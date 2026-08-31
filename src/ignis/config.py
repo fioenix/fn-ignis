@@ -21,9 +21,16 @@ class Settings(BaseSettings):
     # Ingress Connectors
     YOUTUBE_API_KEY: str = Field(default="", description="YouTube Data API v3 Key")
 
+    # Security & Encryption
+    IGNIS_ENCRYPTION_KEY: str = Field(
+        default="",
+        description="Secret key (Fernet AES-256) dùng để mã hóa credentials lưu trên DB"
+    )
+
     # Ingress Defaults
     DEFAULT_GEO: str = Field(default="VN", description="Mã vùng địa lý mặc định")
     INGRESS_BATCH_LIMIT: int = Field(default=50, description="Số lượng bản ghi tối đa mỗi lần fetch")
 
 
 settings = Settings()
+

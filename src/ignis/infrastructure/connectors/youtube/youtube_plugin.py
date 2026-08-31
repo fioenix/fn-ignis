@@ -33,7 +33,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
         r"\baudio chiếm hữu\b", r"\bchanh non\b", r"\btruyện audio\b", r"\bđọc truyện\b",
         r"\bbao tải\b", r"\bbốc xếp\b", r"\bcánh tay robot\b", r"\bbánh răng\b", r"\bxích tải\b",
         r"\bđồ chơi\b", r"\bmô hình cơ khí\b", r"\bur3\b", r"\brobot gắp\b",
-        r"\bphonegrid\b", r"\bphone farm\b", r"\bforex\b", r"\blèm bèm\b"
+        r"\bphonegrid\b", r"\bphone farm\b", r"\bforex\b", r"\blèm bèm\b",
+        r"\boprah\b", r"\bthe dark side of ai\b", r"\btalkshow\b"
     ]
 
     def __init__(self, api_key: str = ""):

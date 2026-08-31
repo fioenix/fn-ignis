@@ -12,6 +12,7 @@ from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.infrastructure.auth.crypto import encrypt_credentials, decrypt_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -578,6 +579,9 @@ class PostgresTimescaleRepository(ITrendRepository):
         expires_at: Optional[datetime] = None,
     ) -> None:
         pool = await self._get_pool()
+        # Zero-Knowledge Encryption trước khi đẩy lên DB
+        payload_to_store = encrypt_credentials(credentials_data)
+
         query = """
             INSERT INTO platform_credentials (
                 platform,
@@ -597,7 +601,7 @@ class PostgresTimescaleRepository(ITrendRepository):
         params = (
             platform.lower(),
             auth_type,
-            json.dumps(credentials_data),
+            json.dumps(payload_to_store),
             is_active,
             expires_at,
         )
@@ -605,7 +609,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(query, params)
-            logger.info(f"Đã lưu credentials cho platform [{platform}].")
+            logger.info(f"Đã lưu credentials (đã mã hóa AES-256) cho platform [{platform}].")
         except Exception as e:
             logger.error(f"Lỗi khi lưu credentials cho {platform}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to save credentials for {platform}: {e}") from e
@@ -627,11 +631,13 @@ class PostgresTimescaleRepository(ITrendRepository):
                 return None
 
             plat, auth_type, creds_json, active, expires, updated = row
-            creds = creds_json if isinstance(creds_json, dict) else json.loads(creds_json or "{}")
+            raw_creds = creds_json if isinstance(creds_json, dict) else json.loads(creds_json or "{}")
+            # Tự động giải mã AES-256 về dictionary ban đầu
+            decrypted_creds = decrypt_credentials(raw_creds)
             return {
                 "platform": plat,
                 "auth_type": auth_type,
-                "credentials_data": creds,
+                "credentials_data": decrypted_creds,
                 "is_active": active,
                 "expires_at": expires.isoformat() if expires else None,
                 "updated_at": updated.isoformat() if updated else None,

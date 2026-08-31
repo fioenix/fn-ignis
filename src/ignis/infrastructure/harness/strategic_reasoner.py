@@ -38,7 +38,8 @@ class StrategicMarketReasoner:
     GARBAGE_EXCLUSIONS = [
         "khát khao độc chiếm", "audio chiếm hữu", "chanh non", "truyện audio", "đọc truyện",
         "phonegrid", "phone farm", "mmo", "forex", "bóng đá", "ur3", "cánh tay robot",
-        "bánh răng", "xích tải", "bốc xếp", "bao tải", "đồ chơi", "lego", "anh khoa hay hỏi"
+        "bánh răng", "xích tải", "bốc xếp", "bao tải", "đồ chơi", "lego", "anh khoa hay hỏi",
+        "oprah", "the dark side of ai", "talkshow"
     ]
 
     def analyze_mission(
@@ -165,11 +166,11 @@ class StrategicMarketReasoner:
 
             opportunity_index = round(demand_score - supply_score, 1)
 
-            # 4. Phân loại khoảng trống và khuyến nghị tiếng Việt mạch lạc
+            # 4. Phân loại khoảng trống và khuyến nghị tiếng Việt mạch lạc, nhất quán logic
             if vn_count == 0 or opportunity_index >= 50.0:
                 opp_type = "HIGH_DEMAND_LOW_SUPPLY"
                 rec = f"Nhu cầu tìm kiếm về '{raw_kw}' đạt {demand_score:.0f}/100 nhưng nguồn cung video tiếng Việt rất mỏng ({vn_count} video). Cơ hội vàng để dẫn đầu thị phần."
-            elif "doanh nghiệp" in kw_clean or "enterprise" in kw_clean or "b2b" in kw_clean:
+            elif ("doanh nghiệp" in kw_clean or "enterprise" in kw_clean or "b2b" in kw_clean) and supply_score < 70.0:
                 opp_type = "ENTERPRISE_GAP"
                 rec = f"Khoảng trống B2B Doanh Nghiệp: Nhu cầu cao nhưng thiếu case-study thực chiến triển khai cho tổ chức tại Việt Nam ({vn_count} video)."
             elif supply_score >= 70.0:
@@ -179,6 +180,12 @@ class StrategicMarketReasoner:
                 opp_type = "GROWING_OPPORTUNITY"
                 rec = f"Phân khúc '{raw_kw}' đang trên đà tăng trưởng ({vn_count} video tiếng Việt), dung lượng thị trường còn rộng mở."
 
+            # Đảm bảo supporting_signals nhất quán với số lượng video tiếng Việt thực chứng
+            if vn_videos:
+                support_sigs = [s.raw_title for s in vn_videos[:3]]
+            else:
+                support_sigs = ["Chưa ghi nhận video tiếng Việt nào trong timeframe 90 ngày."]
+
             opportunities.append(
                 MarketOpportunity(
                     topic=raw_kw,
@@ -187,7 +194,7 @@ class StrategicMarketReasoner:
                     content_supply_score=supply_score,
                     opportunity_index=opportunity_index,
                     strategic_recommendation=rec,
-                    supporting_signals=[s.raw_title for s in vn_videos[:3]] or [s.raw_title for s in matching_videos[:2]],
+                    supporting_signals=support_sigs,
                 )
             )
 
