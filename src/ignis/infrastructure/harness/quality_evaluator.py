@@ -19,28 +19,34 @@ class QualityEvaluator:
         re.IGNORECASE
     )
 
+    # Từ vựng tiếng Pháp dễ gây nhầm lẫn do có chung ký tự dấu
+    FRENCH_WORDS = {"formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant"}
+
     VI_COMMON_WORDS = {
         "va", "cua", "la", "trong", "cho", "voi", "ve", "tu", "dong", "hoa",
         "huong", "dan", "cach", "lam", "chu", "doanh", "nghiep", "ung", "dung",
         "giai", "phap", "phan", "mem", "tri", "tue", "nhan", "tao", "tro", "ly",
-        "kiem", "tien", "nguoi", "viet", "viet", "nam", "danh", "cho", "bai",
-        "hoc", "khoa", "hoc", "thuc", "chien", "tong", "quan", "chi", "tiet"
+        "kiem", "tien", "nguoi", "viet", "nam", "danh", "bai", "hoc", "khoa",
+        "thuc", "chien", "tong", "quan", "chi", "tiet"
     }
 
     def is_vietnamese(self, text: str) -> bool:
-        """Strictly detect if text contains Vietnamese diacritics or core vocabulary."""
+        """Strictly detect if text contains Vietnamese diacritics without French false positives."""
         if not text:
             return False
         
+        text_lower = text.lower()
+        words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", text_lower))
+        
+        # Nếu có từ tiếng Pháp rõ ràng -> loại trừ
+        if any(fw in words for fw in self.FRENCH_WORDS):
+            return False
+
         if self.VIETNAMESE_CHARS_PATTERN.search(text):
             return True
 
-        words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
         vi_word_count = sum(1 for w in words if w in self.VI_COMMON_WORDS)
-        if vi_word_count >= 2:
-            return True
-
-        return False
+        return vi_word_count >= 2
 
     def evaluate_quality(
         self,
@@ -70,70 +76,68 @@ class QualityEvaluator:
         }
         core_platforms = {"google", "youtube"}
         has_core = core_platforms.issubset(platforms_present)
-        coverage_score = (len(platforms_present) / 5.0) * 100.0
+        coverage_score = round((len(platforms_present) / 5.0) * 100.0, 1)
         
         if has_core:
-            strengths.append(f"Collected from core pillars ({', '.join(core_platforms)}).")
+            strengths.append(f"Thu thập đầy đủ 2 kênh trụ cột ({', '.join(core_platforms)}).")
         else:
             missing_core = core_platforms - platforms_present
-            flaws.append(f"Missing core platforms: {', '.join(missing_core)}.")
+            flaws.append(f"Thiếu kênh trụ cột: {', '.join(missing_core)}.")
 
-        # 2. Language Precision (% matching target geo language)
+        # 2. Language Precision (Đo chính xác trên tập tín hiệu nội dung thực tế, không cộng Google Trends vào tử số)
+        content_signals = [s for s in signals if s.platform != PlatformType.GOOGLE_TRENDS]
+        eval_signals = content_signals if content_signals else signals
+
         target_lang_matches = 0
         channels: List[str] = []
 
-        for s in signals:
+        for s in eval_signals:
             title = s.raw_title
             channel = s.metadata.get("channel_title", "")
             if channel:
                 channels.append(channel)
 
             if geo == GeoCode.VN:
-                if s.platform == PlatformType.GOOGLE_TRENDS:
-                    target_lang_matches += 1
-                elif self.is_vietnamese(title) or self.is_vietnamese(channel):
+                if self.is_vietnamese(title) or (channel and self.is_vietnamese(channel)):
                     target_lang_matches += 1
             else:
                 target_lang_matches += 1
 
-        language_precision = round((target_lang_matches / float(len(signals))) * 100.0, 1)
+        language_precision = round((target_lang_matches / float(len(eval_signals))) * 100.0, 1)
         if language_precision >= 70.0:
-            strengths.append(f"High language localization ({language_precision}% verified target language).")
+            strengths.append(f"Độ chính xác bản địa hóa cao ({language_precision}% nội dung tiếng Việt).")
         else:
-            flaws.append(f"{round(100.0 - language_precision, 1)}% of signals are in foreign/non-localized languages.")
+            flaws.append(f"Có {round(100.0 - language_precision, 1)}% tín hiệu nội dung là ngoại ngữ (chưa hoàn toàn bản địa hóa).")
 
-        # 3. Creator Diversity Score
+        # 3. Creator Diversity Score (Tỉ lệ kênh độc lập)
         if channels:
             unique_channels = len(set(channels))
             creator_diversity = round(min(100.0, (unique_channels / float(len(channels))) * 100.0), 1)
             if creator_diversity >= 60.0:
-                strengths.append(f"Diverse creator sources ({unique_channels} independent channels).")
+                strengths.append(f"Nguồn phát tán đa dạng ({unique_channels} kênh độc lập).")
             else:
-                flaws.append("Signals concentrated among few creators (risk of viewpoint bias).")
+                flaws.append("Tập trung vào một số ít kênh (dễ bị thiên lệch quan điểm).")
         else:
             creator_diversity = 70.0
 
-        # 4. Data Freshness Score
+        # 4. Data Freshness Score (% tín hiệu nằm trong khung thời gian timeframe)
         now_utc = datetime.now(timezone.utc)
-        freshness_samples = []
+        in_timeframe_count = 0
         for s in signals:
             if s.captured_at:
                 days_old = (now_utc - s.captured_at).total_seconds() / 86400.0
                 if days_old <= timeframe_days:
-                    score = 100.0 - ((days_old / max(1.0, float(timeframe_days))) * 25.0)
-                else:
-                    score = max(0.0, 75.0 - ((days_old - timeframe_days) * 2.0))
-                freshness_samples.append(score)
+                    in_timeframe_count += 1
             else:
-                freshness_samples.append(85.0)
+                in_timeframe_count += 1
 
-        data_freshness_score = round(sum(freshness_samples) / float(len(freshness_samples)), 1)
+        data_freshness_score = round((in_timeframe_count / float(len(signals))) * 100.0, 1)
         if data_freshness_score >= 80.0:
-            strengths.append(f"High freshness ({data_freshness_score}% matching {timeframe_days}-day window).")
+            strengths.append(f"Dữ liệu tươi mới ({data_freshness_score}% khớp timeframe {timeframe_days} ngày).")
         else:
-            flaws.append(f"Low freshness score ({data_freshness_score}%), contains outdated signals.")
+            flaws.append(f"Độ tươi mới thấp ({data_freshness_score}%), có tín hiệu quá hạn.")
 
-        # 5. Overall Confidence Score
+        # 5. Overall Confidence Score (Bình quân trọng số 4 trục)
         overall_confidence = round(
             (coverage_score * 0.25) +
             (language_precision * 0.25) +
@@ -152,7 +156,7 @@ class QualityEvaluator:
             confidence_level = ConfidenceLevel.UNRELIABLE
 
         return QualityScorecard(
-            coverage_score=round(coverage_score, 1),
+            coverage_score=coverage_score,
             language_precision=language_precision,
             data_freshness_score=data_freshness_score,
             creator_diversity_score=creator_diversity,

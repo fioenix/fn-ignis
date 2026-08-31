@@ -568,3 +568,114 @@ class PostgresTimescaleRepository(ITrendRepository):
         except Exception as e:
             logger.error(f"Lỗi khi truy vấn audit logs: {e}", exc_info=True)
             return []
+
+    async def save_platform_credentials(
+        self,
+        platform: str,
+        auth_type: str,
+        credentials_data: Dict[str, Any],
+        is_active: bool = True,
+        expires_at: Optional[datetime] = None,
+    ) -> None:
+        pool = await self._get_pool()
+        query = """
+            INSERT INTO platform_credentials (
+                platform,
+                auth_type,
+                credentials_data,
+                is_active,
+                expires_at,
+                updated_at
+            ) VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (platform) DO UPDATE SET
+                auth_type = EXCLUDED.auth_type,
+                credentials_data = EXCLUDED.credentials_data,
+                is_active = EXCLUDED.is_active,
+                expires_at = EXCLUDED.expires_at,
+                updated_at = NOW();
+        """
+        params = (
+            platform.lower(),
+            auth_type,
+            json.dumps(credentials_data),
+            is_active,
+            expires_at,
+        )
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(query, params)
+            logger.info(f"Đã lưu credentials cho platform [{platform}].")
+        except Exception as e:
+            logger.error(f"Lỗi khi lưu credentials cho {platform}: {e}", exc_info=True)
+            raise RepositoryException(f"Failed to save credentials for {platform}: {e}") from e
+
+    async def get_platform_credentials(self, platform: str) -> Optional[Dict[str, Any]]:
+        pool = await self._get_pool()
+        query = """
+            SELECT platform, auth_type, credentials_data, is_active, expires_at, updated_at
+            FROM platform_credentials
+            WHERE platform = %s AND is_active = TRUE
+            LIMIT 1;
+        """
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    await cur.execute(query, (platform.lower(),))
+                    row = await cur.fetchone()
+            if not row:
+                return None
+
+            plat, auth_type, creds_json, active, expires, updated = row
+            creds = creds_json if isinstance(creds_json, dict) else json.loads(creds_json or "{}")
+            return {
+                "platform": plat,
+                "auth_type": auth_type,
+                "credentials_data": creds,
+                "is_active": active,
+                "expires_at": expires.isoformat() if expires else None,
+                "updated_at": updated.isoformat() if updated else None,
+            }
+        except Exception as e:
+            logger.error(f"Lỗi khi lấy credentials của {platform}: {e}", exc_info=True)
+            return None
+
+    async def list_platform_credentials(self) -> List[Dict[str, Any]]:
+        pool = await self._get_pool()
+        query = """
+            SELECT platform, auth_type, is_active, expires_at, updated_at
+            FROM platform_credentials
+            ORDER BY updated_at DESC;
+        """
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    await cur.execute(query)
+                    rows = await cur.fetchall()
+            result = []
+            for r in rows:
+                plat, auth_type, active, expires, updated = r
+                result.append({
+                    "platform": plat,
+                    "auth_type": auth_type,
+                    "is_active": active,
+                    "expires_at": expires.isoformat() if expires else None,
+                    "updated_at": updated.isoformat() if updated else None,
+                })
+            return result
+        except Exception as e:
+            logger.error(f"Lỗi khi list platform credentials: {e}", exc_info=True)
+            return []
+
+    async def delete_platform_credentials(self, platform: str) -> bool:
+        pool = await self._get_pool()
+        query = "UPDATE platform_credentials SET is_active = FALSE, updated_at = NOW() WHERE platform = %s;"
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(query, (platform.lower(),))
+                    return cur.rowcount > 0
+        except Exception as e:
+            logger.error(f"Lỗi khi deactivate credentials cho {platform}: {e}", exc_info=True)
+            return False
+

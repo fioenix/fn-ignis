@@ -88,3 +88,31 @@ class ITrendRepository(ABC):
     ) -> List[Dict[str, Any]]:
         """Truy vấn danh sách audit logs gần nhất."""
         pass
+
+    @abstractmethod
+    async def save_platform_credentials(
+        self,
+        platform: str,
+        auth_type: str,
+        credentials_data: Dict[str, Any],
+        is_active: bool = True,
+        expires_at: Optional[datetime] = None,
+    ) -> None:
+        """Lưu hoặc cập nhật thông tin phiên/token xác thực của mạng xã hội."""
+        pass
+
+    @abstractmethod
+    async def get_platform_credentials(self, platform: str) -> Optional[Dict[str, Any]]:
+        """Truy vấn phiên xác thực đang hoạt động của một nền tảng."""
+        pass
+
+    @abstractmethod
+    async def list_platform_credentials(self) -> List[Dict[str, Any]]:
+        """Liệt kê trạng thái kết nối tài khoản của tất cả các nền tảng."""
+        pass
+
+    @abstractmethod
+    async def delete_platform_credentials(self, platform: str) -> bool:
+        """Xóa hoặc vô hiệu hóa phiên xác thực của một nền tảng."""
+        pass
+

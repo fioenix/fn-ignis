@@ -20,6 +20,7 @@ from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.config import settings
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
@@ -44,9 +45,11 @@ def _init_components():
         min_pool_size=settings.DB_MIN_POOL_SIZE,
         max_pool_size=settings.DB_MAX_POOL_SIZE,
     )
+    tiktok_auth_manager = TikTokAuthManager(repository=repository)
+
     registry = ConnectorPluginRegistry(repository=repository)
     registry.register(GoogleTrendsRssPlugin())
-    registry.register(TikTokPlugin())
+    registry.register(TikTokPlugin(auth_manager=tiktok_auth_manager))
     registry.register(ThreadsPlugin())
     registry.register(ReelsPlugin())
 
@@ -80,6 +83,7 @@ def _init_components():
     return {
         "repository": repository,
         "registry": registry,
+        "tiktok_auth_manager": tiktok_auth_manager,
         "clusterer": clusterer,
         "artifact_builder": artifact_builder,
         "quality_evaluator": quality_evaluator,
@@ -294,6 +298,45 @@ async def handle_get_system_logs(level: Optional[str] = None, component: Optiona
             "created_at": log.get("created_at"),
         })
     return json.dumps(sanitized_logs, ensure_ascii=False, indent=2)
+
+
+# --- Handlers for Platform Authentication ---
+
+async def handle_authenticate_tiktok(headless: bool = False, timeout_seconds: int = 90) -> str:
+    comp = get_components()
+    auth_mgr: TikTokAuthManager = comp["tiktok_auth_manager"]
+    result = await auth_mgr.authenticate_interactive(headless=headless, timeout_seconds=timeout_seconds)
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def handle_get_platform_auth_status() -> str:
+    comp = get_components()
+    repo: PostgresTimescaleRepository = comp["repository"]
+    creds = await repo.list_platform_credentials()
+    return json.dumps(
+        {
+            "status": "SUCCESS",
+            "platforms": creds,
+            "count": len(creds),
+        },
+        ensure_ascii=False,
+        indent=2
+    )
+
+
+async def handle_clear_platform_auth(platform: str) -> str:
+    comp = get_components()
+    repo: PostgresTimescaleRepository = comp["repository"]
+    success = await repo.delete_platform_credentials(platform.lower())
+    return json.dumps(
+        {
+            "platform": platform.lower(),
+            "cleared": success,
+            "message": f"Đã xóa session xác thực của {platform}." if success else f"Không tìm thấy session đang hoạt động của {platform}."
+        },
+        ensure_ascii=False,
+        indent=2
+    )
 
 
 # --- Handlers for Research Missions ---
@@ -786,5 +829,21 @@ async def get_current_session_mission(session_id: str) -> str:
     return await handle_get_current_session_mission(session_id=session_id)
 
 
+@mcp.tool(name="authenticate_tiktok", description="Launch 1-Click interactive TikTok login (QR Code / Managed browser) to capture and persist session credentials.")
+async def authenticate_tiktok(headless: bool = False, timeout_seconds: int = 90) -> str:
+    return await handle_authenticate_tiktok(headless=headless, timeout_seconds=timeout_seconds)
+
+
+@mcp.tool(name="get_platform_auth_status", description="Check connection status and active credentials across social platforms (TikTok, Threads, Reels).")
+async def get_platform_auth_status() -> str:
+    return await handle_get_platform_auth_status()
+
+
+@mcp.tool(name="clear_platform_auth", description="Disconnect or remove stored session credentials for a specific platform.")
+async def clear_platform_auth(platform: str) -> str:
+    return await handle_clear_platform_auth(platform=platform)
+
+
 if __name__ == "__main__":
     mcp.run()
+

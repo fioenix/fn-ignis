@@ -114,3 +114,40 @@ async def test_get_cluster_signals(sample_trend_signal):
     assert len(signals) == 1
     assert signals[0].raw_title == sample_trend_signal.raw_title
     assert signals[0].cluster_id == cluster_id
+
+
+@pytest.mark.asyncio
+async def test_platform_credentials_crud():
+    repo = PostgresTimescaleRepository(dsn="postgresql://mock")
+    mock_cursor = AsyncMock()
+    repo._pool = _create_mock_pool(mock_cursor)
+
+    # 1. Test save_platform_credentials
+    await repo.save_platform_credentials(
+        platform="tiktok",
+        auth_type="session_cookies",
+        credentials_data={"cookies": [{"name": "sessionid", "value": "123"}]},
+    )
+    assert mock_cursor.execute.called
+    query_arg, params_arg = mock_cursor.execute.call_args[0]
+    assert "INSERT INTO platform_credentials" in query_arg
+    assert params_arg[0] == "tiktok"
+
+    # 2. Test get_platform_credentials
+    mock_cursor.fetchone = AsyncMock(return_value=("tiktok", "session_cookies", '{"cookies": []}', True, None, None))
+    creds = await repo.get_platform_credentials("tiktok")
+    assert creds is not None
+    assert creds["platform"] == "tiktok"
+    assert creds["is_active"] is True
+
+    # 3. Test list_platform_credentials
+    mock_cursor.fetchall = AsyncMock(return_value=[("tiktok", "session_cookies", True, None, None)])
+    cred_list = await repo.list_platform_credentials()
+    assert len(cred_list) == 1
+    assert cred_list[0]["platform"] == "tiktok"
+
+    # 4. Test delete_platform_credentials
+    mock_cursor.rowcount = 1
+    deleted = await repo.delete_platform_credentials("tiktok")
+    assert deleted is True
+

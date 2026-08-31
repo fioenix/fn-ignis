@@ -106,3 +106,49 @@ async def test_mcp_generate_mission_artifact():
         assert res["shortcode"] == "TEST1234"
         assert "artifact_file" in res
         assert "file://" in res["file_url"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_authenticate_tiktok():
+    from ignis.interfaces.mcp.server import handle_authenticate_tiktok
+
+    with patch("ignis.interfaces.mcp.server.get_components") as mock_get_comp:
+        mock_auth = AsyncMock()
+        mock_auth.authenticate_interactive.return_value = {
+            "success": True,
+            "platform": "tiktok",
+            "message": "Auth OK",
+        }
+        mock_get_comp.return_value = {"tiktok_auth_manager": mock_auth}
+
+        res_str = await handle_authenticate_tiktok(headless=True, timeout_seconds=10)
+        res = json.loads(res_str)
+        assert res["success"] is True
+        assert res["platform"] == "tiktok"
+
+
+@pytest.mark.asyncio
+async def test_mcp_platform_auth_status_and_clear():
+    from ignis.interfaces.mcp.server import handle_get_platform_auth_status, handle_clear_platform_auth
+
+    with patch("ignis.interfaces.mcp.server.get_components") as mock_get_comp:
+        mock_repo = AsyncMock()
+        mock_repo.list_platform_credentials.return_value = [
+            {"platform": "tiktok", "is_active": True, "auth_type": "session_cookies"}
+        ]
+        mock_repo.delete_platform_credentials.return_value = True
+        mock_get_comp.return_value = {"repository": mock_repo}
+
+        # Test get status
+        res_str = await handle_get_platform_auth_status()
+        res = json.loads(res_str)
+        assert res["status"] == "SUCCESS"
+        assert len(res["platforms"]) == 1
+        assert res["platforms"][0]["platform"] == "tiktok"
+
+        # Test clear
+        clear_str = await handle_clear_platform_auth("tiktok")
+        clear_res = json.loads(clear_str)
+        assert clear_res["cleared"] is True
+        assert clear_res["platform"] == "tiktok"
+
