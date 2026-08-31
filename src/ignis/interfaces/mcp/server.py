@@ -270,8 +270,28 @@ async def handle_diagnose_system_health() -> str:
 async def handle_get_system_logs(level: Optional[str] = None, component: Optional[str] = None, limit: int = 20) -> str:
     comp = get_components()
     repo: PostgresTimescaleRepository = comp["repository"]
-    logs = await repo.get_recent_logs(level=level, component=component, limit=max(1, min(limit, 100)))
-    return json.dumps(logs, ensure_ascii=False, indent=2)
+    safe_limit = max(1, min(limit, 30))
+    raw_logs = await repo.get_recent_logs(level=level, component=component, limit=safe_limit)
+    
+    # Rút gọn nội dung chi tiết để không làm phình to token
+    sanitized_logs = []
+    for log in raw_logs:
+        msg = log.get("message", "")
+        if len(msg) > 300:
+            msg = msg[:300] + "..."
+        details = log.get("details", {})
+        if isinstance(details, dict):
+            details = {k: (str(v)[:150] + "..." if len(str(v)) > 150 else v) for k, v in details.items()}
+        sanitized_logs.append({
+            "id": log.get("id"),
+            "level": log.get("level"),
+            "component": log.get("component"),
+            "event_type": log.get("event_type"),
+            "message": msg,
+            "details": details,
+            "created_at": log.get("created_at"),
+        })
+    return json.dumps(sanitized_logs, ensure_ascii=False, indent=2)
 
 
 # --- Handlers for Research Missions ---
@@ -428,7 +448,8 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
 
 async def handle_list_research_missions(limit: int = 10) -> str:
     comp = get_components()
-    missions = await comp["repository"].list_missions(limit=limit)
+    safe_limit = max(1, min(limit, 30))
+    missions = await comp["repository"].list_missions(limit=safe_limit)
     result = [
         {
             "id": str(m.id),
@@ -437,7 +458,7 @@ async def handle_list_research_missions(limit: int = 10) -> str:
             "title": m.title,
             "keywords": m.keywords,
             "status": m.status,
-            "summary": m.summary,
+            "summary": (m.summary[:200] + "...") if m.summary and len(m.summary) > 200 else m.summary,
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in missions
@@ -456,7 +477,8 @@ async def handle_get_trending_topics(
     geo_val = GeoCode(geo.upper()) if geo.upper() in GeoCode._value2member_map_ else GeoCode.VN
     tf_val = Timeframe(timeframe) if timeframe in Timeframe._value2member_map_ else Timeframe.LAST_24H
 
-    clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, timeframe=tf_val, limit=max(1, min(limit, 100)))
+    safe_limit = max(1, min(limit, 30))
+    clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, timeframe=tf_val, limit=safe_limit)
     result = [
         {
             "id": str(c.id),
@@ -472,25 +494,36 @@ async def handle_get_trending_topics(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-async def handle_get_topic_detail(topic_id: str) -> str:
+async def handle_get_topic_detail(topic_id: str, limit: int = 20) -> str:
     comp = get_components()
     try:
         cluster_uuid = UUID(topic_id.strip())
     except (ValueError, AttributeError):
         return json.dumps({"error": f"Invalid UUID: {topic_id}"}, ensure_ascii=False)
 
-    signals = await comp["repository"].get_cluster_signals(cluster_id=cluster_uuid)
-    result = [
-        {
-            "platform": s.platform.value if hasattr(s.platform, "value") else str(s.platform),
-            "title": s.raw_title,
-            "metric_value": s.metric_value,
-            "source_url": s.source_url,
-            "captured_at": s.captured_at.isoformat() if s.captured_at else None,
-            "metadata": s.metadata,
-        }
-        for s in signals
-    ]
+    all_signals = await comp["repository"].get_cluster_signals(cluster_id=cluster_uuid)
+    safe_limit = max(1, min(limit, 50))
+    top_signals = all_signals[:safe_limit]
+
+    result = {
+        "topic_id": str(cluster_uuid),
+        "total_signals": len(all_signals),
+        "returned_signals": len(top_signals),
+        "signals": [
+            {
+                "platform": s.platform.value if hasattr(s.platform, "value") else str(s.platform),
+                "title": s.raw_title,
+                "metric_value": s.metric_value,
+                "growth_velocity": s.growth_velocity,
+                "source_url": s.source_url,
+                "captured_at": s.captured_at.isoformat() if s.captured_at else None,
+                "metadata": {
+                    k: v for k, v in s.metadata.items() if k in ["channel_title", "channel", "views", "likes", "published_at"]
+                },
+            }
+            for s in top_signals
+        ]
+    }
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
@@ -644,9 +677,9 @@ async def get_trending_topics(geo: str = "VN", timeframe: str = "24h", limit: in
     return await handle_get_trending_topics(geo=geo, timeframe=timeframe, limit=limit)
 
 
-@mcp.tool(name="get_topic_detail", description="Lấy toàn bộ lịch sử tín hiệu đa kênh và metrics chi tiết của một chủ đề xu hướng.")
-async def get_topic_detail(topic_id: str) -> str:
-    return await handle_get_topic_detail(topic_id=topic_id)
+@mcp.tool(name="get_topic_detail", description="Lấy lịch sử tín hiệu đa kênh và metrics của một chủ đề xu hướng (Tối ưu token, limit 20).")
+async def get_topic_detail(topic_id: str, limit: int = 20) -> str:
+    return await handle_get_topic_detail(topic_id=topic_id, limit=limit)
 
 
 @mcp.tool(name="generate_trend_artifact", description="Sinh Single-File HTML Artifact (Tailwind + Chart.js) pixel-perfect 100%.")
