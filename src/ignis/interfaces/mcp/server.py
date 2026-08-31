@@ -1,5 +1,7 @@
 import json
 import logging
+import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -368,8 +370,36 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     return json.dumps(analysis, ensure_ascii=False, indent=2)
 
 
+def _get_secure_reports_dir() -> Path:
+    import tempfile
+    # 1. Thử ghi vào thư mục reports/ của project root
+    try:
+        project_root = Path(__file__).resolve().parents[4]
+        reports_dir = project_root / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        # Thử test quyền ghi
+        test_file = reports_dir / ".write_test"
+        test_file.touch()
+        test_file.unlink()
+        return reports_dir
+    except Exception:
+        pass
+
+    # 2. Thử ghi vào ~/.ignis/reports
+    try:
+        home_reports = Path.home() / ".ignis" / "reports"
+        home_reports.mkdir(parents=True, exist_ok=True)
+        return home_reports
+    except Exception:
+        pass
+
+    # 3. Fallback sang temporary directory
+    temp_dir = Path(tempfile.gettempdir()) / "ignis_reports"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    return temp_dir
+
+
 async def handle_generate_mission_artifact(mission_id: str) -> str:
-    from pathlib import Path
     comp = get_components()
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
@@ -399,9 +429,8 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         report=report,
     )
 
-    # Lưu file HTML vào thư mục reports/ của dự án để tránh tràn token buffer
-    reports_dir = Path("reports")
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    # Lưu file HTML vào thư mục reports an toàn tuyệt đối
+    reports_dir = _get_secure_reports_dir()
     report_filename = f"mission_{mission.shortcode.lower()}.html"
     report_path = reports_dir / report_filename
     report_path.write_text(html_content, encoding="utf-8")
@@ -531,12 +560,10 @@ async def handle_generate_trend_artifact(
     topic_id: str = "",
     geo: str = "VN",
 ) -> str:
-    from pathlib import Path
     comp = get_components()
     builder = comp["artifact_builder"]
     geo_val = GeoCode(geo.upper()) if geo.upper() in GeoCode._value2member_map_ else GeoCode.VN
-    reports_dir = Path("reports")
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir = _get_secure_reports_dir()
 
     if not topic_id.strip():
         clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=10)
