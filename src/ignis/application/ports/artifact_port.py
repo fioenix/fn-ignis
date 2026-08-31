@@ -1,24 +1,28 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
-from ignis.domain.entities import TopicCluster, TrendSignal
+from typing import Dict, List, Optional
+from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
+from ignis.domain.value_objects import GeoCode
+
 
 class IArtifactBuilder(ABC):
-    """Giao diện cổng dựng mã HTML/React Artifacts cho Agent Client."""
+    """Giao diện cổng sinh Artifacts hiển thị chuẩn xác (Deterministic Artifact Builder)."""
 
     @abstractmethod
-    def build_dashboard_html(
-        self, 
-        clusters: List[TopicCluster], 
-        metadata: Dict[str, Any]
-    ) -> str:
-        """Dựng giao diện HTML Dashboard tổng quan (Tailwind + Recharts)."""
+    def build_dashboard_artifact(self, clusters: List[TopicCluster], geo: GeoCode = GeoCode.VN) -> str:
+        """Sinh Single-file HTML Dashboard tổng quan xu hướng đa kênh."""
         pass
 
     @abstractmethod
-    def build_topic_deepdive_html(
-        self, 
-        cluster: TopicCluster, 
-        signals: List[TrendSignal]
+    def build_topic_card_artifact(self, cluster: TopicCluster, signals: List[TrendSignal]) -> str:
+        """Sinh Single-file HTML Card chi tiết một chủ đề xu hướng."""
+        pass
+
+    @abstractmethod
+    def build_mission_report_artifact(
+        self,
+        mission: ResearchMission,
+        signals: List[TrendSignal],
+        platform_breakdown: Dict[str, int],
     ) -> str:
-        """Dựng giao diện HTML phân tích sâu 1 chủ đề."""
+        """Sinh Single-file HTML Báo cáo chuyên sâu cho một Research Mission."""
         pass

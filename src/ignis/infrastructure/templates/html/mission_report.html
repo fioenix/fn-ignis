@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="vi" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Executive Trend Intelligence Report - {{ mission.title }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-6 font-sans antialiased">
+  <div class="max-w-6xl mx-auto space-y-6">
+    <!-- Header -->
+    <header class="border-b border-slate-800 pb-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div>
+        <div class="flex items-center space-x-2">
+          <span class="bg-orange-500/10 text-orange-400 text-xs px-2.5 py-1 rounded-full font-bold border border-orange-500/20 tracking-wide">🔥 FN-IGNIS AGENT HARNESS</span>
+          <span class="text-xs text-slate-400 font-mono">Mission: {{ mission.id }}</span>
+        </div>
+        <h1 class="text-2xl md:text-3xl font-extrabold text-white mt-2">{{ mission.title }}</h1>
+        <div class="flex flex-wrap gap-2 mt-2">
+          {% for kw in mission.keywords %}
+          <span class="bg-slate-800/80 text-slate-300 text-xs px-2.5 py-1 rounded-lg border border-slate-700 font-medium">#{{ kw }}</span>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 text-right">
+        <div class="text-xs text-slate-400">Độ Tin Cậy Dữ Liệu (Confidence)</div>
+        <div class="text-lg font-black mt-0.5 {% if scorecard.overall_confidence >= 80 %}text-emerald-400{% elif scorecard.overall_confidence >= 60 %}text-amber-400{% else %}text-rose-400{% endif %}">
+          {{ scorecard.overall_confidence }}% ({{ scorecard.confidence_level.value if scorecard.confidence_level.value is defined else scorecard.confidence_level }})
+        </div>
+        <div class="text-xs text-slate-500 mt-0.5">Maturity: <span class="text-orange-300 font-semibold">{{ maturity_stage.value if maturity_stage.value is defined else maturity_stage }}</span></div>
+      </div>
+    </header>
+
+    <!-- Scorecard Grid -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
+        <span class="text-xs text-slate-400 block">Độ phủ kênh (Coverage)</span>
+        <div class="text-xl font-bold text-white mt-1">{{ scorecard.coverage_score }}%</div>
+        <span class="text-xs text-slate-500 block mt-1">{{ platform_breakdown.keys()|length }} nền tảng phản hồi</span>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
+        <span class="text-xs text-slate-400 block">Khớp Ngôn Ngữ (Geo VN)</span>
+        <div class="text-xl font-bold text-sky-400 mt-1">{{ scorecard.language_precision }}%</div>
+        <span class="text-xs text-slate-500 block mt-1">Bản địa hóa thị trường</span>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
+        <span class="text-xs text-slate-400 block">Độ Mới Dữ Liệu (Freshness)</span>
+        <div class="text-xl font-bold text-emerald-400 mt-1">{{ scorecard.data_freshness_score }}%</div>
+        <span class="text-xs text-slate-500 block mt-1">Chu kỳ {{ mission.timeframe }}</span>
+      </div>
+      <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
+        <span class="text-xs text-slate-400 block">Đa Dạng Tác Giả (Diversity)</span>
+        <div class="text-xl font-bold text-purple-400 mt-1">{{ scorecard.creator_diversity_score }}%</div>
+        <span class="text-xs text-slate-500 block mt-1">Nguồn phát tán độc lập</span>
+      </div>
+    </div>
+
+    <!-- Market Opportunities (White Spaces) -->
+    {% if market_opportunities %}
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+      <h2 class="text-lg font-bold text-white flex items-center space-x-2">
+        <span>💡 Khoảng Trống Thị Trường & Cơ Hội (White Space Analysis)</span>
+      </h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for opp in market_opportunities %}
+        <div class="bg-slate-800/50 border border-slate-700/60 rounded-xl p-4 space-y-3">
+          <div class="flex justify-between items-start">
+            <span class="text-base font-bold text-orange-300">#{{ opp.topic }}</span>
+            <span class="text-xs px-2.5 py-0.5 rounded-full font-bold uppercase {% if opp.opportunity_type == 'HIGH_DEMAND_LOW_SUPPLY' %}bg-emerald-500/20 text-emerald-400 border border-emerald-500/30{% else %}bg-sky-500/20 text-sky-400 border border-sky-500/30{% endif %}">
+              {{ opp.opportunity_type }}
+            </span>
+          </div>
+          
+          <div class="grid grid-cols-3 gap-2 text-center bg-slate-950/50 p-2.5 rounded-lg border border-slate-800">
+            <div>
+              <span class="text-[10px] text-slate-400 block uppercase">Nhu Cầu (Google)</span>
+              <span class="text-sm font-black text-emerald-400">{{ opp.search_interest_score }}/100</span>
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 block uppercase">Nguồn Cung (Video)</span>
+              <span class="text-sm font-black text-amber-400">{{ opp.content_supply_score }}/100</span>
+            </div>
+            <div>
+              <span class="text-[10px] text-slate-400 block uppercase">Chỉ Số Cơ Hội</span>
+              <span class="text-sm font-black text-orange-400">+{{ opp.opportunity_index }}</span>
+            </div>
+          </div>
+
+          <p class="text-xs text-slate-300 leading-relaxed">{{ opp.strategic_recommendation }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Strategic Insights & Actionables -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Insights -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+        <h3 class="text-base font-bold text-amber-400 flex items-center space-x-2">
+          <span>🧠 Nhận Định Chiến Lược (Strategic Insights)</span>
+        </h3>
+        <ul class="space-y-2 text-xs text-slate-300 leading-relaxed">
+          {% for ins in strategic_insights %}
+          <li class="flex items-start space-x-2">
+            <span class="text-amber-500 font-bold">•</span>
+            <span>{{ ins }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <!-- Actionables -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+        <h3 class="text-base font-bold text-emerald-400 flex items-center space-x-2">
+          <span>🎯 Khuyến Nghị Hành Động (Actionable Next Steps)</span>
+        </h3>
+        <ul class="space-y-2 text-xs text-slate-300 leading-relaxed">
+          {% for act in actionable_takeaways %}
+          <li class="flex items-start space-x-2">
+            <span class="text-emerald-500 font-bold">✓</span>
+            <span>{{ act }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+
+    <!-- Multi-Platform Signals Evidence Table -->
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+      <h3 class="text-base font-bold text-white flex justify-between items-center">
+        <span>📊 Bằng Chứng Dữ Liệu Đa Nền Tảng ({{ signals|length }} Signals)</span>
+        <span class="text-xs font-normal text-slate-400">Số views & tương tác thật 100%</span>
+      </h3>
+
+      <div class="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+        {% for s in signals %}
+        <div class="bg-slate-800/40 border border-slate-800/80 hover:border-slate-700 rounded-xl p-3 flex justify-between items-center transition">
+          <div class="space-y-1 min-w-0 pr-4">
+            <div class="flex items-center space-x-2">
+              <span class="bg-slate-700 text-slate-200 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{{ s.platform.value if s.platform.value is defined else s.platform }}</span>
+              <span class="text-xs font-semibold text-white truncate">{{ s.raw_title }}</span>
+            </div>
+            {% if s.metadata.get('channel_title') %}
+            <div class="text-[11px] text-slate-400">Kênh: <span class="text-slate-300 font-medium">{{ s.metadata.get('channel_title') }}</span></div>
+            {% endif %}
+          </div>
+          
+          <div class="text-right shrink-0">
+            {% if s.platform == 'youtube' or s.platform.value == 'youtube' %}
+            <div class="text-xs font-bold text-orange-400">{{ "{:,.0f}".format(s.metric_value) }} views</div>
+            <div class="text-[10px] text-slate-500">{{ s.growth_velocity }} v/h • {{ s.metadata.get('likes', 0) }} likes</div>
+            {% else %}
+            <div class="text-xs font-bold text-emerald-400">Interest: {{ s.metric_value }}</div>
+            <div class="text-[10px] text-slate-500">+{{ s.growth_velocity }}% growth</div>
+            {% endif %}
+            {% if s.source_url %}
+            <a href="{{ s.source_url }}" target="_blank" class="text-sky-400 hover:underline text-[10px] block mt-0.5">Nguồn ↗</a>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</body>
+</html>
