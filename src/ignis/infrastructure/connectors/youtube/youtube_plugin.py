@@ -29,7 +29,9 @@ class YouTubeDataPlugin(IConnectorPlugin):
     GARBAGE_PATTERNS = [
         r"\bMŚ\b", r"\bGr [A-Z]\b", r"\bbóng đá\b", r"\bfootball\b", r"\bmonetization\b",
         r"\bchồng bắt vợ\b", r"\bthiên kim tỷ phú\b", r"\bdrama\b", r"\btiểu tam\b",
-        r"\btổng tài\b", r"\bphim ngắn\b", r"\btruyện ngôn tình\b"
+        r"\btổng tài\b", r"\bphim ngắn\b", r"\btruyện ngôn tình\b",
+        r"\bbao tải\b", r"\bbốc xếp\b", r"\bcánh tay robot\b", r"\bbánh răng\b", r"\bxích tải\b",
+        r"\bđồ chơi\b", r"\bmô hình cơ khí\b"
     ]
 
     def __init__(self, api_key: str = ""):
