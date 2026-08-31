@@ -38,5 +38,71 @@ async def test_mcp_generate_trend_artifact(sample_topic_cluster):
             "artifact_builder": mock_builder,
         }
 
-        html = await handle_generate_trend_artifact(geo="VN")
-        assert "<html>Dashboard Mock</html>" in html
+        res_str = await handle_generate_trend_artifact(geo="VN")
+        res = json.loads(res_str)
+        assert res["status"] == "SUCCESS"
+        assert "artifact_file" in res
+
+
+@pytest.mark.asyncio
+async def test_mcp_generate_mission_artifact():
+    from ignis.interfaces.mcp.server import handle_generate_mission_artifact
+    from ignis.domain.entities import ResearchMission
+    from ignis.domain.value_objects import GeoCode, PlatformType
+    from ignis.domain.harness_models import HarnessResearchReport, QualityScorecard, TrendMaturityStage
+
+    sample_mission = ResearchMission(
+        id=uuid4(),
+        title="Test AI Mission",
+        keywords=["AI agent"],
+        platforms=[PlatformType.YOUTUBE],
+        geo_code=GeoCode.VN,
+        shortcode="TEST1234",
+    )
+
+    with patch("ignis.interfaces.mcp.server.get_components") as mock_get_comp:
+        mock_repo = AsyncMock()
+        mock_repo.get_mission = AsyncMock(return_value=sample_mission)
+        mock_repo.get_mission_signals = AsyncMock(return_value=[])
+
+        mock_top_clusters = AsyncMock()
+        mock_top_clusters.execute = AsyncMock(return_value=[])
+
+        mock_evaluator = MagicMock()
+        mock_evaluator.evaluate_quality.return_value = QualityScorecard(
+            coverage_score=40.0,
+            language_precision=100.0,
+            data_freshness_score=100.0,
+            creator_diversity_score=100.0,
+            overall_confidence=80.0,
+        )
+
+        mock_reasoner = MagicMock()
+        mock_reasoner.analyze_mission.return_value = HarnessResearchReport(
+            mission_id=str(sample_mission.id),
+            title=sample_mission.title,
+            scorecard=mock_evaluator.evaluate_quality.return_value,
+            maturity_stage=TrendMaturityStage.EMERGING,
+            verified_cross_platform_trends=[],
+            market_opportunities=[],
+            strategic_insights=["Insight 1"],
+            actionable_takeaways=["Action 1"],
+        )
+
+        mock_builder = MagicMock()
+        mock_builder.build_mission_report_artifact.return_value = "<html>Mission Report Mock</html>"
+
+        mock_get_comp.return_value = {
+            "repository": mock_repo,
+            "top_clusters_use_case": mock_top_clusters,
+            "quality_evaluator": mock_evaluator,
+            "strategic_reasoner": mock_reasoner,
+            "artifact_builder": mock_builder,
+        }
+
+        res_str = await handle_generate_mission_artifact(str(sample_mission.id))
+        res = json.loads(res_str)
+        assert res["status"] == "SUCCESS"
+        assert res["shortcode"] == "TEST1234"
+        assert "artifact_file" in res
+        assert "file://" in res["file_url"]

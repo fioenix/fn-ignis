@@ -101,5 +101,8 @@ async def test_mission_artifact_generation():
             "artifact_builder": mock_builder,
         }
 
-        html = await handle_generate_mission_artifact(str(mission_id))
-        assert "<html>Mission Report Mock</html>" in html
+        res_str = await handle_generate_mission_artifact(str(mission_id))
+        res = json.loads(res_str)
+        assert res["status"] == "SUCCESS"
+        assert "artifact_file" in res
+        assert "file://" in res["file_url"]

@@ -349,13 +349,12 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
 
 
 async def handle_generate_mission_artifact(mission_id: str) -> str:
+    from pathlib import Path
     comp = get_components()
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
-        return f"<div class='text-red-500 p-4'>Không tìm thấy mission với mã: '{mission_id}'</div>"
+        return json.dumps({"error": f"Không tìm thấy mission với mã: '{mission_id}'"}, ensure_ascii=False)
     m_id = mission.id
-    if not mission:
-        return "<div class='text-red-500'>Mission not found</div>"
 
     signals = await comp["repository"].get_mission_signals(m_id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
@@ -373,11 +372,57 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         p_val = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
         platform_breakdown[p_val] = platform_breakdown.get(p_val, 0) + 1
 
-    return comp["artifact_builder"].build_mission_report_artifact(
+    html_content = comp["artifact_builder"].build_mission_report_artifact(
         mission=mission,
         signals=signals,
         platform_breakdown=platform_breakdown,
         report=report,
+    )
+
+    # Lưu file HTML vào thư mục reports/ của dự án để tránh tràn token buffer
+    reports_dir = Path("reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_filename = f"mission_{mission.shortcode.lower()}.html"
+    report_path = reports_dir / report_filename
+    report_path.write_text(html_content, encoding="utf-8")
+    abs_path = str(report_path.resolve())
+
+    return json.dumps(
+        {
+            "status": "SUCCESS",
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "display_label": f"[{mission.shortcode}] {mission.title}",
+            "title": mission.title,
+            "total_signals": len(signals),
+            "artifact_file": abs_path,
+            "file_url": f"file://{abs_path}",
+            "quality_scorecard": {
+                "overall_confidence": scorecard.overall_confidence,
+                "confidence_level": scorecard.confidence_level.value,
+                "coverage_score": scorecard.coverage_score,
+                "data_freshness_score": scorecard.data_freshness_score,
+                "language_precision": scorecard.language_precision,
+                "strengths": scorecard.strengths_detected,
+                "flaws": scorecard.flaws_detected,
+            },
+            "top_market_opportunities": [
+                {
+                    "topic": opp.topic,
+                    "type": opp.opportunity_type,
+                    "demand_score": opp.search_interest_score,
+                    "supply_score": opp.content_supply_score,
+                    "opportunity_index": opp.opportunity_index,
+                    "recommendation": opp.strategic_recommendation,
+                }
+                for opp in report.market_opportunities[:5]
+            ],
+            "strategic_insights": report.strategic_insights[:3],
+            "actionable_takeaways": report.actionable_takeaways[:3],
+            "instructions_for_user": f"Báo cáo HTML đầy đủ ({len(signals)} signals) đã được xuất thành công. Bạn có thể mở trực tiếp đường dẫn file://{abs_path} trên trình duyệt.",
+        },
+        ensure_ascii=False,
+        indent=2
     )
 
 
@@ -453,18 +498,36 @@ async def handle_generate_trend_artifact(
     topic_id: str = "",
     geo: str = "VN",
 ) -> str:
+    from pathlib import Path
     comp = get_components()
     builder = comp["artifact_builder"]
     geo_val = GeoCode(geo.upper()) if geo.upper() in GeoCode._value2member_map_ else GeoCode.VN
+    reports_dir = Path("reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
 
     if not topic_id.strip():
         clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=10)
-        return builder.build_dashboard_artifact(clusters, geo=geo_val)
+        html_content = builder.build_dashboard_artifact(clusters, geo=geo_val)
+        report_file = reports_dir / f"trend_dashboard_{geo_val.value.lower()}.html"
+        report_file.write_text(html_content, encoding="utf-8")
+        abs_path = str(report_file.resolve())
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "type": "DASHBOARD",
+                "total_clusters": len(clusters),
+                "artifact_file": abs_path,
+                "file_url": f"file://{abs_path}",
+                "message": f"Dashboard xu hướng đã được xuất ra: file://{abs_path}",
+            },
+            ensure_ascii=False,
+            indent=2
+        )
     else:
         try:
             cluster_uuid = UUID(topic_id.strip())
         except (ValueError, AttributeError):
-            return "<div class='text-red-500'>Định dạng Topic ID không hợp lệ.</div>"
+            return json.dumps({"error": "Định dạng Topic ID không hợp lệ."}, ensure_ascii=False)
 
         signals = await comp["repository"].get_cluster_signals(cluster_id=cluster_uuid)
         cluster_info = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=50)
@@ -474,8 +537,23 @@ async def handle_generate_trend_artifact(
             target_cluster = formed[0] if formed else None
 
         if target_cluster:
-            return builder.build_topic_card_artifact(target_cluster, signals)
-        return "<div class='text-slate-400'>Không tìm thấy chủ đề yêu cầu.</div>"
+            html_content = builder.build_topic_card_artifact(target_cluster, signals)
+            report_file = reports_dir / f"topic_{str(cluster_uuid)[:8]}.html"
+            report_file.write_text(html_content, encoding="utf-8")
+            abs_path = str(report_file.resolve())
+            return json.dumps(
+                {
+                    "status": "SUCCESS",
+                    "type": "TOPIC_CARD",
+                    "topic_name": target_cluster.canonical_name,
+                    "artifact_file": abs_path,
+                    "file_url": f"file://{abs_path}",
+                    "message": f"Topic Card đã được xuất ra: file://{abs_path}",
+                },
+                ensure_ascii=False,
+                indent=2
+            )
+        return json.dumps({"error": "Không tìm thấy chủ đề yêu cầu."}, ensure_ascii=False)
 
 
 async def handle_trigger_ingress_refresh(geo: str = "VN") -> str:
