@@ -358,7 +358,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     comp = get_components()
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
-        return json.dumps({"error": f"Không tìm thấy mission với mã: '{mission_id}'"}, ensure_ascii=False)
+        return json.dumps({"error": f"No research mission found with ID or shortcode: '{mission_id}'"}, ensure_ascii=False)
 
     analysis = await comp["get_mission_analysis_use_case"].execute(
         mission_id=mission.id, 
@@ -368,7 +368,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     analysis["mission"]["shortcode"] = mission.shortcode
     analysis["mission"]["display_label"] = f"[{mission.shortcode}] {mission.title}" 
 
-    # Bổ sung Scorecard & Phân tích White Space để Claude tự dựng Native Artifact trong Chat
+    # Enrich with Scorecard & White Space discovery for in-chat Native Artifact rendering
     signals = await comp["repository"].get_mission_signals(mission.id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code)
@@ -404,7 +404,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     ]
     analysis["strategic_insights"] = report.strategic_insights
     analysis["actionable_takeaways"] = report.actionable_takeaways
-    analysis["native_artifact_guideline"] = "Hãy sử dụng dữ liệu này để hiển thị bản phân tích trực tiếp dưới dạng Claude Native Artifact (trực quan, infographic, light mode) trong cửa sổ chat cho user xem ngay. Chỉ xuất file HTML ra đĩa khi user yêu cầu lưu file."
+    analysis["native_artifact_guideline"] = "Render these strategic insights directly as a visual, high-contrast Claude Native Artifact in the chat window. Only export a local HTML file when the user explicitly requests it."
 
     return json.dumps(analysis, ensure_ascii=False, indent=2)
 
@@ -674,99 +674,11 @@ async def handle_trigger_ingress_refresh(geo: str = "VN") -> str:
     )
 
 
-# --- MCP Tools Exposure ---
-
-@mcp.tool(name="run_autonomous_research_mission", description="Chạy trọn gói Agent Harness: Tự động khởi tạo mission, chạy Refinement Loop tối ưu dữ liệu, chấm điểm Scorecard và bóc tách cơ hội thị trường (White Spaces).")
-async def run_autonomous_research_mission(
-    topic: str,
-    keywords: List[str],
-    geo: str = "VN",
-    timeframe: str = "7d",
-    min_signals: int = 15,
-) -> str:
-    return await handle_run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)
-
-
-@mcp.tool(name="evaluate_mission_quality", description="Chấm điểm chất lượng dữ liệu (Coverage, Freshness, Language Accuracy, Confidence Score) cho một Research Mission.")
-async def evaluate_mission_quality(mission_id: str) -> str:
-    return await handle_evaluate_mission_quality(mission_id)
-
-
-@mcp.tool(name="discover_market_opportunities", description="Bóc tách khoảng trống thị trường (White Spaces: Nhu cầu tìm kiếm cao nhưng nguồn cung nội dung thấp) và gợi ý chiến lược.")
-async def discover_market_opportunities(mission_id: str) -> str:
-    return await handle_discover_market_opportunities(mission_id)
-
-
-@mcp.tool(name="create_research_mission", description="Tạo một bài toán nghiên cứu xu hướng đa kênh theo chủ đề và từ khóa cụ thể.")
-async def create_research_mission(
-    topic: str,
-    keywords: List[str],
-    platforms: Optional[List[str]] = None,
-    geo: str = "VN",
-    timeframe: str = "7d",
-) -> str:
-    return await handle_create_research_mission(topic, keywords, platforms, geo, timeframe)
-
-
-@mcp.tool(name="execute_mission_ingress", description="Kích hoạt cào sâu dữ liệu đa kênh cho một Research Mission.")
-async def execute_mission_ingress(mission_id: str) -> str:
-    return await handle_execute_mission_ingress(mission_id)
-
-
-@mcp.tool(name="get_mission_analysis", description="Lấy toàn bộ dữ liệu phân tích chiến lược (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) để Agent hiển thị trực tiếp bằng Claude Native Artifact trong chat.")
-async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
-    return await handle_get_mission_analysis(mission_id=mission_id, limit=limit, platform=platform)
-
-
-@mcp.tool(name="generate_mission_artifact", description="Xuất báo cáo HTML Infographic Canvas ra ổ đĩa máy tính (thư mục reports/). CHỈ SỬ DỤNG khi người dùng có yêu cầu xuất/lưu file HTML cụ thể.")
-async def generate_mission_artifact(mission_id: str) -> str:
-    return await handle_generate_mission_artifact(mission_id)
-
-
-@mcp.tool(name="list_research_missions", description="Liệt kê danh sách các chiến dịch / bài toán nghiên cứu xu hướng đã thực hiện.")
-async def list_research_missions(limit: int = 10) -> str:
-    return await handle_list_research_missions(limit)
-
-
-@mcp.tool(name="diagnose_system_health", description="Chẩn đoán sức khỏe hệ thống, trạng thái Circuit Breaker 5 kênh và gợi ý cách fix lỗi tự động.")
-async def diagnose_system_health() -> str:
-    return await handle_diagnose_system_health()
-
-
-@mcp.tool(name="get_system_logs", description="Truy vấn danh sách Audit Logs và vết lỗi gần nhất trong Database để phân tích và debug.")
-async def get_system_logs(level: Optional[str] = "ERROR", component: Optional[str] = None, limit: int = 20) -> str:
-    return await handle_get_system_logs(level=level, component=component, limit=limit)
-
-
-@mcp.tool(name="get_trending_topics", description="Truy vấn danh sách các chủ đề xu hướng nóng nhất đa nền tảng.")
-async def get_trending_topics(geo: str = "VN", timeframe: str = "24h", limit: int = 10) -> str:
-    return await handle_get_trending_topics(geo=geo, timeframe=timeframe, limit=limit)
-
-
-@mcp.tool(name="get_topic_detail", description="Lấy lịch sử tín hiệu đa kênh và metrics của một chủ đề xu hướng (Tối ưu token, limit 20).")
-async def get_topic_detail(topic_id: str, limit: int = 20) -> str:
-    return await handle_get_topic_detail(topic_id=topic_id, limit=limit)
-
-
-@mcp.tool(name="generate_trend_artifact", description="Sinh Single-File HTML Artifact (Tailwind + Chart.js) pixel-perfect 100%.")
-async def generate_trend_artifact(topic_id: str = "", geo: str = "VN") -> str:
-    return await handle_generate_trend_artifact(topic_id=topic_id, geo=geo)
-
-
-@mcp.tool(name="trigger_ingress_refresh", description="Kích hoạt tiến trình cào dữ liệu Ingress ETL và gom cụm tức thì (Zero-Token).")
-async def trigger_ingress_refresh(geo: str = "VN") -> str:
-    return await handle_trigger_ingress_refresh(geo=geo)
-
-
-if __name__ == "__main__":
-    mcp.run()
-
-
 async def handle_get_current_session_mission(session_id: str) -> str:
     comp = get_components()
     mission = await comp["repository"].get_mission(session_id)
     if not mission:
-        return json.dumps({"status": "not_found", "message": f"Không tìm thấy mission nào gắn với SessionID '{session_id}'"}, ensure_ascii=False)
+        return json.dumps({"status": "not_found", "message": f"No research mission found for session ID '{session_id}'"}, ensure_ascii=False)
 
     return json.dumps(
         {
@@ -784,6 +696,95 @@ async def handle_get_current_session_mission(session_id: str) -> str:
         indent=2
     )
 
-@mcp.tool(name="get_current_session_mission", description="Tự động khôi phục và lấy thông tin Mission gắn liền với phiên chat / SessionID hiện tại.")
+
+# --- MCP Tools Exposure ---
+
+@mcp.tool(name="run_autonomous_research_mission", description="Run an end-to-end autonomous research mission: create mission, execute refinement loop, evaluate quality scorecard, and discover market white spaces.")
+async def run_autonomous_research_mission(
+    topic: str,
+    keywords: List[str],
+    geo: str = "VN",
+    timeframe: str = "7d",
+    min_signals: int = 15,
+) -> str:
+    return await handle_run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)
+
+
+@mcp.tool(name="evaluate_mission_quality", description="Evaluate multi-dimensional data quality and integrity (Coverage, Freshness, Language Accuracy, Confidence Score) for a research mission.")
+async def evaluate_mission_quality(mission_id: str) -> str:
+    return await handle_evaluate_mission_quality(mission_id)
+
+
+@mcp.tool(name="discover_market_opportunities", description="Identify high-demand, low-supply market white spaces and provide actionable strategic recommendations.")
+async def discover_market_opportunities(mission_id: str) -> str:
+    return await handle_discover_market_opportunities(mission_id)
+
+
+@mcp.tool(name="create_research_mission", description="Create a targeted cross-platform trend research mission with specified keywords, platforms, geo, and timeframe.")
+async def create_research_mission(
+    topic: str,
+    keywords: List[str],
+    platforms: Optional[List[str]] = None,
+    geo: str = "VN",
+    timeframe: str = "7d",
+) -> str:
+    return await handle_create_research_mission(topic, keywords, platforms, geo, timeframe)
+
+
+@mcp.tool(name="execute_mission_ingress", description="Trigger deep multi-platform data collection and clustering for a research mission (idempotent replace mode).")
+async def execute_mission_ingress(mission_id: str) -> str:
+    return await handle_execute_mission_ingress(mission_id)
+
+
+@mcp.tool(name="get_mission_analysis", description="Retrieve full strategic analysis payload (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) for in-chat Native Artifact rendering.")
+async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
+    return await handle_get_mission_analysis(mission_id=mission_id, limit=limit, platform=platform)
+
+
+@mcp.tool(name="generate_mission_artifact", description="Export a standalone Infographic Canvas HTML report to local disk (reports/ folder). Use ONLY when the user explicitly requests an exported HTML file.")
+async def generate_mission_artifact(mission_id: str) -> str:
+    return await handle_generate_mission_artifact(mission_id)
+
+
+@mcp.tool(name="list_research_missions", description="List recent trend research missions and tracking campaigns.")
+async def list_research_missions(limit: int = 10) -> str:
+    return await handle_list_research_missions(limit)
+
+
+@mcp.tool(name="diagnose_system_health", description="Inspect system health, connector circuit breaker states, and automated remediation suggestions.")
+async def diagnose_system_health() -> str:
+    return await handle_diagnose_system_health()
+
+
+@mcp.tool(name="get_system_logs", description="Query recent system audit logs and error traces from the database for debugging.")
+async def get_system_logs(level: Optional[str] = "ERROR", component: Optional[str] = None, limit: int = 20) -> str:
+    return await handle_get_system_logs(level=level, component=component, limit=limit)
+
+
+@mcp.tool(name="get_trending_topics", description="Fetch top cross-platform trending topic clusters ranked by momentum velocity.")
+async def get_trending_topics(geo: str = "VN", timeframe: str = "24h", limit: int = 10) -> str:
+    return await handle_get_trending_topics(geo=geo, timeframe=timeframe, limit=limit)
+
+
+@mcp.tool(name="get_topic_detail", description="Retrieve time-series signals and engagement metrics for a specific topic cluster (token-optimized).")
+async def get_topic_detail(topic_id: str, limit: int = 20) -> str:
+    return await handle_get_topic_detail(topic_id=topic_id, limit=limit)
+
+
+@mcp.tool(name="generate_trend_artifact", description="Generate a standalone single-file HTML dashboard or topic card artifact (Tailwind + Chart.js).")
+async def generate_trend_artifact(topic_id: str = "", geo: str = "VN") -> str:
+    return await handle_generate_trend_artifact(topic_id=topic_id, geo=geo)
+
+
+@mcp.tool(name="trigger_ingress_refresh", description="Trigger immediate multi-platform ETL trend ingestion and clustering (zero-token background).")
+async def trigger_ingress_refresh(geo: str = "VN") -> str:
+    return await handle_trigger_ingress_refresh(geo=geo)
+
+
+@mcp.tool(name="get_current_session_mission", description="Automatically retrieve the research mission associated with the current session ID or chat thread.")
 async def get_current_session_mission(session_id: str) -> str:
     return await handle_get_current_session_mission(session_id=session_id)
+
+
+if __name__ == "__main__":
+    mcp.run()

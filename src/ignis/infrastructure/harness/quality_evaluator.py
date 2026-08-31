@@ -10,8 +10,8 @@ from ignis.domain.value_objects import GeoCode, PlatformType
 
 class QualityEvaluator:
     """
-    Module đánh giá chất lượng và độ tin cậy của tập dữ liệu tín hiệu thu thập được.
-    Sử dụng bộ nhận diện tiếng Việt nghiêm ngặt (Strict Vietnamese Detection).
+    Evaluates dataset quality and integrity across multi-platform signals.
+    Provides transparent scorecards (Coverage, Language Precision, Freshness, Creator Diversity).
     """
 
     VIETNAMESE_CHARS_PATTERN = re.compile(
@@ -19,7 +19,6 @@ class QualityEvaluator:
         re.IGNORECASE
     )
 
-    # Các từ vựng tiếng Việt không dấu phổ biến trong lĩnh vực công nghệ / kinh doanh
     VI_COMMON_WORDS = {
         "va", "cua", "la", "trong", "cho", "voi", "ve", "tu", "dong", "hoa",
         "huong", "dan", "cach", "lam", "chu", "doanh", "nghiep", "ung", "dung",
@@ -29,15 +28,13 @@ class QualityEvaluator:
     }
 
     def is_vietnamese(self, text: str) -> bool:
-        """Kiểm tra nghiêm ngặt xem văn bản có thực sự là tiếng Việt hay không."""
+        """Strictly detect if text contains Vietnamese diacritics or core vocabulary."""
         if not text:
             return False
         
-        # 1. Có chứa ký tự tiếng Việt có dấu
         if self.VIETNAMESE_CHARS_PATTERN.search(text):
             return True
 
-        # 2. Kiểm tra từ vựng tiếng Việt không dấu (cần ít nhất 2 từ tiếng Việt ghép)
         words = re.findall(r"\b[a-zA-Z]+\b", text.lower())
         vi_word_count = sum(1 for w in words if w in self.VI_COMMON_WORDS)
         if vi_word_count >= 2:
@@ -59,14 +56,14 @@ class QualityEvaluator:
                 creator_diversity_score=0.0,
                 overall_confidence=0.0,
                 confidence_level=ConfidenceLevel.UNRELIABLE,
-                flaws_detected=["Tập dữ liệu rỗng (0 signals thu thập được)."],
+                flaws_detected=["Dataset is empty (0 signals collected)."],
                 strengths_detected=[],
             )
 
         flaws: List[str] = []
         strengths: List[str] = []
 
-        # 1. Coverage Score (% nền tảng có tín hiệu)
+        # 1. Coverage Score (% active platforms)
         platforms_present: Set[str] = {
             s.platform.value if hasattr(s.platform, "value") else str(s.platform)
             for s in signals
@@ -76,12 +73,12 @@ class QualityEvaluator:
         coverage_score = (len(platforms_present) / 5.0) * 100.0
         
         if has_core:
-            strengths.append(f"Thu thập đầy đủ 2 kênh trụ cột ({', '.join(core_platforms)}).")
+            strengths.append(f"Collected from core pillars ({', '.join(core_platforms)}).")
         else:
             missing_core = core_platforms - platforms_present
-            flaws.append(f"Thiếu kênh trụ cột: {', '.join(missing_core)}.")
+            flaws.append(f"Missing core platforms: {', '.join(missing_core)}.")
 
-        # 2. Language Precision (% bản địa hóa tiếng Việt thực sự)
+        # 2. Language Precision (% matching target geo language)
         target_lang_matches = 0
         channels: List[str] = []
 
@@ -101,22 +98,22 @@ class QualityEvaluator:
 
         language_precision = round((target_lang_matches / float(len(signals))) * 100.0, 1)
         if language_precision >= 70.0:
-            strengths.append(f"Độ chính xác bản địa hóa cao ({language_precision}% nội dung tiếng Việt).")
+            strengths.append(f"High language localization ({language_precision}% verified target language).")
         else:
-            flaws.append(f"Có {round(100.0 - language_precision, 1)}% tín hiệu là nội dung ngoại ngữ (chưa hoàn toàn bản địa hóa).")
+            flaws.append(f"{round(100.0 - language_precision, 1)}% of signals are in foreign/non-localized languages.")
 
         # 3. Creator Diversity Score
         if channels:
             unique_channels = len(set(channels))
             creator_diversity = round(min(100.0, (unique_channels / float(len(channels))) * 100.0), 1)
             if creator_diversity >= 60.0:
-                strengths.append(f"Nguồn phát tán đa dạng ({unique_channels} kênh độc lập).")
+                strengths.append(f"Diverse creator sources ({unique_channels} independent channels).")
             else:
-                flaws.append("Tập trung vào một số ít kênh (dễ bị thiên lệch quan điểm).")
+                flaws.append("Signals concentrated among few creators (risk of viewpoint bias).")
         else:
             creator_diversity = 70.0
 
-        # 4. Data Freshness Score (Tính tương thích với timeframe yêu cầu)
+        # 4. Data Freshness Score
         now_utc = datetime.now(timezone.utc)
         freshness_samples = []
         for s in signals:
@@ -132,11 +129,11 @@ class QualityEvaluator:
 
         data_freshness_score = round(sum(freshness_samples) / float(len(freshness_samples)), 1)
         if data_freshness_score >= 80.0:
-            strengths.append(f"Dữ liệu tươi mới ({data_freshness_score}% khớp timeframe {timeframe_days} ngày).")
+            strengths.append(f"High freshness ({data_freshness_score}% matching {timeframe_days}-day window).")
         else:
-            flaws.append(f"Độ tươi mới thấp ({data_freshness_score}%), nhiều tín hiệu quá hạn.")
+            flaws.append(f"Low freshness score ({data_freshness_score}%), contains outdated signals.")
 
-        # 5. Overall Confidence Score (Weighted Average)
+        # 5. Overall Confidence Score
         overall_confidence = round(
             (coverage_score * 0.25) +
             (language_precision * 0.25) +
