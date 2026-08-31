@@ -135,6 +135,7 @@ class ConnectorPluginRegistry:
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         target_platforms: Optional[List[PlatformType]] = None,
+        custom_timeframe: Optional[str] = None,
     ) -> List[TrendSignal]:
         tasks = []
         enabled_plugins = []
@@ -156,7 +157,7 @@ class ConnectorPluginRegistry:
                 continue
 
             enabled_plugins.append(plugin)
-            tasks.append(self._safe_search(plugin, breaker, keywords, geo, timeframe))
+            tasks.append(self._safe_search(plugin, breaker, keywords, geo, timeframe, custom_timeframe))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_signals: List[TrendSignal] = []
@@ -195,9 +196,25 @@ class ConnectorPluginRegistry:
             breaker.record_failure()
             raise e
 
-    async def _safe_search(self, plugin: IConnectorPlugin, breaker: CircuitBreaker, keywords: List[str], geo: GeoCode, timeframe: Timeframe) -> List[TrendSignal]:
+    async def _safe_search(
+        self, 
+        plugin: IConnectorPlugin, 
+        breaker: CircuitBreaker, 
+        keywords: List[str], 
+        geo: GeoCode, 
+        timeframe: Timeframe,
+        custom_timeframe: Optional[str] = None,
+    ) -> List[TrendSignal]:
         try:
-            signals = await plugin.search_signals(keywords=keywords, geo=geo, timeframe=timeframe)
+            if hasattr(plugin, "search_signals"):
+                import inspect
+                sig = inspect.signature(plugin.search_signals)
+                if "custom_timeframe" in sig.parameters:
+                    signals = await plugin.search_signals(keywords=keywords, geo=geo, timeframe=timeframe, custom_timeframe=custom_timeframe)
+                else:
+                    signals = await plugin.search_signals(keywords=keywords, geo=geo, timeframe=timeframe)
+            else:
+                signals = []
             breaker.record_success()
             return signals
         except Exception as e:

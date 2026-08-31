@@ -475,6 +475,21 @@ class PostgresTimescaleRepository(ITrendRepository):
             logger.error(f"Lỗi khi lấy signals của mission {mission_id}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to fetch mission signals: {e}") from e
 
+    async def delete_mission_signals(self, mission_id: UUID) -> int:
+        pool = await self._get_pool()
+        query = "DELETE FROM trend_signals WHERE mission_id = %s;"
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(query, (str(mission_id),))
+                    deleted_count = cur.rowcount
+                    await conn.commit()
+            logger.info(f"Đã xóa {deleted_count} signals cũ của mission {mission_id} để nạp mới.")
+            return deleted_count
+        except Exception as e:
+            logger.error(f"Lỗi khi xóa signals của mission {mission_id}: {e}", exc_info=True)
+            raise RepositoryException(f"Failed to delete mission signals: {e}") from e
+
     async def log_event(
         self,
         component: str,

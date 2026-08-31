@@ -141,9 +141,14 @@
               <span class="bg-slate-700 text-slate-200 text-[10px] px-2 py-0.5 rounded font-bold uppercase">{{ s.platform.value if s.platform.value is defined else s.platform }}</span>
               <span class="text-xs font-semibold text-white truncate">{{ s.raw_title }}</span>
             </div>
-            {% if s.metadata.get('channel_title') %}
-            <div class="text-[11px] text-slate-400">Kênh: <span class="text-slate-300 font-medium">{{ s.metadata.get('channel_title') }}</span></div>
-            {% endif %}
+            <div class="flex items-center space-x-3 text-[11px] text-slate-400">
+              {% if s.metadata.get('channel_title') %}
+              <span>Kênh: <span class="text-slate-300 font-medium">{{ s.metadata.get('channel_title') }}</span></span>
+              {% endif %}
+              {% if s.metadata.get('published_at') %}
+              <span class="text-emerald-400/90 font-mono text-[10px]">📅 {{ s.metadata.get('published_at')[:10] }}</span>
+              {% endif %}
+            </div>
           </div>
           
           <div class="text-right shrink-0">

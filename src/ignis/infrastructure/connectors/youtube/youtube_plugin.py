@@ -1,6 +1,7 @@
+import re
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import httpx
 
 from ignis.application.ports.connector_port import IConnectorPlugin
@@ -18,11 +19,18 @@ class YouTubeDataPlugin(IConnectorPlugin):
     """
     Ingress Plugin thu thập YouTube Data: Most Popular Videos & Targeted Keyword Search.
     Sử dụng dữ liệu thật 100% từ YouTube Data API v3 (part=snippet,statistics).
-    Hỗ trợ lọc chính xác theo ngày xuất bản (publishedAfter) và ngôn ngữ địa phương (relevanceLanguage).
+    Áp dụng bộ lọc ngày xuất bản (publishedAfter) nghiêm ngặt và bộ lọc rác (Garbage Rejection).
     """
 
     BASE_API_URL = "https://www.googleapis.com/youtube/v3/videos"
     SEARCH_API_URL = "https://www.googleapis.com/youtube/v3/search"
+
+    # Các pattern rác không liên quan đến công nghệ / kinh doanh
+    GARBAGE_PATTERNS = [
+        r"\bMŚ\b", r"\bGr [A-Z]\b", r"\bbóng đá\b", r"\bfootball\b", r"\bmonetization\b",
+        r"\bchồng bắt vợ\b", r"\bthiên kim tỷ phú\b", r"\bdrama\b", r"\btiểu tam\b",
+        r"\btổng tài\b", r"\bphim ngắn\b", r"\btruyện ngôn tình\b"
+    ]
 
     def __init__(self, api_key: str = ""):
         self._api_key = api_key
@@ -50,8 +58,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
         }
         return lang_map.get(geo, None)
 
-    def _timeframe_to_published_after(self, timeframe_str: str) -> str:
-        """Chuyển đổi timeframe sang định dạng RFC 3339 cho YouTube API."""
+    def _timeframe_to_published_after(self, timeframe_str: str) -> Tuple[str, datetime]:
+        """Chuyển đổi timeframe sang định dạng RFC 3339 và datetime UTC."""
         now = datetime.now(timezone.utc)
         tf = str(timeframe_str).lower().strip()
 
@@ -68,7 +76,25 @@ class YouTubeDataPlugin(IConnectorPlugin):
         else:
             dt = now - timedelta(days=90 if "90" in tf else 7)
 
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return dt.strftime("%Y-%m-%dT%H:%M:%SZ"), dt
+
+    def _is_garbage(self, title: str) -> bool:
+        for p in self.GARBAGE_PATTERNS:
+            if re.search(p, title, re.IGNORECASE):
+                return True
+        return False
+
+    def _enrich_keyword(self, kw: str, geo: GeoCode) -> str:
+        """Nếu từ khóa quá ngắn (viết tắt), kết hợp context để tránh nhiễu ngữ nghĩa."""
+        kw_clean = kw.strip()
+        if geo == GeoCode.VN:
+            if kw_clean.upper() == "RPA":
+                return "RPA tự động hóa quy trình"
+            elif kw_clean.upper() == "MCP AI":
+                return "MCP Model Context Protocol AI"
+            elif kw_clean.upper() == "AI AGENT":
+                return "AI agent tự động hóa"
+        return kw_clean
 
     async def is_healthy(self) -> bool:
         if not self._api_key:
@@ -143,7 +169,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
             statistics = item.get("statistics", {})
 
             title = snippet.get("title", "").strip()
-            if not title:
+            if not title or self._is_garbage(title):
                 continue
 
             view_count = float(statistics.get("viewCount", 0))
@@ -200,30 +226,31 @@ class YouTubeDataPlugin(IConnectorPlugin):
         custom_timeframe: Optional[str] = None,
     ) -> List[TrendSignal]:
         """
-        Tìm kiếm video YouTube thật theo từ khóa và lấy metrics (views, likes, comments) thật
-        thông qua videos.list?part=snippet,statistics.
-        Áp dụng bộ lọc publishedAfter đúng theo timeframe (ví dụ: 90d -> lấy video trong 90 ngày qua).
+        Tìm kiếm video YouTube thật theo từ khóa và lấy metrics thật.
+        Áp dụng bộ lọc publishedAfter NGHIÊM NGẶT (không nới lỏng bỏ lọc ngày)
+        và bộ lọc rác (loại bỏ video bóng đá/drama không liên quan).
         """
         if not self._api_key:
             return []
 
         signals: List[TrendSignal] = []
+        seen_video_ids = set()
         region_code = self._geo_to_region_code(geo)
         relevance_lang = self._geo_to_relevance_language(geo)
         
-        # Áp dụng bộ lọc ngày xuất bản theo timeframe
         tf_str = custom_timeframe or (timeframe.value if hasattr(timeframe, "value") else str(timeframe))
-        published_after = self._timeframe_to_published_after(tf_str)
+        published_after_str, published_after_dt = self._timeframe_to_published_after(tf_str)
 
-        for kw in keywords:
+        for raw_kw in keywords:
+            search_kw = self._enrich_keyword(raw_kw, geo)
             search_params = {
                 "part": "snippet",
-                "q": kw,
+                "q": search_kw,
                 "type": "video",
                 "regionCode": region_code,
                 "maxResults": min(limit, 10),
                 "order": "relevance",
-                "publishedAfter": published_after,
+                "publishedAfter": published_after_str,
                 "key": self._api_key,
             }
             if relevance_lang:
@@ -232,39 +259,19 @@ class YouTubeDataPlugin(IConnectorPlugin):
             video_ids = []
             try:
                 async with httpx.AsyncClient(timeout=15.0) as client:
-                    # 1. Gọi search.list lấy video IDs xuất bản trong khoảng timeframe
                     resp = await client.get(self.SEARCH_API_URL, params=search_params)
                     if resp.status_code == 200:
                         search_data = resp.json()
                         for item in search_data.get("items", []):
                             v_id = item.get("id", {}).get("videoId")
-                            if v_id:
+                            if v_id and v_id not in seen_video_ids:
                                 video_ids.append(v_id)
-
-                    # Fallback: nếu lọc ngày gắt quá không có video, nới lỏng search để không bị rỗng data
-                    if not video_ids:
-                        search_params_relaxed = {
-                            "part": "snippet",
-                            "q": kw,
-                            "type": "video",
-                            "regionCode": region_code,
-                            "maxResults": min(limit, 8),
-                            "order": "relevance",
-                            "key": self._api_key,
-                        }
-                        if relevance_lang:
-                            search_params_relaxed["relevanceLanguage"] = relevance_lang
-                        resp_rel = await client.get(self.SEARCH_API_URL, params=search_params_relaxed)
-                        if resp_rel.status_code == 200:
-                            for item in resp_rel.json().get("items", []):
-                                v_id = item.get("id", {}).get("videoId")
-                                if v_id:
-                                    video_ids.append(v_id)
+                                seen_video_ids.add(v_id)
 
                     if not video_ids:
                         continue
 
-                    # 2. Gọi videos.list batch để lấy views, likes, comments THẬT 100%
+                    # Gọi videos.list batch lấy số liệu thật
                     video_params = {
                         "part": "snippet,statistics",
                         "id": ",".join(video_ids),
@@ -279,7 +286,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
                             v_stats = v_item.get("statistics", {})
 
                             title = v_snippet.get("title", "").strip()
-                            if not title:
+                            if not title or self._is_garbage(title):
                                 continue
 
                             view_count = float(v_stats.get("viewCount", 0))
@@ -295,13 +302,16 @@ class YouTubeDataPlugin(IConnectorPlugin):
                             except Exception:
                                 pub_at = datetime.now(timezone.utc)
 
-                            # Tính velocity thật = views/giờ
+                            # Kiểm tra nghiêm ngặt: nếu video cũ hơn timeframe, BỎ QUA
+                            if pub_at < published_after_dt:
+                                continue
+
                             now_utc = datetime.now(timezone.utc)
                             hours_diff = max(1.0, (now_utc - pub_at).total_seconds() / 3600.0)
                             velocity = round(view_count / hours_diff, 2)
 
                             meta = {
-                                "keyword": kw,
+                                "keyword": raw_kw,
                                 "video_id": v_id,
                                 "channel_title": v_snippet.get("channelTitle"),
                                 "channel_id": v_snippet.get("channelId"),
@@ -325,6 +335,6 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                 )
                             )
             except Exception as e:
-                logger.warning(f"YouTube search & stats fetch error for keyword '{kw}': {e}")
+                logger.warning(f"YouTube search error for keyword '{raw_kw}': {e}")
 
         return signals

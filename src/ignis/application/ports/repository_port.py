@@ -63,6 +63,11 @@ class ITrendRepository(ABC):
         pass
 
     @abstractmethod
+    async def delete_mission_signals(self, mission_id: UUID) -> int:
+        """Xóa toàn bộ tín hiệu cũ của một nhiệm vụ nghiên cứu để nạp mới (Replace mode)."""
+        pass
+
+    @abstractmethod
     async def log_event(
         self,
         component: str,

@@ -53,7 +53,21 @@ class StrategicMarketReasoner:
         )
 
     def _is_vietnamese(self, title: str) -> bool:
-        return bool(self.VIETNAMESE_PATTERN.search(title) or "là gì" in title.lower() or "hướng dẫn" in title.lower())
+        return bool(self.VIETNAMESE_PATTERN.search(title) or "là gì" in title.lower() or "hướng dẫn" in title.lower() or "tự động hóa" in title.lower())
+
+    def _matches_topic(self, title: str, kw: str) -> bool:
+        """Kiểm tra xem tiêu đề video có thực sự đề cập đến chủ đề kw hay không."""
+        title_lower = title.lower()
+        kw_lower = kw.lower()
+
+        if kw_lower in title_lower:
+            return True
+
+        # Nếu là từ ghép như "AI agent doanh nghiệp", kiểm tra có chứa đủ các thành tố cốt lõi
+        words = [w for w in kw_lower.split() if len(w) > 1]
+        if len(words) >= 3:
+            return all(w in title_lower for w in words)
+        return False
 
     def _discover_market_opportunities(
         self,
@@ -66,58 +80,68 @@ class StrategicMarketReasoner:
         opportunities: List[MarketOpportunity] = []
         
         google_interests: Dict[str, float] = {}
-        google_related_queries: Dict[str, List[str]] = {}
-        youtube_signals_by_kw: Dict[str, List[TrendSignal]] = defaultdict(list)
+        google_related: Dict[str, List[str]] = {}
+        youtube_signals: List[TrendSignal] = []
 
         for s in signals:
             if s.platform == PlatformType.GOOGLE_TRENDS:
                 kw = s.metadata.get("keyword", s.raw_title.replace("Google Search Trends: ", ""))
                 google_interests[kw] = s.metric_value
-                google_related_queries[kw] = s.metadata.get("related_queries", [])
+                google_related[kw] = s.metadata.get("related_queries", [])
             elif s.platform == PlatformType.YOUTUBE:
-                kw = s.metadata.get("keyword", "general")
-                youtube_signals_by_kw[kw].append(s)
+                youtube_signals.append(s)
 
         for kw in target_keywords:
-            demand_score = google_interests.get(kw, 60.0)
-            yt_list = youtube_signals_by_kw.get(kw, [])
-            
-            # Lọc các video thuần tiếng Việt
-            vn_videos = [v for v in yt_list if self._is_vietnamese(v.raw_title)]
+            # 1. Nhu cầu tìm kiếm (Demand Score)
+            demand_score = google_interests.get(kw, 65.0)
+
+            # 2. Tìm tất cả video YouTube khớp với chủ đề kw
+            matching_videos = [
+                s for s in youtube_signals 
+                if s.metadata.get("keyword") == kw or self._matches_topic(s.raw_title, kw)
+            ]
+
+            # 3. Lọc video tiếng Việt thực tế
+            vn_videos = [v for v in matching_videos if self._is_vietnamese(v.raw_title)]
             vn_views = sum(v.metric_value for v in vn_videos)
+            vn_count = len(vn_videos)
 
-            # Điểm nguồn cung nội dung bản địa hóa (0 - 100)
-            # 10 video tiếng Việt chất lượng + 500k views = 100 điểm supply
-            supply_score = min(100.0, len(vn_videos) * 6.0 + (vn_views / 15000.0))
-            opp_index = round(demand_score - supply_score, 1)
+            # 4. Tính điểm nguồn cung nội dung tiếng Việt chuẩn xác (0 - 100)
+            if vn_count == 0:
+                supply_score = 0.0
+            else:
+                # Mỗi video tiếng Việt đóng góp 8 điểm supply + 1 điểm cho mỗi 10,000 views (tối đa 100)
+                supply_score = min(100.0, round(vn_count * 8.0 + (vn_views / 15000.0), 1))
 
-            # Phân loại khoảng trống
-            if len(vn_videos) <= 1 or opp_index >= 35.0:
+            opportunity_index = round(demand_score - supply_score, 1)
+
+            # 5. Phân loại khoảng trống cơ hội
+            if vn_count == 0 or opportunity_index >= 45.0:
                 opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                rec = f"Nhu cầu tìm kiếm về '{kw}' rất lớn ({demand_score:.0f}/100) nhưng thị trường gần như chưa có video tiếng Việt chuyên sâu ({len(vn_videos)} video). Cơ hội vàng để chiếm lĩnh thị phần."
-            elif "enterprise" in kw.lower() or "doanh nghiệp" in kw.lower():
+                rec = f"Nhu cầu tìm kiếm về '{kw}' đạt {demand_score:.0f}/100 nhưng thị trường Việt Nam có nguồn cung mỏng ({vn_count} video). Cơ hội vàng để dẫn đầu thị phần."
+            elif "doanh nghiệp" in kw.lower() or "enterprise" in kw.lower() or "b2b" in kw.lower():
                 opp_type = "ENTERPRISE_GAP"
-                rec = f"Khoảng trống B2B: Thiếu hụt nghiêm trọng các case-study và giải pháp triển khai thực tế cho tầng Doanh nghiệp tại Việt Nam."
-            elif supply_score >= 75.0:
+                rec = f"Khoảng trống B2B: Thiếu hụt nghiêm trọng các case-study và giải pháp triển khai thực tế cho tầng Doanh nghiệp tại Việt Nam ({vn_count} video)."
+            elif supply_score >= 70.0:
                 opp_type = "SATURATED_SEGMENT"
-                rec = f"Phân khúc '{kw}' đã có nhiều nhà sáng tạo nội dung khai thác ở tầng cơ bản. Cần tiếp cận ở góc nhìn nâng cao hoặc chuyên ngành."
+                rec = f"Phân khúc '{kw}' đã có nhiều creator làm nội dung cơ bản ({vn_count} video tiếng Việt). Cần tiếp cận ở góc nhìn nâng cao hoặc chuyên ngành."
             else:
                 opp_type = "GROWING_OPPORTUNITY"
-                rec = f"Phân khúc '{kw}' đang trên đà tăng trưởng, dung lượng thị trường còn rộng mở."
+                rec = f"Phân khúc '{kw}' đang trên đà tăng trưởng ({vn_count} video tiếng Việt), dung lượng thị trường còn rộng mở."
 
             opportunities.append(
                 MarketOpportunity(
                     topic=kw,
                     opportunity_type=opp_type,
                     search_interest_score=round(demand_score, 1),
-                    content_supply_score=round(supply_score, 1),
-                    opportunity_index=opp_index,
+                    content_supply_score=supply_score,
+                    opportunity_index=opportunity_index,
                     strategic_recommendation=rec,
-                    supporting_signals=[s.raw_title for s in vn_videos[:3]] or [s.raw_title for s in yt_list[:2]],
+                    supporting_signals=[s.raw_title for s in vn_videos[:3]] or [s.raw_title for s in matching_videos[:2]],
                 )
             )
 
-        # Sắp xếp các cơ hội có chỉ số chênh lệch cao nhất lên đầu
+        # Sắp xếp các cơ hội có chỉ số chênh lệch cao nhất (White Space lớn nhất) lên đầu
         return sorted(opportunities, key=lambda x: x.opportunity_index, reverse=True)
 
     def _evaluate_maturity_stage(
@@ -137,7 +161,7 @@ class StrategicMarketReasoner:
         
         if how_to_ratio >= 0.5:
             reasons.append(f"{how_to_ratio * 100:.0f}% nội dung tập trung ở tầng nhập môn / kỹ năng cá nhân ('hướng dẫn', 'là gì').")
-            reasons.append("Thị trường đang ở giai đoạn phổ cập (Early Adopter / Emerging Wave).")
+            reasons.append("Thị trường đang ở giai đoạn phổ cập kỹ năng (Early Adopter Wave).")
             return TrendMaturityStage.EMERGING, reasons
         elif any(c.cross_platform_score >= 70.0 for c in clusters):
             reasons.append("Tín hiệu bùng nổ đồng thời trên nhiều nền tảng với lượng tương tác đột biến.")

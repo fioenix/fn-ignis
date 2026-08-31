@@ -42,6 +42,7 @@ class ExecuteMissionUseCase:
                 keywords=mission.keywords,
                 geo=mission.geo_code,
                 target_platforms=mission.platforms,
+                custom_timeframe=mission.timeframe,
             )
 
             # 2. Gắn mission_id vào toàn bộ signals
@@ -51,14 +52,21 @@ class ExecuteMissionUseCase:
             # 3. Gom cụm và chấm điểm
             clusters = await self._clusterer.cluster_signals(signals) if signals else []
 
-            # 4. Lưu dữ liệu
+            # 4. Xóa signals cũ của mission trước khi lưu mới (Replace mode)
+            await self._repo.delete_mission_signals(mission.id)
+
+            # 5. Lưu dữ liệu mới
             if clusters:
                 await self._repo.save_clusters(clusters)
             if signals:
                 await self._repo.save_signals(signals)
 
+            # Đếm số nền tảng thực tế có dữ liệu trả về
+            active_platforms = list(set(s.platform.value if hasattr(s.platform, "value") else str(s.platform) for s in signals))
+            active_plat_str = ", ".join(active_platforms) if active_platforms else "không có"
+
             mission.status = "COMPLETED"
-            mission.summary = f"Thu thập thành công {len(signals)} signals trên {len(mission.platforms)} nền tảng, phát hiện {len(clusters)} cụm chủ đề phân tích."
+            mission.summary = f"Thu thập thành công {len(signals)} signals từ {len(active_platforms)}/{len(mission.platforms)} nền tảng phản hồi ({active_plat_str}), phát hiện {len(clusters)} cụm chủ đề phân tích."
             await self._repo.update_mission(mission)
 
             logger.info(f"Hoàn tất Research Mission {mission_id}: {mission.summary}")
