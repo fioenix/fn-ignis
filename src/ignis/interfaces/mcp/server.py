@@ -652,7 +652,7 @@ async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optio
     return await handle_get_mission_analysis(mission_id=mission_id, limit=limit, platform=platform)
 
 
-@mcp.tool(name="generate_mission_artifact", description="Sinh Single-File HTML Artifact báo cáo nghiên cứu chuyên sâu (Tailwind CSS) cho một Mission.")
+@mcp.tool(name="generate_mission_artifact", description="Sinh báo cáo HTML Infographic Canvas hoàn chỉnh cho một Mission (Lưu ra thư mục reports/, trả về đường dẫn file và tóm tắt JSON siêu nhẹ an toàn token 100%).")
 async def generate_mission_artifact(mission_id: str) -> str:
     return await handle_generate_mission_artifact(mission_id)
 
