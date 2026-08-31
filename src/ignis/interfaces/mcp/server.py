@@ -367,6 +367,45 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     )
     analysis["mission"]["shortcode"] = mission.shortcode
     analysis["mission"]["display_label"] = f"[{mission.shortcode}] {mission.title}" 
+
+    # Bổ sung Scorecard & Phân tích White Space để Claude tự dựng Native Artifact trong Chat
+    signals = await comp["repository"].get_mission_signals(mission.id)
+    clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
+    scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code)
+    report = comp["strategic_reasoner"].analyze_mission(
+        mission=mission,
+        signals=signals,
+        clusters=clusters,
+        scorecard=scorecard,
+    )
+
+    analysis["quality_scorecard"] = {
+        "overall_confidence": scorecard.overall_confidence,
+        "confidence_level": scorecard.confidence_level.value,
+        "coverage_score": scorecard.coverage_score,
+        "language_precision": scorecard.language_precision,
+        "data_freshness_score": scorecard.data_freshness_score,
+        "creator_diversity_score": scorecard.creator_diversity_score,
+        "strengths": scorecard.strengths_detected,
+        "flaws": scorecard.flaws_detected,
+    }
+    analysis["maturity_stage"] = report.maturity_stage.value
+    analysis["market_opportunities"] = [
+        {
+            "topic": opp.topic,
+            "type": opp.opportunity_type,
+            "demand_score": opp.search_interest_score,
+            "supply_score": opp.content_supply_score,
+            "opportunity_index": opp.opportunity_index,
+            "recommendation": opp.strategic_recommendation,
+            "supporting_signals": opp.supporting_signals[:2],
+        }
+        for opp in report.market_opportunities
+    ]
+    analysis["strategic_insights"] = report.strategic_insights
+    analysis["actionable_takeaways"] = report.actionable_takeaways
+    analysis["native_artifact_guideline"] = "Hãy sử dụng dữ liệu này để hiển thị bản phân tích trực tiếp dưới dạng Claude Native Artifact (trực quan, infographic, light mode) trong cửa sổ chat cho user xem ngay. Chỉ xuất file HTML ra đĩa khi user yêu cầu lưu file."
+
     return json.dumps(analysis, ensure_ascii=False, indent=2)
 
 
@@ -674,12 +713,12 @@ async def execute_mission_ingress(mission_id: str) -> str:
     return await handle_execute_mission_ingress(mission_id)
 
 
-@mcp.tool(name="get_mission_analysis", description="Lấy dữ liệu phân tích tóm tắt & Top tín hiệu nổi bật của một Research Mission (Tối ưu token, không làm tràn context).")
+@mcp.tool(name="get_mission_analysis", description="Lấy toàn bộ dữ liệu phân tích chiến lược (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) để Agent hiển thị trực tiếp bằng Claude Native Artifact trong chat.")
 async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
     return await handle_get_mission_analysis(mission_id=mission_id, limit=limit, platform=platform)
 
 
-@mcp.tool(name="generate_mission_artifact", description="Sinh báo cáo HTML Infographic Canvas hoàn chỉnh cho một Mission (Lưu ra thư mục reports/, trả về đường dẫn file và tóm tắt JSON siêu nhẹ an toàn token 100%).")
+@mcp.tool(name="generate_mission_artifact", description="Xuất báo cáo HTML Infographic Canvas ra ổ đĩa máy tính (thư mục reports/). CHỈ SỬ DỤNG khi người dùng có yêu cầu xuất/lưu file HTML cụ thể.")
 async def generate_mission_artifact(mission_id: str) -> str:
     return await handle_generate_mission_artifact(mission_id)
 

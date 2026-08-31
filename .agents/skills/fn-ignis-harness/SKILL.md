@@ -6,38 +6,41 @@ description: Autonomous Trend Intelligence & Market Opportunity Agent Harness fo
 # fn-ignis Trend Intelligence & Market Opportunity Agent Harness 🚀
 
 Skill này cung cấp cho AI Agent một khung điều phối nghiên cứu tự động (Agent Harness) với khả năng:
-1. **Cross-Agent Session Tracing**: Cho phép gắn `agent` (`claude_desktop`, `claude_code`, `codex`) và `session_id` (`codex://threads/...`, `conversation_id`) vào Mission. Giúp Agent tự động khôi phục ngữ cảnh làm việc khi mở lại phiên chat mà User không cần gõ lại mã!
-2. **Human-Friendly Mission Tracking (Shortcode UX)**: Tự động gắn mã định danh ngắn dễ nhớ (`shortcode` như `VN-AI-AGENT-90D` hoặc `FB16C5EE`).
-3. **Autonomous Refinement Loop**: Tự động mở rộng từ khóa phụ nếu dữ liệu vòng 1 chưa đủ sâu.
-4. **Quality & Integrity Scorecard**: Chấm điểm minh bạch độ tin cậy của dataset (Coverage, Language Precision, Freshness, Creator Diversity).
-5. **White Space Discovery (Khoảng trống thị trường)**: Tự động so sánh Nhu cầu tìm kiếm (Google Trends) và Nguồn cung nội dung (YouTube) để tìm cơ hội kinh doanh.
-6. **Deterministic Executive Artifacts**: Xuất báo cáo HTML độc lập hoàn chỉnh chuẩn xác 100%.
+1. **Cross-Agent Session Tracing**: Gắn `agent` và `session_id` (`codex://threads/...`, `conversation_id`) vào Mission. Tự động khôi phục ngữ cảnh làm việc khi mở lại phiên chat.
+2. **Human-Friendly Mission Tracking (Shortcode UX)**: Tự động gắn mã định danh ngắn (`FB16C5EE` hoặc `VN-AI-AGENT-90D`).
+3. **Quality & Integrity Scorecard**: Chấm điểm minh bạch độ tin cậy của dataset (Coverage, Language Precision, Freshness, Creator Diversity).
+4. **White Space Discovery (Khoảng trống thị trường)**: Bóc tách 10 cơ hội thị trường thực tế dựa trên chênh lệch Cung - Cầu.
+5. **Claude Native Artifacts First**: Hiển thị kết quả phân tích trực tiếp trên giao diện Chat UI.
 
 ---
 
-## 🎨 Quy Chuẩn Giao Tiếp & Giao Diện Bắt Buộc
+## 🎨 Quy Chuẩn Hiển Thị Kết Quả Bắt Buộc
 
 ### 1. Banner Nhận Diện Chiến Dịch
-Khi bắt đầu hoặc phản hồi bất kỳ kết quả nghiên cứu nào, **Agent PHẢI LUÔN hiển thị banner nhận diện rõ ràng**:
+Khi phản hồi kết quả, **Agent PHẢI LUÔN hiển thị banner nhận diện**:
 
 > **🎯 Chiến dịch:** `[VN-AI-AGENT-90D]` — *AI Agents & Automation tại Việt Nam*  
 > **Mã tra cứu nhanh:** `VN-AI-AGENT-90D` *(hoặc `fb16c5ee`)*  
 > **Session ID:** `codex://threads/01a05666...` *(nếu có)*
 
-### 2. Nguyên Tắc Trình Bày Artifacts (Light Mode First) ☀️
-- **BẮT BUỘC:** Ưu tiên sử dụng **Light Mode** (nền trắng/slate-50 sáng, chữ xám đậm/đen tương phản cao, thẻ trắng viền xám tinh tế, badge màu sắc rõ ràng) cho toàn bộ file HTML Artifacts và báo cáo trực quan.
-- **CHỈ SỬ DỤNG Dark Mode khi User có yêu cầu cụ thể** (ví dụ: *"hãy đổi sang darkmode"* hoặc *"render dark theme"*).
+### 2. Quy Tắc Sinh Artifact (Claude Native Artifact First) 🌟
+- **MẶC ĐỊNH TRONG CHAT:** Khi người dùng yêu cầu phân tích/báo cáo mission, Agent gọi `get_mission_analysis(mission_id)` và **TỰ ĐỘNG HIỂN THỊ KẾT QUẢ DƯỚI DẠNG CLAUDE NATIVE ARTIFACT** (khung Artifact bên phải màn hình chat).
+  - Sử dụng Markdown Infographic / Visual Tables / Badges màu sắc / Light Mode sạch sẽ.
+  - Trình bày mạch lạc theo Storyflow 5 phần: *Executive Pulse $\rightarrow$ Scorecard Radar $\rightarrow$ White Space Matrix (10 topics) $\rightarrow$ Strategic Insights & Action Blueprint $\rightarrow$ Top Signals Evidence*.
+- **CHỈ XUẤT FILE LOCAL (`reports/`):** Chỉ gọi `generate_mission_artifact` khi người dùng có **yêu cầu xuất/lưu file HTML cụ thể** (ví dụ: *"hãy xuất file HTML ra máy"*, *"lưu báo cáo ra file"*).
 
 ---
 
-## 🛠️ Danh Mục FastMCP Tools Hỗ Trợ Session Tracking
+## 🛠️ Hướng Dẫn Sử Dụng FastMCP Tools
 
 ### 1. `get_current_session_mission(session_id="...")`
-- **Mục đích:** Tự động khôi phục Mission của phiên chat hiện tại khi mở lại cuộc trò chuyện mà không cần hỏi User mã mission.
+- Tự động khôi phục Mission của phiên chat hiện tại khi mở lại cuộc trò chuyện.
 
-### 2. `run_autonomous_research_mission`
-- **Tham số nâng cao:** `topic`, `keywords`, `geo="VN"`, `timeframe="90d"`, `agent="codex" | "claude"`, `session_id="codex://threads/..."`
+### 2. `execute_mission_ingress(mission_id="...")`
+- Kích hoạt cào dữ liệu đa kênh (Replace Mode, làm sạch rác, lọc theo timeframe).
 
-### 3. `get_mission_analysis` & `generate_mission_artifact`
-- **Tham số:** Chấp nhận cả `Shortcode` (`VN-AI-AGENT-90D`), `8-char prefix` (`fb16c5ee`), `UUID`, hoặc chính `SessionID`!
-- **Cơ chế:** Tự động ghi file HTML vào thư mục `reports/` và trả về JSON metadata siêu nhẹ để tránh tràn token buffer.
+### 3. `get_mission_analysis(mission_id="...")` (KHUYÊN DÙNG CHO NATIVE ARTIFACT)
+- Trả về toàn bộ dữ liệu phân tích chiến lược (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) trong payload JSON nhẹ (~3KB) để Agent dựng Claude Native Artifact.
+
+### 4. `generate_mission_artifact(mission_id="...")` (CHỈ DÙNG KHI USER YÊU CẦU XUẤT FILE)
+- Render file HTML Infographic Canvas độc lập và lưu vào thư mục `reports/`.
