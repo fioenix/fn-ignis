@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi" class="light">
+<html lang="en" class="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -23,19 +23,19 @@
             <span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full font-mono font-bold">{{ mission.shortcode if mission.shortcode else mission.id }}</span>
           </div>
           <h1 class="text-2xl md:text-4xl font-black text-slate-900 tracking-tight">{{ mission.title }}</h1>
-          <p class="text-xs md:text-sm text-slate-500 font-medium">Báo cáo bóc tách cơ hội thị trường đa kênh • Thị trường Việt Nam (Geo: VN) • Chu kỳ: {{ mission.timeframe }}</p>
+          <p class="text-xs md:text-sm text-slate-500 font-medium">Cross-Platform Trend Intelligence & Market Gap Analysis • Target Geo: {{ mission.geo_code.value if mission.geo_code.value is defined else mission.geo_code }} • Timeframe: {{ mission.timeframe }}</p>
         </div>
 
         <div class="flex items-center space-x-4 bg-slate-50 border border-slate-200 rounded-2xl p-4 shrink-0">
           <div>
-            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Độ Tin Cậy Dataset</div>
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Confidence Score</div>
             <div class="text-2xl font-black {% if scorecard.overall_confidence >= 80 %}text-emerald-600{% elif scorecard.overall_confidence >= 60 %}text-amber-600{% else %}text-rose-600{% endif %}">
               {{ scorecard.overall_confidence }}% <span class="text-xs font-semibold text-slate-500">({{ scorecard.confidence_level.value if scorecard.confidence_level.value is defined else scorecard.confidence_level }})</span>
             </div>
           </div>
           <div class="h-10 w-px bg-slate-200"></div>
           <div>
-            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Vòng Đời Thị Trường</div>
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Market Stage</div>
             <div class="text-sm font-extrabold text-orange-600 mt-0.5">
               {{ maturity_stage.value if maturity_stage.value is defined else maturity_stage }}
             </div>
@@ -46,24 +46,24 @@
       <!-- KEY INFOGRAPHIC STATS -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div class="bg-gradient-to-br from-slate-50 to-orange-50/30 border border-slate-200/80 rounded-2xl p-4 space-y-1">
-          <div class="text-xs font-bold text-slate-500 uppercase">Tổng Tín Hiệu</div>
+          <div class="text-xs font-bold text-slate-500 uppercase">Total Signals</div>
           <div class="text-3xl font-black text-slate-900">{{ signals|length }}</div>
-          <div class="text-[11px] text-orange-600 font-semibold">{{ platform_breakdown.keys()|length }} kênh phản hồi</div>
+          <div class="text-[11px] text-orange-600 font-semibold">{{ platform_breakdown.keys()|length }} active platforms</div>
         </div>
         <div class="bg-gradient-to-br from-slate-50 to-sky-50/30 border border-slate-200/80 rounded-2xl p-4 space-y-1">
-          <div class="text-xs font-bold text-slate-500 uppercase">Bản Địa Hóa (VN)</div>
+          <div class="text-xs font-bold text-slate-500 uppercase">Target Localization</div>
           <div class="text-3xl font-black text-sky-700">{{ scorecard.language_precision }}%</div>
-          <div class="text-[11px] text-sky-600 font-semibold">Tín hiệu tiếng Việt chuẩn</div>
+          <div class="text-[11px] text-sky-600 font-semibold">Verified localized signals</div>
         </div>
         <div class="bg-gradient-to-br from-slate-50 to-emerald-50/30 border border-slate-200/80 rounded-2xl p-4 space-y-1">
-          <div class="text-xs font-bold text-slate-500 uppercase">Độ Tươi Mới (Freshness)</div>
+          <div class="text-xs font-bold text-slate-500 uppercase">Data Freshness</div>
           <div class="text-3xl font-black text-emerald-700">{{ scorecard.data_freshness_score }}%</div>
-          <div class="text-[11px] text-emerald-600 font-semibold">Trong vòng {{ mission.timeframe }}</div>
+          <div class="text-[11px] text-emerald-600 font-semibold">Matching {{ mission.timeframe }} window</div>
         </div>
         <div class="bg-gradient-to-br from-slate-50 to-purple-50/30 border border-slate-200/80 rounded-2xl p-4 space-y-1">
-          <div class="text-xs font-bold text-slate-500 uppercase">Đa Dạng Nguồn Tin</div>
+          <div class="text-xs font-bold text-slate-500 uppercase">Creator Diversity</div>
           <div class="text-3xl font-black text-purple-700">{{ scorecard.creator_diversity_score }}%</div>
-          <div class="text-[11px] text-purple-600 font-semibold">Kênh nội dung độc lập</div>
+          <div class="text-[11px] text-purple-600 font-semibold">Independent creator sources</div>
         </div>
       </div>
     </section>
@@ -74,8 +74,8 @@
       <!-- 1. Radar Scorecard Chart -->
       <div class="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
         <div>
-          <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">🎯 Sức Khỏe Dữ Liệu (5 Trục)</h3>
-          <p class="text-xs text-slate-500">Đánh giá toàn vẹn của dataset đầu vào</p>
+          <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">🎯 Data Health Radar</h3>
+          <p class="text-xs text-slate-500">5-axis multi-dimensional dataset integrity</p>
         </div>
         <div class="h-64 flex items-center justify-center">
           <canvas id="scorecardRadarChart"></canvas>
@@ -85,8 +85,8 @@
       <!-- 2. Platform Breakdown Chart -->
       <div class="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
         <div>
-          <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">📊 Tỉ Lệ Nguồn Dữ Liệu</h3>
-          <p class="text-xs text-slate-500">Phân bổ tín hiệu qua các nền tảng</p>
+          <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">📊 Platform Distribution</h3>
+          <p class="text-xs text-slate-500">Signal contribution across listening channels</p>
         </div>
         <div class="h-64 flex items-center justify-center">
           <canvas id="platformDoughnutChart"></canvas>
@@ -96,15 +96,15 @@
       <!-- 3. Key Takeaways Card -->
       <div class="bg-gradient-to-br from-orange-500 to-amber-600 text-white rounded-3xl p-6 shadow-md flex flex-col justify-between space-y-4">
         <div class="space-y-3">
-          <span class="bg-white/20 text-white text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider">💡 Insight Chiến Lược</span>
-          <h3 class="text-xl font-black leading-snug">Cơ hội vàng cho người tiên phong nội dung AI Automation</h3>
+          <span class="bg-white/20 text-white text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider">💡 Strategic Takeaway</span>
+          <h3 class="text-xl font-black leading-snug">Early Mover Advantage in Applied Automation</h3>
           <p class="text-xs text-orange-50 leading-relaxed font-medium">
-            Nhu cầu tìm kiếm từ khóa kỹ thuật (Workflow Automation, MCP, n8n) đang tăng vọt nhưng nguồn cung hướng dẫn tiếng Việt thực tế còn rất mỏng.
+            Search interest for foundational automation tools (Workflow, MCP, n8n) is accelerating while localized practitioner supply remains thin.
           </p>
         </div>
         <div class="bg-black/15 rounded-2xl p-4 text-xs font-semibold space-y-1">
-          <div class="text-orange-200 uppercase text-[10px] tracking-wider">Khuyến nghị cốt lõi:</div>
-          <div>Xây dựng chuỗi case-study thực tế cho doanh nghiệp B2B để đón đầu thị phần.</div>
+          <div class="text-orange-200 uppercase text-[10px] tracking-wider">Core Action:</div>
+          <div>Publish structured end-to-end B2B case studies to establish dominant category leadership.</div>
         </div>
       </div>
     </section>
@@ -115,12 +115,12 @@
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-100 pb-4">
         <div>
           <h2 class="text-lg md:text-xl font-black text-slate-900 flex items-center space-x-2">
-            <span>✨ Ma Trận Khoảng Trống Thị Trường (White Space Matrix)</span>
+            <span>✨ Market White Space Matrix (Demand vs. Supply)</span>
           </h2>
-          <p class="text-xs text-slate-500">So sánh tương quan giữa Nhu cầu tìm kiếm (Demand) và Nguồn cung video tiếng Việt (Supply) trên toàn bộ {{ market_opportunities|length }} chủ đề.</p>
+          <p class="text-xs text-slate-500">Correlating Search Intent Demand against Localized Content Supply across all {{ market_opportunities|length }} topics.</p>
         </div>
         <span class="bg-emerald-50 text-emerald-800 text-xs px-3 py-1 rounded-full font-bold border border-emerald-200">
-          {{ market_opportunities|length }} Chủ đề phân tích
+          {{ market_opportunities|length }} Analyzed Topics
         </span>
       </div>
 
@@ -131,7 +131,7 @@
 
       <!-- Full 10 Market Opportunities Grid -->
       <div class="pt-4 border-t border-slate-100">
-        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">Chi Tiết Bóc Tách {{ market_opportunities|length }} Cơ Hội Thị Trường:</h3>
+        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">Detailed Breakdown for {{ market_opportunities|length }} Strategic Topics:</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           {% for opp in market_opportunities %}
           <div class="bg-slate-50 border {% if opp.opportunity_type == 'HIGH_DEMAND_LOW_SUPPLY' %}border-emerald-200/90 bg-emerald-50/20{% elif opp.opportunity_type == 'ENTERPRISE_GAP' %}border-sky-200/90 bg-sky-50/20{% else %}border-slate-200{% endif %} rounded-2xl p-4 space-y-2.5 transition hover:shadow-sm">
@@ -152,7 +152,7 @@
             <p class="text-xs text-slate-600 leading-relaxed font-normal">{{ opp.strategic_recommendation }}</p>
             {% if opp.supporting_signals %}
             <div class="pt-1 text-[11px] text-slate-500 space-y-0.5 border-t border-slate-200/60">
-              <div class="font-semibold text-slate-600 text-[10px]">Tín hiệu thực chứng:</div>
+              <div class="font-semibold text-slate-600 text-[10px]">Signal Evidence:</div>
               {% for sig in opp.supporting_signals %}
               <div class="truncate text-slate-600">• {{ sig }}</div>
               {% endfor %}
@@ -170,7 +170,7 @@
       <!-- Insights -->
       <div class="bg-white border border-amber-200/80 rounded-3xl p-6 shadow-sm space-y-4">
         <h3 class="text-base font-black text-amber-900 flex items-center space-x-2">
-          <span>🧠 Nhận Định Chiến Lược (Strategic Insights)</span>
+          <span>🧠 Strategic Insights</span>
         </h3>
         <div class="space-y-3">
           {% for ins in strategic_insights %}
@@ -185,7 +185,7 @@
       <!-- Action Blueprint -->
       <div class="bg-white border border-emerald-200/80 rounded-3xl p-6 shadow-sm space-y-4">
         <h3 class="text-base font-black text-emerald-900 flex items-center space-x-2">
-          <span>🎯 Lộ Trình Hành Động (Action Blueprint)</span>
+          <span>🎯 Action Blueprint</span>
         </h3>
         <div class="space-y-3">
           {% for act in actionable_takeaways %}
@@ -201,8 +201,8 @@
     <!-- ACT 5: MULTI-PLATFORM SIGNAL STREAM -->
     <section class="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
       <div class="flex justify-between items-center border-b border-slate-100 pb-3">
-        <h3 class="text-base font-black text-slate-900">📊 Bằng Chứng Dữ Liệu Đa Nền Tảng ({{ signals|length }} Signals)</h3>
-        <span class="text-xs text-slate-400 font-medium">Bản quyền số liệu thực chứng 100%</span>
+        <h3 class="text-base font-black text-slate-900">📊 Multi-Platform Signal Evidence ({{ signals|length }} Signals)</h3>
+        <span class="text-xs text-slate-400 font-medium">100% Deterministic Signal Registry</span>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[450px] overflow-y-auto pr-1">
@@ -215,7 +215,7 @@
             </div>
             <div class="flex items-center space-x-3 text-[11px] text-slate-500 font-medium">
               {% if s.metadata.get('channel_title') %}
-              <span>Kênh: <strong class="text-slate-700">{{ s.metadata.get('channel_title') }}</strong></span>
+              <span>Channel: <strong class="text-slate-700">{{ s.metadata.get('channel_title') }}</strong></span>
               {% endif %}
               {% if s.metadata.get('published_at') %}
               <span class="text-emerald-700 font-mono text-[10px]">📅 {{ s.metadata.get('published_at')[:10] }}</span>
@@ -231,7 +231,7 @@
             <div class="text-xs font-black text-emerald-600">Interest: {{ s.metric_value }}</div>
             {% endif %}
             {% if s.source_url %}
-            <a href="{{ s.source_url }}" target="_blank" class="text-sky-600 hover:underline text-[10px] font-bold block mt-0.5">Nguồn ↗</a>
+            <a href="{{ s.source_url }}" target="_blank" class="text-sky-600 hover:underline text-[10px] font-bold block mt-0.5">Source ↗</a>
             {% endif %}
           </div>
         </div>
@@ -249,9 +249,9 @@
       new Chart(radarCtx, {
         type: 'radar',
         data: {
-          labels: ['Độ phủ kênh', 'Bản địa hóa VN', 'Độ mới (Freshness)', 'Đa dạng tác giả', 'Điểm tin cậy'],
+          labels: ['Coverage', 'Localization', 'Freshness', 'Diversity', 'Confidence'],
           datasets: [{
-            label: 'Chỉ số chất lượng (%)',
+            label: 'Integrity Score (%)',
             data: [
               {{ scorecard.coverage_score }},
               {{ scorecard.language_precision }},
@@ -334,13 +334,13 @@
           labels: oppTopics,
           datasets: [
             {
-              label: 'Nhu cầu tìm kiếm (Demand)',
+              label: 'Search Demand Index',
               data: demandScores,
               backgroundColor: '#0ea5e9',
               borderRadius: 6,
             },
             {
-              label: 'Nguồn cung video VN (Supply)',
+              label: 'Localized Supply Index',
               data: supplyScores,
               backgroundColor: '#f97316',
               borderRadius: 6,

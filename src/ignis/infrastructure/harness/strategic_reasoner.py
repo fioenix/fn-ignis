@@ -3,6 +3,7 @@ import math
 from typing import List, Dict, Any, Tuple
 from collections import defaultdict
 
+from ignis.config import settings
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
 from ignis.domain.harness_models import (
     MarketOpportunity,
@@ -16,7 +17,7 @@ from ignis.domain.value_objects import PlatformType
 class StrategicMarketReasoner:
     """
     Strategic Reasoning Engine for Market Opportunity & White Space Discovery.
-    Uses strict title matching to prevent false positive attribution.
+    Parameters and thresholds are configurable via environment variables.
     """
 
     VIETNAMESE_CHARS_PATTERN = re.compile(
@@ -34,7 +35,6 @@ class StrategicMarketReasoner:
         "thuc", "chien", "tong", "quan"
     }
 
-    # Danh mục rác tuyệt đối loại trừ khỏi phân tích công nghệ
     GARBAGE_EXCLUSIONS = [
         "khát khao độc chiếm", "audio chiếm hữu", "chanh non", "truyện audio", "đọc truyện",
         "phonegrid", "phone farm", "mmo", "forex", "bóng đá", "ur3", "cánh tay robot",
@@ -84,10 +84,6 @@ class StrategicMarketReasoner:
         return any(g in t_low for g in self.GARBAGE_EXCLUSIONS)
 
     def _matches_topic_strictly(self, title: str, kw: str) -> bool:
-        """
-        Quy tắc so khớp nghiêm ngặt theo tiêu đề:
-        Video chỉ được coi là thuộc chủ đề kw nếu tiêu đề thực sự chứa các thành tố cốt lõi.
-        """
         if self._is_garbage(title):
             return False
 
@@ -99,7 +95,6 @@ class StrategicMarketReasoner:
         elif k == "mcp ai":
             return "mcp" in t or "model context protocol" in t
         elif k == "rpa":
-            # Chỉ nhận diện phần mềm RPA (UiPath, Power Automate, RPA)
             return "rpa" in t or "uipath" in t or "power automate" in t or "robotic process automation" in t
         elif k == "ai agent doanh nghiệp":
             has_enterprise = any(w in t for w in ["doanh nghiệp", "enterprise", "b2b", "công ty"])
@@ -145,46 +140,43 @@ class StrategicMarketReasoner:
             kw_clean = raw_kw.lower().strip()
             demand_score = google_interests.get(kw_clean, 65.0)
 
-            # 1. Khớp video nghiêm ngặt theo tiêu đề thực tế
             matching_videos = [
                 s for s in youtube_signals 
                 if self._matches_topic_strictly(s.raw_title, kw_clean)
             ]
 
-            # 2. Lọc video tiếng Việt bản địa hóa thực sự
             vn_videos = [v for v in matching_videos if self._is_vietnamese(v.raw_title)]
             vn_views = sum(v.metric_value for v in vn_videos)
             vn_count = len(vn_videos)
 
-            # 3. Tính điểm nguồn cung (Supply Score) chuẩn hóa toán học
+            # Configurable Supply Scoring Equation
             if vn_count == 0:
                 supply_score = 0.0
             else:
-                base_supply = min(80.0, vn_count * 7.5)
-                view_factor = min(20.0, math.log10(max(10.0, vn_views)) * 3.5) if vn_views > 0 else 0.0
+                base_supply = min(settings.SUPPLY_BASE_MAX, vn_count * settings.SUPPLY_VIDEO_WEIGHT)
+                view_factor = min(settings.SUPPLY_VIEW_MAX, math.log10(max(10.0, vn_views)) * settings.SUPPLY_VIEW_LOG_WEIGHT) if vn_views > 0 else 0.0
                 supply_score = round(min(100.0, base_supply + view_factor), 1)
 
             opportunity_index = round(demand_score - supply_score, 1)
 
-            # 4. Phân loại khoảng trống và khuyến nghị tiếng Việt mạch lạc, nhất quán logic
-            if vn_count == 0 or opportunity_index >= 50.0:
+            # Configurable Opportunity Classification
+            if vn_count == 0 or opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
                 opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                rec = f"Nhu cầu tìm kiếm về '{raw_kw}' đạt {demand_score:.0f}/100 nhưng nguồn cung video tiếng Việt rất mỏng ({vn_count} video). Cơ hội vàng để dẫn đầu thị phần."
-            elif ("doanh nghiệp" in kw_clean or "enterprise" in kw_clean or "b2b" in kw_clean) and supply_score < 70.0:
+                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with very thin localized supply ({vn_count} videos). Prime white space for early market leadership."
+            elif ("doanh nghiệp" in kw_clean or "enterprise" in kw_clean or "b2b" in kw_clean) and supply_score < settings.ENTERPRISE_GAP_SUPPLY_THRESHOLD:
                 opp_type = "ENTERPRISE_GAP"
-                rec = f"Khoảng trống B2B Doanh Nghiệp: Nhu cầu cao nhưng thiếu case-study thực chiến triển khai cho tổ chức tại Việt Nam ({vn_count} video)."
-            elif supply_score >= 70.0:
+                rec = f"Enterprise B2B White Space: High search intent but severe lack of hands-on enterprise case studies in local market ({vn_count} videos)."
+            elif supply_score >= settings.SATURATION_SUPPLY_THRESHOLD:
                 opp_type = "SATURATED_SEGMENT"
-                rec = f"Phân khúc '{raw_kw}' đã có nhiều creator làm nội dung cơ bản ({vn_count} video tiếng Việt). Cần tiếp cận ở góc nhìn chuyên sâu hoặc giải pháp đóng gói."
+                rec = f"Segment '{raw_kw}' has substantial foundational creator supply ({vn_count} localized videos). Recommend differentiating through advanced or verticalized solutions."
             else:
                 opp_type = "GROWING_OPPORTUNITY"
-                rec = f"Phân khúc '{raw_kw}' đang trên đà tăng trưởng ({vn_count} video tiếng Việt), dung lượng thị trường còn rộng mở."
+                rec = f"Segment '{raw_kw}' is actively growing ({vn_count} localized videos), with significant addressable headroom."
 
-            # Đảm bảo supporting_signals nhất quán với số lượng video tiếng Việt thực chứng
             if vn_videos:
                 support_sigs = [s.raw_title for s in vn_videos[:3]]
             else:
-                support_sigs = ["Chưa ghi nhận video tiếng Việt nào trong timeframe 90 ngày."]
+                support_sigs = ["No localized videos recorded in the 90-day timeframe."]
 
             opportunities.append(
                 MarketOpportunity(
@@ -211,19 +203,19 @@ class StrategicMarketReasoner:
 
         reasons = []
         if total_yt == 0:
-            return TrendMaturityStage.EMERGING, ["Thị trường mới nổi, nguồn cung nội dung còn ở mức sơ khai."]
+            return TrendMaturityStage.EMERGING, ["Emerging market with minimal creator supply."]
 
         how_to_ratio = how_to_count / float(total_yt)
         
         if how_to_ratio >= 0.4:
-            reasons.append(f"{how_to_ratio * 100:.0f}% nội dung tập trung ở tầng nhập môn / kỹ năng cá nhân ('hướng dẫn', 'là gì').")
-            reasons.append("Thị trường đang ở giai đoạn phổ cập kỹ năng (Early Adopter Wave).")
+            reasons.append(f"{how_to_ratio * 100:.0f}% of content is introductory tutorials ('how-to', 'basics').")
+            reasons.append("Market is in the Early Adopter / Skill Acquisition wave.")
             return TrendMaturityStage.EMERGING, reasons
         elif any(c.cross_platform_score >= 70.0 for c in clusters):
-            reasons.append("Tín hiệu bùng nổ đồng thời trên nhiều nền tảng với lượng tương tác đột biến.")
+            reasons.append("Breakout multi-platform cross-posting with viral velocity.")
             return TrendMaturityStage.HYPING, reasons
         else:
-            reasons.append("Hệ sinh thái phân hóa đa dạng và có sự tham gia của các tổ chức chuyên nghiệp.")
+            reasons.append("Diversified ecosystem with institutional participation.")
             return TrendMaturityStage.MATURE, reasons
 
     def _extract_verified_trends(
@@ -261,19 +253,19 @@ class StrategicMarketReasoner:
         insights = []
         actionables = []
 
-        insights.append(f"Giai đoạn thị trường: {maturity_stage.value} — {'; '.join(maturity_reasons)}")
+        insights.append(f"Market Maturity: {maturity_stage.value} — {'; '.join(maturity_reasons)}")
 
         top_gaps = [o for o in opportunities if o.opportunity_type in ["HIGH_DEMAND_LOW_SUPPLY", "ENTERPRISE_GAP"]]
         if top_gaps:
             gap_names = ", ".join([f"'{o.topic}'" for o in top_gaps[:3]])
-            insights.append(f"Khoảng trống cơ hội chiến lược lớn nhất tập trung tại: {gap_names}.")
-            actionables.append(f"Tập trung nguồn lực vào các chủ đề có nhu cầu cao {gap_names} để đón đầu thị phần.")
+            insights.append(f"Largest strategic white space opportunities concentrate in: {gap_names}.")
+            actionables.append(f"Focus resources on high-demand topics {gap_names} to capture early-mover advantage.")
 
         n8n_signals = [s for s in signals if "n8n" in s.raw_title.lower() and not self._is_garbage(s.raw_title)]
         if len(n8n_signals) >= 3:
-            insights.append("Cộng đồng No-code & Workflow Automation (đặc biệt là n8n) chiếm tỷ trọng lớn trong thảo luận chuyên môn.")
-            actionables.append("Cảnh báo rủi ro Shadow Automation khi triển khai workflow tự động hóa phân tán không kiểm soát trong doanh nghiệp.")
+            insights.append("No-code & Workflow Automation communities (notably n8n) dominate practitioner discussions.")
+            actionables.append("Mitigate Shadow Automation risks when deploying distributed automation workflows across enterprise teams.")
 
-        actionables.append("Thiết lập chu kỳ Ingress định kỳ mỗi 15 phút để phát hiện sớm các case-study mới xuất hiện.")
+        actionables.append("Schedule periodic 15-minute ingress cycles to detect emerging enterprise case studies.")
 
         return insights, actionables

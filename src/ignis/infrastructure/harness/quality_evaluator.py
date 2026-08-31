@@ -3,6 +3,7 @@ import math
 from datetime import datetime, timezone
 from typing import List, Dict, Set, Optional
 
+from ignis.config import settings
 from ignis.domain.entities import TrendSignal
 from ignis.domain.harness_models import QualityScorecard, ConfidenceLevel
 from ignis.domain.value_objects import GeoCode, PlatformType
@@ -11,7 +12,7 @@ from ignis.domain.value_objects import GeoCode, PlatformType
 class QualityEvaluator:
     """
     Evaluates dataset quality and integrity across multi-platform signals.
-    Provides transparent scorecards (Coverage, Language Precision, Freshness, Creator Diversity).
+    Weights and confidence thresholds are fully configurable via environment variables.
     """
 
     VIETNAMESE_CHARS_PATTERN = re.compile(
@@ -19,7 +20,6 @@ class QualityEvaluator:
         re.IGNORECASE
     )
 
-    # Từ vựng tiếng Pháp dễ gây nhầm lẫn do có chung ký tự dấu
     FRENCH_WORDS = {"formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant"}
 
     VI_COMMON_WORDS = {
@@ -38,7 +38,6 @@ class QualityEvaluator:
         text_lower = text.lower()
         words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", text_lower))
         
-        # Nếu có từ tiếng Pháp rõ ràng -> loại trừ
         if any(fw in words for fw in self.FRENCH_WORDS):
             return False
 
@@ -79,12 +78,12 @@ class QualityEvaluator:
         coverage_score = round((len(platforms_present) / 5.0) * 100.0, 1)
         
         if has_core:
-            strengths.append(f"Thu thập đầy đủ 2 kênh trụ cột ({', '.join(core_platforms)}).")
+            strengths.append(f"Successfully collected from core pillars ({', '.join(core_platforms)}).")
         else:
             missing_core = core_platforms - platforms_present
-            flaws.append(f"Thiếu kênh trụ cột: {', '.join(missing_core)}.")
+            flaws.append(f"Missing core pillars: {', '.join(missing_core)}.")
 
-        # 2. Language Precision (Đo chính xác trên tập tín hiệu nội dung thực tế, không cộng Google Trends vào tử số)
+        # 2. Language Precision (evaluated on content signals)
         content_signals = [s for s in signals if s.platform != PlatformType.GOOGLE_TRENDS]
         eval_signals = content_signals if content_signals else signals
 
@@ -105,22 +104,22 @@ class QualityEvaluator:
 
         language_precision = round((target_lang_matches / float(len(eval_signals))) * 100.0, 1)
         if language_precision >= 70.0:
-            strengths.append(f"Độ chính xác bản địa hóa cao ({language_precision}% nội dung tiếng Việt).")
+            strengths.append(f"High language localization ({language_precision}% verified target market language).")
         else:
-            flaws.append(f"Có {round(100.0 - language_precision, 1)}% tín hiệu nội dung là ngoại ngữ (chưa hoàn toàn bản địa hóa).")
+            flaws.append(f"{round(100.0 - language_precision, 1)}% of content signals are non-localized / foreign language.")
 
-        # 3. Creator Diversity Score (Tỉ lệ kênh độc lập)
+        # 3. Creator Diversity Score
         if channels:
             unique_channels = len(set(channels))
             creator_diversity = round(min(100.0, (unique_channels / float(len(channels))) * 100.0), 1)
             if creator_diversity >= 60.0:
-                strengths.append(f"Nguồn phát tán đa dạng ({unique_channels} kênh độc lập).")
+                strengths.append(f"Diverse creator distribution ({unique_channels} independent channels).")
             else:
-                flaws.append("Tập trung vào một số ít kênh (dễ bị thiên lệch quan điểm).")
+                flaws.append("Signals concentrated among very few creators (viewpoint bias risk).")
         else:
             creator_diversity = 70.0
 
-        # 4. Data Freshness Score (% tín hiệu nằm trong khung thời gian timeframe)
+        # 4. Data Freshness Score
         now_utc = datetime.now(timezone.utc)
         in_timeframe_count = 0
         for s in signals:
@@ -133,24 +132,24 @@ class QualityEvaluator:
 
         data_freshness_score = round((in_timeframe_count / float(len(signals))) * 100.0, 1)
         if data_freshness_score >= 80.0:
-            strengths.append(f"Dữ liệu tươi mới ({data_freshness_score}% khớp timeframe {timeframe_days} ngày).")
+            strengths.append(f"High data freshness ({data_freshness_score}% matching {timeframe_days}-day window).")
         else:
-            flaws.append(f"Độ tươi mới thấp ({data_freshness_score}%), có tín hiệu quá hạn.")
+            flaws.append(f"Low freshness score ({data_freshness_score}%), contains outdated signals.")
 
-        # 5. Overall Confidence Score (Bình quân trọng số 4 trục)
+        # 5. Overall Confidence Score (Weighted average from configurable settings)
         overall_confidence = round(
-            (coverage_score * 0.25) +
-            (language_precision * 0.25) +
-            (data_freshness_score * 0.30) +
-            (creator_diversity * 0.20),
+            (coverage_score * settings.SCORECARD_WEIGHT_COVERAGE) +
+            (language_precision * settings.SCORECARD_WEIGHT_LANGUAGE) +
+            (data_freshness_score * settings.SCORECARD_WEIGHT_FRESHNESS) +
+            (creator_diversity * settings.SCORECARD_WEIGHT_DIVERSITY),
             1
         )
 
-        if overall_confidence >= 80.0:
+        if overall_confidence >= settings.CONFIDENCE_HIGH_THRESHOLD:
             confidence_level = ConfidenceLevel.HIGH
-        elif overall_confidence >= 60.0:
+        elif overall_confidence >= settings.CONFIDENCE_MEDIUM_THRESHOLD:
             confidence_level = ConfidenceLevel.MEDIUM
-        elif overall_confidence >= 40.0:
+        elif overall_confidence >= settings.CONFIDENCE_LOW_THRESHOLD:
             confidence_level = ConfidenceLevel.LOW
         else:
             confidence_level = ConfidenceLevel.UNRELIABLE

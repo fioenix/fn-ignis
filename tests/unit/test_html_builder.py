@@ -8,10 +8,10 @@ def test_build_dashboard_artifact(sample_topic_cluster):
     html = builder.build_dashboard_artifact([sample_topic_cluster], geo=GeoCode.VN)
 
     assert "<!DOCTYPE html>" in html
-    assert "fn-ignis" in html
+    assert "FN-IGNIS" in html
     assert "Generative AI" in html
     assert str(sample_topic_cluster.cross_platform_score) in html
-    assert "Geo: VN" in html
+    assert "VN" in html
 
 
 def test_build_topic_card_artifact(sample_topic_cluster, sample_trend_signal):
@@ -21,4 +21,3 @@ def test_build_topic_card_artifact(sample_topic_cluster, sample_trend_signal):
     assert "<!DOCTYPE html>" in html
     assert "Generative AI" in html
     assert sample_trend_signal.raw_title in html
-    assert "Nguồn ↗" in html

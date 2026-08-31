@@ -52,7 +52,7 @@ async def test_end_to_end_pipeline():
     dashboard_html = builder.build_dashboard_artifact(clusters, geo=GeoCode.VN)
     assert "<!DOCTYPE html>" in dashboard_html
     assert c.canonical_name in dashboard_html
-    assert "fn-ignis" in dashboard_html
+    assert "fn-ignis" in dashboard_html.lower()
 
     card_html = builder.build_topic_card_artifact(c, c.signals)
     assert "<!DOCTYPE html>" in card_html
