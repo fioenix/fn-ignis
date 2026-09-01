@@ -37,9 +37,8 @@ class QualityEvaluator:
     }
 
     TECH_LOAN_WORDS = {
-        "ai", "bot", "chat", "agent", "app", "tool", "n8n", "dify", "make", "rpa",
-        "token", "workflow", "api", "prompt", "code", "coding", "software", "tech",
-        "saas", "plugin", "gpt", "llm", "claude", "gemini", "tutorial", "guide", "free"
+        "ai", "bot", "chat", "agent", "app", "tool", "pro", "plus", "hub", "lab",
+        "tech", "online", "code", "dev", "web", "net", "top", "mini", "shop", "store"
     }
 
     VI_CORE_WORDS = {

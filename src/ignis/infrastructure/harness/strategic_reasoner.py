@@ -26,12 +26,9 @@ class StrategicMarketReasoner:
         re.IGNORECASE
     )
 
-    FRENCH_WORDS = {"formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant"}
-
     TECH_LOAN_WORDS = {
-        "ai", "bot", "chat", "agent", "app", "tool", "n8n", "dify", "make", "rpa",
-        "token", "workflow", "api", "prompt", "code", "coding", "software", "tech",
-        "saas", "plugin", "gpt", "llm", "claude", "gemini", "tutorial", "guide", "free"
+        "ai", "bot", "chat", "agent", "app", "tool", "pro", "plus", "hub", "lab",
+        "tech", "online", "code", "dev", "web", "net", "top", "mini", "shop", "store"
     }
 
     VI_CORE_WORDS = {
@@ -91,8 +88,6 @@ class StrategicMarketReasoner:
             return any(g in t_low for g in self._custom_noise)
         return False
 
-
-
     def analyze_mission(
         self,
         mission: ResearchMission,
@@ -100,9 +95,10 @@ class StrategicMarketReasoner:
         clusters: List[TopicCluster],
         scorecard: QualityScorecard,
     ) -> HarnessResearchReport:
+        maturity_stage, maturity_reasons = self._assess_maturity(signals, clusters)
         opportunities = self._discover_market_opportunities(signals, mission.keywords)
-        maturity_stage, maturity_reasons = self._evaluate_maturity_stage(signals, clusters)
         verified_trends = self._extract_verified_trends(signals, clusters)
+
         insights, actionables = self._synthesize_insights(
             mission, signals, opportunities, maturity_stage, maturity_reasons
         )
@@ -117,6 +113,59 @@ class StrategicMarketReasoner:
             strategic_insights=insights,
             actionable_takeaways=actionables,
         )
+
+    def _assess_maturity(
+        self,
+        signals: List[TrendSignal],
+        clusters: List[TopicCluster],
+    ) -> Tuple[TrendMaturityStage, List[str]]:
+        reasons = []
+        video_signals = [
+            s for s in signals 
+            if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) in ("youtube", "tiktok", "reels")
+        ]
+        
+        if not video_signals:
+            reasons.append("Zero localized video tutorials or production assets detected.")
+            return TrendMaturityStage.EMERGING, reasons
+
+        avg_views = sum(float(s.metric_value) for s in video_signals) / float(len(video_signals))
+        total_clusters = len(clusters)
+
+        if avg_views > 20000 and total_clusters >= 3:
+            reasons.append(f"High average view velocity ({avg_views:,.0f} views/video) across {total_clusters} clusters.")
+            return TrendMaturityStage.HYPING, reasons
+        elif avg_views > 5000:
+            reasons.append(f"Moderate practitioner engagement ({avg_views:,.0f} views/video).")
+            return TrendMaturityStage.EMERGING, reasons
+        else:
+            reasons.append(f"Established ecosystem with stable viewership.")
+            return TrendMaturityStage.MATURE, reasons
+
+    def _extract_verified_trends(
+        self,
+        signals: List[TrendSignal],
+        clusters: List[TopicCluster],
+    ) -> List[Dict[str, Any]]:
+        verified = []
+        for c in clusters[:6]:
+            p_counts: Dict[str, int] = defaultdict(int)
+            total_views = 0.0
+            for s in c.signals:
+                if self._is_vietnamese(s.raw_title):
+                    p_counts[s.platform.value if hasattr(s.platform, "value") else str(s.platform)] += 1
+                    total_views += float(s.metric_value)
+
+            verified.append({
+                "canonical_name": c.canonical_name,
+                "momentum": c.momentum_category.value if hasattr(c.momentum_category, "value") else str(c.momentum_category),
+                "cross_platform_score": c.cross_platform_score,
+                "platform_diversity": len(p_counts),
+                "total_estimated_reach": int(total_views),
+                "summary": c.summary_text or f"Aggregated cluster with {len(c.signals)} signals.",
+            })
+        return verified
+
 
     def register_terms(self, terms: List[str]) -> None:
         """Dynamically register new domain vocabulary terms in memory."""
@@ -167,41 +216,28 @@ class StrategicMarketReasoner:
         return vi_core_count >= 2
 
     def _matches_topic_strictly(self, title: str, kw: str) -> bool:
-
         if self._is_garbage(title):
             return False
 
         t = title.lower()
         k = kw.lower().strip()
 
-        if k == "n8n":
-            return bool(re.search(r"\bn8n\b", t))
-        elif k == "mcp ai" or k == "mcp":
-            return bool(re.search(r"\bmcp\b", t)) or "model context protocol" in t
-        elif k == "rpa":
-            return bool(re.search(r"\brpa\b", t)) or "uipath" in t or "power automate" in t or "robotic process automation" in t
-        elif k == "ai agent doanh nghiệp":
-            has_enterprise = any(w in t for w in ["doanh nghiệp", "enterprise", "b2b", "công ty"])
-            has_agent = any(w in t for w in ["agent", "trợ lý", "ai", "tự động hóa"])
-            return has_enterprise and has_agent
-        elif k == "workflow automation":
-            has_workflow = any(w in t for w in ["workflow", "quy trình", "n8n", "make.com", "zapier"])
-            has_auto = any(w in t for w in ["tự động", "automation", "automate"])
-            return has_workflow and has_auto
-        elif k == "ai automation":
-            has_ai = any(w in t for w in ["ai", "trí tuệ nhân tạo", "gpt", "claude"])
-            has_auto = any(w in t for w in ["tự động", "automation", "automate"])
-            return has_ai and has_auto
-        elif k == "chatbot ai":
-            return "chatbot" in t or ("bot" in t and "chat" in t)
-        elif k == "trợ lý ai":
-            return ("trợ lý" in t or "assistant" in t or "copilot" in t) and ("ai" in t or "ảo" in t)
-        elif k == "tự động hóa ai":
-            return ("tự động hóa" in t or "automation" in t) and ("ai" in t or "trí tuệ nhân tạo" in t)
-        elif k == "ai agent":
-            return "agent" in t
-        else:
-            return k in t
+        # Word boundary regex for short acronyms/words (<=4 chars or single word)
+        if len(k) <= 4 or " " not in k:
+            pattern = rf"\b{re.escape(k)}\b"
+            if re.search(pattern, t):
+                return True
+        
+        # Substring match for multi-word phrases
+        if k in t:
+            return True
+
+        # Token set match: all key content tokens exist in title
+        kw_tokens = [w for w in k.split() if len(w) > 2]
+        if len(kw_tokens) >= 2:
+            return all(w in t for w in kw_tokens)
+
+        return False
 
     def _discover_market_opportunities(
         self,
@@ -209,33 +245,35 @@ class StrategicMarketReasoner:
         target_keywords: List[str],
     ) -> List[MarketOpportunity]:
         opportunities: List[MarketOpportunity] = []
-        
-        google_interests: Dict[str, float] = {}
-        video_supply_signals: List[TrendSignal] = []
+        if not target_keywords:
+            return opportunities
 
-        for s in signals:
-            if s.platform == PlatformType.GOOGLE_TRENDS:
-                kw = s.metadata.get("keyword", s.raw_title.replace("Google Search Trends: ", ""))
-                google_interests[kw.lower().strip()] = s.metric_value
-            elif s.platform in (PlatformType.YOUTUBE, PlatformType.TIKTOK, PlatformType.REELS):
-                video_supply_signals.append(s)
+        # Extract search demand values per keyword
+        demand_signals = [s for s in signals if s.platform == PlatformType.GOOGLE_TRENDS]
+        demand_map: Dict[str, float] = {}
+        for s in demand_signals:
+            kw_meta = s.metadata.get("keyword", "")
+            if kw_meta:
+                demand_map[kw_meta.lower().strip()] = float(s.metric_value)
+            for raw_kw in target_keywords:
+                if raw_kw.lower() in s.raw_title.lower():
+                    demand_map[raw_kw.lower().strip()] = max(demand_map.get(raw_kw.lower().strip(), 0.0), float(s.metric_value))
 
         for raw_kw in target_keywords:
             kw_clean = raw_kw.lower().strip()
-            demand_score = google_interests.get(kw_clean, 65.0)
+            demand_score = demand_map.get(kw_clean, 50.0)
 
+            # Strict topic matching across all video content platforms
             matching_videos = [
-                s for s in video_supply_signals 
-                if self._matches_topic_strictly(s.raw_title, kw_clean)
+                s for s in signals
+                if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) in ("youtube", "tiktok", "reels")
+                and self._matches_topic_strictly(s.raw_title, kw_clean)
             ]
 
-            vn_videos = [v for v in matching_videos if self._is_vietnamese(v.raw_title)]
-
-            # Winsorized View Capping: Cap contribution of any single video to 200,000 views
-            # to prevent a single viral comedy video from dominating the B2B SaaS supply distribution.
-            vn_views = sum(min(v.metric_value, 200000.0) for v in vn_videos)
+            # Empirical Vietnamese localization filter
+            vn_videos = [s for s in matching_videos if self._is_vietnamese(s.raw_title)]
             vn_count = len(vn_videos)
-
+            vn_views = sum(float(s.metric_value) for s in vn_videos)
 
             # View-Weighted Supply Scoring Equation across all video platforms
             if vn_count == 0:
@@ -249,10 +287,8 @@ class StrategicMarketReasoner:
                 view_factor = min(settings.SUPPLY_VIEW_MAX, math.log10(max(10.0, vn_views)) * settings.SUPPLY_VIEW_LOG_WEIGHT)
                 supply_score = round(min(100.0, base_supply + view_factor), 1)
 
-
-            # Phân tách nguồn nền tảng trong báo cáo
-            yt_count = sum(1 for v in vn_videos if v.platform == PlatformType.YOUTUBE)
-            tt_count = sum(1 for v in vn_videos if v.platform == PlatformType.TIKTOK)
+            yt_count = sum(1 for s in vn_videos if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "youtube")
+            tt_count = sum(1 for s in vn_videos if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "tiktok")
             breakdown_parts = []
             if yt_count > 0:
                 breakdown_parts.append(f"{yt_count} YouTube")
@@ -263,19 +299,16 @@ class StrategicMarketReasoner:
 
             # Strict Opportunity Index with Inverted Sample Size Damping & Label Alignment
             if vn_count == 0:
-                # Heavy uncertainty penalty for 0 empirical localized evidence (Speculative Gap)
                 opportunity_index = round(demand_score * 0.15, 1)
                 opp_type = "UNVERIFIED_DEMAND_GAP"
                 rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with zero localized supply recorded ({v_str}). Speculative gap requiring preliminary customer interviews (Effective OI: {opportunity_index:+0.1f})."
             else:
                 raw_oi = demand_score - supply_score
                 if raw_oi < 0:
-                    # Saturated segments are NOT damped towards zero (which would falsely understate saturation)
                     opportunity_index = round(raw_oi, 1)
                     opp_type = "SATURATED_SEGMENT"
                     rec = f"Segment '{raw_kw}' is heavily saturated ({v_str}) relative to demand (OI: {opportunity_index:+0.1f}). Requires verticalized differentiation."
                 else:
-                    # Positive opportunities damped by sample size: N=1 (0.35), N=2 (0.55), N=3 (0.75), N=4 (0.90), N>=5 (1.00)
                     damping_map = {1: 0.35, 2: 0.55, 3: 0.75, 4: 0.90}
                     damping_factor = damping_map.get(vn_count, 1.0)
                     opportunity_index = round(raw_oi * damping_factor, 1)
@@ -294,11 +327,9 @@ class StrategicMarketReasoner:
                         rec = f"Segment '{raw_kw}' is in market equilibrium ({v_str}) where content supply balances consumer demand."
 
             if vn_videos:
-                support_sigs = [f"[{s.platform.value.upper()}] {s.raw_title}" for s in vn_videos[:3]]
+                support_sigs = [f"[{s.platform.value.upper() if hasattr(s.platform, 'value') else str(s.platform).upper()}] {s.raw_title}" for s in vn_videos[:3]]
             else:
                 support_sigs = ["No localized videos recorded across YouTube or TikTok in the requested timeframe."]
-
-
 
             opportunities.append(
                 MarketOpportunity(
@@ -312,62 +343,8 @@ class StrategicMarketReasoner:
                 )
             )
 
-        return sorted(opportunities, key=lambda x: x.opportunity_index, reverse=True)
-
-
-    def _evaluate_maturity_stage(
-        self,
-        signals: List[TrendSignal],
-        clusters: List[TopicCluster],
-    ) -> Tuple[TrendMaturityStage, List[str]]:
-        video_signals = [
-            s for s in signals 
-            if s.platform in (PlatformType.YOUTUBE, PlatformType.TIKTOK, PlatformType.REELS) 
-            and not self._is_garbage(s.raw_title)
-        ]
-        how_to_count = sum(1 for s in video_signals if "hướng dẫn" in s.raw_title.lower() or "là gì" in s.raw_title.lower() or "tutorial" in s.raw_title.lower() or "cơ bản" in s.raw_title.lower())
-        total_videos = len(video_signals)
-
-        reasons = []
-        if total_videos == 0:
-            return TrendMaturityStage.EMERGING, ["Emerging market with minimal creator supply."]
-
-        how_to_ratio = how_to_count / float(total_videos)
-        
-        if how_to_ratio >= 0.4:
-            reasons.append(f"{how_to_ratio * 100:.0f}% of content is introductory tutorials ('how-to', 'basics').")
-            reasons.append("Market is in the Early Adopter / Skill Acquisition wave.")
-            return TrendMaturityStage.EMERGING, reasons
-        elif any(c.cross_platform_score >= 70.0 for c in clusters):
-            reasons.append("Breakout multi-platform cross-posting with viral velocity.")
-            return TrendMaturityStage.HYPING, reasons
-        else:
-            reasons.append("Diversified ecosystem with institutional participation.")
-            return TrendMaturityStage.MATURE, reasons
-
-    def _extract_verified_trends(
-        self,
-        signals: List[TrendSignal],
-        clusters: List[TopicCluster],
-    ) -> List[Dict[str, Any]]:
-        verified = []
-        for c in clusters[:6]:
-            p_counts = defaultdict(int)
-            total_views = 0.0
-            for s in c.signals:
-                if not self._is_garbage(s.raw_title):
-                    p_counts[s.platform.value if hasattr(s.platform, "value") else str(s.platform)] += 1
-                    total_views += s.metric_value
-
-            verified.append({
-                "canonical_name": c.canonical_name,
-                "momentum": c.momentum_category.value,
-                "cross_platform_score": c.cross_platform_score,
-                "platform_diversity": len(p_counts),
-                "total_estimated_reach": int(total_views),
-                "summary": c.summary_text,
-            })
-        return verified
+        opportunities.sort(key=lambda o: o.opportunity_index, reverse=True)
+        return opportunities
 
     def _synthesize_insights(
         self,
@@ -382,17 +359,26 @@ class StrategicMarketReasoner:
 
         insights.append(f"Market Maturity: {maturity_stage.value} — {'; '.join(maturity_reasons)}")
 
-        top_gaps = [o for o in opportunities if o.opportunity_type in ["HIGH_DEMAND_LOW_SUPPLY", "ENTERPRISE_GAP"]]
+        top_gaps = [o for o in opportunities if o.opportunity_type in ["HIGH_DEMAND_LOW_SUPPLY", "GROWING_OPPORTUNITY"]]
         if top_gaps:
             gap_names = ", ".join([f"'{o.topic}'" for o in top_gaps[:3]])
             insights.append(f"Largest strategic white space opportunities concentrate in: {gap_names}.")
-            actionables.append(f"Focus resources on high-demand topics {gap_names} to capture early-mover advantage.")
+            actionables.append(f"Focus resources on high-demand topics {gap_names} to capture early-mover category advantage.")
 
-        n8n_signals = [s for s in signals if "n8n" in s.raw_title.lower() and not self._is_garbage(s.raw_title)]
-        if len(n8n_signals) >= 3:
-            insights.append("No-code & Workflow Automation communities (notably n8n) dominate practitioner discussions.")
-            actionables.append("Mitigate Shadow Automation risks when deploying distributed automation workflows across enterprise teams.")
+        # Identify dominant discussion topic dynamically from signal volume
+        topic_counts: Dict[str, int] = {}
+        for s in signals:
+            for kw in mission.keywords:
+                if self._matches_topic_strictly(s.raw_title, kw):
+                    topic_counts[kw] = topic_counts.get(kw, 0) + 1
 
-        actionables.append("Schedule periodic 15-minute ingress cycles to detect emerging enterprise case studies.")
+        if topic_counts:
+            dominant_kw, max_count = max(topic_counts.items(), key=lambda item: item[1])
+            if max_count >= 3:
+                insights.append(f"Practitioner content is heavily concentrated around '{dominant_kw}' ({max_count} verified signals).")
+                actionables.append(f"Differentiate positioning against existing supply density in '{dominant_kw}'.")
+
+        actionables.append("Schedule periodic ingress cycles to monitor supply churn and search demand acceleration.")
 
         return insights, actionables
+

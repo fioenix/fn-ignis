@@ -112,16 +112,33 @@
       <div class="bg-gradient-to-br from-orange-500 to-amber-600 text-white rounded-3xl p-6 shadow-md flex flex-col justify-between space-y-4">
         <div class="space-y-3">
           <span class="bg-white/20 text-white text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider">💡 Strategic Takeaway</span>
-          <h3 class="text-xl font-black leading-snug">Early Mover Advantage in Applied Automation</h3>
+          <h3 class="text-xl font-black leading-snug">
+            {% if strategic_insights %}
+            {{ strategic_insights[0] }}
+            {% else %}
+            Data-Driven Market Intelligence Overview
+            {% endif %}
+          </h3>
           <p class="text-xs text-orange-50 leading-relaxed font-medium">
-            Search interest for foundational automation tools (Workflow, MCP, n8n) is accelerating while localized practitioner supply remains thin.
+            {% if strategic_insights|length > 1 %}
+            {{ strategic_insights[1] }}
+            {% else %}
+            Multi-platform market listening and opportunity gap evaluation.
+            {% endif %}
           </p>
         </div>
         <div class="bg-black/15 rounded-2xl p-4 text-xs font-semibold space-y-1">
           <div class="text-orange-200 uppercase text-[10px] tracking-wider">Core Action:</div>
-          <div>Publish structured end-to-end B2B case studies to establish dominant category leadership.</div>
+          <div>
+            {% if actionable_takeaways %}
+            {{ actionable_takeaways[0] }}
+            {% else %}
+            Deploy targeted category positioning on identified white space topics.
+            {% endif %}
+          </div>
         </div>
       </div>
+
     </section>
 
     <!-- ACT 3: WHITE SPACE OPPORTUNITY MATRIX (FULL 10 TOPICS CANVAS) -->
