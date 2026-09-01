@@ -13,7 +13,7 @@ class TikTokAuthManager:
     Bắt storageState (cookies, localStorage) và lưu trữ bền vững vào DB.
     """
 
-    LOGIN_URL = "https://www.tiktok.com/login/phone-or-email/qrcode"
+    LOGIN_URL = "https://www.tiktok.com/login"
     EXPLORE_URL = "https://www.tiktok.com/explore"
     PLATFORM_NAME = "tiktok"
 
@@ -73,10 +73,24 @@ class TikTokAuthManager:
             )
             page = await context.new_page()
 
-            logger.info("Đang điều hướng đến trang QR Login của TikTok...")
+            logger.info("Đang điều hướng đến trang Đăng nhập TikTok...")
             await page.goto(self.LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
+            await page.wait_for_timeout(1500)
 
-            # Polling kiểm tra cookies đăng nhập (sessionid, sid_tt, uid_tt)
+            # Tự động click vào nút "Sử dụng mã QR" nếu có để hiển thị ngay QR Code cho user
+            try:
+                qr_btn = (
+                    await page.query_selector('text=Sử dụng mã QR')
+                    or await page.query_selector('text=Use QR code')
+                    or await page.query_selector('a[href*="qrcode"]')
+                )
+                if qr_btn:
+                    await qr_btn.click()
+                    await page.wait_for_timeout(1000)
+            except Exception as e:
+                logger.debug(f"Không thể tự động click nút QR, user có thể tự click: {e}")
+
+            # Polling kiểm tra cookies đăng nhập (sessionid, sid_tt, uid_tt) hoặc URL thay đổi
             start_time = asyncio.get_event_loop().time()
             logged_in = False
             session_cookie = None
@@ -89,8 +103,11 @@ class TikTokAuthManager:
                         session_cookie = c.get("value")
                         break
 
-                if logged_in:
+                current_url = page.url
+                if logged_in or (current_url and "/login" not in current_url and "tiktok.com" in current_url):
+                    logged_in = True
                     break
+
                 await asyncio.sleep(2.0)
 
             if not logged_in:

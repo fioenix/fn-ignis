@@ -1,0 +1,88 @@
+import pytest
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
+from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
+from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
+from ignis.interfaces.mcp.server import handle_get_tiktok_creative_center_trends
+
+
+@pytest.mark.asyncio
+async def test_tiktok_creative_center_plugin_properties():
+    plugin = TikTokCreativeCenterPlugin()
+    assert plugin.platform == PlatformType.TIKTOK
+    assert "Creative Center" in plugin.name
+    assert await plugin.is_healthy() is True
+
+
+def test_metric_number_parser():
+    plugin = TikTokCreativeCenterPlugin()
+    assert plugin._parse_metric_number("346.2K") == 346200.0
+    assert plugin._parse_metric_number("1.9B") == 1900000000.0
+    assert plugin._parse_metric_number("28M") == 28000000.0
+    assert plugin._parse_metric_number("500") == 500.0
+    assert plugin._parse_metric_number("") == 0.0
+
+
+@pytest.mark.asyncio
+async def test_tiktok_creative_center_fetch_signals_mocked():
+    plugin = TikTokCreativeCenterPlugin()
+    mock_data = [
+        {
+            "rank": 1,
+            "hashtag": "#golivegrowfast",
+            "category": "News & Entertainment",
+            "posts": "346.2K",
+            "views": "1.9B",
+            "posts_count": 346200.0,
+            "views_count": 1900000000.0,
+        },
+        {
+            "rank": 2,
+            "hashtag": "#tiktokshop99",
+            "category": "Apparel & Accessories",
+            "posts": "28K",
+            "views": "120M",
+            "posts_count": 28000.0,
+            "views_count": 120000000.0,
+        }
+    ]
+
+    with patch.object(plugin, "fetch_macro_trends", new_callable=AsyncMock) as mock_macro:
+        mock_macro.return_value = mock_data
+
+        signals = await plugin.fetch_signals(geo=GeoCode.VN, timeframe=Timeframe.LAST_7D, limit=10)
+        assert len(signals) == 2
+        assert signals[0].platform == PlatformType.TIKTOK
+        assert signals[0].raw_title == "#golivegrowfast (News & Entertainment)"
+        assert signals[0].metric_value == 1900000000.0
+        assert signals[0].source_url == "https://www.tiktok.com/tag/golivegrowfast"
+        assert signals[0].metadata["rank"] == 1
+        assert signals[0].metadata["posts_formatted"] == "346.2K"
+
+
+@pytest.mark.asyncio
+async def test_handle_get_tiktok_creative_center_trends():
+    mock_comp = {
+        "registry": MagicMock(),
+        "tiktok_auth_manager": AsyncMock(),
+    }
+    mock_comp["registry"]._plugins = {}
+
+    with patch("ignis.interfaces.mcp.server.get_components", return_value=mock_comp):
+        with patch.object(TikTokCreativeCenterPlugin, "fetch_macro_trends", new_callable=AsyncMock) as mock_macro:
+            mock_macro.return_value = [
+                {
+                    "rank": 1,
+                    "hashtag": "#golivegrowfast",
+                    "category": "News & Entertainment",
+                    "posts": "346.2K",
+                    "views": "1.9B",
+                }
+            ]
+
+            resp_json = await handle_get_tiktok_creative_center_trends(geo="VN", period=7, limit=10)
+            resp = json.loads(resp_json)
+            assert resp["status"] == "SUCCESS"
+            assert resp["geo_code"] == "VN"
+            assert resp["total_hashtags"] == 1
+            assert resp["trending_hashtags"][0]["hashtag"] == "#golivegrowfast"

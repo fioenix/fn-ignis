@@ -1,7 +1,7 @@
 import json
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Any
+from typing import Dict, List, Optional, Any
 from uuid import UUID
 
 import psycopg
@@ -682,6 +682,97 @@ class PostgresTimescaleRepository(ITrendRepository):
                     await cur.execute(query, (platform.lower(),))
                     return cur.rowcount > 0
         except Exception as e:
-            logger.error(f"Lỗi khi deactivate credentials cho {platform}: {e}", exc_info=True)
+            logger.error(f"Error deactivating credentials for {platform}: {e}", exc_info=True)
             return False
+
+    async def get_domain_lexicons(self, domain: Optional[str] = None) -> List[Dict[str, Any]]:
+        pool = await self._get_pool()
+        query = """
+            SELECT domain, term, category, created_by, created_at
+            FROM market_lexicons
+        """
+        params = []
+        if domain:
+            query += " WHERE domain = %s"
+            params.append(domain.lower())
+        query += " ORDER BY domain ASC, term ASC;"
+
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    await cur.execute(query, tuple(params) if params else None)
+                    rows = await cur.fetchall()
+            return [
+                {
+                    "domain": r[0],
+                    "term": r[1],
+                    "category": r[2],
+                    "created_by": r[3],
+                    "created_at": r[4].isoformat() if r[4] else None,
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"Error fetching market lexicons: {e}")
+            return []
+
+    async def register_lexicon_terms(
+        self,
+        domain: str,
+        terms: List[str],
+        category: str = "vernacular",
+        created_by: str = "agent",
+    ) -> int:
+        if not terms:
+            return 0
+        pool = await self._get_pool()
+        query = """
+            INSERT INTO market_lexicons (domain, term, category, created_by)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (domain, term) DO UPDATE 
+            SET category = EXCLUDED.category, updated_at = NOW()
+            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'market_lexicons' AND column_name = 'updated_at');
+        """
+        clean_domain = domain.lower().strip()
+        count = 0
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    for t in terms:
+                        clean_term = t.lower().strip()
+                        if clean_term:
+                            await cur.execute(
+                                """
+                                INSERT INTO market_lexicons (domain, term, category, created_by)
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (domain, term) DO NOTHING;
+                                """,
+                                (clean_domain, clean_term, category, created_by)
+                            )
+                            count += 1
+            return count
+        except Exception as e:
+            logger.error(f"Error registering lexicon terms: {e}", exc_info=True)
+            raise RepositoryException(f"Failed to register lexicon terms: {e}") from e
+
+    async def get_industry_taxonomies(self) -> List[Dict[str, Any]]:
+        pool = await self._get_pool()
+        query = "SELECT industry_code, industry_name, keywords FROM industry_taxonomies ORDER BY industry_code ASC;"
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    await cur.execute(query)
+                    rows = await cur.fetchall()
+            return [
+                {
+                    "industry_code": r[0],
+                    "industry_name": r[1],
+                    "keywords": r[2] if isinstance(r[2], list) else list(r[2] or []),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"Error fetching industry taxonomies: {e}")
+            return []
+
 

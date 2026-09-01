@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 import httpx
 
 from ignis.application.ports.connector_port import IConnectorPlugin
@@ -17,12 +17,20 @@ logger = logging.getLogger(__name__)
 class TikTokPlugin(IConnectorPlugin):
     """
     Ingress Plugin thu thập TikTok Trending & Keyword Search.
-    Hỗ trợ cả authenticated Playwright context (với storageState) và fallback HTTP client.
-    Zero-Token Ingress.
+    Bảo vệ quyền riêng tư tuyệt đối: Không bao giờ đọc inbox, notification hay dữ liệu tài khoản cá nhân.
+    Chỉ trích xuất các video công khai có URL hợp lệ từ search grid và explore.
     """
 
     EXPLORE_URL = "https://www.tiktok.com/explore"
     SEARCH_BASE_URL = "https://www.tiktok.com/search?q="
+
+    NOTIFICATION_BLACKLIST = [
+        "follow bạn", "bắt đầu follow", "thích bình luận", "thích video",
+        "đã thích", "bình luận của bạn", "đăng lại", "follow lại",
+        "tin nhắn", "hộp thư", "thông báo", "live ", "đang phát trực tiếp"
+    ]
+
+    VIDEO_URL_PATTERN = re.compile(r"(https://www\.tiktok\.com)?/(@[\w\.-]+)/video/(\d+)")
 
     def __init__(self, auth_manager: Optional[TikTokAuthManager] = None):
         self._auth_manager = auth_manager
@@ -40,6 +48,17 @@ class TikTokPlugin(IConnectorPlugin):
 
     async def is_healthy(self) -> bool:
         return True
+
+    def _is_private_or_notification(self, text: str) -> bool:
+        """Kiểm tra và chặn đứng các text thông báo / tương tác cá nhân."""
+        if not text:
+            return True
+        t_low = text.lower()
+        if any(black in t_low for black in self.NOTIFICATION_BLACKLIST):
+            return True
+        if re.match(r"^\s*\d+[\s\.\,kKmMbB]*\s*$", text):
+            return True
+        return False
 
     async def fetch_signals(
         self,
@@ -66,25 +85,290 @@ class TikTokPlugin(IConnectorPlugin):
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 20,
+        custom_timeframe: Optional[str] = None,
     ) -> List[TrendSignal]:
-        """Tìm kiếm video xu hướng theo từ khóa cụ thể trên TikTok."""
+        """Tìm kiếm video xu hướng công khai theo từ khóa cụ thể trên TikTok."""
         storage_state = None
         if self._auth_manager:
             storage_state = await self._auth_manager.get_storage_state()
 
         all_signals: List[TrendSignal] = []
-        for kw in keywords[:5]: # Giới hạn tối đa 5 keywords mỗi lượt để tối ưu thời gian
-            url = f"{self.SEARCH_BASE_URL}{httpx.URL('', params={'q': kw}).query[2:]}"
+        seen_urls: Set[str] = set()
+
+        import urllib.parse
+        for kw in keywords[:10]:
+            kw_clean = kw.strip()
+            url = f"{self.SEARCH_BASE_URL}{urllib.parse.quote(kw_clean)}"
             signals = await self._fetch_via_playwright(
                 url=url,
                 storage_state=storage_state,
                 geo=geo,
                 limit=limit,
-                keyword=kw,
+                keyword=kw_clean,
+                seen_urls=seen_urls,
             )
-            all_signals.extend(signals)
+            for s in signals:
+                if s.source_url and s.source_url not in seen_urls:
+                    seen_urls.add(s.source_url)
+                    all_signals.append(s)
 
         return all_signals
+
+    async def fetch_suggestions(
+        self,
+        keywords: List[str],
+        geo: GeoCode = GeoCode.VN,
+    ) -> List[Dict[str, Any]]:
+        """
+        Lấy các từ khóa tìm kiếm gợi ý (Search Guide / Autocomplete & Related Topics) từ TikTok.
+        """
+        storage_state = None
+        if self._auth_manager:
+            storage_state = await self._auth_manager.get_storage_state()
+
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            logger.warning("Playwright chưa được cài đặt, bỏ qua cào suggestions.")
+            return []
+
+        results: List[Dict[str, Any]] = []
+        import urllib.parse
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                    ]
+                )
+                context_kwargs: Dict[str, Any] = {
+                    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                    "viewport": {"width": 1280, "height": 800},
+                    "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
+                }
+                if storage_state:
+                    context_kwargs["storage_state"] = storage_state
+
+                context = await browser.new_context(**context_kwargs)
+                page = await context.new_page()
+
+                for kw in keywords[:10]:
+                    kw_clean = kw.strip()
+                    url = f"{self.SEARCH_BASE_URL}{urllib.parse.quote(kw_clean)}"
+                    
+                    guide_words: List[str] = []
+                    async def handle_suggest(resp):
+                        if "suggest/guide" in resp.url or "search/suggest" in resp.url:
+                            try:
+                                if "json" in resp.headers.get("content-type", ""):
+                                    body = await resp.json()
+                                    items = body.get("data", [])
+                                    if isinstance(items, list):
+                                        for item in items:
+                                            if isinstance(item, dict) and item.get("word"):
+                                                guide_words.append(item["word"])
+                            except Exception:
+                                pass
+
+                    page.on("response", handle_suggest)
+                    await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                    await page.wait_for_timeout(2000)
+
+                    # Active In-Page API fetch fallback
+                    try:
+                        api_suggestions = await page.evaluate("""async (keyword) => {
+                            try {
+                                const resp = await fetch(`/api/search/suggest/guide/?keyword=${encodeURIComponent(keyword)}&aid=1988&app_language=vi-VN`);
+                                if (resp.ok) {
+                                    const json = await resp.json();
+                                    return (json.data || []).map(item => item.word).filter(Boolean);
+                                }
+                            } catch (e) {}
+                            return [];
+                        }""", kw_clean)
+                        if api_suggestions and isinstance(api_suggestions, list):
+                            guide_words.extend(api_suggestions)
+                    except Exception:
+                        pass
+
+                    # Extract DOM search guide chips/pills
+                    try:
+                        pill_elements = await page.query_selector_all('div[data-e2e="search-guide-item"], a[href*="/search?q="], div[class*="guide-item"]')
+                        for pill in pill_elements[:8]:
+                            txt = await pill.inner_text()
+                            if txt and len(txt.strip()) > 2 and "\n" not in txt:
+                                guide_words.append(txt.strip())
+                    except Exception:
+                        pass
+
+                    # Extract hashtags and key phrases from top video cards
+                    related_hashtags: List[str] = []
+                    cards = await page.query_selector_all('div[data-e2e="search_top-item"], div[data-e2e="search_video-item"]')
+                    for card in cards[:6]:
+                        parent = await card.query_selector("xpath=..") if hasattr(card, "query_selector") else None
+                        container = parent if parent else card
+                        raw_text = await container.inner_text() if hasattr(container, "inner_text") else ""
+                        text = raw_text if isinstance(raw_text, str) else str(raw_text or "")
+                        if text:
+                            for tag in re.findall(r"#\w+", text):
+                                if tag.lower() not in [t.lower() for t in related_hashtags] and len(tag) > 2:
+                                    related_hashtags.append(tag)
+
+                    sug_entries = []
+                    seen_sug = set()
+
+                    for gw in guide_words:
+                        clean_gw = gw.strip()
+                        if clean_gw.lower() not in seen_sug and len(clean_gw) > 1:
+                            seen_sug.add(clean_gw.lower())
+                            sug_entries.append({"query": clean_gw, "type": "search_guide"})
+
+                    for tag in related_hashtags[:8]:
+                        if tag.lower() not in seen_sug:
+                            seen_sug.add(tag.lower())
+                            sug_entries.append({"query": tag, "type": "trending_hashtag"})
+
+                    results.append({
+                        "keyword": kw_clean,
+                        "platform": self.platform.value,
+                        "geo_code": geo.value if hasattr(geo, "value") else str(geo),
+                        "suggestions_count": len(sug_entries),
+                        "suggestions": sug_entries,
+                    })
+
+                await browser.close()
+
+        except Exception as e:
+            logger.error(f"Lỗi khi thu thập TikTok Search Suggestions: {e}")
+            raise ConnectorExecutionException(f"Failed to fetch TikTok search suggestions: {e}") from e
+
+        return results
+
+    async def fetch_video_comments(
+        self,
+        video_url: str,
+        limit: int = 30,
+    ) -> List[Dict[str, Any]]:
+        """
+        Lấy danh sách bình luận công khai dưới một video TikTok cụ thể.
+        Sử dụng in-page API /api/comment/list/ với context session của Playwright.
+        """
+        match = re.search(r"/video/(\d+)", video_url)
+        if not match:
+            logger.warning(f"Không trích xuất được ID video từ URL: {video_url}")
+            return []
+        aweme_id = match.group(1)
+
+        storage_state = None
+        if self._auth_manager:
+            storage_state = await self._auth_manager.get_storage_state()
+
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            logger.warning("Playwright chưa được cài đặt, bỏ qua cào comments.")
+            return []
+
+        comments: List[Dict[str, Any]] = []
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                    ]
+                )
+                context_kwargs: Dict[str, Any] = {
+                    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                    "viewport": {"width": 1280, "height": 800},
+                    "locale": "vi-VN",
+                }
+                if storage_state:
+                    context_kwargs["storage_state"] = storage_state
+
+                context = await browser.new_context(**context_kwargs)
+                page = await context.new_page()
+
+                await page.goto(video_url, wait_until="domcontentloaded", timeout=25000)
+
+                safe_limit = max(5, min(limit, 50))
+                js_fetch = f"""
+                    async () => {{
+                        try {{
+                            const url = `/api/comment/list/?aid=1988&aweme_id={aweme_id}&count={safe_limit}&cursor=0`;
+                            const resp = await fetch(url);
+                            return await resp.json();
+                        }} catch (e) {{
+                            return {{ error: e.toString() }};
+                        }}
+                    }}
+                """
+                api_data = await page.evaluate(js_fetch)
+                raw_comments = api_data.get("comments", []) if isinstance(api_data, dict) else []
+
+                for c in raw_comments:
+                    if isinstance(c, dict):
+                        user_obj = c.get("user", {}) or {}
+                        user_name = user_obj.get("nickname") or user_obj.get("unique_id") or "Anonymous"
+                        cmt_text = c.get("text", "").strip()
+                        if cmt_text:
+                            comments.append({
+                                "comment_id": str(c.get("cid", "")),
+                                "author": user_name,
+                                "author_id": user_obj.get("unique_id", ""),
+                                "text": cmt_text,
+                                "likes": c.get("digg_count", 0),
+                                "reply_count": c.get("reply_comment_total", 0),
+                                "created_at": c.get("create_time"),
+                            })
+
+                await browser.close()
+
+        except Exception as e:
+            logger.error(f"Lỗi khi cào bình luận video {video_url}: {e}")
+            raise ConnectorExecutionException(f"Failed to fetch TikTok comments: {e}") from e
+
+        return comments
+
+    async def fetch_top_comments_for_keywords(
+        self,
+        keywords: List[str],
+        geo: GeoCode = GeoCode.VN,
+        max_videos: int = 3,
+        limit_per_video: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """
+        Tìm kiếm các video top đầu theo keywords và trích xuất bình luận của chúng để tổng hợp Voice of Customer.
+        """
+        all_results: List[Dict[str, Any]] = []
+
+        signals = await self.search_signals(keywords=keywords, geo=geo, limit=max_videos * 2)
+        valid_vids = [s for s in signals if s.source_url and "/video/" in s.source_url][:max_videos]
+
+        for s in valid_vids:
+            try:
+                cmts = await self.fetch_video_comments(video_url=s.source_url, limit=limit_per_video)
+                all_results.append({
+                    "video_url": s.source_url,
+                    "video_title": s.raw_title,
+                    "author": s.metadata.get("channel", "Unknown"),
+                    "views": s.metric_value,
+                    "total_comments_fetched": len(cmts),
+                    "comments": cmts,
+                })
+            except Exception as e:
+                logger.warning(f"Bỏ qua cào comments cho video {s.source_url}: {e}")
+
+        return all_results
+
+
 
     async def _fetch_via_playwright(
         self,
@@ -93,6 +377,7 @@ class TikTokPlugin(IConnectorPlugin):
         geo: GeoCode,
         limit: int = 30,
         keyword: Optional[str] = None,
+        seen_urls: Optional[Set[str]] = None,
     ) -> List[TrendSignal]:
         try:
             from playwright.async_api import async_playwright
@@ -102,6 +387,7 @@ class TikTokPlugin(IConnectorPlugin):
 
         signals: List[TrendSignal] = []
         captured_items: List[Dict[str, Any]] = []
+        local_seen: Set[str] = set(seen_urls or [])
 
         try:
             async with async_playwright() as p:
@@ -149,20 +435,24 @@ class TikTokPlugin(IConnectorPlugin):
                 # 1. Chuyển đổi từ API JSON nếu bắt được
                 for item in captured_items:
                     sig = self._parse_json_item(item, geo, keyword)
-                    if sig:
+                    if sig and sig.source_url and sig.source_url not in local_seen:
+                        local_seen.add(sig.source_url)
                         signals.append(sig)
                     if len(signals) >= limit:
                         break
 
-                # 2. Nếu API không bắt được, bóc tách trực tiếp từ DOM cards
+                # 2. Nếu API không bắt được, bóc tách trực tiếp từ các Search Video Items
                 if not signals:
                     cards = await page.query_selector_all(
-                        'div[data-e2e="search_top-item"], div[data-e2e="search-card-item"], div[class*="DivItemContainer"], div[data-e2e="explore-item"]'
+                        'div[data-e2e="search_top-item"], div[data-e2e="search_video-item"], div[data-e2e="search-card-item"], div[data-e2e="explore-item"]'
                     )
-                    for card in cards[:limit]:
+                    for card in cards:
                         sig = await self._parse_dom_card(card, geo, keyword)
-                        if sig:
+                        if sig and sig.source_url and sig.source_url not in local_seen:
+                            local_seen.add(sig.source_url)
                             signals.append(sig)
+                        if len(signals) >= limit:
+                            break
 
                 await browser.close()
 
@@ -178,15 +468,24 @@ class TikTokPlugin(IConnectorPlugin):
         stats = item.get("stats") or item.get("statistics", {}) or {}
         author = item.get("author") or {}
 
-        if not item_id and not title:
+        if not item_id or not title or self._is_private_or_notification(title):
             return None
+
+        # Khớp từ khóa chặt chẽ cho các từ viết tắt như n8n, rpa
+        if keyword:
+            kw_low = keyword.lower().strip()
+            if len(kw_low) <= 4 and not re.search(rf"\b{re.escape(kw_low)}\b", title.lower()):
+                return None
 
         play_count = float(stats.get("playCount") or stats.get("play_count", 0))
         author_id = author.get("uniqueId") or author.get("unique_id", "")
-        url = f"https://www.tiktok.com/@{author_id}/video/{item_id}" if author_id and item_id else None
+        if not author_id:
+            return None
+
+        url = f"https://www.tiktok.com/@{author_id}/video/{item_id}"
 
         metadata = {
-            "item_id": item_id,
+            "item_id": str(item_id),
             "author": author_id,
             "author_name": author.get("nickname", ""),
             "likes": int(stats.get("diggCount") or stats.get("digg_count", 0)),
@@ -197,7 +496,7 @@ class TikTokPlugin(IConnectorPlugin):
 
         return TrendSignal(
             platform=PlatformType.TIKTOK,
-            raw_title=title or f"TikTok Video #{item_id}",
+            raw_title=title[:250],
             metric_value=play_count or float(metadata["likes"]),
             growth_velocity=0.0,
             source_url=url,
@@ -208,33 +507,75 @@ class TikTokPlugin(IConnectorPlugin):
 
     async def _parse_dom_card(self, card, geo: GeoCode, keyword: Optional[str]) -> Optional[TrendSignal]:
         try:
-            link_elem = await card.query_selector('a[href*="/video/"]')
-            url = await link_elem.get_attribute("href") if link_elem else None
+            parent = await card.query_selector("xpath=..")
+            container = parent if parent else card
 
-            text = await card.inner_text()
+            link_elem = (
+                await card.query_selector('a[href*="/video/"]')
+                or await container.query_selector('a[href*="/video/"]')
+            )
+            if not link_elem:
+                return None
+
+            raw_href = await link_elem.get_attribute("href")
+            if not raw_href:
+                return None
+
+            match = self.VIDEO_URL_PATTERN.search(raw_href)
+            if not match:
+                return None
+
+            author_tag = match.group(2) # @creator
+            video_id = match.group(3)   # 7674847074868825362
+            canonical_url = f"https://www.tiktok.com/{author_tag}/video/{video_id}"
+
+            text = await container.inner_text()
             lines = [t.strip() for t in text.split("\n") if t.strip()]
             if not lines:
                 return None
 
-            # Dòng đầu hoặc số thường là metric (likes/views), các dòng tiếp theo là title và author
+            # Bỏ qua nếu có dấu hiệu notification hoặc inbox
+            combined_text = " ".join(lines)
+            if self._is_private_or_notification(combined_text):
+                return None
+
+            # Bóc tách metrics và caption thật
             metric_val = 0.0
-            raw_title = " ".join(lines)
-            
-            # Cố gắng bóc tách metric từ các ký tự như "521", "1.2K", "3.4M"
-            match = re.search(r"(\d+(\.\d+)?)\s*([KkMmBb])?", lines[0])
-            if match:
-                num = float(match.group(1))
-                unit = (match.group(3) or "").upper()
+            raw_title = combined_text
+            author_display = author_tag.replace("@", "")
+
+            m_match = re.search(r"^(\d+(\.\d+)?)\s*([KkMmBb])?$", lines[0])
+            if m_match:
+                num = float(m_match.group(1))
+                unit = (m_match.group(3) or "").upper()
                 if unit == "K":
                     num *= 1000
                 elif unit == "M":
                     num *= 1000000
+                elif unit == "B":
+                    num *= 1000000000
                 metric_val = num
                 if len(lines) > 1:
-                    raw_title = " ".join(lines[1:])
+                    raw_title = lines[1]
+                if len(lines) > 2 and lines[2] not in ["", "·"]:
+                    author_display = lines[2]
+            else:
+                raw_title = lines[0]
+                if len(lines) > 1 and lines[1] not in ["", "·"]:
+                    author_display = lines[1]
+
+            if self._is_private_or_notification(raw_title) or len(raw_title.strip()) < 3:
+                return None
+
+            # Khớp từ khóa chặt chẽ
+            if keyword:
+                kw_low = keyword.lower().strip()
+                if len(kw_low) <= 4 and not re.search(rf"\b{re.escape(kw_low)}\b", raw_title.lower()):
+                    return None
 
             metadata = {
-                "source_text": raw_title[:300],
+                "item_id": video_id,
+                "author": author_display,
                 "keyword": keyword,
             }
 
@@ -243,7 +584,7 @@ class TikTokPlugin(IConnectorPlugin):
                 raw_title=raw_title[:250],
                 metric_value=metric_val,
                 growth_velocity=0.0,
-                source_url=url,
+                source_url=canonical_url,
                 geo_code=geo,
                 metadata=metadata,
                 captured_at=datetime.now(timezone.utc),

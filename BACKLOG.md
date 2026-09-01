@@ -2,7 +2,7 @@
 
 > **Cập nhật lần cuối:** 31/08/2026  
 > **Kiến trúc:** Clean Architecture + FastMCP + Timescale/Supabase Cloud  
-> **Trạng thái Tests:** 31/31 unit & integration tests PASSED (100%)
+> **Trạng thái Tests:** 41/41 unit & integration tests PASSED (100%)
 
 ---
 
@@ -10,10 +10,10 @@
 
 ### A. Hạ Tầng & Cơ Sở Dữ Liệu
 - [x] **Supabase Cloud Pooler (Region ap-southeast-1):** Kết nối qua pooler endpoint `aws-0-ap-southeast-1.pooler.supabase.com:5432` với `psycopg_pool.AsyncConnectionPool`.
-- [x] **Schema Bền Vững:** `research_missions`, `topic_clusters`, `trend_signals`, `system_audit_logs`.
+- [x] **Schema Bền Vững:** `research_missions`, `topic_clusters`, `trend_signals`, `system_audit_logs`, `platform_credentials`.
 - [x] **Lightweight Worker Container:** Dockerfile tối ưu (~90MB, multi-stage uv build) chạy nền 24/7 trên OrbStack.
 
-### B. Ingress Connectors (Dữ Liệu Thật 100%)
+### B. Ingress Connectors & Authentication
 - [x] **YouTube Data API v3:** 
   - Batch call `videos.list?part=snippet,statistics` để lấy lượt xem, likes, comments thật.
   - Tính tốc độ tăng trưởng thật: `velocity = views / hours_since_published`.
@@ -22,13 +22,17 @@
 - [x] **Google Trends RSS & Suggest API:** 
   - Dynamic interest score & traffic volume thật.
   - Lấy cụm từ khóa tìm kiếm liên quan (related queries) theo thời gian thực.
+- [x] **TikTok 1-Click QR Code / Managed Browser Ingress:**
+  - `TikTokAuthManager` với khả năng bắt tự động `storageState` (cookies, tokens) mà end-user không cần DevTools.
+  - Hỗ trợ cào Trending và Tìm kiếm theo từ khóa (`search_signals`) bóc tách Play Count, Digg Count, Comment Count, Share Count thật.
+  - Tool FastMCP: `authenticate_tiktok`, `get_platform_auth_status`, `clear_platform_auth`.
 - [x] **Error Isolation & Observability:** Circuit Breaker độc lập cho từng kênh kết nối, tự động ghi vết sự cố vào bảng `system_audit_logs`.
 
 ### C. Agent Harness & Strategic Reasoning (4 Tầng)
 - [x] **Tầng 1 - Autonomous Refinement Loop (`AutonomousRefinementOrchestrator`):** Tự động phát hiện dữ liệu mỏng hoặc độ tin cậy thấp để cào bổ sung đợt 2 (Pass 2) theo từ khóa phụ.
-- [x] **Tầng 2 - Quality & Integrity Scorecard (`QualityEvaluator`):** Chấm điểm minh bạch Coverage (40%), Language Precision, Data Freshness, Creator Diversity, và Overall Confidence.
+- [x] **Tầng 2 - Quality & Integrity Scorecard (`QualityEvaluator`):** Chấm điểm minh bạch Coverage, Language Precision, Data Freshness, Creator Diversity, và Overall Confidence.
 - [x] **Tầng 3 - White Space Discovery (`StrategicMarketReasoner`):**
-  - So sánh Nhu cầu tìm kiếm (Google Trends) vs Nguồn cung video tiếng Việt bản địa (YouTube).
+  - So sánh Nhu cầu tìm kiếm (Google Trends) vs Nguồn cung video tiếng Việt bản địa (YouTube/TikTok).
   - Bóc tách các phân khúc: `HIGH_DEMAND_LOW_SUPPLY`, `ENTERPRISE_GAP`, `SATURATED_SEGMENT`.
   - Đánh giá giai đoạn xu hướng (Trend Maturity Stage: `EMERGING`, `HYPING`, `MATURE`).
 - [x] **Tầng 4 - Deterministic Artifact Builder:** Single-file HTML Report (Tailwind CSS Dark Mode) trực quan hóa Scorecard, Ma trận Cung-Cầu và Bằng chứng đa kênh.
@@ -43,11 +47,10 @@
 
 ## 📌 2. Danh Mục Backlog Cho Các Session Tiếp Theo (Upcoming Roadmap)
 
-### 🎯 Epic 1: Headless Browser Ingress cho TikTok & Meta (Threads/Reels)
-*Mục tiêu: Nâng Coverage Score từ 40% lên 100% bằng cách vượt qua cơ chế chặn bot.*
-- [ ] **Playwright Headless Ingress Worker:** Tích hợp trình duyệt headless (Camoufox / Playwright stealth) để cào dữ liệu công khai từ TikTok Trending và Instagram Reels / Threads.
-- [ ] **Cookie / Session Rotation Pool:** Cơ chế nạp session cookies an toàn qua biến môi trường để duy trì kết nối Meta/TikTok không bị 403.
-- [ ] **Shorts Video Metrics Parser:** Thu thập số liệu video ngắn (TikTok Likes/Shares, Reels Plays).
+### 🎯 Epic 1: Hoàn thiện Meta Ingress (Threads & Instagram Reels)
+*Mục tiêu: Đưa Coverage Score lên 100% bằng cách kết nối Meta Ingress.*
+- [ ] **Official Meta Threads OAuth 2.0 Ingress:** Tích hợp Threads Graph API OAuth với Long-Lived Token (60 ngày tự refresh).
+- [ ] **Instagram Reels Ingress:** Bóc tách video ngắn Reels dựa trên session pool.
 
 ### 🎯 Epic 2: Multi-Language & Regional Expansion (SEA & Global)
 *Mục tiêu: Mở rộng khả năng lắng nghe thị trường ngoài Việt Nam.*

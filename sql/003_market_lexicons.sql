@@ -1,0 +1,65 @@
+-- Table: market_lexicons (Dynamic Domain Vocabulary & Vernacular)
+CREATE TABLE IF NOT EXISTS market_lexicons (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain VARCHAR(64) NOT NULL,
+    term VARCHAR(128) NOT NULL,
+    category VARCHAR(64) DEFAULT 'vernacular',
+    created_by VARCHAR(64) DEFAULT 'system',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT uq_domain_term UNIQUE (domain, term)
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_lexicons_domain ON market_lexicons(domain);
+CREATE INDEX IF NOT EXISTS idx_market_lexicons_term ON market_lexicons(term);
+
+-- Table: industry_taxonomies (Dynamic Category Mappings)
+CREATE TABLE IF NOT EXISTS industry_taxonomies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    industry_code VARCHAR(64) NOT NULL UNIQUE,
+    industry_name VARCHAR(128) NOT NULL,
+    keywords TEXT[] DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed Initial Core Lexicons
+INSERT INTO market_lexicons (domain, term, category, created_by) VALUES
+('common_vi', 'huong dan', 'intent', 'system'),
+('common_vi', 'cach lam', 'intent', 'system'),
+('common_vi', 'kinh nghiem', 'intent', 'system'),
+('common_vi', 'danh gia', 'intent', 'system'),
+('common_vi', 'review', 'intent', 'system'),
+('common_vi', 'chi phi', 'commercial', 'system'),
+('common_vi', 'gia bao nhieu', 'commercial', 'system'),
+('common_vi', 'xin gia', 'commercial', 'system'),
+('common_vi', 'mua o dau', 'commercial', 'system'),
+('tech', 'ai agent', 'topic', 'system'),
+('tech', 'chatbot', 'topic', 'system'),
+('tech', 'zalo', 'platform', 'system'),
+('tech', 'token', 'technical', 'system'),
+('tech', 'n8n', 'tool', 'system'),
+('tech', 'dify', 'tool', 'system'),
+('tech', 'make', 'tool', 'system'),
+('tech', 'rpa', 'tool', 'system'),
+('tech', 'tu dong hoa', 'technical', 'system'),
+('tech', 'cskh', 'domain', 'system'),
+('tech', 'phan mem', 'domain', 'system'),
+('ecommerce', 'tiktok shop', 'platform', 'system'),
+('ecommerce', 'shopee', 'platform', 'system'),
+('ecommerce', 'chot don', 'vernacular', 'system'),
+('ecommerce', 'kho hang', 'vernacular', 'system'),
+('ecommerce', 'van don', 'vernacular', 'system'),
+('fashion', 'local brand', 'vernacular', 'system'),
+('fashion', 'linen', 'material', 'system'),
+('fashion', 'oversize', 'style', 'system'),
+('fashion', 'freesize', 'style', 'system'),
+('fashion', 'outfit', 'style', 'system')
+ON CONFLICT (domain, term) DO NOTHING;
+
+INSERT INTO industry_taxonomies (industry_code, industry_name, keywords) VALUES
+('tech', 'Tech & Electronics', ARRAY['ai', 'software', 'agent', 'bot', 'app', 'tool', 'hardware', 'laptop', 'phone']),
+('ecommerce', 'E-Commerce & Retail', ARRAY['shop', 'shopee', 'lazada', 'order', 'shipping', 'don hang', 'chot don']),
+('fashion', 'Apparel & Accessories', ARRAY['fashion', 'clothing', 'linen', 'dress', 'shirt', 'outfit', 'style', 'local brand']),
+('education', 'Education & Training', ARRAY['course', 'khoa hoc', 'hoc', 'tutorial', 'dao tao', 'huong dan']),
+('beauty', 'Beauty & Personal Care', ARRAY['skincare', 'makeup', 'my pham', 'son', 'kem', 'duong da', 'serum']),
+('finance', 'Financial Services', ARRAY['finance', 'tai chinh', 'dau tu', 'ngan hang', 'bank', 'chung khoan', 'crypto'])
+ON CONFLICT (industry_code) DO NOTHING;

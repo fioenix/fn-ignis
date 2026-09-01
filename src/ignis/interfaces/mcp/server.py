@@ -18,6 +18,7 @@ from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisU
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
+from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.config import settings
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
@@ -28,6 +29,7 @@ from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin
+from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
@@ -36,8 +38,35 @@ from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
 logger = logging.getLogger("ignis.mcp")
 
-# Khởi tạo FastMCP Server
-mcp = FastMCP("fn-ignis-trend-intelligence")
+SOP_SYSTEM_INSTRUCTIONS = """
+You are the fn-ignis Trend Intelligence & Market Opportunity Agent.
+When conducting any market research, niche analysis, or trend discovery task, you MUST STRICTLY FOLLOW the 6-Step Standard Operating Procedure (SOP):
+
+1. Step 1 (Clarify & Formulate Hypothesis):
+   Clarify business model (SaaS, Retail, Agency, Content), target audience (B2B/B2C), target geography (VN/Global), and timeframe. Establish the core hypothesis to test.
+
+2. Step 2 (Macro Scan & Real-World Keyword Expansion):
+   Call `get_tiktok_creative_center_trends` and `get_tiktok_search_suggestions` to uncover actual slang, tool names, and sub-niches being searched by users in target geo before deep crawling.
+
+3. Step 3 (Deep Ingress & Quality Gate):
+   Call `execute_mission_ingress` for deep multi-platform ingestion. Ensure strict date windowing and noise filtering (>=70% confidence).
+
+4. Step 4 (Single-Source 4-Lens Breakdown):
+   - Google Lens: Macro search demand velocity and growth.
+   - YouTube Lens: Long-form supply, case study and tutorial depth.
+   - TikTok Search Lens: Micro short-form intent and trending hashtags.
+   - Voice of Customer Lens: Real objections, pricing questions, unmet needs from comments via `extract_customer_pain_points`.
+
+5. Step 5 (Cross-Source Synthesis & White Space Matrix):
+   Correlate Demand vs. Supply, compute Opportunity Index (+100 to -100), identify HIGH_DEMAND_LOW_SUPPLY opportunities, and determine Trend Maturity Stage.
+
+6. Step 6 (Strategic Verdict, Risks & Fast MVP Blueprint):
+   Synthesize 3-5 market truths, evaluate entry risks/moats (why hasn't this been built?), formulate a 3-7 day low-cost MVP validation plan, and generate a full interactive Infographic HTML Dashboard via `generate_mission_artifact`.
+"""
+
+# Khởi tạo FastMCP Server kèm System Instructions
+mcp = FastMCP("fn-ignis-trend-intelligence", instructions=SOP_SYSTEM_INSTRUCTIONS)
+
 
 def _init_components():
     repository = PostgresTimescaleRepository(
@@ -46,10 +75,12 @@ def _init_components():
         max_pool_size=settings.DB_MAX_POOL_SIZE,
     )
     tiktok_auth_manager = TikTokAuthManager(repository=repository)
+    creative_center_plugin = TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager)
 
     registry = ConnectorPluginRegistry(repository=repository)
     registry.register(GoogleTrendsRssPlugin())
     registry.register(TikTokPlugin(auth_manager=tiktok_auth_manager))
+    registry.register(creative_center_plugin)
     registry.register(ThreadsPlugin())
     registry.register(ReelsPlugin())
 
@@ -79,6 +110,14 @@ def _init_components():
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
     ingest_use_case = IngestTrendsUseCase(registry=registry, repository=repository)
     cluster_use_case = ClusterSignalsUseCase(clusterer=clusterer, repository=repository)
+    autonomous_discovery_use_case = AutonomousDiscoveryUseCase(
+        repository=repository,
+        registry=registry,
+        clusterer=clusterer,
+        quality_evaluator=quality_evaluator,
+        strategic_reasoner=strategic_reasoner,
+        artifact_builder=artifact_builder,
+    )
 
     return {
         "repository": repository,
@@ -95,6 +134,7 @@ def _init_components():
         "top_clusters_use_case": top_clusters_use_case,
         "ingest_use_case": ingest_use_case,
         "cluster_use_case": cluster_use_case,
+        "autonomous_discovery_use_case": autonomous_discovery_use_case,
     }
 
 _COMPONENTS = None
@@ -500,15 +540,30 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
     )
     
     platform_breakdown = {}
+    macro_trends = []
+    customer_inquiries = []
+    
     for s in signals:
         p_val = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
         platform_breakdown[p_val] = platform_breakdown.get(p_val, 0) + 1
+        
+        if s.metadata.get("source") == "tiktok_creative_center":
+            macro_trends.append({
+                "rank": s.metadata.get("rank", 1),
+                "hashtag": s.metadata.get("hashtag", s.raw_title),
+                "category": s.metadata.get("category", "General"),
+                "posts": s.metadata.get("posts_formatted", "N/A"),
+                "views": s.metadata.get("views_formatted", "N/A"),
+            })
 
     html_content = comp["artifact_builder"].build_mission_report_artifact(
         mission=mission,
         signals=signals,
         platform_breakdown=platform_breakdown,
         report=report,
+        customer_inquiries=customer_inquiries,
+        search_suggestions=[],
+        macro_trends=macro_trends,
     )
 
     # Lưu file HTML vào thư mục reports an toàn tuyệt đối
@@ -844,6 +899,319 @@ async def clear_platform_auth(platform: str) -> str:
     return await handle_clear_platform_auth(platform=platform)
 
 
+async def handle_get_tiktok_search_suggestions(keywords: List[str], geo: str = "VN") -> str:
+    comp = get_components()
+    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
+    try:
+        suggestions = await comp["registry"].fetch_suggestions_across_all(
+            keywords=keywords,
+            geo=geo_code,
+            target_platforms=[PlatformType.TIKTOK],
+        )
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "total_keywords": len(keywords),
+                "data": suggestions,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Lỗi khi lấy TikTok search suggestions: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="get_tiktok_search_suggestions", description="Fetch real-time derivative search suggestions / autocomplete queries from TikTok for market demand analysis.")
+async def get_tiktok_search_suggestions(keywords: list[str], geo: str = "VN") -> str:
+    return await handle_get_tiktok_search_suggestions(keywords=keywords, geo=geo)
+
+
+async def handle_get_tiktok_creative_center_trends(geo: str = "VN", period: int = 7, limit: int = 20, industry: Optional[str] = None) -> str:
+    comp = get_components()
+    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
+    safe_limit = max(1, min(limit, 50))
+    safe_period = 30 if period >= 30 else 7
+
+    # Tìm plugin TikTok Creative Center
+    cc_plugin = None
+    for _, plugin in comp["registry"]._plugins.items():
+        if isinstance(plugin, TikTokCreativeCenterPlugin):
+            cc_plugin = plugin
+            break
+
+    if not cc_plugin:
+        cc_plugin = TikTokCreativeCenterPlugin(auth_manager=comp.get("tiktok_auth_manager"))
+
+    try:
+        trends = await cc_plugin.fetch_macro_trends(geo=geo_code, period=safe_period, limit=safe_limit, industry=industry)
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "geo_code": geo_code.value,
+                "period_days": safe_period,
+                "industry_filter": industry,
+                "total_hashtags": len(trends),
+                "trending_hashtags": trends,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error fetching TikTok Creative Center trends: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="get_tiktok_creative_center_trends", description="Fetch top macro trending hashtags, views, and industry categories from TikTok Creative Center with optional industry filtering (e.g. 'tech', 'software', 'education', 'ecommerce').")
+async def get_tiktok_creative_center_trends(geo: str = "VN", period: int = 7, limit: int = 20, industry: Optional[str] = None) -> str:
+    return await handle_get_tiktok_creative_center_trends(geo=geo, period=period, limit=limit, industry=industry)
+
+
+async def handle_get_tiktok_video_comments(video_url: str, limit: int = 30) -> str:
+    comp = get_components()
+    tiktok_plugin = None
+    for _, plugin in comp["registry"]._plugins.items():
+        if isinstance(plugin, TikTokPlugin):
+            tiktok_plugin = plugin
+            break
+
+    if not tiktok_plugin:
+        tiktok_plugin = TikTokPlugin(auth_manager=comp.get("tiktok_auth_manager"))
+
+    try:
+        comments = await tiktok_plugin.fetch_video_comments(video_url=video_url, limit=limit)
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "video_url": video_url,
+                "total_comments": len(comments),
+                "comments": comments,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Lỗi khi lấy comments video {video_url}: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="get_tiktok_video_comments", description="Fetch real-time public comments, inquiries, and discussions under a specific TikTok video URL.")
+async def get_tiktok_video_comments(video_url: str, limit: int = 30) -> str:
+    return await handle_get_tiktok_video_comments(video_url=video_url, limit=limit)
+
+
+async def handle_extract_customer_pain_points(keywords: List[str], geo: str = "VN", max_videos: int = 3) -> str:
+    comp = get_components()
+    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
+    tiktok_plugin = None
+    for _, plugin in comp["registry"]._plugins.items():
+        if isinstance(plugin, TikTokPlugin):
+            tiktok_plugin = plugin
+            break
+
+    if not tiktok_plugin:
+        tiktok_plugin = TikTokPlugin(auth_manager=comp.get("tiktok_auth_manager"))
+
+    try:
+        data = await tiktok_plugin.fetch_top_comments_for_keywords(
+            keywords=keywords,
+            geo=geo_code,
+            max_videos=max_videos,
+            limit_per_video=20,
+        )
+        
+        # Phân loại câu hỏi / thắc mắc / rào cản từ người dùng
+        all_comments = []
+        inquiries = []
+        for v in data:
+            for c in v.get("comments", []):
+                txt = c.get("text", "")
+                all_comments.append(txt)
+                if any(q in txt.lower() for q in ["?", "làm sao", "như thế nào", "giá", "bao nhiêu", "xin", "hướng dẫn", "ở đâu", "mua", "dùng được", "test"]):
+                    inquiries.append({
+                        "video_title": v.get("video_title"),
+                        "author": c.get("author"),
+                        "inquiry": txt,
+                        "likes": c.get("likes", 0),
+                    })
+
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "keywords": keywords,
+                "total_videos_analyzed": len(data),
+                "total_comments_extracted": len(all_comments),
+                "top_inquiries_and_pain_points": inquiries[:15],
+                "videos_breakdown": data,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Lỗi khi bóc tách pain points từ TikTok: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="extract_customer_pain_points", description="Extract voice of customer, frequent inquiries, and unmet needs across top TikTok videos for specific market keywords.")
+async def extract_customer_pain_points(keywords: list[str], geo: str = "VN", max_videos: int = 3) -> str:
+    return await handle_extract_customer_pain_points(keywords=keywords, geo=geo, max_videos=max_videos)
+
+
+async def handle_trigger_autonomous_discovery(geo: str = "VN") -> str:
+    comp = get_components()
+    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
+    try:
+        result = await comp["autonomous_discovery_use_case"].execute(geo=geo_code)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error during autonomous discovery cycle: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="trigger_autonomous_discovery", description="Trigger an on-demand end-to-end autonomous discovery cycle to uncover top daily white space opportunities.")
+async def trigger_autonomous_discovery(geo: str = "VN") -> str:
+    return await handle_trigger_autonomous_discovery(geo=geo)
+
+
+async def handle_get_latest_daily_discovery(geo: str = "VN") -> str:
+    comp = get_components()
+    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
+    missions = await comp["repository"].list_missions(limit=30)
+    
+    # Filter for discovery missions
+    discovery_missions = [m for m in missions if m.shortcode and m.shortcode.startswith(f"DISCOVERY-{geo_code.value}")]
+    if not discovery_missions:
+        return json.dumps({"status": "INFO", "message": f"No autonomous discovery runs recorded yet for {geo_code.value}."}, ensure_ascii=False)
+
+    latest = discovery_missions[0]
+    return await handle_get_mission_analysis(str(latest.id))
+
+
+@mcp.tool(name="get_latest_daily_discovery", description="Retrieve the latest daily automated market discovery digest and opportunity rankings.")
+async def get_latest_daily_discovery(geo: str = "VN") -> str:
+    return await handle_get_latest_daily_discovery(geo=geo)
+
+
+async def handle_register_domain_lexicon(
+    domain: str,
+    terms: list[str],
+    category: str = "vernacular",
+    created_by: str = "agent",
+) -> str:
+    comp = get_components()
+    try:
+        saved_count = await comp["repository"].register_lexicon_terms(
+            domain=domain,
+            terms=terms,
+            category=category,
+            created_by=created_by,
+        )
+        # Update in-memory quality evaluator cache
+        if "quality_evaluator" in comp:
+            comp["quality_evaluator"].register_terms(terms)
+
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "domain": domain.lower(),
+                "terms_registered": len(terms),
+                "saved_count": saved_count,
+                "message": f"Successfully registered {len(terms)} lexicon terms for domain '{domain}'.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error registering domain lexicon: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="register_domain_lexicon", description="Register or expand domain vocabulary, slang, brand names, and industry keywords dynamically into the persistent database so Quality Gate and Ingress engines recognize new niche vernacular.")
+async def register_domain_lexicon(domain: str, terms: list[str], category: str = "vernacular") -> str:
+    return await handle_register_domain_lexicon(domain=domain, terms=terms, category=category)
+
+
+async def handle_list_domain_lexicons(domain: Optional[str] = None) -> str:
+    comp = get_components()
+    try:
+        lexicons = await comp["repository"].get_domain_lexicons(domain=domain)
+        taxonomies = await comp["repository"].get_industry_taxonomies()
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "total_lexicon_terms": len(lexicons),
+                "domain_filter": domain,
+                "lexicons": lexicons,
+                "industry_taxonomies": taxonomies,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error listing domain lexicons: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="list_domain_lexicons", description="List active domain vocabularies, slang terms, and industry mappings currently loaded in the system.")
+async def list_domain_lexicons(domain: Optional[str] = None) -> str:
+    return await handle_list_domain_lexicons(domain=domain)
+
+
+
+
+# ==============================================================================
+# MCP RESOURCES & PROMPTS
+# ==============================================================================
+
+@mcp.resource("fn-ignis://sop/market-research")
+def get_market_research_sop_resource() -> str:
+    """Full documentation of the fn-ignis 6-Step Market Research Standard Operating Procedure (SOP)."""
+    return SOP_SYSTEM_INSTRUCTIONS
+
+
+@mcp.resource("fn-ignis://methodology/opportunity-index")
+def get_opportunity_index_methodology() -> str:
+    """Methodology and mathematical formulation for the Opportunity Index (Demand vs. Supply Matrix)."""
+    return """
+# Opportunity Index Methodology
+Opportunity Index (OI) = Search Demand Score (0-100) - Localized Content Supply Score (0-100).
+- Range: -100 to +100.
+- OI >= +30: HIGH_DEMAND_LOW_SUPPLY (Prime White Space Opportunity).
+- OI between -20 and +29: MODERATE_COMPETITION / BALANCED_MARKET.
+- OI <= -30: SATURATED_SEGMENT / RED_OCEAN.
+- High Enterprise Search with 0 supply: ENTERPRISE_GAP.
+"""
+
+
+@mcp.prompt(name="market_research_pipeline")
+def prompt_market_research_pipeline(topic: str = "AI Agent", geo: str = "VN") -> str:
+    """Guided prompt instructing Claude to execute the 6-Step Market Research SOP."""
+    return f"""
+Please execute a rigorous market intelligence and white-space discovery workflow for the topic: '{topic}' in region '{geo}'.
+Strictly adhere to the 6-Step Standard Operating Procedure:
+1. Clarify the business model, target audience, and establish the Core Hypothesis to validate.
+2. Perform a Macro Scan using Creative Center benchmarks and real-world Autocomplete Search Suggestions to capture authentic search terms and slang.
+3. Ingest deep multi-platform data (Google Trends, YouTube, TikTok) with automated noise and spam rejection (Quality Gate).
+4. Conduct a Single-Source 4-Lens Breakdown (Macro Demand, Long-form Supply, Micro Intent, Voice of Customer / Pain Points).
+5. Synthesize the Cross-Source Demand vs. Supply Matrix, compute the Opportunity Index, and identify HIGH_DEMAND_LOW_SUPPLY white spaces.
+6. Deliver the Strategic Verdict, evaluate entry risks and competitive moats, formulate a 3-7 day fast MVP validation plan, and export the interactive Infographic HTML Dashboard Artifact.
+"""
+
+
+@mcp.prompt(name="voice_of_customer_audit")
+def prompt_voice_of_customer_audit(keywords: str = "Chatbot AI") -> str:
+    """Guided prompt to extract authentic customer voice, pain points, and objections from TikTok comments."""
+    return f"""
+Please extract and analyze authentic customer voice, pricing objections, technical complaints, and unmet needs for the topic '{keywords}'.
+Use the `extract_customer_pain_points` tool across top market videos to synthesize the top 5 unresolved customer pain points.
+"""
+
+
 if __name__ == "__main__":
     mcp.run()
+
+
+
+
+
 

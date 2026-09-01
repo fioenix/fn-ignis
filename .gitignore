@@ -32,8 +32,10 @@ venv.bak/
 .env
 .env.local
 .env.*.local
+.mcp.json
 *.pem
 *.key
+
 
 # Database & Local Storage
 *.sqlite
@@ -48,6 +50,13 @@ pgdata/
 *.swp
 *.swo
 
-# Logs
+# Logs & Reports
 logs/
 *.log
+reports/*.html
+!reports/.gitkeep
+*.backup_*.json
+*storage_state*.json
+*session*.json
+scratch/
+

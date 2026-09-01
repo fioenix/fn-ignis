@@ -44,7 +44,15 @@ async def test_tiktok_plugin_parse_dom_card():
     mock_card = AsyncMock()
     mock_link = AsyncMock()
     mock_link.get_attribute.return_value = "https://www.tiktok.com/@creator/video/12345"
-    mock_card.query_selector.return_value = mock_link
+
+    async def mock_query(selector):
+        if "xpath=.." in selector:
+            return None
+        if "/video/" in selector:
+            return mock_link
+        return None
+
+    mock_card.query_selector.side_effect = mock_query
     mock_card.inner_text.return_value = "1.5M\nAI Agent tu dong hoa quy trinh\n@creator"
 
     signal = await plugin._parse_dom_card(mock_card, geo=GeoCode.VN, keyword="ai")
@@ -61,11 +69,16 @@ async def test_tiktok_plugin_fetch_and_search_mocked():
 
     plugin = TikTokPlugin(auth_manager=mock_auth)
     
-    with patch.object(plugin, "_fetch_via_playwright", new_callable=AsyncMock) as mock_fetch:
+    mock_call_count = 0
+    async def mock_fetch_impl(*args, **kwargs):
+        nonlocal mock_call_count
+        mock_call_count += 1
         mock_sig = MagicMock()
         mock_sig.platform = PlatformType.TIKTOK
-        mock_fetch.return_value = [mock_sig]
+        mock_sig.source_url = f"https://www.tiktok.com/@user/video/{mock_call_count}"
+        return [mock_sig]
 
+    with patch.object(plugin, "_fetch_via_playwright", side_effect=mock_fetch_impl):
         # Test fetch_signals
         signals = await plugin.fetch_signals(geo=GeoCode.VN, limit=10)
         assert len(signals) == 1
@@ -74,3 +87,4 @@ async def test_tiktok_plugin_fetch_and_search_mocked():
         # Test search_signals
         search_signals = await plugin.search_signals(keywords=["ai", "agent"], geo=GeoCode.VN)
         assert len(search_signals) == 2
+

@@ -1,0 +1,21 @@
+---
+description: fn-ignis Autonomous Trend Intelligence and Market Research Operating Protocol
+globs: *
+---
+# fn-ignis Agent Operating Guidelines 🤖
+
+When conducting market research, trend listening, or white-space opportunity analysis:
+
+1. **Architecture (Dual-Track Model):**
+   - Track 1 (Always-On Radar): Continuous 24/7 background surveillance across Google Trends, YouTube, and TikTok (`fn-ignis-worker`).
+   - Track 2 (Targeted Deep Probes): Interactive, hypothesis-driven strategic probes deployed on-demand.
+
+2. **Standard 6-Step SOP:**
+   - Step 1: Clarify business model, geography, timeframe, and establish a falsifiable Core Hypothesis. For niche domains, call `register_domain_lexicon(domain="...", terms=[...])`.
+   - Step 2: Macro scan with `get_tiktok_creative_center_trends` and autocomplete with `get_tiktok_search_suggestions`.
+   - Step 3: Deep ingress with `execute_mission_ingress` and verify QualityScorecard $\ge 70\%$.
+   - Step 4: 4-Lens single-source breakdown (Google, YouTube, TikTok, Voice of Customer via `extract_customer_pain_points`).
+   - Step 5: Cross-source synthesis, compute `Opportunity Index` (+100 to -100), identify `HIGH_DEMAND_LOW_SUPPLY` gaps.
+   - Step 6: Strategic verdict, entry risks, 3-7 day MVP validation plan, and export interactive Infographic HTML Dashboard (`generate_mission_artifact`).
+
+3. **Language Rule:** 100% English for all code, comments, docstrings, and documentation.

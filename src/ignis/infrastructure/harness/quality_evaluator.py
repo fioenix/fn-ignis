@@ -27,11 +27,24 @@ class QualityEvaluator:
         "huong", "dan", "cach", "lam", "chu", "doanh", "nghiep", "ung", "dung",
         "giai", "phap", "phan", "mem", "tri", "tue", "nhan", "tao", "tro", "ly",
         "kiem", "tien", "nguoi", "viet", "nam", "danh", "bai", "hoc", "khoa",
-        "thuc", "chien", "tong", "quan", "chi", "tiet"
+        "thuc", "chien", "tong", "quan", "chi", "tiet", "zalo", "token", "bot",
+        "chat", "agent", "app", "tool", "acc", "clone", "shop", "gia", "ban",
+        "mua", "setup", "chot", "don", "kho", "hang", "sao", "gi", "tai",
+        "bao", "nhieu", "n8n", "dify", "make", "rpa", "cskh", "dai", "phi"
     }
 
-    def is_vietnamese(self, text: str) -> bool:
-        """Strictly detect if text contains Vietnamese diacritics without French false positives."""
+    def __init__(self, custom_lexicon: Optional[Set[str]] = None):
+        self._custom_lexicon: Set[str] = set(custom_lexicon or [])
+
+    def register_terms(self, terms: List[str]) -> None:
+        """Dynamically register new domain vocabulary terms in memory."""
+        for t in terms:
+            clean = t.strip().lower()
+            if clean:
+                self._custom_lexicon.add(clean)
+
+    def is_vietnamese(self, text: str, extra_terms: Optional[Set[str]] = None) -> bool:
+        """Detect if text is localized Vietnamese content, evaluating static and dynamic domain lexicons."""
         if not text:
             return False
         
@@ -44,14 +57,16 @@ class QualityEvaluator:
         if self.VIETNAMESE_CHARS_PATTERN.search(text):
             return True
 
-        vi_word_count = sum(1 for w in words if w in self.VI_COMMON_WORDS)
-        return vi_word_count >= 2
+        active_lexicon = self.VI_COMMON_WORDS | self._custom_lexicon | (extra_terms or set())
+        vi_word_count = sum(1 for w in words if w in active_lexicon)
+        return vi_word_count >= 1
 
     def evaluate_quality(
         self,
         signals: List[TrendSignal],
         geo: GeoCode = GeoCode.VN,
         timeframe_days: int = 90,
+        extra_lexicon: Optional[Set[str]] = None,
     ) -> QualityScorecard:
         if not signals:
             return QualityScorecard(

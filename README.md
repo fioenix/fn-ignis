@@ -1,65 +1,112 @@
 # fn-ignis 🔥
-**Unified Self-Hosted Mission-Driven Trend Intelligence & Social Listening Platform with FastMCP**
+**Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform with FastMCP**
 
-`fn-ignis` là nền tảng tự lưu trữ (self-hosted) giúp các AI Agent (Claude Desktop, Antigravity, Cursor, Codex) tự động khởi tạo các **chiến dịch nghiên cứu xu hướng đa kênh có định hướng (Targeted Research Missions)** trên Google Trends, YouTube, TikTok, Threads, Instagram Reels với chi phí vận hành **$0** (Zero-Token Ingress), lưu trữ phân tích trên Supabase/TimescaleDB và xuất báo cáo Artifacts chuẩn xác 100% pixel-perfect.
+`fn-ignis` is a self-hosted market intelligence and trend analysis platform that empowers AI Agents (Claude Desktop, Claude Code, Antigravity, Codex) and human strategists to discover high-value market white spaces across Google Trends, YouTube, TikTok, Threads, and Instagram Reels with **$0 token ingress costs**, deterministic mathematical scoring (Opportunity Index), real-world Voice of Customer extraction, and pixel-perfect interactive HTML Dashboard artifacts.
 
 ---
 
-## 🏛️ Luồng Vận Hành Cốt Lõi (Mission-Driven Architecture)
+## 🏛️ Dual-Track Architecture
 
-Thay vì cào đại trà vô tội vạ, `fn-ignis` trao quyền cho AI Agent chủ động điều phối:
+`fn-ignis` operates on a dual-track architectural model that balances continuous passive surveillance with active, hypothesis-driven deep dives:
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ 1. USER & AGENT (Claude Desktop / Antigravity)                                         │
-│    User: "Nghiên cứu thị trường thời trang linen / bền vững tại VN 7 ngày qua"        │
-│    Agent lập kế hoạch và định nghĩa:                                                   │
-│      - Keywords: ["thời trang bền vững", "vải linen", "local brand eco"]               │
-│      - Kênh: Google Trends, YouTube, TikTok, Threads, Reels                            │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 2. MCP INTERFACE & ORCHESTRATION                                                       │
-│    Agent gọi FastMCP Tools:                                                            │
-│      1. `create_research_mission(topic, keywords, platforms, geo="VN", timeframe="7d")`│
-│      2. `execute_mission_ingress(mission_id)`                                          │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 3. TARGETED DEEP INGRESS (Đào sâu dữ liệu)                                             │
-│    - Google Trends: Lấy biểu đồ Interest over time + Explore queries                   │
-│    - YouTube: Search top video liên quan + Trích xuất views, likes, comments nổi bật   │
-│    - TikTok / Threads / Reels: Search bài đăng thảo luận thực tế theo hashtag/keyword  │
-│    - Lưu toàn bộ Signals & Context vào Supabase gắn theo `mission_id`                  │
-├────────────────────────────────────────────────────────────────────────────────────────┤
-│ 4. AGENT PHÂN TÍCH & GENERATE ARTIFACT                                                 │
-│    - Agent gọi `get_mission_analysis(mission_id)` $\rightarrow$ Phân tích insight      │
-│    - Gọi `generate_mission_artifact(mission_id)` $\rightarrow$ Xuất Dashboard HTML sâu│
-└────────────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Track1["Track 1: ALWAYS-ON RADAR (Passive & Automated 24/7)"]
+        W["fn-ignis Worker Daemon (Docker)"] -->|Every 15m| E1["Multi-Platform Ingress & Semantic Clustering"]
+        W -->|Every 12h| E2["Autonomous Discovery: Creative Center + White Space Synthesis"]
+        E1 & E2 --> DB[("Postgres / TimescaleDB (Data Baseline)")]
+    end
+
+    subgraph Track2["Track 2: ON-DEMAND DEEP RESEARCH (Targeted & Active Probes)"]
+        User["User / Strategist"] <--> Claude["Claude Desktop / CLI (MCP)"]
+        Claude -->|Step 1: Clarify & Formulate Hypothesis| S1["Scope & Core Questions"]
+        Claude -->|Step 2-4: Active On-Demand Probes| S2["Search Suggestions, Video Grid & Comment Pain Points"]
+        Claude -->|Step 5-6: Opportunity Matrix & Synthesis| S3["Opportunity Index, Moats & 3-7d MVP Blueprint"]
+        S2 -->|Enrich & Write Back| DB
+        Claude --> S4["Interactive Infographic HTML Dashboard"]
+    end
+
+    DB -.->|Provides Continuous Baseline| Claude
 ```
 
----
+### 1. Track 1: Always-On Autonomous Radar (Continuous Surveillance)
+- Runs 24/7 as a background container worker (`fn-ignis-worker`).
+- Periodically ingests macro trends from Google Trends RSS and TikTok Creative Center.
+- Performs zero-token semantic clustering and stores historical interest trajectories.
+- Runs scheduled autonomous discovery cycles to generate persistent daily white space digests (`reports/daily_discovery_vn_YYYY-MM-DD.html`).
 
-## 🤖 Danh Mục FastMCP Tools Cho AI Agent
-
-| Tên Tool | Mục đích | Tham số | Đầu ra |
-|---|---|---|---|
-| `create_research_mission` | Tạo một bài toán nghiên cứu theo chủ đề & từ khóa cụ thể | `topic`, `keywords`, `platforms`, `geo="VN"`, `timeframe="7d"` | `mission_id` và thông tin khởi tạo |
-| `execute_mission_ingress` | Kích hoạt cào sâu đa kênh cho mission đó | `mission_id` | Báo cáo số lượng signals và clusters đã lưu |
-| `get_mission_analysis` | Lấy toàn bộ dữ liệu cào được, phân bố nền tảng và metrics | `mission_id` | JSON chi tiết phục vụ Agent phân tích chiến lược |
-| `generate_mission_artifact` | Sinh Single-File HTML Artifact báo cáo chuyên sâu đa kênh | `mission_id` | Mã HTML Tailwind CSS hoàn chỉnh pixel-perfect |
-| `list_research_missions` | Liệt kê các chiến dịch nghiên cứu đã thực hiện | `limit=10` | JSON danh sách các mission gần nhất |
-| `get_trending_topics` | Truy vấn các chủ đề nóng chung đa kênh | `geo="VN"`, `limit=10` | Bảng xếp hạng các cụm chủ đề tổng hợp |
-| `generate_trend_artifact` | Sinh Dashboard tổng quan xu hướng chung | `topic_id=""`, `geo="VN"` | HTML Dashboard tổng quan |
+### 2. Track 2: On-Demand Targeted Deep Research (Active Strategic Probes)
+- Interactively coordinates with AI Agents via FastMCP tools and prompts.
+- Does not just consume cached data: **actively deploys targeted ingestion probes** for specific niche topics.
+- Extracts authentic user search intent (Autocomplete suggestions) and customer objections (public comment scraping).
+- Calculates the `Opportunity Index` (+100 to -100) and exports interactive HTML dossiers with actionable 3-7 day MVP validation roadmaps.
 
 ---
 
-## 🚀 Khởi Động Nhanh
+## 🧭 6-Step Standard Operating Procedure (SOP)
 
-### 1. Cài đặt môi trường
+Every research mission follows a deterministic 6-step pipeline:
+
+```
+Step 1: Clarify Research Objectives & Core Hypothesis
+   ↓
+Step 2: Macro Scan & Real-World Keyword Expansion (Creative Center & Autocomplete Suggestions)
+   ↓ (Feedback Loop: Expand scope with authentic user slang and sub-niches)
+Step 3: Deep Multi-Platform Ingress & Quality Gate (Spam rejection, Confidence >= 70%)
+   ↓
+Step 4: Single-Source 4-Lens Breakdown (Demand, Supply, Intent, Voice of Customer)
+   ↓
+Step 5: Cross-Source Synthesis & Opportunity Index Matrix (Identify White Spaces)
+   ↓
+Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan + HTML Dashboard)
+```
+
+---
+
+## 🛠️ FastMCP Tool & Prompt Catalog
+
+### 1. Market Research & Strategic Execution
+- `create_research_mission(title, keywords, geo, timeframe, hypothesis)`: Initialize a new targeted research campaign.
+- `execute_mission_ingress(mission_id)`: Execute deep multi-platform ingestion for an existing mission.
+- `get_mission_analysis(mission_id)`: Retrieve synthesized scorecard, white spaces, and action plans in token-optimized JSON.
+- `generate_mission_artifact(mission_id)`: Export a standalone, pixel-perfect single-file HTML Dashboard report to `reports/`.
+- `trigger_autonomous_discovery(geo)`: Trigger an on-demand end-to-end autonomous discovery cycle.
+- `get_latest_daily_discovery(geo)`: Retrieve the latest automated daily discovery digest.
+
+### 2. TikTok Radar & Voice of Customer
+- `get_tiktok_creative_center_trends(geo, period, limit)`: Fetch official nationwide industry ranking benchmarks and hashtags.
+- `get_tiktok_search_suggestions(keywords, geo)`: Fetch live autocomplete search queries and trending sub-hashtags.
+- `get_tiktok_video_comments(video_url, limit)`: Scrape raw public comments for a specific video.
+- `extract_customer_pain_points(keywords, geo, max_videos)`: Extract customer objections, pricing inquiries, and unmet needs.
+
+### 3. General Intelligence & Diagnostics
+- `get_current_session_mission(session_id)`: Restore active mission context for a chat thread.
+- `list_research_missions(limit)`: List recent research missions.
+- `get_trending_topics(geo, limit)`: Query top multi-platform topic clusters.
+- `generate_trend_artifact(topic_id, geo)`: Render general trend overview dashboard.
+
+### 4. Native Prompts & Resources
+- **Prompts**: `market_research_pipeline`, `voice_of_customer_audit`.
+- **Resources**: `fn-ignis://sop/market-research`, `fn-ignis://methodology/opportunity-index`.
+
+---
+
+## ⚡ 1-Click Installation & Setup
+
+### 1. Automated Installation
+Run the bundle installer from the repository root:
 ```bash
-uv venv .venv
-source .venv/bin/activate
-uv pip install -e ".[dev]" pytest pytest-asyncio
+./bundle/install.sh
+```
+Or via Python CLI:
+```bash
+uv pip install -e .
+uv run python -m ignis.interfaces.cli.setup_bundle
+docker compose up -d --build
 ```
 
-### 2. Cấu hình Claude Desktop (`claude_desktop_config.json`)
+### 2. Claude Desktop Integration
+The installer automatically configures `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
@@ -67,8 +114,9 @@ uv pip install -e ".[dev]" pytest pytest-asyncio
       "command": "/Users/fioenix/Projects/fn-ignis/.venv/bin/python",
       "args": ["-m", "ignis.interfaces.mcp.server"],
       "env": {
-        "DATABASE_URL": "postgresql://postgres.jxbysxsovxjglgkgkkfu:Ignis_Trend_999e20f8aaba8f64@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres",
-        "DEFAULT_GEO": "VN"
+        "DATABASE_URL": "postgresql://postgres.xxx:yyy@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres",
+        "DEFAULT_GEO": "VN",
+        "YOUTUBE_API_KEY": "AIzaSy..."
       }
     }
   }
@@ -77,8 +125,14 @@ uv pip install -e ".[dev]" pytest pytest-asyncio
 
 ---
 
-## 🧪 Kiểm Thử (Testing)
+## 🧪 Testing
 
+Run the full pytest suite (100% async coverage):
 ```bash
-.venv/bin/pytest tests/ -v
+uv run pytest
 ```
+
+---
+
+## 📄 License
+MIT License. Built for advanced autonomous market intelligence and white-space discovery.

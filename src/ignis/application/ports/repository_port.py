@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
@@ -115,4 +116,26 @@ class ITrendRepository(ABC):
     async def delete_platform_credentials(self, platform: str) -> bool:
         """Xóa hoặc vô hiệu hóa phiên xác thực của một nền tảng."""
         pass
+
+    @abstractmethod
+    async def get_domain_lexicons(self, domain: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Retrieve dynamic market lexicons, keywords, and slang terms from database."""
+        pass
+
+    @abstractmethod
+    async def register_lexicon_terms(
+        self,
+        domain: str,
+        terms: List[str],
+        category: str = "vernacular",
+        created_by: str = "agent",
+    ) -> int:
+        """Register or expand domain vocabulary and slang terms dynamically."""
+        pass
+
+    @abstractmethod
+    async def get_industry_taxonomies(self) -> List[Dict[str, Any]]:
+        """Retrieve all active industry taxonomies and category keyword mappings."""
+        pass
+
 

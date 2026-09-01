@@ -264,7 +264,13 @@ class YouTubeDataPlugin(IConnectorPlugin):
             try:
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.get(self.SEARCH_API_URL, params=search_params)
-                    if resp.status_code == 200:
+                    if resp.status_code in [403, 429]:
+                        error_json = resp.json() if "json" in resp.headers.get("content-type", "") else {}
+                        reasons = [err.get("reason") for err in error_json.get("error", {}).get("errors", []) if isinstance(err, dict)]
+                        if "quotaExceeded" in reasons or "rateLimitExceeded" in reasons or resp.status_code == 429:
+                            logger.warning("YouTube search API quota exceeded (100 units/query limit).")
+                            raise ConnectorQuotaExceededException("YouTube API search quota limit exceeded.")
+                    elif resp.status_code == 200:
                         search_data = resp.json()
                         for item in search_data.get("items", []):
                             v_id = item.get("id", {}).get("videoId")

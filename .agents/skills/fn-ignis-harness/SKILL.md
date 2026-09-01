@@ -5,12 +5,40 @@ description: Autonomous Trend Intelligence & Market Opportunity Agent Harness fo
 
 # fn-ignis Trend Intelligence & Market Opportunity Agent Harness 🚀
 
-This skill equips AI agents with an autonomous trend intelligence harness:
-1. **Cross-Agent Session Tracing**: Binds `agent` (`claude_desktop`, `claude_code`, `codex`) and `session_id` (`codex://threads/...`, `conversation_id`) to missions. Automatically restores research context across chat restarts.
-2. **Human-Friendly Mission Tracking (Shortcode UX)**: Assigns clean, human-readable identifiers (`FB16C5EE` or `VN-AI-AGENT-90D`).
-3. **Quality & Integrity Scorecard**: Multi-dimensional confidence evaluation (Coverage, Language Precision, Freshness, Creator Diversity).
-4. **White Space Discovery**: Identifies high-demand, low-supply market gaps by correlating search intent (Google Trends) with verified localized supply (YouTube/TikTok).
-5. **Claude Native Artifacts First**: Emphasizes direct in-chat visual rendering.
+This skill equips AI agents with an autonomous trend intelligence harness following the **6-Step Standard Operating Procedure (SOP)**:
+
+---
+
+## 🧭 Standard Operating Procedure (6-Step SOP)
+
+### 1. Step 1: Clarify Research Objectives & Core Hypothesis
+- Clarify business model (SaaS, Retail, Agency, Content), target audience (B2B/B2C), target geography, and timeframe.
+- Establish the **Core Hypothesis** to validate (e.g., *"There is strong market demand for localized AI customer service agents, but existing solutions are overly complex and costly"*).
+- **Dynamic Lexicon Registration**: For new niches (Fashion, Crypto, Healthcare, Retail), call `register_domain_lexicon(domain="...", terms=[...])` so the Quality Gate recognizes domain terminology.
+
+### 2. Step 2: Macro Scan & Real-World Keyword Expansion
+- Call `get_tiktok_creative_center_trends(geo, period, limit, industry)` with vertical filter.
+- Call `get_tiktok_search_suggestions` to uncover actual industry rankings, slang, and authentic search queries.
+- Expand keywords to include user colloquialisms, specific tool names, and sub-niches before deep ingestion.
+
+### 3. Step 3: Deep Multi-Platform Ingress & Quality Gate
+- Call `execute_mission_ingress` for deep multi-platform ingestion (Google Trends, YouTube, TikTok videos, TikTok comments).
+- Automated filters eliminate live streams, noise, and duplicate URLs. Evaluate `QualityScorecard` (Coverage, Precision, Freshness, Creator Diversity). Ensure Confidence Score $\ge 70\%$.
+
+### 4. Step 4: Single-Source 4-Lens Breakdown
+- **Google Lens:** Macro search demand velocity and search volume growth.
+- **YouTube Lens:** Long-form supply, case study and tutorial depth of competitors.
+- **TikTok Search Lens:** Micro short-form intent and trending sub-hashtags.
+- **Voice of Customer Lens:** Authentic objections, pricing questions, unmet needs from comments via `extract_customer_pain_points`.
+
+### 5. Step 5: Cross-Source Synthesis & White Space Discovery
+- Correlate Demand vs. Supply, compute `Opportunity Index` (+100 to -100), identify `HIGH_DEMAND_LOW_SUPPLY` golden opportunities, and determine Trend Maturity Stage (`EMERGING`, `GROWTH`, `SATURATED`).
+
+### 6. Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation
+- Synthesize 3-5 grounded market truths (Key Takeaways).
+- Evaluate entry barriers and competitive moats (Why hasn't this been built? What if big tech enters?).
+- Formulate a 3-7 day fast low-cost MVP validation plan.
+- Render and export the complete interactive Infographic HTML Dashboard (`generate_mission_artifact`).
 
 ---
 
@@ -24,23 +52,23 @@ When reporting mission status or analysis, **ALWAYS display the identification b
 > **Session ID:** `codex://threads/01a05666...` *(if available)*
 
 ### 2. Artifact Presentation Protocol (Native Artifacts First) 🌟
-- **DEFAULT IN-CHAT PRESENTATION:** When the user requests a mission report or analysis, call `get_mission_analysis(mission_id)` and **render the findings directly as a Claude Native Artifact** in the chat window.
-  - Use high-contrast Light Mode styling, visual summary cards, and structured tables.
-  - Follow the 5-act storyflow: *Executive Pulse $\rightarrow$ Scorecard Radar $\rightarrow$ White Space Matrix (10 topics) $\rightarrow$ Strategic Insights & Action Blueprint $\rightarrow$ Supporting Signal Evidence*.
+- **DEFAULT IN-CHAT PRESENTATION:** Call `get_mission_analysis(mission_id)` and **render the findings directly as a Claude Native Artifact** in the chat window.
 - **LOCAL FILE EXPORT:** Call `generate_mission_artifact` ONLY when the user explicitly asks to export or save a standalone HTML report file to local disk (`reports/` folder).
 
 ---
 
 ## 🛠️ FastMCP Tool Reference
 
-### 1. `get_current_session_mission(session_id="...")`
-- Automatically retrieves and resumes the active mission linked to the current chat session.
+1. **`get_current_session_mission(session_id)`**: Restore active mission linked to current chat thread.
+2. **`get_tiktok_creative_center_trends(geo, period, limit, industry)`**: Scan macro industry trends and hashtag benchmarks (Step 2).
+3. **`get_tiktok_search_suggestions(keywords, geo)`**: Fetch authentic user autocomplete search queries (Step 2).
+4. **`execute_mission_ingress(mission_id)`**: Execute deep multi-platform ingestion with quality filtering (Step 3).
+5. **`get_tiktok_video_comments(video_url, limit)`**: Read detailed public comments for a specific video (Step 4).
+6. **`extract_customer_pain_points(keywords, geo, max_videos)`**: Extract customer inquiries, pricing objections, and unmet needs (Step 4).
+7. **`get_mission_analysis(mission_id)`**: Retrieve full cross-platform synthesized strategic analysis (Steps 5 & 6).
+8. **`generate_mission_artifact(mission_id)`**: Export interactive Infographic HTML Dashboard report (Step 6).
+9. **`trigger_autonomous_discovery(geo)`**: Trigger an on-demand full 6-step autonomous discovery cycle.
+10. **`get_latest_daily_discovery(geo)`**: Retrieve the latest daily automated market discovery digest and opportunity rankings.
+11. **`register_domain_lexicon(domain, terms, category)`**: Dynamically register new niche vocabulary/slang in database.
+12. **`list_domain_lexicons(domain)`**: Query active domain vocabularies and industry mappings.
 
-### 2. `execute_mission_ingress(mission_id="...")`
-- Executes deep multi-platform ingestion (idempotent replace mode, strict date filters, and noise rejection).
-
-### 3. `get_mission_analysis(mission_id="...")` *(RECOMMENDED FOR CHAT ARTIFACTS)*
-- Fetches the complete strategic analysis payload (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) in a lightweight JSON payload (~3KB).
-
-### 4. `generate_mission_artifact(mission_id="...")` *(EXPLICIT FILE EXPORT ONLY)*
-- Renders and writes a standalone single-file HTML Infographic Canvas report to `reports/`.

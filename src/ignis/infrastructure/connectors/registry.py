@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from ignis.application.ports.connector_port import IConnectorPlugin
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TrendSignal
@@ -220,3 +222,23 @@ class ConnectorPluginRegistry:
         except Exception as e:
             breaker.record_failure()
             raise e
+
+    async def fetch_suggestions_across_all(
+        self,
+        keywords: List[str],
+        geo: GeoCode = GeoCode.VN,
+        target_platforms: Optional[List[PlatformType]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Thu thập từ khóa tìm kiếm gợi ý (Search Suggestions) từ tất cả các plugin hỗ trợ."""
+        all_suggestions: List[Dict[str, Any]] = []
+        for platform, plugin in self._plugins.items():
+            if target_platforms and platform not in target_platforms:
+                continue
+            try:
+                sugs = await plugin.fetch_suggestions(keywords=keywords, geo=geo)
+                if sugs:
+                    all_suggestions.extend(sugs)
+            except Exception as e:
+                logger.warning(f"Lỗi khi lấy suggestions từ {plugin.name}: {e}")
+        return all_suggestions
+

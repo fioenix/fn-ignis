@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "fn-ignis": {
+      "command": "/absolute/path/to/fn-ignis/.venv/bin/python",
+      "args": [
+        "-m",
+        "ignis.interfaces.mcp.server"
+      ],
+      "env": {
+        "DATABASE_URL": "postgresql://postgres:postgres@localhost:5432/ignis_trends",
+        "DEFAULT_GEO": "VN",
+        "YOUTUBE_API_KEY": "YOUR_YOUTUBE_API_KEY_HERE"
+      }
+    }
+  }
+}

@@ -91,11 +91,11 @@ class StrategicMarketReasoner:
         k = kw.lower().strip()
 
         if k == "n8n":
-            return "n8n" in t
-        elif k == "mcp ai":
-            return "mcp" in t or "model context protocol" in t
+            return bool(re.search(r"\bn8n\b", t))
+        elif k == "mcp ai" or k == "mcp":
+            return bool(re.search(r"\bmcp\b", t)) or "model context protocol" in t
         elif k == "rpa":
-            return "rpa" in t or "uipath" in t or "power automate" in t or "robotic process automation" in t
+            return bool(re.search(r"\brpa\b", t)) or "uipath" in t or "power automate" in t or "robotic process automation" in t
         elif k == "ai agent doanh nghiệp":
             has_enterprise = any(w in t for w in ["doanh nghiệp", "enterprise", "b2b", "công ty"])
             has_agent = any(w in t for w in ["agent", "trợ lý", "ai", "tự động hóa"])
@@ -127,21 +127,21 @@ class StrategicMarketReasoner:
         opportunities: List[MarketOpportunity] = []
         
         google_interests: Dict[str, float] = {}
-        youtube_signals: List[TrendSignal] = []
+        video_supply_signals: List[TrendSignal] = []
 
         for s in signals:
             if s.platform == PlatformType.GOOGLE_TRENDS:
                 kw = s.metadata.get("keyword", s.raw_title.replace("Google Search Trends: ", ""))
                 google_interests[kw.lower().strip()] = s.metric_value
-            elif s.platform == PlatformType.YOUTUBE:
-                youtube_signals.append(s)
+            elif s.platform in (PlatformType.YOUTUBE, PlatformType.TIKTOK, PlatformType.REELS):
+                video_supply_signals.append(s)
 
         for raw_kw in target_keywords:
             kw_clean = raw_kw.lower().strip()
             demand_score = google_interests.get(kw_clean, 65.0)
 
             matching_videos = [
-                s for s in youtube_signals 
+                s for s in video_supply_signals 
                 if self._matches_topic_strictly(s.raw_title, kw_clean)
             ]
 
@@ -149,11 +149,10 @@ class StrategicMarketReasoner:
             vn_views = sum(v.metric_value for v in vn_videos)
             vn_count = len(vn_videos)
 
-            # View-Weighted Supply Scoring Equation
+            # View-Weighted Supply Scoring Equation across all video platforms
             if vn_count == 0:
                 supply_score = 0.0
             elif vn_views < 1000.0:
-                # Content exists but with low viewer traction (e.g. 7 videos with <300 views)
                 base_supply = min(40.0, vn_count * 4.0)
                 view_factor = min(15.0, math.log10(max(10.0, vn_views)) * 3.0) if vn_views > 0 else 0.0
                 supply_score = round(base_supply + view_factor, 1)
@@ -164,9 +163,18 @@ class StrategicMarketReasoner:
 
             opportunity_index = round(demand_score - supply_score, 1)
 
-            v_str = f"{vn_count} video" if vn_count == 1 else f"{vn_count} videos"
+            # Phân tách nguồn nền tảng trong báo cáo
+            yt_count = sum(1 for v in vn_videos if v.platform == PlatformType.YOUTUBE)
+            tt_count = sum(1 for v in vn_videos if v.platform == PlatformType.TIKTOK)
+            breakdown_parts = []
+            if yt_count > 0:
+                breakdown_parts.append(f"{yt_count} YouTube")
+            if tt_count > 0:
+                breakdown_parts.append(f"{tt_count} TikTok")
+            plat_str = f" ({', '.join(breakdown_parts)})" if breakdown_parts else ""
+            v_str = f"{vn_count} video{plat_str}" if vn_count == 1 else f"{vn_count} videos{plat_str}"
 
-            # Clear, Non-Overlapping Opportunity Classification
+            # Phân loại cơ hội thị trường minh bạch
             if vn_count == 0:
                 opp_type = "HIGH_DEMAND_LOW_SUPPLY"
                 rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with zero localized supply recorded. Prime white space for early category leadership."
@@ -184,9 +192,9 @@ class StrategicMarketReasoner:
                 rec = f"Segment '{raw_kw}' is actively growing ({v_str}), with significant addressable headroom."
 
             if vn_videos:
-                support_sigs = [s.raw_title for s in vn_videos[:3]]
+                support_sigs = [f"[{s.platform.value.upper()}] {s.raw_title}" for s in vn_videos[:3]]
             else:
-                support_sigs = ["No localized videos recorded in the 90-day timeframe."]
+                support_sigs = ["No localized videos recorded across YouTube or TikTok in the requested timeframe."]
 
             opportunities.append(
                 MarketOpportunity(
@@ -207,15 +215,19 @@ class StrategicMarketReasoner:
         signals: List[TrendSignal],
         clusters: List[TopicCluster],
     ) -> Tuple[TrendMaturityStage, List[str]]:
-        yt_signals = [s for s in signals if s.platform == PlatformType.YOUTUBE and not self._is_garbage(s.raw_title)]
-        how_to_count = sum(1 for s in yt_signals if "hướng dẫn" in s.raw_title.lower() or "là gì" in s.raw_title.lower() or "tutorial" in s.raw_title.lower() or "cơ bản" in s.raw_title.lower())
-        total_yt = len(yt_signals)
+        video_signals = [
+            s for s in signals 
+            if s.platform in (PlatformType.YOUTUBE, PlatformType.TIKTOK, PlatformType.REELS) 
+            and not self._is_garbage(s.raw_title)
+        ]
+        how_to_count = sum(1 for s in video_signals if "hướng dẫn" in s.raw_title.lower() or "là gì" in s.raw_title.lower() or "tutorial" in s.raw_title.lower() or "cơ bản" in s.raw_title.lower())
+        total_videos = len(video_signals)
 
         reasons = []
-        if total_yt == 0:
+        if total_videos == 0:
             return TrendMaturityStage.EMERGING, ["Emerging market with minimal creator supply."]
 
-        how_to_ratio = how_to_count / float(total_yt)
+        how_to_ratio = how_to_count / float(total_videos)
         
         if how_to_ratio >= 0.4:
             reasons.append(f"{how_to_ratio * 100:.0f}% of content is introductory tutorials ('how-to', 'basics').")

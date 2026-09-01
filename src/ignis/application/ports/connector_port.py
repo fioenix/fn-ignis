@@ -43,3 +43,12 @@ class IConnectorPlugin(ABC):
     ) -> List[TrendSignal]:
         """Cào dữ liệu có định hướng theo danh sách từ khóa nghiên cứu cụ thể."""
         return await self.fetch_signals(geo=geo, timeframe=timeframe, limit=limit)
+
+    async def fetch_suggestions(
+        self,
+        keywords: List[str],
+        geo: GeoCode = GeoCode.VN,
+    ) -> List[dict]:
+        """Lấy danh sách các từ khóa tìm kiếm gợi ý (Search Suggestions / Autocomplete)."""
+        return []
+

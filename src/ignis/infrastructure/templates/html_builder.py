@@ -53,6 +53,9 @@ class HtmlArtifactBuilder(IArtifactBuilder):
         signals: List[TrendSignal],
         platform_breakdown: Dict[str, int],
         report: Optional[HarnessResearchReport] = None,
+        customer_inquiries: Optional[List[Dict[str, Any]]] = None,
+        search_suggestions: Optional[List[Dict[str, Any]]] = None,
+        macro_trends: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         template = self._env.get_template("mission_report.html")
         
@@ -84,5 +87,9 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             market_opportunities=opportunities,
             strategic_insights=insights,
             actionable_takeaways=actionables,
+            customer_inquiries=customer_inquiries or [],
+            search_suggestions=search_suggestions or [],
+            macro_trends=macro_trends or [],
             generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         )
+
