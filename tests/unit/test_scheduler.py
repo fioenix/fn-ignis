@@ -25,3 +25,24 @@ async def test_scheduler_stop():
     scheduler.stop()
     assert scheduler._running is False
     assert scheduler._shutdown_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_health_probe_cycle():
+    scheduler = IngressScheduler(interval_seconds=1)
+    mock_plugin = AsyncMock()
+    mock_plugin.name = "Google Trends Intelligence"
+    mock_plugin.is_healthy.return_value = True
+
+    mock_registry = MagicMock()
+    mock_registry._plugins = {"google": mock_plugin}
+
+    mock_repo = AsyncMock()
+
+    await scheduler.run_health_probe_cycle(mock_registry, mock_repo)
+    assert mock_plugin.is_healthy.called
+    assert mock_repo.log_event.called
+    call_args = mock_repo.log_event.call_args[1]
+    assert call_args["event_type"] == "CONNECTOR_HEALTH_CHECK"
+    assert call_args["level"] == "INFO"
+

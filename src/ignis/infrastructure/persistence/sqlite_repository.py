@@ -33,7 +33,14 @@ class SqliteTrendRepository(ITrendRepository):
             self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
             self._mem_conn.row_factory = sqlite3.Row
 
+    async def close(self) -> None:
+        """Close SQLite connection if in-memory."""
+        if self._mem_conn is not None:
+            self._mem_conn.close()
+            self._mem_conn = None
+
     def _get_connection(self) -> sqlite3.Connection:
+
         if self._mem_conn is not None:
             return self._mem_conn
         conn = sqlite3.connect(self._db_path, check_same_thread=False)

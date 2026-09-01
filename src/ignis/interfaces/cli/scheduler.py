@@ -19,7 +19,8 @@ from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
-from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+from ignis.application.ports.repository_port import ITrendRepository
+from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
 logging.basicConfig(
@@ -32,21 +33,24 @@ logger = logging.getLogger("ignis.scheduler")
 class IngressScheduler:
     """
     Background Cron Daemon executing periodic ETL ingestion, clustering,
-    and the Autonomous 6-Step Market Discovery Engine.
+    Autonomous Discovery Engine, and Synthetic Health Probes.
     """
 
     def __init__(
         self,
         interval_seconds: int = 900,
         discovery_interval_seconds: int = 43200,
+        health_check_interval_seconds: int = 21600,
         geo: GeoCode = GeoCode.VN,
     ):
         self.interval_seconds = interval_seconds
         self.discovery_interval_seconds = discovery_interval_seconds
+        self.health_check_interval_seconds = health_check_interval_seconds
         self.geo = geo
         self._running = False
         self._shutdown_event = asyncio.Event()
         self._last_discovery_time: float = 0.0
+        self._last_health_check_time: float = 0.0
 
     async def run_ingress_cycle(self, registry: ConnectorPluginRegistry, cluster_use_case: ClusterSignalsUseCase):
         logger.info(f"Starting standard periodic Ingress cycle for geo={self.geo.value}...")
@@ -74,16 +78,36 @@ class IngressScheduler:
         except Exception as e:
             logger.error(f"Error during Autonomous Discovery cycle: {e}", exc_info=True)
 
+    async def run_health_probe_cycle(self, registry: ConnectorPluginRegistry, repository: ITrendRepository):
+        logger.info("Running scheduled synthetic connector health probes...")
+        for plat_name, plugin in registry._plugins.items():
+            try:
+                is_ok = await plugin.is_healthy()
+                status_str = "HEALTHY" if is_ok else "UNHEALTHY"
+                level = "INFO" if is_ok else "WARNING"
+                await repository.log_event(
+                    component="scheduler.health_probe",
+                    event_type="CONNECTOR_HEALTH_CHECK",
+                    message=f"Connector {plugin.name} is {status_str}",
+                    level=level,
+                    details={"platform": str(plat_name), "healthy": is_ok},
+                )
+            except Exception as e:
+                logger.error(f"Health probe failed for connector {plugin.name}: {e}")
+                await repository.log_event(
+                    component="scheduler.health_probe",
+                    event_type="CONNECTOR_HEALTH_ERROR",
+                    message=f"Connector {plugin.name} health probe error: {e}",
+                    level="ERROR",
+                    details={"platform": str(plat_name), "error": str(e)},
+                )
+
     async def start(self):
         self._running = True
-        logger.info(f"Starting fn-ignis Worker Scheduler (Ingress: {self.interval_seconds}s, Discovery: {self.discovery_interval_seconds}s)...")
+        logger.info(f"Starting fn-ignis Worker Scheduler (Ingress: {self.interval_seconds}s, Discovery: {self.discovery_interval_seconds}s, Health: {self.health_check_interval_seconds}s)...")
 
         # 1. Dependency Injection Setup
-        repository = PostgresTimescaleRepository(
-            dsn=settings.DATABASE_URL,
-            min_pool_size=settings.DB_MIN_POOL_SIZE,
-            max_pool_size=settings.DB_MAX_POOL_SIZE,
-        )
+        repository = create_repository()
         tiktok_auth_manager = TikTokAuthManager(repository=repository)
         tiktok_plugin = TikTokPlugin(auth_manager=tiktok_auth_manager)
         creative_center_plugin = TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager)
@@ -125,14 +149,21 @@ class IngressScheduler:
                     await self.run_discovery_cycle(discovery_use_case)
                     self._last_discovery_time = current_time
 
+                # 3. Check and run synthetic health probes if due
+                if (current_time - self._last_health_check_time) >= self.health_check_interval_seconds:
+                    await self.run_health_probe_cycle(registry, repository)
+                    self._last_health_check_time = current_time
+
                 try:
                     await asyncio.wait_for(self._shutdown_event.wait(), timeout=self.interval_seconds)
                 except asyncio.TimeoutError:
                     pass
         finally:
             logger.info("Closing repository connections and shutting down scheduler...")
-            await repository.close()
+            if hasattr(repository, "close"):
+                await repository.close()
             logger.info("Scheduler shutdown cleanly.")
+
 
     def stop(self):
         logger.info("Received shutdown signal for Scheduler...")
