@@ -67,17 +67,38 @@ class StrategicMarketReasoner:
             actionable_takeaways=actionables,
         )
 
+    # Characters strictly unique to Vietnamese
+    VI_EXCLUSIVE_CHARS_PATTERN = re.compile(
+        r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủãẽĩõũạẹịọụ]",
+        re.IGNORECASE
+    )
+
+    FOREIGN_STOPWORDS = {
+        "formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant",
+        "como", "funcionam", "chegou", "novos", "veja", "agentes", "autonomos", "autônomos",
+        "para", "com", "por", "sobre", "este", "esta", "todos", "agora", "fazer", "curso",
+        "gratis", "completo", "tutorial", "você", "voce", "seus", "suas", "criar", "criando",
+        "ferramenta", "passo", "inteligencia", "artificial", "automatizar",
+        "cara", "yang", "untuk", "ini", "bisa", "dan", "dari"
+    }
+
     def _is_vietnamese(self, title: str) -> bool:
         if not title:
             return False
         title_lower = title.lower()
         words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", title_lower))
-        if any(fw in words for fw in self.FRENCH_WORDS):
+        
+        # Layer 1: Reject foreign stopwords
+        if any(fw in words for fw in self.FOREIGN_STOPWORDS):
             return False
-        if self.VIETNAMESE_CHARS_PATTERN.search(title):
+
+        # Layer 2: Exclusive Vietnamese characters
+        if self.VI_EXCLUSIVE_CHARS_PATTERN.search(title):
             return True
+
+        # Layer 3: Active Vietnamese lexicon match
         vi_word_count = sum(1 for w in words if w in self.VI_COMMON_WORDS)
-        return vi_word_count >= 2
+        return vi_word_count >= 1
 
     def _is_garbage(self, title: str) -> bool:
         t_low = title.lower()
@@ -161,8 +182,6 @@ class StrategicMarketReasoner:
                 view_factor = min(settings.SUPPLY_VIEW_MAX, math.log10(max(10.0, vn_views)) * settings.SUPPLY_VIEW_LOG_WEIGHT)
                 supply_score = round(min(100.0, base_supply + view_factor), 1)
 
-            opportunity_index = round(demand_score - supply_score, 1)
-
             # Phân tách nguồn nền tảng trong báo cáo
             yt_count = sum(1 for v in vn_videos if v.platform == PlatformType.YOUTUBE)
             tt_count = sum(1 for v in vn_videos if v.platform == PlatformType.TIKTOK)
@@ -174,22 +193,29 @@ class StrategicMarketReasoner:
             plat_str = f" ({', '.join(breakdown_parts)})" if breakdown_parts else ""
             v_str = f"{vn_count} video{plat_str}" if vn_count == 1 else f"{vn_count} videos{plat_str}"
 
-            # Phân loại cơ hội thị trường minh bạch
+            # Strict Opportunity Index with Sample Size Damping & Label Alignment
             if vn_count == 0:
+                opportunity_index = round(demand_score, 1)
                 opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with zero localized supply recorded. Prime white space for early category leadership."
-            elif vn_count > 0 and vn_views < 1000.0:
-                opp_type = "LOW_ENGAGEMENT_SUPPLY"
-                rec = f"Existing localized supply ({v_str}) suffers from low viewer traction ({int(vn_views):,} total views). Strong opportunity for high-quality practical content to dominate mindshare."
-            elif opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
-                opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 outstripping available supply ({v_str}). Prime opportunity for category growth."
-            elif supply_score >= settings.SATURATION_SUPPLY_THRESHOLD:
-                opp_type = "SATURATED_SEGMENT"
-                rec = f"Segment '{raw_kw}' has substantial foundational creator supply ({v_str}). Recommend differentiating through advanced or verticalized solutions."
+                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with zero localized supply recorded ({v_str}). Prime unserved white space for early category leadership."
             else:
-                opp_type = "GROWING_OPPORTUNITY"
-                rec = f"Segment '{raw_kw}' is actively growing ({v_str}), with significant addressable headroom."
+                raw_oi = demand_score - supply_score
+                # Sample size confidence damping: If n < 5, dampen raw score
+                damping_factor = min(1.0, 0.35 + 0.65 * (vn_count / 5.0))
+                opportunity_index = round(raw_oi * damping_factor, 1)
+
+                if opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
+                    opp_type = "HIGH_DEMAND_LOW_SUPPLY"
+                    rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 outstripping available supply ({v_str}). High-confidence opportunity (Effective OI: {opportunity_index:+0.1f})."
+                elif opportunity_index >= 10.0:
+                    opp_type = "GROWING_OPPORTUNITY"
+                    rec = f"Segment '{raw_kw}' shows positive momentum ({v_str}) with addressable market headroom (Effective OI: {opportunity_index:+0.1f})."
+                elif opportunity_index >= -15.0:
+                    opp_type = "BALANCED_COMPETITION"
+                    rec = f"Segment '{raw_kw}' is in market equilibrium ({v_str}) where content supply balances consumer demand."
+                else:
+                    opp_type = "SATURATED_SEGMENT"
+                    rec = f"Segment '{raw_kw}' is heavily saturated ({v_str}) relative to demand (OI: {opportunity_index:+0.1f}). Requires verticalized differentiation."
 
             if vn_videos:
                 support_sigs = [f"[{s.platform.value.upper()}] {s.raw_title}" for s in vn_videos[:3]]
@@ -209,6 +235,7 @@ class StrategicMarketReasoner:
             )
 
         return sorted(opportunities, key=lambda x: x.opportunity_index, reverse=True)
+
 
     def _evaluate_maturity_stage(
         self,

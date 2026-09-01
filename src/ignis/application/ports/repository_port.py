@@ -44,9 +44,15 @@ class ITrendRepository(ABC):
         pass
 
     @abstractmethod
+    async def save_mission(self, mission: ResearchMission) -> ResearchMission:
+        """Lưu hoặc cập nhật (Upsert) một nhiệm vụ nghiên cứu."""
+        pass
+
+    @abstractmethod
     async def get_mission(self, mission_id: UUID) -> Optional[ResearchMission]:
         """Lấy thông tin chi tiết một nhiệm vụ nghiên cứu."""
         pass
+
 
     @abstractmethod
     async def update_mission(self, mission: ResearchMission) -> None:

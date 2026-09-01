@@ -17,9 +17,9 @@ def test_quality_evaluator_empty():
     assert len(scorecard.flaws_detected) > 0
 
 
-def test_quality_evaluator_healthy_signals():
+def test_quality_evaluator_small_and_large_sample_size():
     evaluator = QualityEvaluator()
-    signals = [
+    small_signals = [
         TrendSignal(
             platform=PlatformType.GOOGLE_TRENDS,
             raw_title="Google Search Trends: AI Agent",
@@ -42,11 +42,30 @@ def test_quality_evaluator_healthy_signals():
         ),
     ]
 
-    scorecard = evaluator.evaluate_quality(signals, geo=GeoCode.VN)
-    assert scorecard.coverage_score >= 40.0
-    assert scorecard.language_precision == 100.0
-    assert scorecard.overall_confidence >= 60.0
-    assert scorecard.confidence_level in [ConfidenceLevel.MEDIUM, ConfidenceLevel.HIGH]
+    # Small sample (N=2 localized content signals) is penalized
+    scorecard_small = evaluator.evaluate_quality(small_signals, geo=GeoCode.VN)
+    assert scorecard_small.coverage_score >= 40.0
+    assert scorecard_small.language_precision == 100.0
+    assert scorecard_small.overall_confidence < 50.0
+    assert scorecard_small.confidence_level == ConfidenceLevel.LOW
+    assert any("Low localized dataset size" in f for f in scorecard_small.flaws_detected)
+
+    # Large sample (N=16 localized signals) receives full confidence
+    large_signals = list(small_signals)
+    for i in range(14):
+        large_signals.append(
+            TrendSignal(
+                platform=PlatformType.YOUTUBE,
+                raw_title=f"Video hướng dẫn AI Agent thực chiến phần {i+1}",
+                metric_value=20000.0,
+                geo_code=GeoCode.VN,
+                metadata={"channel_title": f"Creator {i+1}"}
+            )
+        )
+    scorecard_large = evaluator.evaluate_quality(large_signals, geo=GeoCode.VN)
+    assert scorecard_large.overall_confidence >= 80.0
+    assert scorecard_large.confidence_level == ConfidenceLevel.HIGH
+
 
 
 def test_strategic_reasoner_white_space_discovery():
@@ -93,3 +112,50 @@ def test_strategic_reasoner_white_space_discovery():
     assert opp.opportunity_index > 0
     assert len(report.strategic_insights) > 0
     assert len(report.actionable_takeaways) > 0
+
+
+def test_language_filter_portuguese_rejection():
+    evaluator = QualityEvaluator()
+    reasoner = StrategicMarketReasoner()
+
+    portuguese_title = "n8n Agents Chegou: Veja Como Funcionam os Novos Agentes Autônomos"
+    french_title = "Formation Complète n8n Débutant avec Cas Pratique"
+    vietnamese_title = "Hướng dẫn tự động hóa với n8n và AI agent cho doanh nghiệp"
+
+    assert evaluator.is_vietnamese(portuguese_title) is False
+    assert reasoner._is_vietnamese(portuguese_title) is False
+
+    assert evaluator.is_vietnamese(french_title) is False
+    assert reasoner._is_vietnamese(french_title) is False
+
+    assert evaluator.is_vietnamese(vietnamese_title) is True
+    assert reasoner._is_vietnamese(vietnamese_title) is True
+
+
+def test_opportunity_index_sample_size_damping_and_label_alignment():
+    reasoner = StrategicMarketReasoner()
+
+    # Case 1: Single video with demand 90 -> raw OI is ~86, but damped
+    signals_single = [
+        TrendSignal(platform=PlatformType.GOOGLE_TRENDS, raw_title="Google Search Trends: n8n", metric_value=90.0),
+        TrendSignal(platform=PlatformType.YOUTUBE, raw_title="Hướng dẫn n8n cơ bản", metric_value=500.0),
+    ]
+    opps = reasoner._discover_market_opportunities(signals_single, ["n8n"])
+    assert len(opps) == 1
+    # Damping factor for N=1: 0.35 + 0.65*(1/5) = 0.48 -> damped OI is ~40.3
+    assert opps[0].opportunity_index < 50.0
+
+    # Case 2: Negative Opportunity Index (-30) must be SATURATED_SEGMENT, NOT GROWING_OPPORTUNITY
+    signals_saturated = [
+        TrendSignal(platform=PlatformType.GOOGLE_TRENDS, raw_title="Google Search Trends: n8n", metric_value=30.0),
+        TrendSignal(platform=PlatformType.YOUTUBE, raw_title="Hướng dẫn n8n 1", metric_value=50000.0),
+        TrendSignal(platform=PlatformType.YOUTUBE, raw_title="Hướng dẫn n8n 2", metric_value=50000.0),
+        TrendSignal(platform=PlatformType.YOUTUBE, raw_title="Hướng dẫn n8n 3", metric_value=50000.0),
+        TrendSignal(platform=PlatformType.YOUTUBE, raw_title="Hướng dẫn n8n 4", metric_value=50000.0),
+        TrendSignal(platform=PlatformType.YOUTUBE, raw_title="Hướng dẫn n8n 5", metric_value=50000.0),
+    ]
+    opps_sat = reasoner._discover_market_opportunities(signals_saturated, ["n8n"])
+    assert opps_sat[0].opportunity_index < 0
+    assert opps_sat[0].opportunity_type == "SATURATED_SEGMENT"
+    assert "saturated" in opps_sat[0].strategic_recommendation.lower()
+

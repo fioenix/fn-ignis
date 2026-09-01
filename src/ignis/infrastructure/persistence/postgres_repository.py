@@ -291,6 +291,14 @@ class PostgresTimescaleRepository(ITrendRepository):
             logger.error(f"Lỗi khi tạo research mission: {e}", exc_info=True)
             raise RepositoryException(f"Failed to create research mission: {e}") from e
 
+    async def save_mission(self, mission: ResearchMission) -> ResearchMission:
+        """Upsert a research mission (creates if not existing, otherwise updates)."""
+        existing = await self.get_mission(mission.id)
+        if existing:
+            await self.update_mission(mission)
+            return mission
+        return await self.create_mission(mission)
+
     async def get_mission(self, identifier: Any) -> Optional[ResearchMission]:
         pool = await self._get_pool()
         raw_id = str(identifier).strip()

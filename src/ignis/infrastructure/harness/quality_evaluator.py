@@ -15,12 +15,26 @@ class QualityEvaluator:
     Weights and confidence thresholds are fully configurable via environment variables.
     """
 
-    VIETNAMESE_CHARS_PATTERN = re.compile(
-        r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]",
+    # Characters strictly unique to Vietnamese (cannot appear in Portuguese, French, Spanish, etc.)
+    VI_EXCLUSIVE_CHARS_PATTERN = re.compile(
+        r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủãẽĩõũạẹịọụ]",
         re.IGNORECASE
     )
 
-    FRENCH_WORDS = {"formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant"}
+    # Ambiguous shared Latin diacritics (may appear in Portuguese, Spanish, French, etc.)
+    SHARED_LATIN_DIACRITICS = re.compile(r"[ôéèáàâóíúç]", re.IGNORECASE)
+
+    FOREIGN_STOPWORDS = {
+        # French
+        "formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant",
+        # Portuguese / Spanish
+        "como", "funcionam", "chegou", "novos", "veja", "agentes", "autonomos", "autônomos",
+        "para", "com", "por", "sobre", "este", "esta", "todos", "agora", "fazer", "curso",
+        "gratis", "completo", "tutorial", "você", "voce", "seus", "suas", "criar", "criando",
+        "ferramenta", "passo", "inteligencia", "artificial", "automatizar",
+        # Indonesian / Malay
+        "cara", "yang", "untuk", "ini", "bisa", "dan", "dari"
+    }
 
     VI_COMMON_WORDS = {
         "va", "cua", "la", "trong", "cho", "voi", "ve", "tu", "dong", "hoa",
@@ -44,22 +58,31 @@ class QualityEvaluator:
                 self._custom_lexicon.add(clean)
 
     def is_vietnamese(self, text: str, extra_terms: Optional[Set[str]] = None) -> bool:
-        """Detect if text is localized Vietnamese content, evaluating static and dynamic domain lexicons."""
+        """
+        Multi-layer Vietnamese localization detector:
+        1. Instantly rejects Romance / Foreign stopwords.
+        2. Detects unique Vietnamese characters (đ, ơ, ư, hook/dot tones).
+        3. For shared Latin diacritics (e.g. ô in Portuguese 'Autônomos'), requires genuine Vietnamese vocabulary.
+        """
         if not text:
             return False
         
         text_lower = text.lower()
         words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", text_lower))
         
-        if any(fw in words for fw in self.FRENCH_WORDS):
+        # Layer 1: Reject explicit foreign stopwords
+        if any(fw in words for fw in self.FOREIGN_STOPWORDS):
             return False
 
-        if self.VIETNAMESE_CHARS_PATTERN.search(text):
+        # Layer 2: Exclusive Vietnamese characters
+        if self.VI_EXCLUSIVE_CHARS_PATTERN.search(text):
             return True
 
+        # Layer 3: If ambiguous shared diacritics or plain text, require active Vietnamese lexicon match
         active_lexicon = self.VI_COMMON_WORDS | self._custom_lexicon | (extra_terms or set())
         vi_word_count = sum(1 for w in words if w in active_lexicon)
         return vi_word_count >= 1
+
 
     def evaluate_quality(
         self,
@@ -159,18 +182,17 @@ class QualityEvaluator:
             (creator_diversity * settings.SCORECARD_WEIGHT_DIVERSITY)
         )
 
-        # 6. Sample Size Guardrail & Penalty
-        total_signals_count = len(signals)
+        # 6. Strict Localized Sample Size Guardrail & Penalty
         sample_penalty_factor = 1.0
-        if total_signals_count < 10:
-            flaws.append(f"Sample size below recommended production threshold ({total_signals_count} signals).")
-            sample_penalty_factor = max(0.8, total_signals_count / 10.0)
+        if target_lang_matches < 15:
+            flaws.append(f"Low localized dataset size ({target_lang_matches} verified signals in target language). Confidence score penalized.")
+            sample_penalty_factor = max(0.5, target_lang_matches / 15.0)
         else:
-            strengths.append(f"Sufficient dataset size ({total_signals_count} verified signals).")
+            strengths.append(f"Sufficient localized dataset size ({target_lang_matches} verified signals).")
 
         overall_confidence = round(base_confidence * sample_penalty_factor, 1)
 
-        if overall_confidence >= settings.CONFIDENCE_HIGH_THRESHOLD:
+        if overall_confidence >= settings.CONFIDENCE_HIGH_THRESHOLD and target_lang_matches >= 15:
             confidence_level = ConfidenceLevel.HIGH
         elif overall_confidence >= settings.CONFIDENCE_MEDIUM_THRESHOLD:
             confidence_level = ConfidenceLevel.MEDIUM
@@ -178,6 +200,7 @@ class QualityEvaluator:
             confidence_level = ConfidenceLevel.LOW
         else:
             confidence_level = ConfidenceLevel.UNRELIABLE
+
 
         return QualityScorecard(
             coverage_score=coverage_score,
