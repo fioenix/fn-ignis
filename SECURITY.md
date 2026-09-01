@@ -15,7 +15,7 @@ The `fnIgnis` (`fn-ignis`) team at **FINOLABS** takes the security and integrity
 If you believe you have found a security vulnerability in `fnIgnis`:
 
 1. **Do not open a public GitHub issue.**
-2. Please report the issue privately by contacting the maintainers or sending an email to security@finolabs.dev.
+2. Please report the issue privately by contacting the maintainers or sending an email to fioenix@finolabs.io.
 3. Include details of the vulnerability:
    - Steps to reproduce
    - Potential impact

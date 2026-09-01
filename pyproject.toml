@@ -5,7 +5,7 @@ description = "fnIgnis — Unified Self-Hosted Autonomous Trend Intelligence & M
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
-    { name = "FINOLABS", email = "contact@finolabs.dev" }
+    { name = "FINOLABS", email = "fioenix@finolabs.io" }
 ]
 keywords = [
     "trend-intelligence",
