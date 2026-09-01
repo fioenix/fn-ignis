@@ -63,5 +63,16 @@ class Settings(BaseSettings):
         description="Supply score floor for saturated segment classification"
     )
 
+    # Resilience, Caching & Proxy
+    YOUTUBE_CACHE_TTL_SECONDS: int = Field(
+        default=86400,
+        description="TTL in seconds for YouTube search queries cache (default 24h to preserve API quota)"
+    )
+    PLAYWRIGHT_PROXY_SERVER: str = Field(
+        default="",
+        description="Optional HTTP/SOCKS proxy server URI (e.g. http://user:pass@proxy.example.com:8080) for Playwright ingress"
+    )
+
+
 
 settings = Settings()

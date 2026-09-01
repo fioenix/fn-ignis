@@ -12,7 +12,19 @@ from ignis.domain.exceptions import (
 )
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 
+import cachetools
+
+from ignis.config import settings
+
 logger = logging.getLogger(__name__)
+
+# Bounded LRU + TTL Cache for YouTube queries (max 2000 queries, TTL from settings)
+_YOUTUBE_QUERY_CACHE: cachetools.TTLCache = cachetools.TTLCache(
+    maxsize=2000,
+    ttl=settings.YOUTUBE_CACHE_TTL_SECONDS
+)
+
+
 
 
 class YouTubeDataPlugin(IConnectorPlugin):
@@ -248,6 +260,19 @@ class YouTubeDataPlugin(IConnectorPlugin):
         published_after_str, published_after_dt = self._timeframe_to_published_after(tf_str)
 
         for raw_kw in keywords:
+            cache_key = f"{raw_kw.lower().strip()}|{region_code}|{tf_str}|{limit}"
+            cached_sigs = _YOUTUBE_QUERY_CACHE.get(cache_key)
+            if cached_sigs is not None:
+                logger.info(f"Returning {len(cached_sigs)} cached YouTube signals for '{raw_kw}' (Quota preserved).")
+                for cs in cached_sigs:
+                    v_id = cs.metadata.get("video_id")
+                    if v_id and v_id not in seen_video_ids:
+                        seen_video_ids.add(v_id)
+                        signals.append(cs)
+                continue
+
+            kw_signals: List[TrendSignal] = []
+
             search_kw = self._enrich_keyword(raw_kw, geo)
             search_params = {
                 "part": "snippet",
@@ -278,62 +303,60 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                 video_ids.append(v_id)
                                 seen_video_ids.add(v_id)
 
-                    if not video_ids:
-                        continue
+                    if video_ids:
+                        # Gọi videos.list batch lấy số liệu thật
+                        video_params = {
+                            "part": "snippet,statistics",
+                            "id": ",".join(video_ids),
+                            "key": self._api_key,
+                        }
+                        videos_resp = await client.get(self.BASE_API_URL, params=video_params)
+                        if videos_resp.status_code == 200:
+                            videos_data = videos_resp.json()
+                            for v_item in videos_data.get("items", []):
+                                v_id = v_item.get("id")
+                                v_snippet = v_item.get("snippet", {})
+                                v_stats = v_item.get("statistics", {})
 
-                    # Gọi videos.list batch lấy số liệu thật
-                    video_params = {
-                        "part": "snippet,statistics",
-                        "id": ",".join(video_ids),
-                        "key": self._api_key,
-                    }
-                    videos_resp = await client.get(self.BASE_API_URL, params=video_params)
-                    if videos_resp.status_code == 200:
-                        videos_data = videos_resp.json()
-                        for v_item in videos_data.get("items", []):
-                            v_id = v_item.get("id")
-                            v_snippet = v_item.get("snippet", {})
-                            v_stats = v_item.get("statistics", {})
+                                title = v_snippet.get("title", "").strip()
+                                if not title or self._is_garbage(title):
+                                    continue
 
-                            title = v_snippet.get("title", "").strip()
-                            if not title or self._is_garbage(title):
-                                continue
+                                view_count = float(v_stats.get("viewCount", 0))
+                                like_count = int(v_stats.get("likeCount", 0))
+                                comment_count = int(v_stats.get("commentCount", 0))
+                                pub_at_str = v_snippet.get("publishedAt")
 
-                            view_count = float(v_stats.get("viewCount", 0))
-                            like_count = int(v_stats.get("likeCount", 0))
-                            comment_count = int(v_stats.get("commentCount", 0))
-                            pub_at_str = v_snippet.get("publishedAt")
-
-                            try:
-                                if pub_at_str:
-                                    pub_at = datetime.fromisoformat(pub_at_str.replace("Z", "+00:00"))
-                                else:
+                                try:
+                                    if pub_at_str:
+                                        pub_at = datetime.fromisoformat(pub_at_str.replace("Z", "+00:00"))
+                                    else:
+                                        pub_at = datetime.now(timezone.utc)
+                                except Exception:
                                     pub_at = datetime.now(timezone.utc)
-                            except Exception:
-                                pub_at = datetime.now(timezone.utc)
 
-                            # Kiểm tra nghiêm ngặt: nếu video cũ hơn timeframe, BỎ QUA
-                            if pub_at < published_after_dt:
-                                continue
 
-                            now_utc = datetime.now(timezone.utc)
-                            hours_diff = max(1.0, (now_utc - pub_at).total_seconds() / 3600.0)
-                            velocity = round(view_count / hours_diff, 2)
+                                # Kiểm tra nghiêm ngặt: nếu video cũ hơn timeframe, BỎ QUA
+                                if pub_at < published_after_dt:
+                                    continue
 
-                            meta = {
-                                "keyword": raw_kw,
-                                "video_id": v_id,
-                                "channel_title": v_snippet.get("channelTitle"),
-                                "channel_id": v_snippet.get("channelId"),
-                                "views": int(view_count),
-                                "likes": like_count,
-                                "comments": comment_count,
-                                "published_at": pub_at_str,
-                                "timeframe_filter": tf_str,
-                            }
+                                now_utc = datetime.now(timezone.utc)
+                                hours_diff = max(1.0, (now_utc - pub_at).total_seconds() / 3600.0)
+                                velocity = round(view_count / hours_diff, 2)
 
-                            signals.append(
-                                TrendSignal(
+                                meta = {
+                                    "keyword": raw_kw,
+                                    "video_id": v_id,
+                                    "channel_title": v_snippet.get("channelTitle"),
+                                    "channel_id": v_snippet.get("channelId"),
+                                    "views": int(view_count),
+                                    "likes": like_count,
+                                    "comments": comment_count,
+                                    "published_at": pub_at_str,
+                                    "timeframe_filter": tf_str,
+                                }
+
+                                sig = TrendSignal(
                                     platform=PlatformType.YOUTUBE,
                                     raw_title=title,
                                     metric_value=view_count,
@@ -343,8 +366,12 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                     metadata=meta,
                                     captured_at=pub_at,
                                 )
-                            )
+                                kw_signals.append(sig)
+                                signals.append(sig)
+                
+                _YOUTUBE_QUERY_CACHE[cache_key] = kw_signals
             except Exception as e:
                 logger.warning(f"YouTube search error for keyword '{raw_kw}': {e}")
 
         return signals
+

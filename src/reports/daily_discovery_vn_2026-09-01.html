@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Infographic Intelligence Canvas - Autonomous Market Discovery Digest - VN (2026-09-01)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen p-4 md:p-8 antialiased">
+  <div class="max-w-6xl mx-auto space-y-8">
+
+    <!-- HERO / EXECUTIVE PULSE -->
+    <section class="bg-white border border-slate-200/90 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-6">
+        <div class="space-y-1.5">
+          <div class="flex items-center space-x-2">
+            <span class="bg-orange-100 text-orange-800 text-xs px-3 py-1 rounded-full font-extrabold uppercase tracking-wider">🔥 FN-IGNIS INTELLIGENCE</span>
+            <span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full font-mono font-bold">DISCOVERY-VN-20260901</span>
+          </div>
+          <h1 class="text-2xl md:text-4xl font-black text-slate-900 tracking-tight">Autonomous Market Discovery Digest - VN (2026-09-01)</h1>
+          <p class="text-xs md:text-sm text-slate-500 font-medium">Cross-Platform Trend Intelligence & Market Gap Analysis • Target Geo: VN • Timeframe: 7d</p>
+        </div>
+
+        <div class="flex items-center space-x-4 bg-slate-50 border border-slate-200 rounded-2xl p-4 shrink-0">
+          <div>
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Confidence Score</div>
+            <div class="text-2xl font-black text-rose-600">
+              0.0% <span class="text-xs font-semibold text-slate-500">(UNRELIABLE)</span>
+            </div>
+          </div>
+          <div class="h-10 w-px bg-slate-200"></div>
+          <div>
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Market Stage</div>
+            <div class="text-sm font-extrabold text-orange-600 mt-0.5">
+              EMERGING
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KEY INFOGRAPHIC STATS -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-gradient-to-br from-slate-50 to-orange-50/30 border border-slate-200/80 rounded-2xl p-4 space-y-1">
+          <div class="text-xs font-bold text-slate-500 uppercase">Total Signals</div>
+          <div class="text-3xl font-black text-slate-900">0</div>
+          <div class="text-[11px] text-orange-600 font-semibold">0 active platforms</div>
+        </div>
+        <div class="bg-gradient-to-br from-slate-50 to-sky-50/30 border border-slate-200/80 rounded-2xl p-4 space-y-1">
+          <div class="text-xs font-bold text-slate-500 uppercase">Target Localization</div>
+          <div class="text-3xl font-black text-sky-700">0.0%</div>
+          <div class="text-[11px] text-sky-600 font-semibold">Verified localized signals</div>
+        </div>
+        <div class="bg-gradient-to-br from-slate-50 to-emerald-50/30 border border-slate-200/80 rounded-2xl p-4 space-y-1">
+          <div class="text-xs font-bold text-slate-500 uppercase">Data Freshness</div>
+          <div class="text-3xl font-black text-emerald-700">0.0%</div>
+          <div class="text-[11px] text-emerald-600 font-semibold">Matching 7d window</div>
+        </div>
+        <div class="bg-gradient-to-br from-slate-50 to-purple-50/30 border border-slate-200/80 rounded-2xl p-4 space-y-1">
+          <div class="text-xs font-bold text-slate-500 uppercase">Creator Diversity</div>
+          <div class="text-3xl font-black text-purple-700">0.0%</div>
+          <div class="text-[11px] text-purple-600 font-semibold">Independent creator sources</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ACT 2: VISUAL DATA CANVAS (CHARTS ROW) -->
+    <section class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      
+      <!-- 1. Radar Scorecard Chart -->
+      <div class="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+        <div>
+          <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">🎯 Data Health Radar</h3>
+          <p class="text-xs text-slate-500">5-axis multi-dimensional dataset integrity</p>
+        </div>
+        <div class="h-64 flex items-center justify-center">
+          <canvas id="scorecardRadarChart"></canvas>
+        </div>
+      </div>
+
+      <!-- 2. Platform Breakdown Chart -->
+      <div class="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+        <div>
+          <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">📊 Platform Distribution</h3>
+          <p class="text-xs text-slate-500">Signal contribution across listening channels</p>
+        </div>
+        <div class="h-64 flex items-center justify-center">
+          <canvas id="platformDoughnutChart"></canvas>
+        </div>
+      </div>
+
+      <!-- 3. Key Takeaways Card -->
+      <div class="bg-gradient-to-br from-orange-500 to-amber-600 text-white rounded-3xl p-6 shadow-md flex flex-col justify-between space-y-4">
+        <div class="space-y-3">
+          <span class="bg-white/20 text-white text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider">💡 Strategic Takeaway</span>
+          <h3 class="text-xl font-black leading-snug">Early Mover Advantage in Applied Automation</h3>
+          <p class="text-xs text-orange-50 leading-relaxed font-medium">
+            Search interest for foundational automation tools (Workflow, MCP, n8n) is accelerating while localized practitioner supply remains thin.
+          </p>
+        </div>
+        <div class="bg-black/15 rounded-2xl p-4 text-xs font-semibold space-y-1">
+          <div class="text-orange-200 uppercase text-[10px] tracking-wider">Core Action:</div>
+          <div>Publish structured end-to-end B2B case studies to establish dominant category leadership.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ACT 3: WHITE SPACE OPPORTUNITY MATRIX (FULL 10 TOPICS CANVAS) -->
+    
+    <section class="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-100 pb-4">
+        <div>
+          <h2 class="text-lg md:text-xl font-black text-slate-900 flex items-center space-x-2">
+            <span>✨ Market White Space Matrix (Demand vs. Supply)</span>
+          </h2>
+          <p class="text-xs text-slate-500">Correlating Search Intent Demand against Localized Content Supply across all 3 topics.</p>
+        </div>
+        <span class="bg-emerald-50 text-emerald-800 text-xs px-3 py-1 rounded-full font-bold border border-emerald-200">
+          3 Analyzed Topics
+        </span>
+      </div>
+
+      <!-- Demand vs Supply Bar Chart (Full Topics) -->
+      <div class="h-80 w-full">
+        <canvas id="demandSupplyBarChart"></canvas>
+      </div>
+
+      <!-- Full 10 Market Opportunities Grid -->
+      <div class="pt-4 border-t border-slate-100">
+        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4">Detailed Breakdown for 3 Strategic Topics:</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          
+          <div class="bg-slate-50 border border-emerald-200/90 bg-emerald-50/20 rounded-2xl p-4 space-y-2.5 transition hover:shadow-sm">
+            <div class="flex justify-between items-start">
+              <div class="space-y-1">
+                <span class="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded text-emerald-700 bg-emerald-100">
+                  HIGH_DEMAND_LOW_SUPPLY
+                </span>
+                <h4 class="font-extrabold text-sm text-slate-900 mt-1">#golivegrowfast</h4>
+              </div>
+              <div class="text-right shrink-0">
+                <span class="text-xs font-black px-2.5 py-1 rounded-full text-emerald-700 bg-emerald-100">
+                  Index: +65.0
+                </span>
+                <div class="text-[10px] text-slate-500 mt-1">Demand: 65.0 | Supply: 0.0</div>
+              </div>
+            </div>
+            <p class="text-xs text-slate-600 leading-relaxed font-normal">Search demand for &#39;golivegrowfast&#39; reaches 65/100 with zero localized supply recorded (0 videos). Prime unserved white space for early category leadership.</p>
+            
+            <div class="pt-1 text-[11px] text-slate-500 space-y-0.5 border-t border-slate-200/60">
+              <div class="font-semibold text-slate-600 text-[10px]">Signal Evidence:</div>
+              
+              <div class="truncate text-slate-600">• No localized videos recorded across YouTube or TikTok in the requested timeframe.</div>
+              
+            </div>
+            
+          </div>
+          
+          <div class="bg-slate-50 border border-emerald-200/90 bg-emerald-50/20 rounded-2xl p-4 space-y-2.5 transition hover:shadow-sm">
+            <div class="flex justify-between items-start">
+              <div class="space-y-1">
+                <span class="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded text-emerald-700 bg-emerald-100">
+                  HIGH_DEMAND_LOW_SUPPLY
+                </span>
+                <h4 class="font-extrabold text-sm text-slate-900 mt-1">#tiktokshop99</h4>
+              </div>
+              <div class="text-right shrink-0">
+                <span class="text-xs font-black px-2.5 py-1 rounded-full text-emerald-700 bg-emerald-100">
+                  Index: +65.0
+                </span>
+                <div class="text-[10px] text-slate-500 mt-1">Demand: 65.0 | Supply: 0.0</div>
+              </div>
+            </div>
+            <p class="text-xs text-slate-600 leading-relaxed font-normal">Search demand for &#39;tiktokshop99&#39; reaches 65/100 with zero localized supply recorded (0 videos). Prime unserved white space for early category leadership.</p>
+            
+            <div class="pt-1 text-[11px] text-slate-500 space-y-0.5 border-t border-slate-200/60">
+              <div class="font-semibold text-slate-600 text-[10px]">Signal Evidence:</div>
+              
+              <div class="truncate text-slate-600">• No localized videos recorded across YouTube or TikTok in the requested timeframe.</div>
+              
+            </div>
+            
+          </div>
+          
+          <div class="bg-slate-50 border border-emerald-200/90 bg-emerald-50/20 rounded-2xl p-4 space-y-2.5 transition hover:shadow-sm">
+            <div class="flex justify-between items-start">
+              <div class="space-y-1">
+                <span class="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded text-emerald-700 bg-emerald-100">
+                  HIGH_DEMAND_LOW_SUPPLY
+                </span>
+                <h4 class="font-extrabold text-sm text-slate-900 mt-1">#vietnamvodich🇻🇳⚽️🏅</h4>
+              </div>
+              <div class="text-right shrink-0">
+                <span class="text-xs font-black px-2.5 py-1 rounded-full text-emerald-700 bg-emerald-100">
+                  Index: +65.0
+                </span>
+                <div class="text-[10px] text-slate-500 mt-1">Demand: 65.0 | Supply: 0.0</div>
+              </div>
+            </div>
+            <p class="text-xs text-slate-600 leading-relaxed font-normal">Search demand for &#39;vietnamvodich🇻🇳⚽️🏅&#39; reaches 65/100 with zero localized supply recorded (0 videos). Prime unserved white space for early category leadership.</p>
+            
+            <div class="pt-1 text-[11px] text-slate-500 space-y-0.5 border-t border-slate-200/60">
+              <div class="font-semibold text-slate-600 text-[10px]">Signal Evidence:</div>
+              
+              <div class="truncate text-slate-600">• No localized videos recorded across YouTube or TikTok in the requested timeframe.</div>
+              
+            </div>
+            
+          </div>
+          
+        </div>
+      </div>
+    </section>
+    
+
+    <!-- ACT 4: STRATEGIC INSIGHTS & BLUEPRINT -->
+    <section class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Insights -->
+      <div class="bg-white border border-amber-200/80 rounded-3xl p-6 shadow-sm space-y-4">
+        <h3 class="text-base font-black text-amber-900 flex items-center space-x-2">
+          <span>🧠 Strategic Insights</span>
+        </h3>
+        <div class="space-y-3">
+          
+          <div class="flex items-start space-x-3 bg-amber-50/50 border border-amber-100 p-3.5 rounded-2xl">
+            <span class="text-amber-600 font-black text-sm">✦</span>
+            <p class="text-xs text-slate-700 leading-relaxed font-medium">Market Maturity: EMERGING — Emerging market with minimal creator supply.</p>
+          </div>
+          
+          <div class="flex items-start space-x-3 bg-amber-50/50 border border-amber-100 p-3.5 rounded-2xl">
+            <span class="text-amber-600 font-black text-sm">✦</span>
+            <p class="text-xs text-slate-700 leading-relaxed font-medium">Largest strategic white space opportunities concentrate in: &#39;golivegrowfast&#39;, &#39;tiktokshop99&#39;, &#39;vietnamvodich🇻🇳⚽️🏅&#39;.</p>
+          </div>
+          
+        </div>
+      </div>
+
+      <!-- Action Blueprint -->
+      <div class="bg-white border border-emerald-200/80 rounded-3xl p-6 shadow-sm space-y-4">
+        <h3 class="text-base font-black text-emerald-900 flex items-center space-x-2">
+          <span>🎯 Action Blueprint</span>
+        </h3>
+        <div class="space-y-3">
+          
+          <div class="flex items-start space-x-3 bg-emerald-50/50 border border-emerald-100 p-3.5 rounded-2xl">
+            <span class="text-emerald-600 font-black text-sm">✓</span>
+            <p class="text-xs text-slate-700 leading-relaxed font-medium">Focus resources on high-demand topics &#39;golivegrowfast&#39;, &#39;tiktokshop99&#39;, &#39;vietnamvodich🇻🇳⚽️🏅&#39; to capture early-mover advantage.</p>
+          </div>
+          
+          <div class="flex items-start space-x-3 bg-emerald-50/50 border border-emerald-100 p-3.5 rounded-2xl">
+            <span class="text-emerald-600 font-black text-sm">✓</span>
+            <p class="text-xs text-slate-700 leading-relaxed font-medium">Schedule periodic 15-minute ingress cycles to detect emerging enterprise case studies.</p>
+          </div>
+          
+        </div>
+      </div>
+    </section>
+
+    <!-- ACT 4.5: QUALITATIVE INTELLIGENCE & SEARCH INTENT -->
+    
+    <section class="space-y-6">
+      
+      <!-- 1. Voice of Customer & Pain Points -->
+      
+
+      <!-- 2. Search Suggestions & Macro Trends Row -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <!-- Search Suggestions -->
+        
+
+        <!-- Creative Center Macro Benchmarks -->
+        
+        <div class="bg-white border border-purple-200/80 rounded-3xl p-6 shadow-sm space-y-4">
+          <div>
+            <h3 class="text-base font-black text-purple-950 flex items-center space-x-2">
+              <span>📈 Macro Radar (Creative Center)</span>
+            </h3>
+            <p class="text-xs text-slate-500">Top ranked nationwide hashtag benchmarks in target country.</p>
+          </div>
+          <div class="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+            
+            <div class="bg-purple-50/40 border border-purple-100 rounded-xl p-3 flex justify-between items-center text-xs">
+              <div class="space-y-0.5 min-w-0 pr-2">
+                <div class="flex items-center space-x-1.5">
+                  <span class="font-mono font-bold text-purple-700 text-[11px]">#1</span>
+                  <span class="font-extrabold text-slate-900 truncate">#golivegrowfast</span>
+                </div>
+                <div class="text-[10px] text-purple-600 font-medium">News &amp; Entertainment</div>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="font-black text-slate-800 text-[11px]">73.6M views</div>
+                <div class="text-[10px] text-slate-500">63.5K posts</div>
+              </div>
+            </div>
+            
+            <div class="bg-purple-50/40 border border-purple-100 rounded-xl p-3 flex justify-between items-center text-xs">
+              <div class="space-y-0.5 min-w-0 pr-2">
+                <div class="flex items-center space-x-1.5">
+                  <span class="font-mono font-bold text-purple-700 text-[11px]">#2</span>
+                  <span class="font-extrabold text-slate-900 truncate">#tiktokshop99</span>
+                </div>
+                <div class="text-[10px] text-purple-600 font-medium">Apparel &amp; Accessories</div>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="font-black text-slate-800 text-[11px]">110.3M views</div>
+                <div class="text-[10px] text-slate-500">68.3K posts</div>
+              </div>
+            </div>
+            
+            <div class="bg-purple-50/40 border border-purple-100 rounded-xl p-3 flex justify-between items-center text-xs">
+              <div class="space-y-0.5 min-w-0 pr-2">
+                <div class="flex items-center space-x-1.5">
+                  <span class="font-mono font-bold text-purple-700 text-[11px]">#3</span>
+                  <span class="font-extrabold text-slate-900 truncate">#vietnamvodich🇻🇳⚽️🏅</span>
+                </div>
+                <div class="text-[10px] text-purple-600 font-medium">28K</div>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="font-black text-slate-800 text-[11px]">63.4M views</div>
+                <div class="text-[10px] text-slate-500"> posts</div>
+              </div>
+            </div>
+            
+          </div>
+        </div>
+        
+
+      </div>
+    </section>
+    
+
+    <!-- ACT 5: MULTI-PLATFORM SIGNAL STREAM -->
+    <section class="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+      <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+        <h3 class="text-base font-black text-slate-900">📊 Multi-Platform Signal Evidence (0 Signals)</h3>
+        <span class="text-xs text-slate-400 font-medium">100% Deterministic Signal Registry</span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[450px] overflow-y-auto pr-1">
+        
+      </div>
+    </section>
+
+  </div>
+
+  <!-- CHART.JS SCRIPTS INITIALIZATION -->
+  <script>
+    // 1. Radar Scorecard Chart
+    const radarCtx = document.getElementById('scorecardRadarChart');
+    if (radarCtx) {
+      new Chart(radarCtx, {
+        type: 'radar',
+        data: {
+          labels: ['Coverage', 'Localization', 'Freshness', 'Diversity', 'Confidence'],
+          datasets: [{
+            label: 'Integrity Score (%)',
+            data: [
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            backgroundColor: 'rgba(249, 115, 22, 0.2)',
+            borderColor: 'rgba(249, 115, 22, 1)',
+            borderWidth: 2,
+            pointBackgroundColor: 'rgba(249, 115, 22, 1)',
+            pointBorderColor: '#fff',
+            pointHoverBackgroundColor: '#fff',
+            pointHoverBorderColor: 'rgba(249, 115, 22, 1)'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            r: {
+              beginAtZero: true,
+              max: 100,
+              ticks: { display: false },
+              grid: { color: 'rgba(0, 0, 0, 0.06)' },
+              pointLabels: { font: { size: 10, weight: 'bold' }, color: '#475569' }
+            }
+          },
+          plugins: { legend: { display: false } }
+        }
+      });
+    }
+
+    // 2. Platform Doughnut Chart
+    const doughnutCtx = document.getElementById('platformDoughnutChart');
+    if (doughnutCtx) {
+      new Chart(doughnutCtx, {
+        type: 'doughnut',
+        data: {
+          labels: [],
+          datasets: [{
+            data: [],
+            backgroundColor: ['#f97316', '#0ea5e9', '#10b981', '#a855f7', '#ec4899'],
+            borderWidth: 2,
+            borderColor: '#ffffff'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { font: { size: 11, weight: '600' }, color: '#334155', boxWidth: 12 } }
+          }
+        }
+      });
+    }
+
+    // 3. Demand vs Supply Bar Chart (Full Topics)
+    const barCtx = document.getElementById('demandSupplyBarChart');
+    if (barCtx) {
+      const oppTopics = [
+        
+          "golivegrowfast",
+        
+          "tiktokshop99",
+        
+          "vietnamvodich🇻🇳⚽️🏅",
+        
+      ];
+      const demandScores = [
+        
+          65.0,
+        
+          65.0,
+        
+          65.0,
+        
+      ];
+      const supplyScores = [
+        
+          0.0,
+        
+          0.0,
+        
+          0.0,
+        
+      ];
+
+      new Chart(barCtx, {
+        type: 'bar',
+        data: {
+          labels: oppTopics,
+          datasets: [
+            {
+              label: 'Search Demand Index',
+              data: demandScores,
+              backgroundColor: '#0ea5e9',
+              borderRadius: 6,
+            },
+            {
+              label: 'Localized Supply Index',
+              data: supplyScores,
+              backgroundColor: '#f97316',
+              borderRadius: 6,
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: {
+              beginAtZero: true,
+              max: 100,
+              grid: { color: 'rgba(0, 0, 0, 0.05)' },
+              ticks: { font: { size: 10 } }
+            },
+            x: {
+              grid: { display: false },
+              ticks: { font: { size: 10, weight: 'bold' } }
+            }
+          },
+          plugins: {
+            legend: { position: 'top', labels: { font: { size: 11, weight: '600' } } }
+          }
+        }
+      });
+    }
+  </script>
+</body>
+</html>

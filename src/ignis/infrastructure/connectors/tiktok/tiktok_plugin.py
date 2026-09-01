@@ -10,8 +10,10 @@ from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
+from ignis.config import settings
 
 logger = logging.getLogger(__name__)
+
 
 
 class TikTokPlugin(IConnectorPlugin):
@@ -150,8 +152,11 @@ class TikTokPlugin(IConnectorPlugin):
                     "viewport": {"width": 1280, "height": 800},
                     "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
                 }
+                if settings.PLAYWRIGHT_PROXY_SERVER:
+                    context_kwargs["proxy"] = {"server": settings.PLAYWRIGHT_PROXY_SERVER}
                 if storage_state:
                     context_kwargs["storage_state"] = storage_state
+
 
                 context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
@@ -290,8 +295,11 @@ class TikTokPlugin(IConnectorPlugin):
                     "viewport": {"width": 1280, "height": 800},
                     "locale": "vi-VN",
                 }
+                if settings.PLAYWRIGHT_PROXY_SERVER:
+                    context_kwargs["proxy"] = {"server": settings.PLAYWRIGHT_PROXY_SERVER}
                 if storage_state:
                     context_kwargs["storage_state"] = storage_state
+
 
                 context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
@@ -405,8 +413,11 @@ class TikTokPlugin(IConnectorPlugin):
                     "viewport": {"width": 1280, "height": 800},
                     "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
                 }
+                if settings.PLAYWRIGHT_PROXY_SERVER:
+                    context_kwargs["proxy"] = {"server": settings.PLAYWRIGHT_PROXY_SERVER}
                 if storage_state:
                     context_kwargs["storage_state"] = storage_state
+
 
                 context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
