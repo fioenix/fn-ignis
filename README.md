@@ -129,7 +129,17 @@ cd fn-ignis
 ./bundle/install.sh
 ```
 
-### 2. Manual Setup
+### 2. 1-Click Production Deployment (Docker Compose)
+Deploy the full self-hosted stack (TimescaleDB + Autonomous Worker Daemon + Nginx Report Portal) with a single command:
+```bash
+# 1. Configure environment
+cp .env.example .env
+
+# 2. Spin up complete production stack
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### 3. Local Developer Setup
 ```bash
 # 1. Create and activate virtual environment
 uv venv .venv
@@ -138,11 +148,7 @@ source .venv/bin/activate
 # 2. Install dependencies with all extras
 uv pip install -e ".[dev,browser,ai]"
 
-# 3. Configure environment
-cp .env.example .env
-# Edit .env with your PostgreSQL credentials and YouTube API Key
-
-# 4. Start Docker background infrastructure
+# 3. Start local test worker
 docker compose up -d --build
 ```
 
@@ -152,11 +158,14 @@ docker compose up -d --build
 
 | Variable | Description | Default | Required |
 |---|---|---|:---:|
-| `DATABASE_URL` | PostgreSQL/TimescaleDB connection string | `postgresql://postgres:postgres@localhost:5432/ignis_trends` | **Yes** |
+| `DATABASE_URL` | PostgreSQL/TimescaleDB connection string | `postgresql://postgres:postgres@localhost:5432/ignis` | **Yes** |
 | `YOUTUBE_API_KEY` | Google Cloud YouTube Data API v3 Key | `""` | **Yes** |
 | `DEFAULT_GEO` | Default ISO country code for trend intelligence | `VN` | No |
+| `YOUTUBE_CACHE_TTL_SECONDS` | In-memory LRU+TTL cache duration to preserve YouTube API quota | `86400` (24h) | No |
+| `PLAYWRIGHT_PROXY_SERVER` | Optional HTTP/SOCKS proxy server URI for residential scraping | `""` | No |
 | `SYNC_INTERVAL_MINUTES` | Frequency of background multi-platform synchronization | `60` | No |
 | `IGNIS_ENCRYPTION_KEY` | AES-256 Fernet key for session cookie encryption | *(Auto-generated)* | No |
+
 
 ---
 

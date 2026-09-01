@@ -1,0 +1,49 @@
+services:
+  db:
+    image: timescale/timescaledb-ha:pg16-latest
+    container_name: fn-ignis-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-ignis}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+      - ./sql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ignis}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    image: ghcr.io/fioenix/fn-ignis:latest
+    container_name: fn-ignis-worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-ignis}
+      DEFAULT_GEO: ${DEFAULT_GEO:-VN}
+      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-900}
+    volumes:
+      - reports_data:/app/reports
+    command: ["python", "-m", "ignis.interfaces.cli.scheduler"]
+
+  reports:
+    image: nginx:1.27-alpine
+    container_name: fn-ignis-reports
+    restart: unless-stopped
+    ports:
+      - "${REPORTS_PORT:-53080}:80"
+    volumes:
+      - reports_data:/usr/share/nginx/html:ro
+
+volumes:
+  pgdata:
+  reports_data:
