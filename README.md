@@ -102,9 +102,10 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **`get_tiktok_video_comments(video_url, limit)`**: Scrape raw public comments for a specific video.
 - **`extract_customer_pain_points(keywords, geo, max_videos)`**: Extract customer objections, pricing inquiries, and unmet needs from comments.
 
-### 3. Dynamic Lexicon Registry
-- **`register_domain_lexicon(domain, terms, category)`**: Dynamically register new niche vocabulary/slang into PostgreSQL.
+### 3. Dynamic Lexicon & Infrastructure Diagnostics
+- **`register_domain_lexicon(domain, terms, category)`**: Dynamically register new niche vocabulary/slang into database.
 - **`list_domain_lexicons(domain)`**: Query active domain vocabularies and industry mappings.
+- **`verify_connectors_health()`**: Run real-time synthetic diagnostics on YouTube quota, Google RSS, TikTok Playwright contexts, database pool, and proxy connectivity.
 
 ### 4. FastMCP Native Resources & Prompts
 - **Resources**: `fn-ignis://sop/market-research`, `fn-ignis://methodology/opportunity-index`
@@ -112,45 +113,45 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 ---
 
+## 📊 Live Reference Case Studies
+
+Explore sample interactive Infographic HTML reports generated directly by `fn-ignis` in the [`reports/`](reports/) directory:
+
+| Campaign / Dossier | Scope & Focus | Highlights & White Spaces Discovered | Live Artifact |
+|---|---|---|:---:|
+| **`[VN-AI-AGENT-90D]`** | AI Agents & CSKH Automation in Vietnam | High demand for customer service bots; massive white space in enterprise custom integration vs saturated shallow tutorial content. | [View HTML Dossier](reports/case_study_ai_agents_vn.html) |
+| **`[VN-LINEN-FASHION-30D]`** | Apparel, Linen & Local Brands | Skyrocketing seasonal search intent for minimal office linen apparel; major supply gaps in oversized tailored linen shirts. | [View HTML Dossier](reports/case_study_linen_fashion_vn.html) |
+| **`[VN-TIKTOK-SHOP-30D]`** | TikTok Shop Tools & Livestream Automation | Strong merchant demand for automated order closing and live stream inventory sync; high voice-of-customer pricing objection density. | [View HTML Dossier](reports/case_study_tiktok_shop_automation_vn.html) |
+
+---
+
 ## ⚡ Quickstart & Installation
 
-### Prerequisites
-- **Python 3.11+** or [`uv`](https://github.com/astral-sh/uv)
-- **Docker & Docker Compose** (for PostgreSQL/TimescaleDB and background worker)
-- **Google Cloud YouTube Data API Key** (Free tier)
+### 1. Zero-Docker Local Mode (SQLite & In-Memory)
+Run `fn-ignis` with **zero external dependencies** using Python standard library SQLite:
+```bash
+# 1. Clone repository & install dependencies
+git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
+uv pip install -e .
 
-### 1. 1-Command Automated Bundle Setup
+# 2. Run FastMCP server directly (Zero-Docker / SQLite auto-provisioned)
+DATABASE_URL=sqlite:///ignis.db python -m ignis.interfaces.mcp.server
+```
+
+### 2. 1-Command Automated Bundle Setup (Claude Desktop)
 Clone the repository and run the automated installer:
 ```bash
-git clone https://github.com/fioenix/fn-ignis.git
-cd fn-ignis
-
 # Run bundle installer (Sets up venv, installs dependencies, configures Claude Desktop & starts Docker worker)
 ./bundle/install.sh
 ```
 
-### 2. 1-Click Production Deployment (Docker Compose)
-Deploy the full self-hosted stack (TimescaleDB + Autonomous Worker Daemon + Nginx Report Portal) with a single command:
+### 3. 1-Click Production Stack (Docker Compose)
+Deploy the full enterprise self-hosted stack (TimescaleDB + Autonomous Worker Daemon + Nginx Report Portal):
 ```bash
-# 1. Configure environment
-cp .env.example .env
-
-# 2. Spin up complete production stack
+# Spin up complete production stack
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-### 3. Local Developer Setup
-```bash
-# 1. Create and activate virtual environment
-uv venv .venv
-source .venv/bin/activate
-
-# 2. Install dependencies with all extras
-uv pip install -e ".[dev,browser,ai]"
-
-# 3. Start local test worker
-docker compose up -d --build
-```
 
 ---
 
