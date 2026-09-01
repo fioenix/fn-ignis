@@ -79,11 +79,17 @@ class QualityEvaluator:
 
     GARBAGE_EXCLUSIONS = {
         "#funny", "#hai", "#namthầnkinh", "#giadinh", "#haihuoc", "#troll", "#vlog",
-        "nhà thông minh", "sitcom", "tiểu phẩm", "phim ngắn"
+        "nhà thông minh", "sitcom", "tiểu phẩm", "phim ngắn", "nồi đất", "tráng men",
+        "cnc machining", "máy cnc", "phay cnc", "tiện cnc", "hàn xì", "đúc kim loại"
     }
+
+    # Reject foreign scripts (Hangul, Kanji/Hanzi, Kana, Thai, Cyrillic, Arabic)
+    FOREIGN_SCRIPTS_PATTERN = re.compile(r"[\uac00-\ud7af\u4e00-\u9fff\u3040-\u30ff\u0e00-\u0e7f\u0400-\u04ff]")
 
     def _is_garbage(self, text: str) -> bool:
         if not text:
+            return True
+        if self.FOREIGN_SCRIPTS_PATTERN.search(text):
             return True
         t_low = text.lower()
         return any(g in t_low for g in self.GARBAGE_EXCLUSIONS)
@@ -96,10 +102,11 @@ class QualityEvaluator:
     ) -> bool:
         """
         Multi-layer Vietnamese localization detector:
-        1. Instantly rejects comedy/garbage entertainment hashtags.
-        2. Instantly rejects Romance / Foreign stopwords (static baseline + DB dynamic).
-        3. Detects unique Vietnamese characters (đ, ơ, ư, hook/dot tones, accented vowels).
-        4. For unaccented text, ignores borrowed tech words (ai, bot, chat, tool, etc.)
+        1. Instantly rejects foreign non-Latin scripts (Korean, Chinese, Japanese, Thai, Cyrillic).
+        2. Instantly rejects comedy/garbage/unrelated industrial outlier terms.
+        3. Instantly rejects Romance / Foreign stopwords (static baseline + DB dynamic).
+        4. Detects unique Vietnamese characters (đ, ơ, ư, hook/dot tones, accented vowels).
+        5. For unaccented text, ignores borrowed tech words (ai, bot, chat, tool, etc.)
            and requires at least 2 genuine Vietnamese core vocabulary words.
         """
         if not text:
@@ -176,10 +183,9 @@ class QualityEvaluator:
             if channel:
                 channels.append(channel)
 
-            if geo == GeoCode.VN:
-                if self.is_vietnamese(title):
-                    target_lang_matches += 1
-            else:
+            is_loc = self.is_vietnamese(title) if geo == GeoCode.VN else True
+            s.metadata["is_localized"] = is_loc
+            if is_loc:
                 target_lang_matches += 1
 
         language_precision = round((target_lang_matches / float(len(signals))) * 100.0, 1) if signals else 0.0
@@ -189,16 +195,20 @@ class QualityEvaluator:
             flaws.append(f"{round(100.0 - language_precision, 1)}% of signals are non-localized or entertainment outliers ({target_lang_matches}/{len(signals)} verified).")
 
         # 3. View Outlier Concentration Rule
-        content_signals = [s for s in signals if s.platform in (PlatformType.YOUTUBE, PlatformType.TIKTOK, PlatformType.REELS)]
-        total_views = sum(s.metric_value for s in content_signals if s.metric_value > 0)
+        content_signals = [
+            s for s in signals 
+            if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) in ("youtube", "tiktok", "reels")
+        ]
+        total_views = sum(float(s.metric_value) for s in content_signals if float(s.metric_value) > 0)
         if total_views > 0 and content_signals:
-            max_signal = max(content_signals, key=lambda s: s.metric_value)
-            max_views = max_signal.metric_value
-            view_ratio = max_views / float(total_views)
+            max_signal = max(content_signals, key=lambda s: float(s.metric_value))
+            max_views = float(max_signal.metric_value)
+            view_ratio = max_views / total_views
             if view_ratio >= 0.5:
                 flaws.append(
                     f"Severe view distribution skew: Single viral video ('{max_signal.raw_title[:45]}...') accounts for {round(view_ratio * 100, 1)}% of all video views ({int(max_views):,} / {int(total_views):,})."
                 )
+
 
 
 

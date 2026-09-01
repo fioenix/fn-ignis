@@ -180,11 +180,20 @@ def test_language_filter_english_tech_rejection():
 
 
 def test_comedy_and_outlier_rejection():
+    evaluator = QualityEvaluator()
     reasoner = StrategicMarketReasoner()
 
     comedy_video = "Hệ thống nhà thông minh tự động hóa toàn diện #namthầnkinh #funny #giadinh"
     assert reasoner._is_garbage(comedy_video) is True
+    assert evaluator.is_vietnamese(comedy_video) is False
     assert reasoner._matches_topic_strictly(comedy_video, "tự động hóa ai") is False
     assert reasoner._matches_topic_strictly(comedy_video, "workflow automation") is False
+
+    korean_video = "뚝배기 코팅 공정 및 자동화 (Tráng men nồi đất tự động)"
+    assert evaluator.is_vietnamese(korean_video) is False
+
+    cnc_video = "CNC Machining and Milling Automation Tutorial"
+    assert evaluator.is_vietnamese(cnc_video) is False
+
 
 

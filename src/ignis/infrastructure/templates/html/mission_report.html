@@ -335,8 +335,14 @@
           <div class="space-y-1 min-w-0 pr-3">
             <div class="flex items-center space-x-2">
               <span class="bg-slate-200 text-slate-700 text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider">{{ s.platform.value if s.platform.value is defined else s.platform }}</span>
+              {% if s.metadata.get('is_localized') == false %}
+              <span class="bg-rose-100 text-rose-700 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Foreign / Outlier</span>
+              {% else %}
+              <span class="bg-emerald-100 text-emerald-700 text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Localized</span>
+              {% endif %}
               <span class="text-xs font-bold text-slate-900 truncate">{{ s.raw_title }}</span>
             </div>
+
             <div class="flex items-center space-x-3 text-[11px] text-slate-500 font-medium">
               {% if s.metadata.get('channel_title') %}
               <span>Channel: <strong class="text-slate-700">{{ s.metadata.get('channel_title') }}</strong></span>

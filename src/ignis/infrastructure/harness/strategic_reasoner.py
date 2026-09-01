@@ -247,34 +247,40 @@ class StrategicMarketReasoner:
             # Strict Opportunity Index with Inverted Sample Size Damping & Label Alignment
             if vn_count == 0:
                 # Heavy uncertainty penalty for 0 empirical localized evidence (Speculative Gap)
-                damping_factor = 0.25
-                opportunity_index = round(demand_score * damping_factor, 1)
+                opportunity_index = round(demand_score * 0.15, 1)
                 opp_type = "UNVERIFIED_DEMAND_GAP"
-                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 but lacks empirical localized supply evidence ({v_str}). Speculative gap requiring preliminary customer interviews (Effective OI: {opportunity_index:+0.1f})."
+                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with zero localized supply recorded ({v_str}). Speculative gap requiring preliminary customer interviews (Effective OI: {opportunity_index:+0.1f})."
             else:
                 raw_oi = demand_score - supply_score
-                # Monotonic sample size confidence damping: N=1 (0.52), N=2 (0.64), N=3 (0.76), N=5+ (1.0)
-                damping_factor = min(1.0, 0.40 + 0.60 * (vn_count / 5.0))
-                opportunity_index = round(raw_oi * damping_factor, 1)
-
-
-                if opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
-                    opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                    rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 outstripping available supply ({v_str}). High-confidence verified opportunity (Effective OI: {opportunity_index:+0.1f})."
-                elif opportunity_index >= 10.0:
-                    opp_type = "GROWING_OPPORTUNITY"
-                    rec = f"Segment '{raw_kw}' shows positive momentum ({v_str}) with addressable market headroom (Effective OI: {opportunity_index:+0.1f})."
-                elif opportunity_index >= -15.0:
-                    opp_type = "BALANCED_COMPETITION"
-                    rec = f"Segment '{raw_kw}' is in market equilibrium ({v_str}) where content supply balances consumer demand."
-                else:
+                if raw_oi < 0:
+                    # Saturated segments are NOT damped towards zero (which would falsely understate saturation)
+                    opportunity_index = round(raw_oi, 1)
                     opp_type = "SATURATED_SEGMENT"
                     rec = f"Segment '{raw_kw}' is heavily saturated ({v_str}) relative to demand (OI: {opportunity_index:+0.1f}). Requires verticalized differentiation."
+                else:
+                    # Positive opportunities damped by sample size: N=1 (0.35), N=2 (0.55), N=3 (0.75), N=4 (0.90), N>=5 (1.00)
+                    damping_map = {1: 0.35, 2: 0.55, 3: 0.75, 4: 0.90}
+                    damping_factor = damping_map.get(vn_count, 1.0)
+                    opportunity_index = round(raw_oi * damping_factor, 1)
+
+                    if vn_count == 1:
+                        opp_type = "PROBE_OPPORTUNITY"
+                        rec = f"Initial probe detected for '{raw_kw}' ({v_str}). Early signal with thin localized supply (Effective OI: {opportunity_index:+0.1f})."
+                    elif opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
+                        opp_type = "HIGH_DEMAND_LOW_SUPPLY"
+                        rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 outstripping available supply ({v_str}). High-confidence verified opportunity (Effective OI: {opportunity_index:+0.1f})."
+                    elif opportunity_index >= 10.0:
+                        opp_type = "GROWING_OPPORTUNITY"
+                        rec = f"Segment '{raw_kw}' shows positive momentum ({v_str}) with addressable market headroom (Effective OI: {opportunity_index:+0.1f})."
+                    else:
+                        opp_type = "BALANCED_COMPETITION"
+                        rec = f"Segment '{raw_kw}' is in market equilibrium ({v_str}) where content supply balances consumer demand."
 
             if vn_videos:
                 support_sigs = [f"[{s.platform.value.upper()}] {s.raw_title}" for s in vn_videos[:3]]
             else:
                 support_sigs = ["No localized videos recorded across YouTube or TikTok in the requested timeframe."]
+
 
 
             opportunities.append(
