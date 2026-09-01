@@ -59,9 +59,11 @@ class QualityEvaluator:
         self,
         custom_lexicon: Optional[Set[str]] = None,
         custom_stopwords: Optional[Set[str]] = None,
+        custom_noise: Optional[Set[str]] = None,
     ):
         self._custom_lexicon: Set[str] = set(custom_lexicon or [])
         self._custom_stopwords: Set[str] = set(custom_stopwords or [])
+        self._custom_noise: Set[str] = set(custom_noise or [])
 
     def register_terms(self, terms: List[str]) -> None:
         """Dynamically register new domain vocabulary terms in memory."""
@@ -77,13 +79,19 @@ class QualityEvaluator:
             if clean:
                 self._custom_stopwords.add(clean)
 
-    GARBAGE_EXCLUSIONS = {
+    def register_noise_blacklist(self, terms: List[str]) -> None:
+        """Dynamically register mission-specific negative/noise terms."""
+        for t in terms:
+            clean = t.strip().lower()
+            if clean:
+                self._custom_noise.add(clean)
+
+    GENERIC_NOISE_HASHTAGS = {
         "#funny", "#hai", "#namthầnkinh", "#giadinh", "#haihuoc", "#troll", "#vlog",
-        "nhà thông minh", "sitcom", "tiểu phẩm", "phim ngắn", "nồi đất", "tráng men",
-        "cnc machining", "máy cnc", "phay cnc", "tiện cnc", "hàn xì", "đúc kim loại"
+        "sitcom", "tiểu phẩm", "phim ngắn"
     }
 
-    # Reject foreign scripts (Hangul, Kanji/Hanzi, Kana, Thai, Cyrillic, Arabic)
+    # Reject foreign non-Latin scripts (Hangul, Kanji/Hanzi, Kana, Thai, Cyrillic, Arabic)
     FOREIGN_SCRIPTS_PATTERN = re.compile(r"[\uac00-\ud7af\u4e00-\u9fff\u3040-\u30ff\u0e00-\u0e7f\u0400-\u04ff]")
 
     def _is_garbage(self, text: str) -> bool:
@@ -92,7 +100,9 @@ class QualityEvaluator:
         if self.FOREIGN_SCRIPTS_PATTERN.search(text):
             return True
         t_low = text.lower()
-        return any(g in t_low for g in self.GARBAGE_EXCLUSIONS)
+        active_noise = self.GENERIC_NOISE_HASHTAGS | self._custom_noise
+        return any(g in t_low for g in active_noise)
+
 
     def is_vietnamese(
         self,

@@ -47,15 +47,10 @@ class StrategicMarketReasoner:
         "khach", "hang", "dich", "vu", "cong", "nghe", "nen", "tang"
     }
 
-    GARBAGE_EXCLUSIONS = [
-        "khát khao độc chiếm", "audio chiếm hữu", "chanh non", "truyện audio", "đọc truyện",
-        "phonegrid", "phone farm", "mmo", "forex", "bóng đá", "ur3", "cánh tay robot",
-        "bánh răng", "xích tải", "bốc xếp", "bao tải", "đồ chơi", "lego", "anh khoa hay hỏi",
-        "oprah", "the dark side of ai", "talkshow", "ai psychosis", "psychosis", "dating an ai",
+    GENERIC_NOISE_HASHTAGS = [
         "#funny", "#hai", "#namthầnkinh", "#namthankinh", "#giadinh", "#haihuoc", "#hài", "#hàihước",
         "#troll", "#vlog", "#shorts_funny", "#comedy", "#prank", "#chuyenhai", "#giaitri", "#xuhuonghai",
-        "phim hài", "tiểu phẩm", "sitcom", "tập full", "trailer", "karaoke", "nhạc sống", "remix", "tiktok hài",
-        "parody", "reaction", "thách đấu", "ẩm thực", "ăn uống", "mukbang", "nhà thông minh"
+        "phim hài", "tiểu phẩm", "sitcom", "parody"
     ]
 
     # Characters strictly unique to Vietnamese
@@ -63,6 +58,8 @@ class StrategicMarketReasoner:
         r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủãẽĩõũạẹịọụ]",
         re.IGNORECASE
     )
+
+    FOREIGN_SCRIPTS_PATTERN = re.compile(r"[\uac00-\ud7af\u4e00-\u9fff\u3040-\u30ff\u0e00-\u0e7f\u0400-\u04ff]")
 
     FOREIGN_STOPWORDS = {
         "formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant",
@@ -77,9 +74,28 @@ class StrategicMarketReasoner:
         self,
         custom_lexicon: Optional[Set[str]] = None,
         custom_stopwords: Optional[Set[str]] = None,
+        custom_noise: Optional[Set[str]] = None,
     ):
         self._custom_lexicon: Set[str] = set(custom_lexicon or [])
         self._custom_stopwords: Set[str] = set(custom_stopwords or [])
+        self._custom_noise: Set[str] = set(custom_noise or [])
+
+    def register_noise_blacklist(self, terms: List[str]) -> None:
+        """Dynamically register mission-specific noise terms."""
+        for t in terms:
+            clean = t.strip().lower()
+            if clean:
+                self._custom_noise.add(clean)
+
+    def _is_garbage(self, title: str) -> bool:
+        if not title:
+            return True
+        if self.FOREIGN_SCRIPTS_PATTERN.search(title):
+            return True
+        t_low = title.lower()
+        active_noise = set(self.GENERIC_NOISE_HASHTAGS) | self._custom_noise
+        return any(g in t_low for g in active_noise)
+
 
     def analyze_mission(
         self,
@@ -145,12 +161,8 @@ class StrategicMarketReasoner:
         # Requires at least 2 genuine core Vietnamese words for unaccented titles
         return vi_core_count >= 2
 
-    def _is_garbage(self, title: str) -> bool:
-        t_low = title.lower()
-        return any(g in t_low for g in self.GARBAGE_EXCLUSIONS)
-
-
     def _matches_topic_strictly(self, title: str, kw: str) -> bool:
+
         if self._is_garbage(title):
             return False
 
