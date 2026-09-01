@@ -47,12 +47,6 @@ class StrategicMarketReasoner:
         "khach", "hang", "dich", "vu", "cong", "nghe", "nen", "tang"
     }
 
-    GENERIC_NOISE_HASHTAGS = [
-        "#funny", "#hai", "#namthầnkinh", "#namthankinh", "#giadinh", "#haihuoc", "#hài", "#hàihước",
-        "#troll", "#vlog", "#shorts_funny", "#comedy", "#prank", "#chuyenhai", "#giaitri", "#xuhuonghai",
-        "phim hài", "tiểu phẩm", "sitcom", "parody"
-    ]
-
     # Characters strictly unique to Vietnamese
     VI_EXCLUSIVE_CHARS_PATTERN = re.compile(
         r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủãẽĩõũạẹịọụ]",
@@ -92,9 +86,11 @@ class StrategicMarketReasoner:
             return True
         if self.FOREIGN_SCRIPTS_PATTERN.search(title):
             return True
-        t_low = title.lower()
-        active_noise = set(self.GENERIC_NOISE_HASHTAGS) | self._custom_noise
-        return any(g in t_low for g in active_noise)
+        if self._custom_noise:
+            t_low = title.lower()
+            return any(g in t_low for g in self._custom_noise)
+        return False
+
 
 
     def analyze_mission(
@@ -140,6 +136,14 @@ class StrategicMarketReasoner:
         if not title:
             return False
 
+        if self.FOREIGN_SCRIPTS_PATTERN.search(title):
+            return False
+
+        if self._custom_noise:
+            t_low = title.lower()
+            if any(g in t_low for g in self._custom_noise):
+                return False
+
         title_lower = title.lower()
         words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", title_lower))
         
@@ -147,6 +151,7 @@ class StrategicMarketReasoner:
         all_stopwords = self.FOREIGN_STOPWORDS | self._custom_stopwords
         if any(fw in words for fw in all_stopwords):
             return False
+
 
         # Layer 2: Exclusive Vietnamese characters with diacritics
         if self.VI_EXCLUSIVE_CHARS_PATTERN.search(title):

@@ -183,17 +183,27 @@ def test_comedy_and_outlier_rejection():
     evaluator = QualityEvaluator()
     reasoner = StrategicMarketReasoner()
 
-    comedy_video = "Hệ thống nhà thông minh tự động hóa toàn diện #namthầnkinh #funny #giadinh"
-    assert reasoner._is_garbage(comedy_video) is True
-    assert evaluator.is_vietnamese(comedy_video) is False
-    assert reasoner._matches_topic_strictly(comedy_video, "tự động hóa ai") is False
-    assert reasoner._matches_topic_strictly(comedy_video, "workflow automation") is False
-
+    # Foreign script rejection (Korean / CJK)
     korean_video = "뚝배기 코팅 공정 및 자동화 (Tráng men nồi đất tự động)"
     assert evaluator.is_vietnamese(korean_video) is False
+    assert reasoner._is_vietnamese(korean_video) is False
 
+    # English technical title rejection
     cnc_video = "CNC Machining and Milling Automation Tutorial"
     assert evaluator.is_vietnamese(cnc_video) is False
+
+    # Topic keyword isolation: video without topic keyword does not match
+    unrelated_video = "Hệ thống nhà thông minh toàn diện"
+    assert reasoner._matches_topic_strictly(unrelated_video, "tự động hóa ai") is False
+
+    # Dynamic mission noise registration by Agent
+    evaluator.register_noise_blacklist(["#namthầnkinh", "#funny"])
+    reasoner.register_noise_blacklist(["#namthầnkinh", "#funny"])
+
+    comedy_video = "Hệ thống tự động hóa toàn diện #namthầnkinh #funny"
+    assert evaluator.is_vietnamese(comedy_video) is False
+    assert reasoner._is_garbage(comedy_video) is True
+
 
 
 

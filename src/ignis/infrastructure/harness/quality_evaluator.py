@@ -86,22 +86,8 @@ class QualityEvaluator:
             if clean:
                 self._custom_noise.add(clean)
 
-    GENERIC_NOISE_HASHTAGS = {
-        "#funny", "#hai", "#namthầnkinh", "#giadinh", "#haihuoc", "#troll", "#vlog",
-        "sitcom", "tiểu phẩm", "phim ngắn"
-    }
-
     # Reject foreign non-Latin scripts (Hangul, Kanji/Hanzi, Kana, Thai, Cyrillic, Arabic)
     FOREIGN_SCRIPTS_PATTERN = re.compile(r"[\uac00-\ud7af\u4e00-\u9fff\u3040-\u30ff\u0e00-\u0e7f\u0400-\u04ff]")
-
-    def _is_garbage(self, text: str) -> bool:
-        if not text:
-            return True
-        if self.FOREIGN_SCRIPTS_PATTERN.search(text):
-            return True
-        t_low = text.lower()
-        active_noise = self.GENERIC_NOISE_HASHTAGS | self._custom_noise
-        return any(g in t_low for g in active_noise)
 
 
     def is_vietnamese(
@@ -109,11 +95,12 @@ class QualityEvaluator:
         text: str,
         extra_terms: Optional[Set[str]] = None,
         extra_stopwords: Optional[Set[str]] = None,
+        extra_noise: Optional[Set[str]] = None,
     ) -> bool:
         """
         Multi-layer Vietnamese localization detector:
         1. Instantly rejects foreign non-Latin scripts (Korean, Chinese, Japanese, Thai, Cyrillic).
-        2. Instantly rejects comedy/garbage/unrelated industrial outlier terms.
+        2. Rejects mission-specific negative/noise terms if dynamically registered by Agent.
         3. Instantly rejects Romance / Foreign stopwords (static baseline + DB dynamic).
         4. Detects unique Vietnamese characters (đ, ơ, ư, hook/dot tones, accented vowels).
         5. For unaccented text, ignores borrowed tech words (ai, bot, chat, tool, etc.)
@@ -122,8 +109,14 @@ class QualityEvaluator:
         if not text:
             return False
 
-        if self._is_garbage(text):
+        if self.FOREIGN_SCRIPTS_PATTERN.search(text):
             return False
+        
+        text_lower = text.lower()
+        active_noise = self._custom_noise | (extra_noise or set())
+        if active_noise and any(g in text_lower for g in active_noise):
+            return False
+
         
         text_lower = text.lower()
         words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", text_lower))
