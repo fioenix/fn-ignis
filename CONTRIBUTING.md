@@ -31,16 +31,36 @@ cp .env.example .env
 uv run pytest
 ```
 
-## Contribution Guidelines
+## 🌿 GitFlow Branching Model
 
-1. **Language Standard**: All source code, docstrings, comments, commit messages, and documentation must be in **100% English**.
-2. **Deterministic Architecture**: Adhere to Domain-Driven Design (DDD) and Clean Architecture principles. Business logic resides in `application/use_cases`, platform connectors in `infrastructure/connectors`, and entities in `domain/`.
-3. **Security First**: Never hardcode API keys, database credentials, or real session cookies.
-4. **Testing**: Every new connector or use case must include comprehensive unit and integration tests.
+`fnIgnis` follows the standard **GitFlow** branching workflow:
 
-## Pull Request Process
+| Branch | Purpose | Base Branch | Merge Target |
+|---|---|---|---|
+| **`main`** | Stable, production-ready releases (tagged e.g. `v0.1.0`) | — | — |
+| **`develop`** | Active integration branch for tested features | `main` | `main` (via release) |
+| **`feature/*`** | New features, tools, or connector improvements | `develop` | `develop` |
+| **`release/*`** | Release preparation, bump versions, docs stabilization | `develop` | `main` & `develop` |
+| **`hotfix/*`** | Urgent production bug fixes | `main` | `main` & `develop` |
 
-1. Fork the repository and create your feature branch: `git checkout -b feature/my-new-feature`.
-2. Ensure all tests pass: `uv run pytest`.
-3. Commit your changes with concise, conventional commit messages (`Add`, `Fix`, `Refactor`, `Update`).
-4. Push to your branch and open a Pull Request.
+### Feature Workflow Example:
+```bash
+# 1. Start from latest develop
+git checkout develop
+git pull origin develop
+git checkout -b feature/add-threads-voice-analysis
+
+# 2. Implement, test, and commit
+uv run pytest
+git commit -m "feat(threads): add comment sentiment extractor"
+
+# 3. Push and open Pull Request against develop
+git push -u origin feature/add-threads-voice-analysis
+```
+
+## Pull Request & Review Standards
+
+1. All PRs must target **`develop`** (except hotfixes which target `main`).
+2. Automated GitHub Actions CI test suite must pass 100% on Python 3.12.
+3. Commit messages must be atomic and start with standard verbs: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`.
+
