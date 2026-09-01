@@ -137,13 +137,23 @@ class QualityEvaluator:
             flaws.append(f"Low freshness score ({data_freshness_score}%), contains outdated signals.")
 
         # 5. Overall Confidence Score (Weighted average from configurable settings)
-        overall_confidence = round(
+        base_confidence = (
             (coverage_score * settings.SCORECARD_WEIGHT_COVERAGE) +
             (language_precision * settings.SCORECARD_WEIGHT_LANGUAGE) +
             (data_freshness_score * settings.SCORECARD_WEIGHT_FRESHNESS) +
-            (creator_diversity * settings.SCORECARD_WEIGHT_DIVERSITY),
-            1
+            (creator_diversity * settings.SCORECARD_WEIGHT_DIVERSITY)
         )
+
+        # 6. Sample Size Guardrail & Penalty
+        total_signals_count = len(signals)
+        sample_penalty_factor = 1.0
+        if total_signals_count < 10:
+            flaws.append(f"Sample size below recommended production threshold ({total_signals_count} signals).")
+            sample_penalty_factor = max(0.8, total_signals_count / 10.0)
+        else:
+            strengths.append(f"Sufficient dataset size ({total_signals_count} verified signals).")
+
+        overall_confidence = round(base_confidence * sample_penalty_factor, 1)
 
         if overall_confidence >= settings.CONFIDENCE_HIGH_THRESHOLD:
             confidence_level = ConfidenceLevel.HIGH

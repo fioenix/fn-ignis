@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     # Ingress Defaults
     DEFAULT_GEO: str = Field(default="VN", description="Default ISO geographic region code")
     INGRESS_BATCH_LIMIT: int = Field(default=50, description="Maximum items fetched per connector batch")
+    MIN_VALID_SAMPLE_SIZE: int = Field(default=15, description="Minimum sample size threshold for confidence calculation")
 
     # Scorecard Evaluation Weights (Must sum to 1.0)
     SCORECARD_WEIGHT_COVERAGE: float = Field(default=0.25, description="Weight for multi-platform coverage")

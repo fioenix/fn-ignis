@@ -149,25 +149,33 @@ class StrategicMarketReasoner:
             vn_views = sum(v.metric_value for v in vn_videos)
             vn_count = len(vn_videos)
 
-            # Configurable Supply Scoring Equation
+            # View-Weighted Supply Scoring Equation
             if vn_count == 0:
                 supply_score = 0.0
+            elif vn_views < 1000.0:
+                # Content exists but with low viewer traction (e.g. 7 videos with <300 views)
+                base_supply = min(40.0, vn_count * 4.0)
+                view_factor = min(15.0, math.log10(max(10.0, vn_views)) * 3.0) if vn_views > 0 else 0.0
+                supply_score = round(base_supply + view_factor, 1)
             else:
                 base_supply = min(settings.SUPPLY_BASE_MAX, vn_count * settings.SUPPLY_VIDEO_WEIGHT)
-                view_factor = min(settings.SUPPLY_VIEW_MAX, math.log10(max(10.0, vn_views)) * settings.SUPPLY_VIEW_LOG_WEIGHT) if vn_views > 0 else 0.0
+                view_factor = min(settings.SUPPLY_VIEW_MAX, math.log10(max(10.0, vn_views)) * settings.SUPPLY_VIEW_LOG_WEIGHT)
                 supply_score = round(min(100.0, base_supply + view_factor), 1)
 
             opportunity_index = round(demand_score - supply_score, 1)
 
             v_str = f"{vn_count} video" if vn_count == 1 else f"{vn_count} videos"
 
-            # Configurable Opportunity Classification
-            if vn_count == 0 or opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
+            # Clear, Non-Overlapping Opportunity Classification
+            if vn_count == 0:
                 opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with very thin localized supply ({v_str}). Prime white space for early market leadership."
-            elif ("doanh nghiệp" in kw_clean or "enterprise" in kw_clean or "b2b" in kw_clean) and supply_score < settings.ENTERPRISE_GAP_SUPPLY_THRESHOLD:
-                opp_type = "ENTERPRISE_GAP"
-                rec = f"Enterprise B2B White Space: High search intent but severe lack of hands-on enterprise case studies in local market ({v_str})."
+                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with zero localized supply recorded. Prime white space for early category leadership."
+            elif vn_count > 0 and vn_views < 1000.0:
+                opp_type = "LOW_ENGAGEMENT_SUPPLY"
+                rec = f"Existing localized supply ({v_str}) suffers from low viewer traction ({int(vn_views):,} total views). Strong opportunity for high-quality practical content to dominate mindshare."
+            elif opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
+                opp_type = "HIGH_DEMAND_LOW_SUPPLY"
+                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 outstripping available supply ({v_str}). Prime opportunity for category growth."
             elif supply_score >= settings.SATURATION_SUPPLY_THRESHOLD:
                 opp_type = "SATURATED_SEGMENT"
                 rec = f"Segment '{raw_kw}' has substantial foundational creator supply ({v_str}). Recommend differentiating through advanced or verticalized solutions."

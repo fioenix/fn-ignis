@@ -259,8 +259,6 @@ class YouTubeDataPlugin(IConnectorPlugin):
                 "publishedAfter": published_after_str,
                 "key": self._api_key,
             }
-            if relevance_lang:
-                search_params["relevanceLanguage"] = relevance_lang
 
             video_ids = []
             try:
