@@ -70,3 +70,34 @@ Always prefix analysis outputs with the campaign identification banner:
 ### Native Artifacts First
 - Render summaries, scorecards, white space matrices, and actionable roadmaps directly in the chat interface using high-contrast Light Mode markdown tables and cards.
 - Export standalone HTML files to `reports/` via `generate_mission_artifact` for permanent local storage.
+
+---
+
+## 🏷️ 4. Release Versioning Principles & SemVer Guardrails
+
+All agents (**Claude Desktop, Claude Code, Cursor, Windsurf, Antigravity, Codex, OpenClaw, Hermes**) must strictly adhere to **Semantic Versioning 2.0.0 (`MAJOR.MINOR.PATCH`)**:
+
+```
+v MAJOR . MINOR . PATCH
+    ↑       ↑       ↑
+Breaking Feature   Bugfix / Optimization
+```
+
+### Version Bump Criteria
+
+| Increment Level | When to Bump | Example Transition | Reset Rule |
+|---|---|---|---|
+| **`PATCH`** (`+0.0.1`) | Backward-compatible bug fixes, minor connector tweaks, test suite additions, documentation updates, or internal performance tuning. | `0.1.0` $\rightarrow$ `0.1.1` | None |
+| **`MINOR`** (`+0.1.0`) | New platform connectors (e.g. Threads comments, Xiaohongshu), new FastMCP tools/prompts, new database migrations, or significant new analytical models. | `0.1.5` $\rightarrow$ `0.2.0` | `PATCH` resets to `0` |
+| **`MAJOR`** (`+1.0.0`) | Breaking architectural overhauls, incompatible database schema drops, or breaking FastMCP tool signature deprecations. | `0.9.4` $\rightarrow$ `1.0.0` | `MINOR` & `PATCH` reset to `0` |
+
+### ⛔ Strict Agent Guardrails
+
+1. **NO Speculative or Arbitrary Bumps**: Do NOT bump version numbers for routine single-file bug fixes or daily development tasks. Versions are bumped **ONLY during formal release preparation** on `release/*` or `main`.
+2. **NO Number Skipping**: Never jump versions arbitrarily (e.g. from `0.1.0` directly to `0.5.0` or `1.0.0`). Always increment by strictly `+1` at the appropriate level.
+3. **Atomic Triple Synchronization**: When a version bump is performed, the Agent **MUST synchronously update all 3 files in a single atomic commit**:
+   - [`pyproject.toml`](pyproject.toml) $\rightarrow$ `version = "X.Y.Z"`
+   - [`openclaw.json`](openclaw.json) $\rightarrow$ `"version": "X.Y.Z"`
+   - Git Tag on `main` $\rightarrow$ `vX.Y.Z`
+4. **Beta Phase Principle (`0.X.Y`)**: While in initial beta stages (`0.X.Y`), prioritize `PATCH` and `MINOR` increments. Do NOT rush to `1.0.0` until enterprise multi-tenancy and production stability milestones are reached.
+
