@@ -1,9 +1,11 @@
 import json
 import logging
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
+
 
 # Ensure MCP compatibility bridge before importing FastMCP
 import mcp.shared.exceptions
@@ -1155,6 +1157,70 @@ async def handle_list_domain_lexicons(domain: Optional[str] = None) -> str:
 @mcp.tool(name="list_domain_lexicons", description="List active domain vocabularies, slang terms, and industry mappings currently loaded in the system.")
 async def list_domain_lexicons(domain: Optional[str] = None) -> str:
     return await handle_list_domain_lexicons(domain=domain)
+
+
+async def handle_verify_connectors_health() -> str:
+    """
+    Run active diagnostic probes across all multi-platform ingress connectors and infrastructure:
+    - YouTube Data API v3 (API Key & Quota verification)
+    - Google Trends RSS (Feed responsiveness & parsing)
+    - TikTok Connectors & Playwright (Browser engine & optional proxy routing)
+    - PostgreSQL / TimescaleDB (Connection pool & lexicon registry counts)
+    """
+    comp = get_components()
+    repo = comp["repository"]
+    registry = comp["registry"]
+
+    diagnostics: Dict[str, Any] = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "proxy_configured": bool(settings.PLAYWRIGHT_PROXY_SERVER),
+        "proxy_server": settings.PLAYWRIGHT_PROXY_SERVER if settings.PLAYWRIGHT_PROXY_SERVER else "Direct (No Proxy)",
+        "connectors": {},
+        "database": {},
+        "overall_status": "HEALTHY",
+    }
+
+    # 1. Database Probe
+    try:
+        lexicons = await repo.get_domain_lexicons()
+        diagnostics["database"] = {
+            "status": "HEALTHY",
+            "active_lexicons_count": len(lexicons),
+            "storage": "PostgreSQL / TimescaleDB",
+        }
+    except Exception as e:
+        diagnostics["database"] = {
+            "status": "UNHEALTHY",
+            "error": str(e)
+        }
+        diagnostics["overall_status"] = "DEGRADED"
+
+    # 2. Check each connector plugin
+    for plat_name, plugin in registry._plugins.items():
+        try:
+            is_ok = await plugin.is_healthy()
+            diagnostics["connectors"][plugin.name] = {
+                "platform": plat_name.value if hasattr(plat_name, "value") else str(plat_name),
+                "status": "HEALTHY" if is_ok else "UNHEALTHY",
+            }
+            if not is_ok:
+                diagnostics["overall_status"] = "DEGRADED"
+        except Exception as e:
+            diagnostics["connectors"][plugin.name] = {
+                "platform": plat_name.value if hasattr(plat_name, "value") else str(plat_name),
+                "status": "ERROR",
+                "error": str(e)
+            }
+            diagnostics["overall_status"] = "DEGRADED"
+
+    return json.dumps(diagnostics, ensure_ascii=False, indent=2)
+
+
+@mcp.tool(name="verify_connectors_health", description="Run synthetic diagnostic health checks across all multi-platform connectors, database, and proxy.")
+async def verify_connectors_health() -> str:
+    """Run synthetic diagnostic health checks across all multi-platform connectors, database, and proxy."""
+    return await handle_verify_connectors_health()
+
 
 
 

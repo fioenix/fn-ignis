@@ -2,7 +2,9 @@ import pytest
 import json
 from unittest.mock import AsyncMock, patch, MagicMock
 from uuid import uuid4
+from ignis.domain.value_objects import PlatformType
 from ignis.interfaces.mcp.server import (
+
     handle_get_trending_topics,
     handle_get_topic_detail,
     handle_generate_trend_artifact,
@@ -151,4 +153,34 @@ async def test_mcp_platform_auth_status_and_clear():
         clear_res = json.loads(clear_str)
         assert clear_res["cleared"] is True
         assert clear_res["platform"] == "tiktok"
+
+
+@pytest.mark.asyncio
+async def test_mcp_verify_connectors_health():
+    from ignis.interfaces.mcp.server import handle_verify_connectors_health
+
+    with patch("ignis.interfaces.mcp.server.get_components") as mock_get_comp:
+        mock_repo = AsyncMock()
+        mock_repo.get_domain_lexicons.return_value = [{"term": "ai agent", "domain": "tech"}]
+
+        mock_plugin = AsyncMock()
+        mock_plugin.name = "YouTube Data API v3"
+        mock_plugin.is_healthy.return_value = True
+
+        mock_registry = MagicMock()
+        mock_registry._plugins = {PlatformType.YOUTUBE: mock_plugin}
+
+        mock_get_comp.return_value = {
+            "repository": mock_repo,
+            "registry": mock_registry,
+        }
+
+        res_str = await handle_verify_connectors_health()
+        res = json.loads(res_str)
+        assert res["overall_status"] == "HEALTHY"
+        assert res["database"]["status"] == "HEALTHY"
+        assert res["database"]["active_lexicons_count"] == 1
+        assert "YouTube Data API v3" in res["connectors"]
+        assert res["connectors"]["YouTube Data API v3"]["status"] == "HEALTHY"
+
 
