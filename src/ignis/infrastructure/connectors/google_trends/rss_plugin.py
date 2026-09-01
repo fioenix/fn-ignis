@@ -1,6 +1,4 @@
-import json
 import logging
-import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any

@@ -1,10 +1,8 @@
-import pytest
-from datetime import datetime, timezone
 from uuid import uuid4
 
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
 from ignis.domain.value_objects import PlatformType, GeoCode
-from ignis.domain.harness_models import ConfidenceLevel, TrendMaturityStage
+from ignis.domain.harness_models import ConfidenceLevel
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 
@@ -177,6 +175,12 @@ def test_language_filter_english_tech_rejection():
 
     assert evaluator.is_vietnamese(vietnamese_chatbot) is True
     assert reasoner._is_vietnamese(vietnamese_chatbot) is True
+
+    # Unaccented Vietnamese with core grammar words
+    unaccented_guide = "Huong dan cai dat va su dung n8n tu dong hoa"
+    assert evaluator.is_vietnamese(unaccented_guide) is True
+    assert reasoner._is_vietnamese(unaccented_guide) is True
+
 
 
 def test_comedy_and_outlier_rejection():

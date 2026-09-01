@@ -1,8 +1,6 @@
 import asyncio
 import logging
 import signal
-import sys
-from typing import Optional
 
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase

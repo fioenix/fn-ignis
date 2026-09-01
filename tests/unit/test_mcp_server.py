@@ -6,9 +6,7 @@ from ignis.domain.value_objects import PlatformType
 from ignis.interfaces.mcp.server import (
 
     handle_get_trending_topics,
-    handle_get_topic_detail,
     handle_generate_trend_artifact,
-    handle_trigger_ingress_refresh,
 )
 
 

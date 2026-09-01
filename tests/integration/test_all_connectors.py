@@ -1,5 +1,4 @@
-import pytest
-from ignis.domain.value_objects import PlatformType, GeoCode
+from ignis.domain.value_objects import PlatformType
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
 from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin

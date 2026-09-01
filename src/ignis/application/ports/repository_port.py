@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
-from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
+from ignis.domain.value_objects import GeoCode, Timeframe
 
 
 class ITrendRepository(ABC):

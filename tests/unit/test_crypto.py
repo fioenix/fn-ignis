@@ -25,9 +25,10 @@ def test_encrypt_decrypt_roundtrip():
     encrypted = encrypt_credentials(sample_data, secret_key=key)
     assert encrypted["_encrypted"] is True
     assert "ciphertext" in encrypted
-    assert encrypted["algorithm"] == "AES-256-Fernet"
+    assert encrypted["algorithm"] == "Fernet-AES128-CBC"
     # Ensure plaintext token is NOT visible in ciphertext
     assert "secret_session_token_12345" not in encrypted["ciphertext"]
+
 
     # 2. Decrypt
     decrypted = decrypt_credentials(encrypted, secret_key=key)

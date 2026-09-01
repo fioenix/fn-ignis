@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from uuid import UUID
 
-import psycopg
 from psycopg.rows import tuple_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -351,8 +350,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                 updated_at=updated,
             )
         except Exception as e:
-            logger.error(f"Lỗi khi lấy research mission {mission_id}: {e}", exc_info=True)
+            logger.error(f"Lỗi khi lấy research mission {identifier}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to get research mission: {e}") from e
+
 
     async def update_mission(self, mission: ResearchMission) -> None:
         pool = await self._get_pool()
@@ -734,15 +734,9 @@ class PostgresTimescaleRepository(ITrendRepository):
         if not terms:
             return 0
         pool = await self._get_pool()
-        query = """
-            INSERT INTO market_lexicons (domain, term, category, created_by)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (domain, term) DO UPDATE 
-            SET category = EXCLUDED.category, updated_at = NOW()
-            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'market_lexicons' AND column_name = 'updated_at');
-        """
         clean_domain = domain.lower().strip()
         count = 0
+
         try:
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:

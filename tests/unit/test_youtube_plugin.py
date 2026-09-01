@@ -1,11 +1,10 @@
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch, MagicMock
-import httpx
+from unittest.mock import patch, MagicMock
 
 
-from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
-from ignis.domain.exceptions import ConnectorQuotaExceededException, ConnectorExecutionException
+from ignis.domain.value_objects import PlatformType, GeoCode
+from ignis.domain.exceptions import ConnectorQuotaExceededException
 from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin
 
 

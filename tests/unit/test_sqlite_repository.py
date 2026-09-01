@@ -144,6 +144,7 @@ async def test_sqlite_dynamic_lexicons(sqlite_repo):
 
     # Query domain
     fashion_lex = await sqlite_repo.get_domain_lexicons(domain="fashion")
-    terms = [l["term"] for l in fashion_lex]
+    terms = [lex["term"] for lex in fashion_lex]
     assert "ao dai cach tan" in terms
     assert "set linen" in terms
+

@@ -14,6 +14,9 @@ END $$;
 CREATE TABLE IF NOT EXISTS research_missions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     title TEXT NOT NULL,
+    shortcode VARCHAR(50),
+    agent VARCHAR(50) DEFAULT 'claude',
+    session_id TEXT,
     keywords TEXT[] NOT NULL DEFAULT '{}',
     platforms TEXT[] NOT NULL DEFAULT '{"google", "youtube", "tiktok", "threads", "reels"}',
     geo_code VARCHAR(10) DEFAULT 'VN',
@@ -23,6 +26,19 @@ CREATE TABLE IF NOT EXISTS research_missions (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 2.1 Table system_audit_logs
+CREATE TABLE IF NOT EXISTS system_audit_logs (
+    id BIGSERIAL PRIMARY KEY,
+    level VARCHAR(20) NOT NULL DEFAULT 'INFO',
+    component VARCHAR(50) NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    message TEXT NOT NULL,
+    details JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON system_audit_logs (created_at DESC);
+
 
 -- 3. Table topic_clusters (Entity / Topic Level)
 CREATE TABLE IF NOT EXISTS topic_clusters (

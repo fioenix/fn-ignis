@@ -3,8 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 from datetime import datetime, timezone
 
-from ignis.domain.entities import TrendSignal, TopicCluster
-from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
+from ignis.domain.value_objects import GeoCode, Timeframe
 from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
 
 

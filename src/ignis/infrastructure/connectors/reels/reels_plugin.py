@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 import httpx
 
 from ignis.application.ports.connector_port import IConnectorPlugin

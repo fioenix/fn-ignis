@@ -1,10 +1,9 @@
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from uuid import UUID
 from collections import defaultdict
 
 from ignis.application.ports.repository_port import ITrendRepository
-from ignis.domain.entities import ResearchMission, TrendSignal
 
 logger = logging.getLogger(__name__)
 

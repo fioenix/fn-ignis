@@ -9,7 +9,6 @@ from uuid import UUID, uuid4
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
-from ignis.domain.exceptions import RepositoryException
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 from ignis.infrastructure.auth.crypto import decrypt_credentials, encrypt_credentials
 
@@ -653,12 +652,14 @@ class SqliteTrendRepository(ITrendRepository):
                     "id": r["id"],
                     "platform": r["platform"],
                     "auth_type": r["auth_type"],
+                    "credentials_data": decrypted,
                     "credentials": decrypted,
                     "is_active": bool(r["is_active"]),
                     "created_at": r["created_at"],
                     "updated_at": r["updated_at"],
                     "expires_at": r["expires_at"],
                 }
+
 
             finally:
                 if self._mem_conn is None:

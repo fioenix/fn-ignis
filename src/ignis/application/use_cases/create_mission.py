@@ -1,6 +1,5 @@
 import logging
 from typing import List, Optional
-from uuid import UUID
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import ResearchMission

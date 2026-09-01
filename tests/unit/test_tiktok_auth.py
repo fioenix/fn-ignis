@@ -1,6 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 
 @pytest.mark.asyncio

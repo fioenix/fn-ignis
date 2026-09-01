@@ -65,7 +65,7 @@ def setup_claude_desktop_bundle(force: bool = False) -> bool:
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config_data, f, indent=2, ensure_ascii=False)
 
-    print(f"\n🎉 INSTALLATION SUCCESSFUL! fn-ignis is configured for Claude Desktop.")
+    print("\n🎉 INSTALLATION SUCCESSFUL! fn-ignis is configured for Claude Desktop.")
     print("Pre-configured capabilities:")
     print("  • 15 MCP Tools (Research, Ingress, Suggestions, Creative Center, Comments, HTML Report)")
     print("  • 2 MCP Prompts (market_research_pipeline, voice_of_customer_audit)")

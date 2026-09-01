@@ -56,10 +56,11 @@ class StrategicMarketReasoner:
         "formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant",
         "como", "funcionam", "chegou", "novos", "veja", "agentes", "autonomos", "autônomos",
         "para", "com", "por", "sobre", "este", "esta", "todos", "agora", "fazer", "curso",
-        "gratis", "completo", "tutorial", "você", "voce", "seus", "suas", "criar", "criando",
+        "gratis", "completo", "você", "voce", "seus", "suas", "criar", "criando",
         "ferramenta", "passo", "inteligencia", "artificial", "automatizar",
-        "cara", "yang", "untuk", "ini", "bisa", "dan", "dari"
+        "cara", "yang", "untuk", "bisa"
     }
+
 
     def __init__(
         self,
@@ -139,7 +140,7 @@ class StrategicMarketReasoner:
             reasons.append(f"Moderate practitioner engagement ({avg_views:,.0f} views/video).")
             return TrendMaturityStage.EMERGING, reasons
         else:
-            reasons.append(f"Established ecosystem with stable viewership.")
+            reasons.append("Established ecosystem with stable viewership.")
             return TrendMaturityStage.MATURE, reasons
 
     def _extract_verified_trends(

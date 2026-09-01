@@ -80,17 +80,9 @@ class AutonomousDiscoveryUseCase:
             )
             await self._repository.save_mission(mission)
 
-        GENERIC_HASHTAG_BLACKLIST = {
-            "vietnamvodich", "golivegrowfast", "tiktokshop99", "xuhuong", "fyp", "trending",
-            "dance", "nhactre", "haihuoc", "funny", "giaitri", "thethao", "bongda", "troll",
-            "vlog", "duet", "chuyenhai", "music", "capcut", "giadinh", "namthankinh", "namthầnkinh"
-        }
-
-
         # Step 2: Macro Scan (TikTok Creative Center & Google RSS)
         macro_trends: List[Dict[str, Any]] = []
         macro_keywords: List[str] = []
-
 
         try:
             cc_plugin = None
@@ -104,10 +96,12 @@ class AutonomousDiscoveryUseCase:
                 )
                 for item in macro_trends:
                     tag = item.get("hashtag", "").replace("#", "").strip().lower()
-                    if tag and tag not in self.GENERIC_HASHTAG_BLACKLIST and tag not in macro_keywords:
+                    if tag and tag not in macro_keywords:
                         macro_keywords.append(tag)
         except Exception as e:
-            logger.warning(f"Macro scan via Creative Center encountered error: {e}")
+            logger.warning(f"Macro scan via Creative Center encountered error: {e}", exc_info=True)
+
+
 
         # Fallback keywords if Creative Center scan yielded empty
         if not macro_keywords:

@@ -1,6 +1,6 @@
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
+from unittest.mock import patch, MagicMock
+from ignis.domain.value_objects import PlatformType, GeoCode
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 
 SAMPLE_REELS_RESPONSE = {

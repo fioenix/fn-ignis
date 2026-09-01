@@ -32,7 +32,12 @@ jobs:
           uv venv
           uv pip install -e ".[dev,browser]"
 
-      - name: Run Test Suite
+      - name: Run Ruff Linter
         run: |
-          uv run pytest tests/ -v
+          uv run ruff check src/ tests/
+
+      - name: Run Test Suite with Coverage
+        run: |
+          uv run pytest tests/ -v --cov=ignis --cov-report=term-missing
+
 

@@ -1,6 +1,6 @@
 import pytest
 import json
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.interfaces.mcp.server import handle_register_domain_lexicon, handle_list_domain_lexicons
 

@@ -1,7 +1,7 @@
 import pytest
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
-from ignis.domain.value_objects import PlatformType, GeoCode
+from unittest.mock import AsyncMock, patch
+from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.interfaces.mcp.server import handle_get_tiktok_search_suggestions
 

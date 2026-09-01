@@ -1,11 +1,11 @@
 import logging
-from typing import List, Dict, Any
+from typing import List
 from uuid import UUID
 
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
-from ignis.domain.entities import ResearchMission, TrendSignal, TopicCluster
-from ignis.domain.harness_models import HarnessResearchReport, QualityScorecard, ConfidenceLevel
+from ignis.domain.entities import TrendSignal
+from ignis.domain.harness_models import HarnessResearchReport
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
@@ -77,7 +77,7 @@ class AutonomousRefinementOrchestrator:
 
         # Pass 2: Refinement Loop nếu chưa đủ tín hiệu hoặc điểm tin cậy thấp
         if len(signals) < min_signals or scorecard.overall_confidence < target_confidence:
-            logger.info(f"[Harness] Kích hoạt Pass 2 (Refinement Loop) để mở rộng từ khóa phụ...")
+            logger.info("[Harness] Kích hoạt Pass 2 (Refinement Loop) để mở rộng từ khóa phụ...")
             
             # Trích xuất các related queries từ Pass 1
             sub_queries = []

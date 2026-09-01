@@ -1,10 +1,8 @@
 import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
-from ignis.domain.value_objects import PlatformType, GeoCode
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.interfaces.mcp.server import (
-    handle_get_tiktok_video_comments,
     handle_extract_customer_pain_points,
 )
 
@@ -44,9 +42,10 @@ async def test_tiktok_plugin_fetch_video_comments_mocked():
             limit=10,
         )
         assert len(comments) == 1
-        assert comments[0]["author"] == "Nguyen Van A"
+        assert comments[0]["author"].startswith("Ng***_")
         assert "Giá bao nhiêu" in comments[0]["text"]
         assert comments[0]["likes"] == 5
+
 
 
 @pytest.mark.asyncio

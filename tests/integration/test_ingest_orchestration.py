@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from typing import List
 
 from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase

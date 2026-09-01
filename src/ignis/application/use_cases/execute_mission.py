@@ -1,11 +1,9 @@
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 from uuid import UUID
 
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
-from ignis.domain.entities import TrendSignal, TopicCluster
-from ignis.domain.value_objects import GeoCode, Timeframe
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 
 logger = logging.getLogger(__name__)

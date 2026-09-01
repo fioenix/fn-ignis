@@ -1,6 +1,6 @@
-import asyncio
 import logging
 import re
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 import httpx
@@ -263,7 +263,6 @@ class TikTokPlugin(IConnectorPlugin):
         Zero-Playwright lightweight HTTP fallback for suggestion extraction.
         Queries Google Suggestion API specialized on TikTok video intent.
         """
-        import httpx
         results: List[Dict[str, Any]] = []
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
@@ -393,18 +392,23 @@ class TikTokPlugin(IConnectorPlugin):
                 for c in raw_comments:
                     if isinstance(c, dict):
                         user_obj = c.get("user", {}) or {}
-                        user_name = user_obj.get("nickname") or user_obj.get("unique_id") or "Anonymous"
+                        raw_name = user_obj.get("nickname") or user_obj.get("unique_id") or "user"
+                        raw_id = user_obj.get("unique_id") or "anon"
+                        # PII Protection (Law 91/2025/QH15 / GDPR): pseudonymize public comment authors
+                        pseudo_author = f"{raw_name[:2]}***_{hashlib.sha256(raw_name.encode()).hexdigest()[:4]}" if len(raw_name) >= 2 else "user_anon"
+                        pseudo_id = f"id_{hashlib.sha256(raw_id.encode()).hexdigest()[:6]}"
                         cmt_text = c.get("text", "").strip()
                         if cmt_text:
                             comments.append({
                                 "comment_id": str(c.get("cid", "")),
-                                "author": user_name,
-                                "author_id": user_obj.get("unique_id", ""),
+                                "author": pseudo_author,
+                                "author_id": pseudo_id,
                                 "text": cmt_text,
                                 "likes": c.get("digg_count", 0),
                                 "reply_count": c.get("reply_comment_total", 0),
                                 "created_at": c.get("create_time"),
                             })
+
 
                 await browser.close()
 

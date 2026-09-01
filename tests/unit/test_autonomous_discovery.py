@@ -1,12 +1,11 @@
 import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timezone
-from ignis.domain.entities import ResearchMission, TrendSignal, TopicCluster
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.entities import TrendSignal
+from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.domain.harness_models import HarnessResearchReport, MarketOpportunity, TrendMaturityStage, QualityScorecard
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
-from ignis.interfaces.mcp.server import handle_trigger_autonomous_discovery, handle_get_latest_daily_discovery
+from ignis.interfaces.mcp.server import handle_trigger_autonomous_discovery
 
 
 @pytest.mark.asyncio

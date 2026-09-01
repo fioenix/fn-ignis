@@ -1,12 +1,11 @@
 import re
-import math
 from datetime import datetime, timezone
-from typing import List, Dict, Set, Optional
+from typing import List, Set, Optional
 
 from ignis.config import settings
 from ignis.domain.entities import TrendSignal
 from ignis.domain.harness_models import QualityScorecard, ConfidenceLevel
-from ignis.domain.value_objects import GeoCode, PlatformType
+from ignis.domain.value_objects import GeoCode
 
 
 class QualityEvaluator:
@@ -30,11 +29,12 @@ class QualityEvaluator:
         # Portuguese / Spanish
         "como", "funcionam", "chegou", "novos", "veja", "agentes", "autonomos", "autônomos",
         "para", "com", "por", "sobre", "este", "esta", "todos", "agora", "fazer", "curso",
-        "gratis", "completo", "tutorial", "você", "voce", "seus", "suas", "criar", "criando",
+        "gratis", "completo", "você", "voce", "seus", "suas", "criar", "criando",
         "ferramenta", "passo", "inteligencia", "artificial", "automatizar",
-        # Indonesian / Malay
-        "cara", "yang", "untuk", "ini", "bisa", "dan", "dari"
+        # Indonesian / Malay (strictly multi-syllable or unambiguous non-Vietnamese)
+        "cara", "yang", "untuk", "bisa"
     }
+
 
     TECH_LOAN_WORDS = {
         "ai", "bot", "chat", "agent", "app", "tool", "pro", "plus", "hub", "lab",

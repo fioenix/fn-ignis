@@ -13,7 +13,7 @@ def _get_fernet_instance(secret_key: Optional[str] = None) -> Fernet:
     """Khởi tạo Fernet cipher với secret key từ config hoặc biến truyền vào."""
     raw_key = secret_key or settings.IGNIS_ENCRYPTION_KEY
     if not raw_key:
-        # Fallback tạo key an toàn từ hash của DATABASE_URL để không bị crash nếu chưa cấu hình .env
+        logger.warning("SECURITY WARNING: IGNIS_ENCRYPTION_KEY is not set. Using ephemeral fallback key. Set IGNIS_ENCRYPTION_KEY in .env for production.")
         derived = hashlib.sha256((settings.DATABASE_URL or "fn-ignis-default-salt").encode()).digest()
         raw_key = base64.urlsafe_b64encode(derived).decode()
     else:
@@ -26,7 +26,7 @@ def _get_fernet_instance(secret_key: Optional[str] = None) -> Fernet:
 
 
 def generate_new_key() -> str:
-    """Sinh một key mã hóa Fernet AES-256 mới."""
+    """Sinh một key mã hóa Fernet (AES-128-CBC + HMAC-SHA256) mới."""
     return Fernet.generate_key().decode()
 
 
@@ -43,9 +43,10 @@ def encrypt_credentials(data: Dict[str, Any], secret_key: Optional[str] = None) 
         encrypted_bytes = fernet.encrypt(json_str.encode("utf-8"))
         return {
             "_encrypted": True,
-            "algorithm": "AES-256-Fernet",
+            "algorithm": "Fernet-AES128-CBC",
             "ciphertext": encrypted_bytes.decode("utf-8"),
         }
+
     except Exception as e:
         logger.error(f"Lỗi khi mã hóa credentials: {e}")
         raise ValueError(f"Không thể mã hóa credentials: {e}") from e

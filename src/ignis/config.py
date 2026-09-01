@@ -27,8 +27,13 @@ class Settings(BaseSettings):
         description="Fernet AES-256 secret key for encrypting stored credentials in DB"
     )
 
+    # Scheduler Configuration
+    SCHEDULER_INTERVAL_SECONDS: int = Field(default=900, description="Daemon scheduler tick interval in seconds")
+    DISCOVERY_INTERVAL_HOURS: int = Field(default=24, description="Interval in hours between autonomous discovery runs")
+
     # Ingress Defaults
     DEFAULT_GEO: str = Field(default="VN", description="Default ISO geographic region code")
+
     INGRESS_BATCH_LIMIT: int = Field(default=50, description="Maximum items fetched per connector batch")
     MIN_VALID_SAMPLE_SIZE: int = Field(default=15, description="Minimum sample size threshold for confidence calculation")
 

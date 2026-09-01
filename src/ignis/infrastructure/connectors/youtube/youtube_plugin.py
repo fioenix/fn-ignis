@@ -1,7 +1,7 @@
 import re
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Tuple
 import httpx
 
 from ignis.application.ports.connector_port import IConnectorPlugin
@@ -279,11 +279,13 @@ class YouTubeDataPlugin(IConnectorPlugin):
                 "q": search_kw,
                 "type": "video",
                 "regionCode": region_code,
+                "relevanceLanguage": relevance_lang,
                 "maxResults": min(limit, 10),
                 "order": "relevance",
                 "publishedAfter": published_after_str,
                 "key": self._api_key,
             }
+
 
             video_ids = []
             try:
@@ -367,11 +369,17 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                     captured_at=pub_at,
                                 )
                                 kw_signals.append(sig)
-                                signals.append(sig)
-                
-                _YOUTUBE_QUERY_CACHE[cache_key] = kw_signals
+
+                    if kw_signals:
+                        signals.extend(kw_signals)
+                        _YOUTUBE_QUERY_CACHE[cache_key] = kw_signals
+            except ConnectorQuotaExceededException:
+                # Quota errors MUST bubble up to trip Circuit Breaker
+                raise
             except Exception as e:
-                logger.warning(f"YouTube search error for keyword '{raw_kw}': {e}")
+                logger.warning(f"YouTube search error for keyword '{raw_kw}': {e}", exc_info=True)
+
+
 
         return signals
 

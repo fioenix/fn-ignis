@@ -1,4 +1,3 @@
-import pytest
 from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 

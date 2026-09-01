@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from ignis.domain.entities import TrendSignal, TopicCluster
-from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
+from ignis.domain.value_objects import PlatformType, GeoCode
 
 
 @pytest.fixture

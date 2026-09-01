@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List
 from ignis.domain.entities import TrendSignal
 from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
 

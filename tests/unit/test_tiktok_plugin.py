@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
+from ignis.domain.value_objects import PlatformType, GeoCode
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 
 SAMPLE_TIKTOK_ITEM = {

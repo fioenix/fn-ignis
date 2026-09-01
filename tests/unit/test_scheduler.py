@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from ignis.interfaces.cli.scheduler import IngressScheduler
 from ignis.domain.value_objects import GeoCode
 

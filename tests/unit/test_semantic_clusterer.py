@@ -1,6 +1,4 @@
 import pytest
-from uuid import uuid4
-from datetime import datetime, timezone
 
 from ignis.domain.entities import TrendSignal
 from ignis.domain.value_objects import PlatformType, GeoCode

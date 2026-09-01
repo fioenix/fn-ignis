@@ -21,7 +21,10 @@ from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
+from ignis.application.ports.repository_port import ITrendRepository
+
 from ignis.config import settings
+
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
@@ -288,7 +291,7 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
 async def handle_diagnose_system_health() -> str:
     comp = get_components()
     registry: ConnectorPluginRegistry = comp["registry"]
-    repo: PostgresTimescaleRepository = comp["repository"]
+    repo: ITrendRepository = comp["repository"]
 
     health_status = registry.get_health_status()
     recent_errors = await repo.get_recent_logs(level="ERROR", limit=5)
@@ -313,7 +316,7 @@ async def handle_diagnose_system_health() -> str:
 
 async def handle_get_system_logs(level: Optional[str] = None, component: Optional[str] = None, limit: int = 20) -> str:
     comp = get_components()
-    repo: PostgresTimescaleRepository = comp["repository"]
+    repo: ITrendRepository = comp["repository"]
     safe_limit = max(1, min(limit, 30))
     raw_logs = await repo.get_recent_logs(level=level, component=component, limit=safe_limit)
     
@@ -349,7 +352,7 @@ async def handle_authenticate_tiktok(headless: bool = False, timeout_seconds: in
 
 async def handle_get_platform_auth_status() -> str:
     comp = get_components()
-    repo: PostgresTimescaleRepository = comp["repository"]
+    repo: ITrendRepository = comp["repository"]
     creds = await repo.list_platform_credentials()
     return json.dumps(
         {
@@ -364,7 +367,7 @@ async def handle_get_platform_auth_status() -> str:
 
 async def handle_clear_platform_auth(platform: str) -> str:
     comp = get_components()
-    repo: PostgresTimescaleRepository = comp["repository"]
+    repo: ITrendRepository = comp["repository"]
     success = await repo.delete_platform_credentials(platform.lower())
     return json.dumps(
         {
@@ -491,7 +494,6 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
 
 
 def _get_secure_reports_dir() -> Path:
-    import tempfile
     # 1. Thử ghi vào thư mục reports/ của project root
     try:
         project_root = Path(__file__).resolve().parents[4]

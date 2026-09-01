@@ -1,16 +1,9 @@
 import pytest
-import json
-from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
 
-from ignis.domain.entities import TrendSignal, TopicCluster
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.entities import TrendSignal
+from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
-from ignis.interfaces.mcp.server import (
-    handle_get_trending_topics,
-    handle_generate_trend_artifact,
-)
 
 
 @pytest.mark.asyncio

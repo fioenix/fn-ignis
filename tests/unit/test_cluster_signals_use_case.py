@@ -1,7 +1,6 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import uuid4
-from datetime import datetime, timezone
 
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.domain.entities import TrendSignal, TopicCluster

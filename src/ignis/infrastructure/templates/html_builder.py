@@ -5,7 +5,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ignis.application.ports.artifact_port import IArtifactBuilder
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
-from ignis.domain.harness_models import QualityScorecard, MarketOpportunity, TrendMaturityStage, HarnessResearchReport
+from ignis.domain.harness_models import QualityScorecard, TrendMaturityStage, HarnessResearchReport
 from ignis.domain.value_objects import GeoCode
 
 

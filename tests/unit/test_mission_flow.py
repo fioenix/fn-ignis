@@ -3,14 +3,13 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-from ignis.domain.entities import ResearchMission, TrendSignal, TopicCluster
+from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.interfaces.mcp.server import (
     handle_create_research_mission,
     handle_execute_mission_ingress,
-    handle_get_mission_analysis,
     handle_generate_mission_artifact,
 )
 

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from ignis.application.ports.repository_port import ITrendRepository
 
 logger = logging.getLogger(__name__)
@@ -93,15 +93,14 @@ class TikTokAuthManager:
             # Polling kiểm tra cookies đăng nhập (sessionid, sid_tt, uid_tt) hoặc URL thay đổi
             start_time = asyncio.get_event_loop().time()
             logged_in = False
-            session_cookie = None
 
             while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
                 cookies = await context.cookies()
                 for c in cookies:
                     if c.get("name") in ["sessionid", "sessionid_ss", "sid_tt", "uid_tt"] and c.get("value"):
                         logged_in = True
-                        session_cookie = c.get("value")
                         break
+
 
                 current_url = page.url
                 if logged_in or (current_url and "/login" not in current_url and "tiktok.com" in current_url):

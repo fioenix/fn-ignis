@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Dict, List
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.value_objects import GeoCode
 
