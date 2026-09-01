@@ -1,6 +1,7 @@
 # fn-ignis Agent Operating Guidelines & Interface Protocol 🤖
 
-This document defines the operational protocol, architectural guidelines, and tool selection principles for AI Agents (Claude Desktop, Claude Code, Antigravity, Cursor, Codex) interacting with `fn-ignis`.
+This document defines the operational protocol, architectural guidelines, and tool selection principles for AI Agents (**Claude Desktop, Claude Code, Cursor, Windsurf, Antigravity, OpenAI Codex, OpenClaw, and Hermes**) interacting with `fn-ignis`.
+
 
 ---
 

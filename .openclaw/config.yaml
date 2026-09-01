@@ -1,0 +1,14 @@
+name: fn-ignis
+version: 0.1.0
+type: intelligence-harness
+entrypoint: src/ignis/interfaces/mcp/server.py
+lifecycle:
+  on_mission_start:
+    action: register_domain_lexicon
+  on_data_ingest:
+    quality_gate_min_confidence: 0.70
+  on_synthesis:
+    metric: opportunity_index
+transports:
+  - stdio
+  - sse

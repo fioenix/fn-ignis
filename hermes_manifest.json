@@ -1,0 +1,134 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "get_current_session_mission",
+      "description": "Restore active mission linked to current chat thread or session ID.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "session_id": {"type": "string", "description": "Unique session or thread identifier"}
+        },
+        "required": ["session_id"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_tiktok_creative_center_trends",
+      "description": "Fetch top macro trending hashtags, views, and industry categories from TikTok Creative Center with optional industry filtering.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "geo": {"type": "string", "default": "VN", "description": "Country code (e.g. 'VN', 'US')"},
+          "period": {"type": "integer", "default": 7, "description": "Time period (7 or 30 days)"},
+          "limit": {"type": "integer", "default": 20, "description": "Max hashtags to return"},
+          "industry": {"type": "string", "description": "Optional industry filter (e.g. 'tech', 'software', 'education', 'ecommerce')"}
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_tiktok_search_suggestions",
+      "description": "Fetch real-time derivative search suggestions / autocomplete queries from TikTok for market demand analysis.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keywords": {"type": "array", "items": {"type": "string"}, "description": "List of seed search keywords"},
+          "geo": {"type": "string", "default": "VN", "description": "Country code"}
+        },
+        "required": ["keywords"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "execute_mission_ingress",
+      "description": "Execute multi-platform data collection for a research mission and evaluate quality scorecard.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mission_id": {"type": "string", "description": "UUID of the research mission"}
+        },
+        "required": ["mission_id"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "extract_customer_pain_points",
+      "description": "Extract customer pain points, objections, pricing questions, and unmet needs from video comments.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "keywords": {"type": "array", "items": {"type": "string"}, "description": "Keywords to search for"},
+          "geo": {"type": "string", "default": "VN", "description": "Country code"},
+          "max_videos": {"type": "integer", "default": 3, "description": "Max videos to scrape comments from"}
+        },
+        "required": ["keywords"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_mission_analysis",
+      "description": "Retrieve comprehensive synthesized analysis including Opportunity Index and White Space matrix.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mission_id": {"type": "string", "description": "UUID of the research mission"}
+        },
+        "required": ["mission_id"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "generate_mission_artifact",
+      "description": "Export interactive Infographic HTML Dashboard report to local disk.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mission_id": {"type": "string", "description": "UUID of the research mission"}
+        },
+        "required": ["mission_id"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "register_domain_lexicon",
+      "description": "Dynamically register domain vocabulary, slang, brand names, and tool keywords into the database.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "domain": {"type": "string", "description": "Target domain/industry (e.g. 'fashion', 'tech', 'crypto')"},
+          "terms": {"type": "array", "items": {"type": "string"}, "description": "List of terms or slang words"},
+          "category": {"type": "string", "default": "vernacular", "description": "Category of terms"}
+        },
+        "required": ["domain", "terms"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_domain_lexicons",
+      "description": "List active domain vocabularies and industry taxonomies.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "domain": {"type": "string", "description": "Optional domain filter"}
+        }
+      }
+    }
+  }
+]
