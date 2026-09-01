@@ -82,14 +82,37 @@ class StrategicMarketReasoner:
         "cara", "yang", "untuk", "ini", "bisa", "dan", "dari"
     }
 
+    def __init__(
+        self,
+        custom_lexicon: Optional[Set[str]] = None,
+        custom_stopwords: Optional[Set[str]] = None,
+    ):
+        self._custom_lexicon: Set[str] = set(custom_lexicon or [])
+        self._custom_stopwords: Set[str] = set(custom_stopwords or [])
+
+    def register_terms(self, terms: List[str]) -> None:
+        """Dynamically register new domain vocabulary terms in memory."""
+        for t in terms:
+            clean = t.strip().lower()
+            if clean:
+                self._custom_lexicon.add(clean)
+
+    def register_foreign_stopwords(self, terms: List[str]) -> None:
+        """Dynamically register new foreign stop words into filter."""
+        for t in terms:
+            clean = t.strip().lower()
+            if clean:
+                self._custom_stopwords.add(clean)
+
     def _is_vietnamese(self, title: str) -> bool:
         if not title:
             return False
         title_lower = title.lower()
         words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", title_lower))
         
-        # Layer 1: Reject foreign stopwords
-        if any(fw in words for fw in self.FOREIGN_STOPWORDS):
+        # Layer 1: Reject foreign stopwords (Static + Dynamic DB)
+        all_stopwords = self.FOREIGN_STOPWORDS | self._custom_stopwords
+        if any(fw in words for fw in all_stopwords):
             return False
 
         # Layer 2: Exclusive Vietnamese characters
@@ -97,8 +120,10 @@ class StrategicMarketReasoner:
             return True
 
         # Layer 3: Active Vietnamese lexicon match
-        vi_word_count = sum(1 for w in words if w in self.VI_COMMON_WORDS)
+        active_lexicon = self.VI_COMMON_WORDS | self._custom_lexicon
+        vi_word_count = sum(1 for w in words if w in active_lexicon)
         return vi_word_count >= 1
+
 
     def _is_garbage(self, title: str) -> bool:
         t_low = title.lower()

@@ -182,6 +182,20 @@ class AutonomousDiscoveryUseCase:
             clusters = await self._clusterer.cluster_signals(all_signals)
             await self._repository.save_clusters(clusters)
 
+        # Nạp Dynamic Lexicons & Foreign Stopwords từ PostgreSQL DB
+        try:
+            db_lexicons = await self._repository.get_domain_lexicons()
+            pos_terms = [item["term"] for item in db_lexicons if item.get("domain") != "foreign_stopwords"]
+            stop_terms = [item["term"] for item in db_lexicons if item.get("domain") == "foreign_stopwords"]
+            if pos_terms:
+                self._quality_evaluator.register_terms(pos_terms)
+                self._strategic_reasoner.register_terms(pos_terms)
+            if stop_terms:
+                self._quality_evaluator.register_foreign_stopwords(stop_terms)
+                self._strategic_reasoner.register_foreign_stopwords(stop_terms)
+        except Exception as e:
+            logger.warning(f"Could not load dynamic lexicons from DB: {e}")
+
         scorecard = self._quality_evaluator.evaluate_quality(all_signals, geo=geo)
         report: HarnessResearchReport = self._strategic_reasoner.analyze_mission(
             mission=mission,
@@ -189,6 +203,7 @@ class AutonomousDiscoveryUseCase:
             clusters=clusters,
             scorecard=scorecard,
         )
+
 
         # Platform breakdown
         platform_breakdown: Dict[str, int] = {}

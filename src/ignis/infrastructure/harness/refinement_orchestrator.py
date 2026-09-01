@@ -47,6 +47,20 @@ class AutonomousRefinementOrchestrator:
         mission.status = "RUNNING"
         await self._repo.update_mission(mission)
 
+        # 0. Nạp Dynamic Lexicons & Foreign Stopwords từ PostgreSQL DB
+        try:
+            db_lexicons = await self._repo.get_domain_lexicons()
+            pos_terms = [item["term"] for item in db_lexicons if item.get("domain") != "foreign_stopwords"]
+            stop_terms = [item["term"] for item in db_lexicons if item.get("domain") == "foreign_stopwords"]
+            if pos_terms:
+                self._evaluator.register_terms(pos_terms)
+                self._reasoner.register_terms(pos_terms)
+            if stop_terms:
+                self._evaluator.register_foreign_stopwords(stop_terms)
+                self._reasoner.register_foreign_stopwords(stop_terms)
+        except Exception as e:
+            logger.warning(f"[Harness] Không thể tải dynamic lexicons từ DB: {e}")
+
         # Pass 1: Cào theo từ khóa chính
         signals: List[TrendSignal] = await self._registry.search_across_all(
             keywords=mission.keywords,
@@ -56,6 +70,7 @@ class AutonomousRefinementOrchestrator:
 
         for s in signals:
             s.mission_id = mission.id
+
 
         scorecard = self._evaluator.evaluate_quality(signals, geo=mission.geo_code)
         logger.info(f"[Harness] Pass 1 hoàn tất: {len(signals)} signals, Quality Confidence: {scorecard.overall_confidence}% ({scorecard.confidence_level.value}).")

@@ -51,8 +51,27 @@ INSERT INTO market_lexicons (domain, term, category, created_by) VALUES
 ('fashion', 'local brand', 'vernacular', 'system'),
 ('fashion', 'linen', 'material', 'system'),
 ('fashion', 'oversize', 'style', 'system'),
-('fashion', 'freesize', 'style', 'system'),
-('fashion', 'outfit', 'style', 'system')
+('fashion', 'outfit', 'style', 'system'),
+-- Foreign Stopwords (Dynamic Language Filter Seeds)
+('foreign_stopwords', 'como', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'funcionam', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'chegou', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'novos', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'veja', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'agentes', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'autonomos', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'autônomos', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'você', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'voce', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'fazer', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'curso', 'stopwords_pt', 'system'),
+('foreign_stopwords', 'formation', 'stopwords_fr', 'system'),
+('foreign_stopwords', 'complète', 'stopwords_fr', 'system'),
+('foreign_stopwords', 'debutant', 'stopwords_fr', 'system'),
+('foreign_stopwords', 'débutant', 'stopwords_fr', 'system'),
+('foreign_stopwords', 'cara', 'stopwords_id', 'system'),
+('foreign_stopwords', 'yang', 'stopwords_id', 'system'),
+('foreign_stopwords', 'untuk', 'stopwords_id', 'system')
 ON CONFLICT (domain, term) DO NOTHING;
 
 INSERT INTO industry_taxonomies (industry_code, industry_name, keywords) VALUES

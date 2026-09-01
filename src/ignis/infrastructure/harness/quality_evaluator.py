@@ -47,8 +47,13 @@ class QualityEvaluator:
         "bao", "nhieu", "n8n", "dify", "make", "rpa", "cskh", "dai", "phi"
     }
 
-    def __init__(self, custom_lexicon: Optional[Set[str]] = None):
+    def __init__(
+        self,
+        custom_lexicon: Optional[Set[str]] = None,
+        custom_stopwords: Optional[Set[str]] = None,
+    ):
         self._custom_lexicon: Set[str] = set(custom_lexicon or [])
+        self._custom_stopwords: Set[str] = set(custom_stopwords or [])
 
     def register_terms(self, terms: List[str]) -> None:
         """Dynamically register new domain vocabulary terms in memory."""
@@ -57,10 +62,22 @@ class QualityEvaluator:
             if clean:
                 self._custom_lexicon.add(clean)
 
-    def is_vietnamese(self, text: str, extra_terms: Optional[Set[str]] = None) -> bool:
+    def register_foreign_stopwords(self, terms: List[str]) -> None:
+        """Dynamically register new foreign stop words into filter."""
+        for t in terms:
+            clean = t.strip().lower()
+            if clean:
+                self._custom_stopwords.add(clean)
+
+    def is_vietnamese(
+        self,
+        text: str,
+        extra_terms: Optional[Set[str]] = None,
+        extra_stopwords: Optional[Set[str]] = None,
+    ) -> bool:
         """
         Multi-layer Vietnamese localization detector:
-        1. Instantly rejects Romance / Foreign stopwords.
+        1. Instantly rejects Romance / Foreign stopwords (static baseline + DB dynamic).
         2. Detects unique Vietnamese characters (đ, ơ, ư, hook/dot tones).
         3. For shared Latin diacritics (e.g. ô in Portuguese 'Autônomos'), requires genuine Vietnamese vocabulary.
         """
@@ -70,8 +87,9 @@ class QualityEvaluator:
         text_lower = text.lower()
         words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", text_lower))
         
-        # Layer 1: Reject explicit foreign stopwords
-        if any(fw in words for fw in self.FOREIGN_STOPWORDS):
+        # Layer 1: Reject explicit foreign stopwords (Static + Dynamic Database)
+        all_stopwords = self.FOREIGN_STOPWORDS | self._custom_stopwords | (extra_stopwords or set())
+        if any(fw in words for fw in all_stopwords):
             return False
 
         # Layer 2: Exclusive Vietnamese characters
@@ -82,6 +100,7 @@ class QualityEvaluator:
         active_lexicon = self.VI_COMMON_WORDS | self._custom_lexicon | (extra_terms or set())
         vi_word_count = sum(1 for w in words if w in active_lexicon)
         return vi_word_count >= 1
+
 
 
     def evaluate_quality(
