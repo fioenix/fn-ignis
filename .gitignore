@@ -37,11 +37,17 @@ venv.bak/
 *.key
 
 
+# Local Notes & Private Backlogs
+*.local.md
+.local/
+backlog.local.md
+
 # Database & Local Storage
 *.sqlite
 *.sqlite3
 data/
 pgdata/
+
 
 # IDE & OS
 .DS_Store
