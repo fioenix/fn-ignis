@@ -45,6 +45,17 @@ class ExecuteMissionUseCase:
                 custom_timeframe=mission.timeframe,
             )
 
+            # Fail-safe: Nếu một nguồn gặp Quota Exceeded (ví dụ YouTube 429), bảo toàn dữ liệu cũ của nguồn đó
+            existing_signals = await self._repo.get_mission_signals(mission.id)
+            if existing_signals:
+                existing_platforms = {s.platform for s in existing_signals}
+                new_platforms = {s.platform for s in signals}
+                missing_platforms = existing_platforms - new_platforms
+                for missing_plat in missing_platforms:
+                    preserved = [s for s in existing_signals if s.platform == missing_plat]
+                    logger.warning(f"Preserving {len(preserved)} signals for platform {missing_plat} due to ingress quota/fallback.")
+                    signals.extend(preserved)
+
             # 2. Gắn mission_id vào toàn bộ signals
             for s in signals:
                 s.mission_id = mission.id
@@ -52,7 +63,7 @@ class ExecuteMissionUseCase:
             # 3. Gom cụm và chấm điểm
             clusters = await self._clusterer.cluster_signals(signals) if signals else []
 
-            # 4. Xóa signals cũ của mission trước khi lưu mới (Replace mode)
+            # 4. Xóa signals cũ của mission trước khi lưu mới (Atomic Replace mode)
             await self._repo.delete_mission_signals(mission.id)
 
             # 5. Lưu dữ liệu mới
