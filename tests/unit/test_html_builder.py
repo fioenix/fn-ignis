@@ -82,3 +82,20 @@ def test_build_mission_report_artifact_with_qualitative_sections(sample_trend_si
     assert "Macro Radar" in html
     assert "#golivegrowfast" in html
 
+
+def test_html_builder_multi_currency_and_number_filters():
+    builder = HtmlArtifactBuilder()
+    currency_fn = builder._env.filters["format_currency"]
+    number_fn = builder._env.filters["format_number"]
+
+    assert currency_fn(150000, GeoCode.VN) == "150.000 ₫"
+    assert currency_fn(150, GeoCode.US) == "$150"
+    assert currency_fn(150.5, GeoCode.GLOBAL) == "$150.50"
+    assert currency_fn(200, "SG") == "S$200"
+    assert currency_fn(99, "EU") == "€99.00"
+
+    assert number_fn(1500000) == "1.5M"
+    assert number_fn(25400) == "25.4K"
+    assert number_fn(850) == "850"
+
+

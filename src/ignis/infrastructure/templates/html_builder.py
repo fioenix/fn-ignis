@@ -23,6 +23,37 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             autoescape=select_autoescape(["html", "xml"]),
         )
 
+        def format_currency_filter(value: Any, geo: Optional[Any] = None) -> str:
+            try:
+                num = float(value)
+            except (ValueError, TypeError):
+                return str(value)
+            geo_val = geo.value if hasattr(geo, "value") else str(geo or "VN")
+            if geo_val == "VN":
+                return f"{int(num):,} ₫".replace(",", ".")
+            elif geo_val in ("US", "GLOBAL"):
+                return f"${num:,.2f}" if num % 1 != 0 else f"${int(num):,}"
+            elif geo_val in ("SG", "SGP"):
+                return f"S${num:,.2f}" if num % 1 != 0 else f"S${int(num):,}"
+            elif geo_val in ("EU", "DE", "FR"):
+                return f"€{num:,.2f}"
+            return f"${num:,.2f}"
+
+        def format_number_filter(value: Any) -> str:
+            try:
+                num = float(value)
+                if num >= 1_000_000:
+                    return f"{num / 1_000_000:.1f}M"
+                elif num >= 1_000:
+                    return f"{num / 1_000:.1f}K"
+                return f"{int(num):,}"
+            except (ValueError, TypeError):
+                return str(value)
+
+        self._env.filters["format_currency"] = format_currency_filter
+        self._env.filters["format_number"] = format_number_filter
+
+
     def build_dashboard_artifact(
         self,
         clusters: List[TopicCluster],
