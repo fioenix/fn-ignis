@@ -80,9 +80,17 @@ class AutonomousDiscoveryUseCase:
             )
             await self._repository.save_mission(mission)
 
+        GENERIC_HASHTAG_BLACKLIST = {
+            "vietnamvodich", "golivegrowfast", "tiktokshop99", "xuhuong", "fyp", "trending",
+            "dance", "nhactre", "haihuoc", "funny", "giaitri", "thethao", "bongda", "troll",
+            "vlog", "duet", "chuyenhai", "music", "capcut", "giadinh", "namthankinh", "namthầnkinh"
+        }
+
+
         # Step 2: Macro Scan (TikTok Creative Center & Google RSS)
         macro_trends: List[Dict[str, Any]] = []
         macro_keywords: List[str] = []
+
 
         try:
             cc_plugin = None
@@ -91,10 +99,12 @@ class AutonomousDiscoveryUseCase:
                     cc_plugin = plugin
                     break
             if cc_plugin:
-                macro_trends = await cc_plugin.fetch_macro_trends(geo=geo, period=7, limit=max_macro_topics)
+                macro_trends = await cc_plugin.fetch_macro_trends(
+                    geo=geo, period=7, limit=max_macro_topics, industry="Tech & Electronics"
+                )
                 for item in macro_trends:
-                    tag = item.get("hashtag", "").replace("#", "").strip()
-                    if tag and tag not in macro_keywords:
+                    tag = item.get("hashtag", "").replace("#", "").strip().lower()
+                    if tag and tag not in self.GENERIC_HASHTAG_BLACKLIST and tag not in macro_keywords:
                         macro_keywords.append(tag)
         except Exception as e:
             logger.warning(f"Macro scan via Creative Center encountered error: {e}")
@@ -102,6 +112,7 @@ class AutonomousDiscoveryUseCase:
         # Fallback keywords if Creative Center scan yielded empty
         if not macro_keywords:
             macro_keywords = ["ai agent", "chatbot", "automation", "ecommerce", "tiktok shop"]
+
 
         # Step 3: Real-World Search Suggestions & Sub-Niche Expansion
         search_suggestions: List[Dict[str, Any]] = []

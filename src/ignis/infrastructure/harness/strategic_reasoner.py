@@ -28,20 +28,58 @@ class StrategicMarketReasoner:
 
     FRENCH_WORDS = {"formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant"}
 
-    VI_COMMON_WORDS = {
+    TECH_LOAN_WORDS = {
+        "ai", "bot", "chat", "agent", "app", "tool", "n8n", "dify", "make", "rpa",
+        "token", "workflow", "api", "prompt", "code", "coding", "software", "tech",
+        "saas", "plugin", "gpt", "llm", "claude", "gemini", "tutorial", "guide", "free"
+    }
+
+    VI_CORE_WORDS = {
         "va", "cua", "la", "trong", "cho", "voi", "ve", "tu", "dong", "hoa",
         "huong", "dan", "cach", "lam", "chu", "doanh", "nghiep", "ung", "dung",
         "giai", "phap", "phan", "mem", "tri", "tue", "nhan", "tao", "tro", "ly",
         "kiem", "tien", "nguoi", "viet", "nam", "danh", "bai", "hoc", "khoa",
-        "thuc", "chien", "tong", "quan"
+        "thuc", "chien", "tong", "quan", "chi", "tiet", "zalo", "acc", "clone",
+        "shop", "gia", "ban", "mua", "setup", "chot", "don", "kho", "hang",
+        "sao", "gi", "tai", "bao", "nhieu", "cskh", "dai", "phi", "khong",
+        "duoc", "nay", "moi", "tot", "nhat", "hay", "chia", "se", "kinh",
+        "nghiem", "tai", "lieu", "phan", "tich", "xay", "dung", "tu", "van",
+        "khach", "hang", "dich", "vu", "cong", "nghe", "nen", "tang"
     }
 
     GARBAGE_EXCLUSIONS = [
         "khát khao độc chiếm", "audio chiếm hữu", "chanh non", "truyện audio", "đọc truyện",
         "phonegrid", "phone farm", "mmo", "forex", "bóng đá", "ur3", "cánh tay robot",
         "bánh răng", "xích tải", "bốc xếp", "bao tải", "đồ chơi", "lego", "anh khoa hay hỏi",
-        "oprah", "the dark side of ai", "talkshow", "ai psychosis", "psychosis", "dating an ai"
+        "oprah", "the dark side of ai", "talkshow", "ai psychosis", "psychosis", "dating an ai",
+        "#funny", "#hai", "#namthầnkinh", "#namthankinh", "#giadinh", "#haihuoc", "#hài", "#hàihước",
+        "#troll", "#vlog", "#shorts_funny", "#comedy", "#prank", "#chuyenhai", "#giaitri", "#xuhuonghai",
+        "phim hài", "tiểu phẩm", "sitcom", "tập full", "trailer", "karaoke", "nhạc sống", "remix", "tiktok hài",
+        "parody", "reaction", "thách đấu", "ẩm thực", "ăn uống", "mukbang", "nhà thông minh"
     ]
+
+    # Characters strictly unique to Vietnamese
+    VI_EXCLUSIVE_CHARS_PATTERN = re.compile(
+        r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủãẽĩõũạẹịọụ]",
+        re.IGNORECASE
+    )
+
+    FOREIGN_STOPWORDS = {
+        "formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant",
+        "como", "funcionam", "chegou", "novos", "veja", "agentes", "autonomos", "autônomos",
+        "para", "com", "por", "sobre", "este", "esta", "todos", "agora", "fazer", "curso",
+        "gratis", "completo", "tutorial", "você", "voce", "seus", "suas", "criar", "criando",
+        "ferramenta", "passo", "inteligencia", "artificial", "automatizar",
+        "cara", "yang", "untuk", "ini", "bisa", "dan", "dari"
+    }
+
+    def __init__(
+        self,
+        custom_lexicon: Optional[Set[str]] = None,
+        custom_stopwords: Optional[Set[str]] = None,
+    ):
+        self._custom_lexicon: Set[str] = set(custom_lexicon or [])
+        self._custom_stopwords: Set[str] = set(custom_stopwords or [])
 
     def analyze_mission(
         self,
@@ -68,29 +106,6 @@ class StrategicMarketReasoner:
             actionable_takeaways=actionables,
         )
 
-    # Characters strictly unique to Vietnamese
-    VI_EXCLUSIVE_CHARS_PATTERN = re.compile(
-        r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủãẽĩõũạẹịọụ]",
-        re.IGNORECASE
-    )
-
-    FOREIGN_STOPWORDS = {
-        "formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant",
-        "como", "funcionam", "chegou", "novos", "veja", "agentes", "autonomos", "autônomos",
-        "para", "com", "por", "sobre", "este", "esta", "todos", "agora", "fazer", "curso",
-        "gratis", "completo", "tutorial", "você", "voce", "seus", "suas", "criar", "criando",
-        "ferramenta", "passo", "inteligencia", "artificial", "automatizar",
-        "cara", "yang", "untuk", "ini", "bisa", "dan", "dari"
-    }
-
-    def __init__(
-        self,
-        custom_lexicon: Optional[Set[str]] = None,
-        custom_stopwords: Optional[Set[str]] = None,
-    ):
-        self._custom_lexicon: Set[str] = set(custom_lexicon or [])
-        self._custom_stopwords: Set[str] = set(custom_stopwords or [])
-
     def register_terms(self, terms: List[str]) -> None:
         """Dynamically register new domain vocabulary terms in memory."""
         for t in terms:
@@ -108,6 +123,7 @@ class StrategicMarketReasoner:
     def _is_vietnamese(self, title: str) -> bool:
         if not title:
             return False
+
         title_lower = title.lower()
         words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", title_lower))
         
@@ -116,19 +132,23 @@ class StrategicMarketReasoner:
         if any(fw in words for fw in all_stopwords):
             return False
 
-        # Layer 2: Exclusive Vietnamese characters
+        # Layer 2: Exclusive Vietnamese characters with diacritics
         if self.VI_EXCLUSIVE_CHARS_PATTERN.search(title):
             return True
 
-        # Layer 3: Active Vietnamese lexicon match
-        active_lexicon = self.VI_COMMON_WORDS | self._custom_lexicon
-        vi_word_count = sum(1 for w in words if w in active_lexicon)
-        return vi_word_count >= 1
-
+        # Layer 3: Unaccented text verification
+        # Exclude international tech loan words from proof of Vietnamese localization
+        pure_words = words - self.TECH_LOAN_WORDS
+        active_core = self.VI_CORE_WORDS | self._custom_lexicon
+        vi_core_count = sum(1 for w in pure_words if w in active_core)
+        
+        # Requires at least 2 genuine core Vietnamese words for unaccented titles
+        return vi_core_count >= 2
 
     def _is_garbage(self, title: str) -> bool:
         t_low = title.lower()
         return any(g in t_low for g in self.GARBAGE_EXCLUSIONS)
+
 
     def _matches_topic_strictly(self, title: str, kw: str) -> bool:
         if self._is_garbage(title):
@@ -193,8 +213,12 @@ class StrategicMarketReasoner:
             ]
 
             vn_videos = [v for v in matching_videos if self._is_vietnamese(v.raw_title)]
-            vn_views = sum(v.metric_value for v in vn_videos)
+
+            # Winsorized View Capping: Cap contribution of any single video to 200,000 views
+            # to prevent a single viral comedy video from dominating the B2B SaaS supply distribution.
+            vn_views = sum(min(v.metric_value, 200000.0) for v in vn_videos)
             vn_count = len(vn_videos)
+
 
             # View-Weighted Supply Scoring Equation across all video platforms
             if vn_count == 0:
@@ -207,6 +231,7 @@ class StrategicMarketReasoner:
                 base_supply = min(settings.SUPPLY_BASE_MAX, vn_count * settings.SUPPLY_VIDEO_WEIGHT)
                 view_factor = min(settings.SUPPLY_VIEW_MAX, math.log10(max(10.0, vn_views)) * settings.SUPPLY_VIEW_LOG_WEIGHT)
                 supply_score = round(min(100.0, base_supply + view_factor), 1)
+
 
             # Phân tách nguồn nền tảng trong báo cáo
             yt_count = sum(1 for v in vn_videos if v.platform == PlatformType.YOUTUBE)

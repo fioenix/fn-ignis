@@ -36,15 +36,23 @@ class QualityEvaluator:
         "cara", "yang", "untuk", "ini", "bisa", "dan", "dari"
     }
 
-    VI_COMMON_WORDS = {
+    TECH_LOAN_WORDS = {
+        "ai", "bot", "chat", "agent", "app", "tool", "n8n", "dify", "make", "rpa",
+        "token", "workflow", "api", "prompt", "code", "coding", "software", "tech",
+        "saas", "plugin", "gpt", "llm", "claude", "gemini", "tutorial", "guide", "free"
+    }
+
+    VI_CORE_WORDS = {
         "va", "cua", "la", "trong", "cho", "voi", "ve", "tu", "dong", "hoa",
         "huong", "dan", "cach", "lam", "chu", "doanh", "nghiep", "ung", "dung",
         "giai", "phap", "phan", "mem", "tri", "tue", "nhan", "tao", "tro", "ly",
         "kiem", "tien", "nguoi", "viet", "nam", "danh", "bai", "hoc", "khoa",
-        "thuc", "chien", "tong", "quan", "chi", "tiet", "zalo", "token", "bot",
-        "chat", "agent", "app", "tool", "acc", "clone", "shop", "gia", "ban",
-        "mua", "setup", "chot", "don", "kho", "hang", "sao", "gi", "tai",
-        "bao", "nhieu", "n8n", "dify", "make", "rpa", "cskh", "dai", "phi"
+        "thuc", "chien", "tong", "quan", "chi", "tiet", "zalo", "acc", "clone",
+        "shop", "gia", "ban", "mua", "setup", "chot", "don", "kho", "hang",
+        "sao", "gi", "tai", "bao", "nhieu", "cskh", "dai", "phi", "khong",
+        "duoc", "nay", "moi", "tot", "nhat", "hay", "chia", "se", "kinh",
+        "nghiem", "tai", "lieu", "phan", "tich", "xay", "dung", "tu", "van",
+        "khach", "hang", "dich", "vu", "cong", "nghe", "nen", "tang"
     }
 
     def __init__(
@@ -78,8 +86,9 @@ class QualityEvaluator:
         """
         Multi-layer Vietnamese localization detector:
         1. Instantly rejects Romance / Foreign stopwords (static baseline + DB dynamic).
-        2. Detects unique Vietnamese characters (đ, ơ, ư, hook/dot tones).
-        3. For shared Latin diacritics (e.g. ô in Portuguese 'Autônomos'), requires genuine Vietnamese vocabulary.
+        2. Detects unique Vietnamese characters (đ, ơ, ư, hook/dot tones, accented vowels).
+        3. For unaccented text, ignores borrowed tech words (ai, bot, chat, tool, etc.)
+           and requires at least 2 genuine Vietnamese core vocabulary words.
         """
         if not text:
             return False
@@ -92,16 +101,18 @@ class QualityEvaluator:
         if any(fw in words for fw in all_stopwords):
             return False
 
-        # Layer 2: Exclusive Vietnamese characters
+        # Layer 2: Exclusive Vietnamese characters with diacritics
         if self.VI_EXCLUSIVE_CHARS_PATTERN.search(text):
             return True
 
-        # Layer 3: If ambiguous shared diacritics or plain text, require active Vietnamese lexicon match
-        active_lexicon = self.VI_COMMON_WORDS | self._custom_lexicon | (extra_terms or set())
-        vi_word_count = sum(1 for w in words if w in active_lexicon)
-        return vi_word_count >= 1
-
-
+        # Layer 3: Unaccented text verification
+        # Exclude international tech loan words from proof of Vietnamese localization
+        pure_words = words - self.TECH_LOAN_WORDS
+        active_core = self.VI_CORE_WORDS | self._custom_lexicon | (extra_terms or set())
+        vi_core_count = sum(1 for w in pure_words if w in active_core)
+        
+        # Requires at least 2 genuine core Vietnamese words for unaccented titles
+        return vi_core_count >= 2
 
     def evaluate_quality(
         self,
@@ -140,8 +151,8 @@ class QualityEvaluator:
             missing_core = core_platforms - platforms_present
             flaws.append(f"Missing core pillars: {', '.join(missing_core)}.")
 
-        # 2. Language Precision (evaluated on content signals)
-        content_signals = [s for s in signals if s.platform != PlatformType.GOOGLE_TRENDS]
+        # 2. Language Precision (strictly evaluated on content video signals without Google RSS denominator skew)
+        content_signals = [s for s in signals if s.platform in (PlatformType.YOUTUBE, PlatformType.TIKTOK, PlatformType.REELS)]
         eval_signals = content_signals if content_signals else signals
 
         target_lang_matches = 0
@@ -154,16 +165,17 @@ class QualityEvaluator:
                 channels.append(channel)
 
             if geo == GeoCode.VN:
-                if self.is_vietnamese(title) or (channel and self.is_vietnamese(channel)):
+                if self.is_vietnamese(title):
                     target_lang_matches += 1
             else:
                 target_lang_matches += 1
 
-        language_precision = round((target_lang_matches / float(len(eval_signals))) * 100.0, 1)
+        language_precision = round((target_lang_matches / float(len(eval_signals))) * 100.0, 1) if eval_signals else 0.0
         if language_precision >= 70.0:
             strengths.append(f"High language localization ({language_precision}% verified target market language).")
         else:
             flaws.append(f"{round(100.0 - language_precision, 1)}% of content signals are non-localized / foreign language.")
+
 
         # 3. Creator Diversity Score
         if channels:

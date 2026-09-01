@@ -66,7 +66,22 @@
           <div class="text-[11px] text-purple-600 font-semibold">Independent creator sources</div>
         </div>
       </div>
+
+      <!-- Quality Gate Flaws & Confidence Bottlenecks (if any) -->
+      {% if scorecard.flaws_detected %}
+      <div class="mt-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 space-y-2">
+        <div class="flex items-center space-x-2 text-xs font-bold text-amber-700 uppercase tracking-wider">
+          <span>⚠️ Data Quality Bottlenecks & Flaws Detected ({{ scorecard.flaws_detected|length }})</span>
+        </div>
+        <ul class="text-xs text-amber-900 space-y-1 list-disc list-inside">
+          {% for flaw in scorecard.flaws_detected %}
+          <li>{{ flaw }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
     </section>
+
 
     <!-- ACT 2: VISUAL DATA CANVAS (CHARTS ROW) -->
     <section class="grid grid-cols-1 md:grid-cols-3 gap-6">

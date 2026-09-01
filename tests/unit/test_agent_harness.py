@@ -159,3 +159,35 @@ def test_opportunity_index_sample_size_damping_and_label_alignment():
     assert opps_sat[0].opportunity_type == "SATURATED_SEGMENT"
     assert "saturated" in opps_sat[0].strategic_recommendation.lower()
 
+
+def test_language_filter_english_tech_rejection():
+    evaluator = QualityEvaluator()
+    reasoner = StrategicMarketReasoner()
+
+    english_chatbot_1 = "How to build an AI Chatbot with Flowise and LangChain"
+    english_chatbot_2 = "Ultimate AI Agent Tutorial for Beginners (No Code)"
+    english_chatbot_3 = "Building Custom GPTs vs AI Agents in 2026"
+    vietnamese_chatbot = "Hướng dẫn tạo AI Chatbot chăm sóc khách hàng tự động cho shop"
+
+    assert evaluator.is_vietnamese(english_chatbot_1) is False
+    assert reasoner._is_vietnamese(english_chatbot_1) is False
+
+    assert evaluator.is_vietnamese(english_chatbot_2) is False
+    assert reasoner._is_vietnamese(english_chatbot_2) is False
+
+    assert evaluator.is_vietnamese(english_chatbot_3) is False
+    assert reasoner._is_vietnamese(english_chatbot_3) is False
+
+    assert evaluator.is_vietnamese(vietnamese_chatbot) is True
+    assert reasoner._is_vietnamese(vietnamese_chatbot) is True
+
+
+def test_comedy_and_outlier_rejection():
+    reasoner = StrategicMarketReasoner()
+
+    comedy_video = "Hệ thống nhà thông minh tự động hóa toàn diện #namthầnkinh #funny #giadinh"
+    assert reasoner._is_garbage(comedy_video) is True
+    assert reasoner._matches_topic_strictly(comedy_video, "tự động hóa ai") is False
+    assert reasoner._matches_topic_strictly(comedy_video, "workflow automation") is False
+
+
