@@ -10,12 +10,12 @@ The following versions of `fn-ignis` are currently supported with security updat
 
 ## Reporting a Vulnerability
 
-The `fn-ignis` team takes the security and integrity of our codebase and self-hosted deployments seriously.
+The `fnIgnis` (`fn-ignis`) team at **FINOLABS** takes the security and integrity of our codebase and self-hosted deployments seriously.
 
-If you believe you have found a security vulnerability in `fn-ignis`:
+If you believe you have found a security vulnerability in `fnIgnis`:
 
 1. **Do not open a public GitHub issue.**
-2. Please report the issue privately by contacting the maintainers or sending an email to security@fioenix.dev.
+2. Please report the issue privately by contacting the maintainers or sending an email to security@finolabs.dev.
 3. Include details of the vulnerability:
    - Steps to reproduce
    - Potential impact

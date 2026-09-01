@@ -1,9 +1,10 @@
 {
   "$schema": "https://openclaw.dev/schemas/plugin.v1.json",
   "name": "fn-ignis",
+  "title": "fnIgnis",
   "version": "0.1.0",
-  "description": "Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform",
-  "author": "Fioenix",
+  "description": "Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform by FINOLABS",
+  "author": "FINOLABS",
   "capabilities": [
     "trend_monitoring",
     "voice_of_customer",

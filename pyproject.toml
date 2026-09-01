@@ -1,11 +1,11 @@
 [project]
 name = "fn-ignis"
 version = "0.1.0"
-description = "Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform with FastMCP Server"
+description = "fnIgnis — Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform with FastMCP Server"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
-    { name = "Fioenix", email = "fioenix@users.noreply.github.com" }
+    { name = "FINOLABS", email = "contact@finolabs.dev" }
 ]
 keywords = [
     "trend-intelligence",
