@@ -77,6 +77,17 @@ class QualityEvaluator:
             if clean:
                 self._custom_stopwords.add(clean)
 
+    GARBAGE_EXCLUSIONS = {
+        "#funny", "#hai", "#namthầnkinh", "#giadinh", "#haihuoc", "#troll", "#vlog",
+        "nhà thông minh", "sitcom", "tiểu phẩm", "phim ngắn"
+    }
+
+    def _is_garbage(self, text: str) -> bool:
+        if not text:
+            return True
+        t_low = text.lower()
+        return any(g in t_low for g in self.GARBAGE_EXCLUSIONS)
+
     def is_vietnamese(
         self,
         text: str,
@@ -85,12 +96,16 @@ class QualityEvaluator:
     ) -> bool:
         """
         Multi-layer Vietnamese localization detector:
-        1. Instantly rejects Romance / Foreign stopwords (static baseline + DB dynamic).
-        2. Detects unique Vietnamese characters (đ, ơ, ư, hook/dot tones, accented vowels).
-        3. For unaccented text, ignores borrowed tech words (ai, bot, chat, tool, etc.)
+        1. Instantly rejects comedy/garbage entertainment hashtags.
+        2. Instantly rejects Romance / Foreign stopwords (static baseline + DB dynamic).
+        3. Detects unique Vietnamese characters (đ, ơ, ư, hook/dot tones, accented vowels).
+        4. For unaccented text, ignores borrowed tech words (ai, bot, chat, tool, etc.)
            and requires at least 2 genuine Vietnamese core vocabulary words.
         """
         if not text:
+            return False
+
+        if self._is_garbage(text):
             return False
         
         text_lower = text.lower()
@@ -151,14 +166,11 @@ class QualityEvaluator:
             missing_core = core_platforms - platforms_present
             flaws.append(f"Missing core pillars: {', '.join(missing_core)}.")
 
-        # 2. Language Precision (strictly evaluated on content video signals without Google RSS denominator skew)
-        content_signals = [s for s in signals if s.platform in (PlatformType.YOUTUBE, PlatformType.TIKTOK, PlatformType.REELS)]
-        eval_signals = content_signals if content_signals else signals
-
+        # 2. Language Precision & Localization Check
         target_lang_matches = 0
         channels: List[str] = []
 
-        for s in eval_signals:
+        for s in signals:
             title = s.raw_title
             channel = s.metadata.get("channel_title", "")
             if channel:
@@ -170,11 +182,24 @@ class QualityEvaluator:
             else:
                 target_lang_matches += 1
 
-        language_precision = round((target_lang_matches / float(len(eval_signals))) * 100.0, 1) if eval_signals else 0.0
+        language_precision = round((target_lang_matches / float(len(signals))) * 100.0, 1) if signals else 0.0
         if language_precision >= 70.0:
             strengths.append(f"High language localization ({language_precision}% verified target market language).")
         else:
-            flaws.append(f"{round(100.0 - language_precision, 1)}% of content signals are non-localized / foreign language.")
+            flaws.append(f"{round(100.0 - language_precision, 1)}% of signals are non-localized or entertainment outliers ({target_lang_matches}/{len(signals)} verified).")
+
+        # 3. View Outlier Concentration Rule
+        content_signals = [s for s in signals if s.platform in (PlatformType.YOUTUBE, PlatformType.TIKTOK, PlatformType.REELS)]
+        total_views = sum(s.metric_value for s in content_signals if s.metric_value > 0)
+        if total_views > 0 and content_signals:
+            max_signal = max(content_signals, key=lambda s: s.metric_value)
+            max_views = max_signal.metric_value
+            view_ratio = max_views / float(total_views)
+            if view_ratio >= 0.5:
+                flaws.append(
+                    f"Severe view distribution skew: Single viral video ('{max_signal.raw_title[:45]}...') accounts for {round(view_ratio * 100, 1)}% of all video views ({int(max_views):,} / {int(total_views):,})."
+                )
+
 
 
         # 3. Creator Diversity Score

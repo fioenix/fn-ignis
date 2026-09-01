@@ -244,20 +244,23 @@ class StrategicMarketReasoner:
             plat_str = f" ({', '.join(breakdown_parts)})" if breakdown_parts else ""
             v_str = f"{vn_count} video{plat_str}" if vn_count == 1 else f"{vn_count} videos{plat_str}"
 
-            # Strict Opportunity Index with Sample Size Damping & Label Alignment
+            # Strict Opportunity Index with Inverted Sample Size Damping & Label Alignment
             if vn_count == 0:
-                opportunity_index = round(demand_score, 1)
-                opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with zero localized supply recorded ({v_str}). Prime unserved white space for early category leadership."
+                # Heavy uncertainty penalty for 0 empirical localized evidence (Speculative Gap)
+                damping_factor = 0.25
+                opportunity_index = round(demand_score * damping_factor, 1)
+                opp_type = "UNVERIFIED_DEMAND_GAP"
+                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 but lacks empirical localized supply evidence ({v_str}). Speculative gap requiring preliminary customer interviews (Effective OI: {opportunity_index:+0.1f})."
             else:
                 raw_oi = demand_score - supply_score
-                # Sample size confidence damping: If n < 5, dampen raw score
-                damping_factor = min(1.0, 0.35 + 0.65 * (vn_count / 5.0))
+                # Monotonic sample size confidence damping: N=1 (0.52), N=2 (0.64), N=3 (0.76), N=5+ (1.0)
+                damping_factor = min(1.0, 0.40 + 0.60 * (vn_count / 5.0))
                 opportunity_index = round(raw_oi * damping_factor, 1)
+
 
                 if opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
                     opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                    rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 outstripping available supply ({v_str}). High-confidence opportunity (Effective OI: {opportunity_index:+0.1f})."
+                    rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 outstripping available supply ({v_str}). High-confidence verified opportunity (Effective OI: {opportunity_index:+0.1f})."
                 elif opportunity_index >= 10.0:
                     opp_type = "GROWING_OPPORTUNITY"
                     rec = f"Segment '{raw_kw}' shows positive momentum ({v_str}) with addressable market headroom (Effective OI: {opportunity_index:+0.1f})."
@@ -272,6 +275,7 @@ class StrategicMarketReasoner:
                 support_sigs = [f"[{s.platform.value.upper()}] {s.raw_title}" for s in vn_videos[:3]]
             else:
                 support_sigs = ["No localized videos recorded across YouTube or TikTok in the requested timeframe."]
+
 
             opportunities.append(
                 MarketOpportunity(
