@@ -1,55 +1,59 @@
 # fn-ignis 🔥
-**Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform with FastMCP**
 
-`fn-ignis` is a self-hosted market intelligence and trend analysis platform that empowers AI Agents (Claude Desktop, Claude Code, Antigravity, Codex) and human strategists to discover high-value market white spaces across Google Trends, YouTube, TikTok, Threads, and Instagram Reels with **$0 token ingress costs**, deterministic mathematical scoring (Opportunity Index), real-world Voice of Customer extraction, and pixel-perfect interactive HTML Dashboard artifacts.
+[![CI](https://github.com/fioenix/fn-ignis/actions/workflows/ci.yml/badge.svg)](https://github.com/fioenix/fn-ignis/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
+[![MCP](https://img.shields.io/badge/MCP-Standard%20FastMCP-purple.svg)](https://modelcontextprotocol.io/)
+[![Docker Ready](https://img.shields.io/badge/Docker-Worker%20Daemon-2496ED.svg)](https://www.docker.com/)
+
+> **Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform with FastMCP Server**
+
+`fn-ignis` is a high-performance, self-hosted market listening and strategic research engine. It empowers AI Agents (**Claude Desktop, Claude Code, Cursor, Windsurf, Antigravity, OpenAI Codex, OpenClaw, and Nous Hermes**) and human strategists to discover high-value market white spaces across Google Trends, YouTube, TikTok Creative Center, TikTok Search Suggestions, and raw Voice-of-Customer comments with **$0 token ingress costs**, deterministic mathematical scoring (**Opportunity Index**), autonomous lexicon expansion, and pixel-perfect interactive HTML Dashboard artifacts.
 
 ---
 
-## 🏛️ Dual-Track Architecture
+## 🌟 Key Highlights
 
-`fn-ignis` operates on a dual-track architectural model that balances continuous passive surveillance with active, hypothesis-driven deep dives:
+- **⚡ Zero-Token Local Ingress**: Collects, filters, and normalizes high-volume signals locally using deterministic Python parsers without burning expensive LLM API tokens on raw scraping.
+- **🏛️ Dual-Track Architecture**: Combines a continuous 24/7 background radar daemon (`fn-ignis-worker`) with interactive, hypothesis-driven strategic deep dives on-demand.
+- **📊 Mathematical Opportunity Index**: Quantifies market white spaces (+100 to -100) by mathematically comparing macro search demand velocity against localized content supply volume.
+- **🗣️ Voice of Customer Ingress**: Scrapes and synthesizes real customer pain points, pricing inquiries, and unmet objections directly from public video comment sections.
+- **🧠 Autonomous Dynamic Lexicon Engine**: Persistent PostgreSQL registry allowing agents to dynamically register niche slang, brand names, and vernacular on-the-fly without modifying source code.
+- **🤖 Universal Agent Ecosystem**: Native out-of-the-box support for Claude, Cursor, Windsurf, Antigravity, Codex, OpenClaw, and Hermes.
+
+---
+
+## 🏛️ Architecture: The Dual-Track Model
 
 ```mermaid
 flowchart TD
-    subgraph Track1["Track 1: ALWAYS-ON RADAR (Passive & Automated 24/7)"]
+    subgraph Track1["Track 1: ALWAYS-ON RADAR (Continuous Surveillance 24/7)"]
         W["fn-ignis Worker Daemon (Docker)"] -->|Every 15m| E1["Multi-Platform Ingress & Semantic Clustering"]
         W -->|Every 12h| E2["Autonomous Discovery: Creative Center + White Space Synthesis"]
-        E1 & E2 --> DB[("Postgres / TimescaleDB (Data Baseline)")]
+        E1 & E2 --> DB[("PostgreSQL / TimescaleDB (Shared Baseline)")]
     end
 
-    subgraph Track2["Track 2: ON-DEMAND DEEP RESEARCH (Targeted & Active Probes)"]
-        User["User / Strategist"] <--> Claude["Claude Desktop / CLI (MCP)"]
-        Claude -->|Step 1: Clarify & Formulate Hypothesis| S1["Scope & Core Questions"]
-        Claude -->|Step 2-4: Active On-Demand Probes| S2["Search Suggestions, Video Grid & Comment Pain Points"]
-        Claude -->|Step 5-6: Opportunity Matrix & Synthesis| S3["Opportunity Index, Moats & 3-7d MVP Blueprint"]
+    subgraph Track2["Track 2: ON-DEMAND DEEP RESEARCH (Active Strategic Probes)"]
+        User["User / Strategist"] <--> Agent["AI Agent (Claude, Cursor, Codex, OpenClaw)"]
+        Agent -->|Step 1: Clarify & Register Lexicon| S1["Scope, Hypothesis & Domain Vernacular"]
+        Agent -->|Step 2-4: Deploy Active Probes| S2["Search Autocomplete, Video Grid & Comment Pain Points"]
+        Agent -->|Step 5-6: Strategic Synthesis| S3["Opportunity Index, Moats & 3-7d MVP Plan"]
         S2 -->|Enrich & Write Back| DB
-        Claude --> S4["Interactive Infographic HTML Dashboard"]
+        Agent --> S4["Interactive Infographic HTML Dossier"]
     end
 
-    DB -.->|Provides Continuous Baseline| Claude
+    DB -.->|Provides Continuous Historical Baseline| Agent
 ```
-
-### 1. Track 1: Always-On Autonomous Radar (Continuous Surveillance)
-- Runs 24/7 as a background container worker (`fn-ignis-worker`).
-- Periodically ingests macro trends from Google Trends RSS and TikTok Creative Center.
-- Performs zero-token semantic clustering and stores historical interest trajectories.
-- Runs scheduled autonomous discovery cycles to generate persistent daily white space digests (`reports/daily_discovery_vn_YYYY-MM-DD.html`).
-
-### 2. Track 2: On-Demand Targeted Deep Research (Active Strategic Probes)
-- Interactively coordinates with AI Agents via FastMCP tools and prompts.
-- Does not just consume cached data: **actively deploys targeted ingestion probes** for specific niche topics.
-- Extracts authentic user search intent (Autocomplete suggestions) and customer objections (public comment scraping).
-- Calculates the `Opportunity Index` (+100 to -100) and exports interactive HTML dossiers with actionable 3-7 day MVP validation roadmaps.
 
 ---
 
 ## 🧭 6-Step Standard Operating Procedure (SOP)
 
-Every research mission follows a deterministic 6-step pipeline:
+Every targeted research mission follows a deterministic 6-step workflow:
 
 ```
 Step 1: Clarify Research Objectives & Core Hypothesis
-   ↓
+   ↓ (Autonomous Lexicon Registration: Register vertical slang in DB)
 Step 2: Macro Scan & Real-World Keyword Expansion (Creative Center & Autocomplete Suggestions)
    ↓ (Feedback Loop: Expand scope with authentic user slang and sub-niches)
 Step 3: Deep Multi-Platform Ingress & Quality Gate (Spam rejection, Confidence >= 70%)
@@ -63,76 +67,121 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 ---
 
-## 🛠️ FastMCP Tool & Prompt Catalog
+## 🤖 Universal Multi-Agent Compatibility
 
-### 1. Market Research & Strategic Execution
-- `create_research_mission(title, keywords, geo, timeframe, hypothesis)`: Initialize a new targeted research campaign.
-- `execute_mission_ingress(mission_id)`: Execute deep multi-platform ingestion for an existing mission.
-- `get_mission_analysis(mission_id)`: Retrieve synthesized scorecard, white spaces, and action plans in token-optimized JSON.
-- `generate_mission_artifact(mission_id)`: Export a standalone, pixel-perfect single-file HTML Dashboard report to `reports/`.
-- `trigger_autonomous_discovery(geo)`: Trigger an on-demand end-to-end autonomous discovery cycle.
-- `get_latest_daily_discovery(geo)`: Retrieve the latest automated daily discovery digest.
+`fn-ignis` is built from the ground up to integrate seamlessly with any modern AI agent orchestrator:
 
-### 2. TikTok Radar & Voice of Customer
-- `get_tiktok_creative_center_trends(geo, period, limit)`: Fetch official nationwide industry ranking benchmarks and hashtags.
-- `get_tiktok_search_suggestions(keywords, geo)`: Fetch live autocomplete search queries and trending sub-hashtags.
-- `get_tiktok_video_comments(video_url, limit)`: Scrape raw public comments for a specific video.
-- `extract_customer_pain_points(keywords, geo, max_videos)`: Extract customer objections, pricing inquiries, and unmet needs.
-
-### 3. General Intelligence & Diagnostics
-- `get_current_session_mission(session_id)`: Restore active mission context for a chat thread.
-- `list_research_missions(limit)`: List recent research missions.
-- `get_trending_topics(geo, limit)`: Query top multi-platform topic clusters.
-- `generate_trend_artifact(topic_id, geo)`: Render general trend overview dashboard.
-
-### 4. Native Prompts & Resources
-- **Prompts**: `market_research_pipeline`, `voice_of_customer_audit`.
-- **Resources**: `fn-ignis://sop/market-research`, `fn-ignis://methodology/opportunity-index`.
+| AI Agent / Client | Configuration & Standards | Capabilities Supported |
+|---|---|---|
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 15 FastMCP Tools, Prompts, Resources, Automatic SOP Injection |
+| **Claude Code** | [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Agent Skills Standard, Native In-Chat Artifacts |
+| **Cursor IDE** | [`.cursor/rules/fn-ignis.mdc`](.cursor/rules/fn-ignis.mdc), [`.cursorrules`](.cursorrules) | Context-Aware Multi-Platform Market Intelligence |
+| **Windsurf IDE** | [`.windsurfrules`](.windsurfrules) | Cascade Step-by-Step Research Rule Protocol |
+| **Antigravity / Gemini Code** | [`AGENTS.md`](AGENTS.md) + Agent Skills | Dual-Track Continuous Radar & Dynamic Lexicon Ingress |
+| **OpenAI Codex** | [`.codex/instructions.md`](.codex/instructions.md), [`.codexrules`](.codexrules) | Thread Session Continuity (`codex://threads/...`), Structured Tools |
+| **OpenClaw** | [`openclaw.json`](openclaw.json), [`.openclaw/config.yaml`](.openclaw/config.yaml) | OpenClaw Plugin v1 Schema with Lifecycle Hooks |
+| **Nous Hermes** | [`.hermes/tools.json`](.hermes/tools.json), [`hermes_manifest.json`](hermes_manifest.json) | Native Structured Function-Calling JSON Schema |
 
 ---
 
-## ⚡ 1-Click Installation & Setup
+## 🛠️ FastMCP Tool & Resource Catalog
 
-### 1. Automated Installation
-Run the bundle installer from the repository root:
+### 1. Market Research & Strategic Synthesis
+- **`create_research_mission(title, keywords, geo, timeframe, hypothesis)`**: Initialize a new targeted research campaign.
+- **`execute_mission_ingress(mission_id)`**: Execute deep multi-platform data collection with automated quality gate evaluation.
+- **`get_mission_analysis(mission_id)`**: Retrieve full synthesized strategic analysis (Opportunity Index, white spaces, action plan).
+- **`generate_mission_artifact(mission_id)`**: Export a standalone, high-contrast interactive Infographic HTML Dashboard to `reports/`.
+- **`trigger_autonomous_discovery(geo)`**: Trigger an on-demand full autonomous discovery cycle.
+- **`get_latest_daily_discovery(geo)`**: Retrieve the latest automated daily discovery digest.
+
+### 2. Social Listening & Voice of Customer
+- **`get_tiktok_creative_center_trends(geo, period, limit, industry)`**: Fetch official nationwide industry ranking benchmarks with optional vertical filtering.
+- **`get_tiktok_search_suggestions(keywords, geo)`**: Fetch live autocomplete search suggestions and trending hashtags.
+- **`get_tiktok_video_comments(video_url, limit)`**: Scrape raw public comments for a specific video.
+- **`extract_customer_pain_points(keywords, geo, max_videos)`**: Extract customer objections, pricing inquiries, and unmet needs from comments.
+
+### 3. Dynamic Lexicon Registry
+- **`register_domain_lexicon(domain, terms, category)`**: Dynamically register new niche vocabulary/slang into PostgreSQL.
+- **`list_domain_lexicons(domain)`**: Query active domain vocabularies and industry mappings.
+
+### 4. FastMCP Native Resources & Prompts
+- **Resources**: `fn-ignis://sop/market-research`, `fn-ignis://methodology/opportunity-index`
+- **Prompts**: `market_research_pipeline`, `voice_of_customer_audit`
+
+---
+
+## ⚡ Quickstart & Installation
+
+### Prerequisites
+- **Python 3.11+** or [`uv`](https://github.com/astral-sh/uv)
+- **Docker & Docker Compose** (for PostgreSQL/TimescaleDB and background worker)
+- **Google Cloud YouTube Data API Key** (Free tier)
+
+### 1. 1-Command Automated Bundle Setup
+Clone the repository and run the automated installer:
 ```bash
+git clone https://github.com/fioenix/fn-ignis.git
+cd fn-ignis
+
+# Run bundle installer (Sets up venv, installs dependencies, configures Claude Desktop & starts Docker worker)
 ./bundle/install.sh
 ```
-Or via Python CLI:
+
+### 2. Manual Setup
 ```bash
-uv pip install -e .
-uv run python -m ignis.interfaces.cli.setup_bundle
+# 1. Create and activate virtual environment
+uv venv .venv
+source .venv/bin/activate
+
+# 2. Install dependencies with all extras
+uv pip install -e ".[dev,browser,ai]"
+
+# 3. Configure environment
+cp .env.example .env
+# Edit .env with your PostgreSQL credentials and YouTube API Key
+
+# 4. Start Docker background infrastructure
 docker compose up -d --build
 ```
 
-### 2. Claude Desktop Integration
-The installer automatically configures `claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "fn-ignis": {
-      "command": "/Users/fioenix/Projects/fn-ignis/.venv/bin/python",
-      "args": ["-m", "ignis.interfaces.mcp.server"],
-      "env": {
-        "DATABASE_URL": "postgresql://postgres.xxx:yyy@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres",
-        "DEFAULT_GEO": "VN",
-        "YOUTUBE_API_KEY": "AIzaSy..."
-      }
-    }
-  }
-}
-```
+---
+
+## ⚙️ Environment Variables
+
+| Variable | Description | Default | Required |
+|---|---|---|:---:|
+| `DATABASE_URL` | PostgreSQL/TimescaleDB connection string | `postgresql://postgres:postgres@localhost:5432/ignis_trends` | **Yes** |
+| `YOUTUBE_API_KEY` | Google Cloud YouTube Data API v3 Key | `""` | **Yes** |
+| `DEFAULT_GEO` | Default ISO country code for trend intelligence | `VN` | No |
+| `SYNC_INTERVAL_MINUTES` | Frequency of background multi-platform synchronization | `60` | No |
+| `IGNIS_ENCRYPTION_KEY` | AES-256 Fernet key for session cookie encryption | *(Auto-generated)* | No |
 
 ---
 
-## 🧪 Testing
+## 🧪 Verification & Testing
 
-Run the full pytest suite (100% async coverage):
+Run the test suite with 100% async coverage:
 ```bash
 uv run pytest
 ```
 
 ---
 
+## 🛡️ Security & Privacy
+
+- **Zero Data Leakage**: Raw scraping data is parsed and evaluated locally. No third-party LLM sees raw proprietary inputs unless explicitly directed by the agent.
+- **AES-256 Encryption**: Browser session states and credentials are encrypted at rest using AES-256-GCM / Fernet.
+- **Parameterized SQL**: All database operations use strict parameterized queries (`%s`) to prevent SQL injection.
+- For vulnerability reports, please consult our [Security Policy](SECURITY.md).
+
+---
+
+## 🤝 Contributing
+
+Contributions from the open-source community are welcome! Please review our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting pull requests.
+
+---
+
 ## 📄 License
-MIT License. Built for advanced autonomous market intelligence and white-space discovery.
+
+Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
