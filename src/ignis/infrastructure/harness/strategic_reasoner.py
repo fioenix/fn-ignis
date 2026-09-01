@@ -39,7 +39,7 @@ class StrategicMarketReasoner:
         "khát khao độc chiếm", "audio chiếm hữu", "chanh non", "truyện audio", "đọc truyện",
         "phonegrid", "phone farm", "mmo", "forex", "bóng đá", "ur3", "cánh tay robot",
         "bánh răng", "xích tải", "bốc xếp", "bao tải", "đồ chơi", "lego", "anh khoa hay hỏi",
-        "oprah", "the dark side of ai", "talkshow"
+        "oprah", "the dark side of ai", "talkshow", "ai psychosis", "psychosis", "dating an ai"
     ]
 
     def analyze_mission(
@@ -159,19 +159,21 @@ class StrategicMarketReasoner:
 
             opportunity_index = round(demand_score - supply_score, 1)
 
+            v_str = f"{vn_count} video" if vn_count == 1 else f"{vn_count} videos"
+
             # Configurable Opportunity Classification
             if vn_count == 0 or opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
                 opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with very thin localized supply ({vn_count} videos). Prime white space for early market leadership."
+                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with very thin localized supply ({v_str}). Prime white space for early market leadership."
             elif ("doanh nghiệp" in kw_clean or "enterprise" in kw_clean or "b2b" in kw_clean) and supply_score < settings.ENTERPRISE_GAP_SUPPLY_THRESHOLD:
                 opp_type = "ENTERPRISE_GAP"
-                rec = f"Enterprise B2B White Space: High search intent but severe lack of hands-on enterprise case studies in local market ({vn_count} videos)."
+                rec = f"Enterprise B2B White Space: High search intent but severe lack of hands-on enterprise case studies in local market ({v_str})."
             elif supply_score >= settings.SATURATION_SUPPLY_THRESHOLD:
                 opp_type = "SATURATED_SEGMENT"
-                rec = f"Segment '{raw_kw}' has substantial foundational creator supply ({vn_count} localized videos). Recommend differentiating through advanced or verticalized solutions."
+                rec = f"Segment '{raw_kw}' has substantial foundational creator supply ({v_str}). Recommend differentiating through advanced or verticalized solutions."
             else:
                 opp_type = "GROWING_OPPORTUNITY"
-                rec = f"Segment '{raw_kw}' is actively growing ({vn_count} localized videos), with significant addressable headroom."
+                rec = f"Segment '{raw_kw}' is actively growing ({v_str}), with significant addressable headroom."
 
             if vn_videos:
                 support_sigs = [s.raw_title for s in vn_videos[:3]]
