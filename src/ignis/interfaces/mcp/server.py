@@ -35,7 +35,7 @@ from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTok
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
-from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
 logger = logging.getLogger("ignis.mcp")
@@ -44,8 +44,8 @@ SOP_SYSTEM_INSTRUCTIONS = """
 You are the fn-ignis Trend Intelligence & Market Opportunity Agent.
 When conducting any market research, niche analysis, or trend discovery task, you MUST STRICTLY FOLLOW the 6-Step Standard Operating Procedure (SOP):
 
-1. Step 1 (Clarify & Formulate Hypothesis):
-   Clarify business model (SaaS, Retail, Agency, Content), target audience (B2B/B2C), target geography (VN/Global), and timeframe. Establish the core hypothesis to test.
+1. Step 1 (Clarify Objectives & Core Hypothesis):
+   Establish clear, falsifiable hypotheses. Identify vertical (Fashion, Crypto, Healthcare, Logistics) and call `register_domain_lexicon(domain="...", terms=[...])` to expand the Quality Gate's domain vocabulary dynamically before deep crawling.
 
 2. Step 2 (Macro Scan & Real-World Keyword Expansion):
    Call `get_tiktok_creative_center_trends` and `get_tiktok_search_suggestions` to uncover actual slang, tool names, and sub-niches being searched by users in target geo before deep crawling.
@@ -71,11 +71,7 @@ mcp = FastMCP("fn-ignis-trend-intelligence", instructions=SOP_SYSTEM_INSTRUCTION
 
 
 def _init_components():
-    repository = PostgresTimescaleRepository(
-        dsn=settings.DATABASE_URL,
-        min_pool_size=settings.DB_MIN_POOL_SIZE,
-        max_pool_size=settings.DB_MAX_POOL_SIZE,
-    )
+    repository = create_repository()
     tiktok_auth_manager = TikTokAuthManager(repository=repository)
     creative_center_plugin = TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager)
 
