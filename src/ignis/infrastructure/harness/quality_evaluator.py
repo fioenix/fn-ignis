@@ -114,11 +114,17 @@ class QualityEvaluator:
         
         text_lower = text.lower()
         active_noise = self._custom_noise | (extra_noise or set())
-        if active_noise and any(g in text_lower for g in active_noise):
-            return False
+        if active_noise:
+            for term in active_noise:
+                if not term:
+                    continue
+                clean_term = term.lstrip("#").strip()
+                if not clean_term:
+                    continue
+                pattern = rf"(?:\b|#){re.escape(clean_term)}\b"
+                if re.search(pattern, text_lower):
+                    return False
 
-        
-        text_lower = text.lower()
         words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", text_lower))
         
         # Layer 1: Reject explicit foreign stopwords (Static + Dynamic Database)
@@ -152,9 +158,17 @@ class QualityEvaluator:
 
         if self._custom_noise:
             t_low = title.lower()
-            if any(g in t_low for g in self._custom_noise):
-                return False
+            for term in self._custom_noise:
+                if not term:
+                    continue
+                clean_term = term.lstrip("#").strip()
+                if not clean_term:
+                    continue
+                pattern = rf"(?:\b|#){re.escape(clean_term)}\b"
+                if re.search(pattern, t_low):
+                    return False
         return len(title.strip()) >= 3
+
 
     def evaluate_quality(
         self,
@@ -178,14 +192,15 @@ class QualityEvaluator:
         flaws: List[str] = []
         strengths: List[str] = []
 
-        # 1. Coverage Score (% active platforms)
+        # 1. Coverage Score (% active platforms capped at 100.0)
         platforms_present: Set[str] = {
             s.platform.value if hasattr(s.platform, "value") else str(s.platform)
             for s in signals
         }
         core_platforms = {"google", "youtube"}
         has_core = core_platforms.issubset(platforms_present)
-        coverage_score = round((len(platforms_present) / 5.0) * 100.0, 1)
+        coverage_score = round(min(100.0, (len(platforms_present) / 5.0) * 100.0), 1)
+
         
         if has_core:
             strengths.append(f"Successfully collected from core pillars ({', '.join(core_platforms)}).")

@@ -54,9 +54,53 @@ class Timeframe(str, Enum):
     LAST_7D = "7d"
     LAST_30D = "30d"
 
+    @classmethod
+    def _missing_(cls, value: object):
+        if isinstance(value, str):
+            clean_val = value.lower().strip()
+            obj = str.__new__(cls, clean_val)
+            obj._value_ = clean_val
+            obj._name_ = clean_val.upper()
+            return obj
+        return None
+
+
 class MomentumCategory(str, Enum):
     BREAKOUT = "breakout"    # Explosive velocity (> +100%)
     SURGING = "surging"      # Rapid growth (+50% to +100%)
     STEADY = "steady"        # Stable baseline
     DECLINING = "declining"  # Downward momentum
+
+
+def resolve_geo(geo_input: object) -> GeoCode:
+    """
+    Resolve and validate Geographic region code without silent substitution.
+    Accepts GeoCode enum or ISO-3166 alpha-2 country string (e.g. 'BR', 'KR', 'JP', 'DE', 'VN').
+    """
+    if isinstance(geo_input, GeoCode):
+        return geo_input
+    if not geo_input or not str(geo_input).strip():
+        return GeoCode.VN
+    clean = str(geo_input).strip().upper()
+    return GeoCode(clean)
+
+
+def resolve_platform(platform_input: object) -> PlatformType:
+    """
+    Resolve platform identifier for built-in or custom community connectors.
+    Accepts PlatformType enum or string (e.g. 'youtube', 'reddit', 'xiaohongshu').
+    """
+    if isinstance(platform_input, PlatformType):
+        return platform_input
+    clean = str(platform_input).strip().lower()
+    return PlatformType(clean)
+
+
+def resolve_timeframe(timeframe_input: object) -> Timeframe:
+    """Resolve timeframe expression."""
+    if isinstance(timeframe_input, Timeframe):
+        return timeframe_input
+    clean = str(timeframe_input).strip().lower() if timeframe_input else "24h"
+    return Timeframe(clean)
+
 

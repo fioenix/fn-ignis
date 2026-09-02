@@ -44,26 +44,24 @@ INSERT INTO market_lexicons (domain, term, category) VALUES
 
 -- 4. Generic Social Noise & Non-Strategic Content Blacklist
 ('noise_blacklist', 'fyp', 'generic_social_noise'),
+('noise_blacklist', 'foryou', 'generic_social_noise'),
+('noise_blacklist', 'foryoupage', 'generic_social_noise'),
 ('noise_blacklist', 'xuhuong', 'generic_social_noise'),
-('noise_blacklist', 'trending', 'generic_social_noise'),
-('noise_blacklist', 'viral', 'generic_social_noise'),
 ('noise_blacklist', 'haihuoc', 'entertainment_noise'),
 ('noise_blacklist', 'funny', 'entertainment_noise'),
-('noise_blacklist', 'dance', 'entertainment_noise'),
-('noise_blacklist', 'nhactre', 'entertainment_noise'),
-('noise_blacklist', 'giaitri', 'entertainment_noise'),
-('noise_blacklist', 'thethao', 'entertainment_noise'),
-('noise_blacklist', 'bongda', 'entertainment_noise'),
 ('noise_blacklist', 'troll', 'entertainment_noise'),
+('noise_blacklist', 'nhactre', 'entertainment_noise'),
 ('noise_blacklist', 'vlog', 'entertainment_noise'),
-('noise_blacklist', 'duet', 'entertainment_noise'),
-('noise_blacklist', 'chuyenhai', 'entertainment_noise'),
-('noise_blacklist', 'music', 'entertainment_noise'),
-('noise_blacklist', 'capcut', 'entertainment_noise'),
-('noise_blacklist', 'giadinh', 'entertainment_noise'),
+('noise_blacklist', 'chuyenma', 'entertainment_noise'),
+('noise_blacklist', 'kinhdi', 'entertainment_noise'),
+('noise_blacklist', 'phimngan', 'entertainment_noise'),
+('noise_blacklist', 'reviewphim', 'entertainment_noise'),
+('noise_blacklist', 'ngontinh', 'entertainment_noise'),
 ('noise_blacklist', 'namthankinh', 'entertainment_noise'),
 ('noise_blacklist', 'vietnamvodich', 'entertainment_noise'),
 ('noise_blacklist', 'golivegrowfast', 'entertainment_noise'),
-('noise_blacklist', 'tiktokshop99', 'entertainment_noise')
+('noise_blacklist', 'duet', 'entertainment_noise'),
+('noise_blacklist', 'chuyenhai', 'entertainment_noise')
 ON CONFLICT (domain, term) DO NOTHING;
+
 

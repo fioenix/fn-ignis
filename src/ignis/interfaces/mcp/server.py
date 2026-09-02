@@ -25,7 +25,14 @@ from ignis.application.ports.repository_port import ITrendRepository
 
 from ignis.config import settings
 
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import (
+    GeoCode,
+    PlatformType,
+    resolve_geo,
+    resolve_platform,
+    resolve_timeframe,
+)
+
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
@@ -182,7 +189,8 @@ async def handle_run_autonomous_research_mission(
     """Run end-to-end Harness: Mission initialization, refinement loop, quality evaluation, and strategic analysis."""
     comp = get_components()
     await _sync_lexicons_from_db(comp)
-    geo_val = GeoCode(geo.upper()) if geo.upper() in GeoCode._value2member_map_ else GeoCode.VN
+    geo_val = resolve_geo(geo)
+
 
 
     # 1. Tạo Mission
@@ -415,13 +423,12 @@ async def handle_create_research_mission(
     timeframe: str = "7d",
 ) -> str:
     comp = get_components()
-    geo_val = GeoCode(geo.upper()) if geo.upper() in GeoCode._value2member_map_ else GeoCode.VN
+    geo_val = resolve_geo(geo)
     final_title = title or topic or "Untitled Mission"
     final_keywords = keywords or []
     
-    target_platforms = None
-    if platforms:
-        target_platforms = [PlatformType(p.lower()) for p in platforms if p.lower() in PlatformType._value2member_map_]
+    target_platforms = [resolve_platform(p) for p in platforms] if platforms else None
+
 
     mission = await comp["create_mission_use_case"].execute(
         title=final_title,
@@ -669,8 +676,8 @@ async def handle_get_trending_topics(
     limit: int = 10,
 ) -> str:
     comp = get_components()
-    geo_val = GeoCode(geo.upper()) if geo.upper() in GeoCode._value2member_map_ else GeoCode.VN
-    tf_val = Timeframe(timeframe) if timeframe in Timeframe._value2member_map_ else Timeframe.LAST_24H
+    geo_val = resolve_geo(geo)
+    tf_val = resolve_timeframe(timeframe)
 
     safe_limit = max(1, min(limit, 30))
     clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, timeframe=tf_val, limit=safe_limit)
@@ -728,7 +735,7 @@ async def handle_generate_trend_artifact(
 ) -> str:
     comp = get_components()
     builder = comp["artifact_builder"]
-    geo_val = GeoCode(geo.upper()) if geo.upper() in GeoCode._value2member_map_ else GeoCode.VN
+    geo_val = resolve_geo(geo)
     reports_dir = _get_secure_reports_dir()
 
     if not topic_id.strip():
@@ -744,7 +751,7 @@ async def handle_generate_trend_artifact(
                 "total_clusters": len(clusters),
                 "artifact_file": abs_path,
                 "file_url": f"file://{abs_path}",
-                "message": f"Dashboard xu hướng đã được xuất ra: file://{abs_path}",
+                "message": f"Trend dashboard exported to: file://{abs_path}",
             },
             ensure_ascii=False,
             indent=2
@@ -753,7 +760,7 @@ async def handle_generate_trend_artifact(
         try:
             cluster_uuid = UUID(topic_id.strip())
         except (ValueError, AttributeError):
-            return json.dumps({"error": "Định dạng Topic ID không hợp lệ."}, ensure_ascii=False)
+            return json.dumps({"error": "Invalid Topic ID format."}, ensure_ascii=False)
 
         signals = await comp["repository"].get_cluster_signals(cluster_id=cluster_uuid)
         cluster_info = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=50)
@@ -774,17 +781,17 @@ async def handle_generate_trend_artifact(
                     "topic_name": target_cluster.canonical_name,
                     "artifact_file": abs_path,
                     "file_url": f"file://{abs_path}",
-                    "message": f"Topic Card đã được xuất ra: file://{abs_path}",
+                    "message": f"Topic card exported to: file://{abs_path}",
                 },
                 ensure_ascii=False,
                 indent=2
             )
-        return json.dumps({"error": "Không tìm thấy chủ đề yêu cầu."}, ensure_ascii=False)
+        return json.dumps({"error": "Requested topic not found."}, ensure_ascii=False)
 
 
 async def handle_trigger_ingress_refresh(geo: str = "VN") -> str:
     comp = get_components()
-    geo_val = GeoCode(geo.upper()) if geo.upper() in GeoCode._value2member_map_ else GeoCode.VN
+    geo_val = resolve_geo(geo)
 
     signals = await comp["registry"].fetch_from_all(geo=geo_val)
     clusters = await comp["cluster_use_case"].execute(signals)

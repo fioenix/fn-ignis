@@ -9,7 +9,8 @@ from uuid import UUID, uuid4
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_timeframe
+
 from ignis.infrastructure.auth.crypto import decrypt_credentials, encrypt_credentials
 
 logger = logging.getLogger(__name__)
@@ -175,34 +176,32 @@ class SqliteTrendRepository(ITrendRepository):
                 ("foreign_stopwords", "autonomos", "stopwords_pt"),
                 ("foreign_stopwords", "autônomos", "stopwords_pt"),
                 # Generic Entertainment & Social Noise Blacklist
-                ("noise_blacklist", "fyp", "noise_generic"),
-                ("noise_blacklist", "foryou", "noise_generic"),
-                ("noise_blacklist", "foryoupage", "noise_generic"),
-                ("noise_blacklist", "xuhuong", "noise_generic"),
-                ("noise_blacklist", "trending", "noise_generic"),
-                ("noise_blacklist", "viral", "noise_generic"),
-                ("noise_blacklist", "haihuoc", "noise_entertainment"),
-                ("noise_blacklist", "funny", "noise_entertainment"),
-                ("noise_blacklist", "troll", "noise_entertainment"),
-                ("noise_blacklist", "dance", "noise_entertainment"),
-                ("noise_blacklist", "nhactre", "noise_entertainment"),
-                ("noise_blacklist", "vlog", "noise_entertainment"),
-                ("noise_blacklist", "chuyenma", "noise_entertainment"),
-                ("noise_blacklist", "kinhdi", "noise_entertainment"),
-                ("noise_blacklist", "gocnhin", "noise_generic"),
-                ("noise_blacklist", "phimngan", "noise_entertainment"),
-                ("noise_blacklist", "reviewphim", "noise_entertainment"),
-                ("noise_blacklist", "ngontinh", "noise_entertainment"),
-                ("noise_blacklist", "anime", "noise_entertainment"),
-                ("noise_blacklist", "cosplay", "noise_entertainment"),
-                ("noise_blacklist", "game", "noise_entertainment"),
-                ("noise_blacklist", "gaming", "noise_entertainment"),
+                ("noise_blacklist", "fyp", "generic_social_noise"),
+                ("noise_blacklist", "foryou", "generic_social_noise"),
+                ("noise_blacklist", "foryoupage", "generic_social_noise"),
+                ("noise_blacklist", "xuhuong", "generic_social_noise"),
+                ("noise_blacklist", "haihuoc", "entertainment_noise"),
+                ("noise_blacklist", "funny", "entertainment_noise"),
+                ("noise_blacklist", "troll", "entertainment_noise"),
+                ("noise_blacklist", "nhactre", "entertainment_noise"),
+                ("noise_blacklist", "vlog", "entertainment_noise"),
+                ("noise_blacklist", "chuyenma", "entertainment_noise"),
+                ("noise_blacklist", "kinhdi", "entertainment_noise"),
+                ("noise_blacklist", "phimngan", "entertainment_noise"),
+                ("noise_blacklist", "reviewphim", "entertainment_noise"),
+                ("noise_blacklist", "ngontinh", "entertainment_noise"),
+                ("noise_blacklist", "namthankinh", "entertainment_noise"),
+                ("noise_blacklist", "vietnamvodich", "entertainment_noise"),
+                ("noise_blacklist", "golivegrowfast", "entertainment_noise"),
+                ("noise_blacklist", "duet", "entertainment_noise"),
+                ("noise_blacklist", "chuyenhai", "entertainment_noise"),
             ]
             for dom, term, cat in initial_seeds:
                 cur.execute(
                     "INSERT OR IGNORE INTO market_lexicons (id, domain, term, category, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                     (str(uuid4()), dom, term, cat, "system", now_str),
                 )
+
         conn.commit()
         if self._mem_conn is None:
             conn.close()
@@ -433,8 +432,8 @@ class SqliteTrendRepository(ITrendRepository):
                     title=r["title"],
                     keywords=kws,
                     shortcode=r["shortcode"],
-                    geo_code=GeoCode(r["geo_code"]),
-                    timeframe=Timeframe(r["timeframe"]) if r["timeframe"] in Timeframe._value2member_map_ else Timeframe.LAST_30D,
+                    geo_code=resolve_geo(r["geo_code"]),
+                    timeframe=resolve_timeframe(r["timeframe"]),
                     status=r["status"],
                     agent=r["agent"],
                     session_id=r["session_id"],
@@ -473,8 +472,8 @@ class SqliteTrendRepository(ITrendRepository):
                             title=r["title"],
                             keywords=kws,
                             shortcode=r["shortcode"],
-                            geo_code=GeoCode(r["geo_code"]),
-                            timeframe=Timeframe(r["timeframe"]) if r["timeframe"] in Timeframe._value2member_map_ else Timeframe.LAST_30D,
+                            geo_code=resolve_geo(r["geo_code"]),
+                            timeframe=resolve_timeframe(r["timeframe"]),
                             status=r["status"],
                             agent=r["agent"],
                             session_id=r["session_id"],
@@ -483,6 +482,7 @@ class SqliteTrendRepository(ITrendRepository):
                         )
                     )
                 return missions
+
             finally:
                 if self._mem_conn is None:
                     conn.close()

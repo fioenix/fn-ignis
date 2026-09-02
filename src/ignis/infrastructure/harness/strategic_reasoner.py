@@ -88,8 +88,18 @@ class StrategicMarketReasoner:
             return True
         if self._custom_noise:
             t_low = title.lower()
-            return any(g in t_low for g in self._custom_noise)
+            for term in self._custom_noise:
+                if not term:
+                    continue
+                clean_term = term.lstrip("#").strip()
+                if not clean_term:
+                    continue
+                pattern = rf"(?:\b|#){re.escape(clean_term)}\b"
+                if re.search(pattern, t_low):
+                    return True
         return False
+
+
 
     def analyze_mission(
         self,
@@ -195,8 +205,15 @@ class StrategicMarketReasoner:
 
         if self._custom_noise:
             t_low = title.lower()
-            if any(g in t_low for g in self._custom_noise):
-                return False
+            for term in self._custom_noise:
+                if not term:
+                    continue
+                clean_term = term.lstrip("#").strip()
+                if not clean_term:
+                    continue
+                pattern = rf"(?:\b|#){re.escape(clean_term)}\b"
+                if re.search(pattern, t_low):
+                    return False
 
         title_lower = title.lower()
         words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", title_lower))
@@ -205,7 +222,6 @@ class StrategicMarketReasoner:
         all_stopwords = self.FOREIGN_STOPWORDS | self._custom_stopwords
         if any(fw in words for fw in all_stopwords):
             return False
-
 
         # Layer 2: Exclusive Vietnamese characters with diacritics
         if self.VI_EXCLUSIVE_CHARS_PATTERN.search(title):
@@ -254,9 +270,18 @@ class StrategicMarketReasoner:
         # Generalized international localization: reject noise and empty signals
         if self._custom_noise:
             t_low = title.lower()
-            if any(g in t_low for g in self._custom_noise):
-                return False
-        return True
+            for term in self._custom_noise:
+                if not term:
+                    continue
+                clean_term = term.lstrip("#").strip()
+                if not clean_term:
+                    continue
+                pattern = rf"(?:\b|#){re.escape(clean_term)}\b"
+                if re.search(pattern, t_low):
+                    return False
+        return len(title.strip()) >= 3
+
+
 
     def _discover_market_opportunities(
         self,

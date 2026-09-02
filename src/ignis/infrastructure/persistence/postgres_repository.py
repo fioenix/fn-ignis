@@ -10,7 +10,8 @@ from psycopg_pool import AsyncConnectionPool
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_platform
+
 from ignis.infrastructure.auth.crypto import encrypt_credentials, decrypt_credentials
 
 logger = logging.getLogger(__name__)
@@ -343,9 +344,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                 shortcode=sc or str(m_id)[:8].upper(),
                 agent=agent_val or "claude",
                 session_id=sess_id,
-                platforms=[PlatformType(p) for p in (plats or []) if p in PlatformType._value2member_map_],
-                geo_code=GeoCode(geo) if geo in GeoCode._value2member_map_ else GeoCode.VN,
+                platforms=[resolve_platform(p) for p in (plats or [])],
+                geo_code=resolve_geo(geo),
                 timeframe=tf,
+
                 status=status,
                 summary=summary,
                 created_at=created,
@@ -426,9 +428,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                     shortcode=sc or str(m_id)[:8].upper(),
                     agent=agent_val or "claude",
                     session_id=sess_id,
-                    platforms=[PlatformType(p) for p in (plats or []) if p in PlatformType._value2member_map_],
-                    geo_code=GeoCode(geo) if geo in GeoCode._value2member_map_ else GeoCode.VN,
+                    platforms=[resolve_platform(p) for p in (plats or [])],
+                    geo_code=resolve_geo(geo),
                     timeframe=tf,
+
                     status=status,
                     summary=summary,
                     created_at=created,
