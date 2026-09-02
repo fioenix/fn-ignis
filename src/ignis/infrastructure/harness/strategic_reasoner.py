@@ -12,7 +12,8 @@ from ignis.domain.harness_models import (
     HarnessResearchReport,
     QualityScorecard,
 )
-from ignis.domain.value_objects import PlatformType
+from ignis.domain.value_objects import PlatformType, GeoCode
+
 
 
 class StrategicMarketReasoner:
@@ -97,8 +98,8 @@ class StrategicMarketReasoner:
         scorecard: QualityScorecard,
     ) -> HarnessResearchReport:
         maturity_stage, maturity_reasons = self._assess_maturity(signals, clusters)
-        opportunities = self._discover_market_opportunities(signals, mission.keywords)
-        verified_trends = self._extract_verified_trends(signals, clusters)
+        opportunities = self._discover_market_opportunities(signals, mission.keywords, geo=mission.geo_code)
+        verified_trends = self._extract_verified_trends(signals, clusters, geo=mission.geo_code)
 
         insights, actionables = self._synthesize_insights(
             mission, signals, opportunities, maturity_stage, maturity_reasons
@@ -147,15 +148,17 @@ class StrategicMarketReasoner:
         self,
         signals: List[TrendSignal],
         clusters: List[TopicCluster],
+        geo: GeoCode = GeoCode.VN,
     ) -> List[Dict[str, Any]]:
         verified = []
         for c in clusters[:6]:
             p_counts: Dict[str, int] = defaultdict(int)
             total_views = 0.0
             for s in c.signals:
-                if self._is_vietnamese(s.raw_title):
+                if self._is_localized(s.raw_title, geo=geo):
                     p_counts[s.platform.value if hasattr(s.platform, "value") else str(s.platform)] += 1
                     total_views += float(s.metric_value)
+
 
             verified.append({
                 "canonical_name": c.canonical_name,
@@ -240,10 +243,25 @@ class StrategicMarketReasoner:
 
         return False
 
+    def _is_localized(self, title: str, geo: GeoCode = GeoCode.VN) -> bool:
+        if not title:
+            return False
+        geo_val = geo.value if hasattr(geo, "value") else str(geo)
+        if geo_val.upper() == "VN":
+            return self._is_vietnamese(title)
+
+        # Generalized international localization: reject noise and empty signals
+        if self._custom_noise:
+            t_low = title.lower()
+            if any(g in t_low for g in self._custom_noise):
+                return False
+        return True
+
     def _discover_market_opportunities(
         self,
         signals: List[TrendSignal],
         target_keywords: List[str],
+        geo: GeoCode = GeoCode.VN,
     ) -> List[MarketOpportunity]:
         opportunities: List[MarketOpportunity] = []
         if not target_keywords:
@@ -271,35 +289,35 @@ class StrategicMarketReasoner:
                 and self._matches_topic_strictly(s.raw_title, kw_clean)
             ]
 
-            # Empirical Vietnamese localization filter
-            vn_videos = [s for s in matching_videos if self._is_vietnamese(s.raw_title)]
-            vn_count = len(vn_videos)
-            vn_views = sum(float(s.metric_value) for s in vn_videos)
+            # Empirical market localization filter
+            localized_videos = [s for s in matching_videos if self._is_localized(s.raw_title, geo=geo)]
+            loc_count = len(localized_videos)
+            loc_views = sum(float(s.metric_value) for s in localized_videos)
 
             # View-Weighted Supply Scoring Equation across all video platforms
-            if vn_count == 0:
+            if loc_count == 0:
                 supply_score = 0.0
-            elif vn_views < 1000.0:
-                base_supply = min(40.0, vn_count * 4.0)
-                view_factor = min(15.0, math.log10(max(10.0, vn_views)) * 3.0) if vn_views > 0 else 0.0
+            elif loc_views < 1000.0:
+                base_supply = min(40.0, loc_count * 4.0)
+                view_factor = min(15.0, math.log10(max(10.0, loc_views)) * 3.0) if loc_views > 0 else 0.0
                 supply_score = round(base_supply + view_factor, 1)
             else:
-                base_supply = min(settings.SUPPLY_BASE_MAX, vn_count * settings.SUPPLY_VIDEO_WEIGHT)
-                view_factor = min(settings.SUPPLY_VIEW_MAX, math.log10(max(10.0, vn_views)) * settings.SUPPLY_VIEW_LOG_WEIGHT)
+                base_supply = min(settings.SUPPLY_BASE_MAX, loc_count * settings.SUPPLY_VIDEO_WEIGHT)
+                view_factor = min(settings.SUPPLY_VIEW_MAX, math.log10(max(10.0, loc_views)) * settings.SUPPLY_VIEW_LOG_WEIGHT)
                 supply_score = round(min(100.0, base_supply + view_factor), 1)
 
-            yt_count = sum(1 for s in vn_videos if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "youtube")
-            tt_count = sum(1 for s in vn_videos if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "tiktok")
+            yt_count = sum(1 for s in localized_videos if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "youtube")
+            tt_count = sum(1 for s in localized_videos if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "tiktok")
             breakdown_parts = []
             if yt_count > 0:
                 breakdown_parts.append(f"{yt_count} YouTube")
             if tt_count > 0:
                 breakdown_parts.append(f"{tt_count} TikTok")
             plat_str = f" ({', '.join(breakdown_parts)})" if breakdown_parts else ""
-            v_str = f"{vn_count} video{plat_str}" if vn_count == 1 else f"{vn_count} videos{plat_str}"
+            v_str = f"{loc_count} video{plat_str}" if loc_count == 1 else f"{loc_count} videos{plat_str}"
 
             # Strict Opportunity Index with Inverted Sample Size Damping & Label Alignment
-            if vn_count == 0:
+            if loc_count == 0:
                 opportunity_index = round(demand_score * 0.15, 1)
                 opp_type = "UNVERIFIED_DEMAND_GAP"
                 rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with zero localized supply recorded ({v_str}). Speculative gap requiring preliminary customer interviews (Effective OI: {opportunity_index:+0.1f})."
@@ -311,10 +329,10 @@ class StrategicMarketReasoner:
                     rec = f"Segment '{raw_kw}' is heavily saturated ({v_str}) relative to demand (OI: {opportunity_index:+0.1f}). Requires verticalized differentiation."
                 else:
                     damping_map = {1: 0.35, 2: 0.55, 3: 0.75, 4: 0.90}
-                    damping_factor = damping_map.get(vn_count, 1.0)
+                    damping_factor = damping_map.get(loc_count, 1.0)
                     opportunity_index = round(raw_oi * damping_factor, 1)
 
-                    if vn_count == 1:
+                    if loc_count == 1:
                         opp_type = "PROBE_OPPORTUNITY"
                         rec = f"Initial probe detected for '{raw_kw}' ({v_str}). Early signal with thin localized supply (Effective OI: {opportunity_index:+0.1f})."
                     elif opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
@@ -327,8 +345,8 @@ class StrategicMarketReasoner:
                         opp_type = "BALANCED_COMPETITION"
                         rec = f"Segment '{raw_kw}' is in market equilibrium ({v_str}) where content supply balances consumer demand."
 
-            if vn_videos:
-                support_sigs = [f"[{s.platform.value.upper() if hasattr(s.platform, 'value') else str(s.platform).upper()}] {s.raw_title}" for s in vn_videos[:3]]
+            if localized_videos:
+                support_sigs = [f"[{s.platform.value.upper() if hasattr(s.platform, 'value') else str(s.platform).upper()}] {s.raw_title}" for s in localized_videos[:3]]
             else:
                 support_sigs = ["No localized videos recorded across YouTube or TikTok in the requested timeframe."]
 
@@ -346,6 +364,7 @@ class StrategicMarketReasoner:
 
         opportunities.sort(key=lambda o: o.opportunity_index, reverse=True)
         return opportunities
+
 
     def _synthesize_insights(
         self,

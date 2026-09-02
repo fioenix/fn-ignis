@@ -25,8 +25,11 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
     SUGGEST_API_URL = "https://suggestqueries.google.com/complete/search"
     HT_NAMESPACE = {"ht": "https://trends.google.com/trending/rss"}
 
-    # Probe variations to gauge real market search volume and penetration
-    PROBE_PATTERNS = ["{}", "{} là gì", "{} việt nam", "cách dùng {}", "ứng dụng {}"]
+    # Localized probe variations to gauge market penetration across geographic targets
+    DEFAULT_GEO_PROBES: Dict[str, List[str]] = {
+        "VN": ["{}", "{} là gì", "{} việt nam", "cách dùng {}", "ứng dụng {}"],
+        "DEFAULT": ["{}", "what is {}", "how to use {}", "best {} tools", "{} tutorial"],
+    }
 
     @property
     def platform(self) -> PlatformType:
@@ -36,13 +39,15 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
     def name(self) -> str:
         return "Google Trends Intelligence"
 
+    def _get_probe_patterns(self, geo_str: str) -> List[str]:
+        return self.DEFAULT_GEO_PROBES.get(geo_str.upper(), self.DEFAULT_GEO_PROBES["DEFAULT"])
+
     def _geo_to_param(self, geo: GeoCode) -> str:
-        geo_map = {
-            GeoCode.VN: "VN",
-            GeoCode.US: "US",
-            GeoCode.GLOBAL: "",
-        }
-        return geo_map.get(geo, "VN")
+        geo_str = geo.value if hasattr(geo, "value") else str(geo)
+        if geo_str.upper() in ("", "GLOBAL"):
+            return ""
+        return geo_str.upper()
+
 
     def _normalize_timeframe(self, timeframe_str: str) -> str:
         tf = timeframe_str.lower().strip()
@@ -119,7 +124,8 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
         all_unique_queries = set()
         active_probes = 0
 
-        for pattern in self.PROBE_PATTERNS:
+        probe_patterns = self._get_probe_patterns(geo_str)
+        for pattern in probe_patterns:
             probe_q = pattern.format(keyword)
             results = await self._probe_suggest(probe_q, geo_str)
             if results:
@@ -130,15 +136,17 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
         total_unique_variants = len(all_unique_queries)
 
         # Baseline demand calculated from probe penetration & query variety
-        # Broad keywords (e.g. "AI Agent", "chatbot") hit 4-5 probes with 30+ variants
-        # Niche keywords (e.g. "MCP AI", "AI agent enterprise") hit 1-2 probes with 5-10 variants
-        penetration_score = (active_probes / float(len(self.PROBE_PATTERNS))) * 45.0
+        penetration_score = (active_probes / float(len(probe_patterns))) * 45.0
         variety_score = min(35.0, total_unique_variants * 1.4)
         
-        # Commercial / Practical intent depth bonus
-        intent_keywords = ["giá", "cách", "hướng dẫn", "doanh nghiệp", "tự động", "tool", "khóa học", "workflow", "cài đặt"]
+        # Commercial / Practical intent depth bonus across VN and International markers
+        intent_keywords = [
+            "giá", "cách", "hướng dẫn", "doanh nghiệp", "tự động", "tool", "khóa học", "workflow", "cài đặt",
+            "price", "how", "guide", "tutorial", "best", "tools", "enterprise", "api", "setup", "download", "free"
+        ]
         intent_matches = sum(1 for q in all_unique_queries if any(k in q for k in intent_keywords))
         intent_bonus = min(20.0, intent_matches * 2.0)
+
 
         raw_score = penetration_score + variety_score + intent_bonus
 

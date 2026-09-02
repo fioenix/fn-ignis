@@ -1029,9 +1029,14 @@ async def get_tiktok_video_comments(video_url: str, limit: int = 30) -> str:
     return await handle_get_tiktok_video_comments(video_url=video_url, limit=limit)
 
 
-async def handle_extract_customer_pain_points(keywords: List[str], geo: str = "VN", max_videos: int = 3) -> str:
+async def handle_extract_customer_pain_points(
+    keywords: List[str],
+    geo: str = "VN",
+    max_videos: int = 3,
+    inquiry_patterns: Optional[List[str]] = None,
+) -> str:
     comp = get_components()
-    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
+    geo_code = GeoCode(geo.upper())
     tiktok_plugin = None
     for _, plugin in comp["registry"]._plugins.items():
         if isinstance(plugin, TikTokPlugin):
@@ -1049,14 +1054,21 @@ async def handle_extract_customer_pain_points(keywords: List[str], geo: str = "V
             limit_per_video=20,
         )
         
-        # Categorize customer inquiries, objections, and pricing queries
+        # Multi-language baseline inquiry triggers
+        default_triggers = [
+            "?", "how", "what", "why", "price", "cost", "where", "help", "issue", "bug", "fail", "problem", "review",
+            "làm sao", "như thế nào", "giá", "bao nhiêu", "xin", "hướng dẫn", "ở đâu", "mua", "dùng được", "test", "lỗi"
+        ]
+        active_triggers = [t.lower() for t in (inquiry_patterns or default_triggers)]
+
+        # Extract inquiries and top engaged comments
         all_comments = []
         inquiries = []
         for v in data:
             for c in v.get("comments", []):
                 txt = c.get("text", "")
                 all_comments.append(txt)
-                if any(q in txt.lower() for q in ["?", "how", "what", "price", "cost", "làm sao", "như thế nào", "giá", "bao nhiêu", "xin", "hướng dẫn", "ở đâu", "mua", "dùng được", "test"]):
+                if any(q in txt.lower() for q in active_triggers):
                     inquiries.append({
                         "video_title": v.get("video_title"),
                         "author": c.get("author"),
@@ -1068,9 +1080,10 @@ async def handle_extract_customer_pain_points(keywords: List[str], geo: str = "V
             {
                 "status": "SUCCESS",
                 "keywords": keywords,
+                "geo": geo_code.value,
                 "total_videos_analyzed": len(data),
                 "total_comments_extracted": len(all_comments),
-                "top_inquiries_and_pain_points": inquiries[:15],
+                "top_inquiries_and_pain_points": inquiries[:20],
                 "videos_breakdown": data,
             },
             ensure_ascii=False,
@@ -1081,9 +1094,20 @@ async def handle_extract_customer_pain_points(keywords: List[str], geo: str = "V
         return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool(name="extract_customer_pain_points", description="Extract voice of customer, frequent inquiries, and unmet needs across top TikTok videos for specific market keywords.")
-async def extract_customer_pain_points(keywords: list[str], geo: str = "VN", max_videos: int = 3) -> str:
-    return await handle_extract_customer_pain_points(keywords=keywords, geo=geo, max_videos=max_videos)
+@mcp.tool(name="extract_customer_pain_points", description="Extract voice of customer, frequent inquiries, and unmet needs across top TikTok videos for specific market keywords and target geography.")
+async def extract_customer_pain_points(
+    keywords: list[str],
+    geo: str = "VN",
+    max_videos: int = 3,
+    inquiry_patterns: Optional[list[str]] = None,
+) -> str:
+    return await handle_extract_customer_pain_points(
+        keywords=keywords,
+        geo=geo,
+        max_videos=max_videos,
+        inquiry_patterns=inquiry_patterns,
+    )
+
 
 
 async def handle_trigger_autonomous_discovery(geo: str = "VN") -> str:

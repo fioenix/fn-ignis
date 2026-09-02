@@ -138,6 +138,23 @@ class QualityEvaluator:
         # Requires at least 2 genuine core Vietnamese words for unaccented titles
         return vi_core_count >= 2
 
+    def is_localized(self, title: str, geo: GeoCode = GeoCode.VN) -> bool:
+        """
+        Universal language & localization verification.
+        Applies Vietnamese linguistic heuristic for VN, and universal noise/script filtering for other regions.
+        """
+        if not title:
+            return False
+        geo_val = geo.value if hasattr(geo, "value") else str(geo)
+        if geo_val.upper() == "VN":
+            return self.is_vietnamese(title)
+
+        if self._custom_noise:
+            t_low = title.lower()
+            if any(g in t_low for g in self._custom_noise):
+                return False
+        return len(title.strip()) >= 3
+
     def evaluate_quality(
         self,
         signals: List[TrendSignal],
@@ -185,7 +202,7 @@ class QualityEvaluator:
             if channel:
                 channels.append(channel)
 
-            is_loc = self.is_vietnamese(title) if geo == GeoCode.VN else True
+            is_loc = self.is_localized(title, geo=geo)
             if s.metadata is None:
                 s.metadata = {}
             else:
@@ -193,6 +210,7 @@ class QualityEvaluator:
             s.metadata["is_localized"] = is_loc
             if is_loc:
                 target_lang_matches += 1
+
 
 
         language_precision = round((target_lang_matches / float(len(signals))) * 100.0, 1) if signals else 0.0
