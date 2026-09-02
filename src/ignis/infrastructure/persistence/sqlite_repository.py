@@ -174,6 +174,29 @@ class SqliteTrendRepository(ITrendRepository):
                 ("foreign_stopwords", "agentes", "stopwords_pt"),
                 ("foreign_stopwords", "autonomos", "stopwords_pt"),
                 ("foreign_stopwords", "autônomos", "stopwords_pt"),
+                # Generic Entertainment & Social Noise Blacklist
+                ("noise_blacklist", "fyp", "noise_generic"),
+                ("noise_blacklist", "foryou", "noise_generic"),
+                ("noise_blacklist", "foryoupage", "noise_generic"),
+                ("noise_blacklist", "xuhuong", "noise_generic"),
+                ("noise_blacklist", "trending", "noise_generic"),
+                ("noise_blacklist", "viral", "noise_generic"),
+                ("noise_blacklist", "haihuoc", "noise_entertainment"),
+                ("noise_blacklist", "funny", "noise_entertainment"),
+                ("noise_blacklist", "troll", "noise_entertainment"),
+                ("noise_blacklist", "dance", "noise_entertainment"),
+                ("noise_blacklist", "nhactre", "noise_entertainment"),
+                ("noise_blacklist", "vlog", "noise_entertainment"),
+                ("noise_blacklist", "chuyenma", "noise_entertainment"),
+                ("noise_blacklist", "kinhdi", "noise_entertainment"),
+                ("noise_blacklist", "gocnhin", "noise_generic"),
+                ("noise_blacklist", "phimngan", "noise_entertainment"),
+                ("noise_blacklist", "reviewphim", "noise_entertainment"),
+                ("noise_blacklist", "ngontinh", "noise_entertainment"),
+                ("noise_blacklist", "anime", "noise_entertainment"),
+                ("noise_blacklist", "cosplay", "noise_entertainment"),
+                ("noise_blacklist", "game", "noise_entertainment"),
+                ("noise_blacklist", "gaming", "noise_entertainment"),
             ]
             for dom, term, cat in initial_seeds:
                 cur.execute(
@@ -183,6 +206,7 @@ class SqliteTrendRepository(ITrendRepository):
         conn.commit()
         if self._mem_conn is None:
             conn.close()
+
     async def save_signals(self, signals: List[TrendSignal]) -> int:
         if not signals:
             return 0

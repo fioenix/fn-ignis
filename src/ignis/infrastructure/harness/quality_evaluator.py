@@ -16,9 +16,10 @@ class QualityEvaluator:
 
     # Characters strictly unique to Vietnamese (cannot appear in Portuguese, French, Spanish, etc.)
     VI_EXCLUSIVE_CHARS_PATTERN = re.compile(
-        r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủãẽĩõũạẹịọụ]",
+        r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủẽĩạẹịọụ]",
         re.IGNORECASE
     )
+
 
     # Ambiguous shared Latin diacritics (may appear in Portuguese, Spanish, French, etc.)
     SHARED_LATIN_DIACRITICS = re.compile(r"[ôéèáàâóíúç]", re.IGNORECASE)

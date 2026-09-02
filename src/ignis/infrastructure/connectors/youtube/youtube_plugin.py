@@ -1,4 +1,3 @@
-import re
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Tuple
@@ -37,19 +36,6 @@ class YouTubeDataPlugin(IConnectorPlugin):
     BASE_API_URL = "https://www.googleapis.com/youtube/v3/videos"
     SEARCH_API_URL = "https://www.googleapis.com/youtube/v3/search"
 
-    # Các pattern rác không liên quan đến công nghệ / kinh doanh
-    GARBAGE_PATTERNS = [
-        r"\bMŚ\b", r"\bGr [A-Z]\b", r"\bbóng đá\b", r"\bfootball\b", r"\bmonetization\b",
-        r"\bchồng bắt vợ\b", r"\bthiên kim tỷ phú\b", r"\bdrama\b", r"\btiểu tam\b",
-        r"\btổng tài\b", r"\bphim ngắn\b", r"\btruyện ngôn tình\b", r"\bkhát khao độc chiếm\b",
-        r"\baudio chiếm hữu\b", r"\bchanh non\b", r"\btruyện audio\b", r"\bđọc truyện\b",
-        r"\bbao tải\b", r"\bbốc xếp\b", r"\bcánh tay robot\b", r"\bbánh răng\b", r"\bxích tải\b",
-        r"\bđồ chơi\b", r"\bmô hình cơ khí\b", r"\bur3\b", r"\brobot gắp\b",
-        r"\bphonegrid\b", r"\bphone farm\b", r"\bforex\b", r"\blèm bèm\b",
-        r"\boprah\b", r"\bthe dark side of ai\b", r"\btalkshow\b",
-        r"\bai psychosis\b", r"\bpsychosis\b", r"\bdating an ai\b", r"\bhẹn hò.*bot\b"
-    ]
-
     def __init__(self, api_key: str = ""):
         self._api_key = api_key
 
@@ -62,22 +48,27 @@ class YouTubeDataPlugin(IConnectorPlugin):
         return "YouTube Data API v3"
 
     def _geo_to_region_code(self, geo: GeoCode) -> str:
-        geo_map = {
-            GeoCode.VN: "VN",
-            GeoCode.US: "US",
-            GeoCode.GLOBAL: "US",
-        }
-        return geo_map.get(geo, "VN")
+        geo_str = geo.value if hasattr(geo, "value") else str(geo)
+        if geo_str.upper() in ("", "GLOBAL"):
+            return "US"
+        return geo_str.upper()
 
     def _geo_to_relevance_language(self, geo: GeoCode) -> Optional[str]:
+        geo_str = geo.value if hasattr(geo, "value") else str(geo)
         lang_map = {
-            GeoCode.VN: "vi",
-            GeoCode.US: "en",
+            "VN": "vi",
+            "US": "en",
+            "GB": "en",
+            "JP": "ja",
+            "DE": "de",
+            "FR": "fr",
+            "TH": "th",
+            "ID": "id",
         }
-        return lang_map.get(geo, None)
+        return lang_map.get(geo_str.upper(), None)
 
     def _timeframe_to_published_after(self, timeframe_str: str) -> Tuple[str, datetime]:
-        """Chuyển đổi timeframe sang định dạng RFC 3339 và datetime UTC."""
+        """Convert timeframe expression to RFC 3339 formatted UTC datetime string."""
         now = datetime.now(timezone.utc)
         tf = str(timeframe_str).lower().strip()
 
@@ -97,15 +88,15 @@ class YouTubeDataPlugin(IConnectorPlugin):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ"), dt
 
     def _is_garbage(self, title: str) -> bool:
-        for p in self.GARBAGE_PATTERNS:
-            if re.search(p, title, re.IGNORECASE):
-                return True
+        if not title or len(title.strip()) < 3:
+            return True
         return False
 
     def _enrich_keyword(self, kw: str, geo: GeoCode) -> str:
-        """Nếu từ khóa quá ngắn (viết tắt), kết hợp context để tránh nhiễu ngữ nghĩa."""
+        """Enrich short ambiguous acronyms with contextual keywords for target region."""
         kw_clean = kw.strip()
-        if geo == GeoCode.VN:
+        geo_val = geo.value if hasattr(geo, "value") else str(geo)
+        if geo_val.upper() == "VN":
             if kw_clean.upper() == "RPA":
                 return "RPA tự động hóa quy trình"
             elif kw_clean.upper() == "MCP AI":
@@ -113,6 +104,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
             elif kw_clean.upper() == "AI AGENT":
                 return "AI agent tự động hóa"
         return kw_clean
+
 
     async def is_healthy(self) -> bool:
         if not self._api_key:

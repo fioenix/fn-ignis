@@ -47,19 +47,24 @@ class AutonomousRefinementOrchestrator:
         mission.status = "RUNNING"
         await self._repo.update_mission(mission)
 
-        # 0. Load Dynamic Lexicons & Foreign Stopwords from Database
+        # 0. Load Dynamic Lexicons, Foreign Stopwords & Noise Blacklist from Database
         try:
             db_lexicons = await self._repo.get_domain_lexicons()
-            pos_terms = [item["term"] for item in db_lexicons if item.get("domain") != "foreign_stopwords"]
+            pos_terms = [item["term"] for item in db_lexicons if item.get("domain") not in ("foreign_stopwords", "noise_blacklist")]
             stop_terms = [item["term"] for item in db_lexicons if item.get("domain") == "foreign_stopwords"]
+            noise_terms = [item["term"] for item in db_lexicons if item.get("domain") == "noise_blacklist"]
             if pos_terms:
                 self._evaluator.register_terms(pos_terms)
                 self._reasoner.register_terms(pos_terms)
             if stop_terms:
                 self._evaluator.register_foreign_stopwords(stop_terms)
                 self._reasoner.register_foreign_stopwords(stop_terms)
+            if noise_terms:
+                self._evaluator.register_noise_blacklist(noise_terms)
+                self._reasoner.register_noise_blacklist(noise_terms)
         except Exception as e:
             logger.warning(f"[Harness] Failed to load dynamic lexicons from DB: {e}")
+
 
         # Pass 1: Primary keyword search across target platforms
         signals: List[TrendSignal] = await self._registry.search_across_all(
