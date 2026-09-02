@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 class IngestTrendsUseCase:
     """
-    Use Case điều phối việc cào dữ liệu từ tất cả Connector Plugins và lưu vào Repository.
-    Tuân thủ Zero-Token Ingress và Error Isolation.
+    Use Case orchestrating automated trend signal ingress across all registered Connector Plugins.
+    Enforces Zero-Token Ingress and strict Error Isolation.
     """
 
     def __init__(self, registry: ConnectorPluginRegistry, repository: ITrendRepository):
@@ -22,7 +22,7 @@ class IngestTrendsUseCase:
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
     ) -> Dict[str, Any]:
-        logger.info(f"Bắt đầu Ingest pipeline cho vùng {geo.value}, timeframe {timeframe.value}...")
+        logger.info(f"Starting Ingest pipeline for geo={geo.value}, timeframe={timeframe.value}...")
         
         signals = await self._registry.fetch_from_all(geo=geo, timeframe=timeframe)
         saved_count = await self._repo.save_signals(signals)
@@ -33,5 +33,6 @@ class IngestTrendsUseCase:
             "total_fetched": len(signals),
             "total_saved": saved_count,
         }
-        logger.info(f"Hoàn thành Ingest pipeline: {result}")
+        logger.info(f"Ingest pipeline completed: {result}")
         return result
+

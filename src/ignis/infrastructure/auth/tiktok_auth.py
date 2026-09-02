@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 class TikTokAuthManager:
     """
-    Quản lý phiên đăng nhập và xác thực TikTok thông qua Playwright 1-Click / QR Code.
-    Bắt storageState (cookies, localStorage) và lưu trữ bền vững vào DB.
+    Manages TikTok login sessions and authentication via Playwright 1-Click / QR Code.
+    Captures storageState (cookies, localStorage) and persists securely to the database.
     """
 
     LOGIN_URL = "https://www.tiktok.com/login"
@@ -24,7 +24,7 @@ class TikTokAuthManager:
         self._repository = repository
 
     async def is_authenticated(self) -> bool:
-        """Kiểm tra xem hệ thống đã có session TikTok hợp lệ chưa."""
+        """Check if the system has an active valid TikTok authentication session."""
         if not self._repository:
             return False
         creds = await self._repository.get_platform_credentials(self.PLATFORM_NAME)
@@ -33,7 +33,7 @@ class TikTokAuthManager:
         return True
 
     async def get_storage_state(self) -> Optional[Dict[str, Any]]:
-        """Lấy storageState đã lưu từ Database."""
+        """Retrieve persisted storageState from database."""
         if not self._repository:
             return None
         creds = await self._repository.get_platform_credentials(self.PLATFORM_NAME)
@@ -47,15 +47,15 @@ class TikTokAuthManager:
         timeout_seconds: int = 90,
     ) -> Dict[str, Any]:
         """
-        Mở cửa sổ trình duyệt để người dùng đăng nhập TikTok bằng QR Code hoặc tài khoản.
-        Tự động phát hiện khi đăng nhập thành công và lưu storageState vào DB.
+        Open a browser context for interactive user login via QR code or credentials.
+        Automatically detects successful authentication and persists storageState to DB.
         """
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            raise RuntimeError("Playwright chưa được cài đặt. Vui lòng cài `playwright`.")
+            raise RuntimeError("Playwright is not installed. Please install `playwright`.")
 
-        logger.info(f"Khởi động phiên đăng nhập TikTok (headless={headless}, timeout={timeout_seconds}s)...")
+        logger.info(f"Starting TikTok authentication session (headless={headless}, timeout={timeout_seconds}s)...")
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -73,11 +73,11 @@ class TikTokAuthManager:
             )
             page = await context.new_page()
 
-            logger.info("Đang điều hướng đến trang Đăng nhập TikTok...")
+            logger.info("Navigating to TikTok login page...")
             await page.goto(self.LOGIN_URL, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(1500)
 
-            # Tự động click vào nút "Sử dụng mã QR" nếu có để hiển thị ngay QR Code cho user
+            # Auto-click QR code button if available
             try:
                 qr_btn = (
                     await page.query_selector('text=Sử dụng mã QR')
@@ -88,9 +88,9 @@ class TikTokAuthManager:
                     await qr_btn.click()
                     await page.wait_for_timeout(1000)
             except Exception as e:
-                logger.debug(f"Không thể tự động click nút QR, user có thể tự click: {e}")
+                logger.debug(f"Could not auto-click QR button: {e}")
 
-            # Polling kiểm tra cookies đăng nhập (sessionid, sid_tt, uid_tt) hoặc URL thay đổi
+            # Polling for login session cookies
             start_time = asyncio.get_event_loop().time()
             logged_in = False
 
@@ -100,7 +100,6 @@ class TikTokAuthManager:
                     if c.get("name") in ["sessionid", "sessionid_ss", "sid_tt", "uid_tt"] and c.get("value"):
                         logged_in = True
                         break
-
 
                 current_url = page.url
                 if logged_in or (current_url and "/login" not in current_url and "tiktok.com" in current_url):
@@ -113,10 +112,10 @@ class TikTokAuthManager:
                 await browser.close()
                 return {
                     "success": False,
-                    "message": f"Hết thời gian chờ đăng nhập ({timeout_seconds}s). Người dùng chưa quét mã QR hoặc hủy phiên.",
+                    "message": f"Login timed out ({timeout_seconds}s). QR code was not scanned or session was cancelled.",
                 }
 
-            # Lấy toàn bộ storageState
+            # Retrieve complete storageState
             storage_state = await context.storage_state()
             expires_at = datetime.now(timezone.utc) + timedelta(days=60)
 
@@ -131,7 +130,7 @@ class TikTokAuthManager:
                 await self._repository.log_event(
                     component="TikTokAuthManager",
                     event_type="AUTH_SUCCESS",
-                    message="Đăng nhập TikTok thành công và lưu session vào database.",
+                    message="TikTok login successful and session state saved to database.",
                     level="INFO",
                     details={"cookies_count": len(storage_state.get("cookies", [])), "expires_at": expires_at.isoformat()}
                 )
@@ -140,13 +139,14 @@ class TikTokAuthManager:
             return {
                 "success": True,
                 "platform": self.PLATFORM_NAME,
-                "message": "Xác thực TikTok thành công! Session đã được lưu trữ bền vững.",
+                "message": "TikTok authentication successful! Session securely persisted.",
                 "cookies_count": len(storage_state.get("cookies", [])),
                 "expires_at": expires_at.isoformat(),
             }
 
     async def clear_auth(self) -> bool:
-        """Xóa session đăng nhập hiện tại."""
+        """Clear active TikTok authentication session."""
         if not self._repository:
             return False
         return await self._repository.delete_platform_credentials(self.PLATFORM_NAME)
+

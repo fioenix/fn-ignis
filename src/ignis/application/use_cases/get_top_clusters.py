@@ -5,7 +5,8 @@ from ignis.domain.value_objects import GeoCode, Timeframe
 
 
 class GetTopClustersUseCase:
-    """Use case truy vấn danh sách Topic Clusters thịnh hành nhất."""
+    """Use Case for querying the top trending TopicClusters."""
+
 
     def __init__(self, repository: ITrendRepository):
         self._repo = repository

@@ -1,28 +1,29 @@
 class IgnisDomainException(Exception):
-    """Lỗi cơ sở cho Domain layer."""
+    """Base exception class for Domain layer."""
     pass
 
 
 class InvalidSignalDataException(IgnisDomainException):
-    """Dữ liệu signal không hợp lệ."""
+    """Signal payload failed schema or validation check."""
     pass
 
 
 class RepositoryException(IgnisDomainException):
-    """Lỗi thao tác trên tầng lưu trữ Database / TimescaleDB."""
+    """Persistence or database storage layer operation failed."""
     pass
 
 
 class ConnectorExecutionException(IgnisDomainException):
-    """Lỗi khi thực thi Connector plugin."""
+    """Connector plugin encountered an execution error."""
     pass
 
 
 class ConnectorQuotaExceededException(ConnectorExecutionException):
-    """Lỗi cạn hạn ngạch API của nhà cung cấp dịch vụ."""
+    """Upstream connector platform API quota exhausted."""
     pass
 
 
 class CircuitBreakerOpenException(ConnectorExecutionException):
-    """Lỗi khi cố gắng gọi plugin đang trong trạng thái ngắt mạch (Circuit Breaker OPEN)."""
+    """Execution rejected because Circuit Breaker is in OPEN state."""
     pass
+

@@ -147,6 +147,27 @@ def get_components():
     return _COMPONENTS
 
 
+async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
+    """Sync dynamic positive lexicons, foreign stopwords, and noise blacklist from DB into reasoning engines."""
+    try:
+        db_lexicons = await comp["repository"].get_domain_lexicons()
+        pos_terms = [item["term"] for item in db_lexicons if item.get("domain") not in ("foreign_stopwords", "noise_blacklist")]
+        stop_terms = [item["term"] for item in db_lexicons if item.get("domain") == "foreign_stopwords"]
+        noise_terms = [item["term"] for item in db_lexicons if item.get("domain") == "noise_blacklist"]
+        
+        if pos_terms:
+            comp["quality_evaluator"].register_terms(pos_terms)
+            comp["strategic_reasoner"].register_terms(pos_terms)
+        if stop_terms:
+            comp["quality_evaluator"].register_foreign_stopwords(stop_terms)
+            comp["strategic_reasoner"].register_foreign_stopwords(stop_terms)
+        if noise_terms:
+            comp["quality_evaluator"].register_noise_blacklist(noise_terms)
+            comp["strategic_reasoner"].register_noise_blacklist(noise_terms)
+    except Exception as e:
+        logger.warning(f"Could not sync dynamic lexicons from DB: {e}")
+
+
 # --- Handlers for Agent Harness Operations ---
 
 async def handle_run_autonomous_research_mission(
@@ -158,9 +179,11 @@ async def handle_run_autonomous_research_mission(
     agent: str = "claude",
     session_id: Optional[str] = None,
 ) -> str:
-    """Chạy toàn diện Harness: Tự động khởi tạo, Refinement Loop, Đánh giá chất lượng và Bóc tách chiến lược."""
+    """Run end-to-end Harness: Mission initialization, refinement loop, quality evaluation, and strategic analysis."""
     comp = get_components()
+    await _sync_lexicons_from_db(comp)
     geo_val = GeoCode(geo.upper()) if geo.upper() in GeoCode._value2member_map_ else GeoCode.VN
+
 
     # 1. Tạo Mission
     mission = await comp["create_mission_use_case"].execute(
@@ -216,12 +239,11 @@ async def handle_run_autonomous_research_mission(
 
 async def handle_evaluate_mission_quality(mission_id: str) -> str:
     comp = get_components()
+    await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
-        return json.dumps({"error": f"Không tìm thấy mission với mã: '{mission_id}'"}, ensure_ascii=False)
+        return json.dumps({"error": f"Mission with ID/shortcode '{mission_id}' not found."}, ensure_ascii=False)
     m_id = mission.id
-    if not mission:
-        return json.dumps({"error": "Mission not found"}, ensure_ascii=False)
 
     signals = await comp["repository"].get_mission_signals(m_id)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code)
@@ -245,12 +267,12 @@ async def handle_evaluate_mission_quality(mission_id: str) -> str:
 
 async def handle_discover_market_opportunities(mission_id: str) -> str:
     comp = get_components()
+    await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
-        return json.dumps({"error": f"Không tìm thấy mission với mã: '{mission_id}'"}, ensure_ascii=False)
+        return json.dumps({"error": f"Mission with ID/shortcode '{mission_id}' not found."}, ensure_ascii=False)
     m_id = mission.id
-    if not mission:
-        return json.dumps({"error": "Mission not found"}, ensure_ascii=False)
+
 
     signals = await comp["repository"].get_mission_signals(m_id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
@@ -305,11 +327,11 @@ async def handle_diagnose_system_health() -> str:
 
     for plat, info in health_status.items():
         if plat == "tiktok" and info["circuit_state"] != "CLOSED":
-            diagnostics["recommendations"].append("TikTok bị chặn bởi bot detection / WAF. Cần bật Playwright headless browser hoặc cập nhật session cookie.")
+            diagnostics["recommendations"].append("TikTok connector throttled or challenged by bot detection. Launch Playwright authentication or refresh cookies.")
         elif plat in ["threads", "reels"] and info["circuit_state"] != "CLOSED":
-            diagnostics["recommendations"].append(f"Meta ({plat}) yêu cầu xác thực hoặc GraphQL token. Cần kiểm tra sessionid.")
+            diagnostics["recommendations"].append(f"Meta ({plat}) requires authentication or GraphQL token verification. Check credentials.")
         elif plat == "youtube" and not settings.YOUTUBE_API_KEY:
-            diagnostics["recommendations"].append("YouTube API key chưa được cấu hình trong .env.")
+            diagnostics["recommendations"].append("YOUTUBE_API_KEY is not configured in .env.")
 
     return json.dumps(diagnostics, ensure_ascii=False, indent=2)
 
@@ -320,7 +342,7 @@ async def handle_get_system_logs(level: Optional[str] = None, component: Optiona
     safe_limit = max(1, min(limit, 30))
     raw_logs = await repo.get_recent_logs(level=level, component=component, limit=safe_limit)
     
-    # Rút gọn nội dung chi tiết để không làm phình to token
+    # Sanitize log details to prevent context window bloat
     sanitized_logs = []
     for log in raw_logs:
         msg = log.get("message", "")
@@ -373,7 +395,7 @@ async def handle_clear_platform_auth(platform: str) -> str:
         {
             "platform": platform.lower(),
             "cleared": success,
-            "message": f"Đã xóa session xác thực của {platform}." if success else f"Không tìm thấy session đang hoạt động của {platform}."
+            "message": f"Cleared authentication session for {platform}." if success else f"No active session found for {platform}."
         },
         ensure_ascii=False,
         indent=2
@@ -383,33 +405,37 @@ async def handle_clear_platform_auth(platform: str) -> str:
 # --- Handlers for Research Missions ---
 
 async def handle_create_research_mission(
-    topic: str,
-    keywords: List[str],
+    title: Optional[str] = None,
+    keywords: Optional[List[str]] = None,
+    topic: Optional[str] = None,
+    agent: str = "claude",
+    session_id: Optional[str] = None,
     platforms: Optional[List[str]] = None,
     geo: str = "VN",
     timeframe: str = "7d",
-    agent: str = "claude",
-    session_id: Optional[str] = None,
 ) -> str:
     comp = get_components()
     geo_val = GeoCode(geo.upper()) if geo.upper() in GeoCode._value2member_map_ else GeoCode.VN
+    final_title = title or topic or "Untitled Mission"
+    final_keywords = keywords or []
     
     target_platforms = None
     if platforms:
         target_platforms = [PlatformType(p.lower()) for p in platforms if p.lower() in PlatformType._value2member_map_]
 
     mission = await comp["create_mission_use_case"].execute(
-        title=topic,
-        keywords=keywords,
+        title=final_title,
+        keywords=final_keywords,
         agent=agent,
         session_id=session_id,
         platforms=target_platforms,
         geo=geo_val,
         timeframe=timeframe,
     )
+
     return json.dumps(
         {
-            "status": "created",
+            "status": "CREATED",
             "mission_id": str(mission.id),
             "shortcode": mission.shortcode,
             "display_label": f"[{mission.shortcode}] {mission.title}",
@@ -418,8 +444,8 @@ async def handle_create_research_mission(
             "platforms": [p.value for p in mission.platforms],
             "geo": mission.geo_code.value,
             "timeframe": mission.timeframe,
-            "tip": f"Bạn có thể dùng mã ngắn '{mission.shortcode}' hoặc '{str(mission.id)[:8]}' trong các câu lệnh tiếp theo.",
-            "next_step": f"Gọi execute_mission_ingress(mission_id='{mission.shortcode}') để kích hoạt cào dữ liệu."
+            "tip": f"You can reference shortcode '{mission.shortcode}' or ID '{str(mission.id)[:8]}' in subsequent commands.",
+            "next_step": f"Call execute_mission_ingress(mission_id='{mission.shortcode}') to trigger data ingress."
         },
         ensure_ascii=False,
         indent=2
@@ -430,7 +456,7 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
     comp = get_components()
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
-        return json.dumps({"error": f"Không tìm thấy mission với mã: '{mission_id}'"}, ensure_ascii=False)
+        return json.dumps({"error": f"No research mission found with ID or shortcode: '{mission_id}'"}, ensure_ascii=False)
 
     result = await comp["execute_mission_use_case"].execute(mission_id=mission.id)
     result["shortcode"] = mission.shortcode
@@ -440,6 +466,7 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
 
 async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
     comp = get_components()
+    await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
         return json.dumps({"error": f"No research mission found with ID or shortcode: '{mission_id}'"}, ensure_ascii=False)
@@ -494,12 +521,12 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
 
 
 def _get_secure_reports_dir() -> Path:
-    # 1. Thử ghi vào thư mục reports/ của project root
+    # 1. Try project root reports/ directory
     try:
         project_root = Path(__file__).resolve().parents[4]
         reports_dir = project_root / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
-        # Thử test quyền ghi
+        # Test write permission
         test_file = reports_dir / ".write_test"
         test_file.touch()
         test_file.unlink()
@@ -507,7 +534,7 @@ def _get_secure_reports_dir() -> Path:
     except Exception:
         pass
 
-    # 2. Thử ghi vào ~/.ignis/reports
+    # 2. Try ~/.ignis/reports
     try:
         home_reports = Path.home() / ".ignis" / "reports"
         home_reports.mkdir(parents=True, exist_ok=True)
@@ -515,7 +542,7 @@ def _get_secure_reports_dir() -> Path:
     except Exception:
         pass
 
-    # 3. Fallback sang temporary directory
+    # 3. Fallback to temporary directory
     temp_dir = Path(tempfile.gettempdir()) / "ignis_reports"
     temp_dir.mkdir(parents=True, exist_ok=True)
     return temp_dir
@@ -523,14 +550,16 @@ def _get_secure_reports_dir() -> Path:
 
 async def handle_generate_mission_artifact(mission_id: str) -> str:
     comp = get_components()
+    await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
-        return json.dumps({"error": f"Không tìm thấy mission với mã: '{mission_id}'"}, ensure_ascii=False)
+        return json.dumps({"error": f"Mission with ID/shortcode '{mission_id}' not found."}, ensure_ascii=False)
     m_id = mission.id
 
     signals = await comp["repository"].get_mission_signals(m_id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code)
+
     
     report = comp["strategic_reasoner"].analyze_mission(
         mission=mission,
@@ -918,7 +947,7 @@ async def handle_get_tiktok_search_suggestions(keywords: List[str], geo: str = "
             indent=2,
         )
     except Exception as e:
-        logger.error(f"Lỗi khi lấy TikTok search suggestions: {e}")
+        logger.error(f"Error fetching TikTok search suggestions: {e}")
         return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
 
 
@@ -933,7 +962,7 @@ async def handle_get_tiktok_creative_center_trends(geo: str = "VN", period: int 
     safe_limit = max(1, min(limit, 50))
     safe_period = 30 if period >= 30 else 7
 
-    # Tìm plugin TikTok Creative Center
+    # Locate TikTok Creative Center plugin
     cc_plugin = None
     for _, plugin in comp["registry"]._plugins.items():
         if isinstance(plugin, TikTokCreativeCenterPlugin):
@@ -991,7 +1020,7 @@ async def handle_get_tiktok_video_comments(video_url: str, limit: int = 30) -> s
             indent=2,
         )
     except Exception as e:
-        logger.error(f"Lỗi khi lấy comments video {video_url}: {e}")
+        logger.error(f"Error fetching TikTok video comments {video_url}: {e}")
         return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
 
 
@@ -1020,14 +1049,14 @@ async def handle_extract_customer_pain_points(keywords: List[str], geo: str = "V
             limit_per_video=20,
         )
         
-        # Phân loại câu hỏi / thắc mắc / rào cản từ người dùng
+        # Categorize customer inquiries, objections, and pricing queries
         all_comments = []
         inquiries = []
         for v in data:
             for c in v.get("comments", []):
                 txt = c.get("text", "")
                 all_comments.append(txt)
-                if any(q in txt.lower() for q in ["?", "làm sao", "như thế nào", "giá", "bao nhiêu", "xin", "hướng dẫn", "ở đâu", "mua", "dùng được", "test"]):
+                if any(q in txt.lower() for q in ["?", "how", "what", "price", "cost", "làm sao", "như thế nào", "giá", "bao nhiêu", "xin", "hướng dẫn", "ở đâu", "mua", "dùng được", "test"]):
                     inquiries.append({
                         "video_title": v.get("video_title"),
                         "author": c.get("author"),
@@ -1048,7 +1077,7 @@ async def handle_extract_customer_pain_points(keywords: List[str], geo: str = "V
             indent=2,
         )
     except Exception as e:
-        logger.error(f"Lỗi khi bóc tách pain points từ TikTok: {e}")
+        logger.error(f"Error extracting customer pain points from TikTok: {e}")
         return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
 
 
@@ -1106,9 +1135,23 @@ async def handle_register_domain_lexicon(
             category=category,
             created_by=created_by,
         )
-        # Update in-memory quality evaluator cache
-        if "quality_evaluator" in comp:
-            comp["quality_evaluator"].register_terms(terms)
+        # Update in-memory quality evaluator & strategic reasoner caches
+        d_lower = domain.lower()
+        if d_lower in ("noise_blacklist", "noise", "negative_keywords"):
+            if "quality_evaluator" in comp:
+                comp["quality_evaluator"].register_noise_blacklist(terms)
+            if "strategic_reasoner" in comp:
+                comp["strategic_reasoner"].register_noise_blacklist(terms)
+        elif d_lower == "foreign_stopwords":
+            if "quality_evaluator" in comp:
+                comp["quality_evaluator"].register_foreign_stopwords(terms)
+            if "strategic_reasoner" in comp:
+                comp["strategic_reasoner"].register_foreign_stopwords(terms)
+        else:
+            if "quality_evaluator" in comp:
+                comp["quality_evaluator"].register_terms(terms)
+            if "strategic_reasoner" in comp:
+                comp["strategic_reasoner"].register_terms(terms)
 
         return json.dumps(
             {
@@ -1129,6 +1172,12 @@ async def handle_register_domain_lexicon(
 @mcp.tool(name="register_domain_lexicon", description="Register or expand domain vocabulary, slang, brand names, and industry keywords dynamically into the persistent database so Quality Gate and Ingress engines recognize new niche vernacular.")
 async def register_domain_lexicon(domain: str, terms: list[str], category: str = "vernacular") -> str:
     return await handle_register_domain_lexicon(domain=domain, terms=terms, category=category)
+
+
+@mcp.tool(name="register_noise_blacklist", description="Register or expand negative keywords, generic social noise, and entertainment hashtags dynamically into the persistent database so Quality Gate filters out non-strategic signals.")
+async def register_noise_blacklist(terms: list[str]) -> str:
+    return await handle_register_domain_lexicon(domain="noise_blacklist", terms=terms, category="generic_noise")
+
 
 
 async def handle_list_domain_lexicons(domain: Optional[str] = None) -> str:

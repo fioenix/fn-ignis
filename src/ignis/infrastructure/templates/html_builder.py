@@ -11,9 +11,10 @@ from ignis.domain.value_objects import GeoCode
 
 class HtmlArtifactBuilder(IArtifactBuilder):
     """
-    Trình dựng HTML Artifacts xác định (Deterministic) sử dụng Jinja2 + Tailwind CDN.
-    Tích hợp trực tiếp các chỉ số đánh giá của Agent Harness.
+    Deterministic HTML Artifact Builder using Jinja2 + Tailwind CDN.
+    Directly incorporates Agent Harness evaluation scorecards and strategic dossiers.
     """
+
 
     def __init__(self, templates_dir: Optional[Path] = None):
         if templates_dir is None:
@@ -90,7 +91,7 @@ class HtmlArtifactBuilder(IArtifactBuilder):
     ) -> str:
         template = self._env.get_template("mission_report.html")
         
-        # Nếu chưa có report, tạo mock scorecard mặc định
+        # If report is omitted, generate default scorecard baseline
         scorecard = report.scorecard if report else QualityScorecard(
             coverage_score=round((len(platform_breakdown) / 5.0) * 100.0, 1),
             language_precision=90.0,
@@ -101,12 +102,12 @@ class HtmlArtifactBuilder(IArtifactBuilder):
         maturity = report.maturity_stage if report else TrendMaturityStage.EMERGING
         opportunities = report.market_opportunities if report else []
         insights = report.strategic_insights if report else [
-            "Hệ thống đã thu thập dữ liệu đa kênh có kiểm chứng.",
-            "Phân tích nhu cầu tìm kiếm và mức độ tương tác nội dung tại thị trường mục tiêu."
+            "Multi-platform verified market signals collected.",
+            "Analyzing search demand velocity and content engagement distribution in target market."
         ]
         actionables = report.actionable_takeaways if report else [
-            "Tận dụng các khoảng trống nội dung có lượt tìm kiếm cao.",
-            "Thiết lập Ingress theo dõi định kỳ để bắt kịp điểm bùng nổ xu hướng."
+            "Capitalize on high-demand, low-supply content white spaces.",
+            "Establish recurring ingress monitoring to capture emerging trend momentum."
         ]
 
         return template.render(

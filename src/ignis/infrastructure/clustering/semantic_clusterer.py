@@ -10,9 +10,9 @@ from ignis.domain.entities import TopicCluster, TrendSignal
 
 class SemanticClusterer(IClusteringEngine):
     """
-    Thuật toán gom cụm chủ đề ngữ nghĩa và tính điểm lan tỏa đa kênh (Cross-Platform Momentum).
-    Sử dụng Szymkiewicz-Simpson Overlap & Jaccard index cho short text title matching.
-    Độ trễ < 50ms, không phụ thuộc LLM token.
+    Semantic topic clustering algorithm and Cross-Platform Momentum calculation.
+    Uses Szymkiewicz-Simpson Overlap & Jaccard index for short text title matching.
+    Sub-50ms deterministic execution without external LLM dependency.
     """
 
     def __init__(self, similarity_threshold: float = 0.25):
@@ -30,11 +30,11 @@ class SemanticClusterer(IClusteringEngine):
         intersection = len(tokens_a.intersection(tokens_b))
         if intersection == 0:
             return 0.0
-        # Overlap coefficient: tốt cho các tiêu đề có độ dài chênh lệch
+        # Overlap coefficient: handles asymmetric title lengths effectively
         overlap = intersection / min(len(tokens_a), len(tokens_b))
-        # Jaccard
+        # Jaccard index
         jaccard = intersection / len(tokens_a.union(tokens_b))
-        # Điểm tổng hợp trọng số: 70% Overlap + 30% Jaccard
+        # Weighted composite: 70% Overlap + 30% Jaccard
         return 0.7 * overlap + 0.3 * jaccard
 
     def _calculate_cross_platform_score(self, signals: List[TrendSignal]) -> float:
@@ -89,7 +89,7 @@ class SemanticClusterer(IClusteringEngine):
             cluster = TopicCluster(
                 id=cluster_id,
                 canonical_name=canonical_name,
-                summary_text=f"Chủ đề tổng hợp từ {len(group)} tín hiệu trên {len({s.platform for s in group})} nền tảng.",
+                summary_text=f"Aggregated topic from {len(group)} signals across {len({s.platform for s in group})} platforms.",
                 category="general",
                 cross_platform_score=score,
                 signals=group,
@@ -100,3 +100,4 @@ class SemanticClusterer(IClusteringEngine):
 
         clusters.sort(key=lambda c: c.cross_platform_score, reverse=True)
         return clusters
+

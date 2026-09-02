@@ -46,5 +46,6 @@ def test_decrypt_with_wrong_key_fails():
     sample_data = {"secret": "my_val"}
 
     encrypted = encrypt_credentials(sample_data, secret_key=key1)
-    with pytest.raises(ValueError, match="Không thể giải mã"):
+    with pytest.raises(ValueError, match="Failed to decrypt credentials"):
         decrypt_credentials(encrypted, secret_key=key2)
+

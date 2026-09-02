@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class CreateMissionUseCase:
-    """Use Case tạo mới một bài toán nghiên cứu xu hướng với mapping Agent & SessionID."""
+    """Use Case for creating a new targeted Research Mission with Agent and Session mapping."""
 
     def __init__(self, repository: ITrendRepository):
         self._repo = repository
@@ -42,5 +42,6 @@ class CreateMissionUseCase:
         )
 
         mission_id = await self._repo.create_mission(mission)
-        logger.info(f"Đã tạo Research Mission mới: {mission_id} (Shortcode: {mission.shortcode}, Agent: {agent}, Session: {session_id})")
+        logger.info(f"Created new Research Mission: {mission_id} (Shortcode: {mission.shortcode}, Agent: {agent}, Session: {session_id})")
         return mission
+

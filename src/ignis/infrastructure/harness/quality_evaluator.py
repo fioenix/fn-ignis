@@ -181,14 +181,19 @@ class QualityEvaluator:
 
         for s in signals:
             title = s.raw_title
-            channel = s.metadata.get("channel_title", "")
+            channel = (s.metadata or {}).get("channel_title", "")
             if channel:
                 channels.append(channel)
 
             is_loc = self.is_vietnamese(title) if geo == GeoCode.VN else True
+            if s.metadata is None:
+                s.metadata = {}
+            else:
+                s.metadata = dict(s.metadata)
             s.metadata["is_localized"] = is_loc
             if is_loc:
                 target_lang_matches += 1
+
 
         language_precision = round((target_lang_matches / float(len(signals))) * 100.0, 1) if signals else 0.0
         if language_precision >= 70.0:

@@ -53,8 +53,9 @@ async def test_create_and_execute_mission():
             geo="VN"
         )
         res_create = json.loads(res_create_str)
-        assert res_create["status"] == "created"
+        assert res_create["status"].upper() == "CREATED"
         assert res_create["mission_id"] == str(mission_id)
+
 
         # 2. Execute Mission
         res_exec_str = await handle_execute_mission_ingress(str(mission_id))

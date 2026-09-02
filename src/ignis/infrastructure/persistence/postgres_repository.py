@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 
 class PostgresTimescaleRepository(ITrendRepository):
     """
-    Adapter lưu trữ và truy vấn xu hướng sử dụng PostgreSQL/Supabase.
-    Hỗ trợ cả Research Missions theo chủ đề và Ingress chuỗi thời gian.
+    Persistence adapter for PostgreSQL / Supabase storage.
+    Supports both topic-based Research Missions and time-series trend ingress.
     """
+
 
     def __init__(
         self,
@@ -241,8 +242,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                 signals.append(sig)
             return signals
         except Exception as e:
-            logger.error(f"Lỗi khi lấy signals của cluster {cluster_id}: {e}", exc_info=True)
+            logger.error(f"Error fetching signals for cluster {cluster_id}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to fetch cluster signals: {e}") from e
+
 
     async def create_mission(self, mission: ResearchMission) -> ResearchMission:
         pool = await self._get_pool()
@@ -287,7 +289,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     await cur.execute(query, params)
             return mission
         except Exception as e:
-            logger.error(f"Lỗi khi tạo research mission: {e}", exc_info=True)
+            logger.error(f"Error creating research mission: {e}", exc_info=True)
             raise RepositoryException(f"Failed to create research mission: {e}") from e
 
     async def save_mission(self, mission: ResearchMission) -> ResearchMission:
@@ -350,7 +352,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 updated_at=updated,
             )
         except Exception as e:
-            logger.error(f"Lỗi khi lấy research mission {identifier}: {e}", exc_info=True)
+            logger.error(f"Error getting research mission {identifier}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to get research mission: {e}") from e
 
 
@@ -384,7 +386,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 async with conn.cursor() as cur:
                     await cur.execute(query, params)
         except Exception as e:
-            logger.error(f"Lỗi khi cập nhật mission: {e}", exc_info=True)
+            logger.error(f"Error updating mission: {e}", exc_info=True)
             raise RepositoryException(f"Failed to update mission: {e}") from e
 
     async def list_missions(self, limit: int = 20) -> List[ResearchMission]:
@@ -435,7 +437,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 missions.append(mission)
             return missions
         except Exception as e:
-            logger.error(f"Lỗi khi list research missions: {e}", exc_info=True)
+            logger.error(f"Error listing research missions: {e}", exc_info=True)
             raise RepositoryException(f"Failed to list research missions: {e}") from e
 
     async def get_mission_signals(self, mission_id: UUID) -> List[TrendSignal]:
@@ -481,7 +483,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 signals.append(sig)
             return signals
         except Exception as e:
-            logger.error(f"Lỗi khi lấy signals của mission {mission_id}: {e}", exc_info=True)
+            logger.error(f"Error fetching signals for mission {mission_id}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to fetch mission signals: {e}") from e
 
     async def delete_mission_signals(self, mission_id: UUID) -> int:
@@ -493,10 +495,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                     await cur.execute(query, (str(mission_id),))
                     deleted_count = cur.rowcount
                     await conn.commit()
-            logger.info(f"Đã xóa {deleted_count} signals cũ của mission {mission_id} để nạp mới.")
+            logger.info(f"Deleted {deleted_count} prior signals for mission {mission_id} for fresh atomic replace.")
             return deleted_count
         except Exception as e:
-            logger.error(f"Lỗi khi xóa signals của mission {mission_id}: {e}", exc_info=True)
+            logger.error(f"Error deleting signals for mission {mission_id}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to delete mission signals: {e}") from e
 
     async def log_event(
@@ -525,7 +527,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 async with conn.cursor() as cur:
                     await cur.execute(query, params)
         except Exception as e:
-            logger.error(f"Lỗi khi ghi audit log ({component}): {e}")
+            logger.error(f"Error writing audit log ({component}): {e}")
 
     async def get_recent_logs(
         self,
@@ -575,7 +577,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 })
             return logs
         except Exception as e:
-            logger.error(f"Lỗi khi truy vấn audit logs: {e}", exc_info=True)
+            logger.error(f"Error querying audit logs: {e}", exc_info=True)
             return []
 
     async def save_platform_credentials(
@@ -587,7 +589,7 @@ class PostgresTimescaleRepository(ITrendRepository):
         expires_at: Optional[datetime] = None,
     ) -> None:
         pool = await self._get_pool()
-        # Zero-Knowledge Encryption trước khi đẩy lên DB
+        # Zero-Knowledge Encryption before persisting to database
         payload_to_store = encrypt_credentials(credentials_data)
 
         query = """
@@ -617,9 +619,9 @@ class PostgresTimescaleRepository(ITrendRepository):
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(query, params)
-            logger.info(f"Đã lưu credentials (đã mã hóa AES-256) cho platform [{platform}].")
+            logger.info(f"Successfully saved encrypted credentials for platform [{platform}].")
         except Exception as e:
-            logger.error(f"Lỗi khi lưu credentials cho {platform}: {e}", exc_info=True)
+            logger.error(f"Error saving credentials for {platform}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to save credentials for {platform}: {e}") from e
 
     async def get_platform_credentials(self, platform: str) -> Optional[Dict[str, Any]]:
@@ -640,7 +642,7 @@ class PostgresTimescaleRepository(ITrendRepository):
 
             plat, auth_type, creds_json, active, expires, updated = row
             raw_creds = creds_json if isinstance(creds_json, dict) else json.loads(creds_json or "{}")
-            # Tự động giải mã AES-256 về dictionary ban đầu
+            # Automatically decrypt ciphertext back to plaintext dictionary
             decrypted_creds = decrypt_credentials(raw_creds)
             return {
                 "platform": plat,
@@ -651,7 +653,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 "updated_at": updated.isoformat() if updated else None,
             }
         except Exception as e:
-            logger.error(f"Lỗi khi lấy credentials của {platform}: {e}", exc_info=True)
+            logger.error(f"Error retrieving credentials for {platform}: {e}", exc_info=True)
             return None
 
     async def list_platform_credentials(self) -> List[Dict[str, Any]]:
@@ -678,7 +680,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 })
             return result
         except Exception as e:
-            logger.error(f"Lỗi khi list platform credentials: {e}", exc_info=True)
+            logger.error(f"Error listing platform credentials: {e}", exc_info=True)
             return []
 
     async def delete_platform_credentials(self, platform: str) -> bool:

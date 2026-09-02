@@ -85,6 +85,13 @@ class AutonomousDiscoveryUseCase:
         macro_keywords: List[str] = []
 
         try:
+            # Dynamically load registered noise terms from database
+            noise_lexicons = await self._repository.get_domain_lexicons(domain="noise_blacklist")
+            noise_terms = {item["term"].lower().strip() for item in noise_lexicons}
+            if noise_terms:
+                self._quality_evaluator.register_noise_blacklist(list(noise_terms))
+                self._strategic_reasoner.register_noise_blacklist(list(noise_terms))
+
             cc_plugin = None
             for _, plugin in self._registry._plugins.items():
                 if isinstance(plugin, TikTokCreativeCenterPlugin):
@@ -96,10 +103,11 @@ class AutonomousDiscoveryUseCase:
                 )
                 for item in macro_trends:
                     tag = item.get("hashtag", "").replace("#", "").strip().lower()
-                    if tag and tag not in macro_keywords:
+                    if tag and tag not in noise_terms and tag not in macro_keywords:
                         macro_keywords.append(tag)
         except Exception as e:
             logger.warning(f"Macro scan via Creative Center encountered error: {e}", exc_info=True)
+
 
 
 
@@ -187,8 +195,9 @@ class AutonomousDiscoveryUseCase:
             clusters = await self._clusterer.cluster_signals(all_signals)
             await self._repository.save_clusters(clusters)
 
-        # Nạp Dynamic Lexicons & Foreign Stopwords từ PostgreSQL DB
+        # Load dynamic lexicons & foreign stopwords from database
         try:
+
             db_lexicons = await self._repository.get_domain_lexicons()
             pos_terms = [item["term"] for item in db_lexicons if item.get("domain") != "foreign_stopwords"]
             stop_terms = [item["term"] for item in db_lexicons if item.get("domain") == "foreign_stopwords"]

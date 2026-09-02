@@ -8,9 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class ClusterSignalsUseCase:
-    """
-    Use Case gom cụm các TrendSignal thành các TopicCluster và cập nhật thông tin vào kho lưu trữ.
-    """
+    """Use Case for clustering raw TrendSignals into TopicClusters and persisting them."""
 
     def __init__(self, clusterer: IClusteringEngine, repository: ITrendRepository):
         self._clusterer = clusterer
@@ -20,13 +18,14 @@ class ClusterSignalsUseCase:
         if not signals:
             return []
 
-        logger.info(f"Bắt đầu gom cụm {len(signals)} signals...")
+        logger.info(f"Clustering {len(signals)} signals...")
         clusters = await self._clusterer.cluster_signals(signals)
 
-        # Lưu lại clusters vào database
+        # Persist clusters
         await self._repo.save_clusters(clusters)
-        # Cập nhật signals với cluster_id mới
+        # Update signals with assigned cluster IDs
         await self._repo.save_signals(signals)
 
-        logger.info(f"Đã tạo và lưu thành công {len(clusters)} Topic Clusters.")
+        logger.info(f"Successfully generated and stored {len(clusters)} Topic Clusters.")
         return clusters
+

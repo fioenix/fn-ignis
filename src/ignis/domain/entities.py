@@ -8,7 +8,7 @@ from ignis.domain.value_objects import PlatformType, GeoCode, MomentumCategory
 
 
 def generate_mission_shortcode(title: str, geo: GeoCode = GeoCode.VN, timeframe: str = "7d", uid: Optional[UUID] = None) -> str:
-    """Sinh shortcode thân thiện dễ nhớ cho User (ví dụ: VN-AI-AGENT-90D hoặc M-8423AA3A)."""
+    """Generate human-friendly unique shortcode (e.g., VN-AI-AGENT-90D or M-8423AA3A)."""
     clean_words = re.findall(r"[a-zA-Z0-9]+", title.upper())
     slug = "-".join(clean_words[:2]) if clean_words else "TREND"
     tf_clean = re.sub(r"[^0-9A-Z]", "", timeframe.upper())
@@ -20,11 +20,11 @@ def generate_mission_shortcode(title: str, geo: GeoCode = GeoCode.VN, timeframe:
 
 @dataclass
 class TrendSignal:
-    """Tín hiệu xu hướng đơn lẻ từ một nền tảng cụ thể tại một thời điểm."""
+    """A discrete trend signal captured from a data source at a specific point in time."""
     platform: PlatformType
     raw_title: str
     metric_value: float = 0.0           # Views, Search index (0-100), Likes
-    growth_velocity: float = 0.0        # Tốc độ tăng trưởng (% / giờ)
+    growth_velocity: float = 0.0        # Growth velocity (% / hour)
     source_url: Optional[str] = None
     geo_code: GeoCode = GeoCode.VN
     cluster_id: Optional[UUID] = None
@@ -35,7 +35,7 @@ class TrendSignal:
 
 @dataclass
 class TopicCluster:
-    """Thực thể đại diện cho một cụm chủ đề xu hướng tổng hợp từ nhiều nền tảng."""
+    """A synthesized topic entity aggregating correlated cross-platform signals."""
     canonical_name: str
     id: UUID = field(default_factory=uuid4)
     summary_text: Optional[str] = None
@@ -58,7 +58,8 @@ class TopicCluster:
 
 @dataclass
 class ResearchMission:
-    """Nhiệm vụ / Chiến dịch nghiên cứu xu hướng theo chủ đề và từ khóa cụ thể."""
+    """A targeted strategic research mission with bound keywords, timeframe, and agent mapping."""
+
     title: str
     keywords: List[str]
     id: UUID = field(default_factory=uuid4)

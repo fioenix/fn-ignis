@@ -18,7 +18,8 @@ class Timeframe(str, Enum):
     LAST_30D = "30d"
 
 class MomentumCategory(str, Enum):
-    BREAKOUT = "breakout"    # Tăng trưởng đột biến (> +100%)
-    SURGING = "surging"      # Tăng trưởng nhanh (+50% đến +100%)
-    STEADY = "steady"        # Ổn định
-    DECLINING = "declining"  # Đang thoái trào
+    BREAKOUT = "breakout"    # Explosive velocity (> +100%)
+    SURGING = "surging"      # Rapid growth (+50% to +100%)
+    STEADY = "steady"        # Stable baseline
+    DECLINING = "declining"  # Downward momentum
+

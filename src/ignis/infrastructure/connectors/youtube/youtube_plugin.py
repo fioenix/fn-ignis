@@ -263,13 +263,27 @@ class YouTubeDataPlugin(IConnectorPlugin):
             cache_key = f"{raw_kw.lower().strip()}|{region_code}|{tf_str}|{limit}"
             cached_sigs = _YOUTUBE_QUERY_CACHE.get(cache_key)
             if cached_sigs is not None:
+
                 logger.info(f"Returning {len(cached_sigs)} cached YouTube signals for '{raw_kw}' (Quota preserved).")
                 for cs in cached_sigs:
                     v_id = cs.metadata.get("video_id")
                     if v_id and v_id not in seen_video_ids:
                         seen_video_ids.add(v_id)
-                        signals.append(cs)
+                        cloned_sig = TrendSignal(
+                            platform=cs.platform,
+                            raw_title=cs.raw_title,
+                            metric_value=cs.metric_value,
+                            growth_velocity=cs.growth_velocity,
+                            source_url=cs.source_url,
+                            geo_code=cs.geo_code,
+                            cluster_id=cs.cluster_id,
+                            mission_id=cs.mission_id,
+                            metadata=dict(cs.metadata or {}),
+                            captured_at=cs.captured_at,
+                        )
+                        signals.append(cloned_sig)
                 continue
+
 
             kw_signals: List[TrendSignal] = []
 

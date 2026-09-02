@@ -7,16 +7,16 @@ from ignis.domain.value_objects import GeoCode, Timeframe
 
 
 class ITrendRepository(ABC):
-    """Giao diện cổng lưu trữ và truy vấn dữ liệu Trends, Missions & System Audit Logs."""
+    """Port interface for storing and querying Trend signals, Research Missions, and System Audit Logs."""
 
     @abstractmethod
     async def save_signals(self, signals: List[TrendSignal]) -> int:
-        """Lưu danh sách signals vào cơ sở dữ liệu. Trả về số lượng đã lưu."""
+        """Save a batch of trend signals into the database. Returns the number of inserted records."""
         pass
 
     @abstractmethod
     async def save_clusters(self, clusters: List[TopicCluster]) -> None:
-        """Lưu hoặc cập nhật thông tin các Topic Clusters."""
+        """Upsert topic clusters and their metadata."""
         pass
 
     @abstractmethod
@@ -26,7 +26,7 @@ class ITrendRepository(ABC):
         timeframe: Timeframe = Timeframe.LAST_24H, 
         limit: int = 10
     ) -> List[TopicCluster]:
-        """Truy vấn các chủ đề có điểm momentum cao nhất."""
+        """Query top topic clusters ordered by momentum score."""
         pass
 
     @abstractmethod
@@ -35,43 +35,42 @@ class ITrendRepository(ABC):
         cluster_id: UUID, 
         timeframe: Timeframe = Timeframe.LAST_7D
     ) -> List[TrendSignal]:
-        """Lấy toàn bộ lịch sử tín hiệu chuỗi thời gian của một cụm chủ đề."""
+        """Retrieve time-series signal history for a given topic cluster."""
         pass
 
     @abstractmethod
     async def create_mission(self, mission: ResearchMission) -> ResearchMission:
-        """Tạo mới một nhiệm vụ nghiên cứu."""
+        """Create a new research mission record."""
         pass
 
     @abstractmethod
     async def save_mission(self, mission: ResearchMission) -> ResearchMission:
-        """Lưu hoặc cập nhật (Upsert) một nhiệm vụ nghiên cứu."""
+        """Upsert a research mission record."""
         pass
 
     @abstractmethod
     async def get_mission(self, mission_id: UUID) -> Optional[ResearchMission]:
-        """Lấy thông tin chi tiết một nhiệm vụ nghiên cứu."""
+        """Retrieve research mission details by UUID, shortcode, or session ID."""
         pass
-
 
     @abstractmethod
     async def update_mission(self, mission: ResearchMission) -> None:
-        """Cập nhật thông tin/trạng thái nhiệm vụ nghiên cứu."""
+        """Update research mission status, summary, and metadata."""
         pass
 
     @abstractmethod
     async def list_missions(self, limit: int = 20) -> List[ResearchMission]:
-        """Liệt kê các nhiệm vụ nghiên cứu gần nhất."""
+        """List the most recent research missions."""
         pass
 
     @abstractmethod
     async def get_mission_signals(self, mission_id: UUID) -> List[TrendSignal]:
-        """Lấy tất cả các tín hiệu đa kênh đã cào được cho một nhiệm vụ nghiên cứu."""
+        """Retrieve all multi-platform signals captured for a research mission."""
         pass
 
     @abstractmethod
     async def delete_mission_signals(self, mission_id: UUID) -> int:
-        """Xóa toàn bộ tín hiệu cũ của một nhiệm vụ nghiên cứu để nạp mới (Replace mode)."""
+        """Delete existing signals for a mission before a new targeted run (Replace mode)."""
         pass
 
     @abstractmethod
@@ -83,7 +82,7 @@ class ITrendRepository(ABC):
         level: str = "INFO",
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Ghi vết sự kiện hệ thống / lỗi kết nối vào database."""
+        """Record system diagnostic events and connector failures to the database."""
         pass
 
     @abstractmethod
@@ -93,7 +92,7 @@ class ITrendRepository(ABC):
         component: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """Truy vấn danh sách audit logs gần nhất."""
+        """Query recent system audit logs with optional filtering."""
         pass
 
     @abstractmethod
@@ -105,23 +104,24 @@ class ITrendRepository(ABC):
         is_active: bool = True,
         expires_at: Optional[datetime] = None,
     ) -> None:
-        """Lưu hoặc cập nhật thông tin phiên/token xác thực của mạng xã hội."""
+        """Save or update platform authentication tokens / session cookies."""
         pass
 
     @abstractmethod
     async def get_platform_credentials(self, platform: str) -> Optional[Dict[str, Any]]:
-        """Truy vấn phiên xác thực đang hoạt động của một nền tảng."""
+        """Retrieve active authentication credentials for a given platform."""
         pass
 
     @abstractmethod
     async def list_platform_credentials(self) -> List[Dict[str, Any]]:
-        """Liệt kê trạng thái kết nối tài khoản của tất cả các nền tảng."""
+        """List connected authentication sessions across all platforms."""
         pass
 
     @abstractmethod
     async def delete_platform_credentials(self, platform: str) -> bool:
-        """Xóa hoặc vô hiệu hóa phiên xác thực của một nền tảng."""
+        """Revoke or delete authentication session for a platform."""
         pass
+
 
     @abstractmethod
     async def get_domain_lexicons(self, domain: Optional[str] = None) -> List[Dict[str, Any]]:

@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 class GetMissionAnalysisUseCase:
     """
-    Use Case lấy dữ liệu phân tích của Mission tối ưu hóa Token (Token-Efficient).
-    Tóm lược dữ liệu, trích xuất top signals và loại bỏ metadata rác để không làm tràn context của AI Agent.
+    Use Case for retrieving Token-Efficient Mission Analysis data.
+    Condenses datasets, extracts top signals, and strips redundant metadata to prevent LLM context bloat.
     """
 
     def __init__(self, repository: ITrendRepository):
@@ -25,18 +25,18 @@ class GetMissionAnalysisUseCase:
     ) -> Dict[str, Any]:
         mission = await self._repo.get_mission(mission_id)
         if not mission:
-            raise ValueError(f"Research Mission {mission_id} không tồn tại.")
+            raise ValueError(f"Research Mission {mission_id} does not exist.")
 
         signals = await self._repo.get_mission_signals(mission_id)
 
-        # Lọc theo platform nếu có
+        # Apply optional platform filter
         if platform_filter:
             signals = [
                 s for s in signals 
                 if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)).lower() == platform_filter.lower()
             ]
 
-        # Thống kê phân bố nền tảng và kênh phát sóng
+        # Calculate platform distribution and channel breakdown
         platform_breakdown = defaultdict(int)
         channel_counts = defaultdict(int)
         total_views = 0.0
@@ -51,11 +51,11 @@ class GetMissionAnalysisUseCase:
             if p_val == "youtube":
                 total_views += s.metric_value
 
-        # Sắp xếp signals theo độ nổi bật (views/metric giảm dần)
+        # Order signals by engagement metrics
         sorted_signals = sorted(signals, key=lambda x: (x.metric_value, x.growth_velocity), reverse=True)
         top_signals = sorted_signals[:limit]
 
-        # Tinh gọn metadata để tiết kiệm token
+        # Condense metadata to save tokens
         compact_signals = []
         for s in top_signals:
             p_str = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
@@ -81,7 +81,7 @@ class GetMissionAnalysisUseCase:
                 "metadata": clean_meta,
             })
 
-        # Top 5 kênh hoạt động mạnh nhất
+        # Top 5 most active creators
         top_channels = sorted(channel_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
         return {
@@ -100,7 +100,8 @@ class GetMissionAnalysisUseCase:
                 "total_youtube_views": int(total_views),
                 "top_creators": [{"channel": ch, "video_count": cnt} for ch, cnt in top_channels],
                 "signals_returned": len(compact_signals),
-                "note": f"Hiển thị Top {len(compact_signals)} tín hiệu có tương tác cao nhất. Sử dụng generate_mission_artifact để xem toàn bộ danh sách trong HTML."
+                "note": f"Displaying top {len(compact_signals)} highest engagement signals. Use generate_mission_artifact to view the complete HTML dossier."
             },
             "top_signals": compact_signals,
         }
+

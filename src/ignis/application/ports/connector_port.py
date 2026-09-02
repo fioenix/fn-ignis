@@ -5,23 +5,23 @@ from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
 
 
 class IConnectorPlugin(ABC):
-    """Giao diện cổng (Port) chuẩn mực cho mọi Data Source Connector Plugin."""
+    """Port interface for data source connector plugins."""
 
     @property
     @abstractmethod
     def platform(self) -> PlatformType:
-        """Định danh nền tảng của Plugin."""
+        """Platform identifier for this connector."""
         pass
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Tên hiển thị của Plugin."""
+        """Display name of this connector plugin."""
         pass
 
     @abstractmethod
     async def is_healthy(self) -> bool:
-        """Kiểm tra sức khỏe kết nối đến nguồn dữ liệu."""
+        """Check the operational health and reachability of the data source."""
         pass
 
     @abstractmethod
@@ -31,7 +31,7 @@ class IConnectorPlugin(ABC):
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 50,
     ) -> List[TrendSignal]:
-        """Lấy dữ liệu xu hướng chung và chuyển đổi về danh sách TrendSignal domain entities."""
+        """Fetch general trend signals and map them to TrendSignal domain entities."""
         pass
 
     async def search_signals(
@@ -41,7 +41,7 @@ class IConnectorPlugin(ABC):
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 20,
     ) -> List[TrendSignal]:
-        """Cào dữ liệu có định hướng theo danh sách từ khóa nghiên cứu cụ thể."""
+        """Perform targeted search against specific research keywords."""
         return await self.fetch_signals(geo=geo, timeframe=timeframe, limit=limit)
 
     async def fetch_suggestions(
@@ -49,6 +49,7 @@ class IConnectorPlugin(ABC):
         keywords: List[str],
         geo: GeoCode = GeoCode.VN,
     ) -> List[dict]:
-        """Lấy danh sách các từ khóa tìm kiếm gợi ý (Search Suggestions / Autocomplete)."""
+        """Fetch real-world search suggestions and query autocomplete terms."""
         return []
+
 

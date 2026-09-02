@@ -18,33 +18,34 @@ logger = logging.getLogger("ignis.cli")
 
 
 async def run_ingest(geo_code: str = "VN"):
-    """CLI Runner chạy Ingress pipeline độc lập (Zero-Token Background ETL)."""
+    """CLI Runner executing standalone Ingress pipeline (Zero-Token Background ETL)."""
     geo = GeoCode(geo_code.upper())
-    logger.info(f"Khởi động fn-ignis Ingress CLI cho khu vực {geo.value}...")
+    logger.info(f"Starting fn-ignis Ingress CLI for region {geo.value}...")
 
-    # 1. Khởi tạo Registry và đăng ký Plugins
+    # 1. Initialize Registry and register active Plugins
     registry = ConnectorPluginRegistry()
     registry.register(GoogleTrendsRssPlugin())
 
     if settings.YOUTUBE_API_KEY:
         registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
     else:
-        logger.warning("Không tìm thấy YOUTUBE_API_KEY trong cấu hình. Bỏ qua YouTube Plugin.")
+        logger.warning("YOUTUBE_API_KEY not configured in environment. Skipping YouTube Plugin.")
 
-    # 2. Khởi tạo Repository
+    # 2. Initialize Repository
     repository = PostgresTimescaleRepository(
         dsn=settings.DATABASE_URL,
         min_pool_size=settings.DB_MIN_POOL_SIZE,
         max_pool_size=settings.DB_MAX_POOL_SIZE,
     )
 
-    # 3. Kích hoạt Ingest Use Case
+    # 3. Trigger Ingest Use Case
     use_case = IngestTrendsUseCase(registry=registry, repository=repository)
     try:
         result = await use_case.execute(geo=geo, timeframe=Timeframe.LAST_24H)
-        logger.info(f"Ingest hoàn tất: {result}")
+        logger.info(f"Ingest completed: {result}")
     finally:
         await repository.close()
+
 
 
 def main():

@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 class ExecuteMissionUseCase:
     """
-    Use Case kích hoạt cào sâu dữ liệu cho một Research Mission cụ thể,
-    truyền timeframe chính xác, gắn mission_id, gom cụm và cập nhật trạng thái.
+    Use Case for executing deep data ingress for a specific Research Mission,
+    passing exact timeframe filters, tagging mission_id, clustering signals, and updating state.
     """
 
     def __init__(
@@ -28,14 +28,14 @@ class ExecuteMissionUseCase:
     async def execute(self, mission_id: UUID) -> Dict[str, Any]:
         mission = await self._repo.get_mission(mission_id)
         if not mission:
-            raise ValueError(f"Research Mission {mission_id} không tồn tại.")
+            raise ValueError(f"Research Mission {mission_id} does not exist.")
 
-        logger.info(f"Bắt đầu thực thi Research Mission '{mission.title}' [ID: {mission_id}] với keywords: {mission.keywords} (Timeframe: {mission.timeframe})...")
+        logger.info(f"Executing Research Mission '{mission.title}' [ID: {mission_id}] with keywords: {mission.keywords} (Timeframe: {mission.timeframe})...")
         mission.status = "RUNNING"
         await self._repo.update_mission(mission)
 
         try:
-            # 1. Cào sâu theo keywords với đúng timeframe được yêu cầu
+            # 1. Targeted ingress across active connector plugins
             signals = await self._registry.search_across_all(
                 keywords=mission.keywords,
                 geo=mission.geo_code,
@@ -43,7 +43,7 @@ class ExecuteMissionUseCase:
                 custom_timeframe=mission.timeframe,
             )
 
-            # Fail-safe: Nếu một nguồn gặp Quota Exceeded (ví dụ YouTube 429), bảo toàn dữ liệu cũ của nguồn đó
+            # Fail-safe: If a source encountered transient quota exhaustion, preserve historical signals
             existing_signals = await self._repo.get_mission_signals(mission.id)
             if existing_signals:
                 existing_platforms = {s.platform for s in existing_signals}
@@ -51,34 +51,33 @@ class ExecuteMissionUseCase:
                 missing_platforms = existing_platforms - new_platforms
                 for missing_plat in missing_platforms:
                     preserved = [s for s in existing_signals if s.platform == missing_plat]
-                    logger.warning(f"Preserving {len(preserved)} signals for platform {missing_plat} due to ingress quota/fallback.")
+                    logger.warning(f"Preserving {len(preserved)} signals for platform {missing_plat} due to ingress quota fallback.")
                     signals.extend(preserved)
 
-            # 2. Gắn mission_id vào toàn bộ signals
+            # 2. Tag signals with mission_id
             for s in signals:
                 s.mission_id = mission.id
 
-            # 3. Gom cụm và chấm điểm
+            # 3. Semantic clustering
             clusters = await self._clusterer.cluster_signals(signals) if signals else []
 
-            # 4. Xóa signals cũ của mission trước khi lưu mới (Atomic Replace mode)
+            # 4. Atomic Replace: clear previous signals for this mission
             await self._repo.delete_mission_signals(mission.id)
 
-            # 5. Lưu dữ liệu mới
+            # 5. Persist fresh signals and clusters
             if clusters:
                 await self._repo.save_clusters(clusters)
             if signals:
                 await self._repo.save_signals(signals)
 
-            # Đếm số nền tảng thực tế có dữ liệu trả về
             active_platforms = list(set(s.platform.value if hasattr(s.platform, "value") else str(s.platform) for s in signals))
-            active_plat_str = ", ".join(active_platforms) if active_platforms else "không có"
+            active_plat_str = ", ".join(active_platforms) if active_platforms else "none"
 
             mission.status = "COMPLETED"
-            mission.summary = f"Thu thập thành công {len(signals)} signals từ {len(active_platforms)}/{len(mission.platforms)} nền tảng phản hồi ({active_plat_str}), phát hiện {len(clusters)} cụm chủ đề phân tích."
+            mission.summary = f"Successfully collected {len(signals)} signals across {len(active_platforms)}/{len(mission.platforms)} responsive platforms ({active_plat_str}), discovered {len(clusters)} topic clusters."
             await self._repo.update_mission(mission)
 
-            logger.info(f"Hoàn tất Research Mission {mission_id}: {mission.summary}")
+            logger.info(f"Research Mission {mission_id} completed: {mission.summary}")
             return {
                 "mission_id": str(mission.id),
                 "title": mission.title,
@@ -88,8 +87,9 @@ class ExecuteMissionUseCase:
                 "summary": mission.summary,
             }
         except Exception as e:
-            logger.error(f"Lỗi khi thực thi Research Mission {mission_id}: {e}", exc_info=True)
+            logger.error(f"Error executing Research Mission {mission_id}: {e}", exc_info=True)
             mission.status = "FAILED"
-            mission.summary = f"Lỗi thực thi: {str(e)}"
+            mission.summary = f"Execution error: {str(e)}"
             await self._repo.update_mission(mission)
             raise e
+

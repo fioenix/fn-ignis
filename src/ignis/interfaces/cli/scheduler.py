@@ -170,12 +170,13 @@ class IngressScheduler:
 
 
 async def main_async():
-    ingress_interval = int(settings.__dict__.get("SCHEDULER_INTERVAL_SECONDS", 900))
-    discovery_interval = int(settings.__dict__.get("DISCOVERY_INTERVAL_SECONDS", 43200))
+    ingress_interval = int(settings.SCHEDULER_INTERVAL_SECONDS)
+    discovery_interval = int(settings.DISCOVERY_INTERVAL_HOURS * 3600)
     scheduler = IngressScheduler(
         interval_seconds=ingress_interval,
         discovery_interval_seconds=discovery_interval,
     )
+
 
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
