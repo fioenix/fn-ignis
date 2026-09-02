@@ -60,13 +60,13 @@ pgdata/
 *.swp
 *.swo
 
-# Logs & Reports
-logs/
-*.log
+# Reports & Generated Artifacts
 reports/*.html
-!reports/.gitkeep
-*.backup_*.json
+!reports/mission_test1234.html
+src/reports/
+supabase/.temp/
+docs/AUDIT-*.md
+backup_*.json
 *storage_state*.json
 *session*.json
 scratch/
-
