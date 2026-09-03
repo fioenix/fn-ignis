@@ -1,0 +1,19 @@
+version: "1.0"
+runtime: "python"
+entrypoint: "ignis.interfaces.mcp.server"
+command: "uvx"
+args:
+  - "fn-ignis"
+env:
+  DATABASE_URL:
+    description: "Database connection URL (PostgreSQL/TimescaleDB or SQLite e.g. sqlite:///ignis.db)"
+    required: false
+    default: "sqlite:///ignis.db"
+  DEFAULT_GEO:
+    description: "Default ISO Alpha-2 country code for market listening (e.g. VN, US, JP, SG)"
+    required: false
+    default: "VN"
+  YOUTUBE_API_KEY:
+    description: "Google Cloud YouTube Data API v3 key (optional for YouTube ingress)"
+    required: false
+    default: ""

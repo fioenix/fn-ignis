@@ -1354,8 +1354,14 @@ Use the `extract_customer_pain_points` tool across top market videos to synthesi
 """
 
 
-if __name__ == "__main__":
+def main():
+    """Main CLI entry point for the fn-ignis FastMCP server."""
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()
+
 
 
 

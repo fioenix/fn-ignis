@@ -24,8 +24,9 @@
   },
   "protocols": {
     "sop": "6_step_market_research",
-    "tools_count": 15,
+    "tools_count": 28,
     "prompts": ["market_research_pipeline", "voice_of_customer_audit"],
     "resources": ["fn-ignis://sop/market-research", "fn-ignis://methodology/opportunity-index"]
   }
+
 }

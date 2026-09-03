@@ -7,6 +7,7 @@ from ignis.application.ports.artifact_port import IArtifactBuilder
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.harness_models import QualityScorecard, TrendMaturityStage, HarnessResearchReport
 from ignis.domain.value_objects import GeoCode
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 
 
 class HtmlArtifactBuilder(IArtifactBuilder):
@@ -14,7 +15,6 @@ class HtmlArtifactBuilder(IArtifactBuilder):
     Deterministic HTML Artifact Builder using Jinja2 + Tailwind CDN.
     Directly incorporates Agent Harness evaluation scorecards and strategic dossiers.
     """
-
 
     def __init__(self, templates_dir: Optional[Path] = None):
         if templates_dir is None:
@@ -53,6 +53,8 @@ class HtmlArtifactBuilder(IArtifactBuilder):
 
         self._env.filters["format_currency"] = format_currency_filter
         self._env.filters["format_number"] = format_number_filter
+        self._env.filters["sanitize_pii"] = sanitize_pii_text
+
 
 
     def build_dashboard_artifact(

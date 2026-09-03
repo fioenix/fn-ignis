@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/schema/server.json",
+  "name": "io.github.fioenix/fn-ignis",
+  "title": "fnIgnis Trend Intelligence & Market Research",
+  "description": "Unified self-hosted autonomous trend intelligence, multi-platform social listening (Google Trends, YouTube, TikTok), and market opportunity white-space discovery MCP harness.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fioenix/fn-ignis"
+  },
+  "license": "MIT",
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "fn-ignis",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "executable": "ignis-mcp"
+    }
+  ]
+}

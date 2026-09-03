@@ -30,8 +30,10 @@ class Settings(BaseSettings):
     # Scheduler Configuration
     SCHEDULER_INTERVAL_SECONDS: int = Field(default=900, description="Daemon scheduler tick interval in seconds")
     DISCOVERY_INTERVAL_HOURS: int = Field(default=24, description="Interval in hours between autonomous discovery runs")
+    SYNC_INTERVAL_MINUTES: int = Field(default=60, description="Background multi-platform sync interval in minutes")
 
     # Ingress Defaults
+
     DEFAULT_GEO: str = Field(default="VN", description="Default ISO geographic region code")
 
     INGRESS_BATCH_LIMIT: int = Field(default=50, description="Maximum items fetched per connector batch")

@@ -11,8 +11,12 @@ from ignis.domain.exceptions import ConnectorExecutionException
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.config import settings
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
+
 
 logger = logging.getLogger(__name__)
+
+
 
 
 
@@ -409,10 +413,8 @@ class TikTokPlugin(IConnectorPlugin):
 
                         cmt_text = c.get("text", "").strip()
                         if cmt_text:
-                            # Redact phone numbers and email addresses
-                            redacted_text = re.sub(r"(\+?84|0)(3|5|7|8|9)[0-9]{8}\b", "[PHONE_REDACTED]", cmt_text)
-                            redacted_text = re.sub(r"\b\d{10,11}\b", "[PHONE_REDACTED]", redacted_text)
-                            redacted_text = re.sub(r"[\w\.-]+@[\w\.-]+\.\w+", "[EMAIL_REDACTED]", redacted_text)
+                            # Redact phone numbers, emails, and credentials
+                            redacted_text = sanitize_pii_text(cmt_text)
 
                             comments.append({
                                 "comment_id": pseudo_cid,
@@ -423,6 +425,7 @@ class TikTokPlugin(IConnectorPlugin):
                                 "reply_count": c.get("reply_comment_total", 0),
                                 "created_at": c.get("create_time"),
                             })
+
 
 
 
@@ -596,7 +599,7 @@ class TikTokPlugin(IConnectorPlugin):
 
         return TrendSignal(
             platform=PlatformType.TIKTOK,
-            raw_title=title[:250],
+            raw_title=sanitize_pii_text(title[:250]),
             metric_value=play_count or float(metadata["likes"]),
             growth_velocity=0.0,
             source_url=url,
@@ -604,6 +607,7 @@ class TikTokPlugin(IConnectorPlugin):
             metadata=metadata,
             captured_at=datetime.now(timezone.utc),
         )
+
 
     async def _parse_dom_card(self, card, geo: GeoCode, keyword: Optional[str]) -> Optional[TrendSignal]:
         try:
@@ -682,7 +686,7 @@ class TikTokPlugin(IConnectorPlugin):
 
             return TrendSignal(
                 platform=PlatformType.TIKTOK,
-                raw_title=raw_title[:250],
+                raw_title=sanitize_pii_text(raw_title[:250]),
                 metric_value=metric_val,
                 growth_velocity=0.0,
                 source_url=canonical_url,
@@ -690,5 +694,6 @@ class TikTokPlugin(IConnectorPlugin):
                 metadata=metadata,
                 captured_at=datetime.now(timezone.utc),
             )
+
         except Exception:
             return None

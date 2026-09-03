@@ -2,30 +2,421 @@
   {
     "type": "function",
     "function": {
-      "name": "get_current_session_mission",
-      "description": "Restore active mission linked to current chat thread or session ID.",
+      "name": "run_autonomous_research_mission",
+      "description": "Run an end-to-end autonomous research mission: create mission, execute refinement loop, evaluate quality scorecard, and discover market white spaces.",
       "parameters": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "session_id": {"type": "string", "description": "Unique session or thread identifier"}
+          "topic": {
+            "type": "string"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          },
+          "timeframe": {
+            "default": "7d",
+            "type": "string"
+          },
+          "min_signals": {
+            "default": 15,
+            "type": "integer"
+          }
         },
-        "required": ["session_id"]
+        "required": [
+          "topic",
+          "keywords"
+        ],
+        "type": "object"
       }
     }
   },
   {
     "type": "function",
     "function": {
-      "name": "get_tiktok_creative_center_trends",
-      "description": "Fetch top macro trending hashtags, views, and industry categories from TikTok Creative Center with optional industry filtering.",
+      "name": "evaluate_mission_quality",
+      "description": "Evaluate multi-dimensional data quality and integrity (Coverage, Freshness, Language Accuracy, Confidence Score) for a research mission.",
       "parameters": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "geo": {"type": "string", "default": "VN", "description": "Country code (e.g. 'VN', 'US')"},
-          "period": {"type": "integer", "default": 7, "description": "Time period (7 or 30 days)"},
-          "limit": {"type": "integer", "default": 20, "description": "Max hashtags to return"},
-          "industry": {"type": "string", "description": "Optional industry filter (e.g. 'tech', 'software', 'education', 'ecommerce')"}
-        }
+          "mission_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mission_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "discover_market_opportunities",
+      "description": "Identify high-demand, low-supply market white spaces and provide actionable strategic recommendations.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mission_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_research_mission",
+      "description": "Create a targeted cross-platform trend research mission with specified keywords, platforms, geo, and timeframe.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "platforms": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          },
+          "timeframe": {
+            "default": "7d",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic",
+          "keywords"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "execute_mission_ingress",
+      "description": "Trigger deep multi-platform data collection and clustering for a research mission (idempotent replace mode).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mission_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_mission_analysis",
+      "description": "Retrieve full strategic analysis payload (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) for in-chat Native Artifact rendering.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 25,
+            "type": "integer"
+          },
+          "platform": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "mission_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "generate_mission_artifact",
+      "description": "Export a standalone Infographic Canvas HTML report to local disk (reports/ folder). Use ONLY when the user explicitly requests an exported HTML file.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mission_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_research_missions",
+      "description": "List recent trend research missions and tracking campaigns.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 10,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "diagnose_system_health",
+      "description": "Inspect system health, connector circuit breaker states, and automated remediation suggestions.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_system_logs",
+      "description": "Query recent system audit logs and error traces from the database for debugging.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "ERROR"
+          },
+          "component": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_trending_topics",
+      "description": "Fetch top cross-platform trending topic clusters ranked by momentum velocity.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          },
+          "timeframe": {
+            "default": "24h",
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_topic_detail",
+      "description": "Retrieve time-series signals and engagement metrics for a specific topic cluster (token-optimized).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "topic_id": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "topic_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "generate_trend_artifact",
+      "description": "Generate a standalone single-file HTML dashboard or topic card artifact (Tailwind + Chart.js).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "topic_id": {
+            "default": "",
+            "type": "string"
+          },
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "trigger_ingress_refresh",
+      "description": "Trigger immediate multi-platform ETL trend ingestion and clustering (zero-token background).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_current_session_mission",
+      "description": "Automatically retrieve the research mission associated with the current session ID or chat thread.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "authenticate_tiktok",
+      "description": "Launch 1-Click interactive TikTok login (QR Code / Managed browser) to capture and persist session credentials.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "headless": {
+            "default": false,
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "default": 90,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_platform_auth_status",
+      "description": "Check connection status and active credentials across social platforms (TikTok, Threads, Reels).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "clear_platform_auth",
+      "description": "Disconnect or remove stored session credentials for a specific platform.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "platform": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "platform"
+        ],
+        "type": "object"
       }
     }
   },
@@ -35,26 +426,82 @@
       "name": "get_tiktok_search_suggestions",
       "description": "Fetch real-time derivative search suggestions / autocomplete queries from TikTok for market demand analysis.",
       "parameters": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "keywords": {"type": "array", "items": {"type": "string"}, "description": "List of seed search keywords"},
-          "geo": {"type": "string", "default": "VN", "description": "Country code"}
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          }
         },
-        "required": ["keywords"]
+        "required": [
+          "keywords"
+        ],
+        "type": "object"
       }
     }
   },
   {
     "type": "function",
     "function": {
-      "name": "execute_mission_ingress",
-      "description": "Execute multi-platform data collection for a research mission and evaluate quality scorecard.",
+      "name": "get_tiktok_creative_center_trends",
+      "description": "Fetch top macro trending hashtags, views, and industry categories from TikTok Creative Center with optional industry filtering (e.g. 'tech', 'software', 'education', 'ecommerce').",
       "parameters": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "mission_id": {"type": "string", "description": "UUID of the research mission"}
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          },
+          "period": {
+            "default": 7,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 20,
+            "type": "integer"
+          },
+          "industry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
         },
-        "required": ["mission_id"]
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_tiktok_video_comments",
+      "description": "Fetch real-time public comments, inquiries, and discussions under a specific TikTok video URL.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "video_url": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 30,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "video_url"
+        ],
+        "type": "object"
       }
     }
   },
@@ -62,43 +509,77 @@
     "type": "function",
     "function": {
       "name": "extract_customer_pain_points",
-      "description": "Extract customer pain points, objections, pricing questions, and unmet needs from video comments.",
+      "description": "Extract voice of customer, frequent inquiries, and unmet needs across top TikTok videos for specific market keywords and target geography.",
       "parameters": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "keywords": {"type": "array", "items": {"type": "string"}, "description": "Keywords to search for"},
-          "geo": {"type": "string", "default": "VN", "description": "Country code"},
-          "max_videos": {"type": "integer", "default": 3, "description": "Max videos to scrape comments from"}
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          },
+          "max_videos": {
+            "default": 3,
+            "type": "integer"
+          },
+          "inquiry_patterns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
         },
-        "required": ["keywords"]
+        "required": [
+          "keywords"
+        ],
+        "type": "object"
       }
     }
   },
   {
     "type": "function",
     "function": {
-      "name": "get_mission_analysis",
-      "description": "Retrieve comprehensive synthesized analysis including Opportunity Index and White Space matrix.",
+      "name": "trigger_autonomous_discovery",
+      "description": "Trigger an on-demand end-to-end autonomous discovery cycle to uncover top daily white space opportunities.",
       "parameters": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "mission_id": {"type": "string", "description": "UUID of the research mission"}
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          }
         },
-        "required": ["mission_id"]
+        "type": "object"
       }
     }
   },
   {
     "type": "function",
     "function": {
-      "name": "generate_mission_artifact",
-      "description": "Export interactive Infographic HTML Dashboard report to local disk.",
+      "name": "get_latest_daily_discovery",
+      "description": "Retrieve the latest daily automated market discovery digest and opportunity rankings.",
       "parameters": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "mission_id": {"type": "string", "description": "UUID of the research mission"}
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          }
         },
-        "required": ["mission_id"]
+        "type": "object"
       }
     }
   },
@@ -106,15 +587,51 @@
     "type": "function",
     "function": {
       "name": "register_domain_lexicon",
-      "description": "Dynamically register domain vocabulary, slang, brand names, and tool keywords into the database.",
+      "description": "Register or expand domain vocabulary, slang, brand names, and industry keywords dynamically into the persistent database so Quality Gate and Ingress engines recognize new niche vernacular.",
       "parameters": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "domain": {"type": "string", "description": "Target domain/industry (e.g. 'fashion', 'tech', 'crypto')"},
-          "terms": {"type": "array", "items": {"type": "string"}, "description": "List of terms or slang words"},
-          "category": {"type": "string", "default": "vernacular", "description": "Category of terms"}
+          "domain": {
+            "type": "string"
+          },
+          "terms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "category": {
+            "default": "vernacular",
+            "type": "string"
+          }
         },
-        "required": ["domain", "terms"]
+        "required": [
+          "domain",
+          "terms"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "register_noise_blacklist",
+      "description": "Register or expand negative keywords, generic social noise, and entertainment hashtags dynamically into the persistent database so Quality Gate filters out non-strategic signals.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "terms": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "terms"
+        ],
+        "type": "object"
       }
     }
   },
@@ -122,12 +639,35 @@
     "type": "function",
     "function": {
       "name": "list_domain_lexicons",
-      "description": "List active domain vocabularies and industry taxonomies.",
+      "description": "List active domain vocabularies, slang terms, and industry mappings currently loaded in the system.",
       "parameters": {
-        "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "domain": {"type": "string", "description": "Optional domain filter"}
-        }
+          "domain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "verify_connectors_health",
+      "description": "Run synthetic diagnostic health checks across all multi-platform connectors, database, and proxy.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
       }
     }
   }

@@ -14,8 +14,10 @@ from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 import cachetools
 
 from ignis.config import settings
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 
 logger = logging.getLogger(__name__)
+
 
 # Bounded LRU + TTL Cache for YouTube queries (max 2000 queries, TTL from settings)
 _YOUTUBE_QUERY_CACHE: cachetools.TTLCache = cachetools.TTLCache(
@@ -326,7 +328,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                 v_snippet = v_item.get("snippet", {})
                                 v_stats = v_item.get("statistics", {})
 
-                                title = v_snippet.get("title", "").strip()
+                                title = sanitize_pii_text(v_snippet.get("title", "").strip())
                                 if not title or self._is_garbage(title):
                                     continue
 
@@ -347,7 +349,6 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                 if pub_at < published_after_dt:
                                     continue
 
-
                                 now_utc = datetime.now(timezone.utc)
                                 hours_diff = max(1.0, (now_utc - pub_at).total_seconds() / 3600.0)
                                 velocity = round(view_count / hours_diff, 2)
@@ -355,7 +356,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                 meta = {
                                     "keyword": raw_kw,
                                     "video_id": v_id,
-                                    "channel_title": v_snippet.get("channelTitle"),
+                                    "channel_title": sanitize_pii_text(v_snippet.get("channelTitle") or ""),
                                     "channel_id": v_snippet.get("channelId"),
                                     "views": int(view_count),
                                     "likes": like_count,
@@ -363,6 +364,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                     "published_at": pub_at_str,
                                     "timeframe_filter": tf_str,
                                 }
+
 
                                 sig = TrendSignal(
                                     platform=PlatformType.YOUTUBE,

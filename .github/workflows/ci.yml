@@ -40,4 +40,17 @@ jobs:
         run: |
           uv run pytest tests/ -v --cov=ignis --cov-report=term-missing
 
+      - name: Verify Clean Packaging (uv build)
+        run: |
+          uv build
+
+      - name: Verify Quickstart Onboarding from Clean State
+        run: |
+          mkdir -p /tmp/clean-test && cd /tmp/clean-test
+          uv venv
+          . .venv/bin/activate
+          uv pip install -e "${GITHUB_WORKSPACE}"
+          DATABASE_URL="sqlite:///test_smoke.db" uv run python -c "from ignis.interfaces.mcp.server import mcp; print('FastMCP Server initialized successfully from clean install')"
+
+
 

@@ -75,7 +75,7 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 | AI Agent / Client | Configuration & Standards | Capabilities Supported |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 21 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 28 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
 | **Claude Code** | [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Agent Skills Standard, Native In-Chat Artifacts |
 | **Cursor IDE** | [`.cursor/rules/fn-ignis.mdc`](.cursor/rules/fn-ignis.mdc), [`.cursorrules`](.cursorrules) | Context-Aware Multi-Platform Market Intelligence |
 | **Windsurf IDE** | [`.windsurfrules`](.windsurfrules) | Cascade Step-by-Step Research Rule Protocol |
@@ -83,6 +83,8 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 | **OpenAI Codex** | [`.codex/instructions.md`](.codex/instructions.md), [`.codexrules`](.codexrules) | Thread Session Continuity (`codex://threads/...`), Structured Tools |
 | **OpenClaw** | [`openclaw.json`](openclaw.json), [`.openclaw/config.yaml`](.openclaw/config.yaml) | OpenClaw Plugin v1 Schema with Lifecycle Hooks |
 | **Nous Hermes** | [`.hermes/tools.json`](.hermes/tools.json), [`hermes_manifest.json`](hermes_manifest.json) | Native Structured Function-Calling JSON Schema |
+
+<!-- mcp-name: io.github.fioenix/fn-ignis -->
 
 ---
 
@@ -92,8 +94,12 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **`run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)`**: End-to-end mission creation, multi-platform refinement loop, and white space synthesis.
 - **`create_research_mission(title, keywords, geo, timeframe, hypothesis)`**: Initialize a new targeted research campaign.
 - **`execute_mission_ingress(mission_id)`**: Execute deep multi-platform data collection with automated quality gate evaluation.
+- **`evaluate_mission_quality(mission_id)`**: Re-evaluate multi-dimensional quality scorecard.
+- **`discover_market_opportunities(mission_id)`**: Discover unserved content and product white spaces.
 - **`get_mission_analysis(mission_id)`**: Retrieve full synthesized strategic analysis (Opportunity Index, white spaces, action plan).
 - **`generate_mission_artifact(mission_id)`**: Export a standalone, high-contrast interactive Infographic HTML Dashboard to `reports/`.
+- **`list_research_missions(limit)`**: List all historical research campaigns.
+- **`get_current_session_mission(session_id)`**: Restore active mission linked to current chat thread.
 - **`trigger_autonomous_discovery(geo)`**: Trigger an on-demand full autonomous discovery cycle.
 - **`get_latest_daily_discovery(geo)`**: Retrieve the latest automated daily discovery digest.
 
@@ -105,10 +111,13 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 ### 3. Dynamic Lexicon & Infrastructure Diagnostics
 - **`register_domain_lexicon(domain, terms, category)`**: Dynamically register new niche vocabulary/slang into database.
+- **`register_noise_blacklist(terms)`**: Register unwanted viral spam words into the blacklist.
 - **`list_domain_lexicons(domain)`**: Query active domain vocabularies and industry mappings.
+- **`diagnose_system_health()`**: Query full platform telemetry, circuit breakers, and component status.
+- **`get_system_logs(limit, level)`**: Inspect audit event trails.
 - **`verify_connectors_health()`**: Run real-time synthetic diagnostics on YouTube quota, Google RSS, TikTok Playwright contexts, database pool, and proxy connectivity.
 - **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Managed browser credential lifecycle.
-- **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo)`**: Real-time trend exploration.
+- **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo)`**, **`trigger_ingress_refresh(geo)`**: Real-time trend exploration.
 
 ### 4. FastMCP Native Resources & Prompts
 - **Resources**: `fn-ignis://sop/market-research`, `fn-ignis://methodology/opportunity-index`
@@ -137,12 +146,12 @@ Explore sample interactive Infographic HTML reports generated directly by `fn-ig
 ### 1. Zero-Docker Local Mode (SQLite & In-Memory)
 Run `fn-ignis` with **zero external dependencies** using Python standard library SQLite:
 ```bash
-# 1. Clone repository & install dependencies
+# 1. Clone repository & initialize virtual environment
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
-uv pip install -e .
+uv venv && source .venv/bin/activate && uv pip install -e .
 
 # 2. Run FastMCP server directly (Zero-Docker / SQLite auto-provisioned)
-DATABASE_URL=sqlite:///ignis.db python -m ignis.interfaces.mcp.server
+DATABASE_URL=sqlite:///ignis.db ignis-mcp
 ```
 
 ### 2. 1-Command Automated Bundle Setup (Claude Desktop)
@@ -166,13 +175,16 @@ docker compose -f docker-compose.prod.yml up -d
 
 | Variable | Description | Default | Required |
 |---|---|---|:---:|
-| `DATABASE_URL` | PostgreSQL/TimescaleDB connection string | `postgresql://postgres:postgres@localhost:5432/ignis` | **Yes** |
+| `DATABASE_URL` | PostgreSQL/TimescaleDB or SQLite connection string | `postgresql://postgres:postgres@localhost:5432/ignis` | **Yes** |
 | `YOUTUBE_API_KEY` | Google Cloud YouTube Data API v3 Key | `""` | **Yes** |
 | `DEFAULT_GEO` | Default ISO country code for trend intelligence | `VN` | No |
+| `SCHEDULER_INTERVAL_SECONDS` | Daemon scheduler heartbeat / health tick interval | `900` (15m) | No |
+| `DISCOVERY_INTERVAL_HOURS` | Interval between autonomous discovery runs | `24` (daily) | No |
+| `SYNC_INTERVAL_MINUTES` | Frequency of background multi-platform synchronization | `60` | No |
 | `YOUTUBE_CACHE_TTL_SECONDS` | In-memory LRU+TTL cache duration to preserve YouTube API quota | `86400` (24h) | No |
 | `PLAYWRIGHT_PROXY_SERVER` | Optional HTTP/SOCKS proxy server URI for residential scraping | `""` | No |
-| `SYNC_INTERVAL_MINUTES` | Frequency of background multi-platform synchronization | `60` | No |
 | `IGNIS_ENCRYPTION_KEY` | AES-256 Fernet key for session cookie encryption | *(Auto-generated)* | No |
+
 
 
 ---

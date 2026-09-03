@@ -62,11 +62,16 @@ pgdata/
 
 # Reports & Generated Artifacts
 reports/*.html
+reports/*.db
 !reports/mission_test1234.html
+!reports/case_study_*.html
 src/reports/
 supabase/.temp/
 docs/AUDIT-*.md
+docs/LAUNCH-*.md
 backup_*.json
+
 *storage_state*.json
 *session*.json
 scratch/
+
