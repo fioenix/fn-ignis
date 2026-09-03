@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 960 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="arch-title arch-desc">
+      <title id="arch-title">fn-ignis Dual-Track Architecture</title>
+      <desc id="arch-desc">Dual-track market intelligence architecture uniting a 24/7 background radar with on-demand AI agent strategic probes.</desc>
+      <defs>
+        <style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap');</style>
+        <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+          <circle cx="2" cy="2" r="1" fill="rgba(15,23,42,0.08)"/>
+        </pattern>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#475569"/>
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#ea580c"/>
+        </marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#2563eb"/>
+        </marker>
+      </defs>
+
+      <!-- Background -->
+      <rect width="100%" height="100%" fill="#f8fafc"/>
+      <rect width="100%" height="100%" fill="url(#dots)" opacity="0.6"/>
+
+      <!-- ZONE 1: Track 1 (Left) -->
+      <rect x="40" y="72" width="248" height="264" rx="8"
+            fill="rgba(15,23,42,0.02)" stroke="rgba(15,23,42,0.12)" stroke-width="0.8"/>
+      <rect x="56" y="66" width="188" height="14" rx="2" fill="#f8fafc"/>
+      <text x="150" y="77" fill="rgba(15,23,42,0.45)" font-size="7.5" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.14em">TRACK 1 · 24/7 ALWAYS-ON RADAR</text>
+
+      <!-- ZONE 2: Track 2 (Right) -->
+      <rect x="672" y="72" width="248" height="392" rx="8"
+            fill="rgba(15,23,42,0.02)" stroke="rgba(15,23,42,0.12)" stroke-width="0.8"/>
+      <rect x="688" y="66" width="196" height="14" rx="2" fill="#f8fafc"/>
+      <text x="786" y="77" fill="rgba(15,23,42,0.45)" font-size="7.5" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.14em">TRACK 2 · ON-DEMAND DEEP PROBES</text>
+
+      <!-- ZONE 3: Core Engine (Center) -->
+      <rect x="336" y="72" width="288" height="304" rx="8"
+            fill="rgba(234,88,12,0.02)" stroke="rgba(234,88,12,0.25)" stroke-width="0.8" stroke-dasharray="4,4"/>
+      <rect x="396" y="66" width="168" height="14" rx="2" fill="#f8fafc"/>
+      <text x="480" y="77" fill="#ea580c" font-size="7.5" font-family="'Geist Mono', monospace"
+            text-anchor="middle" letter-spacing="0.14em">CORE STRATEGIC INTELLIGENCE</text>
+
+      <!-- CONNECTORS (Behind boxes, strictly orthogonal) -->
+      <!-- 1. Track 1: Worker -> Macro Ingress (Vertical) -->
+      <line x1="164" y1="172" x2="164" y2="244" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- 2. Macro Ingress -> Quality Gate (Orthogonal Elbow) -->
+      <path d="M 264,276 H 312 Q 320,276 320,268 V 160 Q 320,152 328,152 H 360"
+            fill="none" stroke="#2563eb" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+
+      <!-- 3. User -> Agent Harness (Vertical) -->
+      <line x1="796" y1="164" x2="796" y2="220" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- 4. Agent Harness -> Targeted Probes (Vertical) -->
+      <line x1="796" y1="288" x2="796" y2="368" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- 5. Targeted Probes -> Quality Gate (Orthogonal Elbow around right) -->
+      <path d="M 696,400 H 648 Q 640,400 640,392 V 160 Q 640,152 632,152 H 600"
+            fill="none" stroke="#2563eb" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+
+      <!-- 6. Quality Gate -> Clean Signals to Unified DB (Bypasses Opportunity Engine cleanly via left channel) -->
+      <path d="M 360,168 H 304 Q 296,168 296,176 V 448 Q 296,456 288,456 H 264"
+            fill="none" stroke="#ea580c" stroke-width="1.3" marker-end="url(#arrow-accent)"/>
+
+      <!-- 7. Unified DB -> Historical Context to Opportunity Engine -->
+      <path d="M 264,432 H 312 Q 320,432 320,424 V 320 Q 320,312 328,312 H 360"
+            fill="none" stroke="#475569" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+
+      <!-- 8. Agent Harness -> Execute Strategic Synthesis (Opportunity Engine) -->
+      <path d="M 696,254 H 616 Q 608,254 608,262 V 304 Q 608,312 600,312 H 600"
+            fill="none" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+      <!-- 9. Opportunity Engine -> Export Dossier (Vertical) -->
+      <line x1="480" y1="348" x2="480" y2="424" stroke="#ea580c" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
+
+      <!-- CONNECTOR LABELS with MASKS -->
+      <rect x="134" y="200" width="60" height="14" rx="2" fill="#f8fafc"/>
+      <text x="164" y="210" fill="#475569" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">EVERY 15M</text>
+
+      <rect x="290" y="220" width="60" height="14" rx="2" fill="#f8fafc"/>
+      <text x="320" y="230" fill="#2563eb" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">MACRO INGRESS</text>
+
+      <rect x="610" y="220" width="60" height="14" rx="2" fill="#f8fafc"/>
+      <text x="640" y="230" fill="#2563eb" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">LIVE PROBES</text>
+
+      <rect x="264" y="372" width="64" height="14" rx="2" fill="#f8fafc"/>
+      <text x="296" y="382" fill="#ea580c" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">CLEAN SIGNALS</text>
+
+      <rect x="444" y="378" width="72" height="14" rx="2" fill="#f8fafc"/>
+      <text x="480" y="388" fill="#ea580c" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">EXPORT DOSSIER</text>
+
+      <!-- NODES: TRACK 1 -->
+      <!-- Node: Worker Daemon -->
+      <g>
+        <rect x="64" y="108" width="200" height="64" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="72" y="116" width="32" height="12" rx="2" fill="transparent" stroke="rgba(15,23,42,0.25)" stroke-width="0.8"/>
+        <text x="88" y="125" fill="#475569" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">RUNNER</text>
+        <text x="164" y="142" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Worker Daemon</text>
+        <text x="164" y="158" fill="#475569" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">24/7 background cron (Docker)</text>
+      </g>
+
+      <!-- Node: Macro Ingress -->
+      <g>
+        <rect x="64" y="244" width="200" height="64" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="72" y="252" width="36" height="12" rx="2" fill="transparent" stroke="rgba(15,23,42,0.25)" stroke-width="0.8"/>
+        <text x="90" y="261" fill="#475569" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">INGRESS</text>
+        <text x="164" y="278" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Macro Ingress</text>
+        <text x="164" y="294" fill="#475569" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">TikTok Trends · Google Vel.</text>
+      </g>
+
+      <!-- NODES: TRACK 2 -->
+      <!-- Node: Strategist / User -->
+      <g>
+        <rect x="696" y="108" width="200" height="56" rx="6" fill="rgba(71,85,105,0.08)" stroke="#475569" stroke-width="1"/>
+        <rect x="704" y="116" width="32" height="12" rx="2" fill="transparent" stroke="rgba(71,85,105,0.4)" stroke-width="0.8"/>
+        <text x="720" y="125" fill="#475569" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLIENT</text>
+        <text x="796" y="138" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Strategist / User</text>
+        <text x="796" y="153" fill="#475569" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Core hypothesis & scope</text>
+      </g>
+
+      <!-- Node: AI Agent Harness -->
+      <g>
+        <rect x="696" y="220" width="200" height="68" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="704" y="228" width="40" height="12" rx="2" fill="transparent" stroke="rgba(15,23,42,0.25)" stroke-width="0.8"/>
+        <text x="724" y="237" fill="#475569" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">FASTMCP</text>
+        <text x="796" y="254" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">AI Agent Harness</text>
+        <text x="796" y="271" fill="#475569" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Claude · Cursor · Codex · Hermes</text>
+      </g>
+
+      <!-- Node: Targeted Ingress -->
+      <g>
+        <rect x="696" y="368" width="200" height="64" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="704" y="376" width="34" height="12" rx="2" fill="transparent" stroke="rgba(15,23,42,0.25)" stroke-width="0.8"/>
+        <text x="721" y="385" fill="#475569" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">PROBES</text>
+        <text x="796" y="402" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Targeted Probes</text>
+        <text x="796" y="418" fill="#475569" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Autocomplete · Video Grid · VoC</text>
+      </g>
+
+      <!-- NODES: CORE ENGINE (Focal coral) -->
+      <!-- Node: Quality Gate -->
+      <g>
+        <rect x="360" y="116" width="240" height="72" rx="6" fill="rgba(234,88,12,0.06)" stroke="#ea580c" stroke-width="1.4"/>
+        <rect x="368" y="124" width="40" height="12" rx="2" fill="transparent" stroke="rgba(234,88,12,0.5)" stroke-width="0.8"/>
+        <text x="388" y="133" fill="#ea580c" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">QUALITY</text>
+        <text x="480" y="151" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Multi-Tier Quality Gate</text>
+        <text x="480" y="169" fill="#ea580c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">Precision ≥ 70% · Noise & Spam Filter</text>
+      </g>
+
+      <!-- Node: Strategic Synthesis -->
+      <g>
+        <rect x="360" y="276" width="240" height="72" rx="6" fill="rgba(234,88,12,0.06)" stroke="#ea580c" stroke-width="1.4"/>
+        <rect x="368" y="284" width="42" height="12" rx="2" fill="transparent" stroke="rgba(234,88,12,0.5)" stroke-width="0.8"/>
+        <text x="389" y="293" fill="#ea580c" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SYNTHESIS</text>
+        <text x="480" y="311" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Opportunity Engine</text>
+        <text x="480" y="329" fill="#ea580c" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">White Space · Opportunity Index ±100</text>
+      </g>
+
+      <!-- NODES: STORAGE & ARTIFACTS -->
+      <!-- Node: Database -->
+      <g>
+        <rect x="64" y="424" width="200" height="64" rx="6" fill="rgba(15,23,42,0.04)" stroke="#475569" stroke-width="1"/>
+        <rect x="72" y="432" width="36" height="12" rx="2" fill="transparent" stroke="rgba(71,85,105,0.4)" stroke-width="0.8"/>
+        <text x="90" y="441" fill="#475569" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">STORAGE</text>
+        <text x="164" y="458" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Unified Baseline DB</text>
+        <text x="164" y="474" fill="#475569" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">PostgreSQL · TimescaleDB · SQLite</text>
+      </g>
+
+      <!-- Node: Interactive Dossier -->
+      <g>
+        <rect x="360" y="424" width="240" height="64" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="368" y="432" width="40" height="12" rx="2" fill="transparent" stroke="rgba(15,23,42,0.25)" stroke-width="0.8"/>
+        <text x="388" y="441" fill="#475569" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">REPORT</text>
+        <text x="480" y="458" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Interactive Dossier</text>
+        <text x="480" y="474" fill="#475569" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">reports/*.html Dashboard</text>
+      </g>
+    </svg>
