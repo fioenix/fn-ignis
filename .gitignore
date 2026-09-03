@@ -49,6 +49,7 @@ backlog.local.md
 # Database & Local Storage
 *.sqlite
 *.sqlite3
+*.db
 data/
 pgdata/
 
@@ -57,8 +58,11 @@ pgdata/
 .DS_Store
 .idea/
 .vscode/
+.cursor/mcp.json
+.cursor/*.json
 *.swp
 *.swo
+*.backup_*.json
 
 # Reports & Generated Artifacts
 reports/*.html

@@ -1,5 +1,8 @@
 # fn-ignis Operating Protocol for OpenAI Codex Agents 🤖
 
+## ⚡ Zero-Touch Setup
+If setting up this repo or starting afresh, execute `./scripts/bootstrap.sh` to auto-provision `.venv`, SQLite database, and MCP configurations.
+
 ## Context & Architecture
 `fn-ignis` operates on a Dual-Track Architecture:
 - Track 1 (Always-On Radar): 24/7 autonomous surveillance across Google Trends, YouTube, and TikTok (`fn-ignis-worker`).

@@ -169,8 +169,18 @@ class IngressScheduler:
         self._shutdown_event.set()
 
 
+def resolve_ingress_interval(sync_minutes: int = 0, scheduler_seconds: int = 900) -> int:
+    """Resolve active ingress interval in seconds, prioritizing non-zero SYNC_INTERVAL_MINUTES override."""
+    if sync_minutes > 0:
+        return int(sync_minutes * 60)
+    return int(scheduler_seconds)
+
+
 async def main_async():
-    ingress_interval = int(settings.SCHEDULER_INTERVAL_SECONDS)
+    ingress_interval = resolve_ingress_interval(
+        sync_minutes=getattr(settings, "SYNC_INTERVAL_MINUTES", 0),
+        scheduler_seconds=getattr(settings, "SCHEDULER_INTERVAL_SECONDS", 900),
+    )
     discovery_interval = int(settings.DISCOVERY_INTERVAL_HOURS * 3600)
     scheduler = IngressScheduler(
         interval_seconds=ingress_interval,

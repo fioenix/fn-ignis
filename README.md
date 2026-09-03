@@ -143,7 +143,17 @@ Explore sample interactive Infographic HTML reports generated directly by `fn-ig
 
 ## ⚡ Quickstart & Installation
 
-### 1. Zero-Docker Local Mode (SQLite & In-Memory)
+### 🤖 1. Zero-Touch AI Agent Bootstrap (Recommended)
+If you are an AI Agent (**Claude Code, Cursor, Windsurf, Devin, Antigravity, OpenClaw, Hermes**) or setting up locally with 1 command:
+```bash
+git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
+./scripts/bootstrap.sh
+```
+*Automatically sets up Python virtualenv, SQLite database, generates `.env` with encryption keys, registers MCP in Claude Desktop, Cursor, and VS Code, and verifies all connectors.*
+
+---
+
+### 2. Manual Zero-Docker Local Mode (SQLite)
 Run `fn-ignis` with **zero external dependencies** using Python standard library SQLite:
 ```bash
 # 1. Clone repository & initialize virtual environment
@@ -151,14 +161,7 @@ git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
 uv venv && source .venv/bin/activate && uv pip install -e .
 
 # 2. Run FastMCP server directly (Zero-Docker / SQLite auto-provisioned)
-DATABASE_URL=sqlite:///ignis.db ignis-mcp
-```
-
-### 2. 1-Command Automated Bundle Setup (Claude Desktop)
-Clone the repository and run the automated installer:
-```bash
-# Run bundle installer (Sets up venv, installs dependencies, configures Claude Desktop & starts Docker worker)
-./bundle/install.sh
+ignis-mcp
 ```
 
 ### 3. 1-Click Production Stack (Docker Compose)
@@ -171,12 +174,18 @@ docker compose -f docker-compose.prod.yml up -d
 
 ---
 
+## 📖 Comprehensive Documentation & User Guide
+
+For detailed manual installation, Python scripting workflows, Docker ops, and troubleshooting, consult the **[Manual User Guide (Cẩm nang Hướng dẫn Thủ công)](docs/USER_GUIDE.md)**.
+
+---
+
 ## ⚙️ Environment Variables
 
 | Variable | Description | Default | Required |
 |---|---|---|:---:|
-| `DATABASE_URL` | PostgreSQL/TimescaleDB or SQLite connection string | `postgresql://postgres:postgres@localhost:5432/ignis` | **Yes** |
-| `YOUTUBE_API_KEY` | Google Cloud YouTube Data API v3 Key | `""` | **Yes** |
+| `DATABASE_URL` | SQLite (`sqlite:///ignis.db`) or PostgreSQL/TimescaleDB connection string | `sqlite:///ignis.db` | **Yes** |
+| `YOUTUBE_API_KEY` | Google Cloud YouTube Data API v3 Key | `""` | Optional |
 | `DEFAULT_GEO` | Default ISO country code for trend intelligence | `VN` | No |
 | `SCHEDULER_INTERVAL_SECONDS` | Daemon scheduler heartbeat / health tick interval | `900` (15m) | No |
 | `DISCOVERY_INTERVAL_HOURS` | Interval between autonomous discovery runs | `24` (daily) | No |
@@ -184,8 +193,6 @@ docker compose -f docker-compose.prod.yml up -d
 | `YOUTUBE_CACHE_TTL_SECONDS` | In-memory LRU+TTL cache duration to preserve YouTube API quota | `86400` (24h) | No |
 | `PLAYWRIGHT_PROXY_SERVER` | Optional HTTP/SOCKS proxy server URI for residential scraping | `""` | No |
 | `IGNIS_ENCRYPTION_KEY` | AES-256 Fernet key for session cookie encryption | *(Auto-generated)* | No |
-
-
 
 ---
 

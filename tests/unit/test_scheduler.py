@@ -46,3 +46,20 @@ async def test_scheduler_health_probe_cycle():
     assert call_args["event_type"] == "CONNECTOR_HEALTH_CHECK"
     assert call_args["level"] == "INFO"
 
+
+@pytest.mark.parametrize(
+    "sync_min,sched_sec,expected",
+    [
+        (0, 900, 900),
+        (0, 300, 300),
+        (15, 900, 900),
+        (60, 900, 3600),
+        (30, 300, 1800),
+    ],
+)
+def test_ingress_interval_resolution(sync_min, sched_sec, expected):
+    from ignis.interfaces.cli.scheduler import resolve_ingress_interval
+
+    result = resolve_ingress_interval(sync_minutes=sync_min, scheduler_seconds=sched_sec)
+    assert result == expected
+

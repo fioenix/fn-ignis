@@ -7,14 +7,15 @@ EMAIL_PATTERN = re.compile(
     re.IGNORECASE
 )
 
-# Vietnamese & International Phone Number Pattern
+# Vietnamese Phone Number Pattern (e.g., 0931405002, 0931.405.002, +84 931 405 002, (+84) 938-940-397)
 VN_PHONE_PATTERN = re.compile(
     r"(?:(?:\+84|0084|84|\(\+84\))\s*|\b0)[235789](?:[\s\.\-]*\d){8}\b"
 )
 
-# Generic multi-digit continuous phone sequences (10-11 digits)
-GENERIC_PHONE_SEQUENCE = re.compile(
-    r"\b(?:\+?[0-9]{1,3}[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}\b"
+# Structured International Formatted Phone Numbers (Requires explicit delimiters or '+' country prefix)
+# Does NOT match plain unformatted large numbers (e.g., 1234567890 views, 1000000000 VND)
+INTERNATIONAL_FORMATTED_PHONE_PATTERN = re.compile(
+    r"(?:\+\d{1,3}[\s.\-]?)?(?:\(\d{2,4}\)[\s.\-]?|\b\d{2,4}[\s.\-])\d{3,4}[\s.\-]\d{3,4}\b"
 )
 
 # Secrets and token patterns (OpenAI sk-, GitHub ghp_, JWT tokens)
@@ -27,6 +28,7 @@ def sanitize_pii_text(text: str) -> str:
     """
     Sanitize PII (Personal Identifiable Information) from input text.
     Redacts phone numbers, emails, and API credentials to prevent leaks in compliance with GDPR & Privacy Laws.
+    Preserves numerical metrics, view counts, and financial transaction amounts.
     """
     if not text or not isinstance(text, str):
         return text
@@ -38,11 +40,11 @@ def sanitize_pii_text(text: str) -> str:
     # 2. Redact Secrets
     sanitized = SECRET_PATTERN.sub("[REDACTED_SECRET]", sanitized)
 
-    # 3. Redact Vietnamese Phones (including formatted and dotted numbers)
+    # 3. Redact Vietnamese Phones
     sanitized = VN_PHONE_PATTERN.sub("[REDACTED_PHONE]", sanitized)
 
-    # 4. Redact Generic Continuous Phone sequences
-    sanitized = GENERIC_PHONE_SEQUENCE.sub("[REDACTED_PHONE]", sanitized)
+    # 4. Redact Structured International Formatted Phones
+    sanitized = INTERNATIONAL_FORMATTED_PHONE_PATTERN.sub("[REDACTED_PHONE]", sanitized)
 
     return sanitized
 

@@ -4,16 +4,14 @@ set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." >/dev/null 2>&1 && pwd )"
 cd "$DIR"
 
-echo "🔥 [fn-ignis] Verifying environment and configuring Bundle..."
-if [ ! -d ".venv" ]; then
-    uv venv
+# Run universal zero-touch bootstrap
+"$DIR/scripts/bootstrap.sh" "$@"
+
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    if [ -f "docker-compose.yml" ]; then
+        echo "🚀 [fn-ignis] Optional Docker daemon detected. Starting worker background container if needed..."
+        docker compose up -d --build || true
+    fi
 fi
-source .venv/bin/activate
-uv pip install -e .
-uv run python -m ignis.interfaces.cli.setup_bundle
 
-
-echo "🚀 [fn-ignis] Rebuilding and restarting Docker Background Worker..."
-docker compose up -d --build
-
-echo "✅ Complete! Please restart Claude Desktop to load all updated tools and prompts."
+echo "✅ Setup complete. AI Agents and MCP clients are ready to interact with fn-ignis."

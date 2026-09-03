@@ -55,3 +55,40 @@ def test_tracked_reference_reports_have_zero_pii():
         emails = email_re.findall(content)
         assert len(phones) == 0, f"PII phone leak in {report_file.name}: {phones}"
         assert len(emails) == 0, f"PII email leak in {report_file.name}: {emails}"
+
+
+def test_pii_two_column_matrix_guardrails():
+    """
+    Two-column matrix test to verify:
+    - Column 1: MUST redact real PII phone numbers, international formats, and emails.
+    - Column 2: MUST preserve view counts, numerical metrics, currency amounts, and years.
+    """
+    # Column 1: MUST REDACT
+    redaction_cases = [
+        ("Liên hệ 0931405002 để đặt hàng", "[REDACTED_PHONE]"),
+        ("Hotline: (+84) 931 405 002", "[REDACTED_PHONE]"),
+        ("Zalo: 0938.940.397", "[REDACTED_PHONE]"),
+        ("US office: (800) 555-0199", "[REDACTED_PHONE]"),
+        ("Direct: 800-555-0199", "[REDACTED_PHONE]"),
+        ("International: +1 415 555 2671", "[REDACTED_PHONE]"),
+        ("Email support@finolabs.io", "[REDACTED_EMAIL]"),
+        ("Token sk-1234567890abcdef1234567890", "[REDACTED_SECRET]"),
+    ]
+    for raw_input, expected_token in redaction_cases:
+        res = sanitize_pii_text(raw_input)
+        assert expected_token in res, f"Failed to redact in: {raw_input} -> {res}"
+
+    # Column 2: MUST PRESERVE (Negative controls / False positive protection)
+    preservation_cases = [
+        "Video đạt 1234567890 lượt xem",
+        "Cách kiếm 1000000000 VND từ AI",
+        "Doanh số bán buôn 50000000 đ",
+        "Chiến dịch thu hút 1000000 views",
+        "Xu hướng thị trường năm 2026",
+        "Top 10 giải pháp chuyển đổi số",
+        "Sản phẩm mã SP123456 giá 250000đ",
+    ]
+    for raw_input in preservation_cases:
+        res = sanitize_pii_text(raw_input)
+        assert "[REDACTED_PHONE]" not in res, f"False positive redaction in: {raw_input} -> {res}"
+        assert res == raw_input, f"Content altered incorrectly: {raw_input} -> {res}"

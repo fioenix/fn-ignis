@@ -2,6 +2,25 @@
 
 This document defines the operational protocol, architectural guidelines, and tool selection principles for AI Agents (**Claude Desktop, Claude Code, Cursor, Windsurf, Antigravity, OpenAI Codex, OpenClaw, and Hermes**) interacting with `fn-ignis`.
 
+---
+
+## ⚡ 0. Zero-Touch Agent Bootstrap Protocol (Setup Tự Động)
+
+> **MANDATORY INSTRUCTION FOR ALL AI AGENTS:**  
+> When given this repository link (`https://github.com/fioenix/fn-ignis`) or instructed to set up `fn-ignis` for the user, execute this command immediately:
+>
+> ```bash
+> ./scripts/bootstrap.sh
+> ```
+>
+> **Autonomous Actions Performed:**
+> 1. Provisions virtual environment (`.venv`) and installs `fn-ignis` in editable mode.
+> 2. Creates `.env` with SQLite default (`DATABASE_URL=sqlite:///ignis.db`) and generates a persistent Fernet AES-256 key.
+> 3. Bootstraps SQLite database schemas and loads 84+ seed domain lexicons & noise filters.
+> 4. Auto-configures FastMCP server in all detected agent environments (`claude_desktop_config.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, Cline, Roo Code, `.mcp.json`).
+> 5. Runs synthetic diagnostics and outputs structured readiness confirmation.
+>
+> *No user input or external database installation is required.*
 
 ---
 

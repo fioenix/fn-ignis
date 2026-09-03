@@ -10,10 +10,10 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    # Database TimescaleDB / PostgreSQL
+    # Database TimescaleDB / PostgreSQL or SQLite
     DATABASE_URL: str = Field(
-        default="postgresql://postgres:postgres@localhost:5432/ignis",
-        description="PostgreSQL / TimescaleDB connection URI"
+        default="sqlite:///ignis.db",
+        description="Database connection URI (SQLite default for zero-config local mode, or PostgreSQL / TimescaleDB)"
     )
     DB_MIN_POOL_SIZE: int = Field(default=2, description="Minimum database connection pool size")
     DB_MAX_POOL_SIZE: int = Field(default=10, description="Maximum database connection pool size")
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # Scheduler Configuration
     SCHEDULER_INTERVAL_SECONDS: int = Field(default=900, description="Daemon scheduler tick interval in seconds")
     DISCOVERY_INTERVAL_HOURS: int = Field(default=24, description="Interval in hours between autonomous discovery runs")
-    SYNC_INTERVAL_MINUTES: int = Field(default=60, description="Background multi-platform sync interval in minutes")
+    SYNC_INTERVAL_MINUTES: int = Field(default=0, description="Optional override for ingress sync interval in minutes; 0 = fallback to SCHEDULER_INTERVAL_SECONDS")
 
     # Ingress Defaults
 

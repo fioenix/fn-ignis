@@ -4,7 +4,7 @@ globs: *
 ---
 # fn-ignis Agent Operating Guidelines 🤖
 
-When conducting market research, trend listening, or white-space opportunity analysis:
+0. **Zero-Touch Setup:** If setting up this repo or starting afresh, run `./scripts/bootstrap.sh` to auto-provision virtualenv, SQLite DB, and MCP configs.
 
 1. **Architecture (Dual-Track Model):**
    - Track 1 (Always-On Radar): Continuous 24/7 background surveillance across Google Trends, YouTube, and TikTok (`fn-ignis-worker`).
