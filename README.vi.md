@@ -74,7 +74,7 @@ flowchart TB
     P2 --> QGate
     QGate -->|Tín hiệu Sạch| DB
     DB -.->|Dữ liệu Lịch sử| Synth
-    Agent -->|Thực thi SOP| Synth
+    Synth -->|Dữ liệu Tổng hợp| Agent
     Synth -->|Xuất bản| Artifact
 
     %% Styling classes

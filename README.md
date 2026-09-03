@@ -75,7 +75,7 @@ flowchart TB
     P2 --> QGate
     QGate -->|Clean Signals| DB
     DB -.->|Historical Context| Synth
-    Agent -->|Execute SOP| Synth
+    Synth -->|Synthesis Insights| Agent
     Synth -->|Export| Artifact
 
     %% Styling classes

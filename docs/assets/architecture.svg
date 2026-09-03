@@ -57,8 +57,8 @@
       <!-- 4. Agent Harness -> Targeted Probes (Vertical) -->
       <line x1="796" y1="288" x2="796" y2="368" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
 
-      <!-- 5. Targeted Probes -> Quality Gate (Orthogonal Elbow around right) -->
-      <path d="M 696,400 H 648 Q 640,400 640,392 V 160 Q 640,152 632,152 H 600"
+      <!-- 5. Targeted Probes -> Quality Gate (Orthogonal Elbow along x=636) -->
+      <path d="M 696,400 H 644 Q 636,400 636,392 V 160 Q 636,152 628,152 H 600"
             fill="none" stroke="#2563eb" stroke-width="1.2" marker-end="url(#arrow-link)"/>
 
       <!-- 6. Quality Gate -> Clean Signals to Unified DB (Bypasses Opportunity Engine cleanly via left channel) -->
@@ -69,9 +69,9 @@
       <path d="M 264,432 H 312 Q 320,432 320,424 V 320 Q 320,312 328,312 H 360"
             fill="none" stroke="#475569" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
 
-      <!-- 8. Agent Harness -> Execute Strategic Synthesis (Opportunity Engine) -->
-      <path d="M 696,254 H 616 Q 608,254 608,262 V 304 Q 608,312 600,312 H 600"
-            fill="none" stroke="#475569" stroke-width="1.2" marker-end="url(#arrow)"/>
+      <!-- 8. Opportunity Engine -> AI Agent Harness (Synthesis Insights with bridge hop over vertical blue line at x=636) -->
+      <path d="M 600,312 H 628 a 8,8 0 0,1 16,0 H 648 Q 656,312 656,304 V 262 Q 656,254 664,254 H 696"
+            fill="none" stroke="#ea580c" stroke-width="1.3" marker-end="url(#arrow-accent)"/>
 
       <!-- 9. Opportunity Engine -> Export Dossier (Vertical) -->
       <line x1="480" y1="348" x2="480" y2="424" stroke="#ea580c" stroke-width="1.4" marker-end="url(#arrow-accent)"/>
@@ -83,11 +83,14 @@
       <rect x="290" y="220" width="60" height="14" rx="2" fill="#f8fafc"/>
       <text x="320" y="230" fill="#2563eb" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">MACRO INGRESS</text>
 
-      <rect x="610" y="220" width="60" height="14" rx="2" fill="#f8fafc"/>
-      <text x="640" y="230" fill="#2563eb" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">LIVE PROBES</text>
+      <rect x="606" y="200" width="60" height="14" rx="2" fill="#f8fafc"/>
+      <text x="636" y="210" fill="#2563eb" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">LIVE PROBES</text>
 
       <rect x="264" y="372" width="64" height="14" rx="2" fill="#f8fafc"/>
       <text x="296" y="382" fill="#ea580c" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">CLEAN SIGNALS</text>
+
+      <rect x="620" y="278" width="72" height="14" rx="2" fill="#f8fafc"/>
+      <text x="656" y="288" fill="#ea580c" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">SYNTHESIS</text>
 
       <rect x="444" y="378" width="72" height="14" rx="2" fill="#f8fafc"/>
       <text x="480" y="388" fill="#ea580c" font-size="7.5" font-family="'Geist Mono', monospace" text-anchor="middle">EXPORT DOSSIER</text>
