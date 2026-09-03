@@ -41,9 +41,14 @@ venv.bak/
 *.key
 
 
-# Local Notes & Private Backlogs
+# Local Notes, Ephemeral Handoffs & Private Backlogs
 *.local.md
+*.handoff.md
+*.ephemeral.md
+*.tmp.md
 .local/
+.handoff/
+docs/ephemeral/
 backlog.local.md
 
 # Database & Local Storage

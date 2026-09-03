@@ -120,3 +120,15 @@ Breaking Feature   Bugfix / Optimization
    - Git Tag on `main` $\rightarrow$ `vX.Y.Z`
 4. **Beta Phase Principle (`0.X.Y`)**: While in initial beta stages (`0.X.Y`), prioritize `PATCH` and `MINOR` increments. Do NOT rush to `1.0.0` until enterprise multi-tenancy and production stability milestones are reached.
 
+---
+
+## 🗑️ 5. Ephemeral Agent Handoff & Review Protocol (Giao Ban Tạm Thời)
+
+> **MANDATORY RULE FOR TEMPORARY WORKING ARTIFACTS:**
+> Any interim review notes, audit summaries, handoff memos, or scratchpads exchanged between AI agents (Claude Code, Antigravity, Cursor, Codex) **MUST be written exclusively into `.handoff/` (or named `*.handoff.md` / `*.ephemeral.md`)**.
+>
+> - **DO NOT** create temporary audit or review files directly inside `docs/` or project root.
+> - `docs/` is reserved **strictly for permanent product documentation** (e.g. `USER_GUIDE.md`, architecture manuals).
+> - `.handoff/` is 100% ignored by Git and will be purged periodically without affecting repository history.
+
+

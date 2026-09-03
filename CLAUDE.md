@@ -59,7 +59,7 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 ## 🛠️ Essential Development & Verification Commands
 
 ```bash
-# Run complete test suite (84+ tests, 100% async coverage)
+# Run complete test suite (96+ tests, 100% async coverage)
 uv run pytest
 
 # Run auto-provisioner with JSON output
@@ -69,5 +69,13 @@ uv run python -m ignis.interfaces.cli.setup_bundle --json
 ignis-mcp
 
 # Run single ingress pass via CLI
-ignis VN
+ignis --geo VN --timeframe 24h
 ```
+
+---
+
+## 🗑️ Ephemeral Handoff & Review Protocol
+
+- **Temporary Working Notes**: When generating interim reviews, architecture audits, or handoff notes meant for 1-time session exchange, **ALWAYS write them to `.handoff/` (or name them `*.handoff.md`)**.
+- **Do not clutter `docs/`**: `docs/` is strictly for permanent end-user and developer documentation (`USER_GUIDE.md`).
+
