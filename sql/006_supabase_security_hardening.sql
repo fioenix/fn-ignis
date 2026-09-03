@@ -55,3 +55,30 @@ BEGIN
             FOR SELECT TO authenticated, anon USING (true);
     END IF;
 END $$;
+
+-- ====================================================================
+-- 4. MOVE EXTENSION vector OUT OF PUBLIC SCHEMA
+-- ====================================================================
+CREATE SCHEMA IF NOT EXISTS extensions;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_extension e 
+        JOIN pg_namespace n ON e.extnamespace = n.oid 
+        WHERE e.extname = 'vector' AND n.nspname = 'public'
+    ) THEN
+        ALTER EXTENSION vector SET SCHEMA extensions;
+    END IF;
+END $$;
+
+-- ====================================================================
+-- 5. HARDEN SECURITY DEFINER RPC FUNCTION (match_memories)
+-- ====================================================================
+DO $$
+BEGIN
+    -- Thu hồi quyền execute từ public/anon/authenticated qua PostgREST API
+    EXECUTE 'REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM anon, PUBLIC';
+    
+    -- Nếu muốn match_memories tuân thủ RLS theo người gọi (SECURITY INVOKER):
+    -- ALTER FUNCTION public.match_memories SECURITY INVOKER;
+END $$;
