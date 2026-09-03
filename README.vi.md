@@ -28,25 +28,69 @@
 
 ## 🏛️ Kiến trúc: Mô hình Song hành (Dual-Track Model)
 
+<p align="center">
+  <img src="docs/assets/architecture.png" alt="fn-ignis Kiến trúc Mô hình Song hành" width="100%">
+</p>
+<p align="center">
+  <small><em>Sơ đồ: Kiến trúc Tình báo Xu hướng & Nghiên cứu Thị trường Mô hình Song hành (<a href="docs/assets/architecture.svg">Vector SVG</a> · <a href="docs/assets/architecture.html">Bản HTML Độc lập</a>)</em></small>
+</p>
+
+<details>
+  <summary>📄 <b>Xem mã nguồn sơ đồ Mermaid</b></summary>
+
 ```mermaid
-flowchart TD
-    subgraph Track1["Track 1: RADAR CHẠY NGẦM 24/7 (Continuous Surveillance)"]
-        W["fn-ignis Worker Daemon (Docker)"] -->|Mỗi 15 phút| E1["Thu thập Đa nền tảng & Phân cụm Ngữ nghĩa"]
-        W -->|Mỗi 12-24 giờ| E2["Tự động Quét Creative Center & Tổng hợp Khoảng trống"]
-        E1 & E2 --> DB[("PostgreSQL / SQLite (Cơ sở dữ liệu chung)")]
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'ui-sans-serif, system-ui, sans-serif', 'fontSize': '13px', 'primaryColor': '#F8FAFC', 'primaryTextColor': '#0F172A', 'primaryBorderColor': '#CBD5E1', 'lineColor': '#64748B', 'secondaryColor': '#F1F5F9', 'tertiaryColor': '#F8FAFC'}}}%%
+flowchart TB
+    %% Inputs
+    subgraph T1["📡 Track 1: Radar Ngầm 24/7 (Continuous Surveillance)"]
+        direction TB
+        W["<b>Worker Daemon</b><br/>Docker Background Cron"]
+        P1["<b>Thu thập Vĩ mô</b><br/>TikTok Creative + Google Trends"]
+        W -->|Mỗi 15 phút| P1
     end
 
-    subgraph Track2["Track 2: NGHIÊN CỨU CHUYÊN SÂU THEO YÊU CẦU (Active Strategic Probes)"]
-        User["Người dùng / Nhà chiến lược"] <--> Agent["AI Agent (Claude, Cursor, Codex, OpenClaw)"]
-        Agent -->|Bước 1: Xác định Mục tiêu & Đăng ký Từ điển| S1["Phạm vi, Giả thuyết & Từ vựng Chuyên ngành"]
-        Agent -->|Bước 2-4: Triển khai Đầu dò Tích cực| S2["Gợi ý Tìm kiếm, Lưới Video & Bình luận Khách hàng"]
-        Agent -->|Bước 3: Tổng hợp Chiến lược| S3["Opportunity Index, Rào cản & Kế hoạch MVP 3-7 ngày"]
-        S2 -->|Ghi nhận & Làm giàu Dữ liệu| DB
-        Agent --> S4["Báo cáo Dossier HTML Infographic Tương tác"]
+    subgraph T2["🎯 Track 2: Nghiên cứu Sâu Theo Yêu cầu (Active Probes)"]
+        direction TB
+        User(["<b>Người dùng / Chiến lược gia</b>"]) <--> Agent["<b>AI Agent Harness</b><br/>Claude · Cursor · Codex · Hermes"]
+        P2["<b>Đầu dò Mục tiêu</b><br/>Gợi ý Tìm kiếm · Lưới Video · VoC"]
+        Agent -->|Triển khai Đầu dò| P2
     end
 
-    DB -.->|Cung cấp Dữ liệu Lịch sử| Agent
+    %% Engine & Gate
+    subgraph Core["⚡ fn-ignis Core Intelligence"]
+        QGate{"<b>Quality Gate</b><br/>Độ chính xác &ge; 70%?"}
+        Synth["<b>Bộ máy Tổng hợp Chiến lược</b><br/>Opportunity Index (-100 đến +100)"]
+    end
+
+    %% Persistence & Outputs
+    subgraph Storage["💾 Lưu trữ Chung & Báo cáo"]
+        direction LR
+        DB[("<b>Cơ sở Dữ liệu Chung</b><br/>PostgreSQL / SQLite")]
+        Artifact["<b>Báo cáo Dossier Tương tác</b><br/>reports/*.html Dashboard"]
+    end
+
+    %% Cross connections
+    P1 --> QGate
+    P2 --> QGate
+    QGate -->|Tín hiệu Sạch| DB
+    DB -.->|Dữ liệu Lịch sử| Synth
+    Agent -->|Thực thi SOP| Synth
+    Synth -->|Xuất bản| Artifact
+
+    %% Styling classes
+    classDef radar fill:#EEF2FF,stroke:#6366F1,stroke-width:1.5px,color:#312E81;
+    classDef probe fill:#ECFDF5,stroke:#10B981,stroke-width:1.5px,color:#064E3B;
+    classDef core fill:#FFFBEB,stroke:#F59E0B,stroke-width:1.5px,color:#78350F;
+    classDef storage fill:#F1F5F9,stroke:#64748B,stroke-width:1.5px,color:#0F172A;
+    classDef highlight fill:#FAFAFA,stroke:#0F172A,stroke-width:2px,color:#0F172A;
+
+    class W,P1 radar;
+    class Agent,P2 probe;
+    class QGate,Synth core;
+    class DB,Artifact storage;
+    class User highlight;
 ```
+</details>
 
 ---
 
@@ -76,7 +120,7 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 
 | AI Agent / IDE | Cấu hình & Tiêu chuẩn | Khả năng Hỗ trợ |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 28 FastMCP Tools, Prompts, Resources, tự động nạp 6 bước SOP |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 31 FastMCP Tools, Prompts, Resources, tự động nạp 6 bước SOP |
 | **Claude Code** | [`CLAUDE.md`](CLAUDE.md), [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Chuẩn Agent Skills, xuất Artifact HTML trực quan |
 | **Cursor IDE** | [`.cursor/rules/fn-ignis.mdc`](.cursor/rules/fn-ignis.mdc), [`.cursorrules`](.cursorrules) | Nhận diện ngữ cảnh nghiên cứu thị trường đa nền tảng |
 | **Windsurf IDE** | [`.windsurfrules`](.windsurfrules) | Giao thức quy tắc nghiên cứu từng bước cho Cascade |
@@ -87,7 +131,7 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 
 ---
 
-## 🛠️ Danh mục 28 FastMCP Tools, Prompts & Resources
+## 🛠️ Danh mục 31 FastMCP Tools, Prompts & Resources
 
 ### 1. Nghiên cứu Thị trường & Tổng hợp Chiến lược
 - **`run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)`**: Khởi tạo chiến dịch, thu thập dữ liệu đa nguồn, tính toán Opportunity Index và xuất báo cáo trong 1 bước.
@@ -116,6 +160,9 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 - **`get_system_logs(limit, level)`**: Tra cứu nhật ký sự kiện kiểm toán hệ thống.
 - **`verify_connectors_health()`**: Chạy kiểm tra tự động trạng thái YouTube API, Google RSS, Playwright, DB pool và Proxy.
 - **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Quản lý phiên đăng nhập trình duyệt có mã hóa AES-256.
+- **`authenticate_threads(auth_code, client_id, client_secret, redirect_uri)`**: Hoàn tất luồng OAuth 2.0 chính thức của Meta Threads Graph API (authorization code → short-lived token → long-lived user token 60 ngày), lưu trữ mã hóa AES.
+- **`get_threads_auth_status()`**: Kiểm tra token Threads đang lưu — trạng thái còn hiệu lực hay đã hết hạn, scopes, `key_version`, số ngày còn lại và có cần refresh hay không.
+- **`clear_threads_auth()`**: Thu hồi và xóa credentials OAuth của Threads khỏi bộ lưu trữ mã hóa.
 - **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo)`**, **`trigger_ingress_refresh(geo)`**: Khám phá xu hướng thời gian thực.
 
 ### 4. FastMCP Native Resources & Prompts

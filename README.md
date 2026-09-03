@@ -29,25 +29,69 @@
 
 ## 🏛️ Architecture: The Dual-Track Model
 
+<p align="center">
+  <img src="docs/assets/architecture.png" alt="fn-ignis Dual-Track Architecture" width="100%">
+</p>
+<p align="center">
+  <small><em>Figure: The Dual-Track Autonomous Trend Intelligence Architecture (<a href="docs/assets/architecture.svg">Vector SVG</a> · <a href="docs/assets/architecture.html">Standalone HTML</a>)</em></small>
+</p>
+
+<details>
+  <summary>📄 <b>View Mermaid Diagram Source</b></summary>
+
 ```mermaid
-flowchart TD
-    subgraph Track1["Track 1: ALWAYS-ON RADAR (Continuous Surveillance 24/7)"]
-        W["fn-ignis Worker Daemon (Docker)"] -->|Every 15m| E1["Multi-Platform Ingress & Semantic Clustering"]
-        W -->|Every 12h| E2["Autonomous Discovery: Creative Center + White Space Synthesis"]
-        E1 & E2 --> DB[("PostgreSQL / TimescaleDB (Shared Baseline)")]
+%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'ui-sans-serif, system-ui, sans-serif', 'fontSize': '13px', 'primaryColor': '#F8FAFC', 'primaryTextColor': '#0F172A', 'primaryBorderColor': '#CBD5E1', 'lineColor': '#64748B', 'secondaryColor': '#F1F5F9', 'tertiaryColor': '#F8FAFC'}}}%%
+flowchart TB
+    %% Inputs
+    subgraph T1["📡 Track 1: 24/7 Always-On Radar"]
+        direction TB
+        W["<b>Worker Daemon</b><br/>Docker Background Cron"]
+        P1["<b>Macro Ingress</b><br/>TikTok Creative + Google Trends"]
+        W -->|Every 15m| P1
     end
 
-    subgraph Track2["Track 2: ON-DEMAND DEEP RESEARCH (Active Strategic Probes)"]
-        User["User / Strategist"] <--> Agent["AI Agent (Claude, Cursor, Codex, OpenClaw)"]
-        Agent -->|Step 1: Clarify & Register Lexicon| S1["Scope, Hypothesis & Domain Vernacular"]
-        Agent -->|Step 2-4: Deploy Active Probes| S2["Search Autocomplete, Video Grid & Comment Pain Points"]
-        Agent -->|Step 5-6: Strategic Synthesis| S3["Opportunity Index, Moats & 3-7d MVP Plan"]
-        S2 -->|Enrich & Write Back| DB
-        Agent --> S4["Interactive Infographic HTML Dossier"]
+    subgraph T2["🎯 Track 2: On-Demand Deep Probes"]
+        direction TB
+        User(["<b>User / Strategist</b>"]) <--> Agent["<b>AI Agent Harness</b><br/>Claude · Cursor · Codex · Hermes"]
+        P2["<b>Targeted Probes</b><br/>Live Autocomplete · Video Grid · VoC"]
+        Agent -->|Deploy Probes| P2
     end
 
-    DB -.->|Provides Continuous Historical Baseline| Agent
+    %% Engine & Gate
+    subgraph Core["⚡ fn-ignis Core Intelligence"]
+        QGate{"<b>Quality Gate</b><br/>Precision &ge; 70%?"}
+        Synth["<b>Strategic Synthesis Engine</b><br/>Opportunity Index (-100 to +100)"]
+    end
+
+    %% Persistence & Outputs
+    subgraph Storage["💾 Shared Storage & Outputs"]
+        direction LR
+        DB[("<b>Unified Baseline DB</b><br/>PostgreSQL / SQLite")]
+        Artifact["<b>Interactive Dossier</b><br/>reports/*.html Dashboard"]
+    end
+
+    %% Cross connections
+    P1 --> QGate
+    P2 --> QGate
+    QGate -->|Clean Signals| DB
+    DB -.->|Historical Context| Synth
+    Agent -->|Execute SOP| Synth
+    Synth -->|Export| Artifact
+
+    %% Styling classes
+    classDef radar fill:#EEF2FF,stroke:#6366F1,stroke-width:1.5px,color:#312E81;
+    classDef probe fill:#ECFDF5,stroke:#10B981,stroke-width:1.5px,color:#064E3B;
+    classDef core fill:#FFFBEB,stroke:#F59E0B,stroke-width:1.5px,color:#78350F;
+    classDef storage fill:#F1F5F9,stroke:#64748B,stroke-width:1.5px,color:#0F172A;
+    classDef highlight fill:#FAFAFA,stroke:#0F172A,stroke-width:2px,color:#0F172A;
+
+    class W,P1 radar;
+    class Agent,P2 probe;
+    class QGate,Synth core;
+    class DB,Artifact storage;
+    class User highlight;
 ```
+</details>
 
 ---
 
@@ -77,7 +121,7 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 | AI Agent / Client | Configuration & Standards | Capabilities Supported |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 28 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 31 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
 | **Claude Code** | [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Agent Skills Standard, Native In-Chat Artifacts |
 | **Cursor IDE** | [`.cursor/rules/fn-ignis.mdc`](.cursor/rules/fn-ignis.mdc), [`.cursorrules`](.cursorrules) | Context-Aware Multi-Platform Market Intelligence |
 | **Windsurf IDE** | [`.windsurfrules`](.windsurfrules) | Cascade Step-by-Step Research Rule Protocol |
@@ -119,6 +163,9 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **`get_system_logs(limit, level)`**: Inspect audit event trails.
 - **`verify_connectors_health()`**: Run real-time synthetic diagnostics on YouTube quota, Google RSS, TikTok Playwright contexts, database pool, and proxy connectivity.
 - **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Managed browser credential lifecycle.
+- **`authenticate_threads(auth_code, client_id, client_secret, redirect_uri)`**: Complete the official Meta Threads Graph API OAuth 2.0 flow (authorization code → short-lived token → 60-day long-lived user token), persisted AES-encrypted.
+- **`get_threads_auth_status()`**: Inspect the stored Threads token — active/expired state, scopes, `key_version`, days remaining, and whether a refresh is due.
+- **`clear_threads_auth()`**: Revoke and delete the stored Threads OAuth credentials.
 - **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo)`**, **`trigger_ingress_refresh(geo)`**: Real-time trend exploration.
 
 ### 4. FastMCP Native Resources & Prompts

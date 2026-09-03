@@ -21,6 +21,19 @@ class Settings(BaseSettings):
     # Ingress Connectors & API Keys
     YOUTUBE_API_KEY: str = Field(default="", description="YouTube Data API v3 Key")
 
+    # Meta Threads Graph API (Official OAuth 2.0)
+    THREADS_APP_ID: str = Field(default="", description="Meta Threads App ID (client_id) for Graph API OAuth 2.0")
+    THREADS_APP_SECRET: str = Field(default="", description="Meta Threads App Secret (client_secret) used for long-lived token exchange")
+    THREADS_REDIRECT_URI: str = Field(default="", description="Registered OAuth redirect URI for the Threads app")
+    THREADS_API_VERSION: str = Field(default="v1.0", description="Threads Graph API version prefix")
+
+    # Instagram Graph API (Official, for Reels ingress)
+    INSTAGRAM_USER_ID: str = Field(default="", description="Instagram Business/Creator account ID used for Reels Graph API ingress")
+    INSTAGRAM_APP_ID: str = Field(default="", description="Instagram App ID (client_id) for Graph API OAuth 2.0")
+    INSTAGRAM_APP_SECRET: str = Field(default="", description="Instagram App Secret (client_secret) used for long-lived token exchange")
+    INSTAGRAM_REDIRECT_URI: str = Field(default="", description="Registered OAuth redirect URI for the Instagram app")
+    INSTAGRAM_API_VERSION: str = Field(default="v23.0", description="Instagram Graph API version prefix")
+
     # Security & Encryption
     IGNIS_ENCRYPTION_KEY: str = Field(
         default="",

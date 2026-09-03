@@ -27,3 +27,12 @@ class CircuitBreakerOpenException(ConnectorExecutionException):
     """Execution rejected because Circuit Breaker is in OPEN state."""
     pass
 
+
+class ConnectorAuthenticationException(ConnectorExecutionException):
+    """Upstream connector rejected the request due to invalid, expired, or revoked credentials."""
+    pass
+
+
+class EncryptionKeyMissingException(IgnisDomainException):
+    """A persistent IGNIS_ENCRYPTION_KEY is required for this operation but is not configured."""
+    pass

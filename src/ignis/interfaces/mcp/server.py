@@ -34,6 +34,7 @@ from ignis.domain.value_objects import (
     timeframe_to_days,
 )
 
+from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager, ThreadsAuthManager
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
@@ -85,14 +86,16 @@ mcp = FastMCP("fn-ignis-trend-intelligence", instructions=SOP_SYSTEM_INSTRUCTION
 def _init_components():
     repository = create_repository()
     tiktok_auth_manager = TikTokAuthManager(repository=repository)
+    threads_auth_manager = ThreadsAuthManager(repository=repository)
+    instagram_auth_manager = InstagramAuthManager(repository=repository)
     creative_center_plugin = TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager)
 
     registry = ConnectorPluginRegistry(repository=repository)
     registry.register(GoogleTrendsRssPlugin())
     registry.register(TikTokPlugin(auth_manager=tiktok_auth_manager))
     registry.register(creative_center_plugin)
-    registry.register(ThreadsPlugin())
-    registry.register(ReelsPlugin())
+    registry.register(ThreadsPlugin(auth_manager=threads_auth_manager))
+    registry.register(ReelsPlugin(auth_manager=instagram_auth_manager))
 
     if settings.YOUTUBE_API_KEY:
         registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
@@ -133,6 +136,8 @@ def _init_components():
         "repository": repository,
         "registry": registry,
         "tiktok_auth_manager": tiktok_auth_manager,
+        "threads_auth_manager": threads_auth_manager,
+        "instagram_auth_manager": instagram_auth_manager,
         "clusterer": clusterer,
         "artifact_builder": artifact_builder,
         "quality_evaluator": quality_evaluator,
@@ -412,6 +417,54 @@ async def handle_clear_platform_auth(platform: str) -> str:
         },
         ensure_ascii=False,
         indent=2
+    )
+
+
+async def handle_authenticate_threads(
+    auth_code: str,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    redirect_uri: Optional[str] = None,
+) -> str:
+    comp = get_components()
+    auth_mgr: ThreadsAuthManager = comp["threads_auth_manager"]
+    try:
+        result = await auth_mgr.exchange_code_for_token(
+            auth_code=auth_code,
+            client_id=client_id,
+            client_secret=client_secret,
+            redirect_uri=redirect_uri,
+        )
+    except Exception as e:
+        result = {
+            "success": False,
+            "platform": ThreadsAuthManager.PLATFORM_NAME,
+            "error_type": type(e).__name__,
+            "message": str(e),
+        }
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def handle_get_threads_auth_status() -> str:
+    comp = get_components()
+    auth_mgr: ThreadsAuthManager = comp["threads_auth_manager"]
+    status = await auth_mgr.get_auth_status()
+    return json.dumps(status, ensure_ascii=False, indent=2)
+
+
+async def handle_clear_threads_auth() -> str:
+    comp = get_components()
+    auth_mgr: ThreadsAuthManager = comp["threads_auth_manager"]
+    cleared = await auth_mgr.clear_auth()
+    return json.dumps(
+        {
+            "platform": ThreadsAuthManager.PLATFORM_NAME,
+            "cleared": cleared,
+            "message": "Threads OAuth credentials revoked."
+            if cleared else "No active Threads OAuth session found.",
+        },
+        ensure_ascii=False,
+        indent=2,
     )
 
 
@@ -941,6 +994,31 @@ async def get_platform_auth_status() -> str:
 @mcp.tool(name="clear_platform_auth", description="Disconnect or remove stored session credentials for a specific platform.")
 async def clear_platform_auth(platform: str) -> str:
     return await handle_clear_platform_auth(platform=platform)
+
+
+@mcp.tool(name="authenticate_threads", description="Complete the official Meta Threads Graph API OAuth 2.0 flow: exchange an authorization code for a short-lived token, upgrade it to a 60-day long-lived user token, and persist it AES-encrypted.")
+async def authenticate_threads(
+    auth_code: str,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    redirect_uri: Optional[str] = None,
+) -> str:
+    return await handle_authenticate_threads(
+        auth_code=auth_code,
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+    )
+
+
+@mcp.tool(name="get_threads_auth_status", description="Inspect the stored Meta Threads OAuth 2.0 token: active/expired state, granted scopes, key version, days remaining, and whether a refresh is due.")
+async def get_threads_auth_status() -> str:
+    return await handle_get_threads_auth_status()
+
+
+@mcp.tool(name="clear_threads_auth", description="Revoke and delete the stored Meta Threads OAuth 2.0 credentials from local encrypted storage.")
+async def clear_threads_auth() -> str:
+    return await handle_clear_threads_auth()
 
 
 async def handle_get_tiktok_search_suggestions(keywords: List[str], geo: str = "VN") -> str:

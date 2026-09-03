@@ -15,7 +15,10 @@
   "transport": {
     "type": "stdio",
     "command": "python",
-    "args": ["-m", "ignis.interfaces.mcp.server"],
+    "args": [
+      "-m",
+      "ignis.interfaces.mcp.server"
+    ],
     "env": {
       "DATABASE_URL": "${DATABASE_URL}",
       "DEFAULT_GEO": "${DEFAULT_GEO}",
@@ -24,9 +27,14 @@
   },
   "protocols": {
     "sop": "6_step_market_research",
-    "tools_count": 28,
-    "prompts": ["market_research_pipeline", "voice_of_customer_audit"],
-    "resources": ["fn-ignis://sop/market-research", "fn-ignis://methodology/opportunity-index"]
+    "tools_count": 31,
+    "prompts": [
+      "market_research_pipeline",
+      "voice_of_customer_audit"
+    ],
+    "resources": [
+      "fn-ignis://sop/market-research",
+      "fn-ignis://methodology/opportunity-index"
+    ]
   }
-
 }

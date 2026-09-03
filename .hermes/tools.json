@@ -670,5 +670,59 @@
         "type": "object"
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "authenticate_threads",
+      "description": "Complete the official Meta Threads Graph API OAuth 2.0 flow: exchange an authorization code for a short-lived token, upgrade it to a 60-day long-lived user token, and persist it AES-encrypted.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_code": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "client_secret": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "auth_code"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_threads_auth_status",
+      "description": "Inspect the stored Meta Threads OAuth 2.0 token: active/expired state, granted scopes, key version, days remaining, and whether a refresh is due.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "clear_threads_auth",
+      "description": "Revoke and delete the stored Meta Threads OAuth 2.0 credentials from local encrypted storage.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      }
+    }
   }
 ]
