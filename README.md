@@ -8,6 +8,8 @@
 [![Docker Ready](https://img.shields.io/badge/Docker-Worker%20Daemon-2496ED.svg)](https://www.docker.com/)
 
 > **fnIgnis — Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform by FINOLABS**
+>
+> 🌐 [Tiếng Việt](README.vi.md) · [Comprehensive User Guide](docs/USER_GUIDE.md)
 
 `fnIgnis` (`fn-ignis`) is a high-performance, self-hosted market listening and strategic research engine developed by **FINOLABS**. It empowers AI Agents (**Claude Desktop, Claude Code, Cursor, Windsurf, Antigravity, OpenAI Codex, OpenClaw, and Nous Hermes**) and human strategists to discover high-value market white spaces across Google Trends, YouTube, TikTok Creative Center, TikTok Search Suggestions, and raw Voice-of-Customer comments with **$0 token ingress costs**, deterministic mathematical scoring (**Opportunity Index**), autonomous lexicon expansion, and pixel-perfect interactive HTML Dashboard artifacts.
 
@@ -189,7 +191,7 @@ For detailed manual installation, Python scripting workflows, Docker ops, and tr
 | `DEFAULT_GEO` | Default ISO country code for trend intelligence | `VN` | No |
 | `SCHEDULER_INTERVAL_SECONDS` | Daemon scheduler heartbeat / health tick interval | `900` (15m) | No |
 | `DISCOVERY_INTERVAL_HOURS` | Interval between autonomous discovery runs | `24` (daily) | No |
-| `SYNC_INTERVAL_MINUTES` | Frequency of background multi-platform synchronization | `60` | No |
+| `SYNC_INTERVAL_MINUTES` | Optional override for ingress sync interval in minutes (0 = use SCHEDULER_INTERVAL_SECONDS) | `0` | No |
 | `YOUTUBE_CACHE_TTL_SECONDS` | In-memory LRU+TTL cache duration to preserve YouTube API quota | `86400` (24h) | No |
 | `PLAYWRIGHT_PROXY_SERVER` | Optional HTTP/SOCKS proxy server URI for residential scraping | `""` | No |
 | `IGNIS_ENCRYPTION_KEY` | AES-256 Fernet key for session cookie encryption | *(Auto-generated)* | No |
