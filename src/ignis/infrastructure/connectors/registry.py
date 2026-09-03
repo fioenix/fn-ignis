@@ -48,31 +48,68 @@ class CircuitBreaker:
 class ConnectorPluginRegistry:
     """Manages connector plugin catalog and coordinates resilient multi-platform ingress with audit logging."""
     def __init__(self, repository: Optional[ITrendRepository] = None):
-        self._plugins: Dict[PlatformType, IConnectorPlugin] = {}
-        self._breakers: Dict[PlatformType, CircuitBreaker] = {}
+        # Keyed by plugin_id, not platform: a single platform can be served by
+        # several plugins probing it differently (TikTok video grid vs Creative
+        # Center). Keying by platform made the later registration silently
+        # replace the earlier one.
+        self._plugins: Dict[str, IConnectorPlugin] = {}
+        self._breakers: Dict[str, CircuitBreaker] = {}
         self._repository = repository
 
     def set_repository(self, repository: ITrendRepository) -> None:
         self._repository = repository
 
     def register(self, plugin: IConnectorPlugin) -> None:
-        self._plugins[plugin.platform] = plugin
-        self._breakers[plugin.platform] = CircuitBreaker()
-        logger.info(f"Registered Connector Plugin: [{plugin.name}] for platform {plugin.platform.value}")
+        plugin_id = plugin.plugin_id
+        if plugin_id in self._plugins:
+            logger.warning(
+                f"Connector plugin id '{plugin_id}' is already registered by "
+                f"[{self._plugins[plugin_id].name}]; replacing it with [{plugin.name}]. "
+                "Override the `plugin_id` property if both plugins are meant to coexist."
+            )
+        self._plugins[plugin_id] = plugin
+        self._breakers[plugin_id] = CircuitBreaker()
+        logger.info(
+            f"Registered Connector Plugin: [{plugin.name}] as '{plugin_id}' "
+            f"for platform {plugin.platform.value}"
+        )
 
     def get_plugin(self, platform: PlatformType) -> Optional[IConnectorPlugin]:
-        return self._plugins.get(platform)
+        """
+        Return the first plugin registered for a platform.
+
+        Kept for backward compatibility with existing call sites. Prefer
+        `get_plugins()` when a platform may have several probes, or
+        `get_plugin_by_id()` to address one exactly.
+        """
+        for plugin in self._plugins.values():
+            if plugin.platform == platform:
+                return plugin
+        return None
+
+    def get_plugin_by_id(self, plugin_id: str) -> Optional[IConnectorPlugin]:
+        """Return exactly one plugin by its unique registry identifier."""
+        return self._plugins.get(plugin_id)
+
+    def get_plugins(self, platform: Optional[PlatformType] = None) -> List[IConnectorPlugin]:
+        """Return every plugin registered for a platform, or all plugins when omitted."""
+        if platform is None:
+            return list(self._plugins.values())
+        return [p for p in self._plugins.values() if p.platform == platform]
 
     def list_plugins(self) -> List[IConnectorPlugin]:
         return list(self._plugins.values())
 
     def get_health_status(self) -> Dict[str, dict]:
-        """Report connector health status and circuit breaker state across all registered platforms."""
+        """Report health and circuit breaker state independently for every registered plugin."""
         status = {}
-        for platform, plugin in self._plugins.items():
-            breaker = self._breakers[platform]
-            status[platform.value] = {
+        for plugin_id, plugin in self._plugins.items():
+            breaker = self._breakers[plugin_id]
+            status[plugin_id] = {
+                "plugin_id": plugin_id,
+                "platform": plugin.platform.value,
                 "name": plugin.name,
+                "supports_search": plugin.supports_search,
                 "circuit_state": breaker.state,
                 "consecutive_failures": breaker.failure_count,
                 "last_failure": breaker.last_failure_time.isoformat() if breaker.last_failure_time else None,
@@ -87,8 +124,8 @@ class ConnectorPluginRegistry:
         tasks = []
         enabled_plugins = []
 
-        for platform, plugin in self._plugins.items():
-            breaker = self._breakers[platform]
+        for plugin_id, plugin in self._plugins.items():
+            breaker = self._breakers[plugin_id]
             if not breaker.can_execute():
                 logger.warning(f"Skipping plugin [{plugin.name}] because Circuit Breaker is OPEN.")
                 if self._repository:
@@ -142,11 +179,17 @@ class ConnectorPluginRegistry:
         tasks = []
         enabled_plugins = []
 
-        for platform, plugin in self._plugins.items():
-            if target_platforms and platform not in target_platforms:
+        for plugin_id, plugin in self._plugins.items():
+            if target_platforms and plugin.platform not in target_platforms:
                 continue
 
-            breaker = self._breakers[platform]
+            if not plugin.supports_search:
+                # Falling back to fetch_signals here would inject platform-wide
+                # signals unrelated to the requested keywords.
+                logger.debug(f"Skipping search on [{plugin.name}]: no keyword search probe.")
+                continue
+
+            breaker = self._breakers[plugin_id]
             if not breaker.can_execute():
                 logger.warning(f"Skipping plugin [{plugin.name}] because Circuit Breaker is OPEN.")
                 if self._repository:
@@ -208,15 +251,12 @@ class ConnectorPluginRegistry:
         custom_timeframe: Optional[str] = None,
     ) -> List[TrendSignal]:
         try:
-            if hasattr(plugin, "search_signals"):
-                import inspect
-                sig = inspect.signature(plugin.search_signals)
-                if "custom_timeframe" in sig.parameters:
-                    signals = await plugin.search_signals(keywords=keywords, geo=geo, timeframe=timeframe, custom_timeframe=custom_timeframe)
-                else:
-                    signals = await plugin.search_signals(keywords=keywords, geo=geo, timeframe=timeframe)
+            import inspect
+            sig = inspect.signature(plugin.search_signals)
+            if "custom_timeframe" in sig.parameters:
+                signals = await plugin.search_signals(keywords=keywords, geo=geo, timeframe=timeframe, custom_timeframe=custom_timeframe)
             else:
-                signals = []
+                signals = await plugin.search_signals(keywords=keywords, geo=geo, timeframe=timeframe)
             breaker.record_success()
             return signals
         except Exception as e:
@@ -231,8 +271,8 @@ class ConnectorPluginRegistry:
     ) -> List[Dict[str, Any]]:
         """Collect search suggestions across all capable plugins."""
         all_suggestions: List[Dict[str, Any]] = []
-        for platform, plugin in self._plugins.items():
-            if target_platforms and platform not in target_platforms:
+        for plugin in self._plugins.values():
+            if target_platforms and plugin.platform not in target_platforms:
                 continue
             try:
                 sugs = await plugin.fetch_suggestions(keywords=keywords, geo=geo)

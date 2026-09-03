@@ -163,10 +163,12 @@ async def test_mcp_verify_connectors_health():
 
         mock_plugin = AsyncMock()
         mock_plugin.name = "YouTube Data API v3"
+        mock_plugin.platform = PlatformType.YOUTUBE
         mock_plugin.is_healthy.return_value = True
 
         mock_registry = MagicMock()
-        mock_registry._plugins = {PlatformType.YOUTUBE: mock_plugin}
+        # The registry keys plugins by plugin_id; platform is read off the plugin.
+        mock_registry._plugins = {"youtube": mock_plugin}
 
         mock_get_comp.return_value = {
             "repository": mock_repo,

@@ -78,7 +78,7 @@ class IngressScheduler:
 
     async def run_health_probe_cycle(self, registry: ConnectorPluginRegistry, repository: ITrendRepository):
         logger.info("Running scheduled synthetic connector health probes...")
-        for plat_name, plugin in registry._plugins.items():
+        for plugin_id, plugin in registry._plugins.items():
             try:
                 is_ok = await plugin.is_healthy()
                 status_str = "HEALTHY" if is_ok else "UNHEALTHY"
@@ -88,7 +88,7 @@ class IngressScheduler:
                     event_type="CONNECTOR_HEALTH_CHECK",
                     message=f"Connector {plugin.name} is {status_str}",
                     level=level,
-                    details={"platform": str(plat_name), "healthy": is_ok},
+                    details={"plugin_id": str(plugin_id), "platform": str(plugin.platform), "healthy": is_ok},
                 )
             except Exception as e:
                 logger.error(f"Health probe failed for connector {plugin.name}: {e}")
@@ -97,7 +97,7 @@ class IngressScheduler:
                     event_type="CONNECTOR_HEALTH_ERROR",
                     message=f"Connector {plugin.name} health probe error: {e}",
                     level="ERROR",
-                    details={"platform": str(plat_name), "error": str(e)},
+                    details={"plugin_id": str(plugin_id), "platform": str(plugin.platform), "error": str(e)},
                 )
 
     async def start(self):

@@ -34,6 +34,11 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
         return PlatformType.TIKTOK
 
     @property
+    def plugin_id(self) -> str:
+        # Distinct from the video grid plugin, which serves the same platform.
+        return "tiktok_creative_center"
+
+    @property
     def name(self) -> str:
         return "TikTok Creative Center Macro Radar"
 

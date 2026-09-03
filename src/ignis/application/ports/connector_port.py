@@ -19,6 +19,30 @@ class IConnectorPlugin(ABC):
         """Display name of this connector plugin."""
         pass
 
+    @property
+    def plugin_id(self) -> str:
+        """
+        Unique registry identifier for this plugin.
+
+        Defaults to the platform value, which is correct while a platform is served
+        by exactly one plugin. Override it when several plugins serve the same
+        platform through different probes (e.g. TikTok video grid vs Creative Center),
+        otherwise the later registration silently replaces the earlier one.
+        """
+        return self.platform.value
+
+    @property
+    def supports_search(self) -> bool:
+        """
+        Whether this plugin implements a real keyword search probe.
+
+        Derived from whether the subclass overrides `search_signals`, so it cannot
+        drift out of sync with the implementation. Plugins relying on the inherited
+        default only re-run `fetch_signals`, which would inject platform-wide
+        signals unrelated to the requested keywords.
+        """
+        return type(self).search_signals is not IConnectorPlugin.search_signals
+
     @abstractmethod
     async def is_healthy(self) -> bool:
         """Check the operational health and reachability of the data source."""

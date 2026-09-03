@@ -1360,18 +1360,21 @@ async def handle_verify_connectors_health() -> str:
         diagnostics["overall_status"] = "DEGRADED"
 
     # 2. Check each connector plugin
-    for plat_name, plugin in registry._plugins.items():
+    for plugin_id, plugin in registry._plugins.items():
+        platform_value = plugin.platform.value if hasattr(plugin.platform, "value") else str(plugin.platform)
         try:
             is_ok = await plugin.is_healthy()
             diagnostics["connectors"][plugin.name] = {
-                "platform": plat_name.value if hasattr(plat_name, "value") else str(plat_name),
+                "plugin_id": plugin_id,
+                "platform": platform_value,
                 "status": "HEALTHY" if is_ok else "UNHEALTHY",
             }
             if not is_ok:
                 diagnostics["overall_status"] = "DEGRADED"
         except Exception as e:
             diagnostics["connectors"][plugin.name] = {
-                "platform": plat_name.value if hasattr(plat_name, "value") else str(plat_name),
+                "plugin_id": plugin_id,
+                "platform": platform_value,
                 "status": "ERROR",
                 "error": str(e)
             }

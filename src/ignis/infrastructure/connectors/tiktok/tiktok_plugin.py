@@ -49,6 +49,11 @@ class TikTokPlugin(IConnectorPlugin):
         return PlatformType.TIKTOK
 
     @property
+    def plugin_id(self) -> str:
+        # Distinct from the Creative Center plugin, which serves the same platform.
+        return "tiktok_video_grid"
+
+    @property
     def name(self) -> str:
         return "TikTok Trending & Search Ingress"
 
