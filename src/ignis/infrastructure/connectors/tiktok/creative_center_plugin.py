@@ -41,7 +41,7 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
         return True
 
     def _parse_metric_number(self, text: str) -> float:
-        """Chuyển đổi chuỗi định dạng như '346.2K', '1.9B', '28M' sang số thực float."""
+        """Parse metric strings such as '346.2K', '1.9B', '28M' into floating-point numbers."""
         if not text:
             return 0.0
         t = text.strip().upper()
@@ -64,7 +64,8 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
         timeframe: Timeframe = Timeframe.LAST_7D,
         limit: int = 30,
     ) -> List[TrendSignal]:
-        """Thu thập danh sách Top Trending Hashtags từ TikTok Creative Center."""
+        """Fetch list of top trending hashtags from TikTok Creative Center."""
+
         period_days = 30 if "30" in str(timeframe) else 7
         signals_data = await self.fetch_macro_trends(geo=geo, period=period_days, limit=limit)
         
@@ -164,7 +165,7 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
                     except Exception as e:
                         logger.debug(f"Country selection handled via params: {e}")
 
-                # Cuộn trang nhẹ để kích hoạt tải thêm
+                # Scroll slightly to trigger dynamic lazy loading
                 try:
                     await page.evaluate("window.scrollBy(0, 800)")
                     await page.wait_for_timeout(1500)
@@ -174,7 +175,7 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
                 text = await page.inner_text("body")
                 lines = [t.strip() for t in text.split("\n") if t.strip()]
 
-                # Bóc tách cấu trúc dòng rank & hashtag
+                # Parse row structure containing rank and hashtag
                 i = 0
                 while i < len(lines) - 3:
                     if lines[i].isdigit() and lines[i + 1].startswith("#"):
@@ -185,7 +186,7 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
                         posts_str = ""
                         views_str = ""
                         
-                        # Quét tiếp các dòng liền kề để lấy posts và views
+                        # Scan adjacent lines for posts and views count
                         j = i + 3
                         while j < min(i + 8, len(lines)):
                             if lines[j].upper() == "POSTS" and j > i + 3:
@@ -195,6 +196,7 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
                             elif lines[j].isdigit() and j + 1 < len(lines) and lines[j + 1].startswith("#"):
                                 break
                             j += 1
+
 
                         # Apply industry filter if specified
                         if not industry or (industry.lower() in category.lower() or industry.lower() in hashtag_raw.lower()):

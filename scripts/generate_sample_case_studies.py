@@ -1,12 +1,9 @@
 import asyncio
-import json
 import logging
 from pathlib import Path
-from uuid import uuid4
 
 from ignis.application.use_cases.create_mission import CreateMissionUseCase
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
-from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.domain.value_objects import GeoCode, Timeframe
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
@@ -59,7 +56,6 @@ async def run_all_case_studies():
         registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
 
     clusterer = SemanticClusterer()
-    cluster_use_case = ClusterSignalsUseCase(clusterer=clusterer, repository=repo)
     top_clusters_use_case = GetTopClustersUseCase(repository=repo)
     quality_evaluator = QualityEvaluator()
 
@@ -77,7 +73,7 @@ async def run_all_case_studies():
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     for cs in CASE_STUDIES:
-        logger.info(f"==> Bắt đầu Case Study: {cs['title']}...")
+        logger.info(f"==> Starting Case Study Generation: {cs['title']}...")
         mission = await create_uc.execute(
             title=cs["title"],
             keywords=cs["keywords"],
@@ -86,9 +82,10 @@ async def run_all_case_studies():
             agent="case-study-generator",
         )
 
-        exec_res = await execute_uc.execute(
+        await execute_uc.execute(
             mission_id=mission.id,
         )
+
 
 
         signals = await repo.get_mission_signals(mission.id)

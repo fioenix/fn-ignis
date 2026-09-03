@@ -52,7 +52,7 @@ class TikTokPlugin(IConnectorPlugin):
         return True
 
     def _is_private_or_notification(self, text: str) -> bool:
-        """Kiểm tra và chặn đứng các text thông báo / tương tác cá nhân."""
+        """Check and filter out private notification or interaction UI text."""
         if not text:
             return True
         t_low = text.lower()
@@ -68,7 +68,7 @@ class TikTokPlugin(IConnectorPlugin):
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 50,
     ) -> List[TrendSignal]:
-        """Thu thập các video thịnh hành trên TikTok Explore."""
+        """Fetch trending public videos from TikTok Explore."""
         storage_state = None
         if self._auth_manager:
             storage_state = await self._auth_manager.get_storage_state()
@@ -89,7 +89,8 @@ class TikTokPlugin(IConnectorPlugin):
         limit: int = 20,
         custom_timeframe: Optional[str] = None,
     ) -> List[TrendSignal]:
-        """Tìm kiếm video xu hướng công khai theo từ khóa cụ thể trên TikTok."""
+        """Search public trending videos by specific keywords on TikTok."""
+
         storage_state = None
         if self._auth_manager:
             storage_state = await self._auth_manager.get_storage_state()
@@ -510,7 +511,7 @@ class TikTokPlugin(IConnectorPlugin):
                 context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
 
-                # Lắng nghe các response API JSON ngầm
+                # Listen for underlying JSON API responses
                 async def handle_response(response):
                     if any(k in response.url for k in ["item_list", "search/item", "search/general"]):
                         try:
@@ -531,7 +532,7 @@ class TikTokPlugin(IConnectorPlugin):
                 await page.goto(url, wait_until="domcontentloaded", timeout=20000)
                 await page.wait_for_timeout(3500)
 
-                # 1. Chuyển đổi từ API JSON nếu bắt được
+                # 1. Transform from captured JSON API items if available
                 for item in captured_items:
                     sig = self._parse_json_item(item, geo, keyword)
                     if sig and sig.source_url and sig.source_url not in local_seen:
@@ -540,7 +541,7 @@ class TikTokPlugin(IConnectorPlugin):
                     if len(signals) >= limit:
                         break
 
-                # 2. Nếu API không bắt được, bóc tách trực tiếp từ các Search Video Items
+                # 2. Fallback to DOM parsing if JSON API was not captured
                 if not signals:
                     cards = await page.query_selector_all(
                         'div[data-e2e="search_top-item"], div[data-e2e="search_video-item"], div[data-e2e="search-card-item"], div[data-e2e="explore-item"]'
@@ -556,7 +557,7 @@ class TikTokPlugin(IConnectorPlugin):
                 await browser.close()
 
         except Exception as e:
-            logger.error(f"Lỗi khi thực thi TikTok Ingress ({url}): {e}")
+            logger.error(f"Error executing TikTok Ingress ({url}): {e}")
             raise ConnectorExecutionException(f"Failed to fetch TikTok signals: {e}") from e
 
         return signals
@@ -570,7 +571,7 @@ class TikTokPlugin(IConnectorPlugin):
         if not item_id or not title or self._is_private_or_notification(title):
             return None
 
-        # Khớp từ khóa chặt chẽ cho các từ viết tắt như n8n, rpa
+        # Strict keyword match for short acronyms like n8n, rpa
         if keyword:
             kw_low = keyword.lower().strip()
             if len(kw_low) <= 4 and not re.search(rf"\b{re.escape(kw_low)}\b", title.lower()):
@@ -633,12 +634,12 @@ class TikTokPlugin(IConnectorPlugin):
             if not lines:
                 return None
 
-            # Bỏ qua nếu có dấu hiệu notification hoặc inbox
+            # Skip notification / inbox noise
             combined_text = " ".join(lines)
             if self._is_private_or_notification(combined_text):
                 return None
 
-            # Bóc tách metrics và caption thật
+            # Parse metrics and true caption
             metric_val = 0.0
             raw_title = combined_text
             author_display = author_tag.replace("@", "")
@@ -666,11 +667,12 @@ class TikTokPlugin(IConnectorPlugin):
             if self._is_private_or_notification(raw_title) or len(raw_title.strip()) < 3:
                 return None
 
-            # Khớp từ khóa chặt chẽ
+            # Strict keyword match
             if keyword:
                 kw_low = keyword.lower().strip()
                 if len(kw_low) <= 4 and not re.search(rf"\b{re.escape(kw_low)}\b", raw_title.lower()):
                     return None
+
 
             metadata = {
                 "item_id": video_id,

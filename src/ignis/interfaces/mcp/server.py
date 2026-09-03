@@ -76,8 +76,9 @@ When conducting any market research, niche analysis, or trend discovery task, yo
    Synthesize 3-5 market truths, evaluate entry risks/moats (why hasn't this been built?), formulate a 3-7 day low-cost MVP validation plan, and generate a full interactive Infographic HTML Dashboard via `generate_mission_artifact`.
 """
 
-# Khởi tạo FastMCP Server kèm System Instructions
+# Initialize FastMCP Server with System Instructions
 mcp = FastMCP("fn-ignis-trend-intelligence", instructions=SOP_SYSTEM_INSTRUCTIONS)
+
 
 
 def _init_components():
@@ -193,7 +194,7 @@ async def handle_run_autonomous_research_mission(
 
 
 
-    # 1. Tạo Mission
+    # 1. Initialize Mission
     mission = await comp["create_mission_use_case"].execute(
         title=topic,
         keywords=keywords,
@@ -203,8 +204,9 @@ async def handle_run_autonomous_research_mission(
         timeframe=timeframe,
     )
 
-    # 2. Chạy Harness Orchestrator
+    # 2. Execute Harness Orchestrator
     report = await comp["harness_orchestrator"].run_mission_harness(
+
         mission_id=mission.id,
         min_signals=min_signals,
     )
@@ -602,9 +604,10 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         macro_trends=macro_trends,
     )
 
-    # Lưu file HTML vào thư mục reports an toàn tuyệt đối
+    # Securely save HTML report artifact to disk
     reports_dir = _get_secure_reports_dir()
     report_filename = f"mission_{mission.shortcode.lower()}.html"
+
     report_path = reports_dir / report_filename
     report_path.write_text(html_content, encoding="utf-8")
     abs_path = str(report_path.resolve())

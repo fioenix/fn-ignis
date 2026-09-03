@@ -312,7 +312,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                 seen_video_ids.add(v_id)
 
                     if video_ids:
-                        # Gọi videos.list batch lấy số liệu thật
+                        # Batch call videos.list for genuine metrics
                         video_params = {
                             "part": "snippet,statistics",
                             "id": ",".join(video_ids),
@@ -343,10 +343,10 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                 except Exception:
                                     pub_at = datetime.now(timezone.utc)
 
-
-                                # Kiểm tra nghiêm ngặt: nếu video cũ hơn timeframe, BỎ QUA
+                                # Strict timeframe filtering: ignore videos older than cutoff
                                 if pub_at < published_after_dt:
                                     continue
+
 
                                 now_utc = datetime.now(timezone.utc)
                                 hours_diff = max(1.0, (now_utc - pub_at).total_seconds() / 3600.0)

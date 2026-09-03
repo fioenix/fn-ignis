@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 class CircuitBreaker:
-    """Bảo vệ hệ thống: Tự động ngắt plugin nếu tỷ lệ lỗi liên tiếp vượt ngưỡng."""
+    """Circuit breaker protection: isolates failing plugins if consecutive errors exceed threshold."""
     def __init__(self, failure_threshold: int = 3, recovery_time_seconds: int = 300):
         self.failure_threshold = failure_threshold
         self.recovery_time_seconds = recovery_time_seconds
         self.failure_count = 0
-        self.state = "CLOSED"  # CLOSED (bình thường), OPEN (ngắt), HALF_OPEN (thử lại)
+        self.state = "CLOSED"  # CLOSED (normal), OPEN (tripped), HALF_OPEN (probing)
         self.last_failure_time: Optional[datetime] = None
 
     def record_success(self):
@@ -30,7 +30,7 @@ class CircuitBreaker:
         self.last_failure_time = datetime.now(timezone.utc)
         if self.failure_count >= self.failure_threshold:
             self.state = "OPEN"
-            logger.warning(f"Circuit Breaker đã CHUYỂN SANG OPEN do {self.failure_count} lần lỗi liên tiếp.")
+            logger.warning(f"Circuit Breaker TRIPPED to OPEN after {self.failure_count} consecutive failures.")
 
     def can_execute(self) -> bool:
         if self.state == "CLOSED":
@@ -46,7 +46,7 @@ class CircuitBreaker:
 
 
 class ConnectorPluginRegistry:
-    """Quản lý toàn bộ danh mục Connector Plugins và điều phối Ingress kèm Audit Logging."""
+    """Manages connector plugin catalog and coordinates resilient multi-platform ingress with audit logging."""
     def __init__(self, repository: Optional[ITrendRepository] = None):
         self._plugins: Dict[PlatformType, IConnectorPlugin] = {}
         self._breakers: Dict[PlatformType, CircuitBreaker] = {}
@@ -58,7 +58,7 @@ class ConnectorPluginRegistry:
     def register(self, plugin: IConnectorPlugin) -> None:
         self._plugins[plugin.platform] = plugin
         self._breakers[plugin.platform] = CircuitBreaker()
-        logger.info(f"Đã đăng ký Plugin Connector: [{plugin.name}] cho nền tảng {plugin.platform.value}")
+        logger.info(f"Registered Connector Plugin: [{plugin.name}] for platform {plugin.platform.value}")
 
     def get_plugin(self, platform: PlatformType) -> Optional[IConnectorPlugin]:
         return self._plugins.get(platform)
@@ -67,7 +67,7 @@ class ConnectorPluginRegistry:
         return list(self._plugins.values())
 
     def get_health_status(self) -> Dict[str, dict]:
-        """Báo cáo trạng thái sức khỏe và Circuit Breaker của tất cả các kênh."""
+        """Report connector health status and circuit breaker state across all registered platforms."""
         status = {}
         for platform, plugin in self._plugins.items():
             breaker = self._breakers[platform]
@@ -90,12 +90,12 @@ class ConnectorPluginRegistry:
         for platform, plugin in self._plugins.items():
             breaker = self._breakers[platform]
             if not breaker.can_execute():
-                logger.warning(f"Bỏ qua plugin [{plugin.name}] do Circuit Breaker OPEN.")
+                logger.warning(f"Skipping plugin [{plugin.name}] because Circuit Breaker is OPEN.")
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
                         event_type="CIRCUIT_OPEN",
-                        message=f"Bỏ qua plugin {plugin.name} do Circuit Breaker đang OPEN ({breaker.failure_count} lỗi liên tiếp).",
+                        message=f"Skipping plugin {plugin.name} due to OPEN Circuit Breaker ({breaker.failure_count} consecutive errors).",
                         level="WARNING"
                     )
                 continue
@@ -108,23 +108,23 @@ class ConnectorPluginRegistry:
 
         for plugin, result in zip(enabled_plugins, results):
             if isinstance(result, Exception):
-                logger.error(f"Plugin [{plugin.name}] gặp ngoại lệ khi cào: {result}")
+                logger.error(f"Plugin [{plugin.name}] encountered exception during ingress: {result}")
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
                         event_type="INGRESS_FAILURE",
-                        message=f"Lỗi khi cào dữ liệu từ {plugin.name}: {str(result)}",
+                        message=f"Error ingesting signals from {plugin.name}: {str(result)}",
                         level="ERROR",
                         details={"error": str(result), "platform": plugin.platform.value}
                     )
             elif isinstance(result, list):
                 all_signals.extend(result)
-                logger.info(f"Plugin [{plugin.name}] thu thập {len(result)} signals.")
+                logger.info(f"Plugin [{plugin.name}] collected {len(result)} signals.")
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
                         event_type="INGRESS_SUCCESS",
-                        message=f"Thu thập thành công {len(result)} signals từ {plugin.name}.",
+                        message=f"Successfully collected {len(result)} signals from {plugin.name}.",
                         level="INFO",
                         details={"count": len(result), "platform": plugin.platform.value}
                     )
@@ -148,12 +148,12 @@ class ConnectorPluginRegistry:
 
             breaker = self._breakers[platform]
             if not breaker.can_execute():
-                logger.warning(f"Bỏ qua plugin [{plugin.name}] do Circuit Breaker OPEN.")
+                logger.warning(f"Skipping plugin [{plugin.name}] because Circuit Breaker is OPEN.")
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
                         event_type="CIRCUIT_OPEN",
-                        message=f"Bỏ qua search trên {plugin.name} do Circuit Breaker OPEN.",
+                        message=f"Skipping search on {plugin.name} due to OPEN Circuit Breaker.",
                         level="WARNING"
                     )
                 continue
@@ -166,23 +166,23 @@ class ConnectorPluginRegistry:
 
         for plugin, result in zip(enabled_plugins, results):
             if isinstance(result, Exception):
-                logger.error(f"Plugin [{plugin.name}] gặp ngoại lệ khi search: {result}")
+                logger.error(f"Plugin [{plugin.name}] encountered exception during search: {result}")
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
                         event_type="SEARCH_FAILURE",
-                        message=f"Lỗi khi search trên {plugin.name} với keywords {keywords}: {str(result)}",
+                        message=f"Error searching {plugin.name} with keywords {keywords}: {str(result)}",
                         level="ERROR",
                         details={"keywords": keywords, "error": str(result)}
                     )
             elif isinstance(result, list):
                 all_signals.extend(result)
-                logger.info(f"Plugin [{plugin.name}] tìm kiếm được {len(result)} signals theo keywords {keywords}.")
+                logger.info(f"Plugin [{plugin.name}] retrieved {len(result)} signals for keywords {keywords}.")
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
                         event_type="SEARCH_SUCCESS",
-                        message=f"Tìm kiếm thành công {len(result)} signals từ {plugin.name}.",
+                        message=f"Successfully retrieved {len(result)} signals from {plugin.name}.",
                         level="INFO",
                         details={"keywords": keywords, "count": len(result)}
                     )
@@ -229,7 +229,7 @@ class ConnectorPluginRegistry:
         geo: GeoCode = GeoCode.VN,
         target_platforms: Optional[List[PlatformType]] = None,
     ) -> List[Dict[str, Any]]:
-        """Thu thập từ khóa tìm kiếm gợi ý (Search Suggestions) từ tất cả các plugin hỗ trợ."""
+        """Collect search suggestions across all capable plugins."""
         all_suggestions: List[Dict[str, Any]] = []
         for platform, plugin in self._plugins.items():
             if target_platforms and platform not in target_platforms:
@@ -239,6 +239,7 @@ class ConnectorPluginRegistry:
                 if sugs:
                     all_suggestions.extend(sugs)
             except Exception as e:
-                logger.warning(f"Lỗi khi lấy suggestions từ {plugin.name}: {e}")
+                logger.warning(f"Error fetching suggestions from {plugin.name}: {e}")
         return all_suggestions
+
 
