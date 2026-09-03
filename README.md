@@ -173,7 +173,7 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **Prompts**: `market_research_pipeline`, `voice_of_customer_audit`
 
 > [!NOTE]
-> **Localization Transparency:** Currently, Vietnamese (`VN`) features deep multi-layered linguistic heuristics. Other geographic regions apply universal noise filtering, and their `language_precision` indicates that no negative noise constraints failed rather than natural language parsing (full pluggable `ILanguageDetector` architecture is scheduled for `v0.2.0`).
+> **Localization Transparency:** Multi-region linguistic verification (`ILanguageDetector`) is natively supported across VN, US, JP, KR, TH, and BR with subtractive filtering and dynamic domain lexicons.
 
 
 ---
