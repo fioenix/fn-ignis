@@ -181,6 +181,9 @@ Tất cả các biến môi trường được định nghĩa trong file `.env`:
 | `PLAYWRIGHT_PROXY_SERVER` | String | `""` | Không | Proxy server HTTP/SOCKS5 (ví dụ: `http://user:pass@proxy.ip:port`) để cào TikTok không bị chặn. |
 | `CONFIDENCE_HIGH_THRESHOLD` | Float | `80.0` | Không | Ngưỡng điểm để đánh giá chất lượng dữ liệu chiến dịch ở mức HIGH. |
 | `CONFIDENCE_MEDIUM_THRESHOLD`| Float | `60.0` | Không | Ngưỡng điểm để đánh giá chất lượng dữ liệu chiến dịch ở mức MEDIUM. |
+| `THREADS_APP_ID` | String | `""` | Không | Meta App ID cho Threads Graph API (chi tiết xem [META_INTEGRATION_GUIDE.md](META_INTEGRATION_GUIDE.md)). |
+| `THREADS_APP_SECRET` | String | `""` | Không | Meta App Secret cho Threads Graph API (chi tiết xem [META_INTEGRATION_GUIDE.md](META_INTEGRATION_GUIDE.md)). |
+| `THREADS_REDIRECT_URI` | String | `http://localhost:8000/oauth/callback` | Không | OAuth redirect callback URL cho Threads. |
 
 ### Cách lấy `YOUTUBE_API_KEY` miễn phí:
 1. Truy cập [Google Cloud Console](https://console.cloud.google.com/).
@@ -349,9 +352,9 @@ uv run pytest
 
 ---
 
-## 8. Danh mục 28 FastMCP Tools & Khả năng Nghiên cứu Toàn diện
+## 8. Danh mục 31 FastMCP Tools & Khả năng Nghiên cứu Toàn diện
 
-Khi FastMCP Server khởi chạy (`ignis-mcp`), 28 tools, 2 prompts và 2 resources sau đây luôn sẵn sàng cho AI Agents hoặc MCP clients:
+Khi FastMCP Server khởi chạy (`ignis-mcp`), 31 tools, 2 prompts và 2 resources sau đây luôn sẵn sàng cho AI Agents hoặc MCP clients:
 
 ### 1. Nhóm Chiến dịch & Nghiên cứu Chiến lược (Research & White Space)
 | Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
@@ -380,7 +383,16 @@ Khi FastMCP Server khởi chạy (`ignis-mcp`), 28 tools, 2 prompts và 2 resour
 | `generate_trend_artifact` | `topic_id, geo` | Xuất báo cáo HTML độc lập cho một chủ đề cụ thể. |
 | `trigger_ingress_refresh` | `geo` | Buộc quét và làm mới toàn bộ nguồn dữ liệu cho một khu vực. |
 
-### 3. Nhóm Dynamic Lexicon & Chẩn đoán Hạ tầng (Platform & Telemetry)
+### 3. Nhóm Xác thực Meta (Threads OAuth 2.0)
+| Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
+|---|---|---|
+| `authenticate_threads` | `auth_code, client_id, client_secret, redirect_uri` | Hoàn tất luồng OAuth 2.0 Threads Graph API, nâng cấp Long-Lived Token 60 ngày, mã hóa AES. |
+| `get_threads_auth_status` | Không | Kiểm tra token Threads: trạng thái, scopes, key_version, số ngày còn lại, có cần refresh không. |
+| `clear_threads_auth` | Không | Thu hồi và xóa an toàn thông tin xác thực Threads khỏi bộ lưu trữ mã hóa. |
+
+*(Hướng dẫn chi tiết tích hợp Threads & Instagram Reels xem tại [META_INTEGRATION_GUIDE.md](META_INTEGRATION_GUIDE.md))*
+
+### 4. Nhóm Dynamic Lexicon & Chẩn đoán Hạ tầng (Platform & Telemetry)
 | Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
 |---|---|---|
 | `register_domain_lexicon` | `domain, terms, category` | Đăng ký thuật ngữ/slang chuyên ngành vào cơ sở dữ liệu để Quality Gate nhận diện. |
@@ -393,7 +405,7 @@ Khi FastMCP Server khởi chạy (`ignis-mcp`), 28 tools, 2 prompts và 2 resour
 | `get_platform_auth_status` | `platform` | Kiểm tra trạng thái phiên đăng nhập của các nền tảng mạng xã hội. |
 | `clear_platform_auth` | `platform` | Xóa thông tin xác thực đã lưu của nền tảng. |
 
-### 4. FastMCP Native Prompts & Resources
+### 5. FastMCP Native Prompts & Resources
 - **Prompts**:
   - `market_research_pipeline`: Tiêm kịch bản nghiên cứu chuẩn 6 bước SOP.
   - `voice_of_customer_audit`: Tiêm quy trình kiểm toán Voice of Customer & phản đối mua hàng.
