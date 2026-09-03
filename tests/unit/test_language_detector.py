@@ -5,37 +5,99 @@ from ignis.infrastructure.harness.language_detector import HeuristicLanguageDete
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 
 
-def test_language_detector_multi_region():
+def test_language_detector_two_column_matrix_guardrails():
     detector = HeuristicLanguageDetector()
 
-    # 1. Vietnam (VN)
-    assert detector.is_localized("Hướng dẫn xây dựng AI Agent cho doanh nghiệp", geo=GeoCode.VN)
-    assert detector.is_localized("hoc lam ai agent tu dong hoa", geo=GeoCode.VN)
-    assert not detector.is_localized("Como criar agentes autônomos grátis", geo=GeoCode.VN) # Portuguese
-    assert not detector.is_localized("Formation complete intelligence artificielle", geo=GeoCode.VN) # French
-    assert not detector.is_localized("챗GPT AI 에이전트 활용법", geo=GeoCode.VN) # Korean
+    # ---------------------------------------------------------
+    # 1. United States (geo=US / GLOBAL)
+    # ---------------------------------------------------------
+    us_accepted = [
+        "Building Autonomous AI Agents with LangChain",
+        "How to setup n8n workflow for beginners",
+        "Top 10 SaaS market trends in 2026",
+        "AI Agent tutorial and full guide",
+        "Complete enterprise automation strategy",
+    ]
+    us_rejected = [
+        "Hướng dẫn cài đặt n8n cho người mới",           # Vietnamese
+        "Como criar agentes de IA autônomos",            # Portuguese
+        "Formation complète n8n pour débutant",          # French
+        "如何在2026年构建人工智能代理",                    # Chinese
+        "챗GPT AI 에이전트 활용법",                         # Korean
+        "การสร้าง AI Agent สำหรับธุรกิจ",                   # Thai
+        "asdfgh qwerty zxcvbn",                          # Pure consonant gibberish
+        "!!! 12345 !!!",                                 # Pure punctuation / numbers
+        "1234567890",                                    # Numbers only
+    ]
+    for text in us_accepted:
+        assert detector.is_localized(text, geo=GeoCode.US), f"US falsely rejected: '{text}'"
+    for text in us_rejected:
+        assert not detector.is_localized(text, geo=GeoCode.US), f"US falsely accepted: '{text}'"
 
-    # 2. United States / English (US, GLOBAL)
-    assert detector.is_localized("Building Autonomous AI Agents with LangChain", geo=GeoCode.US)
-    assert detector.is_localized("Top 10 SaaS market trends in 2026", geo=GeoCode.GLOBAL)
-    assert not detector.is_localized("챗GPT AI 에이전트 활용법", geo=GeoCode.US)
-    assert not detector.is_localized("การสร้าง AI Agent สำหรับธุรกิจ", geo=GeoCode.US)
+    # ---------------------------------------------------------
+    # 2. Japan (geo=JP) — Must distinguish Japanese from Chinese
+    # ---------------------------------------------------------
+    jp_accepted = [
+        "AIエージェントの業務自動化ガイド",
+        "初心者向けn8n自動化チュートリアル",
+        "2026年のAI市場トレンド解説",
+    ]
+    jp_rejected = [
+        "如何在2026年构建人工智能代理",                    # Chinese CJK only (0 Kana)
+        "Building Autonomous AI Agents",                 # English
+        "Hướng dẫn cài đặt AI Agent",                    # Vietnamese
+    ]
+    for text in jp_accepted:
+        assert detector.is_localized(text, geo=GeoCode.JP), f"JP falsely rejected: '{text}'"
+    for text in jp_rejected:
+        assert not detector.is_localized(text, geo=GeoCode.JP), f"JP falsely accepted: '{text}'"
 
-    # 3. Japan (JP)
-    assert detector.is_localized("AIエージェントの業務自動化ガイド", geo=GeoCode.JP)
-    assert not detector.is_localized("Building Autonomous AI Agents", geo=GeoCode.JP)
+    # ---------------------------------------------------------
+    # 3. Brazil (geo=BR) — Must reject Vietnamese false positives
+    # ---------------------------------------------------------
+    br_accepted = [
+        "Como criar agentes autônomos com inteligência artificial",
+        "Curso de automação para empresas",
+        "Ferramenta gratuita para criar agentes de IA",
+    ]
+    br_rejected = [
+        "Trí tuệ nhân tạo cho doanh nghiệp",             # Vietnamese diacritics
+        "Building Autonomous AI Agents",                 # English
+        "챗GPT AI 에이전트 활용법",                         # Korean
+    ]
+    for text in br_accepted:
+        assert detector.is_localized(text, geo=GeoCode.BR), f"BR falsely rejected: '{text}'"
+    for text in br_rejected:
+        assert not detector.is_localized(text, geo=GeoCode.BR), f"BR falsely accepted: '{text}'"
 
-    # 4. Korea (KR)
-    assert detector.is_localized("2026년 AI 에이전트 트렌드 분석", geo=GeoCode.KR)
-    assert not detector.is_localized("Building Autonomous AI Agents", geo=GeoCode.KR)
+    # ---------------------------------------------------------
+    # 4. Vietnam (geo=VN) — Must accept tech loan mixing
+    # ---------------------------------------------------------
+    vn_accepted = [
+        "Khoá học n8n complete cho người mới",
+        "Hướng dẫn setup AI Agent từ A đến Z",
+        "Cài đặt bot chat cskh tự động hoá",
+        "hoc lam ai agent tu dong hoa",
+    ]
+    vn_rejected = [
+        "Como criar agentes autônomos grátis",           # Portuguese
+        "Formation complete intelligence artificielle",   # French
+        "챗GPT AI 에이전트 활용법",                         # Korean
+        "如何在2026年构建人工智能代理",                    # Chinese
+    ]
+    for text in vn_accepted:
+        assert detector.is_localized(text, geo=GeoCode.VN), f"VN falsely rejected: '{text}'"
+    for text in vn_rejected:
+        assert not detector.is_localized(text, geo=GeoCode.VN), f"VN falsely accepted: '{text}'"
 
-    # 5. Thailand (TH)
-    assert detector.is_localized("แนวโน้ม AI Agent ในปี 2026", geo=GeoCode.TH)
-    assert not detector.is_localized("Building Autonomous AI Agents", geo=GeoCode.TH)
 
-    # 6. Brazil (BR)
-    assert detector.is_localized("Como criar agentes autônomos com inteligência artificial", geo=GeoCode.BR)
-    assert detector.is_localized("Curso de automação para empresas", geo=GeoCode.BR)
+def test_global_whitelist_extra_terms_across_all_regions():
+    detector = HeuristicLanguageDetector()
+    extra_lexicon = {"deepseek r1", "langgraph"}
+
+    # Foreign region with English terms whitelisted explicitly by agent
+    assert detector.is_localized("DeepSeek R1 architecture overview", geo=GeoCode.JP, extra_terms=extra_lexicon)
+    assert detector.is_localized("LangGraph workflow setup", geo=GeoCode.VN, extra_terms=extra_lexicon)
 
 
 def test_noise_blacklist_rejection_across_regions():

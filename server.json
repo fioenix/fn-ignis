@@ -1,13 +1,12 @@
 {
-  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/registry/main/schema/server.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.fioenix/fn-ignis",
   "title": "fnIgnis Trend Intelligence & Market Research",
   "description": "Unified self-hosted autonomous trend intelligence, multi-platform social listening (Google Trends, YouTube, TikTok), and market opportunity white-space discovery MCP harness.",
   "repository": {
-    "type": "git",
-    "url": "https://github.com/fioenix/fn-ignis"
+    "url": "https://github.com/fioenix/fn-ignis",
+    "source": "github"
   },
-  "license": "MIT",
   "version": "0.1.0",
   "packages": [
     {
@@ -17,7 +16,25 @@
       "transport": {
         "type": "stdio"
       },
-      "executable": "ignis-mcp"
+      "environmentVariables": [
+        {
+          "name": "DATABASE_URL",
+          "description": "PostgreSQL DSN or sqlite:///ignis.db for zero-Docker mode",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "YOUTUBE_API_KEY",
+          "description": "YouTube Data API v3 key",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "DEFAULT_GEO",
+          "description": "Default ISO-3166 region code (e.g. VN, US, JP, SG)",
+          "isRequired": false
+        }
+      ]
     }
   ]
 }
