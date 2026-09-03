@@ -6,6 +6,7 @@ from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TrendSignal
 from ignis.domain.harness_models import HarnessResearchReport
+from ignis.domain.value_objects import timeframe_to_days
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
@@ -76,7 +77,8 @@ class AutonomousRefinementOrchestrator:
         for s in signals:
             s.mission_id = mission.id
 
-        scorecard = self._evaluator.evaluate_quality(signals, geo=mission.geo_code)
+        tf_days = timeframe_to_days(mission.timeframe)
+        scorecard = self._evaluator.evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
         logger.info(f"[Harness] Pass 1 complete: {len(signals)} signals, Quality Confidence: {scorecard.overall_confidence}% ({scorecard.confidence_level.value}).")
 
         # Pass 2: Refinement Loop if sample size or confidence score is below threshold
@@ -103,7 +105,7 @@ class AutonomousRefinementOrchestrator:
                 signals.extend(extra_signals)
 
                 # Re-evaluate quality scorecard after refinement
-                scorecard = self._evaluator.evaluate_quality(signals, geo=mission.geo_code)
+                scorecard = self._evaluator.evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
                 logger.info(f"[Harness] Post Pass 2: Total {len(signals)} signals, Quality Confidence: {scorecard.overall_confidence}%.")
 
         # Semantic Clustering

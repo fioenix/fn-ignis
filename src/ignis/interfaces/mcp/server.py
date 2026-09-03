@@ -31,6 +31,7 @@ from ignis.domain.value_objects import (
     resolve_geo,
     resolve_platform,
     resolve_timeframe,
+    timeframe_to_days,
 )
 
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
@@ -256,7 +257,8 @@ async def handle_evaluate_mission_quality(mission_id: str) -> str:
     m_id = mission.id
 
     signals = await comp["repository"].get_mission_signals(m_id)
-    scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code)
+    tf_days = timeframe_to_days(mission.timeframe)
+    scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
 
     return json.dumps(
         {
@@ -286,7 +288,8 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
 
     signals = await comp["repository"].get_mission_signals(m_id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
-    scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code)
+    tf_days = timeframe_to_days(mission.timeframe)
+    scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
     
     report = comp["strategic_reasoner"].analyze_mission(
         mission=mission,
@@ -491,7 +494,8 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     # Enrich with Scorecard & White Space discovery for in-chat Native Artifact rendering
     signals = await comp["repository"].get_mission_signals(mission.id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
-    scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code)
+    tf_days = timeframe_to_days(mission.timeframe)
+    scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
     report = comp["strategic_reasoner"].analyze_mission(
         mission=mission,
         signals=signals,
@@ -567,7 +571,8 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
 
     signals = await comp["repository"].get_mission_signals(m_id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
-    scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code)
+    tf_days = timeframe_to_days(mission.timeframe)
+    scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
 
     
     report = comp["strategic_reasoner"].analyze_mission(

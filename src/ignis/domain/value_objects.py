@@ -32,11 +32,21 @@ class GeoCode(str, Enum):
     GLOBAL = "GLOBAL"
     GB = "GB"
     JP = "JP"
+    KR = "KR"
     TH = "TH"
     SG = "SG"
+    MY = "MY"
     ID = "ID"
+    PH = "PH"
+    BR = "BR"
     DE = "DE"
     FR = "FR"
+    ES = "ES"
+    IT = "IT"
+    AU = "AU"
+    CA = "CA"
+    IN = "IN"
+    MX = "MX"
 
     @classmethod
     def _missing_(cls, value: object):
@@ -105,5 +115,21 @@ def resolve_timeframe(timeframe_input: object) -> Timeframe:
         return timeframe_input
     clean = str(timeframe_input).strip().lower() if timeframe_input else "24h"
     return Timeframe(clean)
+
+
+def timeframe_to_days(timeframe_input: object) -> int:
+    """Convert timeframe enum or string into number of days for window calculations."""
+    tf = resolve_timeframe(timeframe_input).value
+    if tf == "24h":
+        return 1
+    elif tf == "7d":
+        return 7
+    elif tf == "30d":
+        return 30
+    elif tf == "90d":
+        return 90
+    elif tf == "12m":
+        return 365
+    return 90
 
 

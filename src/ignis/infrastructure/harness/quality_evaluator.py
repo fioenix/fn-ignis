@@ -1,11 +1,12 @@
-import re
 from datetime import datetime, timezone
-from typing import List, Set, Optional
+from typing import List, Optional, Set
 
+from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.config import settings
 from ignis.domain.entities import TrendSignal
-from ignis.domain.harness_models import QualityScorecard, ConfidenceLevel
+from ignis.domain.harness_models import ConfidenceLevel, QualityScorecard
 from ignis.domain.value_objects import GeoCode
+from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 
 
 class QualityEvaluator:
@@ -14,56 +15,17 @@ class QualityEvaluator:
     Weights and confidence thresholds are fully configurable via environment variables.
     """
 
-    # Characters strictly unique to Vietnamese (cannot appear in Portuguese, French, Spanish, etc.)
-    VI_EXCLUSIVE_CHARS_PATTERN = re.compile(
-        r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủẽĩạẹịọụ]",
-        re.IGNORECASE
-    )
-
-
-    # Ambiguous shared Latin diacritics (may appear in Portuguese, Spanish, French, etc.)
-    SHARED_LATIN_DIACRITICS = re.compile(r"[ôéèáàâóíúç]", re.IGNORECASE)
-
-    FOREIGN_STOPWORDS = {
-        # French
-        "formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant",
-        # Portuguese / Spanish
-        "como", "funcionam", "chegou", "novos", "veja", "agentes", "autonomos", "autônomos",
-        "para", "com", "por", "sobre", "este", "esta", "todos", "agora", "fazer", "curso",
-        "gratis", "completo", "você", "voce", "seus", "suas", "criar", "criando",
-        "ferramenta", "passo", "inteligencia", "artificial", "automatizar",
-        # Indonesian / Malay (strictly multi-syllable or unambiguous non-Vietnamese)
-        "cara", "yang", "untuk", "bisa"
-    }
-
-
-    TECH_LOAN_WORDS = {
-        "ai", "bot", "chat", "agent", "app", "tool", "pro", "plus", "hub", "lab",
-        "tech", "online", "code", "dev", "web", "net", "top", "mini", "shop", "store"
-    }
-
-    VI_CORE_WORDS = {
-        "va", "cua", "la", "trong", "cho", "voi", "ve", "tu", "dong", "hoa",
-        "huong", "dan", "cach", "lam", "chu", "doanh", "nghiep", "ung", "dung",
-        "giai", "phap", "phan", "mem", "tri", "tue", "nhan", "tao", "tro", "ly",
-        "kiem", "tien", "nguoi", "viet", "nam", "danh", "bai", "hoc", "khoa",
-        "thuc", "chien", "tong", "quan", "chi", "tiet", "zalo", "acc", "clone",
-        "shop", "gia", "ban", "mua", "setup", "chot", "don", "kho", "hang",
-        "sao", "gi", "tai", "bao", "nhieu", "cskh", "dai", "phi", "khong",
-        "duoc", "nay", "moi", "tot", "nhat", "hay", "chia", "se", "kinh",
-        "nghiem", "tai", "lieu", "phan", "tich", "xay", "dung", "tu", "van",
-        "khach", "hang", "dich", "vu", "cong", "nghe", "nen", "tang"
-    }
-
     def __init__(
         self,
         custom_lexicon: Optional[Set[str]] = None,
         custom_stopwords: Optional[Set[str]] = None,
         custom_noise: Optional[Set[str]] = None,
+        detector: Optional[ILanguageDetector] = None,
     ):
         self._custom_lexicon: Set[str] = set(custom_lexicon or [])
         self._custom_stopwords: Set[str] = set(custom_stopwords or [])
         self._custom_noise: Set[str] = set(custom_noise or [])
+        self._detector: ILanguageDetector = detector or HeuristicLanguageDetector()
 
     def register_terms(self, terms: List[str]) -> None:
         """Dynamically register new domain vocabulary terms in memory."""
@@ -86,10 +48,6 @@ class QualityEvaluator:
             if clean:
                 self._custom_noise.add(clean)
 
-    # Reject foreign non-Latin scripts (Hangul, Kanji/Hanzi, Kana, Thai, Cyrillic, Arabic)
-    FOREIGN_SCRIPTS_PATTERN = re.compile(r"[\uac00-\ud7af\u4e00-\u9fff\u3040-\u30ff\u0e00-\u0e7f\u0400-\u04ff]")
-
-
     def is_vietnamese(
         self,
         text: str,
@@ -97,78 +55,27 @@ class QualityEvaluator:
         extra_stopwords: Optional[Set[str]] = None,
         extra_noise: Optional[Set[str]] = None,
     ) -> bool:
-        """
-        Multi-layer Vietnamese localization detector:
-        1. Instantly rejects foreign non-Latin scripts (Korean, Chinese, Japanese, Thai, Cyrillic).
-        2. Rejects mission-specific negative/noise terms if dynamically registered by Agent.
-        3. Instantly rejects Romance / Foreign stopwords (static baseline + DB dynamic).
-        4. Detects unique Vietnamese characters (đ, ơ, ư, hook/dot tones, accented vowels).
-        5. For unaccented text, ignores borrowed tech words (ai, bot, chat, tool, etc.)
-           and requires at least 2 genuine Vietnamese core vocabulary words.
-        """
-        if not text:
-            return False
-
-        if self.FOREIGN_SCRIPTS_PATTERN.search(text):
-            return False
-        
-        text_lower = text.lower()
-        active_noise = self._custom_noise | (extra_noise or set())
-        if active_noise:
-            for term in active_noise:
-                if not term:
-                    continue
-                clean_term = term.lstrip("#").strip()
-                if not clean_term:
-                    continue
-                pattern = rf"(?:\b|#){re.escape(clean_term)}\b"
-                if re.search(pattern, text_lower):
-                    return False
-
-        words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", text_lower))
-        
-        # Layer 1: Reject explicit foreign stopwords (Static + Dynamic Database)
-        all_stopwords = self.FOREIGN_STOPWORDS | self._custom_stopwords | (extra_stopwords or set())
-        if any(fw in words for fw in all_stopwords):
-            return False
-
-        # Layer 2: Exclusive Vietnamese characters with diacritics
-        if self.VI_EXCLUSIVE_CHARS_PATTERN.search(text):
-            return True
-
-        # Layer 3: Unaccented text verification
-        # Exclude international tech loan words from proof of Vietnamese localization
-        pure_words = words - self.TECH_LOAN_WORDS
-        active_core = self.VI_CORE_WORDS | self._custom_lexicon | (extra_terms or set())
-        vi_core_count = sum(1 for w in pure_words if w in active_core)
-        
-        # Requires at least 2 genuine core Vietnamese words for unaccented titles
-        return vi_core_count >= 2
+        """Evaluate Vietnamese linguistic authenticity."""
+        merged_terms = self._custom_lexicon | (extra_terms or set())
+        merged_stopwords = self._custom_stopwords | (extra_stopwords or set())
+        merged_noise = self._custom_noise | (extra_noise or set())
+        return self._detector.is_localized(
+            text=text,
+            geo=GeoCode.VN,
+            extra_terms=merged_terms,
+            extra_stopwords=merged_stopwords,
+            extra_noise=merged_noise,
+        )
 
     def is_localized(self, title: str, geo: GeoCode = GeoCode.VN) -> bool:
-        """
-        Universal language & localization verification.
-        Applies Vietnamese linguistic heuristic for VN, and universal noise/script filtering for other regions.
-        """
-        if not title:
-            return False
-        geo_val = geo.value if hasattr(geo, "value") else str(geo)
-        if geo_val.upper() == "VN":
-            return self.is_vietnamese(title)
-
-        if self._custom_noise:
-            t_low = title.lower()
-            for term in self._custom_noise:
-                if not term:
-                    continue
-                clean_term = term.lstrip("#").strip()
-                if not clean_term:
-                    continue
-                pattern = rf"(?:\b|#){re.escape(clean_term)}\b"
-                if re.search(pattern, t_low):
-                    return False
-        return len(title.strip()) >= 3
-
+        """Universal language & localization verification across geographies."""
+        return self._detector.is_localized(
+            text=title,
+            geo=geo,
+            extra_terms=self._custom_lexicon,
+            extra_stopwords=self._custom_stopwords,
+            extra_noise=self._custom_noise,
+        )
 
     def evaluate_quality(
         self,
@@ -201,7 +108,6 @@ class QualityEvaluator:
         has_core = core_platforms.issubset(platforms_present)
         coverage_score = round(min(100.0, (len(platforms_present) / 5.0) * 100.0), 1)
 
-        
         if has_core:
             strengths.append(f"Successfully collected from core pillars ({', '.join(core_platforms)}).")
         else:
@@ -227,21 +133,21 @@ class QualityEvaluator:
             if is_loc:
                 target_lang_matches += 1
 
-
-
         language_precision = round((target_lang_matches / float(len(signals))) * 100.0, 1) if signals else 0.0
         if language_precision >= 70.0:
             strengths.append(f"High language localization ({language_precision}% verified target market language).")
         else:
-            flaws.append(f"{round(100.0 - language_precision, 1)}% of signals are non-localized or entertainment outliers ({target_lang_matches}/{len(signals)} verified).")
+            flaws.append(
+                f"{round(100.0 - language_precision, 1)}% of signals are non-localized or entertainment outliers ({target_lang_matches}/{len(signals)} verified)."
+            )
 
-        # 3. View Outlier Concentration Rule
+        # 3. View Outlier Concentration Rule (Only evaluated when n >= 3 video signals)
         content_signals = [
-            s for s in signals 
+            s for s in signals
             if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) in ("youtube", "tiktok", "reels")
         ]
         total_views = sum(float(s.metric_value) for s in content_signals if float(s.metric_value) > 0)
-        if total_views > 0 and content_signals:
+        if len(content_signals) >= 3 and total_views > 0:
             max_signal = max(content_signals, key=lambda s: float(s.metric_value))
             max_views = float(max_signal.metric_value)
             view_ratio = max_views / total_views
@@ -250,10 +156,7 @@ class QualityEvaluator:
                     f"Severe view distribution skew: Single viral video ('{max_signal.raw_title[:45]}...') accounts for {round(view_ratio * 100, 1)}% of all video views ({int(max_views):,} / {int(total_views):,})."
                 )
 
-
-
-
-        # 3. Creator Diversity Score
+        # 4. Creator Diversity Score
         if channels:
             unique_channels = len(set(channels))
             creator_diversity = round(min(100.0, (unique_channels / float(len(channels))) * 100.0), 1)
@@ -264,12 +167,22 @@ class QualityEvaluator:
         else:
             creator_diversity = 70.0
 
-        # 4. Data Freshness Score
+        # 5. Data Freshness Score (Evaluate published_at or captured_at against window)
         now_utc = datetime.now(timezone.utc)
         in_timeframe_count = 0
         for s in signals:
-            if s.captured_at:
-                days_old = (now_utc - s.captured_at).total_seconds() / 86400.0
+            signal_dt = None
+            if s.metadata and s.metadata.get("published_at"):
+                pub_str = s.metadata["published_at"]
+                try:
+                    signal_dt = datetime.fromisoformat(str(pub_str).replace("Z", "+00:00"))
+                except Exception:
+                    signal_dt = s.captured_at
+            else:
+                signal_dt = s.captured_at
+
+            if signal_dt:
+                days_old = (now_utc - signal_dt).total_seconds() / 86400.0
                 if days_old <= timeframe_days:
                     in_timeframe_count += 1
             else:
@@ -281,7 +194,7 @@ class QualityEvaluator:
         else:
             flaws.append(f"Low freshness score ({data_freshness_score}%), contains outdated signals.")
 
-        # 5. Overall Confidence Score (Weighted average from configurable settings)
+        # 6. Overall Confidence Score (Weighted average from configurable settings)
         base_confidence = (
             (coverage_score * settings.SCORECARD_WEIGHT_COVERAGE) +
             (language_precision * settings.SCORECARD_WEIGHT_LANGUAGE) +
@@ -289,7 +202,7 @@ class QualityEvaluator:
             (creator_diversity * settings.SCORECARD_WEIGHT_DIVERSITY)
         )
 
-        # 6. Strict Localized Sample Size Guardrail & Penalty
+        # 7. Strict Localized Sample Size Guardrail & Penalty
         sample_penalty_factor = 1.0
         if target_lang_matches < 15:
             flaws.append(f"Low localized dataset size ({target_lang_matches} verified signals in target language). Confidence score penalized.")
@@ -307,7 +220,6 @@ class QualityEvaluator:
             confidence_level = ConfidenceLevel.LOW
         else:
             confidence_level = ConfidenceLevel.UNRELIABLE
-
 
         return QualityScorecard(
             coverage_score=coverage_score,
