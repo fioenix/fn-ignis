@@ -8,18 +8,12 @@ from ignis.domain.value_objects import GeoCode
 class HeuristicLanguageDetector(ILanguageDetector):
     """
     Multi-region linguistic and localization verification engine.
-    Strictly verifies target language authenticity and eliminates rubber-stamp heuristics.
+    Uses subtractive filtering and authentic script/vocabulary rules to eliminate rubber-stamps and false negatives.
     """
 
     # Characters strictly unique to Vietnamese
     VI_EXCLUSIVE_CHARS_PATTERN = re.compile(
         r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủẽĩạẹịọụ]",
-        re.IGNORECASE,
-    )
-
-    # General Vietnamese diacritics (including shared Latin with accents)
-    VI_ALL_DIACRITICS_PATTERN = re.compile(
-        r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]",
         re.IGNORECASE,
     )
 
@@ -30,7 +24,6 @@ class HeuristicLanguageDetector(ILanguageDetector):
 
     # Japanese Kana strictly (Hiragana \u3040-\u309f + Katakana \u30a0-\u30ff)
     JAPANESE_KANA_PATTERN = re.compile(r"[\u3040-\u30ff]")
-    CJK_IDEOGRAPHS_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 
     # Korean Hangul
     KOREAN_HANGUL_PATTERN = re.compile(r"[\uac00-\ud7af]")
@@ -38,29 +31,25 @@ class HeuristicLanguageDetector(ILanguageDetector):
     # Thai script
     THAI_SCRIPT_PATTERN = re.compile(r"[\u0e00-\u0e7f]")
 
-    # Distinctive non-English diacritics
-    NON_ENGLISH_DIACRITICS = re.compile(r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐãõñçüöäß]")
+    # Non-English Latin diacritics (Vietnamese, Portuguese, French, Spanish, German, etc.)
+    NON_ENGLISH_DIACRITICS = re.compile(
+        r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐãõñçüöäß]"
+    )
 
-    # Unambiguous foreign multi-word phrases or non-English terms for Vietnamese filter
-    VI_FOREIGN_PHRASES = {
+    # Foreign phrases for cross-language rejection
+    FOREIGN_STOPWORD_PHRASES = {
         "formation complete", "formation complète", "avec", "cours pour", "dans le", "tuto debutant", "tuto débutant",
         "como criar", "como funcionam", "agentes autonomos", "agentes autônomos", "para você", "para voce",
-        "inteligencia artificial", "inteligência artificial", "todos os", "fazer curso", "cara membuat", "untuk pemula"
+        "inteligencia artificial", "inteligência artificial", "todos os", "fazer curso", "cara membuat", "untuk pemula",
+        "de ia", "com ia", "para empresas"
     }
 
-    PORTUGUESE_STOPWORDS = {
+    PORTUGUESE_DISTINCTIVE_WORDS = {
         "como", "para", "com", "por", "sobre", "este", "esta", "todos", "agora", "fazer",
         "curso", "gratis", "completo", "você", "voce", "seus", "suas", "criar", "criando",
         "ferramenta", "passo", "inteligencia", "artificial", "inteligência", "automatizar",
-        "não", "nao", "em", "de", "da", "do", "que", "um", "uma", "automação", "automacao",
+        "não", "nao", "em", "do", "da", "que", "uma", "um", "automação", "automacao",
         "negócios", "negocios", "agentes"
-    }
-
-    TECH_LOAN_WORDS = {
-        "ai", "bot", "chat", "agent", "agents", "app", "apps", "tool", "tools",
-        "pro", "plus", "hub", "lab", "tech", "online", "code", "dev", "web",
-        "net", "top", "mini", "shop", "store", "n8n", "mcp", "gpt", "saas",
-        "workflow", "api", "cloud", "data", "deep", "learn", "fast", "setup"
     }
 
     VI_CORE_WORDS = {
@@ -76,22 +65,11 @@ class HeuristicLanguageDetector(ILanguageDetector):
         "vu", "cong", "nghe", "nen", "tang"
     }
 
-    # Core high-frequency English vocabulary and grammatical markers
-    COMMON_ENGLISH_WORDS = {
-        "the", "be", "to", "of", "and", "a", "in", "that", "have", "i", "it", "for", "not", "on", "with",
-        "he", "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her", "she",
-        "or", "an", "will", "my", "one", "all", "would", "there", "their", "what", "so", "up", "out", "if",
-        "about", "who", "get", "which", "go", "me", "when", "make", "can", "like", "time", "no", "just", "him",
-        "know", "take", "people", "into", "year", "your", "good", "some", "could", "them", "see", "other", "than",
-        "then", "now", "look", "only", "come", "its", "over", "think", "also", "back", "after", "use", "two",
-        "how", "our", "work", "first", "well", "way", "even", "new", "want", "because", "any", "these", "give",
-        "day", "most", "us", "is", "are", "was", "were", "been", "has", "had", "guide", "tutorial", "best",
-        "top", "review", "vs", "building", "build", "create", "creating", "free", "course", "complete", "beginner",
-        "advanced", "automation", "system", "systems", "market", "marketing", "business", "software", "solution",
-        "solutions", "enterprise", "agency", "step", "steps", "simple", "easy", "fast", "speed", "trends",
-        "intelligence", "strategy", "strategies", "platform", "tools", "tool", "agents", "agent", "workflow",
-        "workflows", "management", "analysis", "case", "study", "studies", "overview", "using", "with", "without",
-        "future", "power", "scale", "scaling", "models", "model", "pipeline", "framework", "architecture"
+    TECH_LOAN_WORDS = {
+        "ai", "bot", "chat", "agent", "agents", "app", "apps", "tool", "tools",
+        "pro", "plus", "hub", "lab", "tech", "online", "code", "dev", "web",
+        "net", "top", "mini", "shop", "store", "n8n", "mcp", "gpt", "saas",
+        "workflow", "api", "cloud", "data", "deep", "learn", "fast", "setup"
     }
 
     def _matches_noise(self, text_lower: str, active_noise: Set[str]) -> bool:
@@ -105,15 +83,6 @@ class HeuristicLanguageDetector(ILanguageDetector):
                 continue
             pattern = rf"(?:\b|#){re.escape(clean_term)}\b"
             if re.search(pattern, text_lower):
-                return True
-        return False
-
-    def _matches_extra_terms(self, text_lower: str, extra_terms: Optional[Set[str]]) -> bool:
-        if not extra_terms:
-            return False
-        for term in extra_terms:
-            clean = term.strip().lower()
-            if clean and clean in text_lower:
                 return True
         return False
 
@@ -136,16 +105,12 @@ class HeuristicLanguageDetector(ILanguageDetector):
         if extra_noise and self._matches_noise(text_lower, extra_noise):
             return False
 
-        # Step 2: Global Whitelist - If text explicitly matches agent registered domain terms, allow it
-        if extra_terms and self._matches_extra_terms(text_lower, extra_terms):
-            return True
-
-        # Step 3: Reject non-linguistic pure punctuation/number garbage
+        # Step 2: Reject non-linguistic pure punctuation/number garbage
         letters_only = re.sub(r"[^a-zA-Z\u00C0-\u024F\u1EA0-\u1EF9\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af\u0e00-\u0e7f]", "", text_clean)
-        if len(letters_only) < 2:
+        if len(letters_only) < 3:
             return False
 
-        # Step 4: Route by geographic region
+        # Step 3: Route by geographic region
         if geo_val == "VN":
             return self._is_vietnamese(
                 text=text_clean,
@@ -154,9 +119,9 @@ class HeuristicLanguageDetector(ILanguageDetector):
                 extra_stopwords=extra_stopwords,
             )
         elif geo_val in ("US", "GB", "CA", "AU", "GLOBAL"):
-            return self._is_english(text_clean, text_lower)
+            return self._is_english(text_clean, text_lower, extra_terms=extra_terms)
         elif geo_val == "JP":
-            return self._is_japanese(text_clean)
+            return self._is_japanese(text_clean, extra_terms=extra_terms)
         elif geo_val == "KR":
             return self._is_korean(text_clean)
         elif geo_val == "TH":
@@ -174,12 +139,12 @@ class HeuristicLanguageDetector(ILanguageDetector):
         extra_terms: Optional[Set[str]] = None,
         extra_stopwords: Optional[Set[str]] = None,
     ) -> bool:
-        # Layer 1: Reject foreign non-Latin scripts (CJK, Korean, Thai, Cyrillic, Arabic)
+        # 1. Reject foreign non-Latin scripts (CJK, Korean, Thai, Cyrillic, Arabic)
         if self.FOREIGN_SCRIPTS_PATTERN.search(text):
             return False
 
-        # Layer 2: Reject unambiguous foreign phrases
-        for fp in self.VI_FOREIGN_PHRASES:
+        # 2. Reject foreign phrases
+        for fp in self.FOREIGN_STOPWORD_PHRASES:
             if fp in text_lower:
                 return False
 
@@ -188,59 +153,78 @@ class HeuristicLanguageDetector(ILanguageDetector):
         if extra_stopwords and any(sw.lower() in words for sw in extra_stopwords):
             return False
 
-        # Layer 3: Exclusive Vietnamese characters with diacritics
+        # 3. Exclusive Vietnamese characters with diacritics
         if self.VI_EXCLUSIVE_CHARS_PATTERN.search(text):
             return True
 
-        # Layer 4: Unaccented text verification
+        # 4. Unaccented text verification
         pure_words = words - self.TECH_LOAN_WORDS
-        active_core = self.VI_CORE_WORDS | (extra_terms or set())
+        active_core = self.VI_CORE_WORDS | {t.lower() for t in (extra_terms or set()) if len(t) >= 3}
         vi_core_count = sum(1 for w in pure_words if w in active_core)
         return vi_core_count >= 2
 
-    def _is_english(self, text: str, text_lower: str) -> bool:
-        # 1. Reject foreign scripts (CJK, Japanese Kana, Korean Hangul, Thai, Cyrillic, Arabic)
+    def _is_english(self, text: str, text_lower: str, extra_terms: Optional[Set[str]] = None) -> bool:
+        # 1. Reject foreign non-Latin scripts
         if self.FOREIGN_SCRIPTS_PATTERN.search(text):
             return False
 
-        # 2. Reject distinctive foreign non-English diacritics
+        # 2. Reject foreign diacritics
         if self.NON_ENGLISH_DIACRITICS.search(text):
             return False
 
-        # 3. Reject known non-English stopword phrases
-        for fp in self.VI_FOREIGN_PHRASES:
+        # 3. Reject foreign phrases
+        for fp in self.FOREIGN_STOPWORD_PHRASES:
             if fp in text_lower:
                 return False
 
-        # 4. Tokenize Latin words
-        words = re.findall(r"\b[a-zA-Z]+\b", text_lower)
-        if not words:
+        pure_alpha_words = set(re.findall(r"\b[a-zA-Z]+\b", text_lower))
+        if not pure_alpha_words:
             return False
 
-        # 5. Check against English vocabulary
-        all_english_vocab = self.COMMON_ENGLISH_WORDS | self.TECH_LOAN_WORDS
-        english_match_count = sum(1 for w in words if w in all_english_vocab)
+        # Total alpha characters must be at least 3
+        total_alpha_len = sum(len(w) for w in pure_alpha_words)
+        if total_alpha_len < 3:
+            return False
 
-        # Single word: must be in English vocabulary
-        if len(words) == 1:
-            return words[0] in all_english_vocab
+        # 4. Reject if contains Vietnamese unaccented grammar (>= 2 core Vietnamese words)
+        vi_matches = sum(1 for w in pure_alpha_words if w in self.VI_CORE_WORDS)
+        if vi_matches >= 2:
+            return False
 
-        # Multi-word: require at least 2 recognized English words or >= 50% English words
-        if english_match_count >= 2:
-            return True
+        # 5. Reject if contains Portuguese/Spanish stopwords (>= 2 distinctive words)
+        pt_matches = sum(1 for w in pure_alpha_words if w in self.PORTUGUESE_DISTINCTIVE_WORDS)
+        if pt_matches >= 2:
+            return False
 
-        return (english_match_count / float(len(words))) >= 0.5
+        # 6. Reject pure consonant gibberish (e.g. 'asdfgh', 'zxcvbn')
+        # Standard English/Latin words of length >= 4 must contain at least one vowel
+        vowels_pattern = re.compile(r"[aeiouyAEIOUY]")
+        long_words = [w for w in pure_alpha_words if len(w) >= 4]
+        if long_words and any(not vowels_pattern.search(w) for w in long_words):
+            return False
 
-    def _is_japanese(self, text: str) -> bool:
+        # Must have at least 1 word with vowel
+        has_vowel = any(vowels_pattern.search(w) for w in pure_alpha_words)
+        return has_vowel
+
+    def _is_japanese(self, text: str, extra_terms: Optional[Set[str]] = None) -> bool:
         # Must contain Japanese Kana (Hiragana/Katakana) to distinguish genuine Japanese from Chinese (ZH)
-        return bool(self.JAPANESE_KANA_PATTERN.search(text))
+        if self.JAPANESE_KANA_PATTERN.search(text):
+            return True
+        # If agent explicitly whitelisted a domain term with Latin text (e.g. DeepSeek R1)
+        if extra_terms:
+            t_low = text.lower()
+            for term in extra_terms:
+                clean_term = term.strip().lower()
+                # Must be >= 3 chars, and text must not contain Chinese characters without Kana
+                if len(clean_term) >= 3 and clean_term in t_low and not re.search(r"[\u4e00-\u9fff]", text):
+                    return True
+        return False
 
     def _is_korean(self, text: str) -> bool:
-        # Must contain Korean Hangul
         return bool(self.KOREAN_HANGUL_PATTERN.search(text))
 
     def _is_thai(self, text: str) -> bool:
-        # Must contain Thai script
         return bool(self.THAI_SCRIPT_PATTERN.search(text))
 
     def _is_portuguese(self, text: str, text_lower: str) -> bool:
@@ -250,4 +234,4 @@ class HeuristicLanguageDetector(ILanguageDetector):
         if self.VI_EXCLUSIVE_CHARS_PATTERN.search(text):
             return False
         words = set(re.findall(r"\b[a-zA-Záéíóúâêôãõç]+\b", text_lower))
-        return any(pw in words for pw in self.PORTUGUESE_STOPWORDS)
+        return any(pw in words for pw in self.PORTUGUESE_DISTINCTIVE_WORDS)

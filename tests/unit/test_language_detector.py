@@ -9,7 +9,7 @@ def test_language_detector_two_column_matrix_guardrails():
     detector = HeuristicLanguageDetector()
 
     # ---------------------------------------------------------
-    # 1. United States (geo=US / GLOBAL)
+    # 1. United States (geo=US / GLOBAL) — Real-world tech titles & brand names
     # ---------------------------------------------------------
     us_accepted = [
         "Building Autonomous AI Agents with LangChain",
@@ -17,6 +17,13 @@ def test_language_detector_two_column_matrix_guardrails():
         "Top 10 SaaS market trends in 2026",
         "AI Agent tutorial and full guide",
         "Complete enterprise automation strategy",
+        # Real-world YouTube/TikTok tech brand titles (formerly false-negatives)
+        "n8n Zapier Make Comparison",
+        "SEO Backlinks Ahrefs Semrush",
+        "Shopify Dropshipping 2026",
+        "Figma to Webflow handoff",
+        "Kubernetes Helm Terraform DevOps",
+        "ChatGPT Automation Masterclass",
     ]
     us_rejected = [
         "Hướng dẫn cài đặt n8n cho người mới",           # Vietnamese
@@ -91,13 +98,18 @@ def test_language_detector_two_column_matrix_guardrails():
         assert not detector.is_localized(text, geo=GeoCode.VN), f"VN falsely accepted: '{text}'"
 
 
-def test_global_whitelist_extra_terms_across_all_regions():
+def test_extra_terms_whitelist_does_not_open_backdoor():
     detector = HeuristicLanguageDetector()
-    extra_lexicon = {"deepseek r1", "langgraph"}
+    common_term = {"ai"}
 
-    # Foreign region with English terms whitelisted explicitly by agent
-    assert detector.is_localized("DeepSeek R1 architecture overview", geo=GeoCode.JP, extra_terms=extra_lexicon)
-    assert detector.is_localized("LangGraph workflow setup", geo=GeoCode.VN, extra_terms=extra_lexicon)
+    # Common extra_terms must NOT bypass garbage or foreign scripts
+    assert not detector.is_localized("!!! 12345 ai !!!", geo=GeoCode.US, extra_terms=common_term)
+    assert not detector.is_localized("asdfgh ai zxcvbn", geo=GeoCode.US, extra_terms=common_term)
+    assert not detector.is_localized("Como criar agentes de ai", geo=GeoCode.US, extra_terms=common_term)
+    assert not detector.is_localized("如何在2026年构建ai代理", geo=GeoCode.JP, extra_terms=common_term)
+
+    # Valid domain term in target market
+    assert detector.is_localized("DeepSeek R1 architecture", geo=GeoCode.US, extra_terms={"deepseek r1"})
 
 
 def test_noise_blacklist_rejection_across_regions():
