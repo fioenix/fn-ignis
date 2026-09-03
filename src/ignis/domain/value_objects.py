@@ -53,6 +53,9 @@ class Timeframe(str, Enum):
     LAST_24H = "24h"
     LAST_7D = "7d"
     LAST_30D = "30d"
+    LAST_90D = "90d"
+    LAST_12M = "12m"
+
 
     @classmethod
     def _missing_(cls, value: object):

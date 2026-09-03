@@ -23,6 +23,8 @@ async def test_tiktok_plugin_fetch_suggestions_mocked():
         mock_p.chromium.launch.return_value = mock_browser
         mock_browser.new_context.return_value = mock_context
         mock_context.new_page.return_value = mock_page
+        mock_page.on = lambda event, cb: None
+
 
         mock_card = AsyncMock()
         mock_card.query_selector.return_value = None

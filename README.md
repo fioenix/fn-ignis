@@ -75,7 +75,7 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 | AI Agent / Client | Configuration & Standards | Capabilities Supported |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 15 FastMCP Tools, Prompts, Resources, Automatic SOP Injection |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 21 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
 | **Claude Code** | [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Agent Skills Standard, Native In-Chat Artifacts |
 | **Cursor IDE** | [`.cursor/rules/fn-ignis.mdc`](.cursor/rules/fn-ignis.mdc), [`.cursorrules`](.cursorrules) | Context-Aware Multi-Platform Market Intelligence |
 | **Windsurf IDE** | [`.windsurfrules`](.windsurfrules) | Cascade Step-by-Step Research Rule Protocol |
@@ -89,6 +89,7 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 ## 🛠️ FastMCP Tool & Resource Catalog
 
 ### 1. Market Research & Strategic Synthesis
+- **`run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)`**: End-to-end mission creation, multi-platform refinement loop, and white space synthesis.
 - **`create_research_mission(title, keywords, geo, timeframe, hypothesis)`**: Initialize a new targeted research campaign.
 - **`execute_mission_ingress(mission_id)`**: Execute deep multi-platform data collection with automated quality gate evaluation.
 - **`get_mission_analysis(mission_id)`**: Retrieve full synthesized strategic analysis (Opportunity Index, white spaces, action plan).
@@ -100,16 +101,22 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **`get_tiktok_creative_center_trends(geo, period, limit, industry)`**: Fetch official nationwide industry ranking benchmarks with optional vertical filtering.
 - **`get_tiktok_search_suggestions(keywords, geo)`**: Fetch live autocomplete search suggestions and trending hashtags.
 - **`get_tiktok_video_comments(video_url, limit)`**: Scrape raw public comments for a specific video.
-- **`extract_customer_pain_points(keywords, geo, max_videos)`**: Extract customer objections, pricing inquiries, and unmet needs from comments.
+- **`extract_customer_pain_points(keywords, geo, max_videos, inquiry_patterns)`**: Extract customer objections, pricing inquiries, and unmet needs from comments.
 
 ### 3. Dynamic Lexicon & Infrastructure Diagnostics
 - **`register_domain_lexicon(domain, terms, category)`**: Dynamically register new niche vocabulary/slang into database.
 - **`list_domain_lexicons(domain)`**: Query active domain vocabularies and industry mappings.
 - **`verify_connectors_health()`**: Run real-time synthetic diagnostics on YouTube quota, Google RSS, TikTok Playwright contexts, database pool, and proxy connectivity.
+- **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Managed browser credential lifecycle.
+- **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo)`**: Real-time trend exploration.
 
 ### 4. FastMCP Native Resources & Prompts
 - **Resources**: `fn-ignis://sop/market-research`, `fn-ignis://methodology/opportunity-index`
 - **Prompts**: `market_research_pipeline`, `voice_of_customer_audit`
+
+> [!NOTE]
+> **Localization Transparency:** Currently, Vietnamese (`VN`) features deep multi-layered linguistic heuristics. Other geographic regions apply universal noise filtering, and their `language_precision` indicates that no negative noise constraints failed rather than natural language parsing (full pluggable `ILanguageDetector` architecture is scheduled for `v0.2.0`).
+
 
 ---
 
