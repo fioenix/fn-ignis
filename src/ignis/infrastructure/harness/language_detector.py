@@ -127,7 +127,7 @@ class HeuristicLanguageDetector(ILanguageDetector):
         elif geo_val == "TH":
             return self._is_thai(text_clean)
         elif geo_val in ("BR", "PT"):
-            return self._is_portuguese(text_clean, text_lower)
+            return self._is_portuguese(text_clean, text_lower, extra_terms=extra_terms)
 
         # Fallback for generic international regions: Latin script with minimum 3 alphabetic letters
         return len(letters_only) >= 3
@@ -227,11 +227,12 @@ class HeuristicLanguageDetector(ILanguageDetector):
     def _is_thai(self, text: str) -> bool:
         return bool(self.THAI_SCRIPT_PATTERN.search(text))
 
-    def _is_portuguese(self, text: str, text_lower: str) -> bool:
+    def _is_portuguese(self, text: str, text_lower: str, extra_terms: Optional[Set[str]] = None) -> bool:
         if self.FOREIGN_SCRIPTS_PATTERN.search(text):
             return False
         # Reject Vietnamese exclusive characters
         if self.VI_EXCLUSIVE_CHARS_PATTERN.search(text):
             return False
         words = set(re.findall(r"\b[a-zA-Záéíóúâêôãõç]+\b", text_lower))
-        return any(pw in words for pw in self.PORTUGUESE_DISTINCTIVE_WORDS)
+        active_vocab = self.PORTUGUESE_DISTINCTIVE_WORDS | {t.lower() for t in (extra_terms or set()) if len(t) >= 3}
+        return any(pw in words for pw in active_vocab)

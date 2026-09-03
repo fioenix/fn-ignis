@@ -110,6 +110,7 @@ def test_extra_terms_whitelist_does_not_open_backdoor():
 
     # Valid domain term in target market
     assert detector.is_localized("DeepSeek R1 architecture", geo=GeoCode.US, extra_terms={"deepseek r1"})
+    assert detector.is_localized("Solução inovadora de finanças", geo=GeoCode.BR, extra_terms={"finanças"})
 
 
 def test_noise_blacklist_rejection_across_regions():
