@@ -125,8 +125,11 @@ def build_mcp_entry(python_bin: str, project_root: Path) -> Dict[str, Any]:
         "env": {
             "DATABASE_URL": settings.DATABASE_URL,
             "DEFAULT_GEO": getattr(settings, "DEFAULT_GEO", "VN"),
+            "IGNIS_ENCRYPTION_KEY": getattr(settings, "IGNIS_ENCRYPTION_KEY", ""),
         }
     }
+    if getattr(settings, "YOUTUBE_API_KEY", ""):
+        entry["env"]["YOUTUBE_API_KEY"] = settings.YOUTUBE_API_KEY
     return entry
 
 
@@ -194,6 +197,34 @@ def setup_all_mcp_clients(project_root: Path, python_bin: str) -> List[Dict[str,
     if roo_path.parent.exists():
         ok = register_mcp_to_json_file(roo_path, mcp_entry, "mcpServers")
         results.append({"client": "Roo Code Extension", "path": str(roo_path), "status": "configured" if ok else "failed"})
+
+    # 7. Google Antigravity IDE & AI Assistant
+    agy_config = Path.home() / ".gemini" / "config" / "mcp_config.json"
+    if agy_config.parent.exists():
+        ok = register_mcp_to_json_file(agy_config, mcp_entry, "mcpServers")
+        # Also provision lazy tool schemas in ~/.gemini/antigravity/mcp/fn-ignis
+        schema_dir = Path.home() / ".gemini" / "antigravity" / "mcp" / "fn-ignis"
+        try:
+            schema_dir.mkdir(parents=True, exist_ok=True)
+            manifest_path = project_root / "hermes_manifest.json"
+            if manifest_path.exists():
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    manifest = json.load(f)
+                for item in manifest:
+                    fn = item.get("function", {})
+                    if fn.get("name"):
+                        with open(schema_dir / f"{fn['name']}.json", "w", encoding="utf-8") as sf:
+                            json.dump(fn, sf, indent=2, ensure_ascii=False)
+                with open(schema_dir / "instructions.md", "w", encoding="utf-8") as inf:
+                    inf.write(
+                        "# fn-ignis MCP Server\n"
+                        "Autonomous Trend Intelligence & Market Opportunity Platform. "
+                        "Provides 34 tools for multi-platform social listening (Google Trends, YouTube, TikTok, Threads, Instagram Reels), "
+                        "White Space Opportunity Index calculation (+100 to -100), and interactive infographic HTML dossier generation.\n"
+                    )
+        except Exception:
+            pass
+        results.append({"client": "Google Antigravity (~/.gemini/config/mcp_config.json)", "path": str(agy_config), "status": "configured" if ok else "failed"})
 
     return results
 

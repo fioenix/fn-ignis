@@ -1,11 +1,14 @@
+from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_PROJECT_ENV = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
     """Configuration settings for fn-ignis loaded from environment variables."""
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(_PROJECT_ENV, ".env"),
         env_file_encoding="utf-8",
         extra="ignore"
     )
