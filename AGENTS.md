@@ -90,6 +90,16 @@ Always prefix analysis outputs with the campaign identification banner:
 - Render summaries, scorecards, white space matrices, and actionable roadmaps directly in the chat interface using high-contrast Light Mode markdown tables and cards.
 - Export standalone HTML files to `reports/` via `generate_mission_artifact` for permanent local storage.
 
+### 📊 Mandatory Data Ingress & Evidence Attribution Standards
+Every strategic research analysis presented to the user **MUST STRICTLY INCLUDE**:
+1. **Data Ingress & Channel Health Summary Table** placed right after the campaign banner:
+   - Must disclose every platform checked (Google Trends, YouTube, TikTok Video Grid, TikTok Comments, Threads, Instagram Reels).
+   - Must disclose signals count, status (`HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`, `RATE_LIMITED`), and top citation reference.
+   - If a channel captured 0 signals, explicitly state why so users know whether a channel was skipped/failed.
+2. **Inline Evidence Citations**:
+   - Every market truth, consumer friction, or strategic takeaway MUST cite concrete source evidence (e.g. `[YouTube: "Build AI Agent" (45K views)]`, `[TikTok Comments: 35/84 comments on @creator video]`, `[Google Trends: +180% velocity]`).
+   - Strictly prohibit vague, unsupported statements without provenance attribution.
+
 ---
 
 ## 🏷️ 4. Release Versioning Principles & SemVer Guardrails

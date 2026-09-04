@@ -68,6 +68,13 @@
 - [x] **Insights TTL Caching (2 giờ):** Caching in-memory cho post metrics của Threads/Reels để giải quyết triệt để bài toán N+1 request và bảo vệ hạn mức 200 reqs/user/hour của Meta Graph API.
 - [x] **Registry Multi-Plugin Coexistence (Tech Debt):** Đảm bảo `TikTokPlugin` (Search Video Grid & Comments) và `TikTokCreativeCenterPlugin` (Macro Trends Radar) cùng tồn tại song song trong `ConnectorPluginRegistry` mà không bị ghi đè.
 
+### 🎯 Epic 2: Data Provenance, Ingress Health Audit & Citation Attribution Engine (Sprint Ready)
+*Mục tiêu: Xóa bỏ nhận định mơ hồ và ảo giác; minh bạch hóa nguồn gốc dữ liệu (Data Provenance) và phát hiện kênh ingress bị rỗng/lỗi.*
+- [ ] **Channel Ingress & Health Summary Table:** Tổng hợp trạng thái (`HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`, `RATE_LIMITED`) và số lượng tín hiệu của từng kênh kết nối (Google Trends, YouTube, TikTok Video Grid, TikTok Comments, Threads, Instagram Reels), đính kèm mẫu tín hiệu tiêu biểu.
+- [ ] **Citation Attribution Engine:** Tự động gắn thẻ dẫn chứng cụ thể (`CitationEvidence`: platform, title, metrics, author, excerpt) vào từng `StrategicInsight`, `MarketOpportunity` và `ActionableTakeaway`.
+- [ ] **HTML Dashboard Visualization:** Trực quan hóa Bảng Kiểm Toán Kênh Dữ Liệu (Ingress Audit Table) và các huy hiệu Citation Badges (Pill Badges) trong báo cáo HTML.
+- [ ] **FastMCP & Agent Reporting Protocol:** Cập nhật payload `get_mission_analysis` và chuẩn hóa quy trình xuất báo cáo bắt buộc có bảng audit và inline citations theo [docs/DATA_PROVENANCE_AND_CITATION_SPEC.md](docs/DATA_PROVENANCE_AND_CITATION_SPEC.md).
+
 ### 🎯 Epic 3: Live Alerts & Notification Webhooks
 *Mục tiêu: Đẩy thông báo chủ động cho người dùng khi xu hướng bùng nổ.*
 - [ ] **Persisted Discovery State:** Lưu trữ `last_discovery_time` vào cơ sở dữ liệu thay vì biến in-memory, tránh tình trạng khởi động lại daemon worker gửi lại toàn bộ alert cũ.
