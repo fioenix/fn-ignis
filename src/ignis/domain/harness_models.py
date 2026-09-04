@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from enum import Enum
+
+from ignis.domain.value_objects import PlatformType
 
 
 class ConfidenceLevel(str, Enum):
@@ -16,6 +18,44 @@ class TrendMaturityStage(str, Enum):
     HYPING = "HYPING"              # Rapid acceleration phase (Surging views across platforms)
     MATURE = "MATURE"              # Mature / mainstream phase (High supply, steady viewership)
     FADING = "FADING"              # Declining interest / decaying velocity
+
+
+class ChannelHealthStatus(str, Enum):
+    HEALTHY = "HEALTHY"              # Ingress succeeded with at least one signal
+    EMPTY_NO_DATA = "EMPTY_NO_DATA"  # Channel ran fine but returned no keyword match
+    AUTH_REQUIRED = "AUTH_REQUIRED"  # No token / browser session bound to the channel
+    RATE_LIMITED = "RATE_LIMITED"    # Quota or HTTP 429 ceiling reached
+    DEGRADED = "DEGRADED"            # Network error / soft-block (Circuit Breaker OPEN)
+
+
+@dataclass
+class CitationEvidence:
+    """Concrete source evidence backing a strategic statement."""
+    citation_id: str                     # 'CIT-01', 'CIT-02', ...
+    platform: PlatformType
+    title_or_query: str                  # Article / video title or search keyword
+    metric_highlight: str                # '120K views', '+180% velocity', '45 comments'
+    author_or_channel: Optional[str] = None
+    url: Optional[str] = None
+    excerpt: Optional[str] = None        # Representative comment / argument snippet
+
+
+@dataclass
+class ChannelDataSummary:
+    """Per-channel ingress audit record."""
+    platform: PlatformType
+    status: ChannelHealthStatus
+    signals_count: int
+    timeframe_used: str                  # e.g. '30d (VN)'
+    top_citation: Optional[CitationEvidence] = None
+    notes: Optional[str] = None          # Warning note when empty / failing
+
+
+@dataclass
+class StrategicInsight:
+    """Strategic statement bound to its supporting evidence."""
+    statement: str
+    citations: List[CitationEvidence] = field(default_factory=list)
 
 
 @dataclass
@@ -50,9 +90,10 @@ class HarnessResearchReport:
     title: str
     scorecard: QualityScorecard
     maturity_stage: TrendMaturityStage
+    channel_summaries: List[ChannelDataSummary] = field(default_factory=list)
     verified_cross_platform_trends: List[Dict[str, Any]] = field(default_factory=list)
     market_opportunities: List[MarketOpportunity] = field(default_factory=list)
-    strategic_insights: List[str] = field(default_factory=list)
+    strategic_insights: List[StrategicInsight] = field(default_factory=list)
     actionable_takeaways: List[str] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

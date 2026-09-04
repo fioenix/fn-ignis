@@ -34,6 +34,40 @@ class AutonomousRefinementOrchestrator:
         self._evaluator = quality_evaluator
         self._reasoner = strategic_reasoner
 
+    # Reels rides on the Instagram session; Threads has a browser and a Graph tier.
+    _PLATFORM_CREDENTIAL_KEYS = {
+        "tiktok": ("tiktok",),
+        "threads": ("threads", "threads_browser"),
+        "reels": ("instagram", "instagram_browser"),
+    }
+
+    async def _collect_channel_context(self):
+        """Read auth and circuit-breaker facts so an empty channel can be explained."""
+        auth_status = None
+        connector_health = None
+        try:
+            creds = await self._repo.list_platform_credentials()
+            active = {
+                str(c.get("platform", "")).lower()
+                for c in creds
+                if isinstance(c, dict) and c.get("is_active")
+            }
+            auth_status = {
+                platform: any(key in active for key in keys)
+                for platform, keys in self._PLATFORM_CREDENTIAL_KEYS.items()
+            }
+        except Exception as e:
+            logger.debug(f"[Harness] Could not read platform credentials for channel audit: {e}")
+
+        try:
+            health = self._registry.get_health_status()
+            if isinstance(health, dict):
+                connector_health = health
+        except Exception as e:
+            logger.debug(f"[Harness] Could not read connector health for channel audit: {e}")
+
+        return auth_status, connector_health
+
     async def run_mission_harness(
         self,
         mission_id: UUID,
@@ -118,11 +152,14 @@ class AutonomousRefinementOrchestrator:
             await self._repo.save_signals(signals)
 
         # Synthesize strategic insights via StrategicMarketReasoner
+        auth_status, connector_health = await self._collect_channel_context()
         report = self._reasoner.analyze_mission(
             mission=mission,
             signals=signals,
             clusters=clusters,
             scorecard=scorecard,
+            auth_status=auth_status,
+            connector_health=connector_health,
         )
 
         mission.status = "COMPLETED"

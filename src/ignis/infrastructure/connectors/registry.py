@@ -20,14 +20,23 @@ class CircuitBreaker:
         self.failure_count = 0
         self.state = "CLOSED"  # CLOSED (normal), OPEN (tripped), HALF_OPEN (probing)
         self.last_failure_time: Optional[datetime] = None
+        # Kept so an empty channel can be explained as a quota ceiling rather
+        # than a generic outage in the Data Ingress audit.
+        self.last_error_type: Optional[str] = None
+        self.last_error_message: Optional[str] = None
 
     def record_success(self):
         self.failure_count = 0
         self.state = "CLOSED"
+        self.last_error_type = None
+        self.last_error_message = None
 
-    def record_failure(self):
+    def record_failure(self, error: Optional[BaseException] = None):
         self.failure_count += 1
         self.last_failure_time = datetime.now(timezone.utc)
+        if error is not None:
+            self.last_error_type = type(error).__name__
+            self.last_error_message = str(error)[:500]
         if self.failure_count >= self.failure_threshold:
             self.state = "OPEN"
             logger.warning(f"Circuit Breaker TRIPPED to OPEN after {self.failure_count} consecutive failures.")
@@ -113,6 +122,8 @@ class ConnectorPluginRegistry:
                 "circuit_state": breaker.state,
                 "consecutive_failures": breaker.failure_count,
                 "last_failure": breaker.last_failure_time.isoformat() if breaker.last_failure_time else None,
+                "last_error_type": breaker.last_error_type,
+                "last_error": breaker.last_error_message,
             }
         return status
 
@@ -238,7 +249,7 @@ class ConnectorPluginRegistry:
             breaker.record_success()
             return signals
         except Exception as e:
-            breaker.record_failure()
+            breaker.record_failure(e)
             raise e
 
     async def _safe_search(
@@ -260,7 +271,7 @@ class ConnectorPluginRegistry:
             breaker.record_success()
             return signals
         except Exception as e:
-            breaker.record_failure()
+            breaker.record_failure(e)
             raise e
 
     async def fetch_suggestions_across_all(

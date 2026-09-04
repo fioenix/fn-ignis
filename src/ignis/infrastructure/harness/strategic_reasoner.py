@@ -7,7 +7,11 @@ from collections import defaultdict
 from ignis.config import settings
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
 from ignis.domain.harness_models import (
+    ChannelDataSummary,
+    ChannelHealthStatus,
+    CitationEvidence,
     MarketOpportunity,
+    StrategicInsight,
     TrendMaturityStage,
     HarnessResearchReport,
     QualityScorecard,
@@ -53,6 +57,11 @@ class StrategicMarketReasoner:
 
 
     FOREIGN_SCRIPTS_PATTERN = re.compile(r"[\uac00-\ud7af\u4e00-\u9fff\u3040-\u30ff\u0e00-\u0e7f\u0400-\u04ff]")
+
+    # Channels that cannot ingest anything without a bound token or browser session.
+    AUTH_SENSITIVE_PLATFORMS = {"tiktok", "threads", "reels"}
+    VIDEO_PLATFORMS = ("youtube", "tiktok", "reels")
+    RATE_LIMIT_HINTS = ("429", "quota", "rate limit", "ratelimit", "too many requests")
 
     FOREIGN_STOPWORDS = {
         "formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant",
@@ -107,13 +116,33 @@ class StrategicMarketReasoner:
         signals: List[TrendSignal],
         clusters: List[TopicCluster],
         scorecard: QualityScorecard,
+        auth_status: Optional[Dict[str, bool]] = None,
+        connector_health: Optional[Dict[str, Any]] = None,
     ) -> HarnessResearchReport:
         maturity_stage, maturity_reasons = self._assess_maturity(signals, clusters)
         opportunities = self._discover_market_opportunities(signals, mission.keywords, geo=mission.geo_code)
         verified_trends = self._extract_verified_trends(signals, clusters, geo=mission.geo_code)
 
+        # One registry per dossier: the same source keeps one CIT-xx identifier
+        # wherever it is cited, so a reader never mistakes one video for two.
+        citation_registry: Dict[str, CitationEvidence] = {}
+
+        channel_summaries = self.summarize_channel_ingress(
+            mission=mission,
+            signals=signals,
+            auth_status=auth_status,
+            connector_health=connector_health,
+            citation_registry=citation_registry,
+        )
+
         insights, actionables = self._synthesize_insights(
-            mission, signals, opportunities, maturity_stage, maturity_reasons
+            mission,
+            signals,
+            opportunities,
+            maturity_stage,
+            maturity_reasons,
+            channel_summaries=channel_summaries,
+            citation_registry=citation_registry,
         )
 
         return HarnessResearchReport(
@@ -121,11 +150,233 @@ class StrategicMarketReasoner:
             title=mission.title,
             scorecard=scorecard,
             maturity_stage=maturity_stage,
+            channel_summaries=channel_summaries,
             verified_cross_platform_trends=verified_trends,
             market_opportunities=opportunities,
             strategic_insights=insights,
             actionable_takeaways=actionables,
         )
+
+    # ------------------------------------------------------------------
+    # Data Provenance: channel ingress audit & citation attribution
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _platform_value(platform: Any) -> str:
+        return platform.value if hasattr(platform, "value") else str(platform)
+
+    @staticmethod
+    def _compact_number(value: float) -> str:
+        num = float(value)
+        if num >= 1_000_000:
+            return f"{num / 1_000_000:.1f}M"
+        if num >= 1_000:
+            return f"{num / 1_000:.1f}K"
+        return f"{int(num):,}"
+
+    def _format_metric_highlight(self, signal: TrendSignal) -> str:
+        """Render the headline metric a reader can verify against the source."""
+        platform = self._platform_value(signal.platform)
+        parts: List[str] = []
+
+        if platform == "google":
+            parts.append(f"chỉ số tìm kiếm {float(signal.metric_value):.0f}/100")
+        elif platform in self.VIDEO_PLATFORMS:
+            parts.append(f"{self._compact_number(signal.metric_value)} lượt xem")
+        else:
+            parts.append(f"{self._compact_number(signal.metric_value)} lượt tương tác")
+
+        if signal.growth_velocity:
+            parts.append(f"tăng {float(signal.growth_velocity):+.0f}%/giờ")
+
+        comments = signal.metadata.get("comments")
+        if comments:
+            try:
+                parts.append(f"{int(comments)} bình luận")
+            except (TypeError, ValueError):
+                pass
+
+        return " · ".join(parts)
+
+    def _build_citation(self, signal: TrendSignal, sequence: int) -> CitationEvidence:
+        author = (
+            signal.metadata.get("channel_title")
+            or signal.metadata.get("author")
+            or signal.metadata.get("username")
+        )
+        excerpt = signal.metadata.get("top_comment") or signal.metadata.get("excerpt")
+        return CitationEvidence(
+            citation_id=f"CIT-{sequence:02d}",
+            platform=signal.platform,
+            title_or_query=signal.metadata.get("keyword") or signal.raw_title,
+            metric_highlight=self._format_metric_highlight(signal),
+            author_or_channel=author,
+            url=signal.source_url,
+            excerpt=excerpt,
+        )
+
+    def _citation_key(self, signal: TrendSignal) -> str:
+        return f"{self._platform_value(signal.platform)}|{signal.source_url or signal.raw_title}"
+
+    def _mint_citation(
+        self,
+        signal: TrendSignal,
+        registry: Dict[str, CitationEvidence],
+    ) -> CitationEvidence:
+        """Return the citation for a source, reusing its identifier if already cited."""
+        key = self._citation_key(signal)
+        existing = registry.get(key)
+        if existing:
+            return existing
+        citation = self._build_citation(signal, len(registry) + 1)
+        registry[key] = citation
+        return citation
+
+    @staticmethod
+    def _engagement_rank(signal: TrendSignal) -> tuple:
+        return (float(signal.metric_value or 0.0), float(signal.growth_velocity or 0.0))
+
+    def _resolve_circuit_state(
+        self,
+        platform_value: str,
+        connector_health: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Return the worst-off plugin health entry serving a platform, if any."""
+        if not connector_health:
+            return None
+        entries = [
+            e for e in connector_health.values()
+            if isinstance(e, dict) and self._platform_value(e.get("platform")) == platform_value
+        ]
+        if not entries:
+            return None
+        open_entries = [e for e in entries if e.get("circuit_state") == "OPEN"]
+        return open_entries[0] if open_entries else entries[0]
+
+    def _looks_rate_limited(self, health_entry: Dict[str, Any]) -> bool:
+        blob = " ".join(
+            str(health_entry.get(k, ""))
+            for k in ("last_error_type", "last_error", "last_failure_reason", "notes")
+        ).lower()
+        return any(hint in blob for hint in self.RATE_LIMIT_HINTS)
+
+    def summarize_channel_ingress(
+        self,
+        mission: ResearchMission,
+        signals: List[TrendSignal],
+        auth_status: Optional[Dict[str, bool]] = None,
+        connector_health: Optional[Dict[str, Any]] = None,
+        citation_registry: Optional[Dict[str, CitationEvidence]] = None,
+    ) -> List[ChannelDataSummary]:
+        """
+        Audit every targeted channel so a silent ingress failure can never be
+        mistaken for genuine absence of market demand.
+
+        `auth_status` maps a platform value to whether credentials are bound;
+        `connector_health` is the registry health map (plugin_id -> status dict).
+        Both are optional: when omitted the audit degrades to signal counting.
+        """
+        geo_value = self._platform_value(mission.geo_code).upper()
+        timeframe_used = f"{mission.timeframe} ({geo_value})"
+
+        by_platform: Dict[str, List[TrendSignal]] = defaultdict(list)
+        for s in signals:
+            by_platform[self._platform_value(s.platform)].append(s)
+
+        summaries: List[ChannelDataSummary] = []
+        registry = citation_registry if citation_registry is not None else {}
+
+        for platform in mission.platforms:
+            p_val = self._platform_value(platform)
+            channel_signals = by_platform.get(p_val, [])
+
+            if channel_signals:
+                top_signal = max(channel_signals, key=self._engagement_rank)
+                summaries.append(
+                    ChannelDataSummary(
+                        platform=platform,
+                        status=ChannelHealthStatus.HEALTHY,
+                        signals_count=len(channel_signals),
+                        timeframe_used=timeframe_used,
+                        top_citation=self._mint_citation(top_signal, registry),
+                        notes=None,
+                    )
+                )
+                continue
+
+            health_entry = self._resolve_circuit_state(p_val, connector_health)
+            needs_auth = (
+                auth_status is not None
+                and p_val in self.AUTH_SENSITIVE_PLATFORMS
+                and auth_status.get(p_val) is False
+            )
+
+            if needs_auth:
+                status = ChannelHealthStatus.AUTH_REQUIRED
+                notes = "Chưa cấu hình token hoặc phiên trình duyệt cho kênh này."
+            elif health_entry and health_entry.get("circuit_state") == "OPEN":
+                if self._looks_rate_limited(health_entry):
+                    status = ChannelHealthStatus.RATE_LIMITED
+                    notes = "Kênh chạm trần hạn mức (429/quota); Circuit Breaker đang OPEN."
+                else:
+                    status = ChannelHealthStatus.DEGRADED
+                    notes = (
+                        "Circuit Breaker đang OPEN sau "
+                        f"{health_entry.get('consecutive_failures', 0)} lỗi liên tiếp."
+                    )
+            elif connector_health is not None and health_entry is None:
+                status = ChannelHealthStatus.DEGRADED
+                notes = "Không có connector plugin nào được đăng ký cho kênh này."
+            else:
+                status = ChannelHealthStatus.EMPTY_NO_DATA
+                notes = "Không có tín hiệu khớp từ khóa trong timeframe."
+
+            summaries.append(
+                ChannelDataSummary(
+                    platform=platform,
+                    status=status,
+                    signals_count=0,
+                    timeframe_used=timeframe_used,
+                    top_citation=None,
+                    notes=notes,
+                )
+            )
+
+        return summaries
+
+    def attribute_citations(
+        self,
+        statements: List[Tuple[str, List[TrendSignal]]],
+        citation_registry: Optional[Dict[str, CitationEvidence]] = None,
+        max_citations_per_statement: int = 3,
+    ) -> List[StrategicInsight]:
+        """
+        Bind each statement to the concrete signals it was derived from.
+
+        A statement with no supporting signal is still emitted, but with an empty
+        citation list so downstream renderers can flag it as unverified rather
+        than presenting speculation as evidence.
+        """
+        insights: List[StrategicInsight] = []
+        registry = citation_registry if citation_registry is not None else {}
+
+        for statement, supporting in statements:
+            if not statement or not statement.strip():
+                continue
+            citations: List[CitationEvidence] = []
+            seen: set = set()
+            ranked = sorted(supporting or [], key=self._engagement_rank, reverse=True)
+            for sig in ranked:
+                if len(citations) >= max_citations_per_statement:
+                    break
+                key = self._citation_key(sig)
+                if key in seen:
+                    continue
+                seen.add(key)
+                citations.append(self._mint_citation(sig, registry))
+            insights.append(StrategicInsight(statement=statement.strip(), citations=citations))
+
+        return insights
 
     def _assess_maturity(
         self,
@@ -139,20 +390,20 @@ class StrategicMarketReasoner:
         ]
         
         if not video_signals:
-            reasons.append("Zero localized video tutorials or production assets detected.")
+            reasons.append("Chưa ghi nhận video hướng dẫn hay tài sản nội dung nội địa hóa nào.")
             return TrendMaturityStage.EMERGING, reasons
 
         avg_views = sum(float(s.metric_value) for s in video_signals) / float(len(video_signals))
         total_clusters = len(clusters)
 
         if avg_views > 20000 and total_clusters >= 3:
-            reasons.append(f"High average view velocity ({avg_views:,.0f} views/video) across {total_clusters} clusters.")
+            reasons.append(f"Lượt xem trung bình cao ({avg_views:,.0f} lượt/video) trên {total_clusters} cụm chủ đề.")
             return TrendMaturityStage.HYPING, reasons
         elif avg_views > 5000:
-            reasons.append(f"Moderate practitioner engagement ({avg_views:,.0f} views/video).")
+            reasons.append(f"Mức độ tương tác của người làm nghề ở mức trung bình ({avg_views:,.0f} lượt xem/video).")
             return TrendMaturityStage.EMERGING, reasons
         else:
-            reasons.append("Established ecosystem with stable viewership.")
+            reasons.append("Hệ sinh thái đã định hình với lượng người xem ổn định.")
             return TrendMaturityStage.MATURE, reasons
 
     def _extract_verified_trends(
@@ -177,7 +428,7 @@ class StrategicMarketReasoner:
                 "cross_platform_score": c.cross_platform_score,
                 "platform_diversity": len(p_counts),
                 "total_estimated_reach": int(total_views),
-                "summary": c.summary_text or f"Aggregated cluster with {len(c.signals)} signals.",
+                "summary": c.summary_text or f"Cụm chủ đề tổng hợp từ {len(c.signals)} tín hiệu.",
             })
         return verified
 
@@ -340,19 +591,19 @@ class StrategicMarketReasoner:
             if tt_count > 0:
                 breakdown_parts.append(f"{tt_count} TikTok")
             plat_str = f" ({', '.join(breakdown_parts)})" if breakdown_parts else ""
-            v_str = f"{loc_count} video{plat_str}" if loc_count == 1 else f"{loc_count} videos{plat_str}"
+            v_str = f"{loc_count} video{plat_str}"
 
             # Strict Opportunity Index with Inverted Sample Size Damping & Label Alignment
             if loc_count == 0:
                 opportunity_index = round(demand_score * 0.15, 1)
                 opp_type = "UNVERIFIED_DEMAND_GAP"
-                rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 with zero localized supply recorded ({v_str}). Speculative gap requiring preliminary customer interviews (Effective OI: {opportunity_index:+0.1f})."
+                rec = f"Nhu cầu tìm kiếm cho '{raw_kw}' đạt {demand_score:.0f}/100 nhưng chưa ghi nhận nguồn cung nội địa nào ({v_str}). Đây là khoảng trống mang tính suy đoán, cần phỏng vấn khách hàng để kiểm chứng trước (Chỉ số Cơ hội hiệu dụng: {opportunity_index:+0.1f})."
             else:
                 raw_oi = demand_score - supply_score
                 if raw_oi < 0:
                     opportunity_index = round(raw_oi, 1)
                     opp_type = "SATURATED_SEGMENT"
-                    rec = f"Segment '{raw_kw}' is heavily saturated ({v_str}) relative to demand (OI: {opportunity_index:+0.1f}). Requires verticalized differentiation."
+                    rec = f"Phân khúc '{raw_kw}' đang bão hòa nặng ({v_str}) so với nhu cầu thực tế (Chỉ số Cơ hội: {opportunity_index:+0.1f}). Cần khác biệt hóa theo ngành dọc để chen chân."
                 else:
                     damping_map = {1: 0.35, 2: 0.55, 3: 0.75, 4: 0.90}
                     damping_factor = damping_map.get(loc_count, 1.0)
@@ -360,21 +611,21 @@ class StrategicMarketReasoner:
 
                     if loc_count == 1:
                         opp_type = "PROBE_OPPORTUNITY"
-                        rec = f"Initial probe detected for '{raw_kw}' ({v_str}). Early signal with thin localized supply (Effective OI: {opportunity_index:+0.1f})."
+                        rec = f"Đã dò được tín hiệu đầu tiên cho '{raw_kw}' ({v_str}). Tín hiệu sớm với nguồn cung nội địa còn mỏng (Chỉ số Cơ hội hiệu dụng: {opportunity_index:+0.1f})."
                     elif opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
                         opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                        rec = f"Search demand for '{raw_kw}' reaches {demand_score:.0f}/100 outstripping available supply ({v_str}). High-confidence verified opportunity (Effective OI: {opportunity_index:+0.1f})."
+                        rec = f"Nhu cầu tìm kiếm cho '{raw_kw}' đạt {demand_score:.0f}/100, vượt xa nguồn cung hiện có ({v_str}). Cơ hội đã kiểm chứng với độ tin cậy cao (Chỉ số Cơ hội hiệu dụng: {opportunity_index:+0.1f})."
                     elif opportunity_index >= 10.0:
                         opp_type = "GROWING_OPPORTUNITY"
-                        rec = f"Segment '{raw_kw}' shows positive momentum ({v_str}) with addressable market headroom (Effective OI: {opportunity_index:+0.1f})."
+                        rec = f"Phân khúc '{raw_kw}' cho thấy đà tăng tích cực ({v_str}) và vẫn còn dư địa thị trường để khai thác (Chỉ số Cơ hội hiệu dụng: {opportunity_index:+0.1f})."
                     else:
                         opp_type = "BALANCED_COMPETITION"
-                        rec = f"Segment '{raw_kw}' is in market equilibrium ({v_str}) where content supply balances consumer demand."
+                        rec = f"Phân khúc '{raw_kw}' đang ở trạng thái cân bằng ({v_str}), nguồn cung nội dung vừa khớp với nhu cầu người dùng."
 
             if localized_videos:
                 support_sigs = [f"[{s.platform.value.upper() if hasattr(s.platform, 'value') else str(s.platform).upper()}] {s.raw_title}" for s in localized_videos[:3]]
             else:
-                support_sigs = ["No localized videos recorded across YouTube or TikTok in the requested timeframe."]
+                support_sigs = ["Không ghi nhận video nội địa nào trên YouTube hay TikTok trong khung thời gian đã chọn."]
 
             opportunities.append(
                 MarketOpportunity(
@@ -399,32 +650,95 @@ class StrategicMarketReasoner:
         opportunities: List[MarketOpportunity],
         maturity_stage: TrendMaturityStage,
         maturity_reasons: List[str],
-    ) -> Tuple[List[str], List[str]]:
-        insights = []
-        actionables = []
+        channel_summaries: Optional[List[ChannelDataSummary]] = None,
+        citation_registry: Optional[Dict[str, CitationEvidence]] = None,
+    ) -> Tuple[List[StrategicInsight], List[str]]:
+        statements: List[Tuple[str, List[TrendSignal]]] = []
+        actionables: List[str] = []
 
-        insights.append(f"Market Maturity: {maturity_stage.value} — {'; '.join(maturity_reasons)}")
+        video_signals = [
+            s for s in signals
+            if self._platform_value(s.platform) in self.VIDEO_PLATFORMS
+        ]
+        demand_signals = [s for s in signals if s.platform == PlatformType.GOOGLE_TRENDS]
+
+        statements.append((
+            f"Độ trưởng thành thị trường: {maturity_stage.value} — {'; '.join(maturity_reasons)}",
+            sorted(video_signals, key=self._engagement_rank, reverse=True)[:3],
+        ))
 
         top_gaps = [o for o in opportunities if o.opportunity_type in ["HIGH_DEMAND_LOW_SUPPLY", "GROWING_OPPORTUNITY"]]
         if top_gaps:
             gap_names = ", ".join([f"'{o.topic}'" for o in top_gaps[:3]])
-            insights.append(f"Largest strategic white space opportunities concentrate in: {gap_names}.")
-            actionables.append(f"Focus resources on high-demand topics {gap_names} to capture early-mover category advantage.")
+            gap_topics = [o.topic for o in top_gaps[:3]]
+            # Demand vs supply claims must cite both sides of the comparison.
+            gap_evidence = [
+                s for s in demand_signals
+                if any(self._matches_topic_strictly(s.metadata.get("keyword", "") or s.raw_title, t) for t in gap_topics)
+            ] or demand_signals[:2]
+            gap_evidence = gap_evidence + [
+                s for s in video_signals
+                if any(self._matches_topic_strictly(s.raw_title, t) for t in gap_topics)
+            ]
+            statements.append((
+                f"Các khoảng trống chiến lược lớn nhất tập trung ở: {gap_names}.",
+                gap_evidence,
+            ))
+            actionables.append(f"Dồn nguồn lực vào các chủ đề có nhu cầu cao {gap_names} để giành lợi thế người đi trước trong ngành hàng.")
 
         # Identify dominant discussion topic dynamically from signal volume
         topic_counts: Dict[str, int] = {}
+        topic_signals: Dict[str, List[TrendSignal]] = defaultdict(list)
         for s in signals:
             for kw in mission.keywords:
                 if self._matches_topic_strictly(s.raw_title, kw):
                     topic_counts[kw] = topic_counts.get(kw, 0) + 1
+                    topic_signals[kw].append(s)
 
         if topic_counts:
             dominant_kw, max_count = max(topic_counts.items(), key=lambda item: item[1])
             if max_count >= 3:
-                insights.append(f"Practitioner content is heavily concentrated around '{dominant_kw}' ({max_count} verified signals).")
-                actionables.append(f"Differentiate positioning against existing supply density in '{dominant_kw}'.")
+                statements.append((
+                    f"Nội dung của người làm nghề đang dồn mạnh quanh '{dominant_kw}' ({max_count} tín hiệu đã kiểm chứng).",
+                    topic_signals[dominant_kw],
+                ))
+                actionables.append(f"Định vị khác biệt để tránh đối đầu trực diện với mật độ nguồn cung sẵn có ở '{dominant_kw}'.")
 
-        actionables.append("Schedule periodic ingress cycles to monitor supply churn and search demand acceleration.")
+        # Voice of Customer: pain point clusters must cite the discussion carrying them.
+        discussed = [s for s in signals if self._comment_count(s) > 0]
+        if discussed:
+            total_comments = sum(self._comment_count(s) for s in discussed)
+            top_discussed = sorted(discussed, key=self._comment_count, reverse=True)
+            statements.append((
+                f"Tiếng nói khách hàng tập trung ở {len(discussed)} nội dung được thảo luận với {total_comments} phản hồi thu được; "
+                "cần đọc kỹ các luồng bình luận này để nắm phản đối và nhu cầu chưa được đáp ứng trước khi định vị.",
+                top_discussed,
+            ))
 
+        # Honest observability: an incomplete channel mix is itself a finding.
+        if channel_summaries:
+            broken = [c for c in channel_summaries if c.status != ChannelHealthStatus.HEALTHY]
+            if broken:
+                broken_desc = ", ".join(
+                    f"{self._platform_value(c.platform).upper()} ({c.status.value})" for c in broken
+                )
+                statements.append((
+                    f"Độ phủ thu thập chưa đầy đủ: {len(broken)}/{len(channel_summaries)} kênh không trả về tín hiệu nào — {broken_desc}. "
+                    "Hãy xem các kết luận đa nền tảng là tạm thời cho tới khi những kênh này được khôi phục.",
+                    [],
+                ))
+                actionables.append(
+                    f"Khôi phục các kênh thu thập đang rỗng ({broken_desc}) và chạy lại mission trước khi rót ngân sách."
+                )
+
+        actionables.append("Lập lịch thu thập định kỳ để theo dõi biến động nguồn cung và tốc độ tăng của nhu cầu tìm kiếm.")
+
+        insights = self.attribute_citations(statements, citation_registry=citation_registry)
         return insights, actionables
 
+    @staticmethod
+    def _comment_count(signal: TrendSignal) -> int:
+        try:
+            return int(signal.metadata.get("comments") or 0)
+        except (TypeError, ValueError):
+            return 0

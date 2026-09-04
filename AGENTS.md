@@ -94,11 +94,29 @@ Always prefix analysis outputs with the campaign identification banner:
 Every strategic research analysis presented to the user **MUST STRICTLY INCLUDE**:
 1. **Data Ingress & Channel Health Summary Table** placed right after the campaign banner:
    - Must disclose every platform checked (Google Trends, YouTube, TikTok Video Grid, TikTok Comments, Threads, Instagram Reels).
-   - Must disclose signals count, status (`HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`, `RATE_LIMITED`), and top citation reference.
+   - Must disclose signals count, status (`HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`, `RATE_LIMITED`, `DEGRADED`), and top citation reference.
+   - Read it straight from the `channel_summaries` field returned by `get_mission_analysis` / `generate_mission_artifact`; never reconstruct it by hand.
    - If a channel captured 0 signals, explicitly state why so users know whether a channel was skipped/failed.
 2. **Inline Evidence Citations**:
    - Every market truth, consumer friction, or strategic takeaway MUST cite concrete source evidence (e.g. `[YouTube: "Build AI Agent" (45K views)]`, `[TikTok Comments: 35/84 comments on @creator video]`, `[Google Trends: +180% velocity]`).
    - Strictly prohibit vague, unsupported statements without provenance attribution.
+   - `strategic_insights` is returned as objects `{statement, citations[]}`; render each `citation` as an inline pill next to the claim it supports. An insight with an empty `citations` list MUST be labelled as unverified.
+
+### 🧾 Mandatory Chat Report Structure
+Every research report written to the chat window MUST follow this exact order:
+1. **Campaign Identification Banner**
+2. **Data Ingress Summary Table** (from `channel_summaries`)
+3. **Quality Scorecard**
+4. **Single-Source 4-Lens Breakdown** — each lens carries its own source citations
+5. **Market Opportunities & Demand vs. Supply Matrix** — each claim carries its numeric evidence
+6. **Fast MVP Action Plan**
+
+### 🌐 Language & Localization Protocol (CRITICAL)
+- **ReAct & Internal Reasoning**: Agents MAY think and reason internally in English for speed and token precision.
+- **User-Facing Deliverables & Responses**:
+  - All deliverables presented to the user (chat text, markdown tables, roadmaps, and HTML reports in `reports/`) **MUST STRICTLY MATCH THE USER'S CURRENT LANGUAGE** (Vietnamese by default when targeting Vietnam or communicating with Vietnamese users).
+  - English is permitted ONLY for technical terms, proper nouns, and technology/brand names.
+  - Generating raw English HTML report files or English preview summaries when the user interacts in Vietnamese is STRICTLY PROHIBITED. Localize all titles, takeaways, and status notes to the target audience.
 
 ---
 

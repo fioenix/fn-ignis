@@ -1,3 +1,13 @@
+{% set PLATFORM_ICONS = {'google': '🔍', 'youtube': '▶️', 'tiktok': '🎵', 'threads': '🧵', 'reels': '📸'} %}
+{% macro platform_label(platform) -%}
+{%- set pv = platform.value if platform.value is defined else platform -%}
+{{ PLATFORM_ICONS.get(pv, '🌐') }} {{ pv|upper }}
+{%- endmacro %}
+{% macro citation_pill(cit) -%}
+{%- set pv = cit.platform.value if cit.platform.value is defined else cit.platform -%}
+{% if cit.url %}<a href="{{ cit.url }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition max-w-full">📌 [{{ cit.citation_id }} · {{ pv|upper }}] <span class="truncate ml-1">{{ cit.title_or_query }}</span> <span class="ml-1 font-bold whitespace-nowrap">({{ cit.metric_highlight }})</span></a>
+{% else %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 max-w-full">📌 [{{ cit.citation_id }} · {{ pv|upper }}] <span class="truncate ml-1">{{ cit.title_or_query }}</span> <span class="ml-1 font-bold whitespace-nowrap">({{ cit.metric_highlight }})</span></span>{% endif %}
+{%- endmacro %}
 <!DOCTYPE html>
 <html lang="en" class="light">
 <head>
@@ -83,6 +93,64 @@
     </section>
 
 
+    <!-- ACT 1.5: DATA INGRESS & PROVENANCE AUDIT -->
+    {% if channel_summaries %}
+    <section class="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-5">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-100 pb-4">
+        <div>
+          <h2 class="text-lg md:text-xl font-black text-slate-900">🛰️ Data Ingress &amp; Provenance Audit</h2>
+          <p class="text-xs text-slate-500">Per-channel collection health. An empty channel is reported, never silently omitted.</p>
+        </div>
+        {% set healthy_count = channel_summaries|selectattr('status.value', 'equalto', 'HEALTHY')|list|length %}
+        <span class="text-xs px-3 py-1 rounded-full font-bold border {% if healthy_count == channel_summaries|length %}bg-emerald-50 text-emerald-800 border-emerald-200{% else %}bg-amber-50 text-amber-800 border-amber-200{% endif %}">
+          {{ healthy_count }}/{{ channel_summaries|length }} channels healthy
+        </span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse min-w-[720px]">
+          <thead>
+            <tr class="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
+              <th class="py-2 pr-3 font-bold">Platform</th>
+              <th class="py-2 px-3 font-bold">Status</th>
+              <th class="py-2 px-3 font-bold text-right">Signals</th>
+              <th class="py-2 px-3 font-bold">Timeframe &amp; Geo</th>
+              <th class="py-2 pl-3 font-bold">Representative Evidence</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {% for ch in channel_summaries %}
+            {% set st = ch.status.value if ch.status.value is defined else ch.status %}
+            <tr class="align-top">
+              <td class="py-3 pr-3 text-xs font-extrabold text-slate-900 whitespace-nowrap">{{ platform_label(ch.platform) }}</td>
+              <td class="py-3 px-3">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black tracking-wide
+                  {% if st == 'HEALTHY' %}bg-emerald-100 text-emerald-800
+                  {% elif st == 'EMPTY_NO_DATA' %}bg-amber-100 text-amber-800
+                  {% else %}bg-rose-100 text-rose-800{% endif %}">
+                  {{ st }}
+                </span>
+              </td>
+              <td class="py-3 px-3 text-sm font-black text-right {% if ch.signals_count > 0 %}text-slate-900{% else %}text-rose-600{% endif %}">{{ ch.signals_count }}</td>
+              <td class="py-3 px-3 text-xs text-slate-600 whitespace-nowrap">{{ ch.timeframe_used }}</td>
+              <td class="py-3 pl-3 text-xs text-slate-600">
+                {% if ch.top_citation %}
+                <div class="font-semibold text-slate-800 line-clamp-2">{{ ch.top_citation.title_or_query }}</div>
+                <div class="text-[11px] text-slate-500">
+                  {{ ch.top_citation.metric_highlight }}{% if ch.top_citation.author_or_channel %} • {{ ch.top_citation.author_or_channel }}{% endif %}
+                </div>
+                {% else %}
+                <span class="text-rose-700 font-medium">⚠️ {{ ch.notes or 'No signal captured.' }}</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
     <!-- ACT 2: VISUAL DATA CANVAS (CHARTS ROW) -->
     <section class="grid grid-cols-1 md:grid-cols-3 gap-6">
       
@@ -114,14 +182,14 @@
           <span class="bg-white/20 text-white text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider">💡 Strategic Takeaway</span>
           <h3 class="text-xl font-black leading-snug">
             {% if strategic_insights %}
-            {{ strategic_insights[0] }}
+            {{ strategic_insights[0].statement }}
             {% else %}
             Data-Driven Market Intelligence Overview
             {% endif %}
           </h3>
           <p class="text-xs text-orange-50 leading-relaxed font-medium">
             {% if strategic_insights|length > 1 %}
-            {{ strategic_insights[1] }}
+            {{ strategic_insights[1].statement }}
             {% else %}
             Multi-platform market listening and opportunity gap evaluation.
             {% endif %}
@@ -208,7 +276,16 @@
           {% for ins in strategic_insights %}
           <div class="flex items-start space-x-3 bg-amber-50/50 border border-amber-100 p-3.5 rounded-2xl">
             <span class="text-amber-600 font-black text-sm">✦</span>
-            <p class="text-xs text-slate-700 leading-relaxed font-medium">{{ ins }}</p>
+            <div class="space-y-2 min-w-0">
+              <p class="text-xs text-slate-700 leading-relaxed font-medium">{{ ins.statement }}</p>
+              {% if ins.citations %}
+              <div class="flex flex-wrap gap-1.5">
+                {% for cit in ins.citations %}{{ citation_pill(cit) }}{% endfor %}
+              </div>
+              {% else %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-600">⚠️ NO DIRECT CITATION</span>
+              {% endif %}
+            </div>
           </div>
           {% endfor %}
         </div>

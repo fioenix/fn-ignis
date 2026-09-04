@@ -5,9 +5,35 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ignis.application.ports.artifact_port import IArtifactBuilder
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
-from ignis.domain.harness_models import QualityScorecard, TrendMaturityStage, HarnessResearchReport
+from ignis.domain.harness_models import (
+    ChannelDataSummary,
+    HarnessResearchReport,
+    QualityScorecard,
+    StrategicInsight,
+    TrendMaturityStage,
+)
 from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
+
+
+def _normalize_insights(raw_insights: List[Any]) -> List[Dict[str, Any]]:
+    """
+    Accept both the current StrategicInsight objects and the plain strings stored
+    by missions generated before the citation engine landed, so an old dossier
+    still renders instead of blowing up the template.
+    """
+    normalized: List[Dict[str, Any]] = []
+    for item in raw_insights or []:
+        if isinstance(item, StrategicInsight):
+            normalized.append({"statement": item.statement, "citations": item.citations})
+        elif isinstance(item, dict):
+            normalized.append({
+                "statement": item.get("statement", ""),
+                "citations": item.get("citations", []) or [],
+            })
+        else:
+            normalized.append({"statement": str(item), "citations": []})
+    return normalized
 
 
 class HtmlArtifactBuilder(IArtifactBuilder):
@@ -101,12 +127,13 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             creator_diversity_score=85.0,
             overall_confidence=82.5,
         )
+        channel_summaries: List[ChannelDataSummary] = list(report.channel_summaries) if report else []
         maturity = report.maturity_stage if report else TrendMaturityStage.EMERGING
         opportunities = report.market_opportunities if report else []
-        insights = report.strategic_insights if report else [
+        insights = _normalize_insights(report.strategic_insights if report else [
             "Multi-platform verified market signals collected.",
             "Analyzing search demand velocity and content engagement distribution in target market."
-        ]
+        ])
         actionables = report.actionable_takeaways if report else [
             "Capitalize on high-demand, low-supply content white spaces.",
             "Establish recurring ingress monitoring to capture emerging trend momentum."
@@ -120,6 +147,7 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             maturity_stage=maturity,
             market_opportunities=opportunities,
             strategic_insights=insights,
+            channel_summaries=channel_summaries,
             actionable_takeaways=actionables,
             customer_inquiries=customer_inquiries or [],
             search_suggestions=search_suggestions or [],

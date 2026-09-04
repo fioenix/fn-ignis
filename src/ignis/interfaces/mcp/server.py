@@ -179,6 +179,97 @@ def get_components():
     return _COMPONENTS
 
 
+# --- Data Provenance serialization helpers ---
+
+# A mission platform can be served by credentials stored under a different key
+# (Reels rides on the Instagram session, Threads has a browser + Graph tier).
+_PLATFORM_CREDENTIAL_KEYS = {
+    "tiktok": ("tiktok",),
+    "threads": ("threads", "threads_browser"),
+    "reels": ("instagram", "instagram_browser"),
+}
+
+
+async def _collect_channel_context(comp: Dict[str, Any]):
+    """
+    Gather the auth and connector-health facts the reasoner needs to explain an
+    empty channel. Returns (auth_status, connector_health); either may be None
+    when the underlying source is unavailable, which downgrades the audit to
+    plain signal counting rather than inventing a cause.
+    """
+    auth_status = None
+    connector_health = None
+
+    try:
+        creds = await comp["repository"].list_platform_credentials()
+        active = {
+            str(c.get("platform", "")).lower()
+            for c in creds
+            if isinstance(c, dict) and c.get("is_active")
+        }
+        auth_status = {
+            platform: any(key in active for key in keys)
+            for platform, keys in _PLATFORM_CREDENTIAL_KEYS.items()
+        }
+    except Exception as e:
+        logger.debug(f"Channel audit could not read platform credentials: {e}")
+
+    try:
+        registry = comp.get("registry")
+        if registry is not None:
+            health = registry.get_health_status()
+            if isinstance(health, dict):
+                connector_health = health
+    except Exception as e:
+        logger.debug(f"Channel audit could not read connector health: {e}")
+
+    return auth_status, connector_health
+
+
+def _serialize_citation(cit: Any) -> Dict[str, Any]:
+    platform = getattr(cit, "platform", None)
+    return {
+        "citation_id": getattr(cit, "citation_id", None),
+        "platform": platform.value if hasattr(platform, "value") else str(platform),
+        "title_or_query": getattr(cit, "title_or_query", None),
+        "metric_highlight": getattr(cit, "metric_highlight", None),
+        "author_or_channel": getattr(cit, "author_or_channel", None),
+        "url": getattr(cit, "url", None),
+        "excerpt": getattr(cit, "excerpt", None),
+    }
+
+
+def _serialize_insights(insights: Any) -> List[Dict[str, Any]]:
+    """Tolerates pre-citation missions whose insights are still plain strings."""
+    out: List[Dict[str, Any]] = []
+    for item in insights or []:
+        if isinstance(item, str):
+            out.append({"statement": item, "citations": []})
+            continue
+        out.append({
+            "statement": getattr(item, "statement", str(item)),
+            "citations": [_serialize_citation(c) for c in getattr(item, "citations", []) or []],
+        })
+    return out
+
+
+def _serialize_channel_summaries(summaries: Any) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for ch in summaries or []:
+        platform = getattr(ch, "platform", None)
+        status = getattr(ch, "status", None)
+        top = getattr(ch, "top_citation", None)
+        out.append({
+            "platform": platform.value if hasattr(platform, "value") else str(platform),
+            "status": status.value if hasattr(status, "value") else str(status),
+            "signals_count": getattr(ch, "signals_count", 0),
+            "timeframe_used": getattr(ch, "timeframe_used", None),
+            "top_citation": _serialize_citation(top) if top else None,
+            "notes": getattr(ch, "notes", None),
+        })
+    return out
+
+
 async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
     """Sync dynamic positive lexicons, foreign stopwords, and noise blacklist from DB into reasoning engines."""
     try:
@@ -262,7 +353,8 @@ async def handle_run_autonomous_research_mission(
                 }
                 for opp in report.market_opportunities
             ],
-            "strategic_insights": report.strategic_insights,
+            "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
+            "strategic_insights": _serialize_insights(report.strategic_insights),
             "actionable_takeaways": report.actionable_takeaways,
             "next_step": f"Gọi generate_mission_artifact(mission_id='{mission.id}') để xem báo cáo HTML đầy đủ."
         },
@@ -314,11 +406,14 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
     tf_days = timeframe_to_days(mission.timeframe)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
     
+    auth_status, connector_health = await _collect_channel_context(comp)
     report = comp["strategic_reasoner"].analyze_mission(
         mission=mission,
         signals=signals,
         clusters=clusters,
         scorecard=scorecard,
+        auth_status=auth_status,
+        connector_health=connector_health,
     )
 
     return json.dumps(
@@ -336,7 +431,8 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
                 }
                 for opp in report.market_opportunities
             ],
-            "strategic_insights": report.strategic_insights,
+            "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
+            "strategic_insights": _serialize_insights(report.strategic_insights),
             "actionables": report.actionable_takeaways,
         },
         ensure_ascii=False,
@@ -673,11 +769,14 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
     tf_days = timeframe_to_days(mission.timeframe)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
+    auth_status, connector_health = await _collect_channel_context(comp)
     report = comp["strategic_reasoner"].analyze_mission(
         mission=mission,
         signals=signals,
         clusters=clusters,
         scorecard=scorecard,
+        auth_status=auth_status,
+        connector_health=connector_health,
     )
 
     analysis["quality_scorecard"] = {
@@ -703,7 +802,8 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         }
         for opp in report.market_opportunities
     ]
-    analysis["strategic_insights"] = report.strategic_insights
+    analysis["channel_summaries"] = _serialize_channel_summaries(report.channel_summaries)
+    analysis["strategic_insights"] = _serialize_insights(report.strategic_insights)
     analysis["actionable_takeaways"] = report.actionable_takeaways
     analysis["native_artifact_guideline"] = "Render these strategic insights directly as a visual, high-contrast Claude Native Artifact in the chat window. Only export a local HTML file when the user explicitly requests it."
 
@@ -752,11 +852,14 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
 
     
+    auth_status, connector_health = await _collect_channel_context(comp)
     report = comp["strategic_reasoner"].analyze_mission(
         mission=mission,
         signals=signals,
         clusters=clusters,
         scorecard=scorecard,
+        auth_status=auth_status,
+        connector_health=connector_health,
     )
     
     platform_breakdown = {}
@@ -824,7 +927,8 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
                 }
                 for opp in report.market_opportunities[:5]
             ],
-            "strategic_insights": report.strategic_insights[:3],
+            "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
+            "strategic_insights": _serialize_insights(report.strategic_insights)[:3],
             "actionable_takeaways": report.actionable_takeaways[:3],
             "instructions_for_user": f"Báo cáo HTML đầy đủ ({len(signals)} signals) đã được xuất thành công. Bạn có thể mở trực tiếp đường dẫn file://{abs_path} trên trình duyệt.",
         },
