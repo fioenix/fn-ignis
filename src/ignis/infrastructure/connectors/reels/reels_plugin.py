@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -16,7 +16,15 @@ from ignis.domain.exceptions import (
     ConnectorQuotaExceededException,
 )
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, timeframe_to_days
+from ignis.infrastructure.auth.meta_browser_auth import InstagramBrowserAuthManager
 from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager
+from ignis.infrastructure.cache.insights_cache import InsightsTTLCache
+from ignis.infrastructure.connectors.meta_browser_ingress import (
+    caption_text,
+    coerce_int,
+    collect_json_payloads,
+    extract_records,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +35,21 @@ class ReelsPlugin(IConnectorPlugin):
 
     Primary path is the official Instagram Graph API (`/{ig-user-id}/media` plus
     per-media insights), extracting play_count, like_count, comment_count, caption
-    and published_at. Hashtag search backs keyword probes. Falls back to the legacy
-    public clips endpoint only when no OAuth manager is bound.
+    and published_at. Hashtag search backs keyword probes.
+
+    Ingress path is resolved per call, in order:
+      1. Tier 2 Graph API when a usable OAuth token is stored.
+      2. Tier 1 browser session (`InstagramBrowserAuthManager`) when the user signed in
+         with an ordinary personal account and no Meta Developer App exists.
+      3. Legacy unauthenticated public clips endpoint when nothing is bound.
     """
 
     GRAPH_BASE_URL = "https://graph.instagram.com"
     LEGACY_DISCOVER_URL = "https://www.instagram.com/api/v1/clips/discover/"
     BASE_URL = LEGACY_DISCOVER_URL  # retained for backward compatibility
+    BROWSER_EXPLORE_URL = "https://www.instagram.com/reels/"
+    BROWSER_HASHTAG_URL = "https://www.instagram.com/explore/tags/{hashtag}/"
+    BROWSER_API_MARKERS = ["/api/v1/tags/", "/api/v1/clips/", "/graphql/query", "/api/graphql"]
 
     MEDIA_FIELDS = "id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count,username"
     INSIGHT_METRICS = "plays,reach,total_interactions"
@@ -45,12 +61,19 @@ class ReelsPlugin(IConnectorPlugin):
         self,
         auth_manager: Optional[InstagramAuthManager] = None,
         ig_user_id: Optional[str] = None,
+        browser_auth_manager: Optional[InstagramBrowserAuthManager] = None,
+        insights_cache: Optional[InsightsTTLCache] = None,
     ):
         self._auth_manager = auth_manager
         self._ig_user_id = ig_user_id or settings.INSTAGRAM_USER_ID
+        self._browser_auth_manager = browser_auth_manager
+        self._insights_cache = insights_cache or InsightsTTLCache()
 
     def set_auth_manager(self, auth_manager: InstagramAuthManager) -> None:
         self._auth_manager = auth_manager
+
+    def set_browser_auth_manager(self, browser_auth_manager: InstagramBrowserAuthManager) -> None:
+        self._browser_auth_manager = browser_auth_manager
 
     @property
     def platform(self) -> PlatformType:
@@ -66,12 +89,33 @@ class ReelsPlugin(IConnectorPlugin):
 
     async def is_healthy(self) -> bool:
         """An OAuth-backed connector without a usable token is not healthy."""
-        if not self._auth_manager:
+        if not self._auth_manager and not self._browser_auth_manager:
             return True
+        try:
+            if self._auth_manager and (await self._auth_manager.get_access_token()):
+                return True
+            return await self._browser_storage_state() is not None
+        except Exception as e:
+            logger.warning(f"Reels health check failed: {e}")
+            return False
+
+    async def _browser_storage_state(self) -> Optional[Dict[str, Any]]:
+        if not self._browser_auth_manager:
+            return None
+        try:
+            return await self._browser_auth_manager.get_storage_state()
+        except Exception as e:
+            logger.warning(f"Could not load the Instagram browser session: {e}")
+            return None
+
+    async def _has_graph_token(self) -> bool:
+        """Whether the Tier 2 Graph API path is usable right now."""
+        if not self._auth_manager:
+            return False
         try:
             return (await self._auth_manager.get_access_token()) is not None
         except Exception as e:
-            logger.warning(f"Reels health check failed: {e}")
+            logger.warning(f"Instagram OAuth token lookup failed: {e}")
             return False
 
     # --- Ingress ---
@@ -83,8 +127,14 @@ class ReelsPlugin(IConnectorPlugin):
         limit: int = 50,
     ) -> List[TrendSignal]:
         """Fetch the account's Reels published inside the requested timeframe window."""
-        if not self._auth_manager:
-            return await self._fetch_legacy_public(geo=geo, limit=limit)
+        if not await self._has_graph_token():
+            storage_state = await self._browser_storage_state()
+            if storage_state:
+                return await self._fetch_via_browser_session(
+                    url=self.BROWSER_EXPLORE_URL, storage_state=storage_state, geo=geo, limit=limit
+                )
+            if not self._auth_manager:
+                return await self._fetch_legacy_public(geo=geo, limit=limit)
 
         token = await self._require_token()
         if not self._ig_user_id:
@@ -116,8 +166,14 @@ class ReelsPlugin(IConnectorPlugin):
         limit: int = 20,
     ) -> List[TrendSignal]:
         """Probe top Reels per keyword through the Instagram hashtag search endpoints."""
-        if not self._auth_manager:
-            return await self._fetch_legacy_public(geo=geo, limit=limit)
+        if not await self._has_graph_token():
+            storage_state = await self._browser_storage_state()
+            if storage_state:
+                return await self._search_via_browser_session(
+                    keywords=keywords, storage_state=storage_state, geo=geo, limit=limit
+                )
+            if not self._auth_manager:
+                return await self._fetch_legacy_public(geo=geo, limit=limit)
 
         token = await self._require_token()
         if not self._ig_user_id:
@@ -233,9 +289,17 @@ class ReelsPlugin(IConnectorPlugin):
         if not media_ids:
             return {}
 
+        # The 15-minute worker pass re-reads the same media; serving them from the TTL
+        # cache is what keeps this under Meta's 200 calls/user/hour budget.
+        insights, pending = self._insights_cache.partition(
+            PlatformType.REELS.value, media_ids, self.INSIGHT_METRICS
+        )
+        if not pending:
+            return insights
+
         semaphore = asyncio.Semaphore(self.MAX_INSIGHT_CONCURRENCY)
 
-        async def _one(media_id: str) -> tuple[str, Dict[str, float]]:
+        async def _one(media_id: str) -> Tuple[str, Dict[str, float]]:
             async with semaphore:
                 payload = await self._graph_get(
                     f"{self._api_root}/{media_id}/insights",
@@ -243,9 +307,8 @@ class ReelsPlugin(IConnectorPlugin):
                 )
                 return media_id, self._parse_insights(payload)
 
-        results = await asyncio.gather(*[_one(mid) for mid in media_ids], return_exceptions=True)
+        results = await asyncio.gather(*[_one(mid) for mid in pending], return_exceptions=True)
 
-        insights: Dict[str, Dict[str, float]] = {}
         for result in results:
             if isinstance(result, (ConnectorAuthenticationException, ConnectorQuotaExceededException)):
                 raise result
@@ -254,6 +317,7 @@ class ReelsPlugin(IConnectorPlugin):
                 continue
             media_id, metrics = result
             insights[media_id] = metrics
+            self._insights_cache.set(PlatformType.REELS.value, media_id, self.INSIGHT_METRICS, metrics)
         return insights
 
     @staticmethod
@@ -349,6 +413,127 @@ class ReelsPlugin(IConnectorPlugin):
             if err:
                 return str(err)
         return str(body)[:300]
+
+    # --- Tier 1 browser-session ingress ---
+
+    async def _search_via_browser_session(
+        self,
+        keywords: List[str],
+        storage_state: Dict[str, Any],
+        geo: GeoCode,
+        limit: int,
+    ) -> List[TrendSignal]:
+        """Walk each keyword's public hashtag page using the captured browser session."""
+        all_signals: List[TrendSignal] = []
+        seen_ids: set[str] = set()
+
+        for keyword in [k.strip() for k in keywords[:10] if k and k.strip()]:
+            hashtag = self._to_hashtag(keyword)
+            if not hashtag:
+                continue
+            signals = await self._fetch_via_browser_session(
+                url=self.BROWSER_HASHTAG_URL.format(hashtag=hashtag),
+                storage_state=storage_state,
+                geo=geo,
+                limit=limit,
+                keyword=keyword,
+            )
+            for signal in signals:
+                reel_id = str(signal.metadata.get("reel_id") or "")
+                if reel_id and reel_id in seen_ids:
+                    continue
+                seen_ids.add(reel_id)
+                all_signals.append(signal)
+
+        return all_signals
+
+    async def _fetch_via_browser_session(
+        self,
+        url: str,
+        storage_state: Dict[str, Any],
+        geo: GeoCode,
+        limit: int,
+        keyword: Optional[str] = None,
+    ) -> List[TrendSignal]:
+        payloads = await collect_json_payloads(
+            url=url,
+            storage_state=storage_state,
+            url_markers=self.BROWSER_API_MARKERS,
+            geo=geo,
+        )
+        records = extract_records(
+            payloads,
+            is_record=self._is_browser_reel,
+            identity=lambda node: str(node.get("pk") or node.get("id") or ""),
+            limit=min(max(limit, 1), 100),
+        )
+        return [self._map_browser_reel(node, geo=geo, keyword=keyword) for node in records]
+
+    @staticmethod
+    def _is_browser_reel(node: Dict[str, Any]) -> bool:
+        """Match the shape of a public Reel item rather than a fixed GraphQL envelope path."""
+        if not (node.get("pk") or node.get("id")):
+            return False
+        if not isinstance(node.get("code"), str):
+            return False
+        # media_type 2 is video on Instagram's private payloads; clips metadata marks Reels.
+        return bool(
+            node.get("video_versions")
+            or node.get("clips_metadata")
+            or node.get("play_count") is not None
+            or coerce_int(node.get("media_type")) == 2
+        )
+
+    def _map_browser_reel(
+        self,
+        node: Dict[str, Any],
+        geo: GeoCode,
+        keyword: Optional[str],
+    ) -> TrendSignal:
+        reel_id = str(node.get("pk") or node.get("id") or "")
+        code = str(node.get("code") or "")
+        caption = caption_text(node)
+        user = node.get("user") if isinstance(node.get("user"), dict) else {}
+        clips = node.get("clips_metadata") if isinstance(node.get("clips_metadata"), dict) else {}
+        music = clips.get("music_info") if isinstance(clips.get("music_info"), dict) else {}
+
+        play_count = coerce_int(node.get("play_count") or node.get("view_count"))
+        like_count = coerce_int(node.get("like_count"))
+        comment_count = coerce_int(node.get("comment_count"))
+
+        return TrendSignal(
+            platform=PlatformType.REELS,
+            raw_title=caption[:200] or f"Instagram Reel #{reel_id}",
+            metric_value=float(play_count) if play_count > 0 else float(like_count),
+            growth_velocity=0.0,
+            source_url=f"https://www.instagram.com/reel/{code}/" if code else None,
+            geo_code=geo,
+            metadata={
+                "reel_id": reel_id,
+                "username": str(user.get("username") or ""),
+                "play_count": play_count,
+                "like_count": like_count,
+                "comment_count": comment_count,
+                "music_title": str((music.get("music_asset_info") or {}).get("title") or "")
+                if isinstance(music.get("music_asset_info"), dict) else "",
+                "caption": caption,
+                "published_at": self._normalize_epoch(node.get("taken_at")),
+                "source": "instagram_browser_session",
+                "tier": "TIER_1_BROWSER_SESSION",
+                **({"matched_keyword": keyword} if keyword else {}),
+            },
+            captured_at=datetime.now(timezone.utc),
+        )
+
+    @staticmethod
+    def _normalize_epoch(raw: Any) -> Optional[str]:
+        """Instagram's private payloads carry `taken_at` as unix seconds."""
+        if not raw:
+            return None
+        try:
+            return datetime.fromtimestamp(int(raw), tz=timezone.utc).isoformat()
+        except (TypeError, ValueError, OSError):
+            return None
 
     # --- Legacy unauthenticated fallback ---
 

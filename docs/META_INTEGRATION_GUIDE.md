@@ -43,14 +43,20 @@ Tài liệu này định nghĩa chi tiết kiến trúc tích hợp, hướng d�
 Tương tự như cơ chế của TikTok Ingress trong `fn-ignis`, người dùng chỉ cần sử dụng tài khoản cá nhân có sẵn:
 
 1. **Khởi chạy lệnh xác thực**:
-   - Trong giao diện chat với AI Agent (Claude, Cursor, Codex) hoặc FastMCP:
+   - Trong giao diện chat với AI Agent (Claude, Cursor, Codex) hoặc FastMCP, gọi tool tương ứng mà **không truyền tham số nào**:
      ```
      authenticate_threads()
+     authenticate_instagram()
      ```
+   - Khi không có `auth_code`, hệ thống mặc định chạy luồng Tier 1. Nếu bạn đã cấu hình OAuth nhưng vẫn muốn ép chạy Tier 1, truyền `browser_login=true`.
 2. **Xác nhận đăng nhập trên trình duyệt**:
    - `fn-ignis` khởi động một phiên Playwright Chromium biệt lập.
    - Người dùng đăng nhập tài khoản Threads hoặc Instagram trên màn hình trình duyệt.
    - Ngay khi đăng nhập thành công, `fn-ignis` tự động bóc tách session token an toàn, đóng cửa sổ trình duyệt và mã hóa AES-256 vào cơ sở dữ liệu (`platform_credentials`).
+3. **Phiên Tier 1 và token Tier 2 tồn tại song song**:
+   - Session trình duyệt được lưu dưới khóa riêng (`threads_browser`, `instagram_browser`), tách biệt hoàn toàn với bản ghi OAuth (`threads`, `instagram`). Kết nối Tier 1 không ghi đè token Tier 2 và ngược lại.
+   - `ThreadsPlugin` và `ReelsPlugin` chọn đường ingress theo thứ tự ưu tiên: Graph API khi còn token hợp lệ → session trình duyệt → endpoint công khai legacy. Nhờ vậy, người dùng phổ thông cào được bài viết và hashtag công khai mà không vướng rào cản Meta App Review.
+   - Kiểm tra cả hai tier bằng `get_threads_auth_status()` hoặc `get_instagram_auth_status()`: trường `browser_session` mô tả trạng thái phiên trình duyệt.
 
 ### Dữ liệu thu được & Giới hạn chấp nhận
 - **Dữ liệu thu được**:
@@ -130,6 +136,7 @@ Hệ thống `fn-ignis` đã tích hợp sẵn công cụ tự động hóa toà
    Gửi lệnh cho AI Agent:
    ```python
    authenticate_threads(auth_code="AQD...")
+   authenticate_instagram(auth_code="IGQW...")
    ```
 4. **Hệ thống tự động thực hiện 3 bước ngầm**:
    - Đổi `auth_code` lấy **Short-Lived Token** (hạn 1 giờ).
@@ -141,7 +148,14 @@ Hệ thống `fn-ignis` đã tích hợp sẵn công cụ tự động hóa toà
 ## 4. 🤖 Kịch bản Tự Động Hóa Dành Riêng Cho AI Agent (Agent Runbook)
 
 > **Dành cho Claude Code, Cursor, Codex, OpenClaw hoặc Hermes:**  
-> Khi người dùng yêu cầu: *"Hãy giúp tôi cài đặt kết nối Meta Threads / Instagram cho fn-ignis"*, AI Agent hãy thực hiện tuần tự theo quy trình tự hành sau:
+> Khi người dùng yêu cầu: *"Hãy giúp tôi cài đặt kết nối Meta Threads / Instagram cho fn-ignis"*, trước hết hãy hỏi họ có tài khoản Meta Developer hay không.
+>
+> - **Không có (đa số người dùng)** → chạy ngay Tier 1, chỉ một lệnh duy nhất, không cần `.env`, không cần App ID:
+>   ```python
+>   authenticate_threads()      # hoặc authenticate_instagram()
+>   ```
+>   Sau đó xác nhận bằng `get_threads_auth_status()` / `get_instagram_auth_status()` và kiểm tra trường `browser_session.status == "ACTIVE"`.
+> - **Có, và muốn vận hành 24/7 ổn định** → thực hiện tuần tự quy trình Tier 2 dưới đây:
 
 ```
 [Agent Step 1: Kiểm tra Khoá Mã Hóa]
@@ -204,5 +218,6 @@ Hệ thống `fn-ignis` đã tích hợp sẵn công cụ tự động hóa toà
 ### Q3: Bị lỗi `Rate Limited (HTTP 429)` từ Meta Graph API?
 **Khắc phục**:
 Meta Graph API giới hạn 200 lượt gọi/người dùng/giờ. Hệ thống `fn-ignis` đã tích hợp sẵn:
+- **Insights TTL Cache (2 giờ)**: Chỉ số của từng bài viết (`views, likes, replies, reposts, quotes` với Threads; `plays, reach, total_interactions` với Reels) được lưu trong bộ nhớ với TTL 2 giờ. Worker daemon quét lại cùng một cửa sổ dữ liệu sau mỗi 15 phút sẽ đọc từ cache thay vì phát lại N+1 request, triệt tiêu nguồn tiêu thụ quota lớn nhất. Điều chỉnh qua biến môi trường `META_INSIGHTS_CACHE_TTL_SECONDS`.
 - **Semaphore(5)**: Giới hạn tối đa 5 requests insights đồng thời.
 - **Circuit Breaker**: Sau 3 lần chạm ngưỡng 429, Circuit Breaker sẽ tự động chuyển sang trạng thái `OPEN` để cách ly plugin trong 300 giây, bảo vệ tài khoản của bạn không bị Meta khóa tạm thời.

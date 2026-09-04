@@ -2,7 +2,7 @@
 
 > **Cập nhật lần cuối:** 03/09/2026  
 > **Phiên bản:** `v0.2.0`  
-> **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite) + FastMCP Server (31 Handlers & Tools)  
+> **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite) + FastMCP Server (34 Handlers & Tools)  
 > **Trạng thái Tests:** 147/147 unit & integration tests PASSED (100%) | Ruff Linter Clean
 
 
@@ -58,15 +58,15 @@
 
 ## 📌 2. Danh Mục Backlog Cho Các Session Tiếp Theo (Upcoming Roadmap)
 
-### 🎯 Epic 1.5: Dual-UX Meta Ingress & Instagram Parity (Sprint Ready)
+### ✅ Epic 1.5: Dual-UX Meta Ingress & Instagram Parity (Đã hoàn thành)
 *Mục tiêu: Đạt tỷ lệ kích hoạt 100% cho cả người dùng phổ thông (Non-tech) lẫn chuyên gia (Tech-heavy).*
-- [ ] **Tier 1 (Non-Tech) 1-Click Browser Session Capture:** Bổ sung luồng Playwright browser login cho Threads và Instagram tương tự `authenticate_tiktok()`, cho phép người dùng phổ thông đăng nhập bằng tài khoản cá nhân thông thường để quét dữ liệu công khai (public search, hashtags) mà không cần Meta Developer Portal.
-- [ ] **FastMCP Instagram Tools Parity:** Bổ sung 3 công cụ FastMCP:
-  - `authenticate_instagram(auth_code, client_id, client_secret, redirect_uri)`
+- [x] **Tier 1 (Non-Tech) 1-Click Browser Session Capture:** Bổ sung luồng Playwright browser login cho Threads và Instagram tương tự `authenticate_tiktok()`, cho phép người dùng phổ thông đăng nhập bằng tài khoản cá nhân thông thường để quét dữ liệu công khai (public search, hashtags) mà không cần Meta Developer Portal.
+- [x] **FastMCP Instagram Tools Parity:** Bổ sung 3 công cụ FastMCP:
+  - `authenticate_instagram(auth_code, client_id, client_secret, redirect_uri)` — hợp nhất luôn cả luồng `browser_login` của Tier 1
   - `get_instagram_auth_status()`
   - `clear_instagram_auth()`
-- [ ] **Insights TTL Caching (2 giờ):** Caching in-memory cho post metrics của Threads/Reels để giải quyết triệt để bài toán N+1 request và bảo vệ hạn mức 200 reqs/user/hour của Meta Graph API.
-- [ ] **Registry Multi-Plugin Coexistence (Tech Debt):** Đảm bảo `TikTokPlugin` (Search Video Grid & Comments) và `TikTokCreativeCenterPlugin` (Macro Trends Radar) cùng tồn tại song song trong `ConnectorPluginRegistry` mà không bị ghi đè.
+- [x] **Insights TTL Caching (2 giờ):** Caching in-memory cho post metrics của Threads/Reels để giải quyết triệt để bài toán N+1 request và bảo vệ hạn mức 200 reqs/user/hour của Meta Graph API.
+- [x] **Registry Multi-Plugin Coexistence (Tech Debt):** Đảm bảo `TikTokPlugin` (Search Video Grid & Comments) và `TikTokCreativeCenterPlugin` (Macro Trends Radar) cùng tồn tại song song trong `ConnectorPluginRegistry` mà không bị ghi đè.
 
 ### 🎯 Epic 3: Live Alerts & Notification Webhooks
 *Mục tiêu: Đẩy thông báo chủ động cho người dùng khi xu hướng bùng nổ.*

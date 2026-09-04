@@ -34,6 +34,10 @@ from ignis.domain.value_objects import (
     timeframe_to_days,
 )
 
+from ignis.infrastructure.auth.meta_browser_auth import (
+    InstagramBrowserAuthManager,
+    ThreadsBrowserAuthManager,
+)
 from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager, ThreadsAuthManager
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
@@ -88,14 +92,26 @@ def _init_components():
     tiktok_auth_manager = TikTokAuthManager(repository=repository)
     threads_auth_manager = ThreadsAuthManager(repository=repository)
     instagram_auth_manager = InstagramAuthManager(repository=repository)
+    threads_browser_auth_manager = ThreadsBrowserAuthManager(repository=repository)
+    instagram_browser_auth_manager = InstagramBrowserAuthManager(repository=repository)
     creative_center_plugin = TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager)
 
     registry = ConnectorPluginRegistry(repository=repository)
     registry.register(GoogleTrendsRssPlugin())
     registry.register(TikTokPlugin(auth_manager=tiktok_auth_manager))
     registry.register(creative_center_plugin)
-    registry.register(ThreadsPlugin(auth_manager=threads_auth_manager))
-    registry.register(ReelsPlugin(auth_manager=instagram_auth_manager))
+    registry.register(
+        ThreadsPlugin(
+            auth_manager=threads_auth_manager,
+            browser_auth_manager=threads_browser_auth_manager,
+        )
+    )
+    registry.register(
+        ReelsPlugin(
+            auth_manager=instagram_auth_manager,
+            browser_auth_manager=instagram_browser_auth_manager,
+        )
+    )
 
     if settings.YOUTUBE_API_KEY:
         registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
@@ -138,6 +154,8 @@ def _init_components():
         "tiktok_auth_manager": tiktok_auth_manager,
         "threads_auth_manager": threads_auth_manager,
         "instagram_auth_manager": instagram_auth_manager,
+        "threads_browser_auth_manager": threads_browser_auth_manager,
+        "instagram_browser_auth_manager": instagram_browser_auth_manager,
         "clusterer": clusterer,
         "artifact_builder": artifact_builder,
         "quality_evaluator": quality_evaluator,
@@ -420,35 +438,86 @@ async def handle_clear_platform_auth(platform: str) -> str:
     )
 
 
-async def handle_authenticate_threads(
-    auth_code: str,
-    client_id: Optional[str] = None,
-    client_secret: Optional[str] = None,
-    redirect_uri: Optional[str] = None,
-) -> str:
-    comp = get_components()
-    auth_mgr: ThreadsAuthManager = comp["threads_auth_manager"]
+async def _run_meta_auth(
+    oauth_manager: Any,
+    browser_manager: Any,
+    platform_name: str,
+    auth_code: Optional[str],
+    client_id: Optional[str],
+    client_secret: Optional[str],
+    redirect_uri: Optional[str],
+    browser_login: bool,
+    headless: bool,
+    timeout_seconds: int,
+) -> Dict[str, Any]:
+    """
+    Dual-UX entry point: Tier 1 browser session capture, or Tier 2 Graph API OAuth.
+
+    An absent auth_code is treated as an explicit request for the browser flow, so a
+    non-technical user who just calls the tool with no arguments lands on Tier 1.
+    """
+    use_browser = browser_login or not (auth_code and auth_code.strip())
     try:
-        result = await auth_mgr.exchange_code_for_token(
+        if use_browser:
+            if not browser_manager:
+                raise RuntimeError(f"No browser auth manager is bound for {platform_name}.")
+            return await browser_manager.authenticate_interactive(
+                headless=headless, timeout_seconds=timeout_seconds
+            )
+        return await oauth_manager.exchange_code_for_token(
             auth_code=auth_code,
             client_id=client_id,
             client_secret=client_secret,
             redirect_uri=redirect_uri,
         )
     except Exception as e:
-        result = {
+        return {
             "success": False,
-            "platform": ThreadsAuthManager.PLATFORM_NAME,
+            "platform": platform_name,
+            "tier": "TIER_1_BROWSER_SESSION" if use_browser else "TIER_2_GRAPH_API",
             "error_type": type(e).__name__,
             "message": str(e),
         }
+
+
+async def _meta_auth_status(oauth_manager: Any, browser_manager: Any) -> Dict[str, Any]:
+    """Report both tiers so the agent can see which ingress path is actually live."""
+    status = await oauth_manager.get_auth_status()
+    if browser_manager:
+        status["browser_session"] = await browser_manager.get_auth_status()
+    return status
+
+
+async def handle_authenticate_threads(
+    auth_code: Optional[str] = None,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    redirect_uri: Optional[str] = None,
+    browser_login: bool = False,
+    headless: bool = False,
+    timeout_seconds: int = 180,
+) -> str:
+    comp = get_components()
+    result = await _run_meta_auth(
+        oauth_manager=comp["threads_auth_manager"],
+        browser_manager=comp.get("threads_browser_auth_manager"),
+        platform_name=ThreadsAuthManager.PLATFORM_NAME,
+        auth_code=auth_code,
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        browser_login=browser_login,
+        headless=headless,
+        timeout_seconds=timeout_seconds,
+    )
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 async def handle_get_threads_auth_status() -> str:
     comp = get_components()
-    auth_mgr: ThreadsAuthManager = comp["threads_auth_manager"]
-    status = await auth_mgr.get_auth_status()
+    status = await _meta_auth_status(
+        comp["threads_auth_manager"], comp.get("threads_browser_auth_manager")
+    )
     return json.dumps(status, ensure_ascii=False, indent=2)
 
 
@@ -456,12 +525,67 @@ async def handle_clear_threads_auth() -> str:
     comp = get_components()
     auth_mgr: ThreadsAuthManager = comp["threads_auth_manager"]
     cleared = await auth_mgr.clear_auth()
+    browser_mgr = comp.get("threads_browser_auth_manager")
+    browser_cleared = await browser_mgr.clear_auth() if browser_mgr else False
     return json.dumps(
         {
             "platform": ThreadsAuthManager.PLATFORM_NAME,
             "cleared": cleared,
+            "browser_session_cleared": browser_cleared,
             "message": "Threads OAuth credentials revoked."
             if cleared else "No active Threads OAuth session found.",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def handle_authenticate_instagram(
+    auth_code: Optional[str] = None,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    redirect_uri: Optional[str] = None,
+    browser_login: bool = False,
+    headless: bool = False,
+    timeout_seconds: int = 180,
+) -> str:
+    comp = get_components()
+    result = await _run_meta_auth(
+        oauth_manager=comp["instagram_auth_manager"],
+        browser_manager=comp.get("instagram_browser_auth_manager"),
+        platform_name=InstagramAuthManager.PLATFORM_NAME,
+        auth_code=auth_code,
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        browser_login=browser_login,
+        headless=headless,
+        timeout_seconds=timeout_seconds,
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def handle_get_instagram_auth_status() -> str:
+    comp = get_components()
+    status = await _meta_auth_status(
+        comp["instagram_auth_manager"], comp.get("instagram_browser_auth_manager")
+    )
+    return json.dumps(status, ensure_ascii=False, indent=2)
+
+
+async def handle_clear_instagram_auth() -> str:
+    comp = get_components()
+    auth_mgr: InstagramAuthManager = comp["instagram_auth_manager"]
+    cleared = await auth_mgr.clear_auth()
+    browser_mgr = comp.get("instagram_browser_auth_manager")
+    browser_cleared = await browser_mgr.clear_auth() if browser_mgr else False
+    return json.dumps(
+        {
+            "platform": InstagramAuthManager.PLATFORM_NAME,
+            "cleared": cleared,
+            "browser_session_cleared": browser_cleared,
+            "message": "Instagram OAuth credentials revoked."
+            if cleared else "No active Instagram OAuth session found.",
         },
         ensure_ascii=False,
         indent=2,
@@ -996,22 +1120,28 @@ async def clear_platform_auth(platform: str) -> str:
     return await handle_clear_platform_auth(platform=platform)
 
 
-@mcp.tool(name="authenticate_threads", description="Complete the official Meta Threads Graph API OAuth 2.0 flow: exchange an authorization code for a short-lived token, upgrade it to a 60-day long-lived user token, and persist it AES-encrypted.")
+@mcp.tool(name="authenticate_threads", description="Connect Meta Threads with either tier: call with no auth_code (or browser_login=true) for the 1-click browser session capture that needs no Meta Developer App, or pass auth_code to run the Graph API OAuth 2.0 flow and store a 60-day long-lived token AES-encrypted.")
 async def authenticate_threads(
-    auth_code: str,
+    auth_code: Optional[str] = None,
     client_id: Optional[str] = None,
     client_secret: Optional[str] = None,
     redirect_uri: Optional[str] = None,
+    browser_login: bool = False,
+    headless: bool = False,
+    timeout_seconds: int = 180,
 ) -> str:
     return await handle_authenticate_threads(
         auth_code=auth_code,
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
+        browser_login=browser_login,
+        headless=headless,
+        timeout_seconds=timeout_seconds,
     )
 
 
-@mcp.tool(name="get_threads_auth_status", description="Inspect the stored Meta Threads OAuth 2.0 token: active/expired state, granted scopes, key version, days remaining, and whether a refresh is due.")
+@mcp.tool(name="get_threads_auth_status", description="Inspect the stored Meta Threads credentials across both tiers: OAuth 2.0 token state, granted scopes, key version, days remaining and refresh due, plus any captured browser session.")
 async def get_threads_auth_status() -> str:
     return await handle_get_threads_auth_status()
 
@@ -1019,6 +1149,37 @@ async def get_threads_auth_status() -> str:
 @mcp.tool(name="clear_threads_auth", description="Revoke and delete the stored Meta Threads OAuth 2.0 credentials from local encrypted storage.")
 async def clear_threads_auth() -> str:
     return await handle_clear_threads_auth()
+
+
+@mcp.tool(name="authenticate_instagram", description="Connect Instagram with either tier: call with no auth_code (or browser_login=true) for the 1-click browser session capture that needs no Meta Developer App, or pass auth_code to run the Instagram Graph API OAuth 2.0 flow and store a 60-day long-lived token AES-encrypted.")
+async def authenticate_instagram(
+    auth_code: Optional[str] = None,
+    client_id: Optional[str] = None,
+    client_secret: Optional[str] = None,
+    redirect_uri: Optional[str] = None,
+    browser_login: bool = False,
+    headless: bool = False,
+    timeout_seconds: int = 180,
+) -> str:
+    return await handle_authenticate_instagram(
+        auth_code=auth_code,
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        browser_login=browser_login,
+        headless=headless,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+@mcp.tool(name="get_instagram_auth_status", description="Inspect the stored Instagram credentials across both tiers: OAuth 2.0 token state, granted scopes, days remaining and refresh due, plus any captured browser session.")
+async def get_instagram_auth_status() -> str:
+    return await handle_get_instagram_auth_status()
+
+
+@mcp.tool(name="clear_instagram_auth", description="Revoke and delete the stored Instagram OAuth 2.0 credentials and captured browser session from local encrypted storage.")
+async def clear_instagram_auth() -> str:
+    return await handle_clear_instagram_auth()
 
 
 async def handle_get_tiktok_search_suggestions(keywords: List[str], geo: str = "VN") -> str:

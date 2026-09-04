@@ -332,7 +332,10 @@ class ThreadsAuthManager:
                 "auth_type": self.AUTH_TYPE,
                 "status": "NOT_CONNECTED",
                 "encryption_key_configured": self._crypto.has_persistent_key(),
-                "message": "No Threads OAuth credentials stored. Run authenticate_threads(auth_code=...).",
+                "message": (
+                    f"No {self.PLATFORM_NAME} OAuth credentials stored. "
+                    f"Run authenticate_{self.PLATFORM_NAME}(auth_code=...)."
+                ),
             }
 
         remaining = self._days_remaining(record)

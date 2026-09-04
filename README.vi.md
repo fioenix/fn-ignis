@@ -120,7 +120,7 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 
 | AI Agent / IDE | Cấu hình & Tiêu chuẩn | Khả năng Hỗ trợ |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 31 FastMCP Tools, Prompts, Resources, tự động nạp 6 bước SOP |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 34 FastMCP Tools, Prompts, Resources, tự động nạp 6 bước SOP |
 | **Claude Code** | [`CLAUDE.md`](CLAUDE.md), [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Chuẩn Agent Skills, xuất Artifact HTML trực quan |
 | **Cursor IDE** | [`.cursor/rules/fn-ignis.mdc`](.cursor/rules/fn-ignis.mdc), [`.cursorrules`](.cursorrules) | Nhận diện ngữ cảnh nghiên cứu thị trường đa nền tảng |
 | **Windsurf IDE** | [`.windsurfrules`](.windsurfrules) | Giao thức quy tắc nghiên cứu từng bước cho Cascade |
@@ -131,7 +131,7 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 
 ---
 
-## 🛠️ Danh mục 31 FastMCP Tools, Prompts & Resources
+## 🛠️ Danh mục 34 FastMCP Tools, Prompts & Resources
 
 ### 1. Nghiên cứu Thị trường & Tổng hợp Chiến lược
 - **`run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)`**: Khởi tạo chiến dịch, thu thập dữ liệu đa nguồn, tính toán Opportunity Index và xuất báo cáo trong 1 bước.
@@ -160,9 +160,12 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 - **`get_system_logs(limit, level)`**: Tra cứu nhật ký sự kiện kiểm toán hệ thống.
 - **`verify_connectors_health()`**: Chạy kiểm tra tự động trạng thái YouTube API, Google RSS, Playwright, DB pool và Proxy.
 - **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Quản lý phiên đăng nhập trình duyệt có mã hóa AES-256.
-- **`authenticate_threads(auth_code, client_id, client_secret, redirect_uri)`**: Hoàn tất luồng OAuth 2.0 chính thức của Meta Threads Graph API (authorization code → short-lived token → long-lived user token 60 ngày), lưu trữ mã hóa AES.
-- **`get_threads_auth_status()`**: Kiểm tra token Threads đang lưu — trạng thái còn hiệu lực hay đã hết hạn, scopes, `key_version`, số ngày còn lại và có cần refresh hay không.
-- **`clear_threads_auth()`**: Thu hồi và xóa credentials OAuth của Threads khỏi bộ lưu trữ mã hóa.
+- **`authenticate_threads(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: Kết nối Meta theo mô hình Dual-UX. Gọi mà không truyền `auth_code` (hoặc đặt `browser_login=true`) sẽ chạy luồng Tier 1 — bắt phiên trình duyệt 1 chạm bằng tài khoản cá nhân thông thường, không cần Meta Developer App. Khi truyền `auth_code`, hệ thống chạy luồng Tier 2 OAuth 2.0 Graph API (authorization code → short-lived token → long-lived user token 60 ngày), lưu trữ mã hóa AES.
+- **`get_threads_auth_status()`**: Kiểm tra cả hai tier — trạng thái token, scopes, `key_version`, số ngày còn lại, có cần refresh hay không, kèm thông tin phiên trình duyệt đã bắt được.
+- **`clear_threads_auth()`**: Thu hồi và xóa credentials OAuth cùng phiên trình duyệt của Threads khỏi bộ lưu trữ mã hóa.
+- **`authenticate_instagram(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: Luồng kết nối Dual-UX tương tự cho Instagram, phục vụ ingress Reels.
+- **`get_instagram_auth_status()`**: Kiểm tra credentials Instagram đang lưu trên cả hai tier.
+- **`clear_instagram_auth()`**: Thu hồi và xóa credentials OAuth cùng phiên trình duyệt của Instagram.
 - **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo)`**, **`trigger_ingress_refresh(geo)`**: Khám phá xu hướng thời gian thực.
 
 ### 4. FastMCP Native Resources & Prompts

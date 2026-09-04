@@ -88,6 +88,10 @@ class Settings(BaseSettings):
         default=86400,
         description="TTL in seconds for YouTube search queries cache (default 24h to preserve API quota)"
     )
+    META_INSIGHTS_CACHE_TTL_SECONDS: int = Field(
+        default=7200,
+        description="TTL in seconds for Threads/Reels post insights cache (default 2h to stay under Meta's 200 calls/user/hour limit)"
+    )
     PLAYWRIGHT_PROXY_SERVER: str = Field(
         default="",
         description="Optional HTTP/SOCKS proxy server URI (e.g. http://user:pass@proxy.example.com:8080) for Playwright ingress"

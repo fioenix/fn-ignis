@@ -352,9 +352,9 @@ uv run pytest
 
 ---
 
-## 8. Danh mục 31 FastMCP Tools & Khả năng Nghiên cứu Toàn diện
+## 8. Danh mục 34 FastMCP Tools & Khả năng Nghiên cứu Toàn diện
 
-Khi FastMCP Server khởi chạy (`ignis-mcp`), 31 tools, 2 prompts và 2 resources sau đây luôn sẵn sàng cho AI Agents hoặc MCP clients:
+Khi FastMCP Server khởi chạy (`ignis-mcp`), 34 tools, 2 prompts và 2 resources sau đây luôn sẵn sàng cho AI Agents hoặc MCP clients:
 
 ### 1. Nhóm Chiến dịch & Nghiên cứu Chiến lược (Research & White Space)
 | Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
@@ -386,9 +386,12 @@ Khi FastMCP Server khởi chạy (`ignis-mcp`), 31 tools, 2 prompts và 2 resour
 ### 3. Nhóm Xác thực Meta (Threads OAuth 2.0)
 | Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
 |---|---|---|
-| `authenticate_threads` | `auth_code, client_id, client_secret, redirect_uri` | Hoàn tất luồng OAuth 2.0 Threads Graph API, nâng cấp Long-Lived Token 60 ngày, mã hóa AES. |
-| `get_threads_auth_status` | Không | Kiểm tra token Threads: trạng thái, scopes, key_version, số ngày còn lại, có cần refresh không. |
-| `clear_threads_auth` | Không | Thu hồi và xóa an toàn thông tin xác thực Threads khỏi bộ lưu trữ mã hóa. |
+| `authenticate_threads` | `auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?, headless?, timeout_seconds?` | Kết nối Threads theo Dual-UX: không có `auth_code` (hoặc `browser_login=true`) chạy Tier 1 bắt phiên trình duyệt 1 chạm; có `auth_code` chạy Tier 2 OAuth 2.0 nâng cấp Long-Lived Token 60 ngày, mã hóa AES. |
+| `get_threads_auth_status` | Không | Kiểm tra Threads trên cả hai tier: trạng thái token, scopes, key_version, số ngày còn lại, có cần refresh không, kèm phiên trình duyệt. |
+| `clear_threads_auth` | Không | Thu hồi và xóa an toàn thông tin xác thực Threads (OAuth và phiên trình duyệt) khỏi bộ lưu trữ mã hóa. |
+| `authenticate_instagram` | `auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?, headless?, timeout_seconds?` | Kết nối Instagram theo Dual-UX: Tier 1 bắt phiên trình duyệt 1 chạm hoặc Tier 2 OAuth 2.0 Instagram Graph API với Long-Lived Token 60 ngày. |
+| `get_instagram_auth_status` | Không | Kiểm tra Instagram trên cả hai tier: trạng thái token, scopes, số ngày còn lại, kèm phiên trình duyệt. |
+| `clear_instagram_auth` | Không | Thu hồi và xóa an toàn thông tin xác thực Instagram (OAuth và phiên trình duyệt) khỏi bộ lưu trữ mã hóa. |
 
 *(Hướng dẫn chi tiết tích hợp Threads & Instagram Reels xem tại [META_INTEGRATION_GUIDE.md](META_INTEGRATION_GUIDE.md))*
 

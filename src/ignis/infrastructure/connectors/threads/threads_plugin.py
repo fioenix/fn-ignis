@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import urllib.parse
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -16,7 +17,15 @@ from ignis.domain.exceptions import (
     ConnectorQuotaExceededException,
 )
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, timeframe_to_days
+from ignis.infrastructure.auth.meta_browser_auth import ThreadsBrowserAuthManager
 from ignis.infrastructure.auth.meta_oauth import ThreadsAuthManager
+from ignis.infrastructure.cache.insights_cache import InsightsTTLCache
+from ignis.infrastructure.connectors.meta_browser_ingress import (
+    caption_text,
+    coerce_int,
+    collect_json_payloads,
+    extract_records,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +39,18 @@ class ThreadsPlugin(IConnectorPlugin):
     (429) raise typed exceptions so the registry's circuit breaker trips instead of
     silently returning an empty, apparently-healthy result set.
 
-    When no auth manager is bound, the plugin falls back to the legacy unauthenticated
-    public trending endpoint (best-effort, no insights).
+    Ingress path is resolved per call, in order:
+      1. Tier 2 Graph API when a usable OAuth token is stored.
+      2. Tier 1 browser session (`ThreadsBrowserAuthManager`) when the user signed in
+         with an ordinary personal account and no Meta Developer App exists.
+      3. Legacy unauthenticated public trending endpoint when nothing is bound.
     """
 
     GRAPH_BASE_URL = "https://graph.threads.net"
     LEGACY_TRENDING_URL = "https://www.threads.net/api/trending"
+    BROWSER_FEED_URL = "https://www.threads.net/"
+    BROWSER_SEARCH_URL = "https://www.threads.net/search"
+    BROWSER_API_MARKERS = ["/graphql/query", "/api/graphql", "/api/v1/text_feed"]
 
     THREAD_FIELDS = "id,text,permalink,timestamp,username,media_type,is_quote_post"
     INSIGHT_METRICS = "views,likes,replies,reposts,quotes"
@@ -43,11 +58,21 @@ class ThreadsPlugin(IConnectorPlugin):
     REQUEST_TIMEOUT_SECONDS = 20.0
     MAX_INSIGHT_CONCURRENCY = 5
 
-    def __init__(self, auth_manager: Optional[ThreadsAuthManager] = None):
+    def __init__(
+        self,
+        auth_manager: Optional[ThreadsAuthManager] = None,
+        browser_auth_manager: Optional[ThreadsBrowserAuthManager] = None,
+        insights_cache: Optional[InsightsTTLCache] = None,
+    ):
         self._auth_manager = auth_manager
+        self._browser_auth_manager = browser_auth_manager
+        self._insights_cache = insights_cache or InsightsTTLCache()
 
     def set_auth_manager(self, auth_manager: ThreadsAuthManager) -> None:
         self._auth_manager = auth_manager
+
+    def set_browser_auth_manager(self, browser_auth_manager: ThreadsBrowserAuthManager) -> None:
+        self._browser_auth_manager = browser_auth_manager
 
     @property
     def platform(self) -> PlatformType:
@@ -66,13 +91,34 @@ class ThreadsPlugin(IConnectorPlugin):
         Report health honestly: an OAuth-backed connector without a usable token is
         NOT healthy, because every ingress call would fail authentication.
         """
-        if not self._auth_manager:
+        if not self._auth_manager and not self._browser_auth_manager:
             # Legacy unauthenticated public mode — nothing to verify.
             return True
         try:
-            return (await self._auth_manager.get_access_token()) is not None
+            if self._auth_manager and (await self._auth_manager.get_access_token()):
+                return True
+            return await self._browser_storage_state() is not None
         except Exception as e:
             logger.warning(f"Threads health check failed: {e}")
+            return False
+
+    async def _browser_storage_state(self) -> Optional[Dict[str, Any]]:
+        if not self._browser_auth_manager:
+            return None
+        try:
+            return await self._browser_auth_manager.get_storage_state()
+        except Exception as e:
+            logger.warning(f"Could not load the Threads browser session: {e}")
+            return None
+
+    async def _has_graph_token(self) -> bool:
+        """Whether the Tier 2 Graph API path is usable right now."""
+        if not self._auth_manager:
+            return False
+        try:
+            return (await self._auth_manager.get_access_token()) is not None
+        except Exception as e:
+            logger.warning(f"Threads OAuth token lookup failed: {e}")
             return False
 
     # --- Ingress ---
@@ -84,8 +130,14 @@ class ThreadsPlugin(IConnectorPlugin):
         limit: int = 50,
     ) -> List[TrendSignal]:
         """Fetch top/recent threads within the requested timeframe window."""
-        if not self._auth_manager:
-            return await self._fetch_legacy_public(geo=geo, limit=limit)
+        if not await self._has_graph_token():
+            storage_state = await self._browser_storage_state()
+            if storage_state:
+                return await self._fetch_via_browser_session(
+                    url=self.BROWSER_FEED_URL, storage_state=storage_state, geo=geo, limit=limit
+                )
+            if not self._auth_manager:
+                return await self._fetch_legacy_public(geo=geo, limit=limit)
 
         token = await self._require_token()
         since, until = self._resolve_window(timeframe)
@@ -112,8 +164,14 @@ class ThreadsPlugin(IConnectorPlugin):
         limit: int = 20,
     ) -> List[TrendSignal]:
         """Probe the Threads keyword search endpoint for each research keyword."""
-        if not self._auth_manager:
-            return await self._fetch_legacy_public(geo=geo, limit=limit)
+        if not await self._has_graph_token():
+            storage_state = await self._browser_storage_state()
+            if storage_state:
+                return await self._search_via_browser_session(
+                    keywords=keywords, storage_state=storage_state, geo=geo, limit=limit
+                )
+            if not self._auth_manager:
+                return await self._fetch_legacy_public(geo=geo, limit=limit)
 
         token = await self._require_token()
         since, until = self._resolve_window(timeframe)
@@ -200,9 +258,17 @@ class ThreadsPlugin(IConnectorPlugin):
         if not post_ids:
             return {}
 
+        # The 15-minute worker pass re-reads the same posts; serving them from the TTL
+        # cache is what keeps this under Meta's 200 calls/user/hour budget.
+        insights, pending = self._insights_cache.partition(
+            PlatformType.THREADS.value, post_ids, self.INSIGHT_METRICS
+        )
+        if not pending:
+            return insights
+
         semaphore = asyncio.Semaphore(self.MAX_INSIGHT_CONCURRENCY)
 
-        async def _one(post_id: str) -> tuple[str, Dict[str, float]]:
+        async def _one(post_id: str) -> Tuple[str, Dict[str, float]]:
             async with semaphore:
                 payload = await self._graph_get(
                     f"{self._api_root}/{post_id}/insights",
@@ -210,9 +276,8 @@ class ThreadsPlugin(IConnectorPlugin):
                 )
                 return post_id, self._parse_insights(payload)
 
-        results = await asyncio.gather(*[_one(pid) for pid in post_ids], return_exceptions=True)
+        results = await asyncio.gather(*[_one(pid) for pid in pending], return_exceptions=True)
 
-        insights: Dict[str, Dict[str, float]] = {}
         for result in results:
             if isinstance(result, (ConnectorAuthenticationException, ConnectorQuotaExceededException)):
                 # Token rejection / soft-block must surface, not be swallowed per-post.
@@ -222,6 +287,7 @@ class ThreadsPlugin(IConnectorPlugin):
                 continue
             post_id, metrics = result
             insights[post_id] = metrics
+            self._insights_cache.set(PlatformType.THREADS.value, post_id, self.INSIGHT_METRICS, metrics)
         return insights
 
     @staticmethod
@@ -320,6 +386,112 @@ class ThreadsPlugin(IConnectorPlugin):
             if err:
                 return str(err)
         return str(body)[:300]
+
+    # --- Tier 1 browser-session ingress ---
+
+    async def _search_via_browser_session(
+        self,
+        keywords: List[str],
+        storage_state: Dict[str, Any],
+        geo: GeoCode,
+        limit: int,
+    ) -> List[TrendSignal]:
+        """Run one logged-in public search per keyword using the captured browser session."""
+        all_signals: List[TrendSignal] = []
+        seen_ids: set[str] = set()
+
+        for keyword in [k.strip() for k in keywords[:10] if k and k.strip()]:
+            url = f"{self.BROWSER_SEARCH_URL}?{urllib.parse.urlencode({'q': keyword, 'serp_type': 'default'})}"
+            signals = await self._fetch_via_browser_session(
+                url=url, storage_state=storage_state, geo=geo, limit=limit, keyword=keyword
+            )
+            for signal in signals:
+                post_id = str(signal.metadata.get("post_id") or "")
+                if post_id and post_id in seen_ids:
+                    continue
+                seen_ids.add(post_id)
+                all_signals.append(signal)
+
+        return all_signals
+
+    async def _fetch_via_browser_session(
+        self,
+        url: str,
+        storage_state: Dict[str, Any],
+        geo: GeoCode,
+        limit: int,
+        keyword: Optional[str] = None,
+    ) -> List[TrendSignal]:
+        payloads = await collect_json_payloads(
+            url=url,
+            storage_state=storage_state,
+            url_markers=self.BROWSER_API_MARKERS,
+            geo=geo,
+        )
+        records = extract_records(
+            payloads,
+            is_record=self._is_browser_post,
+            identity=lambda node: str(node.get("pk") or node.get("id") or ""),
+            limit=min(max(limit, 1), 100),
+        )
+        return [self._map_browser_post(node, geo=geo, keyword=keyword) for node in records]
+
+    @staticmethod
+    def _is_browser_post(node: Dict[str, Any]) -> bool:
+        """Match the shape of a Threads post rather than a fixed GraphQL envelope path."""
+        if not (node.get("pk") or node.get("id")):
+            return False
+        if not isinstance(node.get("code"), str):
+            return False
+        return bool(node.get("caption") is not None or node.get("text_post_app_info"))
+
+    def _map_browser_post(
+        self,
+        node: Dict[str, Any],
+        geo: GeoCode,
+        keyword: Optional[str],
+    ) -> TrendSignal:
+        post_id = str(node.get("pk") or node.get("id") or "")
+        code = str(node.get("code") or "")
+        text = caption_text(node)
+        user = node.get("user") if isinstance(node.get("user"), dict) else {}
+        username = str(user.get("username") or "")
+        app_info = node.get("text_post_app_info") if isinstance(node.get("text_post_app_info"), dict) else {}
+
+        likes = coerce_int(node.get("like_count"))
+        replies = coerce_int(app_info.get("direct_reply_count"))
+
+        return TrendSignal(
+            platform=PlatformType.THREADS,
+            raw_title=text[:200] or f"Threads Post #{post_id}",
+            metric_value=float(likes),
+            growth_velocity=0.0,
+            source_url=f"https://www.threads.net/@{username}/post/{code}" if username and code else None,
+            geo_code=geo,
+            metadata={
+                "post_id": post_id,
+                "username": username,
+                "like_count": likes,
+                "reply_count": replies,
+                "reposts": coerce_int(app_info.get("repost_count")),
+                "quotes": coerce_int(app_info.get("quote_count")),
+                "published_at": self._normalize_epoch(node.get("taken_at")),
+                "source": "threads_browser_session",
+                "tier": "TIER_1_BROWSER_SESSION",
+                **({"matched_keyword": keyword} if keyword else {}),
+            },
+            captured_at=datetime.now(timezone.utc),
+        )
+
+    @staticmethod
+    def _normalize_epoch(raw: Any) -> Optional[str]:
+        """Threads' private payloads carry `taken_at` as unix seconds."""
+        if not raw:
+            return None
+        try:
+            return datetime.fromtimestamp(int(raw), tz=timezone.utc).isoformat()
+        except (TypeError, ValueError, OSError):
+            return None
 
     # --- Legacy unauthenticated fallback ---
 

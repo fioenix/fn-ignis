@@ -121,7 +121,7 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 | AI Agent / Client | Configuration & Standards | Capabilities Supported |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 31 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 34 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
 | **Claude Code** | [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Agent Skills Standard, Native In-Chat Artifacts |
 | **Cursor IDE** | [`.cursor/rules/fn-ignis.mdc`](.cursor/rules/fn-ignis.mdc), [`.cursorrules`](.cursorrules) | Context-Aware Multi-Platform Market Intelligence |
 | **Windsurf IDE** | [`.windsurfrules`](.windsurfrules) | Cascade Step-by-Step Research Rule Protocol |
@@ -163,9 +163,12 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **`get_system_logs(limit, level)`**: Inspect audit event trails.
 - **`verify_connectors_health()`**: Run real-time synthetic diagnostics on YouTube quota, Google RSS, TikTok Playwright contexts, database pool, and proxy connectivity.
 - **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Managed browser credential lifecycle.
-- **`authenticate_threads(auth_code, client_id, client_secret, redirect_uri)`**: Complete the official Meta Threads Graph API OAuth 2.0 flow (authorization code → short-lived token → 60-day long-lived user token), persisted AES-encrypted.
-- **`get_threads_auth_status()`**: Inspect the stored Threads token — active/expired state, scopes, `key_version`, days remaining, and whether a refresh is due.
-- **`clear_threads_auth()`**: Revoke and delete the stored Threads OAuth credentials.
+- **`authenticate_threads(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: Dual-UX Meta connect. Called with no `auth_code` (or `browser_login=true`) it runs the Tier 1 1-click browser session capture — an ordinary personal account, no Meta Developer App. With an `auth_code` it runs the Tier 2 Graph API OAuth 2.0 flow (authorization code → short-lived token → 60-day long-lived user token), persisted AES-encrypted.
+- **`get_threads_auth_status()`**: Inspect both tiers — token active/expired state, scopes, `key_version`, days remaining, refresh due, plus any captured browser session.
+- **`clear_threads_auth()`**: Revoke and delete the stored Threads OAuth credentials and browser session.
+- **`authenticate_instagram(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: The same Dual-UX connect for Instagram, backing Reels ingress.
+- **`get_instagram_auth_status()`**: Inspect the stored Instagram credentials across both tiers.
+- **`clear_instagram_auth()`**: Revoke and delete the stored Instagram OAuth credentials and browser session.
 - **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo)`**, **`trigger_ingress_refresh(geo)`**: Real-time trend exploration.
 
 ### 4. FastMCP Native Resources & Prompts

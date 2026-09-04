@@ -249,7 +249,7 @@ def auto_provision(json_output: bool = False) -> Dict[str, Any]:
         "clients_configured": client_results,
         "diagnostics": diag,
         "capabilities": {
-            "tools_count": 31,
+            "tools_count": 34,
             "prompts_count": 2,
             "resources_count": 2,
             "sop": "6-Step Market Opportunity & White Space Standard Operating Procedure"

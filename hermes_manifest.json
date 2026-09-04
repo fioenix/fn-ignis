@@ -423,6 +423,192 @@
   {
     "type": "function",
     "function": {
+      "name": "authenticate_threads",
+      "description": "Connect Meta Threads with either tier: call with no auth_code (or browser_login=true) for the 1-click browser session capture that needs no Meta Developer App, or pass auth_code to run the Graph API OAuth 2.0 flow and store a 60-day long-lived token AES-encrypted.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "redirect_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "browser_login": {
+            "default": false,
+            "type": "boolean"
+          },
+          "headless": {
+            "default": false,
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "default": 180,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_threads_auth_status",
+      "description": "Inspect the stored Meta Threads credentials across both tiers: OAuth 2.0 token state, granted scopes, key version, days remaining and refresh due, plus any captured browser session.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "clear_threads_auth",
+      "description": "Revoke and delete the stored Meta Threads OAuth 2.0 credentials from local encrypted storage.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "authenticate_instagram",
+      "description": "Connect Instagram with either tier: call with no auth_code (or browser_login=true) for the 1-click browser session capture that needs no Meta Developer App, or pass auth_code to run the Instagram Graph API OAuth 2.0 flow and store a 60-day long-lived token AES-encrypted.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "auth_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "redirect_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "browser_login": {
+            "default": false,
+            "type": "boolean"
+          },
+          "headless": {
+            "default": false,
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "default": 180,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_instagram_auth_status",
+      "description": "Inspect the stored Instagram credentials across both tiers: OAuth 2.0 token state, granted scopes, days remaining and refresh due, plus any captured browser session.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "clear_instagram_auth",
+      "description": "Revoke and delete the stored Instagram OAuth 2.0 credentials and captured browser session from local encrypted storage.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "get_tiktok_search_suggestions",
       "description": "Fetch real-time derivative search suggestions / autocomplete queries from TikTok for market demand analysis.",
       "parameters": {
@@ -667,60 +853,6 @@
       "parameters": {
         "additionalProperties": false,
         "properties": {},
-        "type": "object"
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "authenticate_threads",
-      "description": "Complete the official Meta Threads Graph API OAuth 2.0 flow: exchange an authorization code for a short-lived token, upgrade it to a 60-day long-lived user token, and persist it AES-encrypted.",
-      "parameters": {
-        "additionalProperties": false,
-        "properties": {
-          "auth_code": {
-            "type": "string"
-          },
-          "client_id": {
-            "type": "string"
-          },
-          "client_secret": {
-            "type": "string"
-          },
-          "redirect_uri": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "auth_code"
-        ],
-        "type": "object"
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "get_threads_auth_status",
-      "description": "Inspect the stored Meta Threads OAuth 2.0 token: active/expired state, granted scopes, key version, days remaining, and whether a refresh is due.",
-      "parameters": {
-        "additionalProperties": false,
-        "properties": {},
-        "required": [],
-        "type": "object"
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "clear_threads_auth",
-      "description": "Revoke and delete the stored Meta Threads OAuth 2.0 credentials from local encrypted storage.",
-      "parameters": {
-        "additionalProperties": false,
-        "properties": {},
-        "required": [],
         "type": "object"
       }
     }
