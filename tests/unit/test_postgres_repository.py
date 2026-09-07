@@ -57,12 +57,14 @@ async def test_save_clusters_upsert(sample_topic_cluster):
 
     await repo.save_clusters([sample_topic_cluster])
     
-    assert mock_cursor.execute.called
-    query_arg, params_arg = mock_cursor.execute.call_args[0]
-    assert "INSERT INTO topic_clusters" in query_arg
-    assert "ON CONFLICT (canonical_name) DO UPDATE" in query_arg
-    assert "RETURNING id" in query_arg
-    assert params_arg[1] == sample_topic_cluster.canonical_name
+    assert mock_cursor.execute.call_count == 2
+    # First call: find_query
+    first_call_query = mock_cursor.execute.call_args_list[0][0][0]
+    assert "SELECT id, canonical_name" in first_call_query
+    assert "FROM topic_clusters" in first_call_query
+    # Second call: update_query (since mock_cursor returned a row)
+    second_call_query = mock_cursor.execute.call_args_list[1][0][0]
+    assert "UPDATE topic_clusters SET" in second_call_query
 
 
 @pytest.mark.asyncio

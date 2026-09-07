@@ -103,7 +103,22 @@ class PostgresTimescaleRepository(ITrendRepository):
             return
 
         pool = await self._get_pool()
-        query = """
+        find_query = """
+            SELECT id, canonical_name
+            FROM topic_clusters
+            WHERE id = %s OR LOWER(canonical_name) = LOWER(%s)
+            LIMIT 1;
+        """
+        update_query = """
+            UPDATE topic_clusters SET
+                canonical_name = %s,
+                summary_text = %s,
+                category = %s,
+                cross_platform_score = %s,
+                last_updated_at = %s
+            WHERE id = %s;
+        """
+        insert_query = """
             INSERT INTO topic_clusters (
                 id,
                 canonical_name,
@@ -112,13 +127,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 cross_platform_score,
                 first_seen_at,
                 last_updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (canonical_name) DO UPDATE SET
-                summary_text = EXCLUDED.summary_text,
-                category = EXCLUDED.category,
-                cross_platform_score = EXCLUDED.cross_platform_score,
-                last_updated_at = EXCLUDED.last_updated_at
-            RETURNING id;
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s);
         """
 
         try:
@@ -127,24 +136,44 @@ class PostgresTimescaleRepository(ITrendRepository):
                     for c in clusters:
                         c_first_seen = c.first_seen_at or datetime.now(timezone.utc)
                         c_last_updated = c.last_updated_at or datetime.now(timezone.utc)
-                        await cur.execute(
-                            query,
-                            (
-                                str(c.id),
-                                c.canonical_name,
-                                c.summary_text,
-                                c.category,
-                                c.cross_platform_score,
-                                c_first_seen,
-                                c_last_updated,
-                            ),
-                        )
+                        clean_name = c.canonical_name.strip()
+                        c_id_str = str(c.id)
+
+                        await cur.execute(find_query, (c_id_str, clean_name))
                         row = await cur.fetchone()
-                        if row and row[0]:
+
+                        if row:
                             actual_id = row[0]
-                            c.id = actual_id
-                            for s in c.signals:
-                                s.cluster_id = actual_id
+                            await cur.execute(
+                                update_query,
+                                (
+                                    clean_name,
+                                    c.summary_text,
+                                    c.category,
+                                    c.cross_platform_score,
+                                    c_last_updated,
+                                    actual_id,
+                                ),
+                            )
+                        else:
+                            actual_id = c.id
+                            await cur.execute(
+                                insert_query,
+                                (
+                                    c_id_str,
+                                    clean_name,
+                                    c.summary_text,
+                                    c.category,
+                                    c.cross_platform_score,
+                                    c_first_seen,
+                                    c_last_updated,
+                                ),
+                            )
+
+                        c.id = actual_id
+                        for s in c.signals:
+                            s.cluster_id = actual_id
+
             logger.info(f"Successfully upserted {len(clusters)} topic clusters.")
         except Exception as e:
             logger.error(f"Error upserting topic clusters: {e}", exc_info=True)

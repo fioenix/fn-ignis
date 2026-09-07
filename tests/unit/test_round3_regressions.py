@@ -202,4 +202,6 @@ async def test_save_clusters_canonical_name_conflict_resolution():
     # Ensure actual cluster ID and signal cluster ID were mapped to the existing ID
     assert cluster.id == existing_id
     assert sig.cluster_id == existing_id
-    assert "ON CONFLICT (canonical_name) DO UPDATE" in mock_cursor.execute.call_args[0][0]
+    # Assert that existing cluster was updated
+    second_call_query = mock_cursor.execute.call_args_list[1][0][0]
+    assert "UPDATE topic_clusters SET" in second_call_query
