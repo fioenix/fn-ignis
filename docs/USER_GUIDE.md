@@ -257,6 +257,7 @@ The `fn-ignis` FastMCP server exposes **39 atomic and strategic tools**:
 ### 2. Macro Trend Surveillance & Exploration (4 Tools)
 - `get_trending_topics`: Retrieve breakout topics scored by composite momentum.
 - `get_topic_detail`: Retrieve deep multi-channel telemetry for a specific topic.
+- All HTML artifacts render in the FINOLABS design system (Anton / Space Grotesk / JetBrains Mono, Lab Ink neutrals, mint-and-violet brand palette).
 - `generate_trend_artifact`: Export a standalone HTML artifact — the trend dashboard, a single topic card (`topic_id`), or an interactive force-directed trend graph (`format="graph"`). The graph is navigable down to the cluster level; signals are aggregated into density halos around their cluster, so a day with tens of thousands of rows still renders smoothly.
 - `trigger_ingress_refresh`: Manually trigger macro pipeline scan.
 

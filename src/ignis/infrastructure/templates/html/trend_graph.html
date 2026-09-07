@@ -5,88 +5,107 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FN-IGNIS Trend Graph</title>
   <!--
-    Dependency-free by design: the canvas renderer and the force layout are implemented inline so the
-    exported file stays a single self-contained artifact that opens offline, without a CDN round trip.
+    The canvas renderer and the force layout are written inline so the export stays a single
+    self-contained file. Only the FINOLABS webfonts are fetched, and they degrade to the
+    system stack offline.
   -->
+  {% include "_fino_theme.html" %}
   <style>
-    :root {
-      --bg: #f8fafc;
-      --panel: #ffffff;
-      --border: #e2e8f0;
-      --text: #0f172a;
-      --muted: #64748b;
-      --accent: #ea580c;
-    }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      overflow: hidden;
-    }
+    body { overflow: hidden; font-family: var(--font-sans); }
     #stage { position: fixed; inset: 0; }
     canvas { display: block; width: 100%; height: 100%; cursor: grab; }
     canvas.dragging { cursor: grabbing; }
 
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      box-shadow: 0 8px 24px rgba(15, 23, 42, .06);
-    }
     #toolbar {
       position: fixed; top: 16px; left: 16px; right: 16px;
       display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-      padding: 10px 14px;
+      padding: 12px 16px;
     }
-    #toolbar .brand { font-weight: 800; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
-    #toolbar .chip { font-size: 11px; font-weight: 700; color: var(--muted); background: #f1f5f9; border-radius: 999px; padding: 3px 10px; }
+    #toolbar .brand {
+      font-family: var(--font-display); font-weight: 400; font-size: var(--text-lg);
+      letter-spacing: var(--tracking-display); text-transform: uppercase;
+      color: var(--color-foreground); line-height: 1;
+    }
+    #toolbar .brand::after {
+      content: ""; display: block; height: 2px; margin-top: 3px; border-radius: 2px;
+      background: var(--fn-gradient-iridescent-line);
+    }
     #toolbar input, #toolbar select {
-      font: inherit; font-size: 12px; padding: 6px 10px;
-      border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text);
+      font-family: var(--font-sans); font-size: var(--text-xs); padding: 7px 10px;
+      border: 1px solid var(--color-border); border-radius: var(--radius-md);
+      background: var(--color-background); color: var(--color-foreground);
     }
-    #toolbar input[type="range"] { padding: 0; width: 110px; }
-    #toolbar label { font-size: 11px; font-weight: 700; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    #toolbar input:focus-visible, #toolbar select:focus-visible, #toolbar button:focus-visible {
+      outline: 2px solid var(--color-ring); outline-offset: 2px;
+    }
+    #toolbar input[type="range"] { padding: 0; width: 110px; accent-color: var(--color-fn-violet); }
+    #toolbar label {
+      font-size: var(--text-2xs); font-weight: var(--font-weight-bold); letter-spacing: var(--tracking-micro);
+      color: var(--color-muted-foreground); display: flex; align-items: center; gap: 6px;
+    }
     #toolbar button {
-      font: inherit; font-size: 12px; font-weight: 700; padding: 6px 12px; cursor: pointer;
-      border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text);
+      font-family: var(--font-sans); font-size: var(--text-xs); font-weight: var(--font-weight-semibold);
+      padding: 7px 14px; cursor: pointer; border: 1px solid var(--color-border);
+      border-radius: var(--radius-full); background: var(--color-background); color: var(--color-foreground);
+      transition: border-color var(--duration-base) var(--ease-out), background var(--duration-base) var(--ease-out);
     }
-    #toolbar button:hover { border-color: #cbd5e1; }
+    #toolbar button:hover { border-color: var(--color-fn-mint); background: var(--color-fn-mint-soft); }
 
     #details {
-      position: fixed; top: 88px; right: 16px; width: 310px; max-height: calc(100vh - 120px);
-      overflow-y: auto; padding: 16px; display: none;
+      position: fixed; top: 96px; right: 16px; width: 320px; max-height: calc(100vh - 128px);
+      overflow-y: auto; padding: 18px; display: none;
     }
-    #details h2 { margin: 0 0 6px; font-size: 15px; line-height: 1.35; }
-    #details .meta { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
-    #details .summary { font-size: 12px; color: #475569; line-height: 1.55; margin-bottom: 14px; }
-    #details .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11px; }
-    #details .bar-row .name { width: 74px; font-weight: 700; color: var(--muted); }
-    #details .bar { height: 8px; border-radius: 999px; flex: 1; background: #f1f5f9; overflow: hidden; }
-    #details .bar span { display: block; height: 100%; border-radius: 999px; }
-    #details .close { position: absolute; top: 12px; right: 14px; border: 0; background: none; font-size: 18px; color: var(--muted); cursor: pointer; }
+    #details h2 {
+      margin: 0 0 6px; font-size: var(--text-base); line-height: 1.4;
+      letter-spacing: var(--tracking-heading); font-weight: var(--font-weight-bold);
+    }
+    #details .meta {
+      font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: var(--tracking-mono);
+      color: var(--color-muted-foreground); margin-bottom: 14px; font-variant-numeric: tabular-nums;
+    }
+    #details .summary { font-size: var(--text-xs); color: var(--color-muted-foreground); line-height: 1.6; margin-bottom: 16px; }
+    #details .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: var(--text-2xs); }
+    #details .bar-row .name { width: 74px; font-weight: var(--font-weight-bold); color: var(--color-muted-foreground); }
+    #details .bar-row b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    #details .bar { height: 8px; border-radius: var(--radius-full); flex: 1; background: var(--color-muted); overflow: hidden; }
+    #details .bar span { display: block; height: 100%; border-radius: var(--radius-full); }
+    #details .close {
+      position: absolute; top: 14px; right: 16px; border: 0; background: none;
+      font-size: var(--text-lg); color: var(--color-subtle-foreground); cursor: pointer; line-height: 1;
+    }
 
-    #legend { position: fixed; bottom: 16px; left: 16px; padding: 12px 14px; font-size: 11px; }
-    #legend .row { display: flex; align-items: center; gap: 7px; margin-top: 5px; color: var(--muted); font-weight: 600; }
-    #legend .dot { width: 9px; height: 9px; border-radius: 50%; }
-    #legend .title { font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--text); font-size: 10px; }
+    #legend { position: fixed; bottom: 16px; left: 16px; padding: 14px 16px; font-size: var(--text-2xs); }
+    #legend .row { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--color-muted-foreground); font-weight: var(--font-weight-medium); }
+    #legend .dot { width: 10px; height: 10px; border-radius: var(--radius-full); flex-shrink: 0; }
+    #legend .ring { width: 10px; height: 10px; border-radius: var(--radius-full); flex-shrink: 0; border: 3px solid; background: transparent; }
+    #legend .title {
+      font-weight: var(--font-weight-bold); text-transform: uppercase; letter-spacing: var(--tracking-eyebrow);
+      color: var(--color-fn-mint-ink); font-size: var(--text-3xs);
+    }
+    #legend .title + .caption { color: var(--color-subtle-foreground); font-size: var(--text-3xs); margin-top: 2px; }
 
     #tooltip {
       position: fixed; pointer-events: none; display: none; z-index: 20;
-      background: #0f172a; color: #f8fafc; font-size: 11px; font-weight: 600;
-      padding: 6px 10px; border-radius: 8px; max-width: 260px; line-height: 1.4;
+      background: var(--color-ink-900); color: var(--color-ink-0);
+      font-size: var(--text-2xs); font-weight: var(--font-weight-medium);
+      padding: 7px 11px; border-radius: var(--radius-md); max-width: 280px; line-height: 1.45;
     }
-    #hint { position: fixed; bottom: 16px; right: 16px; font-size: 11px; color: var(--muted); font-weight: 600; }
+    #tooltip b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    #hint {
+      position: fixed; bottom: 18px; right: 18px; font-size: var(--text-2xs);
+      color: var(--color-subtle-foreground); font-weight: var(--font-weight-medium);
+    }
   </style>
 </head>
-<body>
+<body class="product-mode">
   <div id="stage"><canvas id="graph"></canvas></div>
 
-  <div id="toolbar" class="card">
+  <div id="toolbar" class="fn-card">
     <span class="brand">FN-IGNIS Graph</span>
-    <span class="chip" id="geo-chip"></span>
-    <span class="chip" id="count-chip"></span>
+    <span class="fn-chip fn-mono" id="geo-chip"></span>
+    <span class="fn-chip fn-mono" id="count-chip"></span>
     <input id="search" type="search" placeholder="Search topic..." autocomplete="off">
     <select id="category-filter"><option value="">All categories</option></select>
     <select id="platform-filter"><option value="">All platforms</option></select>
@@ -96,7 +115,7 @@
     <button id="reset">Reset view</button>
   </div>
 
-  <div id="details" class="card">
+  <div id="details" class="fn-card">
     <button class="close" id="details-close" aria-label="Close">&times;</button>
     <h2 id="d-title"></h2>
     <div class="meta" id="d-meta"></div>
@@ -104,8 +123,7 @@
     <div id="d-platforms"></div>
   </div>
 
-  <div id="legend" class="card">
-    <div class="title">Platforms</div>
+  <div id="legend" class="fn-card">
     <div id="legend-rows"></div>
   </div>
 
@@ -115,21 +133,27 @@
   <script>
     const GRAPH = {{ graph | tojson }};
 
-    const PLATFORM_COLORS = {
-      google: "#4285f4",
-      youtube: "#ef4444",
-      tiktok: "#0f172a",
-      threads: "#8b5cf6",
-      reels: "#ec4899",
+    // Colours are read from the FINOLABS tokens rather than hard-coded, so the artifact
+    // follows the design system when it moves. Two encodings, deliberately kept apart:
+    // the node fill is momentum (ordinal, cool to warm) and the ring is the platform mix
+    // (categorical, from the data-viz chart slots).
+    const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    const PLATFORM_TOKENS = {
+      google: "--color-chart-1",
+      youtube: "--color-chart-9",
+      tiktok: "--color-chart-12",
+      threads: "--color-chart-4",
+      reels: "--color-chart-5",
     };
-    const MOMENTUM_COLORS = {
-      breakout: "#e11d48",
-      surging: "#ea580c",
-      steady: "#0ea5e9",
-      declining: "#94a3b8",
+    const MOMENTUM_TOKENS = {
+      declining: "--color-ink-300",
+      steady: "--color-chart-3",
+      surging: "--color-chart-2",
+      breakout: "--color-chart-10",
     };
-    const platformColor = (p) => PLATFORM_COLORS[p] || "#64748b";
-    const momentumColor = (m) => MOMENTUM_COLORS[(m || "").toLowerCase()] || "#94a3b8";
+    const FALLBACK = token("--color-ink-400") || "#8B8BA6";
+    const platformColor = (p) => token(PLATFORM_TOKENS[p] || "") || FALLBACK;
+    const momentumColor = (m) => token(MOMENTUM_TOKENS[(m || "").toLowerCase()] || "") || FALLBACK;
 
     const canvas = document.getElementById("graph");
     const ctx = canvas.getContext("2d");
@@ -138,11 +162,13 @@
     const nodes = GRAPH.nodes.map((n, i) => {
       const angle = (i / Math.max(1, GRAPH.nodes.length)) * Math.PI * 2;
       const spread = 200 + Math.sqrt(i) * 42;
+      const total = Math.max(1, Object.values(n.platforms).reduce((sum, c) => sum + c, 0));
       return Object.assign({}, n, {
         x: Math.cos(angle) * spread,
         y: Math.sin(angle) * spread,
         vx: 0, vy: 0,
         r: 6 + Math.sqrt(Math.max(1, n.signal_count)) * 2.4 + n.score / 22,
+        mix: Object.entries(n.platforms).sort((a, b) => b[1] - a[1]).map(([p, c]) => [p, c / total]),
         visible: true,
       });
     });
@@ -232,7 +258,7 @@
       ctx.lineWidth = 1 / scale;
       edges.forEach((e) => {
         const lit = e.source.visible && e.target.visible && isFocused(e.source) && isFocused(e.target);
-        ctx.strokeStyle = lit ? "rgba(100,116,139," + (0.25 + e.weight * 0.5) + ")" : "rgba(148,163,184,0.08)";
+        ctx.strokeStyle = lit ? "rgba(91, 91, 121, " + (0.22 + e.weight * 0.45) + ")" : "rgba(188, 188, 208, 0.10)";
         ctx.beginPath();
         ctx.moveTo(e.source.x, e.source.y);
         ctx.lineTo(e.target.x, e.target.y);
@@ -247,15 +273,32 @@
         const dim = !n.visible || !isFocused(n);
         const alphaMul = dim ? 0.13 : 1;
 
-        if (n.dots.length && n.r * scale >= 5) {
-          // The signal layer is a density halo: dots are aggregated, never individually addressable.
-          const ring = n.r + 7;
+        // Ring: the platform mix of the cluster, always drawn so the platform legend is
+        // legible at any zoom. It costs one arc per platform, never one per signal.
+        if (n.mix.length) {
+          ctx.globalAlpha = alphaMul;
+          ctx.lineWidth = Math.max(2.2, n.r * 0.34);
+          const ringRadius = n.r + ctx.lineWidth * 0.75;
+          let from = -Math.PI / 2;
+          n.mix.forEach(([platform, share]) => {
+            const to = from + share * Math.PI * 2;
+            ctx.strokeStyle = platformColor(platform);
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, ringRadius, from + 0.012, to - 0.012);
+            ctx.stroke();
+            from = to;
+          });
+        }
+
+        // Dots are the signal density cue, aggregated and never individually addressable.
+        if (n.dots.length && n.r * scale >= 9) {
+          const halo = n.r + Math.max(2.2, n.r * 0.34) * 1.5 + 5;
           n.dots.forEach((platform, i) => {
             const a = (i / n.dots.length) * Math.PI * 2 + n.r;
-            ctx.globalAlpha = alphaMul * 0.75;
+            ctx.globalAlpha = alphaMul * 0.65;
             ctx.fillStyle = platformColor(platform);
             ctx.beginPath();
-            ctx.arc(n.x + Math.cos(a) * ring, n.y + Math.sin(a) * ring, 1.9, 0, Math.PI * 2);
+            ctx.arc(n.x + Math.cos(a) * halo, n.y + Math.sin(a) * halo, 1.8, 0, Math.PI * 2);
             ctx.fill();
           });
         }
@@ -267,7 +310,7 @@
         ctx.fill();
 
         if (n === hovered || n === selected) {
-          ctx.strokeStyle = "#0f172a";
+          ctx.strokeStyle = token("--color-ring");
           ctx.lineWidth = 2 / scale;
           ctx.stroke();
         }
@@ -276,8 +319,8 @@
           || (n.r >= LABEL_MIN_RADIUS && n.r * scale >= 4.5);
         if (labelsEnabled && !dim && labelWorthy) {
           ctx.globalAlpha = 1;
-          ctx.fillStyle = "#0f172a";
-          ctx.font = (11 / scale) + "px 'Plus Jakarta Sans', system-ui, sans-serif";
+          ctx.fillStyle = token("--color-foreground");
+          ctx.font = (11 / scale) + "px " + token("--font-sans");
           ctx.textAlign = "center";
           const label = n.label.length > 34 ? n.label.slice(0, 33) + "…" : n.label;
           ctx.fillText(label, n.x, n.y + n.r + 13 / scale);
@@ -342,7 +385,11 @@
         tooltip.style.display = "block";
         tooltip.style.left = (ev.clientX + 14) + "px";
         tooltip.style.top = (ev.clientY + 14) + "px";
-        tooltip.textContent = hovered.label + "  ·  " + hovered.score + "  ·  " + hovered.signal_count + " signals";
+        tooltip.innerHTML = "";
+        tooltip.append(hovered.label, document.createElement("br"));
+        const stats = document.createElement("b");
+        stats.textContent = hovered.score + " · " + hovered.signal_count + " signals · " + hovered.momentum;
+        tooltip.append(stats);
       } else {
         tooltip.style.display = "none";
       }
@@ -457,29 +504,30 @@
       fill(momentumFilter, momentums);
 
       const rows = document.getElementById("legend-rows");
-      platforms.forEach((p) => {
+      const section = (title, caption) => {
+        const heading = document.createElement("div");
+        heading.className = "title";
+        heading.style.marginTop = rows.childElementCount ? "12px" : "0";
+        heading.textContent = title;
+        const sub = document.createElement("div");
+        sub.className = "caption";
+        sub.textContent = caption;
+        rows.append(heading, sub);
+      };
+      const swatchRow = (label, style) => {
         const row = document.createElement("div");
         row.className = "row";
-        const dot = document.createElement("span");
-        dot.className = "dot";
-        dot.style.background = platformColor(p);
-        row.append(dot, document.createTextNode(p));
+        const swatch = document.createElement("span");
+        Object.assign(swatch, style.attrs);
+        Object.assign(swatch.style, style.css);
+        row.append(swatch, document.createTextNode(label));
         rows.appendChild(row);
-      });
-      const momentumTitle = document.createElement("div");
-      momentumTitle.className = "title";
-      momentumTitle.style.marginTop = "10px";
-      momentumTitle.textContent = "Momentum";
-      rows.appendChild(momentumTitle);
-      momentums.forEach((m) => {
-        const row = document.createElement("div");
-        row.className = "row";
-        const dot = document.createElement("span");
-        dot.className = "dot";
-        dot.style.background = momentumColor(m);
-        row.append(dot, document.createTextNode(m));
-        rows.appendChild(row);
-      });
+      };
+
+      section("Momentum", "node fill");
+      momentums.forEach((m) => swatchRow(m, { attrs: { className: "dot" }, css: { background: momentumColor(m) } }));
+      section("Platform", "ring around the node");
+      platforms.forEach((p) => swatchRow(p, { attrs: { className: "ring" }, css: { borderColor: platformColor(p) } }));
     }
 
     resize();

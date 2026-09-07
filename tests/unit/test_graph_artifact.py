@@ -88,12 +88,24 @@ def test_edges_link_similar_clusters_and_stay_bounded_per_node():
     assert all(count <= HtmlArtifactBuilder.MAX_EDGES_PER_NODE for count in per_node.values())
 
 
-def test_graph_artifact_is_a_self_contained_offline_file():
+def test_graph_artifact_runs_without_external_code():
+    """Only the FINOLABS webfonts may be fetched; the renderer itself must work offline."""
     html = HtmlArtifactBuilder().build_graph_artifact(
         [_cluster("Topic", 50.0, "tech", _signals(PlatformType.YOUTUBE, 1))], geo=GeoCode.VN
     )
     assert "<canvas" in html
-    assert "src=\"http" not in html and "@import url(" not in html
+    assert "<script src=" not in html
+    external = set(re.findall(r'href="(https?://[^"]+)"', html))
+    assert all("fonts.googleapis.com" in url or "fonts.gstatic.com" in url for url in external), external
+
+
+def test_graph_artifact_uses_design_system_tokens_instead_of_raw_hex():
+    """Colours come from the FINOLABS token layer, not from hard-coded values."""
+    html = HtmlArtifactBuilder().build_graph_artifact(
+        [_cluster("Topic", 50.0, "tech", _signals(PlatformType.YOUTUBE, 1))], geo=GeoCode.VN
+    )
+    assert "--color-chart-1" in html and "--font-sans" in html
+    assert "product-mode" in html
 
 
 def test_graph_artifact_sanitizes_pii_in_labels():

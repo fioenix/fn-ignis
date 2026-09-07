@@ -1,40 +1,82 @@
 <!DOCTYPE html>
-<html lang="en" class="light">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ cluster.canonical_name }} - Trend Card</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>{{ cluster.canonical_name }} — Topic Card</title>
+  {% include "_fino_theme.html" %}
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; padding: 32px 16px;
+      background: var(--color-elevated);
+      display: flex; align-items: center; justify-content: center;
+      -webkit-font-smoothing: antialiased;
+    }
+    .card { width: 100%; max-width: 40rem; padding: 28px; position: relative; overflow: hidden; }
+    .card::before {
+      content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+      background: var(--fn-gradient-iridescent-line);
+    }
+    header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;
+             padding-bottom: 18px; border-bottom: 1px solid var(--color-border); }
+    h1 {
+      margin: 8px 0 0; font-size: var(--text-xl); line-height: 1.35;
+      letter-spacing: var(--tracking-heading); font-weight: var(--font-weight-bold);
+    }
+    .score {
+      flex-shrink: 0; text-align: right;
+      font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+    }
+    .score .value { display: block; font-size: var(--text-2xl); font-weight: var(--font-weight-bold); line-height: 1.1; }
+    .score .caption {
+      display: block; font-size: var(--text-3xs); text-transform: uppercase;
+      letter-spacing: var(--tracking-eyebrow); color: var(--color-subtle-foreground);
+      font-family: var(--font-sans); font-weight: var(--font-weight-bold);
+    }
+    .summary { margin: 20px 0 0; font-size: var(--text-sm); line-height: 1.65; color: var(--color-muted-foreground); }
+    .section-title {
+      margin: 24px 0 12px; font-size: var(--text-3xs); text-transform: uppercase;
+      letter-spacing: var(--tracking-eyebrow); font-weight: var(--font-weight-bold);
+      color: var(--color-fn-mint-ink);
+    }
+    .stream { display: flex; flex-direction: column; gap: 8px; max-height: 18rem; overflow-y: auto; padding-right: 4px; }
+    .signal {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      background: var(--color-elevated); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); padding: 10px 12px; font-size: var(--text-xs);
+    }
+    .signal .title { font-weight: var(--font-weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .signal .metric {
+      flex-shrink: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+      font-weight: var(--font-weight-bold); color: var(--color-fn-mint-ink);
+    }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen p-4 md:p-8 antialiased flex items-center justify-center">
-  <div class="max-w-2xl w-full bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
-    <div class="flex justify-between items-start border-b border-slate-100 pb-4">
-      <div class="space-y-1">
-        <span class="bg-orange-100 text-orange-800 text-xs px-2.5 py-0.5 rounded-full font-extrabold uppercase">🔥 TOPIC INTEL</span>
-        <h1 class="text-xl md:text-2xl font-black text-slate-900 mt-1">{{ cluster.canonical_name }}</h1>
+<body class="product-mode">
+  <article class="card fn-card">
+    <header>
+      <div>
+        <div class="fn-eyebrow">FN-IGNIS · Topic intel</div>
+        <h1>{{ cluster.canonical_name|sanitize_pii }}</h1>
       </div>
-      <span class="text-xs font-mono font-bold bg-slate-100 text-slate-600 px-3 py-1 rounded-full">
-        Momentum: {{ cluster.cross_platform_score|round(1) }}
-      </span>
-    </div>
-
-    <p class="text-sm text-slate-600 leading-relaxed font-normal">{{ cluster.summary_text }}</p>
-
-    <div class="space-y-3 pt-2">
-      <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400">Supporting Signal Stream ({{ signals|length }})</h3>
-      <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
-        {% for s in signals %}
-        <div class="bg-slate-50 border border-slate-200/80 rounded-xl p-3 flex justify-between items-center text-xs">
-          <span class="font-semibold text-slate-800 truncate pr-2">{{ s.raw_title|sanitize_pii }}</span>
-          <span class="font-mono text-orange-600 font-bold shrink-0">{{ s.metric_value|int }}</span>
-        </div>
-        {% endfor %}
+      <div class="score">
+        <span class="value">{{ cluster.cross_platform_score|round(1) }}</span>
+        <span class="caption">Momentum</span>
       </div>
+    </header>
+
+    <p class="summary">{{ cluster.summary_text|sanitize_pii }}</p>
+
+    <h2 class="section-title">Supporting signal stream — {{ signals|length }}</h2>
+    <div class="stream">
+      {% for s in signals %}
+      <div class="signal">
+        <span class="title">{{ s.raw_title|sanitize_pii }}</span>
+        <span class="metric">{{ s.metric_value|format_number }}</span>
+      </div>
+      {% endfor %}
     </div>
-  </div>
+  </article>
 </body>
 </html>

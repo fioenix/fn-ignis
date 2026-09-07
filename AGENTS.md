@@ -102,6 +102,27 @@ When executing a formal Strategic Research Campaign, prefix the analysis with th
 - Render summaries, scorecards, and white-space matrices directly inside the chat interface (using markdown tables and cards).
 - Export standalone HTML files to `reports/` via `generate_mission_artifact` when the user requests a persistent local dossier.
 
+### 🎨 FINOLABS Design System
+
+Every HTML artifact renders in the FINOLABS design system. The tokens are vendored into
+`src/ignis/infrastructure/templates/html/_fino_theme.html` from the "Finolabs Design System"
+project on claude.ai/design (`theme.css`); update that partial when the source moves, and keep the
+values byte-identical rather than eyeballing new ones.
+
+Rules that apply to artifacts specifically:
+- Artifacts are **product surfaces**: `<body class="product-mode">`, density and data-viz tokens,
+  never the marketing register on the same page.
+- **Type**: Anton for display caps, Space Grotesk for UI and body, JetBrains Mono for numbers and
+  machine labels. Numbers use `font-variant-numeric: tabular-nums`.
+- **Colour**: never hard-code hex. Chrome reads the role tokens (`--color-foreground`,
+  `--color-border`), series read the data-viz slots (`--color-chart-1..12`), labels read the tag
+  pairs. Mint is the everyday brand colour; violet is reserved for a single high-stakes accent.
+- **No emoji.** `→ ↗ • — ◆ ◇` are the allowed glyphs; `→` is the canonical action glyph.
+- **Radius** `--radius-lg` for cards, `--radius-full` for chips; shadows only `xs`, `md`, `xl`.
+- Artifacts may fetch the FINOLABS webfonts, and nothing else external beyond the CDN libraries a
+  template already declares. The trend graph renders its canvas and force layout inline so the
+  export stays usable offline.
+
 ### 📊 Evidence Attribution Standards
 When presenting strategic conclusions, agents must maintain evidentiary integrity:
 1. **Data Ingress Summary Table**:

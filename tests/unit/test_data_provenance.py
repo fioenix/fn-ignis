@@ -351,7 +351,7 @@ def test_html_renders_ingress_audit_table_and_citation_pills():
     assert "DEGRADED" in html
     assert "Vincent AI" in html
     # Citation pill badges under the insights.
-    assert "📌 [CIT-" in html
+    assert "◆ [CIT-" in html
     assert "bg-blue-100 text-blue-800" in html
 
 

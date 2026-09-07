@@ -1,51 +1,102 @@
 <!DOCTYPE html>
-<html lang="en" class="light">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FN-IGNIS Trend Intelligence Dashboard</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  {% include "_fino_theme.html" %}
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px 20px 56px; background: var(--color-elevated); -webkit-font-smoothing: antialiased; }
+    .wrap { max-width: 72rem; margin: 0 auto; }
+
+    header.masthead { padding: 26px 28px; margin-bottom: 24px; position: relative; overflow: hidden; }
+    header.masthead::before {
+      content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+      background: var(--fn-gradient-iridescent-line);
+    }
+    .masthead-grid { display: flex; flex-wrap: wrap; gap: 20px; justify-content: space-between; align-items: flex-end; }
+    .masthead h1 { margin: 10px 0 4px; font-size: var(--text-3xl); line-height: 1.1; }
+    .masthead p { margin: 0; font-size: var(--text-sm); color: var(--color-muted-foreground); }
+    .totals { display: flex; gap: 12px; }
+    .total {
+      background: var(--color-elevated); border: 1px solid var(--color-border);
+      border-radius: var(--radius-md); padding: 12px 18px; text-align: right; min-width: 7.5rem;
+    }
+    .total .label {
+      font-size: var(--text-3xs); text-transform: uppercase; letter-spacing: var(--tracking-eyebrow);
+      color: var(--color-subtle-foreground); font-weight: var(--font-weight-bold);
+    }
+    .total .value {
+      font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+      font-size: var(--text-2xl); font-weight: var(--font-weight-bold); line-height: 1.2;
+    }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); gap: 18px; }
+    .topic { display: flex; flex-direction: column; gap: 14px; padding: 20px; }
+    .topic-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .momentum {
+      display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+      border-radius: var(--radius-full); font-size: var(--text-3xs);
+      font-weight: var(--font-weight-bold); text-transform: uppercase; letter-spacing: var(--tracking-micro);
+      background: var(--color-tag-slate); color: var(--color-tag-slate-foreground);
+    }
+    .momentum[data-level="breakout"] { background: var(--color-tag-coral); color: var(--color-tag-coral-foreground); }
+    .momentum[data-level="surging"] { background: var(--color-tag-violet); color: var(--color-tag-violet-foreground); }
+    .momentum[data-level="steady"] { background: var(--color-tag-teal); color: var(--color-tag-teal-foreground); }
+    .score { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+             font-size: var(--text-sm); font-weight: var(--font-weight-bold); }
+    .topic h2 {
+      margin: 0; font-size: var(--text-base); line-height: 1.4;
+      letter-spacing: var(--tracking-heading); font-weight: var(--font-weight-bold);
+    }
+    .topic p { margin: 0; font-size: var(--text-xs); line-height: 1.6; color: var(--color-muted-foreground); }
+    .topic footer {
+      margin-top: auto; padding-top: 14px; border-top: 1px solid var(--color-border);
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: var(--text-2xs); color: var(--color-muted-foreground);
+    }
+    .topic footer b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--color-foreground); }
+    .category { font-weight: var(--font-weight-medium); letter-spacing: var(--tracking-micro); }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen p-4 md:p-8 antialiased">
-  <div class="max-w-6xl mx-auto space-y-8">
-    <header class="bg-white border border-slate-200/90 rounded-3xl p-6 md:p-8 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-      <div>
-        <div class="flex items-center space-x-2">
-          <span class="bg-orange-100 text-orange-800 text-xs px-3 py-1 rounded-full font-extrabold uppercase tracking-wider">🔥 FN-IGNIS</span>
-          <span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full font-mono font-bold">{{ geo.value if geo.value is defined else geo }}</span>
+<body class="product-mode">
+  <div class="wrap">
+    <header class="masthead fn-card">
+      <div class="masthead-grid">
+        <div>
+          <div class="fn-eyebrow">FN-IGNIS · {{ geo.value if geo.value is defined else geo }}</div>
+          <h1 class="fn-display">Cross-platform trend intelligence</h1>
+          <p>Momentum tracking and cross-platform trend synthesis — generated {{ generated_at }}</p>
         </div>
-        <h1 class="text-2xl md:text-3xl font-black text-slate-900 mt-2">Cross-Platform Trend Intelligence</h1>
-        <p class="text-xs md:text-sm text-slate-500 font-medium">Real-time momentum tracking and cross-platform trend synthesis</p>
-      </div>
-      <div class="bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3 text-right shrink-0">
-        <div class="text-[11px] font-bold text-slate-400 uppercase">Active Clusters</div>
-        <div class="text-2xl font-black text-slate-900">{{ clusters|length }}</div>
+        <div class="totals">
+          <div class="total">
+            <div class="label">Topics</div>
+            <div class="value">{{ clusters|length }}</div>
+          </div>
+          <div class="total">
+            <div class="label">Signals</div>
+            <div class="value">{{ clusters|map(attribute='signals')|map('length')|sum }}</div>
+          </div>
+        </div>
       </div>
     </header>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <div class="grid">
       {% for cluster in clusters %}
-      <div class="bg-white border border-slate-200/80 hover:border-slate-300 rounded-3xl p-6 shadow-sm flex flex-col justify-between space-y-4 transition">
-        <div class="space-y-3">
-          <div class="flex justify-between items-start">
-            <span class="text-[10px] font-bold px-2.5 py-1 rounded-full uppercase {% if cluster.momentum_category.value == 'BREAKOUT' %}bg-rose-100 text-rose-700{% elif cluster.momentum_category.value == 'RISING' %}bg-orange-100 text-orange-700{% else %}bg-slate-100 text-slate-600{% endif %}">
-              {{ cluster.momentum_category.value if cluster.momentum_category.value is defined else cluster.momentum_category }}
-            </span>
-            <span class="text-xs font-mono font-bold text-slate-400">Score: {{ cluster.cross_platform_score|round(1) }}</span>
-          </div>
-          <h3 class="font-extrabold text-base text-slate-900 leading-snug">{{ cluster.canonical_name|sanitize_pii }}</h3>
-          <p class="text-xs text-slate-500 leading-relaxed line-clamp-3">{{ cluster.summary_text|sanitize_pii }}</p>
+      {% set momentum = cluster.momentum_category.value if cluster.momentum_category.value is defined else cluster.momentum_category %}
+      <article class="topic fn-card">
+        <div class="topic-head">
+          <span class="momentum" data-level="{{ momentum|lower }}">{{ momentum }}</span>
+          <span class="score">{{ cluster.cross_platform_score|round(1) }}</span>
         </div>
-
-        <div class="pt-4 border-t border-slate-100 flex justify-between items-center text-xs text-slate-500">
-          <span>{{ cluster.signals|length }} Signals</span>
-          <span class="font-bold text-orange-600">Velocity: {{ (cluster.growth_velocity if cluster.growth_velocity is defined else 0.0)|round(1) }}</span>
-        </div>
-      </div>
+        <h2>{{ cluster.canonical_name|sanitize_pii }}</h2>
+        <p>{{ cluster.summary_text|sanitize_pii }}</p>
+        <footer>
+          <span class="category">{{ cluster.category }}</span>
+          <span><b>{{ cluster.signals|length }}</b> signals</span>
+        </footer>
+      </article>
       {% endfor %}
     </div>
   </div>

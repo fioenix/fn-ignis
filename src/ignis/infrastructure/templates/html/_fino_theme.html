@@ -1,0 +1,152 @@
+{#
+  FINOLABS design tokens, vendored from the "Finolabs Design System" project (theme.css).
+  Artifacts are product surfaces, so they run in the .product-mode register: data-viz palette,
+  density tokens, Space Grotesk for UI, Anton for display caps, JetBrains Mono for numbers.
+  Only the tokens the artifacts actually use are copied here; update this file when the
+  design system moves, and keep the values byte-identical to the source.
+#}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+
+    /* Brand */
+    --color-fn-violet: #9750C4;
+    --color-fn-violet-soft: #C9A8E5;
+    --color-fn-violet-ink: #4B1E73;
+    --color-fn-mint: #7FE2CE;
+    --color-fn-mint-soft: #BFF0E3;
+    --color-fn-mint-ink: #156B58;
+    --color-fn-teal: #87D3E1;
+    --color-fn-teal-soft: #C3E8EF;
+    --color-fn-teal-ink: #14627A;
+    --color-fn-peri: #858AC2;
+    --color-fn-peri-ink: #2B2F66;
+
+    /* Neutrals — Lab Ink */
+    --color-ink-0: #FFFFFF;
+    --color-ink-50: #F7F7FB;
+    --color-ink-100: #EEEEF5;
+    --color-ink-200: #DCDCE8;
+    --color-ink-300: #BCBCD0;
+    --color-ink-400: #8B8BA6;
+    --color-ink-500: #5B5B79;
+    --color-ink-700: #25253A;
+    --color-ink-900: #0B0B17;
+
+    /* Status */
+    --color-success: #2EB67D;
+    --color-warning: #E2A53B;
+    --color-destructive: #E04A6A;
+
+    /* Roles */
+    --color-background: var(--color-ink-0);
+    --color-foreground: var(--color-ink-900);
+    --color-card: var(--color-ink-0);
+    --color-elevated: var(--color-ink-50);
+    --color-primary: var(--color-fn-mint);
+    --color-primary-foreground: var(--color-ink-900);
+    --color-muted: var(--color-ink-100);
+    --color-muted-foreground: var(--color-ink-500);
+    --color-subtle-foreground: var(--color-ink-400);
+    --color-border: var(--color-ink-200);
+    --color-border-strong: var(--color-ink-300);
+    --color-ring: var(--color-fn-violet);
+
+    /* Data-viz */
+    --color-chart-1: #7FE2CE;
+    --color-chart-2: #9750C4;
+    --color-chart-3: #87D3E1;
+    --color-chart-4: #858AC2;
+    --color-chart-5: #2EB67D;
+    --color-chart-9: #E2A53B;
+    --color-chart-10: #E0716A;
+    --color-chart-12: #4F4F66;
+
+    /* Tags */
+    --color-tag-mint: #DCF3E8;
+    --color-tag-mint-foreground: #156B58;
+    --color-tag-violet: #EDDFF7;
+    --color-tag-violet-foreground: #4B1E73;
+    --color-tag-teal: #DCEEF4;
+    --color-tag-teal-foreground: #14627A;
+    --color-tag-amber: #FBEFD6;
+    --color-tag-amber-foreground: #7A5A0E;
+    --color-tag-coral: #FBDFE5;
+    --color-tag-coral-foreground: #8A2B3A;
+    --color-tag-slate: #EEEEF5;
+    --color-tag-slate-foreground: #3D3D55;
+
+    /* Type */
+    --font-display: "Anton", "Oswald", Impact, ui-sans-serif, sans-serif;
+    --font-sans: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --text-3xs: 0.625rem;
+    --text-2xs: 0.6875rem;
+    --text-xs: 0.75rem;
+    --text-sm: 0.875rem;
+    --text-base: 1rem;
+    --text-lg: 1.125rem;
+    --text-xl: 1.375rem;
+    --text-2xl: 1.75rem;
+    --text-3xl: 2.25rem;
+    --tracking-display: -0.02em;
+    --tracking-heading: -0.01em;
+    --tracking-eyebrow: 0.18em;
+    --tracking-micro: 0.06em;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+
+    /* Radius, shadow, motion */
+    --radius-sm: 0.25rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1.125rem;
+    --radius-full: 9999px;
+    --shadow-xs: 0 1px 2px rgb(11 11 23 / 0.05), 0 1px 1px rgb(11 11 23 / 0.04);
+    --shadow-md: 0 6px 18px -8px rgb(11 11 23 / 0.18), 0 2px 4px rgb(11 11 23 / 0.06);
+    --shadow-xl: 0 20px 40px -16px rgb(75 30 115 / 0.25), 0 4px 8px rgb(11 11 23 / 0.06);
+    --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+    --duration-base: 200ms;
+
+    /* Signature gradient — one accent per surface (design system hard rule 1) */
+    --fn-gradient-iridescent-line: linear-gradient(90deg, #87D3E1 0%, #7FE2CE 35%, #B49BD8 65%, #9750C4 100%);
+  }
+
+  .product-mode {
+    font-family: var(--font-sans);
+    color: var(--color-foreground);
+    background: var(--color-background);
+  }
+  .fn-eyebrow {
+    font-family: var(--font-sans);
+    font-size: var(--text-2xs);
+    font-weight: var(--font-weight-bold);
+    letter-spacing: var(--tracking-eyebrow);
+    text-transform: uppercase;
+    color: var(--color-fn-mint-ink);
+  }
+  .fn-display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: var(--tracking-display);
+    text-transform: uppercase;
+  }
+  .fn-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .fn-card {
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xs);
+  }
+  .fn-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border-radius: var(--radius-full);
+    background: var(--color-tag-slate); color: var(--color-tag-slate-foreground);
+    font-size: var(--text-2xs); font-weight: var(--font-weight-bold);
+    letter-spacing: var(--tracking-micro);
+  }
+</style>

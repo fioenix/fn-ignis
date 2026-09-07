@@ -1,12 +1,11 @@
-{% set PLATFORM_ICONS = {'google': '🔍', 'youtube': '▶️', 'tiktok': '🎵', 'threads': '🧵', 'reels': '📸'} %}
 {% macro platform_label(platform) -%}
 {%- set pv = platform.value if platform.value is defined else platform -%}
-{{ PLATFORM_ICONS.get(pv, '🌐') }} {{ pv|upper }}
+{{ pv|upper }}
 {%- endmacro %}
 {% macro citation_pill(cit) -%}
 {%- set pv = cit.platform.value if cit.platform.value is defined else cit.platform -%}
-{% if cit.url %}<a href="{{ cit.url }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition max-w-full">📌 [{{ cit.citation_id }} · {{ pv|upper }}] <span class="truncate ml-1">{{ cit.title_or_query|sanitize_pii }}</span> <span class="ml-1 font-bold whitespace-nowrap">({{ cit.metric_highlight }})</span></a>
-{% else %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 max-w-full">📌 [{{ cit.citation_id }} · {{ pv|upper }}] <span class="truncate ml-1">{{ cit.title_or_query|sanitize_pii }}</span> <span class="ml-1 font-bold whitespace-nowrap">({{ cit.metric_highlight }})</span></span>{% endif %}
+{% if cit.url %}<a href="{{ cit.url }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition max-w-full">◆ [{{ cit.citation_id }} · {{ pv|upper }}] <span class="truncate ml-1">{{ cit.title_or_query|sanitize_pii }}</span> <span class="ml-1 font-bold whitespace-nowrap">({{ cit.metric_highlight }})</span></a>
+{% else %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 max-w-full">◆ [{{ cit.citation_id }} · {{ pv|upper }}] <span class="truncate ml-1">{{ cit.title_or_query|sanitize_pii }}</span> <span class="ml-1 font-bold whitespace-nowrap">({{ cit.metric_highlight }})</span></span>{% endif %}
 {%- endmacro %}
 <!DOCTYPE html>
 <html lang="en" class="light">
@@ -16,12 +15,67 @@
   <title>Infographic Intelligence Canvas - {{ mission.title }}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  {% include "_fino_theme.html" %}
+  <script>
+    // The Tailwind scales this report already uses are remapped onto the FINOLABS palette,
+    // so every utility class resolves to a design-system colour instead of a stock one.
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["Space Grotesk", "ui-sans-serif", "system-ui", "sans-serif"],
+            mono: ["JetBrains Mono", "ui-monospace", "Menlo", "monospace"],
+            display: ["Anton", "Oswald", "Impact", "sans-serif"],
+          },
+          colors: {
+            slate: {
+              50: "#F7F7FB", 100: "#EEEEF5", 200: "#DCDCE8", 300: "#BCBCD0", 400: "#8B8BA6",
+              500: "#5B5B79", 600: "#3D3D55", 700: "#25253A", 800: "#16162A", 900: "#0B0B17",
+            },
+            orange: {
+              50: "#EAF8F4", 100: "#DCF3E8", 200: "#BFF0E3", 400: "#7FE2CE",
+              500: "#2EB67D", 600: "#156B58", 700: "#156B58", 800: "#156B58", 900: "#0F4E40",
+            },
+            emerald: {
+              50: "#EAF8F4", 100: "#DCF3E8", 200: "#B7E0CA", 400: "#7FE2CE",
+              500: "#2EB67D", 600: "#2EB67D", 700: "#1C8B60", 800: "#156B58", 900: "#0F4E40",
+            },
+            rose: {
+              50: "#FDF1F4", 100: "#FBDFE5", 200: "#F5C1C5", 400: "#EC8496",
+              500: "#E04A6A", 600: "#E04A6A", 700: "#8A2B3A", 800: "#8A2B3A", 900: "#6B1F2C",
+            },
+            amber: {
+              50: "#FDF7EB", 100: "#FBEFD6", 200: "#F4D89A", 400: "#E9BC66",
+              500: "#E2A53B", 600: "#E2A53B", 700: "#7A5A0E", 800: "#7A5A0E", 900: "#5A420A",
+            },
+            sky: {
+              50: "#F1F9FB", 100: "#DCEEF4", 200: "#C3E8EF", 400: "#87D3E1",
+              500: "#4E9DC4", 600: "#4E9DC4", 700: "#14627A", 800: "#14627A", 900: "#0F4E61",
+            },
+            blue: {
+              50: "#F1F9FB", 100: "#DCEEF4", 200: "#C3E8EF", 400: "#87D3E1",
+              500: "#4E9DC4", 600: "#4E9DC4", 700: "#14627A", 800: "#14627A", 900: "#0F4E61",
+            },
+            violet: {
+              100: "#EDDFF7", 200: "#DDC9F2", 400: "#C9A8E5",
+              500: "#9750C4", 600: "#9750C4", 700: "#6B3C8A", 800: "#4B1E73", 900: "#4B1E73",
+            },
+            purple: {
+              100: "#EDDFF7", 200: "#DDC9F2", 400: "#C9A8E5",
+              500: "#9750C4", 600: "#9750C4", 700: "#6B3C8A", 800: "#4B1E73", 900: "#4B1E73",
+            },
+          },
+        },
+      },
+    };
+  </script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    body { font-family: var(--font-sans); }
+    h1, .font-black { letter-spacing: var(--tracking-heading); }
+    .font-mono { font-variant-numeric: tabular-nums; }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen p-4 md:p-8 antialiased">
+<body class="product-mode bg-slate-50 text-slate-900 min-h-screen p-4 md:p-8 antialiased">
   <div class="max-w-6xl mx-auto space-y-8">
 
     <!-- HERO / EXECUTIVE PULSE -->
@@ -29,7 +83,7 @@
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-100 pb-6">
         <div class="space-y-1.5">
           <div class="flex items-center space-x-2">
-            <span class="bg-orange-100 text-orange-800 text-xs px-3 py-1 rounded-full font-extrabold uppercase tracking-wider">🔥 FN-IGNIS INTELLIGENCE</span>
+            <span class="bg-orange-100 text-orange-800 text-xs px-3 py-1 rounded-full font-extrabold uppercase tracking-wider">Ignis intelligence</span>
             <span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full font-mono font-bold">{{ mission.shortcode if mission.shortcode else mission.id }}</span>
           </div>
           <h1 class="text-2xl md:text-4xl font-black text-slate-900 tracking-tight">{{ mission.title }}</h1>
@@ -81,7 +135,7 @@
       {% if scorecard.flaws_detected %}
       <div class="mt-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 space-y-2">
         <div class="flex items-center space-x-2 text-xs font-bold text-amber-700 uppercase tracking-wider">
-          <span>⚠️ Data Quality Bottlenecks & Flaws Detected ({{ scorecard.flaws_detected|length }})</span>
+          <span>Data Quality Bottlenecks & Flaws Detected ({{ scorecard.flaws_detected|length }})</span>
         </div>
         <ul class="text-xs text-amber-900 space-y-1 list-disc list-inside">
           {% for flaw in scorecard.flaws_detected %}
@@ -98,7 +152,7 @@
     <section class="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-5">
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-100 pb-4">
         <div>
-          <h2 class="text-lg md:text-xl font-black text-slate-900">🛰️ Data Ingress &amp; Provenance Audit</h2>
+          <h2 class="text-lg md:text-xl font-black text-slate-900">Data Ingress &amp; Provenance Audit</h2>
           <p class="text-xs text-slate-500">Per-channel collection health. An empty channel is reported, never silently omitted.</p>
         </div>
         {% set healthy_count = channel_summaries|selectattr('status.value', 'equalto', 'HEALTHY')|list|length %}
@@ -140,7 +194,7 @@
                   {{ ch.top_citation.metric_highlight }}{% if ch.top_citation.author_or_channel %} • {{ ch.top_citation.author_or_channel|sanitize_pii }}{% endif %}
                 </div>
                 {% else %}
-                <span class="text-rose-700 font-medium">⚠️ {{ ch.notes or 'No signal captured.' }}</span>
+                <span class="text-rose-700 font-medium">{{ ch.notes or 'No signal captured.' }}</span>
                 {% endif %}
               </td>
             </tr>
@@ -157,7 +211,7 @@
       <!-- 1. Radar Scorecard Chart -->
       <div class="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
         <div>
-          <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">🎯 Data Health Radar</h3>
+          <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">Data Health Radar</h3>
           <p class="text-xs text-slate-500">5-axis multi-dimensional dataset integrity</p>
         </div>
         <div class="h-64 flex items-center justify-center">
@@ -168,7 +222,7 @@
       <!-- 2. Platform Breakdown Chart -->
       <div class="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
         <div>
-          <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">📊 Platform Distribution</h3>
+          <h3 class="text-sm font-black text-slate-900 uppercase tracking-wider">Platform Distribution</h3>
           <p class="text-xs text-slate-500">Signal contribution across listening channels</p>
         </div>
         <div class="h-64 flex items-center justify-center">
@@ -179,7 +233,7 @@
       <!-- 3. Key Takeaways Card -->
       <div class="bg-gradient-to-br from-orange-500 to-amber-600 text-white rounded-3xl p-6 shadow-md flex flex-col justify-between space-y-4">
         <div class="space-y-3">
-          <span class="bg-white/20 text-white text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider">💡 Strategic Takeaway</span>
+          <span class="bg-white/20 text-white text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider">Strategic Takeaway</span>
           <h3 class="text-xl font-black leading-snug">
             {% if strategic_insights %}
             {{ strategic_insights[0].statement }}
@@ -215,7 +269,7 @@
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-100 pb-4">
         <div>
           <h2 class="text-lg md:text-xl font-black text-slate-900 flex items-center space-x-2">
-            <span>✨ Market White Space Matrix (Demand vs. Supply)</span>
+            <span>Market White Space Matrix (Demand vs. Supply)</span>
           </h2>
           <p class="text-xs text-slate-500">Correlating Search Intent Demand against Localized Content Supply across all {{ market_opportunities|length }} topics.</p>
         </div>
@@ -270,12 +324,12 @@
       <!-- Insights -->
       <div class="bg-white border border-amber-200/80 rounded-3xl p-6 shadow-sm space-y-4">
         <h3 class="text-base font-black text-amber-900 flex items-center space-x-2">
-          <span>🧠 Strategic Insights</span>
+          <span>Strategic Insights</span>
         </h3>
         <div class="space-y-3">
           {% for ins in strategic_insights %}
           <div class="flex items-start space-x-3 bg-amber-50/50 border border-amber-100 p-3.5 rounded-2xl">
-            <span class="text-amber-600 font-black text-sm">✦</span>
+            <span class="text-amber-600 font-black text-sm">◆</span>
             <div class="space-y-2 min-w-0">
               <p class="text-xs text-slate-700 leading-relaxed font-medium">{{ ins.statement }}</p>
               {% if ins.citations %}
@@ -283,7 +337,7 @@
                 {% for cit in ins.citations %}{{ citation_pill(cit) }}{% endfor %}
               </div>
               {% else %}
-              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-600">⚠️ NO DIRECT CITATION</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-600">NO DIRECT CITATION</span>
               {% endif %}
             </div>
           </div>
@@ -294,12 +348,12 @@
       <!-- Action Blueprint -->
       <div class="bg-white border border-emerald-200/80 rounded-3xl p-6 shadow-sm space-y-4">
         <h3 class="text-base font-black text-emerald-900 flex items-center space-x-2">
-          <span>🎯 Action Blueprint</span>
+          <span>Action Blueprint</span>
         </h3>
         <div class="space-y-3">
           {% for act in actionable_takeaways %}
           <div class="flex items-start space-x-3 bg-emerald-50/50 border border-emerald-100 p-3.5 rounded-2xl">
-            <span class="text-emerald-600 font-black text-sm">✓</span>
+            <span class="text-emerald-600 font-black text-sm">→</span>
             <p class="text-xs text-slate-700 leading-relaxed font-medium">{{ act }}</p>
           </div>
           {% endfor %}
@@ -317,7 +371,7 @@
         <div class="flex justify-between items-center border-b border-slate-100 pb-3">
           <div>
             <h3 class="text-base font-black text-slate-900 flex items-center space-x-2">
-              <span>🗣️ Voice of Customer & Unmet Needs</span>
+              <span>Voice of Customer & Unmet Needs</span>
             </h3>
             <p class="text-xs text-slate-500">Real customer questions, objections, and feature requests extracted from public comments.</p>
           </div>
@@ -338,14 +392,14 @@
               </div>
               {% if inq.likes and inq.likes > 0 %}
               <span class="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100">
-                ❤️ {{ inq.likes }}
+                {{ inq.likes }} likes
               </span>
               {% endif %}
             </div>
             <p class="text-xs text-slate-700 font-medium italic">"{{ inq.inquiry|sanitize_pii }}"</p>
             {% if inq.video_title %}
             <div class="text-[10px] text-slate-400 truncate pt-1 border-t border-slate-200/60">
-              📺 {{ inq.video_title|sanitize_pii }}
+              {{ inq.video_title|sanitize_pii }}
             </div>
             {% endif %}
           </div>
@@ -362,7 +416,7 @@
         <div class="bg-white border border-sky-200/80 rounded-3xl p-6 shadow-sm space-y-4">
           <div>
             <h3 class="text-base font-black text-sky-950 flex items-center space-x-2">
-              <span>🔍 Derivative Search Demand</span>
+              <span>Derivative Search Demand</span>
             </h3>
             <p class="text-xs text-slate-500">Real-time autocomplete search queries and trending sub-hashtags.</p>
           </div>
@@ -373,7 +427,7 @@
               <div class="flex flex-wrap gap-1.5">
                 {% for sug in item.suggestions %}
                 <span class="inline-flex items-center text-[11px] font-medium px-2.5 py-1 rounded-full {% if sug.type == 'search_guide' %}bg-white border border-sky-200 text-sky-800{% else %}bg-sky-100/80 text-sky-900 font-semibold{% endif %}">
-                  {% if sug.type == 'search_guide' %}🔎{% else %}#️⃣{% endif %} {{ sug.query }}
+                  {{ sug.query }}
                 </span>
                 {% endfor %}
               </div>
@@ -388,7 +442,7 @@
         <div class="bg-white border border-purple-200/80 rounded-3xl p-6 shadow-sm space-y-4">
           <div>
             <h3 class="text-base font-black text-purple-950 flex items-center space-x-2">
-              <span>📈 Macro Radar (Creative Center)</span>
+              <span>Macro Radar (Creative Center)</span>
             </h3>
             <p class="text-xs text-slate-500">Top ranked nationwide hashtag benchmarks in target country.</p>
           </div>
@@ -419,7 +473,7 @@
     <!-- ACT 5: MULTI-PLATFORM SIGNAL STREAM -->
     <section class="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
       <div class="flex justify-between items-center border-b border-slate-100 pb-3">
-        <h3 class="text-base font-black text-slate-900">📊 Multi-Platform Signal Evidence ({{ signals|length }} Signals)</h3>
+        <h3 class="text-base font-black text-slate-900">Multi-Platform Signal Evidence ({{ signals|length }} Signals)</h3>
         <span class="text-xs text-slate-400 font-medium">100% Deterministic Signal Registry</span>
       </div>
 
@@ -442,7 +496,7 @@
               <span>Channel: <strong class="text-slate-700">{{ s.metadata.get('channel_title')|sanitize_pii }}</strong></span>
               {% endif %}
               {% if s.metadata.get('published_at') %}
-              <span class="text-emerald-700 font-mono text-[10px]">📅 {{ s.metadata.get('published_at')[:10] }}</span>
+              <span class="text-emerald-700 font-mono text-[10px]">{{ s.metadata.get('published_at')[:10] }}</span>
               {% endif %}
             </div>
           </div>
@@ -483,13 +537,13 @@
               {{ scorecard.creator_diversity_score }},
               {{ scorecard.overall_confidence }}
             ],
-            backgroundColor: 'rgba(249, 115, 22, 0.2)',
-            borderColor: 'rgba(249, 115, 22, 1)',
+            backgroundColor: 'rgba(151, 80, 196, 0.18)',
+            borderColor: '#9750C4',
             borderWidth: 2,
-            pointBackgroundColor: 'rgba(249, 115, 22, 1)',
+            pointBackgroundColor: '#9750C4',
             pointBorderColor: '#fff',
             pointHoverBackgroundColor: '#fff',
-            pointHoverBorderColor: 'rgba(249, 115, 22, 1)'
+            pointHoverBorderColor: '#9750C4'
           }]
         },
         options: {
@@ -500,8 +554,8 @@
               beginAtZero: true,
               max: 100,
               ticks: { display: false },
-              grid: { color: 'rgba(0, 0, 0, 0.06)' },
-              pointLabels: { font: { size: 10, weight: 'bold' }, color: '#475569' }
+              grid: { color: 'rgba(220, 220, 232, 0.9)' },
+              pointLabels: { font: { size: 10, weight: 'bold' }, color: '#5B5B79' }
             }
           },
           plugins: { legend: { display: false } }
@@ -518,7 +572,7 @@
           labels: {{ platform_breakdown.keys()|list|tojson }},
           datasets: [{
             data: {{ platform_breakdown.values()|list|tojson }},
-            backgroundColor: ['#f97316', '#0ea5e9', '#10b981', '#a855f7', '#ec4899'],
+            backgroundColor: ['#7FE2CE', '#9750C4', '#87D3E1', '#858AC2', '#2EB67D'],
             borderWidth: 2,
             borderColor: '#ffffff'
           }]
@@ -527,7 +581,7 @@
           responsive: true,
           maintainAspectRatio: false,
           plugins: {
-            legend: { position: 'bottom', labels: { font: { size: 11, weight: '600' }, color: '#334155', boxWidth: 12 } }
+            legend: { position: 'bottom', labels: { font: { size: 11, weight: '600' }, color: '#3D3D55', boxWidth: 12 } }
           }
         }
       });
@@ -560,13 +614,13 @@
             {
               label: 'Search Demand Index',
               data: demandScores,
-              backgroundColor: '#0ea5e9',
+              backgroundColor: '#87D3E1',
               borderRadius: 6,
             },
             {
               label: 'Localized Supply Index',
               data: supplyScores,
-              backgroundColor: '#f97316',
+              backgroundColor: '#9750C4',
               borderRadius: 6,
             }
           ]
@@ -578,7 +632,7 @@
             y: {
               beginAtZero: true,
               max: 100,
-              grid: { color: 'rgba(0, 0, 0, 0.05)' },
+              grid: { color: 'rgba(220, 220, 232, 0.8)' },
               ticks: { font: { size: 10 } }
             },
             x: {
