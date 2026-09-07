@@ -40,7 +40,7 @@ def test_bug11_missing_expiry_is_reported_not_silently_ok():
 
 
 def test_bug11_refresh_slots_are_staggered_at_least_one_day_apart():
-    """Threads va Instagram het han cung ngay khong duoc refresh cung mot luc."""
+    """Threads and Instagram expiring on the same day must not be refreshed at the same time."""
     plan = plan_staggered_refresh([_cred("threads", 20), _cred("instagram", 20)], now=NOW)
     slots = sorted(datetime.fromisoformat(e["recommended_refresh_at"]) for e in plan)
     assert (slots[1] - slots[0]) >= timedelta(hours=24)

@@ -98,7 +98,7 @@ def _fake_row_lines(count: int) -> list:
 def test_bug10_parser_reads_every_rendered_row_not_only_three():
     plugin = TikTokCreativeCenterPlugin()
     rows = plugin._parse_trend_rows(_fake_row_lines(20), limit=30)
-    assert len(rows) == 20, f"Parser chi doc duoc {len(rows)} hashtag"
+    assert len(rows) == 20, f"Parser only read {len(rows)} hashtags"
     assert rows[0]["hashtag"] == "#tag1"
     assert rows[-1]["rank"] == 20
     assert rows[4]["views_count"] == 5_000_000.0
@@ -112,7 +112,7 @@ def test_bug10_parser_respects_limit_and_industry_filter():
 
 @pytest.mark.asyncio
 async def test_bug10_load_all_rows_paginates_until_no_new_rows():
-    """Trang lazy-load: phai scroll/click 'View More' cho den khi khong sinh them row."""
+    """The page lazy-loads: scroll and click "View More" until no new row appears."""
     plugin = TikTokCreativeCenterPlugin()
     pages_text = [
         "\n".join(_fake_row_lines(3)),

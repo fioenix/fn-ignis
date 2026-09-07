@@ -81,7 +81,7 @@ async def test_bug05_sqlite_repository_dynamic_score_calculation(tmp_path):
 
 
 def test_scoring_contract_breakout_reachable_for_multi_platform_viral_topic():
-    """Spec 003 US2: >= 3 nen tang voi luong tuong tac cao => score >= 80 (BREAKOUT)."""
+    """Spec 003 US2: >= 3 platforms with high engagement must score >= 80 (BREAKOUT)."""
     clusterer = SemanticClusterer()
     viral = [
         TrendSignal(platform=PlatformType.GOOGLE_TRENDS, raw_title="V", metric_value=100.0, growth_velocity=9000.0, geo_code=GeoCode.VN),
@@ -89,12 +89,12 @@ def test_scoring_contract_breakout_reachable_for_multi_platform_viral_topic():
         TrendSignal(platform=PlatformType.TIKTOK, raw_title="V", metric_value=140_000_000.0, growth_velocity=12000.0, geo_code=GeoCode.VN),
     ]
     cluster = TopicCluster(canonical_name="V", cross_platform_score=clusterer._calculate_cross_platform_score(viral))
-    assert cluster.cross_platform_score >= 80.0, f"Score thuc te: {cluster.cross_platform_score}"
+    assert cluster.cross_platform_score >= 80.0, f"Actual score: {cluster.cross_platform_score}"
     assert cluster.momentum_category.value == "breakout"
 
 
 def test_scoring_weights_follow_platform_metric_velocity_contract():
-    """Trong so 40 (platform) / 40 (metric) / 20 (velocity) khong duoc lech khoi spec 003."""
+    """The 40 (platform) / 40 (metric) / 20 (velocity) weights must not drift from spec 003."""
     clusterer = SemanticClusterer()
     platform_only = [
         TrendSignal(platform=p, raw_title="P", metric_value=0.0, growth_velocity=0.0, geo_code=GeoCode.VN)

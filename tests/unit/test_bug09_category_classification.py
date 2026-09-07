@@ -13,7 +13,7 @@ TAXONOMIES = [
 
 @pytest.mark.asyncio
 async def test_bug09_category_propagated_from_source_metadata():
-    """Category tu TikTok Creative Center phai duoc giu nguyen, khong bi ghi de thanh 'general'."""
+    """A category reported by TikTok Creative Center must survive, not be overwritten with "general"."""
     clusterer = SemanticClusterer()
     signals = [
         TrendSignal(
@@ -29,7 +29,7 @@ async def test_bug09_category_propagated_from_source_metadata():
 
 @pytest.mark.asyncio
 async def test_bug09_category_inferred_from_registered_taxonomy():
-    """Nguon khong co category thi phan loai bang industry_taxonomies trong DB."""
+    """Sources without a category are classified against the industry_taxonomies table."""
     clusterer = SemanticClusterer()
     clusterer.register_taxonomies(TAXONOMIES)
     signals = [
@@ -56,13 +56,13 @@ async def test_bug09_sqlite_bootstrap_seeds_industry_taxonomies(tmp_path):
 
     repo = SqliteTrendRepository(db_path=str(tmp_path / "tax.db"))
     taxonomies = await repo.get_industry_taxonomies()
-    assert taxonomies, "SQLite bootstrap phai seed industry_taxonomies"
+    assert taxonomies, "SQLite bootstrap must seed industry_taxonomies"
     assert all(t["keywords"] for t in taxonomies)
 
 
 @pytest.mark.asyncio
 async def test_bug09_taxonomy_match_is_diacritics_insensitive():
-    """Lexicon luu khong dau ('khoa hoc'), tieu de co dau van phai khop."""
+    """Lexicon entries are stored unaccented ("khoa hoc"); accented titles must still match."""
     clusterer = SemanticClusterer()
     clusterer.register_taxonomies([
         {"industry_code": "education", "industry_name": "Education", "keywords": ["khoa hoc", "dao tao"]},

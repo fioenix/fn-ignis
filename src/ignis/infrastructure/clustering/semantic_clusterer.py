@@ -131,7 +131,7 @@ class SemanticClusterer(IClusteringEngine):
             canonical = cls._clean_title(canonical)
 
         if not canonical:
-            canonical = "Chủ đề xu hướng tổng hợp"
+            canonical = "Aggregated trending topic"
 
         # Capitalize first character for clean presentation
         canonical = canonical[0].upper() + canonical[1:] if len(canonical) > 1 else canonical.upper()
@@ -163,7 +163,7 @@ class SemanticClusterer(IClusteringEngine):
         if len(intersection) == 1:
             shared_token = next(iter(intersection))
             # If both titles have 2 or more tokens, a single shared token is insufficient
-            # to declare identical topics (e.g. 'người lao động' vs 'người mẫu', 'đại học' vs 'triều đại')
+            # to declare identical topics (two titles sharing only one generic word are different topics)
             if len(tokens_a) >= 2 and len(tokens_b) >= 2:
                 return 0.0
             # If one side is a single token, reject ambiguous/generic single unigrams
