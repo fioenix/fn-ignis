@@ -18,8 +18,8 @@ class Settings(BaseSettings):
         default="sqlite:///ignis.db",
         description="Database connection URI (SQLite default for zero-config local mode, or PostgreSQL / TimescaleDB)"
     )
-    DB_MIN_POOL_SIZE: int = Field(default=2, description="Minimum database connection pool size")
-    DB_MAX_POOL_SIZE: int = Field(default=10, description="Maximum database connection pool size")
+    DB_MIN_POOL_SIZE: int = Field(default=1, description="Minimum database connection pool size")
+    DB_MAX_POOL_SIZE: int = Field(default=3, description="Maximum database connection pool size")
 
     # Ingress Connectors & API Keys
     YOUTUBE_API_KEY: str = Field(default="", description="YouTube Data API v3 Key")

@@ -113,31 +113,38 @@ class PostgresTimescaleRepository(ITrendRepository):
                 first_seen_at,
                 last_updated_at
             ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (id) DO UPDATE SET
-                canonical_name = EXCLUDED.canonical_name,
+            ON CONFLICT (canonical_name) DO UPDATE SET
                 summary_text = EXCLUDED.summary_text,
                 category = EXCLUDED.category,
                 cross_platform_score = EXCLUDED.cross_platform_score,
-                last_updated_at = EXCLUDED.last_updated_at;
+                last_updated_at = EXCLUDED.last_updated_at
+            RETURNING id;
         """
-
-        params = [
-            (
-                str(c.id),
-                c.canonical_name,
-                c.summary_text,
-                c.category,
-                c.cross_platform_score,
-                c.first_seen_at or datetime.now(timezone.utc),
-                c.last_updated_at or datetime.now(timezone.utc),
-            )
-            for c in clusters
-        ]
 
         try:
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
-                    await cur.executemany(query, params)
+                    for c in clusters:
+                        c_first_seen = c.first_seen_at or datetime.now(timezone.utc)
+                        c_last_updated = c.last_updated_at or datetime.now(timezone.utc)
+                        await cur.execute(
+                            query,
+                            (
+                                str(c.id),
+                                c.canonical_name,
+                                c.summary_text,
+                                c.category,
+                                c.cross_platform_score,
+                                c_first_seen,
+                                c_last_updated,
+                            ),
+                        )
+                        row = await cur.fetchone()
+                        if row and row[0]:
+                            actual_id = row[0]
+                            c.id = actual_id
+                            for s in c.signals:
+                                s.cluster_id = actual_id
             logger.info(f"Successfully upserted {len(clusters)} topic clusters.")
         except Exception as e:
             logger.error(f"Error upserting topic clusters: {e}", exc_info=True)

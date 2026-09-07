@@ -52,16 +52,17 @@ async def test_save_signals_batch_insert(sample_trend_signal):
 async def test_save_clusters_upsert(sample_topic_cluster):
     repo = PostgresTimescaleRepository(dsn="postgresql://mock")
     mock_cursor = AsyncMock()
+    mock_cursor.fetchone.return_value = (sample_topic_cluster.id,)
     repo._pool = _create_mock_pool(mock_cursor)
 
     await repo.save_clusters([sample_topic_cluster])
     
-    assert mock_cursor.executemany.called
-    query_arg, params_arg = mock_cursor.executemany.call_args[0]
+    assert mock_cursor.execute.called
+    query_arg, params_arg = mock_cursor.execute.call_args[0]
     assert "INSERT INTO topic_clusters" in query_arg
-    assert "ON CONFLICT (id) DO UPDATE" in query_arg
-    assert len(params_arg) == 1
-    assert params_arg[0][0] == str(sample_topic_cluster.id)
+    assert "ON CONFLICT (canonical_name) DO UPDATE" in query_arg
+    assert "RETURNING id" in query_arg
+    assert params_arg[1] == sample_topic_cluster.canonical_name
 
 
 @pytest.mark.asyncio

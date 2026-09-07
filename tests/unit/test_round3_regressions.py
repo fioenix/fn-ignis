@@ -152,3 +152,54 @@ async def test_verify_connectors_health_remediation_labels():
         connector_diag = payload["connectors"]["Meta Threads Ingress"]
         assert connector_diag["status"] == "NOT_CONFIGURED"
         assert "authenticate_threads" in connector_diag["remediation"]
+
+
+@pytest.mark.asyncio
+async def test_save_clusters_canonical_name_conflict_resolution():
+    """Verify that PostgresTimescaleRepository resolves canonical_name conflicts and updates cluster_id on signals."""
+    from uuid import uuid4
+    from unittest.mock import AsyncMock, MagicMock
+    from ignis.domain.entities import TopicCluster, TrendSignal
+    from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+
+    mock_cursor = AsyncMock()
+    existing_id = uuid4()
+    mock_cursor.fetchone.return_value = (existing_id,)
+
+    mock_cursor_cm = MagicMock()
+    mock_cursor_cm.__aenter__ = AsyncMock(return_value=mock_cursor)
+    mock_cursor_cm.__aexit__ = AsyncMock(return_value=None)
+
+    mock_conn = MagicMock()
+    mock_conn.cursor = MagicMock(return_value=mock_cursor_cm)
+
+    mock_conn_cm = MagicMock()
+    mock_conn_cm.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_conn_cm.__aexit__ = AsyncMock(return_value=None)
+
+    mock_pool = MagicMock()
+    mock_pool.connection = MagicMock(return_value=mock_conn_cm)
+
+    repo = PostgresTimescaleRepository(dsn="postgresql://mock", pool=mock_pool)
+
+    new_id = uuid4()
+    sig = TrendSignal(
+        platform=PlatformType.THREADS,
+        raw_title="ừ cơm gà thì cơm gà",
+        metric_value=10.0,
+        geo_code=GeoCode.VN,
+        cluster_id=new_id,
+    )
+    cluster = TopicCluster(
+        id=new_id,
+        canonical_name="ừ cơm gà thì cơm gà",
+        cross_platform_score=50.0,
+        signals=[sig],
+    )
+
+    await repo.save_clusters([cluster])
+
+    # Ensure actual cluster ID and signal cluster ID were mapped to the existing ID
+    assert cluster.id == existing_id
+    assert sig.cluster_id == existing_id
+    assert "ON CONFLICT (canonical_name) DO UPDATE" in mock_cursor.execute.call_args[0][0]

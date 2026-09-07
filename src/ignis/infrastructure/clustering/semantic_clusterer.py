@@ -91,12 +91,13 @@ class SemanticClusterer(IClusteringEngine):
                     group.append(sig_b)
                     visited.add(j)
 
-            canonical_name = min(group, key=lambda s: len(s.raw_title)).raw_title
+            raw_name = min(group, key=lambda s: len(s.raw_title)).raw_title
+            canonical_name = re.sub(r"\s+", " ", raw_name).strip()
             if len(canonical_name) > 80:
                 canonical_name = canonical_name[:77] + "..."
 
             # Deterministic cluster UUID based on canonical_name to prevent duplicate cluster records across runs
-            cluster_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"cluster:{canonical_name.strip().lower()}")
+            cluster_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"cluster:{canonical_name.lower()}")
             for s in group:
                 s.cluster_id = cluster_id
 
