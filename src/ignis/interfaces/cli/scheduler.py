@@ -121,6 +121,10 @@ class IngressScheduler:
             registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
 
         clusterer = SemanticClusterer()
+        try:
+            clusterer.register_taxonomies(await repository.get_industry_taxonomies())
+        except Exception as e:
+            logger.warning(f"Could not load industry taxonomies for classification: {e}")
         cluster_use_case = ClusterSignalsUseCase(clusterer=clusterer, repository=repository)
         quality_evaluator = QualityEvaluator()
         strategic_reasoner = StrategicMarketReasoner()

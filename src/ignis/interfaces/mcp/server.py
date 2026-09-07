@@ -321,6 +321,10 @@ async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
             comp["strategic_reasoner"].register_noise_blacklist(noise_terms)
             if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
                 comp["clusterer"].register_stopwords(noise_terms)
+        if "clusterer" in comp and hasattr(comp["clusterer"], "register_taxonomies"):
+            taxonomies = await comp["repository"].get_industry_taxonomies()
+            if taxonomies:
+                comp["clusterer"].register_taxonomies(taxonomies)
     except Exception as e:
         logger.warning(f"Could not sync dynamic lexicons from DB: {e}")
 

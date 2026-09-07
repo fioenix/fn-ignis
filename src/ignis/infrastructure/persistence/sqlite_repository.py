@@ -183,6 +183,21 @@ class SqliteTrendRepository(ITrendRepository):
                                 (str(uuid4()), dom, term, cat, "system", now_str),
                             )
 
+        cur.execute("SELECT COUNT(*) FROM industry_taxonomies")
+        if cur.fetchone()[0] == 0:
+            sql_dir = Path(__file__).resolve().parents[4] / "sql"
+            tax_path = sql_dir / "003_market_lexicons.sql"
+            if tax_path.exists():
+                now_str = datetime.now(timezone.utc).isoformat()
+                content = tax_path.read_text(encoding="utf-8")
+                tax_matches = re.findall(r"\('([^']+)',\s*'([^']+)',\s*ARRAY\[([^\]]+)\]\)", content)
+                for code, name, kw_blob in tax_matches:
+                    keywords = re.findall(r"'([^']+)'", kw_blob)
+                    cur.execute(
+                        "INSERT OR IGNORE INTO industry_taxonomies (id, industry_code, industry_name, keywords, created_at) VALUES (?, ?, ?, ?, ?)",
+                        (str(uuid4()), code, name, json.dumps(keywords, ensure_ascii=False), now_str),
+                    )
+
         cur.execute("SELECT COUNT(*) FROM runtime_configs")
         rc_count = cur.fetchone()[0]
         if rc_count == 0:
@@ -428,7 +443,7 @@ class SqliteTrendRepository(ITrendRepository):
                             canonical_name=row["canonical_name"],
                             cross_platform_score=final_score,
                             summary_text=dynamic_summary,
-                            category=row["category"] or "general",
+                            category=row["category"] or "unclassified",
                             first_seen_at=first_seen,
                             last_updated_at=last_updated,
                             signals=signals_list,

@@ -39,7 +39,7 @@ class TopicCluster:
     canonical_name: str
     id: UUID = field(default_factory=uuid4)
     summary_text: Optional[str] = None
-    category: str = "general"
+    category: str = "unclassified"
     cross_platform_score: float = 0.0
     signals: List[TrendSignal] = field(default_factory=list)
     first_seen_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

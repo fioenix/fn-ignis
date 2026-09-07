@@ -364,7 +364,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     id=UUID(str(c_id)),
                     canonical_name=name,
                     summary_text=dynamic_summary,
-                    category=cat or "general",
+                    category=cat or "unclassified",
                     cross_platform_score=float(score or 0.0),
                     signals=signals_list,
                     first_seen_at=first_seen,

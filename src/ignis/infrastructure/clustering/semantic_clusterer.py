@@ -28,6 +28,7 @@ class SemanticClusterer(IClusteringEngine):
     ):
         self.similarity_threshold = similarity_threshold
         self._custom_stopwords: Set[str] = set(custom_stopwords or [])
+        self._taxonomies: List[Tuple[str, Set[str]]] = []
 
     def register_stopwords(self, terms: List[str]) -> None:
         """Dynamically register stopwords from database or runtime config."""
@@ -35,6 +36,41 @@ class SemanticClusterer(IClusteringEngine):
             clean = t.strip().lower()
             if clean:
                 self._custom_stopwords.add(clean)
+
+    def register_taxonomies(self, taxonomies: List[dict]) -> None:
+        """Load industry taxonomies (industry_code + keywords) from the database for classification."""
+        loaded: List[Tuple[str, Set[str]]] = []
+        for item in taxonomies or []:
+            code = str(item.get("industry_code") or "").strip().lower()
+            keywords = {str(k).strip().lower() for k in (item.get("keywords") or []) if str(k).strip()}
+            if code and keywords:
+                loaded.append((code, keywords))
+        self._taxonomies = loaded
+
+    def _classify_category(self, group: List[TrendSignal]) -> str:
+        """Resolve a cluster category: source-provided first, then taxonomy match, else unclassified."""
+        source_categories: List[str] = []
+        for s in group:
+            raw = (s.metadata or {}).get("category")
+            if raw and str(raw).strip():
+                source_categories.append(str(raw).strip().lower())
+        if source_categories:
+            return max(set(source_categories), key=source_categories.count)
+
+        if self._taxonomies:
+            tokens: Set[str] = set()
+            for s in group:
+                tokens |= self._tokenize(s.raw_title)
+            haystack = " ".join(self._clean_title(s.raw_title).lower() for s in group)
+            best_code, best_hits = "", 0
+            for code, keywords in self._taxonomies:
+                hits = sum(1 for kw in keywords if (kw in tokens) or (" " in kw and kw in haystack))
+                if hits > best_hits:
+                    best_code, best_hits = code, hits
+            if best_code:
+                return best_code
+
+        return "unclassified"
 
     @classmethod
     def _clean_title(cls, text: str) -> str:
@@ -192,7 +228,7 @@ class SemanticClusterer(IClusteringEngine):
                 id=cluster_id,
                 canonical_name=canonical_name,
                 summary_text=f"Aggregated topic from {len(group)} signals across {len({s.platform for s in group})} platforms.",
-                category="general",
+                category=self._classify_category(group),
                 cross_platform_score=score,
                 signals=group,
                 first_seen_at=min(s.captured_at for s in group),
