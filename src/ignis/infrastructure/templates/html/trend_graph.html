@@ -178,9 +178,6 @@
       });
     });
     const nodeById = new Map(nodes.map((n) => [n.id, n]));
-    // Only the larger nodes carry a label until the user zooms in, otherwise a dense day is unreadable.
-    const sortedRadii = nodes.map((n) => n.r).sort((a, b) => a - b);
-    const LABEL_MIN_RADIUS = sortedRadii.length ? sortedRadii[Math.floor(sortedRadii.length * 0.75)] : 0;
     const edges = GRAPH.edges
       .map((e) => ({ source: nodeById.get(e.source), target: nodeById.get(e.target), weight: e.weight }))
       .filter((e) => e.source && e.target);
@@ -272,7 +269,9 @@
 
       // Detail is gated on the node's on-screen size, not on the zoom level alone, so a fitted
       // overview still labels its biggest topics while a dense field never turns into soup.
+      // Labels themselves are collected here and drawn later, in drawLabels().
       const labelsEnabled = document.getElementById("label-toggle").checked;
+      const labelCandidates = [];
 
       nodes.forEach((n) => {
         const dim = !n.visible || !isFocused(n);
@@ -282,7 +281,7 @@
         // legible at any zoom. It costs one arc per platform, never one per signal.
         if (n.mix.length) {
           ctx.globalAlpha = alphaMul;
-          ctx.lineWidth = Math.max(2.2, n.r * 0.34);
+          ctx.lineWidth = ringWidth(n);
           const ringRadius = n.r + ctx.lineWidth * 0.75;
           let from = -Math.PI / 2;
           n.mix.forEach(([platform, share]) => {
@@ -297,7 +296,7 @@
 
         // Dots are the signal layer: each one is a sampled signal carrying its verbatim title,
         // readable on hover. They are drawn only once the node is large enough on screen.
-        if (n.dots.length && n.r * scale >= 9) {
+        if (dotsVisible(n)) {
           n.dots.forEach((dot, i) => {
             const point = dotPosition(n, i);
             ctx.globalAlpha = alphaMul * (dot === hoveredDot ? 1 : 0.7);
@@ -320,19 +319,89 @@
           ctx.stroke();
         }
 
-        const labelWorthy = n === hovered || n === selected || scale > 1.6
-          || (n.r >= LABEL_MIN_RADIUS && n.r * scale >= 4.5);
-        if (labelsEnabled && !dim && labelWorthy) {
-          ctx.globalAlpha = 1;
-          ctx.fillStyle = token("--color-foreground");
-          ctx.font = (11 / scale) + "px " + token("--font-sans");
-          ctx.textAlign = "center";
-          const label = n.label.length > 34 ? n.label.slice(0, 33) + "…" : n.label;
-          ctx.fillText(label, n.x, n.y + n.r + 13 / scale);
-        }
+        if (labelsEnabled && !dim && n.r * scale >= 4.5) labelCandidates.push(n);
       });
 
       ctx.globalAlpha = 1;
+      ctx.restore();
+
+      drawLabels(labelCandidates);
+    }
+
+    // Labels are drawn in their own screen-space pass after every node, so a circle can never
+    // paint over a label, and each one claims a rectangle: a label that would collide with one
+    // already placed is dropped. Zooming in spreads the nodes apart, which frees rectangles and
+    // reveals more labels — instead of stacking them all on top of each other.
+    const LABEL_FONT_PX = 11;
+    const LABEL_MAX_CHARS = 34;
+    const LABEL_PADDING = 3;
+    const LABEL_BUDGET = 90;
+
+    function occupiedPanels() {
+      const margin = 6;
+      return ["toolbar", "legend", "details", "hint"].reduce((boxes, id) => {
+        const el = document.getElementById(id);
+        if (!el || el.style.display === "none") return boxes;
+        const r = el.getBoundingClientRect();
+        if (r.width && r.height) {
+          boxes.push({ left: r.left - margin, right: r.right + margin, top: r.top - margin, bottom: r.bottom + margin });
+        }
+        return boxes;
+      }, []);
+    }
+
+    function drawLabels(candidates) {
+      if (!candidates.length) return;
+
+      const priority = (n) => (n === selected ? 3 : n === hovered ? 2 : 0);
+      candidates.sort((a, b) => (priority(b) - priority(a)) || (b.r - a.r));
+
+      ctx.save();
+      ctx.font = "600 " + LABEL_FONT_PX + "px " + token("--font-sans");
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.lineJoin = "round";
+      const halo = token("--color-background") || "#FFFFFF";
+      const ink = token("--color-foreground") || "#0B0B17";
+
+      const placed = occupiedPanels();
+      let drawn = 0;
+      for (const n of candidates) {
+        if (drawn >= LABEL_BUDGET) break;
+        const text = n.label.length > LABEL_MAX_CHARS ? n.label.slice(0, LABEL_MAX_CHARS - 1) + "…" : n.label;
+        const width = ctx.measureText(text).width;
+        const cx = n.x * scale + canvas.clientWidth / 2 + offsetX;
+        const outerRadius = (dotsVisible(n) ? haloRadius(n) + 3 : n.r + ringWidth(n)) * scale;
+        const centreY = n.y * scale + canvas.clientHeight / 2 + offsetY;
+        // Below the node first, then above it: a label blocked by a neighbour or by a panel gets
+        // a second chance on the other side before it is dropped.
+        const options = [centreY + outerRadius + 5, centreY - outerRadius - 5 - LABEL_FONT_PX];
+
+        let box = null;
+        for (const cy of options) {
+          const candidate = {
+            left: cx - width / 2 - LABEL_PADDING,
+            right: cx + width / 2 + LABEL_PADDING,
+            top: cy - LABEL_PADDING,
+            bottom: cy + LABEL_FONT_PX + LABEL_PADDING,
+            y: cy,
+          };
+          if (candidate.right < 0 || candidate.left > canvas.clientWidth) break;
+          if (candidate.bottom < 0 || candidate.top > canvas.clientHeight) continue;
+          const collides = placed.some((p) =>
+            candidate.left < p.right && candidate.right > p.left && candidate.top < p.bottom && candidate.bottom > p.top);
+          if (!collides) { box = candidate; break; }
+        }
+        if (!box) continue;
+
+        placed.push(box);
+        drawn++;
+        ctx.strokeStyle = halo;
+        ctx.lineWidth = 3.5;
+        ctx.strokeText(text, cx, box.y);
+        ctx.fillStyle = ink;
+        ctx.fillText(text, cx, box.y);
+      }
       ctx.restore();
     }
 
@@ -357,8 +426,12 @@
       requestAnimationFrame(frame);
     }
 
+    const ringWidth = (n) => Math.max(2.2, n.r * 0.34);
+    const haloRadius = (n) => n.r + ringWidth(n) * 1.5 + 5;
+    const dotsVisible = (n) => n.dots.length > 0 && n.r * scale >= 9;
+
     function dotPosition(n, index) {
-      const halo = n.r + Math.max(2.2, n.r * 0.34) * 1.5 + 5;
+      const halo = haloRadius(n);
       const angle = (index / n.dots.length) * Math.PI * 2 + n.r;
       return { x: n.x + Math.cos(angle) * halo, y: n.y + Math.sin(angle) * halo };
     }
@@ -368,7 +441,7 @@
       // how many signals the database holds.
       const radius = 6 / scale;
       for (const n of nodes) {
-        if (!n.visible || !n.dots.length || n.r * scale < 9) continue;
+        if (!n.visible || !dotsVisible(n)) continue;
         const reach = n.r * 2 + 20;
         if (Math.abs(n.x - worldPoint.x) > reach || Math.abs(n.y - worldPoint.y) > reach) continue;
         for (let i = 0; i < n.dots.length; i++) {
