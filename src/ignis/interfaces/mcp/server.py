@@ -4,6 +4,7 @@ import tempfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import uuid
 from uuid import UUID
 
 
@@ -22,6 +23,7 @@ from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.domain.entities import TopicCluster
 
 from ignis.config import settings
 
@@ -1832,50 +1834,153 @@ async def refresh_runtime_config_cache() -> str:
 async def handle_verify_connectors_health() -> str:
     """
     Run active diagnostic probes across all multi-platform ingress connectors and infrastructure:
+    - Database Read & Write Probe (Connection pool, active lexicons, sentinel cluster upsert)
     - YouTube Data API v3 (API Key & Quota verification)
     - Google Trends RSS (Feed responsiveness & parsing)
     - TikTok Connectors & Playwright (Browser engine & optional proxy routing)
-    - PostgreSQL / TimescaleDB (Connection pool & lexicon registry counts)
+    - Threads & Instagram Reels (Active synthetic HTTP probe & session expiry check)
+    - Real-time Alert generation for consecutive failures, expiring credentials, and parse-empty probes.
     """
     comp = get_components()
     repo = comp["repository"]
     registry = comp["registry"]
 
+    now = datetime.now(timezone.utc)
+    alerts: List[Dict[str, Any]] = []
+
     diagnostics: Dict[str, Any] = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now.isoformat(),
         "proxy_configured": bool(settings.PLAYWRIGHT_PROXY_SERVER),
         "proxy_server": settings.PLAYWRIGHT_PROXY_SERVER if settings.PLAYWRIGHT_PROXY_SERVER else "Direct (No Proxy)",
         "connectors": {},
         "database": {},
+        "alerts": [],
         "overall_status": "HEALTHY",
     }
 
-    # 1. Database Probe
+    # 1. Database Read Probe
     try:
         lexicons = await repo.get_domain_lexicons()
         diagnostics["database"] = {
             "status": "HEALTHY",
             "active_lexicons_count": len(lexicons),
             "storage": "PostgreSQL / TimescaleDB",
+            "write_probe": "PENDING",
         }
     except Exception as e:
         diagnostics["database"] = {
             "status": "UNHEALTHY",
-            "error": str(e)
+            "error": str(e),
+            "write_probe": "SKIPPED",
         }
         diagnostics["overall_status"] = "DEGRADED"
+        alerts.append({
+            "level": "CRITICAL",
+            "type": "DATABASE_READ_FAILURE",
+            "component": "database",
+            "message": f"Database read probe failed: {e}",
+            "timestamp": now.isoformat(),
+        })
+
+    # 1b. Database Write Probe (Sentinel Cluster Upsert)
+    try:
+        sentinel_id = uuid.uuid5(uuid.NAMESPACE_DNS, "sentinel:health_write_probe")
+        sentinel_cluster = TopicCluster(
+            id=sentinel_id,
+            canonical_name="sentinel_health_write_probe",
+            summary_text="Health check write probe",
+            category="health",
+            cross_platform_score=0.0,
+            signals=[],
+            first_seen_at=now,
+            last_updated_at=now,
+        )
+        await repo.save_clusters([sentinel_cluster])
+        diagnostics["database"]["write_probe"] = "HEALTHY"
+    except Exception as write_err:
+        diagnostics["database"]["write_probe"] = "FAILED"
+        diagnostics["database"]["write_error"] = str(write_err)
+        diagnostics["database"]["status"] = "UNHEALTHY"
+        diagnostics["overall_status"] = "DEGRADED"
+        alerts.append({
+            "level": "CRITICAL",
+            "type": "DATABASE_WRITE_FAILURE",
+            "component": "database",
+            "message": f"Database cluster upsert probe failed: {write_err}",
+            "timestamp": now.isoformat(),
+        })
 
     # 2. Check each connector plugin
     for plugin_id, plugin in registry._plugins.items():
         platform_value = plugin.platform.value if hasattr(plugin.platform, "value") else str(plugin.platform)
+        breaker = registry._breakers.get(plugin_id)
+
+        # Check credentials & expiry
+        expires_at_str = None
+        days_remaining = None
+        auth_mgr = getattr(plugin, "_auth_manager", None) or getattr(plugin, "_browser_auth_manager", None)
+        if auth_mgr and hasattr(auth_mgr, "get_auth_status"):
+            try:
+                auth_info = await auth_mgr.get_auth_status()
+                # Parse expires_at from browser_session or direct fields
+                exp_raw = None
+                if isinstance(auth_info, dict):
+                    if "browser_session" in auth_info and isinstance(auth_info["browser_session"], dict):
+                        exp_raw = auth_info["browser_session"].get("expires_at")
+                    elif "expires_at" in auth_info:
+                        exp_raw = auth_info.get("expires_at")
+
+                if exp_raw:
+                    expires_at_str = str(exp_raw)
+                    try:
+                        exp_dt = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                        days_remaining = (exp_dt - now).days
+                        if days_remaining < 7:
+                            alerts.append({
+                                "level": "WARNING",
+                                "type": "TOKEN_EXPIRING_SOON",
+                                "component": plugin.name,
+                                "message": f"Credential for {plugin.name} expires in {days_remaining} days ({expires_at_str}).",
+                                "timestamp": now.isoformat(),
+                            })
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
         try:
             is_ok = await plugin.is_healthy()
             if is_ok:
+                # Check if synthetic probe capability exists and whether it returns empty
+                probe_status = "HEALTHY"
+                remediation = None
+
+                if hasattr(plugin, "synthetic_probe"):
+                    try:
+                        probe_res = await plugin.synthetic_probe()
+                        if isinstance(probe_res, list) and len(probe_res) == 0:
+                            probe_status = "PARSE_EMPTY"
+                            remediation = f"Probe to {plugin.name} returned 0 elements. Endpoint schema or selector may have changed."
+                            diagnostics["overall_status"] = "DEGRADED"
+                            alerts.append({
+                                "level": "ERROR",
+                                "type": "PROBE_RETURNED_EMPTY",
+                                "component": plugin.name,
+                                "message": remediation,
+                                "timestamp": now.isoformat(),
+                            })
+                    except Exception as pe:
+                        probe_status = "DEGRADED"
+                        remediation = f"Synthetic probe error: {pe}"
+                        diagnostics["overall_status"] = "DEGRADED"
+
                 diagnostics["connectors"][plugin.name] = {
                     "plugin_id": plugin_id,
                     "platform": platform_value,
-                    "status": "HEALTHY",
-                    "remediation": None,
+                    "status": probe_status,
+                    "expires_at": expires_at_str,
+                    "days_remaining": days_remaining,
+                    "remediation": remediation,
                 }
             else:
                 # Determine reason: missing config vs expired vs unhealthy
@@ -1894,22 +1999,68 @@ async def handle_verify_connectors_health() -> str:
                     status_label = "NOT_CONFIGURED"
                     remediation = "YOUTUBE_API_KEY is not set in environment or config. Set YOUTUBE_API_KEY to enable YouTube Data API."
 
+                if breaker and hasattr(breaker, "record_failure"):
+                    try:
+                        breaker.record_failure(RuntimeError(f"Health check failed: {status_label}"))
+                        if getattr(breaker, "failure_count", 0) >= 2:
+                            alerts.append({
+                                "level": "CRITICAL",
+                                "type": "CIRCUIT_BREAKER_OPEN",
+                                "component": plugin.name,
+                                "message": f"Circuit breaker for {plugin.name} tripped to OPEN after {breaker.failure_count} consecutive failures.",
+                                "timestamp": now.isoformat(),
+                            })
+                    except Exception:
+                        pass
+
                 diagnostics["connectors"][plugin.name] = {
                     "plugin_id": plugin_id,
                     "platform": platform_value,
                     "status": status_label,
+                    "expires_at": expires_at_str,
+                    "days_remaining": days_remaining,
                     "remediation": remediation,
                 }
                 diagnostics["overall_status"] = "DEGRADED"
         except Exception as e:
+            if breaker and hasattr(breaker, "record_failure"):
+                try:
+                    breaker.record_failure(e)
+                    if getattr(breaker, "failure_count", 0) >= 2:
+                        alerts.append({
+                            "level": "CRITICAL",
+                            "type": "CIRCUIT_BREAKER_OPEN",
+                            "component": plugin.name,
+                            "message": f"Circuit breaker for {plugin.name} tripped to OPEN after {breaker.failure_count} consecutive failures.",
+                            "timestamp": now.isoformat(),
+                        })
+                except Exception:
+                    pass
+
             diagnostics["connectors"][plugin.name] = {
                 "plugin_id": plugin_id,
                 "platform": platform_value,
                 "status": "ERROR",
                 "error": str(e),
+                "expires_at": expires_at_str,
+                "days_remaining": days_remaining,
                 "remediation": "Check system logs or network access to diagnose connector failure.",
             }
             diagnostics["overall_status"] = "DEGRADED"
+
+    # Persist alerts to audit log
+    diagnostics["alerts"] = alerts
+    for a in alerts:
+        try:
+            await repo.log_event(
+                component=a.get("component", "system"),
+                event_type=a.get("type", "ALERT"),
+                message=a.get("message", ""),
+                level=a.get("level", "WARNING"),
+                details=a,
+            )
+        except Exception:
+            pass
 
     return json.dumps(diagnostics, ensure_ascii=False, indent=2)
 
