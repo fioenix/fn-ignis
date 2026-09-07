@@ -1,4 +1,3 @@
-import asyncio
 import json
 import pytest
 from ignis.interfaces.mcp.server import mcp

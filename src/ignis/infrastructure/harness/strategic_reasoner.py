@@ -178,7 +178,6 @@ class StrategicMarketReasoner:
         """Render the headline metric a reader can verify against the source."""
         platform = self._platform_value(signal.platform)
         parts: List[str] = []
-        is_vn = (geo == GeoCode.VN) if isinstance(geo, GeoCode) else (str(geo).upper() == "VN")
 
         if platform == "google":
             parts.append(f"search index {float(signal.metric_value):.0f}/100")
@@ -313,7 +312,6 @@ class StrategicMarketReasoner:
                 and auth_status.get(p_val) is False
             )
 
-            is_vn = (mission.geo_code == GeoCode.VN) if isinstance(mission.geo_code, GeoCode) else (str(mission.geo_code).upper() == "VN")
             if needs_auth:
                 status = ChannelHealthStatus.AUTH_REQUIRED
                 notes = "Missing token or browser session for this channel."
@@ -387,7 +385,6 @@ class StrategicMarketReasoner:
         geo: GeoCode = GeoCode.VN,
     ) -> Tuple[TrendMaturityStage, List[str]]:
         reasons = []
-        is_vn = (geo == GeoCode.VN) if isinstance(geo, GeoCode) else (str(geo).upper() == "VN")
         video_signals = [
             s for s in signals 
             if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) in ("youtube", "tiktok", "reels")
@@ -598,7 +595,6 @@ class StrategicMarketReasoner:
             plat_str = f" ({', '.join(breakdown_parts)})" if breakdown_parts else ""
             v_str = f"{loc_count} video{plat_str}"
 
-            is_vn = (geo == GeoCode.VN) if isinstance(geo, GeoCode) else (str(geo).upper() == "VN")
             # Strict Opportunity Index with Inverted Sample Size Damping & Label Alignment
             if loc_count == 0:
                 opportunity_index = round(demand_score * 0.15, 1)
@@ -667,7 +663,6 @@ class StrategicMarketReasoner:
             if self._platform_value(s.platform) in self.VIDEO_PLATFORMS
         ]
         demand_signals = [s for s in signals if s.platform == PlatformType.GOOGLE_TRENDS]
-        is_vn = (mission.geo_code == GeoCode.VN) if isinstance(mission.geo_code, GeoCode) else (str(mission.geo_code).upper() == "VN")
 
         maturity_stmt = f"Market maturity stage: {maturity_stage.value} — {'; '.join(maturity_reasons)}"
         statements.append((

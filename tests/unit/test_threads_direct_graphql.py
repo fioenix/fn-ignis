@@ -9,7 +9,6 @@ from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.connectors.meta_browser_ingress import (
     GraphQLDocIdCache,
     build_cookie_header,
-    extract_records,
     extract_search_suggestions,
     extract_token_from_storage,
     extract_trending_topics,
