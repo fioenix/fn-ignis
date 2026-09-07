@@ -372,11 +372,13 @@ class SqliteTrendRepository(ITrendRepository):
                     plat_count = row["plat_count"]
                     total_metric = row["total_metric"]
                     avg_velocity = row["avg_velocity"]
+                    sig_count = row["sig_count"]
 
-                    platform_diversity_score = (plat_count / 5.0) * 40.0
-                    metric_score = min(40.0, (math.log10(max(1.0, total_metric + 1.0)) / 7.0) * 40.0)
-                    velocity_score = min(20.0, max(0.0, avg_velocity * 0.5))
-                    dynamic_score = round(min(100.0, platform_diversity_score + metric_score + velocity_score), 1)
+                    platform_diversity_score = (plat_count / 5.0) * 35.0
+                    metric_score = min(35.0, (math.log10(max(1.0, total_metric + 1.0)) / 10.0) * 35.0)
+                    velocity_score = min(20.0, (math.log10(max(1.0, avg_velocity + 1.0)) / 5.0) * 20.0)
+                    volume_score = min(10.0, (math.log10(max(1.0, float(sig_count) + 1.0)) / 3.0) * 10.0)
+                    dynamic_score = round(min(100.0, platform_diversity_score + metric_score + velocity_score + volume_score), 1)
 
                     persisted_score = row["cross_platform_score"]
                     final_score = persisted_score if (persisted_score is not None and persisted_score > 0) else dynamic_score

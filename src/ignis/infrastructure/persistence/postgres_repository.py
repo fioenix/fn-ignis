@@ -227,9 +227,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                     COALESCE(SUM(ts.metric_value), 0.0) AS total_metric,
                     COALESCE(AVG(ts.growth_velocity), 0.0) AS avg_velocity,
                     ROUND(LEAST(100.0, 
-                        (COUNT(DISTINCT ts.platform) / 5.0 * 40.0) +
-                        LEAST(40.0, (LOG(GREATEST(1.0, COALESCE(SUM(ts.metric_value), 0.0) + 1.0)) / 7.0) * 40.0) +
-                        LEAST(20.0, GREATEST(0.0, COALESCE(AVG(ts.growth_velocity), 0.0) * 0.5))
+                        (COUNT(DISTINCT ts.platform) / 5.0 * 35.0) +
+                        LEAST(35.0, (LOG(GREATEST(1.0, COALESCE(SUM(ts.metric_value), 0.0) + 1.0)) / 10.0) * 35.0) +
+                        LEAST(20.0, (LOG(GREATEST(1.0, COALESCE(AVG(ts.growth_velocity), 0.0) + 1.0)) / 5.0) * 20.0) +
+                        LEAST(10.0, (LOG(GREATEST(1.0, COUNT(ts.id)::numeric + 1.0)) / 3.0) * 10.0)
                     )::numeric, 1) AS dynamic_score
                 FROM topic_clusters tc
                 INNER JOIN trend_signals ts ON ts.cluster_id = tc.id

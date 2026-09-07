@@ -137,15 +137,17 @@ class SemanticClusterer(IClusteringEngine):
             return 0.0
 
         unique_platforms = {s.platform for s in signals}
-        platform_diversity_score = (len(unique_platforms) / 5.0) * 40.0
+        platform_diversity_score = (len(unique_platforms) / 5.0) * 35.0
 
         total_metric = sum(s.metric_value for s in signals)
-        metric_score = min(40.0, (math.log10(total_metric + 1.0) / 7.0) * 40.0)
+        metric_score = min(35.0, (math.log10(max(0.0, total_metric) + 1.0) / 10.0) * 35.0)
 
         avg_velocity = sum(s.growth_velocity for s in signals) / len(signals)
-        velocity_score = min(20.0, max(0.0, avg_velocity * 0.5))
+        velocity_score = min(20.0, (math.log10(max(0.0, avg_velocity) + 1.0) / 5.0) * 20.0)
 
-        return round(min(100.0, platform_diversity_score + metric_score + velocity_score), 1)
+        volume_score = min(10.0, (math.log10(len(signals) + 1.0) / 3.0) * 10.0)
+
+        return round(min(100.0, platform_diversity_score + metric_score + velocity_score + volume_score), 1)
 
     async def cluster_signals(self, signals: List[TrendSignal]) -> List[TopicCluster]:
         if not signals:
