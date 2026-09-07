@@ -1012,18 +1012,23 @@ async def handle_get_trending_topics(
 
     safe_limit = max(1, min(limit, 30))
     clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, timeframe=tf_val, limit=safe_limit)
-    topics = [
-        {
+    topics = []
+    for c in clusters:
+        raw_count = len(c.signals)
+        distinct_count = len({s.source_url for s in c.signals if s.source_url}) + len([s for s in c.signals if not s.source_url])
+        plat_count = len({s.platform for s in c.signals})
+        dynamic_summary = c.summary_text or f"Chủ đề tổng hợp từ {raw_count} tín hiệu trên {plat_count} nền tảng."
+        topics.append({
             "id": str(c.id),
             "topic_name": c.canonical_name,
-            "summary": c.summary_text,
+            "summary": dynamic_summary,
             "category": c.category,
             "cross_platform_score": c.cross_platform_score,
             "momentum": c.momentum_category.value,
-            "signal_count": len(c.signals),
-        }
-        for c in clusters
-    ]
+            "signal_count": raw_count,
+            "distinct_signal_count": distinct_count,
+            "raw_row_count": raw_count,
+        })
     envelope = {
         "status": "SUCCESS",
         "geo": geo_val.value,

@@ -422,12 +422,14 @@ class SqliteTrendRepository(ITrendRepository):
                     persisted_score = row["cross_platform_score"]
                     final_score = persisted_score if (persisted_score is not None and persisted_score > 0) else dynamic_score
 
+                    plat_cnt = len({s.platform for s in signals_list})
+                    dynamic_summary = f"Chủ đề tổng hợp từ {len(signals_list)} tín hiệu trên {plat_cnt} nền tảng."
                     clusters.append(
                         TopicCluster(
                             id=UUID(c_id),
                             canonical_name=row["canonical_name"],
                             cross_platform_score=final_score,
-                            summary_text=row["summary_text"],
+                            summary_text=dynamic_summary,
                             category=row["category"] or "general",
                             first_seen_at=first_seen,
                             last_updated_at=last_updated,

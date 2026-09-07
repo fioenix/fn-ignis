@@ -187,7 +187,7 @@ class SemanticClusterer(IClusteringEngine):
             cluster = TopicCluster(
                 id=cluster_id,
                 canonical_name=canonical_name,
-                summary_text=f"Aggregated topic from {len(group)} signals across {len({s.platform for s in group})} platforms.",
+                summary_text=f"Chủ đề tổng hợp từ {len(group)} tín hiệu trên {len({s.platform for s in group})} nền tảng.",
                 category="general",
                 cross_platform_score=score,
                 signals=group,

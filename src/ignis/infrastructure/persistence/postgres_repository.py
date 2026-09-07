@@ -356,10 +356,12 @@ class PostgresTimescaleRepository(ITrendRepository):
                         )
                     )
 
+                plat_cnt = len({s.platform for s in signals_list})
+                dynamic_summary = f"Chủ đề tổng hợp từ {len(signals_list)} tín hiệu trên {plat_cnt} nền tảng."
                 cluster = TopicCluster(
                     id=UUID(str(c_id)),
                     canonical_name=name,
-                    summary_text=summary,
+                    summary_text=dynamic_summary,
                     category=cat or "general",
                     cross_platform_score=float(score or 0.0),
                     signals=signals_list,
