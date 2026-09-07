@@ -9,7 +9,7 @@ from ignis.interfaces.mcp.server import handle_get_topic_detail
 
 @pytest.mark.asyncio
 async def test_bug06_poll_same_url_twice_deduplicates_signal_and_records_metrics(tmp_path):
-    """Poll cùng 1 URL 2 lần -> 1 row trong bảng signal, 2 rows trong signal_metrics."""
+    """Polling the same URL twice leaves one signal row and two signal_metrics rows."""
     db_path = str(tmp_path / "test_dedup.db")
     repo = SqliteTrendRepository(db_path=db_path)
     
@@ -24,10 +24,10 @@ async def test_bug06_poll_same_url_twice_deduplicates_signal_and_records_metrics
         captured_at=datetime(2026, 9, 7, 10, 0, 0, tzinfo=timezone.utc),
     )
     
-    # Lần poll 1
+    # First poll
     await repo.save_signals([s1])
     
-    # Lần poll 2: cùng URL, metric và velocity tăng
+    # Second poll: same URL, higher metric and velocity
     s2 = TrendSignal(
         platform=PlatformType.TIKTOK,
         raw_title="Video viral mẫu",
@@ -39,19 +39,19 @@ async def test_bug06_poll_same_url_twice_deduplicates_signal_and_records_metrics
     )
     await repo.save_signals([s2])
     
-    # Kiểm tra bảng trend_signals: đúng 1 row duy nhất cho URL này
+    # trend_signals must hold exactly one row for this URL
     conn = repo._get_connection()
     cur = conn.cursor()
     cur.execute("SELECT count(*) FROM trend_signals WHERE source_url = ?", (url,))
     signal_count = cur.fetchone()[0]
-    assert signal_count == 1, f"Bảng trend_signals phải có đúng 1 row, thực tế có {signal_count}"
+    assert signal_count == 1, f"trend_signals must hold exactly one row, found {signal_count}"
     
-    # Kiểm tra bảng signal_metrics: có 2 rows lưu lịch sử time-series
+    # signal_metrics must keep both time-series points
     cur.execute("SELECT count(*) FROM signal_metrics")
     metrics_count = cur.fetchone()[0]
-    assert metrics_count == 2, f"Bảng signal_metrics phải có 2 rows, thực tế có {metrics_count}"
+    assert metrics_count == 2, f"signal_metrics must hold two rows, found {metrics_count}"
     
-    # Giá trị metric trong trend_signals được cập nhật lên giá trị mới nhất
+    # The metric on trend_signals is refreshed to the latest value
     cur.execute("SELECT metric_value FROM trend_signals WHERE source_url = ?", (url,))
     latest_metric = cur.fetchone()[0]
     assert latest_metric == 2500.0
@@ -59,7 +59,7 @@ async def test_bug06_poll_same_url_twice_deduplicates_signal_and_records_metrics
 
 @pytest.mark.asyncio
 async def test_bug06_get_cluster_signals_no_duplicate_urls(tmp_path):
-    """get_cluster_signals không trả về signals trùng source_url."""
+    """get_cluster_signals never returns two signals sharing a source_url."""
     db_path = str(tmp_path / "test_dedup_cluster.db")
     repo = SqliteTrendRepository(db_path=db_path)
     
@@ -90,5 +90,5 @@ async def test_bug06_get_cluster_signals_no_duplicate_urls(tmp_path):
     
     signals = await repo.get_cluster_signals(cluster_id=cluster_id)
     urls = [s.source_url for s in signals if s.source_url]
-    assert len(urls) == len(set(urls)), f"Có URLs bị trùng lặp: {urls}"
+    assert len(urls) == len(set(urls)), f"Duplicate URLs returned: {urls}"
     assert len(urls) == 1

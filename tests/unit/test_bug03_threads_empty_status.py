@@ -11,7 +11,7 @@ from ignis.interfaces.mcp.server import (
 
 @pytest.mark.asyncio
 async def test_bug03_threads_trending_topics_empty_returns_parse_empty():
-    """AC-1: get_threads_trending_topics khi topics rỗng phải trả PARSE_EMPTY, không bao giờ là SUCCESS."""
+    """AC-1: get_threads_trending_topics must report PARSE_EMPTY on zero topics, never SUCCESS."""
     mock_plugin = AsyncMock()
     mock_plugin.resolve_auth_tier.return_value = ("session_cookies", {"cookies": []})
     mock_plugin.fetch_trending_topics.return_value = []
@@ -30,7 +30,7 @@ async def test_bug03_threads_trending_topics_empty_returns_parse_empty():
 
 @pytest.mark.asyncio
 async def test_bug03_threads_search_suggestions_empty_returns_parse_empty():
-    """AC-2: get_threads_search_suggestions khi suggestions rỗng phải trả PARSE_EMPTY, không bao giờ là SUCCESS."""
+    """AC-2: get_threads_search_suggestions must report PARSE_EMPTY on zero suggestions, never SUCCESS."""
     mock_plugin = AsyncMock()
     mock_plugin.resolve_auth_tier.return_value = ("session_cookies", {"cookies": []})
     mock_plugin.fetch_search_suggestions.return_value = []
@@ -49,7 +49,7 @@ async def test_bug03_threads_search_suggestions_empty_returns_parse_empty():
 
 @pytest.mark.asyncio
 async def test_bug03_threads_unauthenticated_returns_auth_required():
-    """AC-3: Khi chưa xác thực (tier == 'none'), trả về AUTH_REQUIRED."""
+    """AC-3: an unauthenticated platform (tier == 'none') reports AUTH_REQUIRED."""
     mock_plugin = AsyncMock()
     mock_plugin.resolve_auth_tier.return_value = ("none", None)
 

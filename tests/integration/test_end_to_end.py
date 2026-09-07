@@ -8,7 +8,7 @@ from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
 @pytest.mark.asyncio
 async def test_end_to_end_pipeline():
-    # 1. Giả lập tín hiệu thu thập từ 3 nền tảng khác nhau
+    # 1. Simulate signals ingested from three different platforms
     signals = [
         TrendSignal(
             platform=PlatformType.GOOGLE_TRENDS,
@@ -30,7 +30,7 @@ async def test_end_to_end_pipeline():
         ),
     ]
 
-    # 2. Gom cụm và chấm điểm
+    # 2. Cluster and score
     clusterer = SemanticClusterer()
     clusters = await clusterer.cluster_signals(signals)
 

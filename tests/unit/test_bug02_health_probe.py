@@ -8,7 +8,7 @@ from ignis.interfaces.mcp.server import handle_verify_connectors_health
 
 @pytest.mark.asyncio
 async def test_bug02_health_probe_empty_returns_degraded():
-    """AC-1 & AC-2: Khi connector có synthetic_probe trả về rỗng, gán status PARSE_EMPTY và overall DEGRADED."""
+    """AC-1 & AC-2: an empty synthetic_probe marks the connector PARSE_EMPTY and the system DEGRADED."""
     with patch("ignis.interfaces.mcp.server.get_components") as mock_get_comp:
         mock_repo = AsyncMock()
         mock_repo.get_domain_lexicons.return_value = [{"term": "test"}]
@@ -38,7 +38,7 @@ async def test_bug02_health_probe_empty_returns_degraded():
 
 @pytest.mark.asyncio
 async def test_bug02_database_write_failure_alert():
-    """AC-3: Khi repo.save_clusters gặp lỗi, phát hiện DATABASE_WRITE_FAILURE và overall DEGRADED."""
+    """AC-3: a failing repo.save_clusters raises DATABASE_WRITE_FAILURE and marks the system DEGRADED."""
     with patch("ignis.interfaces.mcp.server.get_components") as mock_get_comp:
         mock_repo = AsyncMock()
         mock_repo.get_domain_lexicons.return_value = [{"term": "test"}]

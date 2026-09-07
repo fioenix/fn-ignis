@@ -10,12 +10,12 @@ from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 def test_bug08_matches_topic_strictly_handles_case_and_short_acronyms():
     reasoner = StrategicMarketReasoner()
     
-    # "AI", "ai", "Ai" phải cho cùng kết quả
+    # "AI", "ai" and "Ai" must behave identically
     assert reasoner._matches_topic_strictly("Video tạo bằng AI đỉnh cao", "AI")
     assert reasoner._matches_topic_strictly("Video tạo bằng AI đỉnh cao", "ai")
     assert reasoner._matches_topic_strictly("Video tạo bằng AI đỉnh cao", "Ai")
     
-    # Keyword "ai agent" phải match với các video về AI hoặc AI Agent
+    # The keyword "ai agent" must match videos about AI or AI agents
     assert reasoner._matches_topic_strictly("Video tạo bằng AI đỉnh cao", "ai agent")
     assert reasoner._matches_topic_strictly("Hướng dẫn xây dựng AI Agent thực chiến", "ai agent")
 
@@ -65,9 +65,9 @@ def test_bug08_mission_analysis_catches_ai_cluster_for_ai_agent_keywords():
         scorecard=scorecard,
     )
     
-    # Kiểm tra: phải có ít nhất 1 cơ hội thị trường được phát hiện, không bị NO_DATA_RECORDED toàn bộ
+    # At least one market opportunity must be detected instead of an all NO_DATA_RECORDED report
     active_opps = [opp for opp in report.market_opportunities if opp.opportunity_type != "NO_DATA_RECORDED"]
-    assert len(active_opps) > 0, f"Phải bắt được cơ hội thị trường từ signals AI, thực tế: {[o.topic for o in report.market_opportunities]}"
+    assert len(active_opps) > 0, f"Expected an opportunity from the AI signals, got: {[o.topic for o in report.market_opportunities]}"
     
-    # overall_confidence không thể là 0.0
+    # overall_confidence cannot be 0.0
     assert scorecard.overall_confidence > 0.0

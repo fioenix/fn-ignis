@@ -4,6 +4,29 @@ Welcome to **fnIgnis** (`fn-ignis`) — Unified Self-Hosted Autonomous Trend Int
 
 ---
 
+## 🚦 Two Rules That Are Violated Most Often — Read Before Editing Any File
+
+These are not release-time checks. They apply to every line you write, at the moment you write it.
+Full detail lives in `AGENTS.md` Section 3 (Language Boundary Protocol, Data-Driven Vocabulary Protocol).
+
+**1. Language is decided by where the artifact lives, not by the language of the conversation.**
+Everything inside `src/` and `tests/` is English — identifiers, docstrings, comments, assert messages,
+log lines, exception text, and any string the code emits (`summary_text`, fallback names, status labels).
+"Match the user's language" governs chat responses and regional deliverables (`reports/`,
+`README.vi.md`, `docs/*.vi.md`) only. A failing assertion read by a Vietnamese developer is still
+developer output, so it is English. Test *fixture data* may be Vietnamese — that is the subject under
+test, not prose. Never write Vietnamese stripped of its diacritics as a compromise.
+
+**2. Domain vocabulary goes in the database, never in a Python constant.**
+Terms, synonyms, brand names, intent keywords, noise phrases, and category keywords belong in
+`market_lexicons` / `industry_taxonomies` / `runtime_configs`, seeded from `sql/` and read through the
+existing `register_*` and `get_*` paths. Adding a `KEYWORD_SYNONYMS`-style dict to `src/` is a band-aid
+even when it turns a test green. The only exceptions are third-party UI selectors that must match
+verbatim, and character-class regexes where the characters are the algorithm; both need an inline
+comment saying so.
+
+Verify with: `.venv/bin/pytest tests/unit/test_repo_conventions.py`
+
 ## ⚡ 1-Step Zero-Touch Autonomous Setup (Automated Setup)
 
 If the user gives you this repository link or asks you to set up `fn-ignis`, execute this single command immediately in the terminal:
@@ -89,7 +112,9 @@ ignis --geo VN --timeframe 24h
 Before completing changes or cutting a release, verify these three checklist gates:
 
 ### Checklist A: Open-Source Codebase & Documentation Standards
-- [ ] Source code, tests, docstrings, variable/function names, and git commits follow standard English conventions for global open-source contributors.
+- [ ] Source code, tests, docstrings, variable/function names, assert messages, emitted strings, and git commits follow standard English conventions for global open-source contributors.
+- [ ] No new domain vocabulary hardcoded as Python constants in `src/` (seed it in `sql/`, read it from the database).
+- [ ] `.venv/bin/pytest tests/unit/test_repo_conventions.py` passes.
 - [ ] Meta instructions (`CLAUDE.md`, `AGENTS.md`, `SKILL.md`) are maintained in English.
 - [ ] Regional documentations (`README.vi.md`) and localized market reports in `reports/` are maintained for their respective target audiences.
 

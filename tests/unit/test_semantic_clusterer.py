@@ -34,13 +34,13 @@ async def test_semantic_clusterer_grouping():
     
     assert len(clusters) == 2
     
-    # Cụm vàng phải gom 2 signals (Google + YouTube)
+    # The gold-price cluster must hold two signals (Google + YouTube)
     gold_cluster = next(c for c in clusters if "vàng" in c.canonical_name.lower())
     assert len(gold_cluster.signals) == 2
     assert gold_cluster.cross_platform_score > 0
     assert {s.platform for s in gold_cluster.signals} == {PlatformType.GOOGLE_TRENDS, PlatformType.YOUTUBE}
 
-    # Cụm AI phải có 1 signal
+    # The AI cluster must hold one signal
     ai_cluster = next(c for c in clusters if "ai" in c.canonical_name.lower() or "bot" in c.canonical_name.lower() or "coding" in c.canonical_name.lower())
     assert len(ai_cluster.signals) == 1
 

@@ -133,7 +133,7 @@ def test_crypto_ephemeral_key_security(monkeypatch):
 
 
 def test_portuguese_tilde_rejection():
-    """Verify Portuguese words with tilde (ã, õ, ũ) are not falsely recognized as Vietnamese."""
+    """Portuguese words carrying a tilde must not be misread as Vietnamese."""
     evaluator = QualityEvaluator()
     reasoner = StrategicMarketReasoner()
 

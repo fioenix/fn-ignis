@@ -20,7 +20,7 @@ async def test_bug04_regression_trieu_dai_not_grouped_with_dai_hoc():
         geo_code=GeoCode.VN,
     )
     clusters = await clusterer.cluster_signals([s1, s2])
-    # Không được gộp chung vì chỉ trùng chữ 'đại'
+    # Must stay apart: the titles share only the generic word 'dai'
     assert len(clusters) == 2
 
 
@@ -40,7 +40,7 @@ async def test_bug04_regression_nguoi_lao_dong_not_grouped_with_nguoi_mau():
         geo_code=GeoCode.VN,
     )
     clusters = await clusterer.cluster_signals([s1, s2])
-    # Không được gộp chung chỉ vì trùng chữ 'người'
+    # Must stay apart: the titles share only the generic word 'nguoi'
     assert len(clusters) == 2
 
 
@@ -60,14 +60,14 @@ async def test_bug04_ai_and_video_tao_bang_ai_grouped():
         geo_code=GeoCode.VN,
     )
     clusters = await clusterer.cluster_signals([s1, s2])
-    # Phải gộp thành 1 cluster AI
+    # Must merge into a single AI cluster
     assert len(clusters) == 1
     assert "ai" in clusters[0].canonical_name.lower()
     assert len(clusters[0].signals) == 2
 
 
 def test_bug04_canonical_name_constraints():
-    # Không chứa emoji, hashtag, và <= 80 ký tự
+    # No emoji, no hashtag, at most 80 characters
     raw = "🔥🎉 #xuhuong #fyp Cách để chạy hong buồn ngủ … vừa chạy vừa hát😄😄 Ủa mấy a bộ con gái chạy là phải mệt hả mọi người ơi dài ngoằng ngoẵng hơn tám mươi ký tự luôn nè trời ơi"
     clean = SemanticClusterer._clean_title(raw)
     assert "#" not in clean

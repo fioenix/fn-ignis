@@ -412,6 +412,7 @@ def _parse_count_label(label: Optional[str]) -> int:
     """Helper to convert human-friendly post count string ('12.5K', '1.2M') into integer."""
     if not label:
         return 0
+    # "BÀI VIẾT" is Instagram's own Vietnamese label for "POSTS"; it must match the rendered UI verbatim.
     clean = label.upper().replace("POSTS", "").replace("BÀI VIẾT", "").replace(",", ".").strip()
     try:
         if "M" in clean:

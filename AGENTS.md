@@ -122,10 +122,51 @@ When compiling a Comprehensive Strategic Dossier, the following standard structu
 
 *(For ad-hoc queries, agents should adjust output format flexibly to match the user's specific conversational need).*
 
-### 🌐 Language & Localization Protocol
-- **Internal Reasoning**: Agents may reason internally in English for speed and token precision.
-- **Target Audience Alignment**: Deliverables presented to users (chat responses, roadmaps, and HTML reports in `reports/`) should strictly match the user's conversational language (e.g., Vietnamese when researching the Vietnam market or conversing in Vietnamese).
-- **International Open-Source Standard**: Source code, docstrings, developer guides, and commit messages follow standard English conventions to ensure accessibility for global open-source contributors. Regional documentations (e.g., `README.vi.md`) are maintained alongside the canonical English docs.
+### 🌐 Language Boundary Protocol
+
+The language of an artifact is decided by **where the artifact lives**, never by the language the user
+is speaking in the current conversation. Agents reason internally in English.
+
+| Artifact | Language | Notes |
+|---|---|---|
+| Chat responses to the user | User's language | The only place conversational language applies |
+| `reports/`, `README.vi.md`, `docs/*.vi.md` | Target market language | Regional deliverables |
+| HTML report copy rendered for a regional audience | Target market language | Template body text, not template identifiers |
+| `src/**` — code, identifiers, docstrings, comments | **English** | No exceptions |
+| `src/**` — log lines, exception messages, strings the code emits (`summary_text`, fallback names, status labels) | **English** | These are machine-facing output, not conversation |
+| `tests/**` — docstrings, comments, assert messages, test names | **English** | A failing assertion is developer output |
+| `tests/**` — fixture data (titles, comments, keywords under test) | Any language | Vietnamese fixtures are required to test Vietnamese behaviour |
+| `sql/**` seeds, migration comments | **English** identifiers; vocabulary rows may be any language | The row *is* the data |
+| Git commits, PR descriptions, branch names | **English**, imperative | `Add`, `Fix`, `Refactor`, `Update` |
+| `AGENTS.md`, `CLAUDE.md`, skills, specs | **English** | Developer meta-guidance |
+
+> **The trap this rule exists to close:** "match the user's language" applies to the conversation only.
+> An assert message, a log line, or a string the engine returns is *not* a chat response, even when a
+> Vietnamese user eventually reads it. When an agent is unsure which side a string falls on, it is English.
+
+> **Diacritics:** never write Vietnamese without its diacritics as a compromise ("Chu de tong hop").
+> That satisfies neither convention. Write correct English, or correct Vietnamese where Vietnamese belongs.
+
+### 🗄️ Data-Driven Vocabulary Protocol
+
+Domain knowledge belongs in the database, not in Python. The tables exist precisely so that vocabulary
+can be extended at runtime without a release:
+
+- `market_lexicons` — domain terms, slang, synonyms (grouped by `domain` + `category`), foreign stopwords, noise blacklist.
+- `industry_taxonomies` — category keywords used to classify clusters.
+- `runtime_configs` — thresholds and connector parameters.
+
+**Do NOT** introduce a Python `list`/`dict`/`set` of domain terms, synonyms, brand names, intent
+keywords, noise phrases, or category keywords inside `src/`. Seed them in `sql/` and read them through
+the existing `register_*` / `get_domain_lexicons` / `get_industry_taxonomies` paths. If a new engine
+needs vocabulary, it grows a `register_*` method and a sync call — it does not grow a constant.
+
+Two narrow exceptions, both of which must carry an inline comment stating why:
+1. **Locale-dependent selectors** that must match a third-party UI verbatim (`'button:has-text("Xem thêm")'`).
+2. **Character-class regexes** used for script/language detection, where the characters *are* the algorithm.
+
+A hardcoded vocabulary is a band-aid even when it makes a test pass: it ships domain knowledge that only
+a code release can change, and it silently diverges from the database other components read.
 
 ---
 
@@ -175,7 +216,9 @@ Breaking Feature   Bugfix / Optimization
 Every AI Agent modifying this repository or preparing a release must verify compliance against these three mandatory checklists:
 
 ### Checklist A: Open-Source Codebase & Documentation Standards
-- [ ] **Global Codebase Convention**: All source code (`src/`), test suites (`tests/`), variable/function names, docstrings, and inline comments follow standard English for global open-source contributors.
+- [ ] **Global Codebase Convention**: All source code (`src/`), test suites (`tests/`), variable/function names, docstrings, inline comments, assert messages, log lines, and strings emitted by the code follow standard English (see the Language Boundary Protocol table in Section 3).
+- [ ] **No Hardcoded Vocabulary**: No new domain terms, synonyms, intent keywords, noise phrases, or category keywords added as Python constants in `src/` (see the Data-Driven Vocabulary Protocol in Section 3).
+- [ ] **Convention Gate**: `.venv/bin/pytest tests/unit/test_repo_conventions.py` passes.
 - [ ] **Developer Meta-Guidance**: Core developer instructions (`AGENTS.md`, `CLAUDE.md`, skills) are maintained in English.
 - [ ] **Git Commits & Branching**: 100% English imperative commit messages (e.g., `Add`, `Fix`, `Refactor`, `Update`).
 - [ ] **Regional Documentation**: Dedicated localized documentation (such as `README.vi.md`) and market dossiers in `reports/` are accurately maintained for regional audiences.

@@ -7,10 +7,10 @@ from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendReposi
 
 
 def test_bug05_variance_of_scores_is_non_zero():
-    """Phương sai điểm của 5 topic có số liệu khác nhau phải khác 0 (không bị bão hòa cùng 1 số 76.0)."""
+    """Five topics with different metrics must produce different scores, not all saturate at 76.0."""
     clusterer = SemanticClusterer()
     
-    # Tạo 5 nhóm tín hiệu khác nhau về metric volume và velocity
+    # Five signal groups differing in metric volume and velocity
     topics_signals = [
         [
             TrendSignal(platform=PlatformType.GOOGLE_TRENDS, raw_title="T1", metric_value=10000.0, growth_velocity=50.0, geo_code=GeoCode.VN),
@@ -36,16 +36,16 @@ def test_bug05_variance_of_scores_is_non_zero():
     
     scores = [clusterer._calculate_cross_platform_score(sigs) for sigs in topics_signals]
     
-    # Ở phiên bản cũ bị hard cap 40.0 + 20.0 + 16.0 = 76.0 cho tất cả
-    assert all(s != 76.0 for s in scores), f"Có topic bị kẹt ở điểm cũ 76.0: {scores}"
-    assert len(set(scores)) == len(scores), f"Tất cả 5 scores phải khác biệt nhau: {scores}"
+    # The previous formula hard-capped every topic at 40.0 + 20.0 + 16.0 = 76.0
+    assert all(s != 76.0 for s in scores), f"A topic is stuck at the old saturated 76.0: {scores}"
+    assert len(set(scores)) == len(scores), f"All five scores must differ: {scores}"
     variance = float(np.var(scores))
-    assert variance > 0.5, f"Phương sai phải lớn hơn 0.5, thực tế là {variance}"
+    assert variance > 0.5, f"Variance must exceed 0.5, actual {variance}"
 
 
 @pytest.mark.asyncio
 async def test_bug05_sqlite_repository_dynamic_score_calculation(tmp_path):
-    """SqliteTrendRepository tính dynamic score 4 thành phần khi cluster chưa có score."""
+    """SqliteTrendRepository computes a dynamic score when the cluster has none persisted."""
     db_path = str(tmp_path / "test_scoring.db")
     repo = SqliteTrendRepository(db_path=db_path)
     
@@ -75,7 +75,7 @@ async def test_bug05_sqlite_repository_dynamic_score_calculation(tmp_path):
     
     top = await repo.get_top_clusters(geo=GeoCode.VN, timeframe=Timeframe.LAST_24H)
     assert len(top) == 1
-    # Dynamic score được tính và > 0 và không bị gán 76.0
+    # The dynamic score is computed, greater than 0, and not the old saturated 76.0
     assert top[0].cross_platform_score > 0
     assert top[0].cross_platform_score != 76.0
 
