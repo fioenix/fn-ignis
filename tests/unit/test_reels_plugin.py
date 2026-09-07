@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from ignis.domain.value_objects import PlatformType, GeoCode
+from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 
 SAMPLE_REELS_RESPONSE = {
@@ -31,7 +31,7 @@ async def test_reels_plugin_fetch():
         mock_resp.raise_for_status = MagicMock()
         mock_get.return_value = mock_resp
 
-        signals = await plugin.fetch_signals(geo=GeoCode.VN, limit=10)
+        signals = await plugin.fetch_signals(geo=GeoCode.VN, limit=10, scope=IngressScope.OWN_PROFILE)
         assert len(signals) == 1
         s = signals[0]
         assert s.platform == PlatformType.REELS

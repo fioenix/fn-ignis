@@ -16,7 +16,7 @@ from ignis.domain.exceptions import (
     ConnectorExecutionException,
     ConnectorQuotaExceededException,
 )
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, timeframe_to_days
+from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe, timeframe_to_days
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 from ignis.infrastructure.auth.meta_browser_auth import ThreadsBrowserAuthManager
 from ignis.infrastructure.auth.meta_oauth import ThreadsAuthManager
@@ -167,13 +167,35 @@ class ThreadsPlugin(IConnectorPlugin):
 
     # --- Ingress ---
 
+    @property
+    def default_feed_scope(self) -> IngressScope:
+        """Both Threads feeds this plugin can read belong to the authenticated account.
+
+        The Graph path is `/me/threads` (the account's own posts) and the browser path is the
+        personalised home feed (the account plus whoever it follows). Neither is market evidence,
+        so the registry keeps them out of public passes and uses `search_signals` instead.
+        """
+        return IngressScope.OWN_PROFILE
+
     async def fetch_signals(
         self,
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 50,
+        scope: IngressScope = IngressScope.PUBLIC_MARKET,
     ) -> List[TrendSignal]:
-        """Fetch top/recent threads within the requested timeframe window."""
+        """Fetch top/recent threads within the requested timeframe window.
+
+        Every surface reachable here is account-owned, so a public-market pass gets nothing:
+        callers wanting market signals use `search_signals`, and the registry routes them there.
+        """
+        if not scope.includes_own:
+            logger.info(
+                "Threads fetch_signals skipped: its feeds are account-owned and the requested "
+                f"scope is {scope.value}."
+            )
+            return []
+
         if not await self._has_graph_token():
             storage_state = await self._browser_storage_state()
             if storage_state:
@@ -620,6 +642,9 @@ class ThreadsPlugin(IConnectorPlugin):
         text = caption_text(node)
         user = node.get("user") if isinstance(node.get("user"), dict) else {}
         username = str(user.get("username") or "")
+        # The author id travels with the payload and is what the self-content guard matches on:
+        # a browser session knows its own numeric account id but not always its handle.
+        author_id = str(user.get("pk") or user.get("id") or "")
         app_info = node.get("text_post_app_info") if isinstance(node.get("text_post_app_info"), dict) else {}
 
         likes = coerce_int(node.get("like_count"))
@@ -635,6 +660,7 @@ class ThreadsPlugin(IConnectorPlugin):
             metadata={
                 "post_id": post_id,
                 "username": username,
+                "user_id": author_id,
                 "like_count": likes,
                 "reply_count": replies,
                 "reposts": coerce_int(app_info.get("repost_count")),
@@ -687,6 +713,7 @@ class ThreadsPlugin(IConnectorPlugin):
             caption = caption_obj.get("text", "") if isinstance(caption_obj, dict) else str(caption_obj or "")
             user = item.get("user", {})
             username = user.get("username", "")
+            author_id = str(user.get("pk") or user.get("id") or "")
 
             like_count = float(item.get("like_count", 0))
             reply_count = int(item.get("reply_count", 0))
@@ -704,6 +731,7 @@ class ThreadsPlugin(IConnectorPlugin):
                     metadata={
                         "post_id": post_id,
                         "username": username,
+                        "user_id": author_id,
                         "reply_count": reply_count,
                         "like_count": int(like_count),
                         "source": "threads_public_trending",

@@ -10,7 +10,7 @@ import httpx
 from ignis.application.ports.connector_port import IConnectorPlugin
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,7 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 50,
+        scope: IngressScope = IngressScope.PUBLIC_MARKET,
     ) -> List[TrendSignal]:
         geo_param = self._geo_to_param(geo)
         url = f"{self.BASE_RSS_URL}?geo={geo_param}" if geo_param else self.BASE_RSS_URL

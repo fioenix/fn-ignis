@@ -8,7 +8,7 @@ import httpx
 from ignis.application.ports.connector_port import IConnectorPlugin
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.config import settings
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
@@ -76,6 +76,7 @@ class TikTokPlugin(IConnectorPlugin):
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 50,
+        scope: IngressScope = IngressScope.PUBLIC_MARKET,
     ) -> List[TrendSignal]:
         """Fetch trending public videos from TikTok Explore."""
         storage_state = None

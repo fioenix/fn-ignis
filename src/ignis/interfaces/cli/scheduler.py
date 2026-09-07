@@ -1,11 +1,14 @@
 import asyncio
 import logging
 import signal
+from typing import Optional
 
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
+from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.config import settings
-from ignis.domain.value_objects import GeoCode
+from ignis.domain.value_objects import GeoCode, IngressScope
+from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
@@ -50,10 +53,26 @@ class IngressScheduler:
         self._last_discovery_time: float = 0.0
         self._last_health_check_time: float = 0.0
 
-    async def run_ingress_cycle(self, registry: ConnectorPluginRegistry, cluster_use_case: ClusterSignalsUseCase):
+    async def run_ingress_cycle(
+        self,
+        registry: ConnectorPluginRegistry,
+        cluster_use_case: ClusterSignalsUseCase,
+        ingest_use_case: Optional[IngestTrendsUseCase] = None,
+    ):
+        """Run one public-market ingress cycle.
+
+        The radar listens to the market, never to the operator's own accounts: connectors whose
+        only feed is the connected account are probed by keyword using the persisted lexicon, and
+        the registry's scope guard drops any self-authored signal that still comes back.
+        """
         logger.info(f"Starting standard periodic Ingress cycle for geo={self.geo.value}...")
         try:
-            signals = await registry.fetch_from_all(geo=self.geo)
+            seeds = await ingest_use_case.load_seed_keywords() if ingest_use_case else []
+            signals = await registry.fetch_from_all(
+                geo=self.geo,
+                scope=IngressScope.PUBLIC_MARKET,
+                seed_keywords=seeds,
+            )
             logger.info(f"Ingested {len(signals)} signals across active connector plugins.")
             if signals:
                 clusters = await cluster_use_case.execute(signals)
@@ -125,6 +144,13 @@ class IngressScheduler:
             clusterer.register_taxonomies(await repository.get_industry_taxonomies())
         except Exception as e:
             logger.warning(f"Could not load industry taxonomies for classification: {e}")
+        try:
+            identities = await SelfIdentityRegistry(repository).load()
+            registry.register_self_identities(identities)
+            logger.info(f"Self-content guard armed with {len(identities)} connected account identities.")
+        except Exception as e:
+            logger.warning(f"Could not load self-account identities: {e}")
+        ingest_use_case = IngestTrendsUseCase(registry=registry, repository=repository)
         cluster_use_case = ClusterSignalsUseCase(clusterer=clusterer, repository=repository)
         quality_evaluator = QualityEvaluator()
         strategic_reasoner = StrategicMarketReasoner()
@@ -143,7 +169,7 @@ class IngressScheduler:
             import time
             while self._running and not self._shutdown_event.is_set():
                 # 1. Run standard ingress cycle
-                await self.run_ingress_cycle(registry, cluster_use_case)
+                await self.run_ingress_cycle(registry, cluster_use_case, ingest_use_case)
 
                 # 2. Check and run discovery cycle if due
                 current_time = time.time()

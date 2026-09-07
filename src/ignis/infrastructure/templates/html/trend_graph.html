@@ -387,7 +387,8 @@
       for (const n of candidates) {
         if (drawn >= LABEL_BUDGET) break;
         const fontPx = labelFontSize(n);
-        ctx.font = (fontPx >= 14 ? "700 " : "600 ") + fontPx + "px " + fontStack;
+        // One weight at every size: hierarchy comes from the type size, not from going bold.
+        ctx.font = "500 " + fontPx + "px " + fontStack;
         const text = n.label.length > LABEL_MAX_CHARS ? n.label.slice(0, LABEL_MAX_CHARS - 1) + "…" : n.label;
         const width = ctx.measureText(text).width;
         const cx = n.x * scale + canvas.clientWidth / 2 + offsetX;

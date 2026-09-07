@@ -8,7 +8,7 @@ from ignis.domain.exceptions import (
     ConnectorAuthenticationException,
     ConnectorQuotaExceededException,
 )
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 
@@ -93,7 +93,7 @@ async def test_fetch_signals_maps_graph_api_payload_to_trend_signals():
     plugin = ThreadsPlugin(auth_manager=_auth_manager())
 
     with patch("httpx.AsyncClient.get", side_effect=_route_graph(list_payload=THREADS_LIST_RESPONSE)):
-        signals = await plugin.fetch_signals(geo=GeoCode.VN, timeframe=Timeframe.LAST_7D, limit=25)
+        signals = await plugin.fetch_signals(geo=GeoCode.VN, timeframe=Timeframe.LAST_7D, limit=25, scope=IngressScope.OWN_PROFILE)
 
     assert len(signals) == 2
     first = signals[0]
@@ -129,7 +129,7 @@ async def test_fetch_signals_sends_timeframe_window_and_token():
         return _resp(200, {"data": []})
 
     with patch("httpx.AsyncClient.get", side_effect=_get):
-        await plugin.fetch_signals(timeframe=Timeframe.LAST_30D, limit=40)
+        await plugin.fetch_signals(timeframe=Timeframe.LAST_30D, limit=40, scope=IngressScope.OWN_PROFILE)
 
     assert captured["access_token"] == "LONG_LIVED_TOKEN"
     assert captured["limit"] == 40
@@ -175,7 +175,7 @@ async def test_metric_falls_back_to_likes_when_insights_scope_is_missing():
         return _resp(200, {"data": [THREADS_LIST_RESPONSE["data"][0]]})
 
     with patch("httpx.AsyncClient.get", side_effect=_get):
-        signals = await plugin.fetch_signals()
+        signals = await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
     assert len(signals) == 1
     assert signals[0].metric_value == 0.0
@@ -193,7 +193,7 @@ async def test_invalid_or_expired_token_raises_auth_exception_and_audits(status)
 
     with patch("httpx.AsyncClient.get", return_value=_resp(status, {"error": {"message": "Invalid OAuth access token"}})):
         with pytest.raises(ConnectorAuthenticationException, match=f"HTTP {status}"):
-            await plugin.fetch_signals()
+            await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
     auth_mgr.record_api_failure.assert_awaited_once()
     assert auth_mgr.record_api_failure.await_args.args[0] == status
@@ -206,7 +206,7 @@ async def test_rate_limit_raises_quota_exception_and_audits():
 
     with patch("httpx.AsyncClient.get", return_value=_resp(429, {"error": {"message": "Application request limit reached"}})):
         with pytest.raises(ConnectorQuotaExceededException, match="429"):
-            await plugin.fetch_signals()
+            await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
     assert auth_mgr.record_api_failure.await_args.args[0] == 429
 
@@ -217,7 +217,7 @@ async def test_missing_token_raises_instead_of_returning_empty():
 
     with patch("httpx.AsyncClient.get") as mock_get:
         with pytest.raises(ConnectorAuthenticationException, match="authenticate_threads"):
-            await plugin.fetch_signals()
+            await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
     mock_get.assert_not_called()
 
@@ -240,7 +240,7 @@ async def test_circuit_breaker_trips_after_repeated_meta_soft_blocks():
 
     with patch("httpx.AsyncClient.get", return_value=_resp(429, {"error": {"message": "rate limited"}})):
         for _ in range(3):
-            signals = await registry.fetch_from_all(geo=GeoCode.VN, timeframe=Timeframe.LAST_24H)
+            signals = await registry.fetch_from_all(geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, scope=IngressScope.OWN_PROFILE)
             assert signals == []
 
     status = registry.get_health_status()[PlatformType.THREADS.value]
@@ -249,7 +249,7 @@ async def test_circuit_breaker_trips_after_repeated_meta_soft_blocks():
 
     # Once OPEN the registry stops calling the plugin at all.
     with patch("httpx.AsyncClient.get") as mock_get:
-        await registry.fetch_from_all()
+        await registry.fetch_from_all(scope=IngressScope.OWN_PROFILE)
         mock_get.assert_not_called()
 
     events = [c.kwargs["event_type"] for c in repo.log_event.await_args_list]
@@ -265,7 +265,7 @@ async def test_expired_token_failure_is_never_reported_as_healthy_success():
     registry.register(ThreadsPlugin(auth_manager=_auth_manager()))
 
     with patch("httpx.AsyncClient.get", return_value=_resp(401, {"error": {"message": "expired"}})):
-        await registry.fetch_from_all()
+        await registry.fetch_from_all(scope=IngressScope.OWN_PROFILE)
 
     events = [c.kwargs["event_type"] for c in repo.log_event.await_args_list]
     assert "INGRESS_SUCCESS" not in events
@@ -294,7 +294,7 @@ async def test_plugin_without_auth_manager_uses_public_fallback():
     }
 
     with patch("httpx.AsyncClient.get", return_value=_resp(200, legacy_payload)):
-        signals = await plugin.fetch_signals(geo=GeoCode.VN, limit=10)
+        signals = await plugin.fetch_signals(geo=GeoCode.VN, limit=10, scope=IngressScope.OWN_PROFILE)
 
     assert len(signals) == 1
     assert signals[0].metric_value == 3400.0

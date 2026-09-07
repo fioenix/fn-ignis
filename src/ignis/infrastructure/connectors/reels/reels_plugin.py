@@ -15,7 +15,7 @@ from ignis.domain.exceptions import (
     ConnectorExecutionException,
     ConnectorQuotaExceededException,
 )
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, timeframe_to_days
+from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe, timeframe_to_days
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 from ignis.infrastructure.auth.meta_browser_auth import InstagramBrowserAuthManager
 from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager
@@ -162,13 +162,35 @@ class ReelsPlugin(IConnectorPlugin):
 
     # --- Ingress ---
 
+    @property
+    def default_feed_scope(self) -> IngressScope:
+        """The Graph feed is `/{ig-user-id}/media`, the authenticated account's own media.
+
+        The browser path reads the Reels explore surface, which is public but personalised; both
+        are therefore treated as account-scoped and kept out of market passes, where the hashtag
+        probe in `search_signals` is used instead.
+        """
+        return IngressScope.OWN_PROFILE
+
     async def fetch_signals(
         self,
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 50,
+        scope: IngressScope = IngressScope.PUBLIC_MARKET,
     ) -> List[TrendSignal]:
-        """Fetch the account's Reels published inside the requested timeframe window."""
+        """Fetch the account's Reels published inside the requested timeframe window.
+
+        The surfaces reachable here are account-owned or personalised, so a public-market pass
+        gets nothing: the registry routes those to the hashtag probe in `search_signals`.
+        """
+        if not scope.includes_own:
+            logger.info(
+                "Reels fetch_signals skipped: its feeds are account-owned and the requested "
+                f"scope is {scope.value}."
+            )
+            return []
+
         tier, credential = await self.resolve_auth_tier()
         if tier == "session_cookies" and credential:
             return await self._fetch_via_browser_session(
@@ -536,6 +558,8 @@ class ReelsPlugin(IConnectorPlugin):
         code = str(node.get("code") or "")
         caption = caption_text(node)
         user = node.get("user") if isinstance(node.get("user"), dict) else {}
+        # Author id, matched by the self-content guard when only the numeric account is known.
+        author_id = str(user.get("pk") or user.get("id") or "")
         clips = node.get("clips_metadata") if isinstance(node.get("clips_metadata"), dict) else {}
         music = clips.get("music_info") if isinstance(clips.get("music_info"), dict) else {}
 
@@ -553,6 +577,7 @@ class ReelsPlugin(IConnectorPlugin):
             metadata={
                 "reel_id": reel_id,
                 "username": str(user.get("username") or ""),
+                "user_id": author_id,
                 "play_count": play_count,
                 "like_count": like_count,
                 "comment_count": comment_count,
@@ -626,6 +651,7 @@ class ReelsPlugin(IConnectorPlugin):
                     metadata={
                         "reel_id": reel_id,
                         "username": username,
+                        "user_id": str((item.get("user") or {}).get("pk") or (item.get("user") or {}).get("id") or ""),
                         "music_title": music_title,
                         "play_count": int(play_count),
                         "like_count": like_count,

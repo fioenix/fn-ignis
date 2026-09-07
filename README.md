@@ -182,7 +182,7 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **`authenticate_threads(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: Dual-UX Meta connect (Tier 1 browser session or Tier 2 Graph API OAuth 2.0).
 - **`get_threads_auth_status()`**, **`clear_threads_auth()`**: Inspect or revoke Threads credentials and browser sessions.
 - **`authenticate_instagram(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**, **`get_instagram_auth_status()`**, **`clear_instagram_auth()`**: Managed Instagram credentials lifecycle.
-- **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo, format)`**, **`trigger_ingress_refresh(geo)`**: Real-time trend exploration.
+- **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo, format)`**, **`trigger_ingress_refresh(geo, scope)`**: Real-time trend exploration.
 
 ### 4. FastMCP Native Resources & Prompts
 - **Resources**: `fn-ignis://sop/market-research`, `fn-ignis://methodology/opportunity-index`

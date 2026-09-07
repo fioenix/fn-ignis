@@ -378,7 +378,7 @@ Khi FastMCP Server khởi chạy (`ignis-mcp`), 39 tools, 2 prompts và 2 resour
 | `get_trending_topics` | `geo, timeframe, limit` | Lấy danh sách các chủ đề đang thịnh hành kèm điểm tín hiệu. |
 | `get_topic_detail` | `topic_id` | Xem chi tiết cụm chủ đề và danh sách tín hiệu liên quan. |
 | `generate_trend_artifact` | `topic_id, geo, format` | Xuất báo cáo HTML độc lập: dashboard, thẻ chủ đề (`topic_id`), hoặc đồ thị tương tác (`format="graph"`) zoom/pan được. Đồ thị xem chi tiết tới tầng cluster; tín hiệu được gom thành vầng chấm quanh cluster nên không bị lag khi dữ liệu lớn. |
-| `trigger_ingress_refresh` | `geo` | Buộc quét và làm mới toàn bộ nguồn dữ liệu cho một khu vực. |
+| `trigger_ingress_refresh` | `geo, scope` | Buộc quét và làm mới toàn bộ nguồn dữ liệu cho một khu vực. Mặc định `scope="public_market"`: chỉ lấy dữ liệu công khai, không đọc và không tính post của chính tài khoản đang đăng nhập. Chỉ dùng `scope="own_profile"` khi người dùng nói rõ là muốn xem profile của họ. |
 
 ### 3. Nhóm Xác thực Meta (Threads & Instagram)
 | Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |

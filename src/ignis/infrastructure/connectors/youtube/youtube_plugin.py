@@ -9,7 +9,7 @@ from ignis.domain.exceptions import (
     ConnectorExecutionException,
     ConnectorQuotaExceededException,
 )
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
 
 import cachetools
 
@@ -131,6 +131,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 50,
+        scope: IngressScope = IngressScope.PUBLIC_MARKET,
     ) -> List[TrendSignal]:
         if not self._api_key:
             raise ConnectorExecutionException("YouTube API Key is missing or not configured.")

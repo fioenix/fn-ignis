@@ -7,7 +7,7 @@ from ignis.domain.exceptions import (
     ConnectorAuthenticationException,
     ConnectorQuotaExceededException,
 )
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 
 IG_MEDIA_RESPONSE = {
@@ -92,7 +92,7 @@ async def test_fetch_signals_extracts_reel_engagement_metrics():
     plugin = _plugin()
 
     with patch("httpx.AsyncClient.get", side_effect=_route(media_payload=IG_MEDIA_RESPONSE)):
-        signals = await plugin.fetch_signals(geo=GeoCode.VN, timeframe=Timeframe.LAST_7D, limit=30)
+        signals = await plugin.fetch_signals(geo=GeoCode.VN, timeframe=Timeframe.LAST_7D, limit=30, scope=IngressScope.OWN_PROFILE)
 
     # The non-Reel FEED image must be filtered out.
     assert len(signals) == 1
@@ -122,7 +122,7 @@ async def test_fetch_signals_sends_window_and_account_scoped_url():
         return _resp(200, {"data": []})
 
     with patch("httpx.AsyncClient.get", side_effect=_get):
-        await plugin.fetch_signals(timeframe=Timeframe.LAST_24H)
+        await plugin.fetch_signals(timeframe=Timeframe.LAST_24H, scope=IngressScope.OWN_PROFILE)
 
     assert "17841400000000000/media" in captured["url"]
     assert captured["params"]["access_token"] == "IG_LONG_LIVED_TOKEN"
@@ -178,7 +178,7 @@ async def test_metric_falls_back_to_likes_without_insights_scope():
         return _resp(200, {"data": [IG_MEDIA_RESPONSE["data"][0]]})
 
     with patch("httpx.AsyncClient.get", side_effect=_get):
-        signals = await plugin.fetch_signals()
+        signals = await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
     assert signals[0].metric_value == 67000.0
     assert signals[0].metadata["play_count"] == 0
@@ -195,7 +195,7 @@ async def test_invalid_token_raises_and_audits(status):
 
     with patch("httpx.AsyncClient.get", return_value=_resp(status, {"error": {"message": "Invalid OAuth access token"}})):
         with pytest.raises(ConnectorAuthenticationException, match=f"HTTP {status}"):
-            await plugin.fetch_signals()
+            await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
     assert auth_mgr.record_api_failure.await_args.args[0] == status
 
@@ -206,7 +206,7 @@ async def test_rate_limit_raises_quota_exception():
 
     with patch("httpx.AsyncClient.get", return_value=_resp(429, {"error": {"message": "limit reached"}})):
         with pytest.raises(ConnectorQuotaExceededException, match="429"):
-            await plugin.fetch_signals()
+            await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
 
 @pytest.mark.asyncio
@@ -215,7 +215,7 @@ async def test_missing_ig_user_id_raises_before_any_request():
 
     with patch("httpx.AsyncClient.get") as mock_get:
         with pytest.raises(ConnectorAuthenticationException, match="INSTAGRAM_USER_ID"):
-            await plugin.fetch_signals()
+            await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
     mock_get.assert_not_called()
 
@@ -248,7 +248,7 @@ async def test_plugin_without_auth_manager_uses_public_clips_fallback():
     }
 
     with patch("httpx.AsyncClient.get", return_value=_resp(200, legacy_payload)):
-        signals = await plugin.fetch_signals(geo=GeoCode.VN, limit=10)
+        signals = await plugin.fetch_signals(geo=GeoCode.VN, limit=10, scope=IngressScope.OWN_PROFILE)
 
     assert len(signals) == 1
     assert signals[0].metric_value == 890000.0

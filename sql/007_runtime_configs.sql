@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS runtime_configs (
 );
 
 INSERT INTO runtime_configs (key, value, category, description, updated_by) VALUES
+('self_accounts', '{}', 'ingress', 'Accounts owned by the operator, as {"platform": ["handle_or_id"]}. Market passes exclude their content; discovered automatically from session cookies when possible, set here when no API reports the handle.', 'system'),
 ('threads_web_client_id', '238260118693652', 'threads', 'Meta internal web client ID for Threads web requests (X-IG-App-ID)', 'system'),
 ('threads_graphql_endpoint', 'https://www.threads.net/api/graphql', 'threads', 'Meta Threads Web GraphQL endpoint', 'system'),
 ('threads_doc_id_trending_topics', '', 'threads', 'Persisted GraphQL doc_id for Threads Trending Topics query', 'system'),

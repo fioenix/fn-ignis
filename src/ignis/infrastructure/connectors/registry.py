@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from ignis.application.ports.connector_port import IConnectorPlugin
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.domain.self_content import SelfIdentity, partition_self_authored
 from ignis.domain.entities import TrendSignal
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,12 @@ class ConnectorPluginRegistry:
         self._plugins: Dict[str, IConnectorPlugin] = {}
         self._breakers: Dict[str, CircuitBreaker] = {}
         self._repository = repository
+        self._self_identities: List[SelfIdentity] = []
+        self.last_pass_report: Dict[str, Any] = {}
+
+    def register_self_identities(self, identities: List[SelfIdentity]) -> None:
+        """Bind the operator's own accounts so their content can be kept out of market passes."""
+        self._self_identities = [i for i in identities if i.is_usable]
 
     def set_repository(self, repository: ITrendRepository) -> None:
         self._repository = repository
@@ -128,12 +135,24 @@ class ConnectorPluginRegistry:
         return status
 
     async def fetch_from_all(
-        self, 
-        geo: GeoCode = GeoCode.VN, 
-        timeframe: Timeframe = Timeframe.LAST_24H
+        self,
+        geo: GeoCode = GeoCode.VN,
+        timeframe: Timeframe = Timeframe.LAST_24H,
+        scope: IngressScope = IngressScope.PUBLIC_MARKET,
+        seed_keywords: Optional[List[str]] = None,
     ) -> List[TrendSignal]:
+        """Run one ingress pass across every healthy connector.
+
+        `scope` decides which surfaces may be read. Under PUBLIC_MARKET a connector that declares
+        an account-scoped feed is not asked for its feed at all: its keyword probe is used with
+        `seed_keywords` when it has one, and otherwise it contributes nothing and says so. Whatever
+        the route, the pass ends by dropping content authored by the operator's own accounts, so a
+        connector regressing to an account endpoint cannot quietly poison demand analysis.
+        """
         tasks = []
         enabled_plugins = []
+        account_scoped_skipped: List[str] = []
+        seeds = [k.strip() for k in (seed_keywords or []) if k and k.strip()]
 
         for plugin_id, plugin in self._plugins.items():
             breaker = self._breakers[plugin_id]
@@ -148,8 +167,34 @@ class ConnectorPluginRegistry:
                     )
                 continue
 
+            feed_scope = getattr(plugin, "default_feed_scope", IngressScope.PUBLIC_MARKET)
+            account_only_feed = feed_scope == IngressScope.OWN_PROFILE
+            if account_only_feed and not scope.includes_own:
+                if plugin.supports_search and seeds:
+                    enabled_plugins.append(plugin)
+                    tasks.append(self._safe_search(plugin, breaker, seeds, geo, timeframe))
+                    continue
+                account_scoped_skipped.append(plugin.name)
+                logger.info(
+                    f"Skipping [{plugin.name}]: its feed is account-owned and this is a "
+                    f"{scope.value} pass"
+                    + (" with no seed keywords to probe with." if plugin.supports_search else ".")
+                )
+                if self._repository:
+                    await self._repository.log_event(
+                        component=plugin.name,
+                        event_type="ACCOUNT_SCOPED_FEED_SKIPPED",
+                        message=(
+                            f"{plugin.name} was skipped: its feed returns content owned by the "
+                            f"authenticated account, which a {scope.value} pass must not ingest."
+                        ),
+                        level="INFO",
+                        details={"platform": plugin.platform.value, "scope": scope.value},
+                    )
+                continue
+
             enabled_plugins.append(plugin)
-            tasks.append(self._safe_fetch(plugin, breaker, geo, timeframe))
+            tasks.append(self._safe_fetch(plugin, breaker, geo, timeframe, scope))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_signals: List[TrendSignal] = []
@@ -177,7 +222,7 @@ class ConnectorPluginRegistry:
                         details={"count": len(result), "platform": plugin.platform.value}
                     )
 
-        return all_signals
+        return await self._apply_scope_guard(all_signals, scope, account_scoped_skipped)
 
     async def search_across_all(
         self,
@@ -186,7 +231,13 @@ class ConnectorPluginRegistry:
         timeframe: Timeframe = Timeframe.LAST_24H,
         target_platforms: Optional[List[PlatformType]] = None,
         custom_timeframe: Optional[str] = None,
+        scope: IngressScope = IngressScope.PUBLIC_MARKET,
     ) -> List[TrendSignal]:
+        """Probe every keyword-capable connector.
+
+        A keyword search reads a public surface, but it can still surface the operator's own post
+        when they happened to write about that keyword, so the same scope guard applies here.
+        """
         tasks = []
         enabled_plugins = []
 
@@ -241,11 +292,75 @@ class ConnectorPluginRegistry:
                         details={"keywords": keywords, "count": len(result)}
                     )
 
-        return all_signals
+        return await self._apply_scope_guard(all_signals, scope, [])
 
-    async def _safe_fetch(self, plugin: IConnectorPlugin, breaker: CircuitBreaker, geo: GeoCode, timeframe: Timeframe) -> List[TrendSignal]:
+    async def _apply_scope_guard(
+        self,
+        signals: List[TrendSignal],
+        scope: IngressScope,
+        account_scoped_skipped: List[str],
+    ) -> List[TrendSignal]:
+        """Keep only the signals the requested scope allows, and record what was dropped."""
+        collected = len(signals)
+        kept: List[TrendSignal] = signals
+        dropped: List[TrendSignal] = []
+
+        if self._self_identities and scope != IngressScope.BOTH:
+            public, own = partition_self_authored(signals, self._self_identities)
+            if scope == IngressScope.PUBLIC_MARKET:
+                kept, dropped = public, own
+            else:
+                kept, dropped = own, public
+
+        platforms = sorted({
+            (s.platform.value if hasattr(s.platform, "value") else str(s.platform))
+            for s in dropped
+        })
+        self.last_pass_report = {
+            "scope": scope.value,
+            "collected": collected,
+            "kept": len(kept),
+            "filtered_out": len(dropped),
+            "filtered_platforms": platforms,
+            "account_scoped_skipped": account_scoped_skipped,
+            "self_identities_known": len(self._self_identities),
+        }
+
+        if dropped and scope == IngressScope.PUBLIC_MARKET:
+            logger.info(
+                f"Filtered {len(dropped)} self-authored signals out of a {scope.value} pass "
+                f"({', '.join(platforms) or 'unknown platform'})."
+            )
+            if self._repository:
+                await self._repository.log_event(
+                    component="ingress",
+                    event_type="SELF_CONTENT_FILTERED",
+                    message=(
+                        f"Dropped {len(dropped)} signals authored by the operator's own accounts "
+                        f"from a {scope.value} pass, so they cannot distort demand analysis."
+                    ),
+                    level="INFO",
+                    details={"count": len(dropped), "platforms": platforms, "scope": scope.value},
+                )
+        return kept
+
+    async def _safe_fetch(
+        self,
+        plugin: IConnectorPlugin,
+        breaker: CircuitBreaker,
+        geo: GeoCode,
+        timeframe: Timeframe,
+        scope: IngressScope = IngressScope.PUBLIC_MARKET,
+    ) -> List[TrendSignal]:
         try:
-            signals = await plugin.fetch_signals(geo=geo, timeframe=timeframe)
+            # `scope` is only forwarded to plugins that declare it, the same way custom_timeframe
+            # is handled below: a third-party connector written against the older signature keeps
+            # working, and the scope guard still covers whatever it returns.
+            import inspect
+            if "scope" in inspect.signature(plugin.fetch_signals).parameters:
+                signals = await plugin.fetch_signals(geo=geo, timeframe=timeframe, scope=scope)
+            else:
+                signals = await plugin.fetch_signals(geo=geo, timeframe=timeframe)
             breaker.record_success()
             return signals
         except Exception as e:

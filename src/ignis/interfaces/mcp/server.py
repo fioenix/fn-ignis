@@ -27,6 +27,7 @@ from ignis.domain.entities import TopicCluster
 
 from ignis.config import settings
 
+from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
 from ignis.domain.token_rotation import (
     STATUS_EXPIRED,
     STATUS_EXPIRING_SOON,
@@ -35,6 +36,7 @@ from ignis.domain.token_rotation import (
 )
 from ignis.domain.value_objects import (
     GeoCode,
+    IngressScope,
     PlatformType,
     resolve_geo,
     resolve_platform,
@@ -333,6 +335,28 @@ async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
                 comp["clusterer"].register_taxonomies(taxonomies)
     except Exception as e:
         logger.warning(f"Could not sync dynamic lexicons from DB: {e}")
+
+    await _sync_self_identities(comp)
+
+
+async def _sync_self_identities(comp: Dict[str, Any]) -> None:
+    """Bind the operator's own connected accounts so market passes can exclude their content."""
+    try:
+        identities = await SelfIdentityRegistry(comp["repository"]).load()
+        comp["registry"].register_self_identities(identities)
+        comp["self_identities"] = identities
+        if identities:
+            logger.info(
+                "Self-content guard armed for: "
+                + ", ".join(sorted({f"{i.platform}:{i.normalized_username or i.normalized_account_id}" for i in identities}))
+            )
+        else:
+            logger.info(
+                "No connected account identity is known, so self-authored content cannot be "
+                "recognised. Set the 'self_accounts' runtime config to close that gap."
+            )
+    except Exception as e:
+        logger.warning(f"Could not load self-account identities: {e}")
 
 
 # --- Handlers for Agent Harness Operations ---
@@ -1180,20 +1204,41 @@ async def handle_generate_trend_artifact(
         return json.dumps({"error": "Requested topic not found."}, ensure_ascii=False)
 
 
-async def handle_trigger_ingress_refresh(geo: str = "VN") -> str:
+async def handle_trigger_ingress_refresh(geo: str = "VN", scope: str = "public_market") -> str:
     comp = get_components()
     await _sync_lexicons_from_db(comp)
     geo_val = resolve_geo(geo)
 
-    signals = await comp["registry"].fetch_from_all(geo=geo_val)
+    scope_val = IngressScope(scope)
+    if scope_val is None:
+        return json.dumps(
+            {
+                "status": "INVALID_SCOPE",
+                "message": (
+                    f"Unknown scope '{scope}'. Use 'public_market' (default, market listening), "
+                    "'own_profile' (only the connected account's own posts) or 'both'."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    # A public pass seeds the keyword probes from the persisted lexicon, because the connectors
+    # whose only feed is the operator's own account are reached that way instead.
+    seeds = await comp["ingest_use_case"].load_seed_keywords() if scope_val.includes_public else []
+    signals = await comp["registry"].fetch_from_all(geo=geo_val, scope=scope_val, seed_keywords=seeds)
     clusters = await comp["cluster_use_case"].execute(signals)
+    guard = dict(getattr(comp["registry"], "last_pass_report", {}) or {})
 
     return json.dumps(
         {
             "status": "success",
             "geo": geo_val.value,
+            "scope": scope_val.value,
             "total_signals_fetched": len(signals),
             "total_clusters_formed": len(clusters),
+            "seed_keywords_used": len(seeds),
+            "scope_guard": guard,
         },
         ensure_ascii=False,
         indent=2,
@@ -1302,9 +1347,9 @@ async def generate_trend_artifact(topic_id: str = "", geo: str = "VN", format: s
     return await handle_generate_trend_artifact(topic_id=topic_id, geo=geo, format=format)
 
 
-@mcp.tool(name="trigger_ingress_refresh", description="Trigger immediate multi-platform ETL trend ingestion and clustering (zero-token background).")
-async def trigger_ingress_refresh(geo: str = "VN") -> str:
-    return await handle_trigger_ingress_refresh(geo=geo)
+@mcp.tool(name="trigger_ingress_refresh", description="Trigger immediate multi-platform ETL trend ingestion and clustering. Reads public market surfaces only by default; pass scope='own_profile' to read the connected account's own posts instead, or scope='both' for the union.")
+async def trigger_ingress_refresh(geo: str = "VN", scope: str = "public_market") -> str:
+    return await handle_trigger_ingress_refresh(geo=geo, scope=scope)
 
 
 @mcp.tool(name="get_current_session_mission", description="Automatically retrieve the research mission associated with the current session ID or chat thread.")

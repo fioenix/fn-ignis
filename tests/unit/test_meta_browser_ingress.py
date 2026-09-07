@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ignis.domain.exceptions import ConnectorAuthenticationException
-from ignis.domain.value_objects import GeoCode, PlatformType
+from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType
 from ignis.infrastructure.connectors.meta_browser_ingress import (
     caption_text,
     coerce_int,
@@ -182,7 +182,7 @@ async def test_threads_prefers_the_graph_api_when_a_token_is_available():
     ) as collect, patch.object(
         ThreadsPlugin, "_graph_get", AsyncMock(return_value={"data": []})
     ) as graph_get:
-        await plugin.fetch_signals()
+        await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
     collect.assert_not_awaited()
     graph_get.assert_awaited()
@@ -195,7 +195,7 @@ async def test_threads_still_raises_when_oauth_is_configured_but_unusable_and_no
     )
 
     with pytest.raises(ConnectorAuthenticationException):
-        await plugin.fetch_signals()
+        await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
 
 @pytest.mark.asyncio
@@ -253,7 +253,7 @@ async def test_reels_browser_ingress_does_not_require_an_instagram_business_acco
         "ignis.infrastructure.connectors.reels.reels_plugin.collect_json_payloads",
         AsyncMock(return_value=[REELS_PAYLOAD]),
     ):
-        signals = await plugin.fetch_signals(geo=GeoCode.VN, limit=5)
+        signals = await plugin.fetch_signals(geo=GeoCode.VN, limit=5, scope=IngressScope.OWN_PROFILE)
 
     assert len(signals) == 1
 
@@ -270,7 +270,7 @@ async def test_reels_prefers_the_graph_api_when_a_token_is_available():
         "ignis.infrastructure.connectors.reels.reels_plugin.collect_json_payloads",
         AsyncMock(return_value=[REELS_PAYLOAD]),
     ) as collect, patch.object(ReelsPlugin, "_graph_get", AsyncMock(return_value={"data": []})):
-        await plugin.fetch_signals()
+        await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
 
     collect.assert_not_awaited()
 
