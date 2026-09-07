@@ -145,8 +145,11 @@ class PostgresTimescaleRepository(ITrendRepository):
                             "INSERT INTO signal_metrics (signal_id, captured_at, metric_value, growth_velocity) VALUES (%s, %s, %s, %s);",
                             all_metric_points,
                         )
-            logger.info(f"Successfully processed {len(signals)} signals into database.")
-            return len(signals)
+            logger.info(
+                f"Processed {len(signals)} signals into database "
+                f"({len(to_insert)} inserted, {len(updates)} refreshed)."
+            )
+            return len(to_insert)
         except Exception as e:
             logger.error(f"Error saving signals to database: {e}", exc_info=True)
             raise RepositoryException(f"Failed to batch insert signals: {e}") from e
@@ -280,10 +283,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                     COALESCE(SUM(ts.metric_value), 0.0) AS total_metric,
                     COALESCE(AVG(ts.growth_velocity), 0.0) AS avg_velocity,
                     ROUND(LEAST(100.0, 
-                        (COUNT(DISTINCT ts.platform) / 5.0 * 35.0) +
-                        LEAST(35.0, (LOG(GREATEST(1.0, COALESCE(SUM(ts.metric_value), 0.0) + 1.0)) / 10.0) * 35.0) +
-                        LEAST(20.0, (LOG(GREATEST(1.0, COALESCE(AVG(ts.growth_velocity), 0.0) + 1.0)) / 5.0) * 20.0) +
-                        LEAST(10.0, (LOG(GREATEST(1.0, COUNT(ts.id)::numeric + 1.0)) / 3.0) * 10.0)
+                        (COUNT(DISTINCT ts.platform) / 5.0 * 40.0) +
+                        LEAST(40.0, (LOG(GREATEST(1.0, COALESCE(SUM(ts.metric_value), 0.0) + 1.0)) / 8.0) * 40.0) +
+                        LEAST(20.0, (LOG(GREATEST(1.0, COALESCE(AVG(ts.growth_velocity), 0.0) + 1.0)) / 4.0) * 20.0)
                     )::numeric, 1) AS dynamic_score
                 FROM topic_clusters tc
                 INNER JOIN trend_signals ts ON ts.cluster_id = tc.id
@@ -357,7 +359,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     )
 
                 plat_cnt = len({s.platform for s in signals_list})
-                dynamic_summary = f"Chủ đề tổng hợp từ {len(signals_list)} tín hiệu trên {plat_cnt} nền tảng."
+                dynamic_summary = f"Aggregated topic from {len(signals_list)} signals across {plat_cnt} platforms."
                 cluster = TopicCluster(
                     id=UUID(str(c_id)),
                     canonical_name=name,
@@ -412,7 +414,8 @@ class PostgresTimescaleRepository(ITrendRepository):
 
             signals = []
             seen_urls = set()
-            for row in reversed(rows):  # rows sorted captured_at ASC, so reversed gives latest first
+            # Walk newest first so the latest metric of a duplicated source_url wins, then restore ASC order.
+            for row in reversed(rows):
                 platform_str, title, metric, velocity, url, geo_str, meta_json, captured, c_id, m_id = row
                 if url:
                     key = (platform_str, url)
@@ -433,6 +436,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     captured_at=captured,
                 )
                 signals.append(sig)
+            signals.reverse()
             return signals
         except Exception as e:
             logger.error(f"Error fetching signals for cluster {cluster_id}: {e}", exc_info=True)

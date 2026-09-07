@@ -35,8 +35,8 @@ async def test_bug07_summary_matches_signal_count_across_timeframes(tmp_path):
     c24 = clusters_24h[0]
     assert len(c24.signals) == 2
     # Trích xuất số tín hiệu từ text summary
-    match_24 = re.search(r"(\d+)\s+tín hiệu", c24.summary_text)
-    assert match_24 is not None, f"summary_text phải chứa số tín hiệu tiếng Việt: {c24.summary_text}"
+    match_24 = re.search(r"(\d+)\s+signals", c24.summary_text)
+    assert match_24 is not None, f"summary_text phai chua so tin hieu: {c24.summary_text}"
     assert int(match_24.group(1)) == len(c24.signals) == 2
     
     # Query 7d
@@ -44,6 +44,6 @@ async def test_bug07_summary_matches_signal_count_across_timeframes(tmp_path):
     assert len(clusters_7d) == 1
     c7 = clusters_7d[0]
     assert len(c7.signals) == 4
-    match_7 = re.search(r"(\d+)\s+tín hiệu", c7.summary_text)
+    match_7 = re.search(r"(\d+)\s+signals", c7.summary_text)
     assert match_7 is not None
     assert int(match_7.group(1)) == len(c7.signals) == 4

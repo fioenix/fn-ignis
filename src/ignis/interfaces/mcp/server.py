@@ -302,6 +302,15 @@ async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
         if pos_terms:
             comp["quality_evaluator"].register_terms(pos_terms)
             comp["strategic_reasoner"].register_terms(pos_terms)
+            # Terms sharing a (domain, category) bucket are treated as expansions of each other,
+            # so keyword matching uses the persisted vocabulary instead of hardcoded synonyms.
+            buckets: Dict[tuple, List[str]] = {}
+            for item in db_lexicons:
+                domain = item.get("domain")
+                if domain in ("foreign_stopwords", "noise_blacklist"):
+                    continue
+                buckets.setdefault((domain, item.get("category")), []).append(item["term"])
+            comp["strategic_reasoner"].register_synonym_groups([g for g in buckets.values() if len(g) > 1])
         if stop_terms:
             comp["quality_evaluator"].register_foreign_stopwords(stop_terms)
             comp["strategic_reasoner"].register_foreign_stopwords(stop_terms)
@@ -1014,10 +1023,10 @@ async def handle_get_trending_topics(
     clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, timeframe=tf_val, limit=safe_limit)
     topics = []
     for c in clusters:
-        raw_count = len(c.signals)
-        distinct_count = len({s.source_url for s in c.signals if s.source_url}) + len([s for s in c.signals if not s.source_url])
+        signal_count = len(c.signals)
         plat_count = len({s.platform for s in c.signals})
-        dynamic_summary = c.summary_text or f"Chủ đề tổng hợp từ {raw_count} tín hiệu trên {plat_count} nền tảng."
+        # Summary is rendered from the signals actually returned for this timeframe (BUG-07).
+        dynamic_summary = c.summary_text or f"Aggregated topic from {signal_count} signals across {plat_count} platforms."
         topics.append({
             "id": str(c.id),
             "topic_name": c.canonical_name,
@@ -1025,9 +1034,7 @@ async def handle_get_trending_topics(
             "category": c.category,
             "cross_platform_score": c.cross_platform_score,
             "momentum": c.momentum_category.value,
-            "signal_count": raw_count,
-            "distinct_signal_count": distinct_count,
-            "raw_row_count": raw_count,
+            "signal_count": signal_count,
         })
     envelope = {
         "status": "SUCCESS",

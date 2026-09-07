@@ -1,6 +1,7 @@
 import logging
-import re
 import math
+import re
+import unicodedata
 from typing import List, Dict, Any, Tuple, Optional, Set
 
 from collections import defaultdict
@@ -22,6 +23,9 @@ from ignis.domain.harness_models import (
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.domain.value_objects import PlatformType, GeoCode
+
+# Longest token still treated as an acronym that identifies a topic by itself (ai, seo, crm...)
+ACRONYM_MAX_LEN = 3
 
 
 class StrategicMarketReasoner:
@@ -47,6 +51,7 @@ class StrategicMarketReasoner:
         self._custom_lexicon: Set[str] = set(custom_lexicon or [])
         self._custom_stopwords: Set[str] = set(custom_stopwords or [])
         self._custom_noise: Set[str] = set(custom_noise or [])
+        self._synonym_index: Dict[str, Set[str]] = {}
         self._detector: ILanguageDetector = detector or HeuristicLanguageDetector()
 
     def register_noise_blacklist(self, terms: List[str]) -> None:
@@ -408,6 +413,19 @@ class StrategicMarketReasoner:
             if clean:
                 self._custom_lexicon.add(clean)
 
+    def register_synonym_groups(self, groups: List[List[str]]) -> None:
+        """Register related-term groups (one group = terms sharing a lexicon domain + category).
+
+        Every term in a group becomes an expansion of the others, so mission keyword matching
+        follows the persisted vocabulary instead of a dictionary baked into the code.
+        """
+        for group in groups:
+            terms = {t.strip().lower() for t in group if t and t.strip()}
+            if len(terms) < 2:
+                continue
+            for term in terms:
+                self._synonym_index.setdefault(term, set()).update(terms - {term})
+
     def register_foreign_stopwords(self, terms: List[str]) -> None:
         """Dynamically register new foreign stop words into filter."""
         for t in terms:
@@ -418,20 +436,10 @@ class StrategicMarketReasoner:
     def _is_vietnamese(self, title: str) -> bool:
         return self._is_localized(title, geo=GeoCode.VN)
 
-    KEYWORD_SYNONYMS: Dict[str, Set[str]] = {
-        "ai agent": {"ai", "trí tuệ nhân tạo", "agent", "trợ lý ảo", "chatbot", "bot", "tự động hóa", "tự động"},
-        "ai": {"ai", "trí tuệ nhân tạo", "artificial intelligence", "agent", "bot"},
-        "chatbot": {"chat bot", "chatbot", "trợ lý ảo", "bot", "ai"},
-        "automation": {"tự động hóa", "tự động", "automation", "quy trình", "auto"},
-        "ecommerce": {"thương mại điện tử", "e-commerce", "bán hàng online", "shop", "tiktok shop"},
-        "tiktok shop": {"tiktokshop", "tiktok shop", "bán hàng tiktok", "shop"},
-    }
-
     def _matches_topic_strictly(self, title: str, kw: str) -> bool:
         if self._is_garbage(title):
             return False
 
-        import unicodedata
         t = unicodedata.normalize("NFC", title).lower()
         k = unicodedata.normalize("NFC", kw).lower().strip()
 
@@ -445,20 +453,20 @@ class StrategicMarketReasoner:
         if k in t:
             return True
 
-        # Check domain synonyms / expansions
-        synonyms = self.KEYWORD_SYNONYMS.get(k, set())
-        for syn in synonyms:
+        # Expansions registered from the market_lexicons table (no vocabulary is hardcoded here)
+        for syn in self._synonym_index.get(k, set()):
             if len(syn) <= 4 or " " not in syn:
                 if re.search(rf"\b{re.escape(syn)}\b", t):
                     return True
             elif syn in t:
                 return True
 
-        # Token set match preserving 2-letter tokens like 'ai'
+        # Token set match; keeps 2-letter tokens such as 'ai' that a >2 filter used to drop
         kw_tokens = [w for w in k.split() if len(w) >= 2]
         if kw_tokens:
-            distinctive_tokens = [w for w in kw_tokens if w in ("ai", "bot", "app", "seo", "ads", "crm", "erp")]
-            if any(re.search(rf"\b{re.escape(dt)}\b", t) for dt in distinctive_tokens):
+            # An acronym-shaped token (<= 3 ASCII alphanumerics) carries the topic on its own
+            acronyms = [w for w in kw_tokens if len(w) <= ACRONYM_MAX_LEN and w.isascii() and w.isalnum()]
+            if any(re.search(rf"\b{re.escape(a)}\b", t) for a in acronyms):
                 return True
             if len(kw_tokens) >= 2 and all(w in t for w in kw_tokens):
                 return True
@@ -487,9 +495,11 @@ class StrategicMarketReasoner:
             return opportunities
 
         # Extract search demand values per keyword
-        demand_signals = [s for s in signals if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "google"]
-        video_signals = [s for s in signals if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) in ("youtube", "tiktok", "reels")]
-        logger.info(f"Evaluating {len(target_keywords)} mission keywords against {len(signals)} candidate signals (demand: {len(demand_signals)}, video: {len(video_signals)}).")
+        demand_signals = [s for s in signals if s.platform == PlatformType.GOOGLE_TRENDS]
+        logger.info(
+            f"Evaluating {len(target_keywords)} mission keywords against {len(signals)} candidate signals "
+            f"({len(demand_signals)} of them search-demand signals)."
+        )
 
         demand_map: Dict[str, float] = {}
         for s in demand_signals:
