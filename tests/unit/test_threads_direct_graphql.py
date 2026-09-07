@@ -149,6 +149,21 @@ def test_extract_search_suggestions():
     assert "ai coding assistant review" in suggestions
     assert "tự động hóa marketing threads" in suggestions
 
+    modern_payload = {
+        "data": {
+            "xdt_api__v1__text_feed__keyword_search": {
+                "keywords": [
+                    {"id": "1", "name": "thờitrang", "tag_community_info": None},
+                    {"id": "2", "name": "thời trang nữ", "tag_community_info": None},
+                    {"id": "3", "name": "thời trang công sở", "tag_community_info": None},
+                ]
+            }
+        }
+    }
+    modern_suggestions = extract_search_suggestions([modern_payload], limit=5)
+    assert len(modern_suggestions) == 3
+    assert modern_suggestions == ["thờitrang", "thời trang nữ", "thời trang công sở"]
+
 
 # --- Tests for Direct GraphQL HTTP Fetch ---
 

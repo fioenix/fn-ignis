@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -201,7 +201,11 @@ async def test_threads_still_raises_when_oauth_is_configured_but_unusable_and_no
 @pytest.mark.asyncio
 async def test_threads_is_healthy_on_a_browser_session_alone():
     plugin = ThreadsPlugin(auth_manager=_oauth_manager(None), browser_auth_manager=_browser_manager())
-    assert await plugin.is_healthy() is True
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_get.return_value = mock_resp
+        assert await plugin.is_healthy() is True
 
     offline = ThreadsPlugin(
         auth_manager=_oauth_manager(None), browser_auth_manager=_browser_manager(state=None)
@@ -269,3 +273,22 @@ async def test_reels_prefers_the_graph_api_when_a_token_is_available():
         await plugin.fetch_signals()
 
     collect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reels_is_healthy_synthetic_probe():
+    plugin = ReelsPlugin(auth_manager=_oauth_manager(None), browser_auth_manager=_browser_manager())
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_get.return_value = mock_resp
+        assert await plugin.is_healthy() is True
+
+        # When session expires and redirects to login (e.g. 302/401)
+        mock_resp.status_code = 302
+        assert await plugin.is_healthy() is False
+
+    offline = ReelsPlugin(
+        auth_manager=_oauth_manager(None), browser_auth_manager=_browser_manager(state=None)
+    )
+    assert await offline.is_healthy() is False

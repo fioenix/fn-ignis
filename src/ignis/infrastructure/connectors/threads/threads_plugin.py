@@ -23,9 +23,11 @@ from ignis.infrastructure.auth.meta_oauth import ThreadsAuthManager
 from ignis.infrastructure.cache.insights_cache import InsightsTTLCache
 from ignis.infrastructure.connectors.meta_browser_ingress import (
     GraphQLDocIdCache,
+    build_cookie_header,
     caption_text,
     coerce_int,
     collect_json_payloads,
+    collect_threads_search_suggestions_via_browser,
     extract_records,
     extract_search_suggestions,
     extract_trending_topics,
@@ -53,8 +55,8 @@ class ThreadsPlugin(IConnectorPlugin):
 
     GRAPH_BASE_URL = "https://graph.threads.net"
     LEGACY_TRENDING_URL = "https://www.threads.net/api/trending"
-    BROWSER_FEED_URL = "https://www.threads.net/"
-    BROWSER_SEARCH_URL = "https://www.threads.net/search"
+    BROWSER_FEED_URL = "https://www.threads.com/"
+    BROWSER_SEARCH_URL = "https://www.threads.com/search"
     BROWSER_API_MARKERS = ["/graphql/query", "/api/graphql", "/api/v1/text_feed"]
 
     THREAD_FIELDS = "id,text,permalink,timestamp,username,media_type,is_quote_post"
@@ -93,18 +95,37 @@ class ThreadsPlugin(IConnectorPlugin):
 
     async def is_healthy(self) -> bool:
         """
-        Report health honestly: an OAuth-backed connector without a usable token is
-        NOT healthy, because every ingress call would fail authentication.
+        Active synthetic health check:
+        - If OAuth2 Tier: verify access token validity.
+        - If Browser Session Tier 1: send a lightweight authenticated HTTP GET to verify
+          the session cookie is still valid and not redirected to login.
         """
         if not self._auth_manager and not self._browser_auth_manager:
             # Legacy unauthenticated public mode — nothing to verify.
             return True
         try:
-            if self._auth_manager and (await self._auth_manager.get_access_token()):
-                return True
-            return await self._browser_storage_state() is not None
+            if self._auth_manager:
+                token = await self._auth_manager.get_access_token()
+                if token:
+                    return True
+
+            storage_state = await self._browser_storage_state()
+            if not storage_state:
+                return False
+
+            cookie_header = build_cookie_header(storage_state)
+            if not cookie_header:
+                return False
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                "Cookie": cookie_header,
+            }
+            async with httpx.AsyncClient(timeout=6.0, follow_redirects=False) as client:
+                resp = await client.get(self.BROWSER_FEED_URL, headers=headers)
+                return resp.status_code == 200
         except Exception as e:
-            logger.warning(f"Threads health check failed: {e}")
+            logger.warning(f"Threads active health probe failed: {e}")
             return False
 
     async def _browser_storage_state(self) -> Optional[Dict[str, Any]]:
@@ -293,6 +314,7 @@ class ThreadsPlugin(IConnectorPlugin):
     ) -> List[str]:
         """
         Fetch search autocomplete suggestions / related terms from Threads search.
+        Uses Direct GraphQL fast-path if doc_id is cached, falling back to Playwright input typing.
         """
         storage_state = await self._browser_storage_state()
         clean_kw = keyword.strip()
@@ -303,7 +325,7 @@ class ThreadsPlugin(IConnectorPlugin):
         if doc_id:
             direct_payload = await fetch_graphql_direct(
                 doc_id=doc_id,
-                variables={"query": clean_kw},
+                variables={"query": clean_kw, "has_communities": True, "has_favicons": False},
                 storage_state=storage_state,
                 lsd=lsd,
                 geo=geo,
@@ -313,11 +335,9 @@ class ThreadsPlugin(IConnectorPlugin):
                 if suggestions:
                     return suggestions
 
-        url = f"{self.BROWSER_SEARCH_URL}?{urllib.parse.urlencode({'q': clean_kw, 'serp_type': 'default'})}"
-        payloads = await collect_json_payloads(
-            url=url,
+        payloads = await collect_threads_search_suggestions_via_browser(
             storage_state=storage_state,
-            url_markers=self.BROWSER_API_MARKERS,
+            keyword=clean_kw,
             geo=geo,
         )
         return extract_search_suggestions(payloads, limit=limit)

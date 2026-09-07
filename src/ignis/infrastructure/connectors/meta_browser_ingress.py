@@ -24,12 +24,12 @@ USER_AGENT = (
 
 def get_threads_web_client_id() -> str:
     """Retrieve dynamic Meta web client ID (X-IG-App-ID) from runtime configuration."""
-    return RuntimeConfigManager.get_instance().get_sync("threads_web_client_id", "238260118693652")
+    return RuntimeConfigManager.get_instance().get_sync("threads_web_client_id", "238260118697367")
 
 
 def get_threads_graphql_endpoint() -> str:
     """Retrieve dynamic GraphQL endpoint from runtime configuration."""
-    return RuntimeConfigManager.get_instance().get_sync("threads_graphql_endpoint", "https://www.threads.net/api/graphql")
+    return RuntimeConfigManager.get_instance().get_sync("threads_graphql_endpoint", "https://www.threads.com/api/graphql")
 
 
 class GraphQLDocIdCache:
@@ -93,7 +93,9 @@ class GraphQLDocIdCache:
         if not isinstance(vars_dict, dict):
             vars_dict = {}
 
-        if "query" in vars_dict or "search_query" in vars_dict:
+        if "has_communities" in vars_dict or "has_favicons" in vars_dict:
+            cls.set("search_suggestions", doc_id, lsd)
+        elif "query" in vars_dict or "search_query" in vars_dict:
             cls.set("search_posts", doc_id, lsd)
         elif "prompt" in vars_dict or "keyword" in vars_dict:
             cls.set("search_suggestions", doc_id, lsd)
@@ -151,8 +153,8 @@ async def fetch_graphql_direct(
         "X-CSRFToken": csrf_token,
         "X-ASBD-ID": "129477",
         "Cookie": cookie_header,
-        "Origin": "https://www.threads.net",
-        "Referer": "https://www.threads.net/search",
+        "Origin": "https://www.threads.com",
+        "Referer": "https://www.threads.com/search",
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept": "*/*",
         "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7" if geo == GeoCode.VN else "en-US,en;q=0.9",
@@ -367,14 +369,30 @@ def extract_trending_topics(payloads: List[Dict[str, Any]], limit: int = 20) -> 
 def extract_search_suggestions(payloads: List[Dict[str, Any]], limit: int = 15) -> List[str]:
     """
     Extract search query suggestions/autocomplete terms from captured GraphQL payloads.
+    Supports both modern Threads schema ('xdt_api__v1__text_feed__keyword_search' -> 'keywords' -> [{'name': '...'}])
+    and legacy fallback keys ('keyword', 'query', 'suggestion').
     """
     suggestions: List[str] = []
     seen: set[str] = set()
 
     for payload in payloads:
         for node in walk_dicts(payload):
+            # 1. Modern Threads keyword autocomplete schema
+            if "keywords" in node and isinstance(node["keywords"], list):
+                for item in node["keywords"]:
+                    if isinstance(item, dict) and "name" in item and isinstance(item["name"], str):
+                        kw = item["name"].strip()
+                        if kw and kw not in seen and not kw.startswith("http"):
+                            seen.add(kw)
+                            suggestions.append(kw)
+                            if len(suggestions) >= limit:
+                                return suggestions
+
+            # 2. Individual suggestion nodes
             text = None
-            if "keyword" in node and isinstance(node["keyword"], str):
+            if "name" in node and isinstance(node["name"], str) and "tag_community_info" in node:
+                text = node["name"].strip()
+            elif "keyword" in node and isinstance(node["keyword"], str):
                 text = node["keyword"].strip()
             elif "query" in node and isinstance(node["query"], str) and len(node["query"]) < 100:
                 text = node["query"].strip()
@@ -422,3 +440,94 @@ def caption_text(node: Dict[str, Any]) -> str:
     if isinstance(caption, str):
         return caption.strip()
     return str(node.get("text") or "").strip()
+
+
+async def collect_threads_search_suggestions_via_browser(
+    storage_state: Dict[str, Any],
+    keyword: str,
+    geo: GeoCode = GeoCode.VN,
+    timeout_ms: int = 3000,
+) -> List[Dict[str, Any]]:
+    """
+    Drive a logged-in Playwright context to www.threads.com/search, focus the search input,
+    type `keyword` to trigger autocomplete, and capture incoming GraphQL response payloads.
+    """
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        logger.warning("Playwright is not installed; skipping Meta browser-session search suggestions.")
+        return []
+
+    payloads: List[Dict[str, Any]] = []
+    search_url = "https://www.threads.com/search"
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                ],
+            )
+            context_kwargs: Dict[str, Any] = {
+                "user_agent": USER_AGENT,
+                "viewport": {"width": 1280, "height": 900},
+                "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
+                "storage_state": storage_state,
+            }
+            if settings.PLAYWRIGHT_PROXY_SERVER:
+                context_kwargs["proxy"] = {"server": settings.PLAYWRIGHT_PROXY_SERVER}
+
+            context = await browser.new_context(**context_kwargs)
+            page = await context.new_page()
+
+            async def handle_request(request: Any) -> None:
+                try:
+                    if "/graphql" in request.url and request.method == "POST":
+                        post_data = request.post_data
+                        if post_data:
+                            params = urllib.parse.parse_qs(post_data)
+                            doc_ids = params.get("doc_id")
+                            lsds = params.get("lsd")
+                            if doc_ids:
+                                captured_doc_id = doc_ids[0]
+                                captured_lsd = lsds[0] if lsds else None
+                                vars_raw = params.get("variables", ["{}"])[0]
+                                GraphQLDocIdCache.record_signature_from_payload(
+                                    captured_doc_id, captured_lsd, vars_raw
+                                )
+                except Exception:
+                    pass
+
+            page.on("request", handle_request)
+
+            async def handle_response(response: Any) -> None:
+                if "/graphql" not in response.url:
+                    return
+                try:
+                    if "json" not in response.headers.get("content-type", ""):
+                        return
+                    body = await response.json()
+                    if isinstance(body, dict):
+                        payloads.append(body)
+                except Exception:
+                    pass
+
+            page.on("response", handle_response)
+
+            await page.goto(search_url, wait_until="domcontentloaded", timeout=25000)
+            await page.wait_for_timeout(2000)
+
+            input_el = page.locator("input").first
+            if await input_el.count() > 0:
+                await input_el.fill(keyword)
+                await page.wait_for_timeout(timeout_ms)
+
+            await browser.close()
+    except Exception as e:
+        logger.warning(f"Failed to collect search suggestions via browser: {e}")
+
+    return payloads
+

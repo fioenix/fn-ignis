@@ -21,6 +21,7 @@ from ignis.infrastructure.auth.meta_browser_auth import InstagramBrowserAuthMana
 from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager
 from ignis.infrastructure.cache.insights_cache import InsightsTTLCache
 from ignis.infrastructure.connectors.meta_browser_ingress import (
+    build_cookie_header,
     caption_text,
     coerce_int,
     collect_json_payloads,
@@ -89,15 +90,37 @@ class ReelsPlugin(IConnectorPlugin):
         return f"{self.GRAPH_BASE_URL}/{settings.INSTAGRAM_API_VERSION}"
 
     async def is_healthy(self) -> bool:
-        """An OAuth-backed connector without a usable token is not healthy."""
+        """
+        Active synthetic health check:
+        - If OAuth2 Tier: verify access token validity.
+        - If Browser Session Tier 1: send a lightweight authenticated HTTP GET to verify
+          the session cookie is still valid and not redirected to login.
+        """
         if not self._auth_manager and not self._browser_auth_manager:
             return True
         try:
-            if self._auth_manager and (await self._auth_manager.get_access_token()):
-                return True
-            return await self._browser_storage_state() is not None
+            if self._auth_manager:
+                token = await self._auth_manager.get_access_token()
+                if token:
+                    return True
+
+            storage_state = await self._browser_storage_state()
+            if not storage_state:
+                return False
+
+            cookie_header = build_cookie_header(storage_state)
+            if not cookie_header:
+                return False
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                "Cookie": cookie_header,
+            }
+            async with httpx.AsyncClient(timeout=6.0, follow_redirects=False) as client:
+                resp = await client.get(self.BROWSER_EXPLORE_URL, headers=headers)
+                return resp.status_code == 200
         except Exception as e:
-            logger.warning(f"Reels health check failed: {e}")
+            logger.warning(f"Reels active health probe failed: {e}")
             return False
 
     async def _browser_storage_state(self) -> Optional[Dict[str, Any]]:
