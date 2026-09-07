@@ -44,7 +44,7 @@ def test_graph_artifact_exposes_cluster_nodes_with_platform_breakdown():
     payload = _graph_payload(HtmlArtifactBuilder().build_graph_artifact(clusters, geo=GeoCode.VN))
 
     assert len(payload["nodes"]) == 2
-    node = next(n for n in payload["nodes"] if n["label"].startswith("AI agent"))
+    node = next(n for n in payload["nodes"] if n["full_title"].startswith("AI agent"))
     assert node["platforms"] == {"youtube": 3, "tiktok": 2}
     assert node["signal_count"] == 5
     assert node["momentum"] == "breakout"
@@ -61,10 +61,30 @@ def test_signal_layer_is_capped_so_dense_clusters_cannot_stall_the_canvas():
     assert len(node["dots"]) == HtmlArtifactBuilder.MAX_SIGNAL_DOTS_PER_CLUSTER
 
 
-def test_small_clusters_show_one_dot_per_signal():
-    light = _cluster("Light topic", 40.0, "tech", _signals(PlatformType.THREADS, 3))
+def test_small_clusters_show_one_dot_per_signal_carrying_its_verbatim_title():
+    light = _cluster("Light topic", 40.0, "tech", _signals(PlatformType.THREADS, 3, title="raw post"))
     payload = _graph_payload(HtmlArtifactBuilder().build_graph_artifact([light], geo=GeoCode.VN))
-    assert payload["nodes"][0]["dots"] == ["threads"] * 3
+    dots = payload["nodes"][0]["dots"]
+    assert [d["p"] for d in dots] == ["threads"] * 3
+    assert [d["t"] for d in dots] == ["raw post 0", "raw post 1", "raw post 2"]
+
+
+def test_node_label_summarises_the_topic_instead_of_quoting_one_signal():
+    """canonical_name is one signal's verbatim text; the node label must be the shared phrase."""
+    signals = [
+        TrendSignal(platform=PlatformType.THREADS, geo_code=GeoCode.VN, metric_value=1.0,
+                    raw_title="anthropic nhan manh rang viec ton tai cam xuc chuc nang khong dong nghia voi y thuc"),
+        TrendSignal(platform=PlatformType.YOUTUBE, geo_code=GeoCode.VN, metric_value=1.0,
+                    raw_title="cam xuc chuc nang cua mo hinh ngon ngu la gi"),
+        TrendSignal(platform=PlatformType.TIKTOK, geo_code=GeoCode.VN, metric_value=1.0,
+                    raw_title="giai thich cam xuc chuc nang theo anthropic"),
+    ]
+    cluster = _cluster(signals[0].raw_title, 60.0, "tech", signals)
+    node = _graph_payload(HtmlArtifactBuilder().build_graph_artifact([cluster], geo=GeoCode.VN))["nodes"][0]
+
+    assert "cam xuc chuc nang" in node["label"]
+    assert len(node["label"]) < len(node["full_title"])
+    assert node["full_title"] == signals[0].raw_title
 
 
 def test_edges_link_similar_clusters_and_stay_bounded_per_node():

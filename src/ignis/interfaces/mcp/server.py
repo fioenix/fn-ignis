@@ -1106,8 +1106,9 @@ async def handle_generate_trend_artifact(
     reports_dir = _get_secure_reports_dir()
 
     if format.strip().lower() == "graph" and not topic_id.strip():
+        await _sync_lexicons_from_db(comp)
         clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=150)
-        html_content = builder.build_graph_artifact(clusters, geo=geo_val)
+        html_content = builder.build_graph_artifact(clusters, geo=geo_val, clusterer=comp.get("clusterer"))
         report_file = reports_dir / f"trend_graph_{geo_val.value.lower()}.html"
         report_file.write_text(html_content, encoding="utf-8")
         abs_path = str(report_file.resolve())
