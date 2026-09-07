@@ -57,42 +57,95 @@ class PostgresTimescaleRepository(ITrendRepository):
             return 0
 
         pool = await self._get_pool()
-        query = """
-            INSERT INTO trend_signals (
-                platform,
-                raw_title,
-                cluster_id,
-                mission_id,
-                metric_value,
-                growth_velocity,
-                source_url,
-                geo_code,
-                metadata,
-                captured_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-        """
-
-        params = [
-            (
-                s.platform.value if hasattr(s.platform, "value") else str(s.platform),
-                s.raw_title,
-                s.cluster_id,
-                s.mission_id,
-                s.metric_value,
-                s.growth_velocity,
-                s.source_url,
-                s.geo_code.value if hasattr(s.geo_code, "value") else str(s.geo_code),
-                json.dumps(s.metadata or {}),
-                s.captured_at or datetime.now(timezone.utc),
-            )
-            for s in signals
-        ]
-
         try:
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
-                    await cur.executemany(query, params)
-            logger.info(f"Successfully saved {len(signals)} signals to database.")
+                    url_signals = {}
+                    no_url_signals = []
+                    all_metric_points = []
+
+                    for s in signals:
+                        plat = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
+                        url = s.source_url.strip() if s.source_url else ""
+                        if url:
+                            url_signals[(plat, url)] = s
+                        else:
+                            no_url_signals.append(s)
+
+                    existing_map = {}
+                    if url_signals:
+                        urls_list = list(url_signals.keys())
+                        conds = " OR ".join(["(platform = %s AND source_url = %s)"] * len(urls_list))
+                        params = []
+                        for p, u in urls_list:
+                            params.extend([p, u])
+                        await cur.execute(
+                            f"SELECT id, platform, source_url FROM trend_signals WHERE {conds};",
+                            params,
+                        )
+                        rows = await cur.fetchall()
+                        for r in rows:
+                            existing_map[(r[1], r[2])] = r[0]
+
+                    updates = []
+                    for (plat, url), s in url_signals.items():
+                        if (plat, url) in existing_map:
+                            sig_id = existing_map[(plat, url)]
+                            meta_json = json.dumps(s.metadata or {})
+                            cap_at = s.captured_at or datetime.now(timezone.utc)
+                            c_id = str(s.cluster_id) if s.cluster_id else None
+                            updates.append((s.metric_value, s.growth_velocity, s.raw_title, meta_json, cap_at, c_id, sig_id))
+                            all_metric_points.append((sig_id, cap_at, s.metric_value, s.growth_velocity))
+
+                    if updates:
+                        update_query = """
+                            UPDATE trend_signals 
+                            SET metric_value = %s, growth_velocity = %s, raw_title = %s, metadata = %s, captured_at = %s, cluster_id = COALESCE(%s, cluster_id)
+                            WHERE id = %s;
+                        """
+                        await cur.executemany(update_query, updates)
+
+                    to_insert = [s for (plat, url), s in url_signals.items() if (plat, url) not in existing_map]
+                    to_insert.extend(no_url_signals)
+
+                    if to_insert:
+                        insert_query = """
+                            INSERT INTO trend_signals (
+                                platform,
+                                raw_title,
+                                cluster_id,
+                                mission_id,
+                                metric_value,
+                                growth_velocity,
+                                source_url,
+                                geo_code,
+                                metadata,
+                                captured_at
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                        """
+                        insert_params = [
+                            (
+                                s.platform.value if hasattr(s.platform, "value") else str(s.platform),
+                                s.raw_title,
+                                s.cluster_id,
+                                s.mission_id,
+                                s.metric_value,
+                                s.growth_velocity,
+                                s.source_url,
+                                s.geo_code.value if hasattr(s.geo_code, "value") else str(s.geo_code),
+                                json.dumps(s.metadata or {}),
+                                s.captured_at or datetime.now(timezone.utc),
+                            )
+                            for s in to_insert
+                        ]
+                        await cur.executemany(insert_query, insert_params)
+
+                    if all_metric_points:
+                        await cur.executemany(
+                            "INSERT INTO signal_metrics (signal_id, captured_at, metric_value, growth_velocity) VALUES (%s, %s, %s, %s);",
+                            all_metric_points,
+                        )
+            logger.info(f"Successfully processed {len(signals)} signals into database.")
             return len(signals)
         except Exception as e:
             logger.error(f"Error saving signals to database: {e}", exc_info=True)
@@ -356,8 +409,14 @@ class PostgresTimescaleRepository(ITrendRepository):
                     rows = await cur.fetchall()
 
             signals = []
-            for row in rows:
+            seen_urls = set()
+            for row in reversed(rows):  # rows sorted captured_at ASC, so reversed gives latest first
                 platform_str, title, metric, velocity, url, geo_str, meta_json, captured, c_id, m_id = row
+                if url:
+                    key = (platform_str, url)
+                    if key in seen_urls:
+                        continue
+                    seen_urls.add(key)
                 meta = meta_json if isinstance(meta_json, dict) else json.loads(meta_json or "{}")
                 sig = TrendSignal(
                     platform=PlatformType(platform_str),

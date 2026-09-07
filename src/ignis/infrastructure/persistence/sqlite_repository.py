@@ -80,6 +80,15 @@ class SqliteTrendRepository(ITrendRepository):
                 captured_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS signal_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id TEXT NOT NULL,
+                captured_at TEXT NOT NULL,
+                metric_value REAL DEFAULT 0.0,
+                growth_velocity REAL DEFAULT 0.0
+            );
+            CREATE INDEX IF NOT EXISTS idx_signal_metrics_sig ON signal_metrics (signal_id, captured_at DESC);
+
             CREATE TABLE IF NOT EXISTS topic_clusters (
                 id TEXT PRIMARY KEY,
                 canonical_name TEXT NOT NULL UNIQUE,
@@ -205,23 +214,53 @@ class SqliteTrendRepository(ITrendRepository):
                 cur = conn.cursor()
                 inserted = 0
                 for s in signals:
-                    s_id = str(uuid4())
                     plat = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
                     geo = s.geo_code.value if hasattr(s.geo_code, "value") else str(s.geo_code)
                     c_id = str(s.cluster_id) if s.cluster_id else None
                     m_id = str(s.mission_id) if s.mission_id else None
                     meta_json = json.dumps(s.metadata or {}, ensure_ascii=False)
                     cap_at = s.captured_at.isoformat() if s.captured_at else datetime.now(timezone.utc).isoformat()
+                    url = s.source_url.strip() if s.source_url else ""
+
+                    existing_id = None
+                    if url:
+                        cur.execute(
+                            "SELECT id FROM trend_signals WHERE platform = ? AND source_url = ? ORDER BY captured_at DESC LIMIT 1;",
+                            (plat, url),
+                        )
+                        found = cur.fetchone()
+                        if found:
+                            existing_id = found["id"] if isinstance(found, dict) or hasattr(found, "keys") else found[0]
+
+                    if existing_id:
+                        s_id = existing_id
+                        cur.execute(
+                            """
+                            UPDATE trend_signals 
+                            SET metric_value = ?, growth_velocity = ?, raw_title = ?, metadata = ?, captured_at = ?, cluster_id = COALESCE(?, cluster_id)
+                            WHERE id = ?;
+                            """,
+                            (s.metric_value, s.growth_velocity, s.raw_title, meta_json, cap_at, c_id, s_id),
+                        )
+                    else:
+                        s_id = str(uuid4())
+                        cur.execute(
+                            """
+                            INSERT INTO trend_signals 
+                            (id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            """,
+                            (s_id, plat, s.raw_title, s.metric_value, s.growth_velocity, url or None, geo, c_id, m_id, meta_json, cap_at),
+                        )
+                        inserted += 1
 
                     cur.execute(
                         """
-                        INSERT OR REPLACE INTO trend_signals 
-                        (id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        INSERT INTO signal_metrics (signal_id, captured_at, metric_value, growth_velocity)
+                        VALUES (?, ?, ?, ?);
                         """,
-                        (s_id, plat, s.raw_title, s.metric_value, s.growth_velocity, s.source_url, geo, c_id, m_id, meta_json, cap_at)
+                        (s_id, cap_at, s.metric_value, s.growth_velocity),
                     )
-                    inserted += 1
                 conn.commit()
                 return inserted
             finally:
@@ -434,7 +473,15 @@ class SqliteTrendRepository(ITrendRepository):
                 )
                 rows = cur.fetchall()
                 signals: List[TrendSignal] = []
+                seen_urls = set()
                 for r in rows:
+                    url = r["source_url"]
+                    if url:
+                        plat = r["platform"]
+                        key = (plat, url)
+                        if key in seen_urls:
+                            continue
+                        seen_urls.add(key)
                     meta = json.loads(r["metadata"]) if r["metadata"] else {}
                     cap_at = datetime.fromisoformat(r["captured_at"]) if r["captured_at"] else datetime.now(timezone.utc)
                     signals.append(
