@@ -192,13 +192,13 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 
 ## 📊 Báo cáo Nghiên cứu Thực tế Mẫu
 
-Xem trực tiếp các báo cáo tương tác trực quan được kết xuất bởi `fn-ignis` trong thư mục [`reports/`](reports/):
+Xem các báo cáo tương tác mẫu do `fn-ignis` kết xuất trong [`examples/case-studies/`](examples/case-studies/) — báo cáo chạy tại máy sẽ nằm ở thư mục `reports/` (không đưa vào git):
 
 | Chiến dịch / Hồ sơ | Phạm vi & Trọng tâm | Điểm nổi bật & Khoảng trống Phát hiện | Báo cáo Trực tiếp |
 |---|---|---|:---:|
-| **`[VN-AI-AGENT-90D]`** | AI Agents & CSKH Tự Động tại Việt Nam | Nhu cầu lớn về bot chăm sóc khách hàng; khoảng trống lớn ở mảng tích hợp chuyên sâu cho doanh nghiệp so với nội dung hướng dẫn đại trà. | [Xem Dossier HTML](reports/case_study_ai_agents_vn.html) |
-| **`[VN-LINEN-FASHION-30D]`** | Thời trang, Vải Linen & Local Brand | Nhu cầu tìm kiếm đồ linen công sở tối giản tăng vọt theo mùa; thiếu hụt nguồn cung sơ mi linen phom rộng cao cấp. | [Xem Dossier HTML](reports/case_study_linen_fashion_vn.html) |
-| **`[VN-TIKTOK-SHOP-30D]`** | Công cụ TikTok Shop & Livestream Automation | Nhu cầu cao về chốt đơn tự động và đồng bộ kho livestream; mật độ câu hỏi về giá và chiết khấu rất dày đặc. | [Xem Dossier HTML](reports/case_study_tiktok_shop_automation_vn.html) |
+| **`[VN-AI-AGENT-90D]`** | AI Agents & CSKH Tự Động tại Việt Nam | Nhu cầu lớn về bot chăm sóc khách hàng; khoảng trống lớn ở mảng tích hợp chuyên sâu cho doanh nghiệp so với nội dung hướng dẫn đại trà. | [Xem Dossier HTML](examples/case-studies/case_study_ai_agents_vn.html) |
+| **`[VN-LINEN-FASHION-30D]`** | Thời trang, Vải Linen & Local Brand | Nhu cầu tìm kiếm đồ linen công sở tối giản tăng vọt theo mùa; thiếu hụt nguồn cung sơ mi linen phom rộng cao cấp. | [Xem Dossier HTML](examples/case-studies/case_study_linen_fashion_vn.html) |
+| **`[VN-TIKTOK-SHOP-30D]`** | Công cụ TikTok Shop & Livestream Automation | Nhu cầu cao về chốt đơn tự động và đồng bộ kho livestream; mật độ câu hỏi về giá và chiết khấu rất dày đặc. | [Xem Dossier HTML](examples/case-studies/case_study_tiktok_shop_automation_vn.html) |
 
 ---
 

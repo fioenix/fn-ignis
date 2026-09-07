@@ -69,7 +69,9 @@ async def run_all_case_studies():
         clusterer=clusterer,
     )
 
-    reports_dir = Path(__file__).resolve().parents[1] / "reports"
+    # These dossiers are curated samples committed to the repository, not local scratch output,
+    # so they land in examples/ rather than in the gitignored reports/ directory.
+    reports_dir = Path(__file__).resolve().parents[1] / "examples" / "case-studies"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     for cs in CASE_STUDIES:

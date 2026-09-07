@@ -311,9 +311,9 @@ reports/mission_<shortcode>.html
 ### Xem báo cáo:
 - **Cách 1 (Trực tiếp)**: Mở trực tiếp file HTML bằng bất kỳ trình duyệt nào:
   ```bash
-  open reports/case_study_ai_agents_vn.html      # Trên macOS
-  xdg-open reports/case_study_ai_agents_vn.html  # Trên Linux
-  start reports/case_study_ai_agents_vn.html     # Trên Windows
+  open examples/case-studies/case_study_ai_agents_vn.html      # Trên macOS
+  xdg-open examples/case-studies/case_study_ai_agents_vn.html  # Trên Linux
+  start examples/case-studies/case_study_ai_agents_vn.html     # Trên Windows
   ```
 - **Cách 2 (Nginx Web Portal trong Docker)**:
   Truy cập `http://localhost:53080/` để xem và chia sẻ báo cáo qua mạng nội bộ.

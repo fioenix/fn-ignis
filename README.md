@@ -196,13 +196,13 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 ## 📊 Live Reference Case Studies
 
-Explore sample interactive Infographic HTML reports generated directly by `fn-ignis` in the [`reports/`](reports/) directory:
+Explore sample interactive Infographic HTML reports generated directly by `fn-ignis` in [`examples/case-studies/`](examples/case-studies/) — runtime output goes to the local, untracked `reports/` directory instead:
 
 | Campaign / Dossier | Scope & Focus | Highlights & White Spaces Discovered | Live Artifact |
 |---|---|---|:---:|
-| **`[VN-AI-AGENT-90D]`** | AI Agents & CSKH Automation in Vietnam | High demand for customer service bots; massive white space in enterprise custom integration vs saturated shallow tutorial content. | [View HTML Dossier](reports/case_study_ai_agents_vn.html) |
-| **`[VN-LINEN-FASHION-30D]`** | Apparel, Linen & Local Brands | Skyrocketing seasonal search intent for minimal office linen apparel; major supply gaps in oversized tailored linen shirts. | [View HTML Dossier](reports/case_study_linen_fashion_vn.html) |
-| **`[VN-TIKTOK-SHOP-30D]`** | TikTok Shop Tools & Livestream Automation | Strong merchant demand for automated order closing and live stream inventory sync; high voice-of-customer pricing objection density. | [View HTML Dossier](reports/case_study_tiktok_shop_automation_vn.html) |
+| **`[VN-AI-AGENT-90D]`** | AI Agents & CSKH Automation in Vietnam | High demand for customer service bots; massive white space in enterprise custom integration vs saturated shallow tutorial content. | [View HTML Dossier](examples/case-studies/case_study_ai_agents_vn.html) |
+| **`[VN-LINEN-FASHION-30D]`** | Apparel, Linen & Local Brands | Skyrocketing seasonal search intent for minimal office linen apparel; major supply gaps in oversized tailored linen shirts. | [View HTML Dossier](examples/case-studies/case_study_linen_fashion_vn.html) |
+| **`[VN-TIKTOK-SHOP-30D]`** | TikTok Shop Tools & Livestream Automation | Strong merchant demand for automated order closing and live stream inventory sync; high voice-of-customer pricing objection density. | [View HTML Dossier](examples/case-studies/case_study_tiktok_shop_automation_vn.html) |
 
 ---
 

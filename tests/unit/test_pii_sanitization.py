@@ -42,7 +42,7 @@ def test_sanitize_pii_data_recursive():
 
 
 def test_tracked_reference_reports_have_zero_pii():
-    reports_dir = Path(__file__).resolve().parents[2] / "reports"
+    reports_dir = Path(__file__).resolve().parents[2] / "examples" / "case-studies"
     if not reports_dir.exists():
         return
 

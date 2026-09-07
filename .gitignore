@@ -69,11 +69,10 @@ pgdata/
 *.swo
 *.backup_*.json
 
-# Reports & Generated Artifacts
-reports/*.html
-reports/*.db
+# Generated artifacts — reports/ is local output only, never committed.
+# Curated sample dossiers live in examples/case-studies/ instead.
+reports/*
 !reports/.gitkeep
-!reports/case_study_*.html
 src/reports/
 supabase/.temp/
 docs/AUDIT-*.md

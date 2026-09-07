@@ -265,3 +265,11 @@ Every AI Agent modifying this repository or preparing a release must verify comp
 
 
 
+
+---
+
+## 📁 7. Artifact Output vs. Committed Samples
+
+- `reports/` is **local runtime output only** and is fully gitignored (except `.gitkeep`). Every artifact a tool generates at runtime lands here, and nothing in it is ever committed.
+- `examples/case-studies/` holds the **curated sample dossiers** that documentation links to. `scripts/generate_sample_case_studies.py` writes there on purpose.
+- HTML **templates** live in `src/ignis/infrastructure/templates/html/` and are the only report source committed as code.
