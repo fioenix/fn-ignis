@@ -30,9 +30,9 @@ _YOUTUBE_QUERY_CACHE: cachetools.TTLCache = cachetools.TTLCache(
 
 class YouTubeDataPlugin(IConnectorPlugin):
     """
-    Ingress Plugin thu thập YouTube Data: Most Popular Videos & Targeted Keyword Search.
-    Sử dụng dữ liệu thật 100% từ YouTube Data API v3 (part=snippet,statistics).
-    Áp dụng bộ lọc ngày xuất bản (publishedAfter) nghiêm ngặt và bộ lọc rác (Garbage Rejection).
+    Ingress Plugin for YouTube Data: Most Popular Videos & Targeted Keyword Search.
+    Uses 100% verified data from official YouTube Data API v3 (part=snippet,statistics).
+    Enforces strict publishedAfter date filtering and garbage rejection.
     """
 
     BASE_API_URL = "https://www.googleapis.com/youtube/v3/videos"
@@ -238,9 +238,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
         custom_timeframe: Optional[str] = None,
     ) -> List[TrendSignal]:
         """
-        Tìm kiếm video YouTube thật theo từ khóa và lấy metrics thật.
-        Áp dụng bộ lọc publishedAfter NGHIÊM NGẶT (không nới lỏng bỏ lọc ngày)
-        và bộ lọc rác (loại bỏ video bóng đá/drama không liên quan).
+        Search verified YouTube videos by keyword and retrieve actual engagement metrics.
+        Enforces strict publishedAfter filtering and non-domain garbage rejection.
         """
         if not self._api_key:
             return []

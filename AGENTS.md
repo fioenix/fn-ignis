@@ -15,7 +15,7 @@ This document defines the operational protocol, architectural guidelines, and to
 >
 > **Autonomous Actions Performed:**
 > 1. Provisions virtual environment (`.venv`) and installs `fn-ignis` in editable mode.
-> 2. Creates `.env` with SQLite default (`DATABASE_URL=sqlite:///ignis.db`) and generates a persistent Fernet AES-256 key.
+> 2. Creates `.env` with SQLite default (`DATABASE_URL=sqlite:///ignis.db`) and generates a persistent Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) key.
 > 3. Bootstraps SQLite database schemas and loads 84+ seed domain lexicons & noise filters.
 > 4. Auto-configures FastMCP server in all supported agent environments (`.mcp.json`, `claude_desktop_config.json`, Google Antigravity, OpenAI Codex `config.toml`).
 > 5. Runs synthetic diagnostics and outputs structured readiness confirmation.

@@ -168,7 +168,7 @@ Tất cả các biến môi trường được định nghĩa trong file `.env`:
 | `DATABASE_URL` | String | `sqlite:///ignis.db` | Có | URI kết nối database. Dùng `sqlite:///ignis.db` cho Zero-Docker hoặc `postgresql://user:pass@host:5432/db` cho Postgres/TimescaleDB. |
 | `DEFAULT_GEO` | String (ISO) | `VN` | Không | Mã quốc gia 2 ký tự mặc định để quét xu hướng (`VN`, `US`, `JP`, `UK`,...). |
 | `YOUTUBE_API_KEY` | String | `""` | Khuyến nghị | Key Google Cloud YouTube Data API v3 để cào video tutorials & case studies. |
-| `IGNIS_ENCRYPTION_KEY` | Base64 String | *(Tự sinh)* | Không | Khóa Fernet AES-256 để mã hóa cookie/phiên đăng nhập TikTok lưu trong database. |
+| `IGNIS_ENCRYPTION_KEY` | Base64 String | *(Tự sinh)* | Không | Khóa Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) để mã hóa cookie/phiên đăng nhập TikTok lưu trong database. |
 | `SCHEDULER_INTERVAL_SECONDS` | Integer | `900` (15m) | Không | Tần suất heartbeat kiểm tra trạng thái của worker daemon. |
 | `DISCOVERY_INTERVAL_HOURS` | Integer | `24` | Không | Khoảng cách giữa các đợt tự động quét toàn diện Creative Center và phát hiện white space. |
 | `SYNC_INTERVAL_MINUTES` | Integer | `60` | Không | Chu kỳ cào dữ liệu Google Trends RSS định kỳ. |
@@ -404,7 +404,7 @@ Khi FastMCP Server khởi chạy (`ignis-mcp`), 39 tools, 2 prompts và 2 resour
 | `diagnose_system_health` | Không | Kiểm tra telemetry toàn diện, circuit breakers và trạng thái các thành phần. |
 | `get_system_logs` | `limit, level` | Truy vấn nhật ký sự kiện kiểm toán hệ thống. |
 | `verify_connectors_health` | Không | Chạy synthetic diagnostics trên YouTube quota, Google RSS, DB pool, Playwright contexts. |
-| `authenticate_tiktok` | `headless, timeout_seconds` | Quản lý vòng đời xác thực trình duyệt TikTok có mã hóa AES-256. |
+| `authenticate_tiktok` | `headless, timeout_seconds` | Quản lý vòng đời xác thực trình duyệt TikTok có mã hóa Fernet (AES-128-CBC + HMAC-SHA256). |
 | `get_platform_auth_status` | `platform` | Kiểm tra trạng thái phiên đăng nhập của các nền tảng mạng xã hội. |
 | `clear_platform_auth` | `platform` | Xóa thông tin xác thực đã lưu của nền tảng. |
 

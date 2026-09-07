@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 class TikTokCreativeCenterPlugin(IConnectorPlugin):
     """
-    Ingress Plugin thu thập Top Trending Hashtags, số bài đăng, lượt xem và phân loại ngành hàng
-    từ TikTok Creative Center (https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/en).
-    Cung cấp lớp quan sát vĩ mô (Macro Radar) cho thị trường Việt Nam.
+    Ingress Plugin for collecting Top Trending Hashtags, post counts, views, and industry classification
+    from TikTok Creative Center (https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/en).
+    Provides a macro surveillance layer for target markets.
     """
 
     BASE_URL = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/en"

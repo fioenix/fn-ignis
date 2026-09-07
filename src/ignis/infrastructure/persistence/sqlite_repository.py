@@ -580,17 +580,21 @@ class SqliteTrendRepository(ITrendRepository):
     ) -> None:
         await self._ensure_schema()
 
+        from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text, sanitize_pii_data
+
         def _sync_log():
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
                 log_id = str(uuid4())
-                details_json = json.dumps(details or {}, ensure_ascii=False)
+                clean_msg = sanitize_pii_text(message)
+                clean_details = sanitize_pii_data(details or {})
+                details_json = json.dumps(clean_details, ensure_ascii=False)
                 now_str = datetime.now(timezone.utc).isoformat()
 
                 cur.execute(
                     "INSERT INTO system_audit_logs (id, component, event_type, message, level, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (log_id, component, event_type, message, level, details_json, now_str),
+                    (log_id, component, event_type, clean_msg, level, details_json, now_str),
                 )
                 conn.commit()
             finally:

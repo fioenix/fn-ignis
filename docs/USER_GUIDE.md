@@ -43,7 +43,7 @@ This document provides a comprehensive, step-by-step guide for developers, data 
                                          ▼
                      ┌───────────────────────────────────────┐
                      │ Persistence: SQLite / PostgreSQL      │
-                     │ Encryption: AES-256 Fernet (Tokens)   │
+                     │ Encryption: Fernet 256-bit (Tokens)   │
                      └───────────────────┬───────────────────┘
                                          │
                                          ▼
@@ -73,7 +73,7 @@ cd fn-ignis
 The bootstrap script will automatically:
 - Create the Python virtual environment (`.venv`).
 - Generate `.env` with SQLite defaults (`sqlite:///ignis.db`).
-- Generate an AES-256 Fernet encryption key.
+- Generate a persistent Fernet (AES-128-CBC + HMAC-SHA256, 256-bit key) encryption key.
 - Initialize database schemas and load 84+ domain lexicons and noise filters.
 - Register the FastMCP server in all supported agent environments.
 
@@ -265,7 +265,7 @@ The `fn-ignis` FastMCP server exposes **39 atomic and strategic tools**:
 - `get_tiktok_creative_center_trends`: Discover top surging hashtags and industry verticals.
 - `get_tiktok_video_comments`: Scrape raw user comments for sentiment and objections.
 - `extract_customer_pain_points`: Analyze friction, price resistance, and competitor shortcomings.
-- `authenticate_tiktok`: Authenticate TikTok session credentials with AES-256 encryption.
+- `authenticate_tiktok`: Authenticate TikTok session credentials with Fernet encryption (AES-128-CBC + HMAC-SHA256).
 
 ### 4. Threads Social Listening & Graph API (5 Tools)
 - `get_threads_trending_topics`: Extract trending public discussion topics.

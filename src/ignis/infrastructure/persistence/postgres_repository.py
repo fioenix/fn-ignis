@@ -512,6 +512,7 @@ class PostgresTimescaleRepository(ITrendRepository):
         level: str = "INFO",
         details: Optional[dict] = None,
     ) -> None:
+        from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text, sanitize_pii_data
         pool = await self._get_pool()
         query = """
             INSERT INTO system_audit_logs (level, component, event_type, message, details, created_at)
@@ -521,8 +522,8 @@ class PostgresTimescaleRepository(ITrendRepository):
             level.upper(),
             component,
             event_type,
-            message,
-            json.dumps(details or {}),
+            sanitize_pii_text(message),
+            json.dumps(sanitize_pii_data(details or {})),
             datetime.now(timezone.utc),
         )
         try:

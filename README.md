@@ -257,7 +257,7 @@ For detailed manual installation, Python scripting workflows, Docker ops, and tr
 | `SYNC_INTERVAL_MINUTES` | Optional override for ingress sync interval in minutes (0 = use SCHEDULER_INTERVAL_SECONDS) | `0` | No |
 | `YOUTUBE_CACHE_TTL_SECONDS` | In-memory LRU+TTL cache duration to preserve YouTube API quota | `86400` (24h) | No |
 | `PLAYWRIGHT_PROXY_SERVER` | Optional HTTP/SOCKS proxy server URI for residential scraping | `""` | No |
-| `IGNIS_ENCRYPTION_KEY` | AES-256 Fernet key for session cookie encryption | *(Auto-generated)* | No |
+| `IGNIS_ENCRYPTION_KEY` | Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) for session cookie encryption | *(Auto-generated)* | No |
 
 ---
 
@@ -273,7 +273,7 @@ uv run pytest
 ## 🛡️ Security & Privacy
 
 - **Zero Data Leakage**: Raw scraping data is parsed and evaluated locally. No third-party LLM sees raw proprietary inputs unless explicitly directed by the agent.
-- **AES-256 Encryption**: Browser session states and credentials are encrypted at rest using AES-256-GCM / Fernet.
+- **Fernet Encryption**: Browser session states and credentials are encrypted at rest using Fernet (AES-128-CBC + HMAC-SHA256, 256-bit key).
 - **Parameterized SQL**: All database operations use strict parameterized queries (`%s`) to prevent SQL injection.
 - For vulnerability reports, please consult our [Security Policy](SECURITY.md).
 

@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 class TikTokPlugin(IConnectorPlugin):
     """
-    Ingress Plugin thu thập TikTok Trending & Keyword Search.
-    Bảo vệ quyền riêng tư tuyệt đối: Không bao giờ đọc inbox, notification hay dữ liệu tài khoản cá nhân.
-    Chỉ trích xuất các video công khai có URL hợp lệ từ search grid và explore.
+    Ingress Plugin for TikTok Trending & Keyword Search.
+    Guarantees strict privacy: Never inspects personal inbox, notifications, or private profile data.
+    Extracts only public videos with valid canonical URLs from explore and search grids.
     """
 
     EXPLORE_URL = "https://www.tiktok.com/explore"
@@ -132,7 +132,7 @@ class TikTokPlugin(IConnectorPlugin):
         geo: GeoCode = GeoCode.VN,
     ) -> List[Dict[str, Any]]:
         """
-        Lấy các từ khóa tìm kiếm gợi ý (Search Guide / Autocomplete & Related Topics) từ TikTok.
+        Fetch keyword search suggestions (Search Guide / Autocomplete & Related Topics) from TikTok.
         """
         storage_state = None
         if self._auth_manager:
@@ -337,8 +337,7 @@ class TikTokPlugin(IConnectorPlugin):
         limit: int = 30,
     ) -> List[Dict[str, Any]]:
         """
-        Lấy danh sách bình luận công khai dưới một video TikTok cụ thể.
-        Sử dụng in-page API /api/comment/list/ với context session của Playwright.
+        Fetch public comments under a specific TikTok video using in-page API with Playwright session context.
         """
         match = re.search(r"/video/(\d+)", video_url)
         if not match:

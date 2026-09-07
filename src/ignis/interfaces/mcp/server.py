@@ -493,15 +493,17 @@ async def handle_get_system_logs(level: Optional[str] = None, component: Optiona
     safe_limit = max(1, min(limit, 30))
     raw_logs = await repo.get_recent_logs(level=level, component=component, limit=safe_limit)
     
-    # Sanitize log details to prevent context window bloat
+    # Sanitize log details to prevent context window bloat and PII / credential leaks
+    from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text, sanitize_pii_data
     sanitized_logs = []
     for log in raw_logs:
-        msg = log.get("message", "")
+        msg = sanitize_pii_text(log.get("message", ""))
         if len(msg) > 300:
             msg = msg[:300] + "..."
         details = log.get("details", {})
         if isinstance(details, dict):
-            details = {k: (str(v)[:150] + "..." if len(str(v)) > 150 else v) for k, v in details.items()}
+            clean_details = sanitize_pii_data(details)
+            details = {k: (str(v)[:150] + "..." if len(str(v)) > 150 else v) for k, v in clean_details.items()}
         sanitized_logs.append({
             "id": log.get("id"),
             "level": log.get("level"),

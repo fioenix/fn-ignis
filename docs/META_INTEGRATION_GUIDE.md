@@ -53,8 +53,10 @@ When no API keys are provided in `.env`, `fn-ignis` automatically falls back to:
 
 ### Step 1: Register Application on Meta Developer Portal
 1. Navigate to [Meta for Developers](https://developers.facebook.com/).
-2. Click **My Apps** $ightarrow$ **Create App**.
-3. Select **Other** $ightarrow$ **Business** (or Consumer).
+2. Click **My Apps** $
+ightarrow$ **Create App**.
+3. Select **Other** $
+ightarrow$ **Business** (or Consumer).
 4. Add the **Threads** product and/or **Instagram** product to your app.
 
 ### Step 2: Configure Scopes & Redirect URIs
@@ -105,7 +107,7 @@ When an AI Agent is tasked with connecting Meta channels, it follows this sequen
 
 ## 5. Credential Security Architecture & Token Lifecycle
 
-- **Encryption at Rest**: Tokens and secrets are encrypted with AES-256 Fernet using `ENCRYPTION_KEY`.
+- **Encryption at Rest**: Tokens and secrets are encrypted with Fernet (AES-128-CBC + HMAC-SHA256, 256-bit key) using `IGNIS_ENCRYPTION_KEY`.
 - **In-Memory Sanitization**: Plaintext credentials are never logged or exposed in LLM prompt contexts.
 - **PII Scrubbing**: All inbound social payloads are stripped of phone numbers, emails, and auth tokens before ingestion.
 

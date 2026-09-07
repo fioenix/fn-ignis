@@ -15,7 +15,7 @@ If the user gives you this repository link or asks you to set up `fn-ignis`, exe
 ### What this command does automatically:
 1. Detects Python $\ge 3.11$ and creates isolated virtual environment (`.venv`).
 2. Installs `fn-ignis` with all dependencies.
-3. Automatically generates `.env` with secure Fernet AES-256 key and default Zero-Docker SQLite configuration (`DATABASE_URL=sqlite:///ignis.db`).
+3. Automatically generates `.env` with secure Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) key and default Zero-Docker SQLite configuration (`DATABASE_URL=sqlite:///ignis.db`).
 4. Bootstraps SQLite database schemas and loads 84+ seed domain lexicons & noise filters.
 5. Registers the `fn-ignis` FastMCP server into Claude Desktop (`claude_desktop_config.json`), Google Antigravity, OpenAI Codex (`~/.codex/config.toml`), and workspace `.mcp.json`.
 6. Executes synthetic diagnostic self-tests to ensure 100% operational readiness.

@@ -152,8 +152,8 @@ def test_opportunity_index_sample_size_damping_and_label_alignment():
     opps_sat = reasoner._discover_market_opportunities(signals_saturated, ["n8n"])
     assert opps_sat[0].opportunity_index < 0
     assert opps_sat[0].opportunity_type == "SATURATED_SEGMENT"
-    # Report copy is rendered in the user's language (Vietnamese for the VN market).
-    assert "bão hòa" in opps_sat[0].strategic_recommendation.lower()
+    # Strategic recommendations are rendered in standard English.
+    assert "saturated" in opps_sat[0].strategic_recommendation.lower()
 
 
 def test_language_filter_english_tech_rejection():

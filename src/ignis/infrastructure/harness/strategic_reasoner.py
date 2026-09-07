@@ -181,24 +181,19 @@ class StrategicMarketReasoner:
         is_vn = (geo == GeoCode.VN) if isinstance(geo, GeoCode) else (str(geo).upper() == "VN")
 
         if platform == "google":
-            label = f"chỉ số tìm kiếm {float(signal.metric_value):.0f}/100" if is_vn else f"search index {float(signal.metric_value):.0f}/100"
-            parts.append(label)
+            parts.append(f"search index {float(signal.metric_value):.0f}/100")
         elif platform in self.VIDEO_PLATFORMS:
-            label = f"{self._compact_number(signal.metric_value)} lượt xem" if is_vn else f"{self._compact_number(signal.metric_value)} views"
-            parts.append(label)
+            parts.append(f"{self._compact_number(signal.metric_value)} views")
         else:
-            label = f"{self._compact_number(signal.metric_value)} lượt tương tác" if is_vn else f"{self._compact_number(signal.metric_value)} engagements"
-            parts.append(label)
+            parts.append(f"{self._compact_number(signal.metric_value)} engagements")
 
         if signal.growth_velocity:
-            growth_suffix = "%/giờ" if is_vn else "%/hr"
-            parts.append(f"{float(signal.growth_velocity):+.0f}{growth_suffix}")
+            parts.append(f"{float(signal.growth_velocity):+.0f}%/hr")
 
         comments = signal.metadata.get("comments")
         if comments:
             try:
-                comment_label = f"{int(comments)} bình luận" if is_vn else f"{int(comments)} comments"
-                parts.append(comment_label)
+                parts.append(f"{int(comments)} comments")
             except (TypeError, ValueError):
                 pass
 
@@ -321,25 +316,21 @@ class StrategicMarketReasoner:
             is_vn = (mission.geo_code == GeoCode.VN) if isinstance(mission.geo_code, GeoCode) else (str(mission.geo_code).upper() == "VN")
             if needs_auth:
                 status = ChannelHealthStatus.AUTH_REQUIRED
-                notes = "Chưa cấu hình token hoặc phiên trình duyệt cho kênh này." if is_vn else "Missing token or browser session for this channel."
+                notes = "Missing token or browser session for this channel."
             elif health_entry and health_entry.get("circuit_state") == "OPEN":
                 if self._looks_rate_limited(health_entry):
                     status = ChannelHealthStatus.RATE_LIMITED
-                    notes = "Kênh chạm trần hạn mức (429/quota); Circuit Breaker đang OPEN." if is_vn else "Rate limit reached (429/quota); Circuit Breaker is OPEN."
+                    notes = "Rate limit reached (429/quota); Circuit Breaker is OPEN."
                 else:
                     status = ChannelHealthStatus.DEGRADED
                     fails = health_entry.get('consecutive_failures', 0)
-                    notes = (
-                        f"Circuit Breaker đang OPEN sau {fails} lỗi liên tiếp."
-                        if is_vn else
-                        f"Circuit Breaker is OPEN after {fails} consecutive failures."
-                    )
+                    notes = f"Circuit Breaker is OPEN after {fails} consecutive failures."
             elif connector_health is not None and health_entry is None:
                 status = ChannelHealthStatus.DEGRADED
-                notes = "Không có connector plugin nào được đăng ký cho kênh này." if is_vn else "No connector plugin registered for this channel."
+                notes = "No connector plugin registered for this channel."
             else:
                 status = ChannelHealthStatus.EMPTY_NO_DATA
-                notes = "Không có tín hiệu khớp từ khóa trong timeframe." if is_vn else "No signals matched keywords in timeframe."
+                notes = "No signals matched keywords in timeframe."
 
             summaries.append(
                 ChannelDataSummary(
@@ -403,24 +394,20 @@ class StrategicMarketReasoner:
         ]
         
         if not video_signals:
-            msg = "Chưa ghi nhận video hướng dẫn hay tài sản nội dung nội địa hóa nào." if is_vn else "Zero localized tutorial videos or content assets recorded."
-            reasons.append(msg)
+            reasons.append("Zero localized tutorial videos or content assets recorded.")
             return TrendMaturityStage.EMERGING, reasons
 
         avg_views = sum(float(s.metric_value) for s in video_signals) / float(len(video_signals))
         total_clusters = len(clusters)
 
         if avg_views > 20000 and total_clusters >= 3:
-            msg = f"Lượt xem trung bình cao ({avg_views:,.0f} lượt/video) trên {total_clusters} cụm chủ đề." if is_vn else f"High average reach ({avg_views:,.0f} views/video) across {total_clusters} topic clusters."
-            reasons.append(msg)
+            reasons.append(f"High average reach ({avg_views:,.0f} views/video) across {total_clusters} topic clusters.")
             return TrendMaturityStage.HYPING, reasons
         elif avg_views > 5000:
-            msg = f"Mức độ tương tác của người làm nghề ở mức trung bình ({avg_views:,.0f} lượt xem/video)." if is_vn else f"Moderate practitioner engagement ({avg_views:,.0f} views/video)."
-            reasons.append(msg)
+            reasons.append(f"Moderate practitioner engagement ({avg_views:,.0f} views/video).")
             return TrendMaturityStage.EMERGING, reasons
         else:
-            msg = "Hệ sinh thái đã định hình với lượng người xem ổn định." if is_vn else "Established ecosystem with steady viewer baseline."
-            reasons.append(msg)
+            reasons.append("Established ecosystem with steady viewer baseline.")
             return TrendMaturityStage.MATURE, reasons
 
     def _extract_verified_trends(
@@ -439,12 +426,7 @@ class StrategicMarketReasoner:
                     total_views += float(s.metric_value)
 
 
-            is_vn = (geo == GeoCode.VN) if isinstance(geo, GeoCode) else (str(geo).upper() == "VN")
-            default_summary = (
-                f"Cụm chủ đề tổng hợp từ {len(c.signals)} tín hiệu."
-                if is_vn else
-                f"Topic cluster synthesized from {len(c.signals)} signals."
-            )
+            default_summary = f"Topic cluster synthesized from {len(c.signals)} signals."
             verified.append({
                 "canonical_name": c.canonical_name,
                 "momentum": c.momentum_category.value if hasattr(c.momentum_category, "value") else str(c.momentum_category),
@@ -621,19 +603,13 @@ class StrategicMarketReasoner:
             if loc_count == 0:
                 opportunity_index = round(demand_score * 0.15, 1)
                 opp_type = "UNVERIFIED_DEMAND_GAP"
-                if is_vn:
-                    rec = f"Nhu cầu tìm kiếm cho '{raw_kw}' đạt {demand_score:.0f}/100 nhưng chưa ghi nhận nguồn cung nội địa nào ({v_str}). Đây là khoảng trống mang tính suy đoán, cần phỏng vấn khách hàng để kiểm chứng trước (Chỉ số Cơ hội hiệu dụng: {opportunity_index:+0.1f})."
-                else:
-                    rec = f"Search demand for '{raw_kw}' reached {demand_score:.0f}/100 with zero local video supply recorded ({v_str}). Unverified demand gap requiring VoC interviews (Effective Opportunity Index: {opportunity_index:+0.1f})."
+                rec = f"Search demand for '{raw_kw}' reached {demand_score:.0f}/100 with zero local video supply recorded ({v_str}). Unverified demand gap requiring VoC interviews (Effective Opportunity Index: {opportunity_index:+0.1f})."
             else:
                 raw_oi = demand_score - supply_score
                 if raw_oi < 0:
                     opportunity_index = round(raw_oi, 1)
                     opp_type = "SATURATED_SEGMENT"
-                    if is_vn:
-                        rec = f"Phân khúc '{raw_kw}' đang bão hòa nặng ({v_str}) so với nhu cầu thực tế (Chỉ số Cơ hội: {opportunity_index:+0.1f}). Cần khác biệt hóa theo ngành dọc để chen chân."
-                    else:
-                        rec = f"Segment '{raw_kw}' is heavily saturated ({v_str}) relative to demand (Opportunity Index: {opportunity_index:+0.1f}). Vertical differentiation required."
+                    rec = f"Segment '{raw_kw}' is heavily saturated ({v_str}) relative to demand (Opportunity Index: {opportunity_index:+0.1f}). Vertical differentiation required."
                 else:
                     damping_map = {1: 0.35, 2: 0.55, 3: 0.75, 4: 0.90}
                     damping_factor = damping_map.get(loc_count, 1.0)
@@ -641,41 +617,21 @@ class StrategicMarketReasoner:
 
                     if loc_count == 1:
                         opp_type = "PROBE_OPPORTUNITY"
-                        rec = (
-                            f"Đã dò được tín hiệu đầu tiên cho '{raw_kw}' ({v_str}). Tín hiệu sớm với nguồn cung nội địa còn mỏng (Chỉ số Cơ hội hiệu dụng: {opportunity_index:+0.1f})."
-                            if is_vn else
-                            f"Initial single probe detected for '{raw_kw}' ({v_str}). Early signal with thin local supply (Effective Opportunity Index: {opportunity_index:+0.1f})."
-                        )
+                        rec = f"Initial single probe detected for '{raw_kw}' ({v_str}). Early signal with thin local supply (Effective Opportunity Index: {opportunity_index:+0.1f})."
                     elif opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
                         opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                        rec = (
-                            f"Nhu cầu tìm kiếm cho '{raw_kw}' đạt {demand_score:.0f}/100, vượt xa nguồn cung hiện có ({v_str}). Cơ hội đã kiểm chứng với độ tin cậy cao (Chỉ số Cơ hội hiệu dụng: {opportunity_index:+0.1f})."
-                            if is_vn else
-                            f"Search demand for '{raw_kw}' reached {demand_score:.0f}/100, heavily outpacing supply ({v_str}). High-conviction verified opportunity (Effective Opportunity Index: {opportunity_index:+0.1f})."
-                        )
+                        rec = f"Search demand for '{raw_kw}' reached {demand_score:.0f}/100, heavily outpacing supply ({v_str}). High-conviction verified opportunity (Effective Opportunity Index: {opportunity_index:+0.1f})."
                     elif opportunity_index >= 10.0:
                         opp_type = "GROWING_OPPORTUNITY"
-                        rec = (
-                            f"Phân khúc '{raw_kw}' cho thấy đà tăng tích cực ({v_str}) và vẫn còn dư địa thị trường để khai thác (Chỉ số Cơ hội hiệu dụng: {opportunity_index:+0.1f})."
-                            if is_vn else
-                            f"Segment '{raw_kw}' shows positive momentum ({v_str}) with viable market runway (Effective Opportunity Index: {opportunity_index:+0.1f})."
-                        )
+                        rec = f"Segment '{raw_kw}' shows positive momentum ({v_str}) with viable market runway (Effective Opportunity Index: {opportunity_index:+0.1f})."
                     else:
                         opp_type = "BALANCED_COMPETITION"
-                        rec = (
-                            f"Phân khúc '{raw_kw}' đang ở trạng thái cân bằng ({v_str}), nguồn cung nội dung vừa khớp với nhu cầu người dùng."
-                            if is_vn else
-                            f"Segment '{raw_kw}' is in competitive equilibrium ({v_str}); content supply matches user demand."
-                        )
+                        rec = f"Segment '{raw_kw}' is in competitive equilibrium ({v_str}); content supply matches user demand."
 
             if localized_videos:
                 support_sigs = [f"[{s.platform.value.upper() if hasattr(s.platform, 'value') else str(s.platform).upper()}] {s.raw_title}" for s in localized_videos[:3]]
             else:
-                support_sigs = (
-                    ["Không ghi nhận video nội địa nào trên YouTube hay TikTok trong khung thời gian đã chọn."]
-                    if is_vn else
-                    ["No localized videos recorded on YouTube or TikTok within selected timeframe."]
-                )
+                support_sigs = ["No localized videos recorded on YouTube or TikTok within selected timeframe."]
 
             opportunities.append(
                 MarketOpportunity(
@@ -713,11 +669,7 @@ class StrategicMarketReasoner:
         demand_signals = [s for s in signals if s.platform == PlatformType.GOOGLE_TRENDS]
         is_vn = (mission.geo_code == GeoCode.VN) if isinstance(mission.geo_code, GeoCode) else (str(mission.geo_code).upper() == "VN")
 
-        maturity_stmt = (
-            f"Độ trưởng thành thị trường: {maturity_stage.value} — {'; '.join(maturity_reasons)}"
-            if is_vn else
-            f"Market maturity stage: {maturity_stage.value} — {'; '.join(maturity_reasons)}"
-        )
+        maturity_stmt = f"Market maturity stage: {maturity_stage.value} — {'; '.join(maturity_reasons)}"
         statements.append((
             maturity_stmt,
             sorted(video_signals, key=self._engagement_rank, reverse=True)[:3],
@@ -736,16 +688,8 @@ class StrategicMarketReasoner:
                 s for s in video_signals
                 if any(self._matches_topic_strictly(s.raw_title, t) for t in gap_topics)
             ]
-            gap_stmt = (
-                f"Các khoảng trống chiến lược lớn nhất tập trung ở: {gap_names}."
-                if is_vn else
-                f"Top strategic white spaces concentrated in: {gap_names}."
-            )
-            gap_action = (
-                f"Dồn nguồn lực vào các chủ đề có nhu cầu cao {gap_names} để giành lợi thế người đi trước trong ngành hàng."
-                if is_vn else
-                f"Allocate resources to high-demand topics {gap_names} to capture first-mover advantage."
-            )
+            gap_stmt = f"Top strategic white spaces concentrated in: {gap_names}."
+            gap_action = f"Allocate resources to high-demand topics {gap_names} to capture first-mover advantage."
             statements.append((gap_stmt, gap_evidence))
             actionables.append(gap_action)
 
@@ -761,16 +705,8 @@ class StrategicMarketReasoner:
         if topic_counts:
             dominant_kw, max_count = max(topic_counts.items(), key=lambda item: item[1])
             if max_count >= 3:
-                dom_stmt = (
-                    f"Nội dung của người làm nghề đang dồn mạnh quanh '{dominant_kw}' ({max_count} tín hiệu đã kiểm chứng)."
-                    if is_vn else
-                    f"Practitioner content is concentrated around '{dominant_kw}' ({max_count} verified signals)."
-                )
-                dom_action = (
-                    f"Định vị khác biệt để tránh đối đầu trực diện với mật độ nguồn cung sẵn có ở '{dominant_kw}'."
-                    if is_vn else
-                    f"Differentiate positioning to avoid direct head-to-head competition with saturated supply in '{dominant_kw}'."
-                )
+                dom_stmt = f"Practitioner content is concentrated around '{dominant_kw}' ({max_count} verified signals)."
+                dom_action = f"Differentiate positioning to avoid direct head-to-head competition with saturated supply in '{dominant_kw}'."
                 statements.append((dom_stmt, topic_signals[dominant_kw]))
                 actionables.append(dom_action)
 
@@ -780,9 +716,6 @@ class StrategicMarketReasoner:
             total_comments = sum(self._comment_count(s) for s in discussed)
             top_discussed = sorted(discussed, key=self._comment_count, reverse=True)
             voc_stmt = (
-                f"Tiếng nói khách hàng tập trung ở {len(discussed)} nội dung được thảo luận với {total_comments} phản hồi thu được; "
-                "cần đọc kỹ các luồng bình luận này để nắm phản đối và nhu cầu chưa được đáp ứng trước khi định vị."
-                if is_vn else
                 f"Voice of Customer concentrated in {len(discussed)} discussion threads with {total_comments} comments captured; "
                 "carefully review these comments to uncover purchase objections and unmet demands."
             )
@@ -796,23 +729,14 @@ class StrategicMarketReasoner:
                     f"{self._platform_value(c.platform).upper()} ({c.status.value})" for c in broken
                 )
                 broken_stmt = (
-                    f"Độ phủ thu thập chưa đầy đủ: {len(broken)}/{len(channel_summaries)} kênh không trả về tín hiệu nào — {broken_desc}. "
-                    "Hãy xem các kết luận đa nền tảng là tạm thời cho tới khi những kênh này được khôi phục."
-                    if is_vn else
                     f"Incomplete ingress coverage: {len(broken)}/{len(channel_summaries)} channels returned zero signals — {broken_desc}. "
                     "Treat cross-platform findings as preliminary until channels are restored."
                 )
-                broken_action = (
-                    f"Khôi phục các kênh thu thập đang rỗng ({broken_desc}) và chạy lại mission trước khi rót ngân sách."
-                    if is_vn else
-                    f"Restore empty ingress channels ({broken_desc}) and re-run mission prior to capital allocation."
-                )
+                broken_action = f"Restore empty ingress channels ({broken_desc}) and re-run mission prior to capital allocation."
                 statements.append((broken_stmt, []))
                 actionables.append(broken_action)
 
         actionables.append(
-            "Lập lịch thu thập định kỳ để theo dõi biến động nguồn cung và tốc độ tăng của nhu cầu tìm kiếm."
-            if is_vn else
             "Schedule periodic ingress surveillance to track supply shifts and search demand growth velocity."
         )
 

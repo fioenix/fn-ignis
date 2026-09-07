@@ -175,7 +175,7 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 - **`diagnose_system_health()`**: Kiểm tra telemetry và trạng thái toàn bộ thành phần hệ thống.
 - **`get_system_logs(limit, level)`**: Tra cứu nhật ký sự kiện kiểm toán hệ thống.
 - **`verify_connectors_health()`**: Chạy kiểm tra tự động trạng thái YouTube API, Google RSS, Playwright, DB pool và Proxy.
-- **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Quản lý phiên đăng nhập trình duyệt có mã hóa AES-256.
+- **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Quản lý phiên đăng nhập trình duyệt có mã hóa Fernet (256-bit key: AES-128-CBC + HMAC-SHA256).
 - **`authenticate_threads(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: Kết nối Meta theo mô hình Dual-UX. Gọi mà không truyền `auth_code` (hoặc đặt `browser_login=true`) sẽ chạy luồng Tier 1 — bắt phiên trình duyệt 1 chạm bằng tài khoản cá nhân thông thường, không cần Meta Developer App. Khi truyền `auth_code`, hệ thống chạy luồng Tier 2 OAuth 2.0 Graph API (authorization code → short-lived token → long-lived user token 60 ngày), lưu trữ mã hóa AES.
 - **`get_threads_auth_status()`**: Kiểm tra cả hai tier — trạng thái token, scopes, `key_version`, số ngày còn lại, có cần refresh hay không, kèm thông tin phiên trình duyệt đã bắt được.
 - **`clear_threads_auth()`**: Thu hồi và xóa credentials OAuth cùng phiên trình duyệt của Threads khỏi bộ lưu trữ mã hóa.
@@ -210,7 +210,7 @@ Nếu bạn là AI Agent (**Claude Code, Antigravity, OpenAI Codex, OpenClaw, He
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
 ./scripts/bootstrap.sh
 ```
-*Script sẽ tự động khởi tạo môi trường Python virtualenv, SQLite database, sinh file `.env` với khóa bảo mật Fernet AES-256, tự động đăng ký FastMCP vào Claude Desktop, Antigravity, Codex và chạy kiểm tra hệ thống.*
+*Script sẽ tự động khởi tạo môi trường Python virtualenv, SQLite database, sinh file `.env` với khóa bảo mật Fernet (256-bit key: AES-128-CBC + HMAC-SHA256), tự động đăng ký FastMCP vào Claude Desktop, Antigravity, Codex và chạy kiểm tra hệ thống.*
 
 ---
 
@@ -252,7 +252,7 @@ docker compose -f docker-compose.prod.yml up -d
 | `SYNC_INTERVAL_MINUTES` | Tùy chọn ghi đè chu kỳ đồng bộ ingress (phút; 0 = dùng SCHEDULER_INTERVAL_SECONDS) | `0` | Không |
 | `YOUTUBE_CACHE_TTL_SECONDS` | Thời gian cache kết quả tìm kiếm YouTube để bảo vệ quota API | `86400` (24h) | Không |
 | `PLAYWRIGHT_PROXY_SERVER` | Proxy HTTP/SOCKS tùy chọn khi cào dữ liệu qua Playwright | `""` | Không |
-| `IGNIS_ENCRYPTION_KEY` | Khóa Fernet AES-256 mã hóa cookie phiên đăng nhập | *(Tự sinh)* | Không |
+| `IGNIS_ENCRYPTION_KEY` | Khóa Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) mã hóa cookie phiên đăng nhập | *(Tự sinh)* | Không |
 
 ---
 
@@ -268,7 +268,7 @@ uv run pytest
 ## 🛡️ Bảo mật & Quyền riêng tư
 
 - **Không rò rỉ dữ liệu (Zero Data Leakage)**: Toàn bộ dữ liệu cào thô được phân tích và bóc tách cục bộ. Không gửi dữ liệu thô ra các mô hình LLM bên thứ ba trừ khi agent được chỉ định rõ ràng.
-- **Mã hóa AES-256**: Trạng thái phiên trình duyệt và thông tin xác thực được mã hóa an toàn bằng AES-256 / Fernet.
+- **Mã hóa Fernet**: Trạng thái phiên trình duyệt và thông tin xác thực được mã hóa an toàn bằng Fernet (AES-128-CBC + HMAC-SHA256, 256-bit key).
 - **Truy vấn SQL tham số hóa**: Tất cả truy vấn cơ sở dữ liệu sử dụng parameterized query để chống tấn công SQL Injection.
 - Báo cáo lỗ hổng bảo mật: Xem chi tiết tại [Chính sách Bảo mật (SECURITY.md)](SECURITY.md).
 

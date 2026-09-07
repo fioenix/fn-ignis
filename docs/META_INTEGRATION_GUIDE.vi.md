@@ -52,7 +52,7 @@ Tương tự như cơ chế của TikTok Ingress trong `fn-ignis`, người dùn
 2. **Xác nhận đăng nhập trên trình duyệt**:
    - `fn-ignis` khởi động một phiên Playwright Chromium biệt lập.
    - Người dùng đăng nhập tài khoản Threads hoặc Instagram trên màn hình trình duyệt.
-   - Ngay khi đăng nhập thành công, `fn-ignis` tự động bóc tách session token an toàn, đóng cửa sổ trình duyệt và mã hóa AES-256 vào cơ sở dữ liệu (`platform_credentials`).
+   - Ngay khi đăng nhập thành công, `fn-ignis` tự động bóc tách session token an toàn, đóng cửa sổ trình duyệt và mã hóa Fernet vào cơ sở dữ liệu (`platform_credentials`).
 3. **Phiên Tier 1 và token Tier 2 tồn tại song song**:
    - Session trình duyệt được lưu dưới khóa riêng (`threads_browser`, `instagram_browser`), tách biệt hoàn toàn với bản ghi OAuth (`threads`, `instagram`). Kết nối Tier 1 không ghi đè token Tier 2 và ngược lại.
    - `ThreadsPlugin` và `ReelsPlugin` chọn đường ingress theo thứ tự ưu tiên: Graph API khi còn token hợp lệ → session trình duyệt → endpoint công khai legacy. Nhờ vậy, người dùng phổ thông cào được bài viết và hashtag công khai mà không vướng rào cản Meta App Review.
@@ -141,7 +141,7 @@ Hệ thống `fn-ignis` đã tích hợp sẵn công cụ tự động hóa toà
 4. **Hệ thống tự động thực hiện 3 bước ngầm**:
    - Đổi `auth_code` lấy **Short-Lived Token** (hạn 1 giờ).
    - Ngay lập tức gọi Meta Graph API nâng cấp lên **Long-Lived User Token (hạn 60 ngày)**.
-   - Mã hóa AES-256 toàn bộ token và client secret trước khi lưu vào `platform_credentials`.
+   - Mã hóa Fernet toàn bộ token và client secret trước khi lưu vào `platform_credentials`.
 
 ---
 
@@ -161,7 +161,7 @@ Hệ thống `fn-ignis` đã tích hợp sẵn công cụ tự động hóa toà
 [Agent Step 1: Kiểm tra Khoá Mã Hóa]
   │
   ├── Đọc file .env kiểm tra IGNIS_ENCRYPTION_KEY.
-  └── Nếu chưa có: Thực thi lệnh sinh khoá Fernet AES-256 và tự ghi vào .env:
+  └── Nếu chưa có: Thực thi lệnh sinh khoá Fernet (256-bit key) và tự ghi vào .env:
       python -c "from ignis.infrastructure.auth.crypto import generate_new_key; print(generate_new_key())"
   │
 [Agent Step 2: Thu Thập Thông Tin Ứng Dụng]

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # Security & Encryption
     IGNIS_ENCRYPTION_KEY: str = Field(
         default="",
-        description="Fernet AES-256 secret key for encrypting stored credentials in DB"
+        description="Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) secret key for encrypting stored credentials in DB"
     )
 
     # Scheduler Configuration
