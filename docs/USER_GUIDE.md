@@ -153,7 +153,7 @@ All settings can be placed in `.env` at the project root:
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `DATABASE_URL` | String | `sqlite:///ignis.db` | Connection string (`sqlite:///...` or `postgresql://user:pass@host:5432/db`) |
-| `ENCRYPTION_KEY` | String | Auto-generated | 32-byte url-safe Fernet key for encrypting social platform credentials |
+| `IGNIS_ENCRYPTION_KEY` | String | Auto-generated | 32-byte url-safe Fernet key for encrypting social platform credentials |
 | `YOUTUBE_API_KEY` | String | Optional | Official YouTube Data API v3 key |
 | `TIKTOK_SESSION_ID` | String | Optional | TikTok session cookie for deep video & comment scraping |
 | `THREADS_APP_ID` | String | Optional | Meta Developer App ID for official Threads Graph API |
@@ -297,4 +297,4 @@ The `fn-ignis` FastMCP server exposes **39 atomic and strategic tools**:
 - `discover_market_opportunities`: Cross-source market gap discovery.
 - `trigger_autonomous_discovery`: Trigger unguided exploration for whitespace opportunities.
 - `get_latest_daily_discovery`: Inspect latest automated daily digest.
-- `export_mission_dossier`: Export complete mission dossier in structured formats.
+- `refresh_runtime_config_cache`: Invalidate and refresh in-memory runtime config cache.

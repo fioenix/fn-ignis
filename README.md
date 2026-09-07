@@ -241,7 +241,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 ## 📖 Comprehensive Documentation & User Guide
 
-For detailed manual installation, Python scripting workflows, Docker ops, and troubleshooting, consult the **[Manual User Guide (Cẩm nang Hướng dẫn Thủ công)](docs/USER_GUIDE.md)**.
+For detailed manual installation, Python scripting workflows, Docker ops, and troubleshooting, consult the **[Manual User Guide](docs/USER_GUIDE.md)**.
 
 ---
 

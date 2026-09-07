@@ -37,8 +37,8 @@
             </span>
             <span class="text-xs font-mono font-bold text-slate-400">Score: {{ cluster.cross_platform_score|round(1) }}</span>
           </div>
-          <h3 class="font-extrabold text-base text-slate-900 leading-snug">{{ cluster.canonical_name }}</h3>
-          <p class="text-xs text-slate-500 leading-relaxed line-clamp-3">{{ cluster.summary_text }}</p>
+          <h3 class="font-extrabold text-base text-slate-900 leading-snug">{{ cluster.canonical_name|sanitize_pii }}</h3>
+          <p class="text-xs text-slate-500 leading-relaxed line-clamp-3">{{ cluster.summary_text|sanitize_pii }}</p>
         </div>
 
         <div class="pt-4 border-t border-slate-100 flex justify-between items-center text-xs text-slate-500">
