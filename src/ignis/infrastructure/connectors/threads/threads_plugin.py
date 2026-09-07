@@ -17,14 +17,19 @@ from ignis.domain.exceptions import (
     ConnectorQuotaExceededException,
 )
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, timeframe_to_days
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 from ignis.infrastructure.auth.meta_browser_auth import ThreadsBrowserAuthManager
 from ignis.infrastructure.auth.meta_oauth import ThreadsAuthManager
 from ignis.infrastructure.cache.insights_cache import InsightsTTLCache
 from ignis.infrastructure.connectors.meta_browser_ingress import (
+    GraphQLDocIdCache,
     caption_text,
     coerce_int,
     collect_json_payloads,
     extract_records,
+    extract_search_suggestions,
+    extract_trending_topics,
+    fetch_graphql_direct,
 )
 
 logger = logging.getLogger(__name__)
@@ -133,9 +138,35 @@ class ThreadsPlugin(IConnectorPlugin):
         if not await self._has_graph_token():
             storage_state = await self._browser_storage_state()
             if storage_state:
-                return await self._fetch_via_browser_session(
+                feed_signals = await self._fetch_via_browser_session(
                     url=self.BROWSER_FEED_URL, storage_state=storage_state, geo=geo, limit=limit
                 )
+                try:
+                    topics = await self.fetch_trending_topics(geo=geo, limit=10)
+                    for t in topics:
+                        t_name = t.get("topic", "")
+                        p_count = t.get("post_count", 0)
+                        feed_signals.append(
+                            TrendSignal(
+                                platform=PlatformType.THREADS,
+                                raw_title=f"[Trending Topic] {t_name}",
+                                metric_value=float(p_count) if p_count > 0 else 1000.0,
+                                growth_velocity=0.0,
+                                source_url=t.get("search_url"),
+                                geo_code=geo,
+                                metadata={
+                                    "topic": t_name,
+                                    "topic_id": t.get("topic_id"),
+                                    "post_count_label": t.get("post_count_label"),
+                                    "source": "threads_trending_topics",
+                                    "tier": "TIER_1_BROWSER_SESSION",
+                                },
+                                captured_at=datetime.now(timezone.utc),
+                            )
+                        )
+                except Exception as e:
+                    logger.warning(f"Could not augment Threads feed with trending topics: {e}")
+                return feed_signals
             if not self._auth_manager:
                 return await self._fetch_legacy_public(geo=geo, limit=limit)
 
@@ -201,6 +232,78 @@ class ThreadsPlugin(IConnectorPlugin):
 
         return all_signals
 
+    async def fetch_trending_topics(
+        self,
+        geo: GeoCode = GeoCode.VN,
+        limit: int = 15,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch real-time Trending Topics from Threads search surface.
+        Uses Direct GraphQL fast-path if doc_id is available, falling back to Playwright.
+        """
+        storage_state = await self._browser_storage_state()
+        if not storage_state:
+            return []
+
+        doc_id, lsd = GraphQLDocIdCache.get("trending_topics")
+        if doc_id:
+            direct_payload = await fetch_graphql_direct(
+                doc_id=doc_id,
+                variables={},
+                storage_state=storage_state,
+                lsd=lsd,
+                geo=geo,
+            )
+            if direct_payload:
+                topics = extract_trending_topics([direct_payload], limit=limit)
+                if topics:
+                    return topics
+
+        payloads = await collect_json_payloads(
+            url=self.BROWSER_SEARCH_URL,
+            storage_state=storage_state,
+            url_markers=self.BROWSER_API_MARKERS,
+            geo=geo,
+        )
+        return extract_trending_topics(payloads, limit=limit)
+
+    async def fetch_search_suggestions(
+        self,
+        keyword: str,
+        geo: GeoCode = GeoCode.VN,
+        limit: int = 10,
+    ) -> List[str]:
+        """
+        Fetch search autocomplete suggestions / related terms from Threads search.
+        """
+        storage_state = await self._browser_storage_state()
+        clean_kw = keyword.strip()
+        if not storage_state or not clean_kw:
+            return []
+
+        doc_id, lsd = GraphQLDocIdCache.get("search_suggestions")
+        if doc_id:
+            direct_payload = await fetch_graphql_direct(
+                doc_id=doc_id,
+                variables={"query": clean_kw},
+                storage_state=storage_state,
+                lsd=lsd,
+                geo=geo,
+            )
+            if direct_payload:
+                suggestions = extract_search_suggestions([direct_payload], limit=limit)
+                if suggestions:
+                    return suggestions
+
+        url = f"{self.BROWSER_SEARCH_URL}?{urllib.parse.urlencode({'q': clean_kw, 'serp_type': 'default'})}"
+        payloads = await collect_json_payloads(
+            url=url,
+            storage_state=storage_state,
+            url_markers=self.BROWSER_API_MARKERS,
+            geo=geo,
+        )
+        return extract_search_suggestions(payloads, limit=limit)
+
     # --- Mapping ---
 
     async def _map_items(
@@ -230,7 +333,7 @@ class ThreadsPlugin(IConnectorPlugin):
             signals.append(
                 TrendSignal(
                     platform=PlatformType.THREADS,
-                    raw_title=text[:200] or f"Threads Post #{post_id}",
+                    raw_title=sanitize_pii_text(text[:200]) or f"Threads Post #{post_id}",
                     metric_value=metric_value,
                     growth_velocity=0.0,
                     source_url=item.get("permalink"),
@@ -396,16 +499,37 @@ class ThreadsPlugin(IConnectorPlugin):
         geo: GeoCode,
         limit: int,
     ) -> List[TrendSignal]:
-        """Run one logged-in public search per keyword using the captured browser session."""
+        """Run search per keyword using Direct GraphQL fast-path, falling back to Playwright."""
         all_signals: List[TrendSignal] = []
         seen_ids: set[str] = set()
+        doc_id, lsd = GraphQLDocIdCache.get("search_posts")
 
         for keyword in [k.strip() for k in keywords[:10] if k and k.strip()]:
-            url = f"{self.BROWSER_SEARCH_URL}?{urllib.parse.urlencode({'q': keyword, 'serp_type': 'default'})}"
-            signals = await self._fetch_via_browser_session(
-                url=url, storage_state=storage_state, geo=geo, limit=limit, keyword=keyword
-            )
-            for signal in signals:
+            keyword_signals: List[TrendSignal] = []
+            if doc_id:
+                direct_payload = await fetch_graphql_direct(
+                    doc_id=doc_id,
+                    variables={"query": keyword, "search_type": "TOP"},
+                    storage_state=storage_state,
+                    lsd=lsd,
+                    geo=geo,
+                )
+                if direct_payload:
+                    records = extract_records(
+                        [direct_payload],
+                        is_record=self._is_browser_post,
+                        identity=lambda node: str(node.get("pk") or node.get("id") or ""),
+                        limit=min(max(limit, 1), 100),
+                    )
+                    keyword_signals = [self._map_browser_post(node, geo=geo, keyword=keyword) for node in records]
+
+            if not keyword_signals:
+                url = f"{self.BROWSER_SEARCH_URL}?{urllib.parse.urlencode({'q': keyword, 'serp_type': 'default'})}"
+                keyword_signals = await self._fetch_via_browser_session(
+                    url=url, storage_state=storage_state, geo=geo, limit=limit, keyword=keyword
+                )
+
+            for signal in keyword_signals:
                 post_id = str(signal.metadata.get("post_id") or "")
                 if post_id and post_id in seen_ids:
                     continue
@@ -463,7 +587,7 @@ class ThreadsPlugin(IConnectorPlugin):
 
         return TrendSignal(
             platform=PlatformType.THREADS,
-            raw_title=text[:200] or f"Threads Post #{post_id}",
+            raw_title=sanitize_pii_text(text[:200]) or f"Threads Post #{post_id}",
             metric_value=float(likes),
             growth_velocity=0.0,
             source_url=f"https://www.threads.net/@{username}/post/{code}" if username and code else None,
@@ -510,7 +634,7 @@ class ThreadsPlugin(IConnectorPlugin):
                     return []
                 data = resp.json()
         except Exception as e:
-            logger.error(f"Lỗi khi cào Threads: {e}")
+            logger.error(f"Error fetching Threads: {e}")
             raise ConnectorExecutionException(f"Failed to fetch Threads signals: {e}") from e
 
         signals: List[TrendSignal] = []
@@ -532,7 +656,7 @@ class ThreadsPlugin(IConnectorPlugin):
             signals.append(
                 TrendSignal(
                     platform=PlatformType.THREADS,
-                    raw_title=caption[:200] or f"Threads Post #{post_id}",
+                    raw_title=sanitize_pii_text(caption[:200]) or f"Threads Post #{post_id}",
                     metric_value=like_count,
                     growth_velocity=0.0,
                     source_url=url,

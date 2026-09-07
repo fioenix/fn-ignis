@@ -141,7 +141,7 @@ class TikTokPlugin(IConnectorPlugin):
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            logger.info("Playwright chưa được cài đặt, kích hoạt HTTP Fallback Matrix cho search suggestions.")
+            logger.info("Playwright not installed; activating HTTP Fallback Matrix for search suggestions.")
             return await self._fetch_suggestions_http_fallback(keywords, geo)
 
         results: List[Dict[str, Any]] = []
@@ -259,7 +259,7 @@ class TikTokPlugin(IConnectorPlugin):
                 await browser.close()
 
         except Exception as e:
-            logger.warning(f"Playwright search suggestions gặp sự cố ({e}), kích hoạt HTTP Fallback Matrix.")
+            logger.warning(f"Playwright search suggestions failed ({e}), activating HTTP Fallback Matrix.")
             return await self._fetch_suggestions_http_fallback(keywords, geo)
 
         return results
@@ -342,7 +342,7 @@ class TikTokPlugin(IConnectorPlugin):
         """
         match = re.search(r"/video/(\d+)", video_url)
         if not match:
-            logger.warning(f"Không trích xuất được ID video từ URL: {video_url}")
+            logger.warning(f"Could not extract video ID from URL: {video_url}")
             return []
         aweme_id = match.group(1)
 
@@ -353,7 +353,7 @@ class TikTokPlugin(IConnectorPlugin):
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            logger.warning("Playwright chưa được cài đặt, bỏ qua cào comments.")
+            logger.warning("Playwright not installed, skipping comments scraping.")
             return []
 
         comments: List[Dict[str, Any]] = []
@@ -437,7 +437,7 @@ class TikTokPlugin(IConnectorPlugin):
                 await browser.close()
 
         except Exception as e:
-            logger.error(f"Lỗi khi cào bình luận video {video_url}: {e}")
+            logger.error(f"Error scraping comments for video {video_url}: {e}")
             raise ConnectorExecutionException(f"Failed to fetch TikTok comments: {e}") from e
 
         return comments
@@ -450,7 +450,7 @@ class TikTokPlugin(IConnectorPlugin):
         limit_per_video: int = 20,
     ) -> List[Dict[str, Any]]:
         """
-        Tìm kiếm các video top đầu theo keywords và trích xuất bình luận của chúng để tổng hợp Voice of Customer.
+        Search top videos for keywords and extract comments for Voice of Customer analysis.
         """
         all_results: List[Dict[str, Any]] = []
 
@@ -469,7 +469,7 @@ class TikTokPlugin(IConnectorPlugin):
                     "comments": cmts,
                 })
             except Exception as e:
-                logger.warning(f"Bỏ qua cào comments cho video {s.source_url}: {e}")
+                logger.warning(f"Skipping comments scraping for video {s.source_url}: {e}")
 
         return all_results
 
@@ -487,7 +487,7 @@ class TikTokPlugin(IConnectorPlugin):
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            logger.warning("Playwright chưa được cài đặt, bỏ qua cào TikTok.")
+            logger.warning("Playwright not installed, skipping TikTok scraping.")
             return []
 
         signals: List[TrendSignal] = []

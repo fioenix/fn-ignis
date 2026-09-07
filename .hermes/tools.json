@@ -516,6 +516,54 @@
   {
     "type": "function",
     "function": {
+      "name": "get_threads_trending_topics",
+      "description": "Fetch real-time Trending Topics from Threads search surface (threads.net/search) for macro market awareness.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          },
+          "limit": {
+            "default": 15,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_threads_search_suggestions",
+      "description": "Fetch search autocomplete suggestions and derivative queries from Threads search for keyword expansion and slang discovery.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "keyword": {
+            "type": "string"
+          },
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "keyword"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "authenticate_instagram",
       "description": "Connect Instagram with either tier: call with no auth_code (or browser_login=true) for the 1-click browser session capture that needs no Meta Developer App, or pass auth_code to run the Instagram Graph API OAuth 2.0 flow and store a 60-day long-lived token AES-encrypted.",
       "parameters": {
@@ -841,6 +889,91 @@
             "default": null
           }
         },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_runtime_config",
+      "description": "Inspect dynamic runtime configuration parameters (e.g. threads_web_client_id, threads_graphql_endpoint, doc_ids) from persistent storage and in-memory cache.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_runtime_config",
+      "description": "Update a dynamic runtime configuration parameter (e.g. updating an outdated web client ID or GraphQL doc_id) into persistent storage and active in-memory cache.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "category": {
+            "default": "connector",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "key",
+          "value"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "refresh_runtime_config_cache",
+      "description": "Force invalidate and reload all dynamic runtime configurations from database into active in-memory cache.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
         "type": "object"
       }
     }

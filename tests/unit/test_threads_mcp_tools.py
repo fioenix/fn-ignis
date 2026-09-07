@@ -1,5 +1,5 @@
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -76,3 +76,45 @@ async def test_clear_threads_auth_reports_outcome(cleared, expected_fragment):
 
     assert res["cleared"] is cleared
     assert expected_fragment in res["message"]
+
+
+@pytest.mark.asyncio
+async def test_get_threads_trending_topics_mcp_tool():
+    from ignis.interfaces.mcp.server import handle_get_threads_trending_topics
+
+    mock_plugin = AsyncMock()
+    mock_plugin.fetch_trending_topics.return_value = [
+        {"topic": "AI Coding", "post_count": 5000, "post_count_label": "5K posts"}
+    ]
+    mock_registry = MagicMock()
+    mock_registry.get_plugin.return_value = mock_plugin
+
+    with patch("ignis.interfaces.mcp.server.get_components", return_value={"registry": mock_registry}):
+        res = json.loads(await handle_get_threads_trending_topics(geo="VN", limit=5))
+
+    assert res["status"] == "SUCCESS"
+    assert res["platform"] == "THREADS"
+    assert res["total_topics"] == 1
+    assert res["topics"][0]["topic"] == "AI Coding"
+
+
+@pytest.mark.asyncio
+async def test_get_threads_search_suggestions_mcp_tool():
+    from ignis.interfaces.mcp.server import handle_get_threads_search_suggestions
+
+    mock_plugin = AsyncMock()
+    mock_plugin.fetch_search_suggestions.return_value = [
+        "ai coding agent",
+        "ai coding assistant",
+    ]
+    mock_registry = MagicMock()
+    mock_registry.get_plugin.return_value = mock_plugin
+
+    with patch("ignis.interfaces.mcp.server.get_components", return_value={"registry": mock_registry}):
+        res = json.loads(await handle_get_threads_search_suggestions(keyword="ai coding", geo="VN", limit=5))
+
+    assert res["status"] == "SUCCESS"
+    assert res["keyword"] == "ai coding"
+    assert res["total_suggestions"] == 2
+    assert "ai coding agent" in res["suggestions"]
+

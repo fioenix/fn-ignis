@@ -51,20 +51,37 @@ from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTok
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
 logger = logging.getLogger("ignis.mcp")
 
-SOP_SYSTEM_INSTRUCTIONS = """
-You are the fn-ignis Trend Intelligence & Market Opportunity Agent.
-When conducting any market research, niche analysis, or trend discovery task, you MUST STRICTLY FOLLOW the 6-Step Standard Operating Procedure (SOP):
+HARNESS_SYSTEM_INSTRUCTIONS = """
+fn-ignis is an Autonomous Social Intelligence & Market Opportunity Agent Harness.
+It equips AI agents with social listening connectors, mathematical methodologies, domain knowledge, and reporting scaffolds without constraining the agent's workflow or deliverables.
+
+Harness Capabilities:
+1. Multi-Platform Connectors & Probes: Atomic operations across Threads, TikTok, YouTube, Google Trends, and Instagram (autocomplete queries, comments, video cards, trending topics, dynamic config, auth tokens).
+2. Methodology & Scoring: Mathematical formulations including Opportunity Index (Demand vs. Supply), Quality Gate (Coverage, Precision, Freshness, Diversity >= 70%), and Voice of Customer pain-point clustering.
+3. Domain Knowledge & Lexicons: Dynamic domain lexicon registration, negative noise filtering, and localized language heuristics.
+4. Reporting Scaffolds: Data contracts and high-contrast interactive HTML Dashboard artifacts (`generate_mission_artifact`).
+
+Operational Flexibility:
+- Agents have full autonomy to select and compose tools as needed (e.g., ad-hoc social scanning, customer pain-point auditing, or end-to-end strategic dossiers).
+- The 6-Step Strategic Research Framework is provided as an analytical recipe/guideline (accessible via resource `fn-ignis://sop/market-research` or prompt `market_research_pipeline`) when a comprehensive market opportunity dossier is requested.
+"""
+
+SOP_FRAMEWORK_DOC = """
+# fn-ignis 6-Step Strategic Market Research Reference Framework
+
+This framework serves as a recommended analytical recipe when agents conduct comprehensive market opportunity and white-space discovery:
 
 1. Step 1 (Clarify Objectives & Core Hypothesis):
    Establish clear, falsifiable hypotheses. Identify vertical (Fashion, Crypto, Healthcare, Logistics) and call `register_domain_lexicon(domain="...", terms=[...])` to expand the Quality Gate's domain vocabulary dynamically before deep crawling.
 
 2. Step 2 (Macro Scan & Real-World Keyword Expansion):
-   Call `get_tiktok_creative_center_trends` and `get_tiktok_search_suggestions` to uncover actual slang, tool names, and sub-niches being searched by users in target geo before deep crawling.
+   Call `get_tiktok_creative_center_trends`, `get_tiktok_search_suggestions`, or `get_threads_trending_topics` to uncover actual slang, tool names, and sub-niches being searched by users in target geo before deep crawling.
 
 3. Step 3 (Deep Ingress & Quality Gate):
    Call `execute_mission_ingress` for deep multi-platform ingestion. Ensure strict date windowing and noise filtering (>=70% confidence).
@@ -72,7 +89,7 @@ When conducting any market research, niche analysis, or trend discovery task, yo
 4. Step 4 (Single-Source 4-Lens Breakdown):
    - Google Lens: Macro search demand velocity and growth.
    - YouTube Lens: Long-form supply, case study and tutorial depth.
-   - TikTok Search Lens: Micro short-form intent and trending hashtags.
+   - TikTok / Threads Lens: Micro short-form intent, trending hashtags, and real-time discussions.
    - Voice of Customer Lens: Real objections, pricing questions, unmet needs from comments via `extract_customer_pain_points`.
 
 5. Step 5 (Cross-Source Synthesis & White Space Matrix):
@@ -82,13 +99,14 @@ When conducting any market research, niche analysis, or trend discovery task, yo
    Synthesize 3-5 market truths, evaluate entry risks/moats (why hasn't this been built?), formulate a 3-7 day low-cost MVP validation plan, and generate a full interactive Infographic HTML Dashboard via `generate_mission_artifact`.
 """
 
-# Initialize FastMCP Server with System Instructions
-mcp = FastMCP("fn-ignis-trend-intelligence", instructions=SOP_SYSTEM_INSTRUCTIONS)
+# Initialize FastMCP Server with Non-Prescriptive Harness Instructions
+mcp = FastMCP("fn-ignis-trend-intelligence", instructions=HARNESS_SYSTEM_INSTRUCTIONS)
 
 
 
 def _init_components():
     repository = create_repository()
+    runtime_config_manager = RuntimeConfigManager(repository=repository)
     tiktok_auth_manager = TikTokAuthManager(repository=repository)
     threads_auth_manager = ThreadsAuthManager(repository=repository)
     instagram_auth_manager = InstagramAuthManager(repository=repository)
@@ -168,6 +186,7 @@ def _init_components():
         "ingest_use_case": ingest_use_case,
         "cluster_use_case": cluster_use_case,
         "autonomous_discovery_use_case": autonomous_discovery_use_case,
+        "runtime_config_manager": runtime_config_manager,
     }
 
 _COMPONENTS = None
@@ -356,7 +375,7 @@ async def handle_run_autonomous_research_mission(
             "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
             "strategic_insights": _serialize_insights(report.strategic_insights),
             "actionable_takeaways": report.actionable_takeaways,
-            "next_step": f"Gọi generate_mission_artifact(mission_id='{mission.id}') để xem báo cáo HTML đầy đủ."
+            "next_step": f"Call generate_mission_artifact(mission_id='{mission.id}') to render the full interactive HTML dossier."
         },
         ensure_ascii=False,
         indent=2
@@ -930,7 +949,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
             "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
             "strategic_insights": _serialize_insights(report.strategic_insights)[:3],
             "actionable_takeaways": report.actionable_takeaways[:3],
-            "instructions_for_user": f"Báo cáo HTML đầy đủ ({len(signals)} signals) đã được xuất thành công. Bạn có thể mở trực tiếp đường dẫn file://{abs_path} trên trình duyệt.",
+            "instructions_for_user": f"Interactive HTML dossier ({len(signals)} signals) exported successfully. Open file://{abs_path} directly in your browser.",
         },
         ensure_ascii=False,
         indent=2
@@ -1253,6 +1272,67 @@ async def get_threads_auth_status() -> str:
 @mcp.tool(name="clear_threads_auth", description="Revoke and delete the stored Meta Threads OAuth 2.0 credentials from local encrypted storage.")
 async def clear_threads_auth() -> str:
     return await handle_clear_threads_auth()
+
+
+async def handle_get_threads_trending_topics(geo: str = "VN", limit: int = 15) -> str:
+    comp = get_components()
+    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
+    threads_plugin = comp["registry"].get_plugin(PlatformType.THREADS)
+    if not threads_plugin or not hasattr(threads_plugin, "fetch_trending_topics"):
+        return json.dumps({"status": "ERROR", "message": "Threads plugin not available or does not support trending topics."}, ensure_ascii=False)
+
+    try:
+        topics = await threads_plugin.fetch_trending_topics(geo=geo_code, limit=max(1, min(limit, 30)))
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "platform": "THREADS",
+                "geo": geo_code.value,
+                "total_topics": len(topics),
+                "topics": topics,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error fetching Threads trending topics: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="get_threads_trending_topics", description="Fetch real-time Trending Topics from Threads search surface (threads.net/search) for macro market awareness.")
+async def get_threads_trending_topics(geo: str = "VN", limit: int = 15) -> str:
+    return await handle_get_threads_trending_topics(geo=geo, limit=limit)
+
+
+async def handle_get_threads_search_suggestions(keyword: str, geo: str = "VN", limit: int = 10) -> str:
+    comp = get_components()
+    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
+    threads_plugin = comp["registry"].get_plugin(PlatformType.THREADS)
+    if not threads_plugin or not hasattr(threads_plugin, "fetch_search_suggestions"):
+        return json.dumps({"status": "ERROR", "message": "Threads plugin not available or does not support search suggestions."}, ensure_ascii=False)
+
+    try:
+        suggestions = await threads_plugin.fetch_search_suggestions(keyword=keyword, geo=geo_code, limit=max(1, min(limit, 20)))
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "platform": "THREADS",
+                "keyword": keyword,
+                "total_suggestions": len(suggestions),
+                "suggestions": suggestions,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error fetching Threads search suggestions: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="get_threads_search_suggestions", description="Fetch search autocomplete suggestions and derivative queries from Threads search for keyword expansion and slang discovery.")
+async def get_threads_search_suggestions(keyword: str, geo: str = "VN", limit: int = 10) -> str:
+    return await handle_get_threads_search_suggestions(keyword=keyword, geo=geo, limit=limit)
+
 
 
 @mcp.tool(name="authenticate_instagram", description="Connect Instagram with either tier: call with no auth_code (or browser_login=true) for the 1-click browser session capture that needs no Meta Developer App, or pass auth_code to run the Instagram Graph API OAuth 2.0 flow and store a 60-day long-lived token AES-encrypted.")
@@ -1588,6 +1668,109 @@ async def list_domain_lexicons(domain: Optional[str] = None) -> str:
     return await handle_list_domain_lexicons(domain=domain)
 
 
+async def handle_get_runtime_config(key: Optional[str] = None, category: Optional[str] = None) -> str:
+    comp = get_components()
+    mgr = comp["runtime_config_manager"]
+    try:
+        if key:
+            val = await mgr.get(key)
+            return json.dumps(
+                {
+                    "status": "SUCCESS",
+                    "key": key,
+                    "value": val,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        configs = await mgr.get_all(category=category)
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "total_configs": len(configs),
+                "category_filter": category,
+                "configs": configs,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error fetching runtime config: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="get_runtime_config", description="Inspect dynamic runtime configuration parameters (e.g. threads_web_client_id, threads_graphql_endpoint, doc_ids) from persistent storage and in-memory cache.")
+async def get_runtime_config(key: Optional[str] = None, category: Optional[str] = None) -> str:
+    return await handle_get_runtime_config(key=key, category=category)
+
+
+async def handle_update_runtime_config(
+    key: str,
+    value: str,
+    category: str = "connector",
+    description: Optional[str] = None,
+) -> str:
+    comp = get_components()
+    mgr = comp["runtime_config_manager"]
+    try:
+        await mgr.set(
+            key=key,
+            value=value,
+            category=category,
+            description=description,
+            updated_by="agent",
+        )
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "message": f"Successfully updated runtime config '{key}'.",
+                "key": key,
+                "value": value,
+                "category": category,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error updating runtime config '{key}': {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="update_runtime_config", description="Update a dynamic runtime configuration parameter (e.g. updating an outdated web client ID or GraphQL doc_id) into persistent storage and active in-memory cache.")
+async def update_runtime_config(
+    key: str,
+    value: str,
+    category: str = "connector",
+    description: Optional[str] = None,
+) -> str:
+    return await handle_update_runtime_config(key=key, value=value, category=category, description=description)
+
+
+async def handle_refresh_runtime_config_cache() -> str:
+    comp = get_components()
+    mgr = comp["runtime_config_manager"]
+    try:
+        cached = await mgr.refresh()
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "message": "Successfully refreshed runtime configuration in-memory cache from database.",
+                "total_cached_keys": len(cached),
+                "cached_keys": list(cached.keys()),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except Exception as e:
+        logger.error(f"Error refreshing runtime config cache: {e}")
+        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+
+
+@mcp.tool(name="refresh_runtime_config_cache", description="Force invalidate and reload all dynamic runtime configurations from database into active in-memory cache.")
+async def refresh_runtime_config_cache() -> str:
+    return await handle_refresh_runtime_config_cache()
+
+
 async def handle_verify_connectors_health() -> str:
     """
     Run active diagnostic probes across all multi-platform ingress connectors and infrastructure:
@@ -1663,8 +1846,8 @@ async def verify_connectors_health() -> str:
 
 @mcp.resource("fn-ignis://sop/market-research")
 def get_market_research_sop_resource() -> str:
-    """Full documentation of the fn-ignis 6-Step Market Research Standard Operating Procedure (SOP)."""
-    return SOP_SYSTEM_INSTRUCTIONS
+    """Full documentation of the fn-ignis 6-Step Market Research Reference Framework."""
+    return SOP_FRAMEWORK_DOC
 
 
 @mcp.resource("fn-ignis://methodology/opportunity-index")

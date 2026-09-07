@@ -142,6 +142,16 @@ class SqliteTrendRepository(ITrendRepository):
                 keywords TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS runtime_configs (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                category TEXT DEFAULT 'connector',
+                description TEXT,
+                updated_by TEXT DEFAULT 'system',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
         """)
 
         # Seed Initial Lexicons if table is empty
@@ -201,6 +211,23 @@ class SqliteTrendRepository(ITrendRepository):
                     "INSERT OR IGNORE INTO market_lexicons (id, domain, term, category, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                     (str(uuid4()), dom, term, cat, "system", now_str),
                 )
+
+        # Seed Initial Runtime Configs if table is empty
+        cur.execute("SELECT COUNT(*) FROM runtime_configs")
+        rc_count = cur.fetchone()[0]
+        if rc_count == 0:
+            now_str = datetime.now(timezone.utc).isoformat()
+            initial_configs = [
+                ("threads_web_client_id", "238260118693652", "threads", "Meta internal web client ID for Threads web requests (X-IG-App-ID)", "system", now_str, now_str),
+                ("threads_graphql_endpoint", "https://www.threads.net/api/graphql", "threads", "Meta Threads Web GraphQL endpoint", "system", now_str, now_str),
+                ("threads_doc_id_trending_topics", "", "threads", "Persisted GraphQL doc_id for Threads Trending Topics query", "system", now_str, now_str),
+                ("threads_doc_id_search_posts", "", "threads", "Persisted GraphQL doc_id for Threads Keyword Search query", "system", now_str, now_str),
+                ("threads_doc_id_search_suggestions", "", "threads", "Persisted GraphQL doc_id for Threads Search Suggestions query", "system", now_str, now_str),
+            ]
+            cur.executemany(
+                "INSERT INTO runtime_configs (key, value, category, description, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                initial_configs,
+            )
 
         conn.commit()
         if self._mem_conn is None:
@@ -827,3 +854,95 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.close()
 
         return await asyncio.to_thread(_sync_get)
+
+    async def get_runtime_config(self, key: str) -> Optional[str]:
+        await self._ensure_schema()
+
+        def _sync_get():
+            conn = self._get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT value FROM runtime_configs WHERE key = ?", (key,))
+                row = cur.fetchone()
+                return str(row["value"]) if row else None
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_get)
+
+    async def get_all_runtime_configs(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        await self._ensure_schema()
+
+        def _sync_get_all():
+            conn = self._get_connection()
+            try:
+                cur = conn.cursor()
+                if category:
+                    cur.execute(
+                        "SELECT key, value, category, description, updated_by, created_at, updated_at FROM runtime_configs WHERE category = ? ORDER BY key ASC",
+                        (category,),
+                    )
+                else:
+                    cur.execute(
+                        "SELECT key, value, category, description, updated_by, created_at, updated_at FROM runtime_configs ORDER BY category ASC, key ASC"
+                    )
+                rows = cur.fetchall()
+                return [dict(r) for r in rows]
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_get_all)
+
+    async def set_runtime_config(
+        self,
+        key: str,
+        value: str,
+        category: str = "connector",
+        description: Optional[str] = None,
+        updated_by: str = "system",
+    ) -> None:
+        await self._ensure_schema()
+
+        def _sync_set():
+            conn = self._get_connection()
+            try:
+                now_str = datetime.now(timezone.utc).isoformat()
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO runtime_configs (key, value, category, description, updated_by, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = excluded.value,
+                        category = COALESCE(excluded.category, runtime_configs.category),
+                        description = COALESCE(excluded.description, runtime_configs.description),
+                        updated_by = excluded.updated_by,
+                        updated_at = excluded.updated_at
+                    """,
+                    (key, str(value), category, description, updated_by, now_str, now_str),
+                )
+                conn.commit()
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        await asyncio.to_thread(_sync_set)
+
+    async def delete_runtime_config(self, key: str) -> bool:
+        await self._ensure_schema()
+
+        def _sync_del():
+            conn = self._get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM runtime_configs WHERE key = ?", (key,))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_del)
+

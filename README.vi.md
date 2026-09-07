@@ -11,18 +11,18 @@
 >
 > 🌐 [English Version](README.md) · [Tài liệu Hướng dẫn Toàn diện](docs/USER_GUIDE.md)
 
-`fnIgnis` (`fn-ignis`) là công cụ nghiên cứu chiến lược và lắng nghe thị trường hiệu năng cao, tự lưu trữ (self-hosted), được phát triển bởi **FINOLABS**. Nền tảng hỗ trợ các AI Agent (**Claude Desktop, Claude Code, Cursor, Windsurf, Antigravity, OpenAI Codex, OpenClaw, Nous Hermes**) và các nhà hoạch định chiến lược phát hiện các khoảng trống thị trường (white spaces) giá trị cao trên Google Trends, YouTube, TikTok Creative Center, gợi ý tìm kiếm TikTok và bình luận thực tế của khách hàng (Voice of Customer) với **chi phí token cào $0**, công thức tính toán toán học chuẩn xác (**Opportunity Index**), tự động nạp từ điển ngành linh hoạt và kết xuất báo cáo HTML Infographic trực quan, sắc nét.
+`fnIgnis` (`fn-ignis`) là công cụ nghiên cứu chiến lược và lắng nghe thị trường hiệu năng cao, tự lưu trữ (self-hosted), được phát triển bởi **FINOLABS**. Nền tảng hỗ trợ các AI Agent (**Claude Desktop, Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, Pi Agent**) và các nhà hoạch định chiến lược phát hiện các khoảng trống thị trường (white spaces) giá trị cao trên Google Trends, YouTube, TikTok Creative Center, gợi ý tìm kiếm TikTok và bình luận thực tế của khách hàng (Voice of Customer) với **chi phí token cào $0**, công thức tính toán toán học chuẩn xác (**Opportunity Index**), tự động nạp từ điển ngành linh hoạt và kết xuất báo cáo HTML Infographic trực quan, sắc nét.
 
 ---
 
-## 🌟 Điểm Nổi bật & Ưu thế Cốt lõi
+## 🌟 Điểm Nhấn Nổi Bật
 
-- **⚡ Chi phí Token Thu thập $0 (Zero-Token Local Ingress)**: Thu thập, lọc nhiễu và chuẩn hóa lượng lớn tín hiệu cục bộ bằng parser Python mà không tiêu tốn token LLM đắt đỏ cho công đoạn cào thô.
-- **🏛️ Kiến trúc Song hành (Dual-Track Architecture)**: Kết hợp giữa daemon radar chạy ngầm 24/7 (`fn-ignis-worker`) và các chiến dịch nghiên cứu chuyên sâu theo yêu cầu (on-demand).
-- **📊 Chỉ số Cơ hội Toán học (Opportunity Index)**: Định lượng khoảng trống thị trường (+100 đến -100) bằng cách so sánh tốc độ tăng trưởng nhu cầu tìm kiếm (Google/TikTok) với mức độ bão hòa nguồn cung nội dung (YouTube/TikTok).
-- **🗣️ Lắng nghe Khách hàng Thực tế (Voice of Customer)**: Tự động trích xuất và tổng hợp các phản đối mua hàng, câu hỏi về giá và nhu cầu chưa được đáp ứng từ phần bình luận video công khai.
-- **🧠 Từ điển Chuyên ngành Động (Autonomous Dynamic Lexicon Engine)**: Cho phép agent tự động đăng ký thuật ngữ/slang mới của từng ngành hàng vào cơ sở dữ liệu mà không cần sửa code.
-- **🤖 Tương thích Toàn diện Hệ sinh thái Agent**: Hỗ trợ sẵn sàng out-of-the-box cho Claude, Cursor, Windsurf, Antigravity, Codex, OpenClaw và Hermes.
+- **⚡ Cào Dữ liệu Cục bộ $0 Token**: Thu thập, lọc và chuẩn hóa dữ liệu lớn cục bộ bằng các bộ parser Python xác định mà không làm hao tốn token API LLM đắt đỏ.
+- **🏛️ Kiến trúc Dual-Track**: Kết hợp daemon radar nền chạy 24/7 (`fn-ignis-worker`) với các đợt nghiên cứu chiến lược chuyên sâu theo giả thuyết khi cần.
+- **📊 Chỉ số Cơ hội Toán học (Opportunity Index)**: Định lượng khoảng trống thị trường (+100 đến -100) bằng tương quan toán học giữa tốc độ tăng trưởng nhu cầu tìm kiếm vĩ mô và khối lượng cung cấp nội dung bản địa.
+- **🗣️ Lắng nghe Khách hàng Thực tế (Voice of Customer)**: Cào và tổng hợp các rào cản mua hàng, thắc mắc về giá và nhu cầu chưa được đáp ứng trực tiếp từ phần bình luận video công khai.
+- **🧠 Cơ chế Từ điển Động Tự trị (Dynamic Lexicon)**: Bảng từ vựng lưu trữ bền vững trên SQLite/PostgreSQL cho phép agent đăng ký tiếng lóng ngành, tên thương hiệu mới ngay trong quá trình chạy mà không cần sửa code.
+- **🤖 Tương thích Toàn diện Hệ sinh thái Agent**: Hỗ trợ sẵn sàng out-of-the-box cho Claude (Desktop & Code), Antigravity, Codex, OpenClaw, Hermes và Pi Agent.
 
 ---
 
@@ -51,7 +51,7 @@ flowchart TB
 
     subgraph T2["🎯 Track 2: Nghiên cứu Sâu Theo Yêu cầu (Active Probes)"]
         direction TB
-        User(["<b>Người dùng / Chiến lược gia</b>"]) <--> Agent["<b>AI Agent Harness</b><br/>Claude · Cursor · Codex · Hermes"]
+        User(["<b>Người dùng / Chiến lược gia</b>"]) <--> Agent["<b>AI Agent Harness</b><br/>Claude · Codex · Antigravity · Hermes"]
         P2["<b>Đầu dò Mục tiêu</b><br/>Gợi ý Tìm kiếm · Lưới Video · VoC"]
         Agent -->|Triển khai Đầu dò| P2
     end
@@ -120,18 +120,29 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 
 | AI Agent / IDE | Cấu hình & Tiêu chuẩn | Khả năng Hỗ trợ |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 34 FastMCP Tools, Prompts, Resources, tự động nạp 6 bước SOP |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 39 FastMCP Tools, Prompts, Resources, tự động nạp 6 bước SOP |
 | **Claude Code** | [`CLAUDE.md`](CLAUDE.md), [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Chuẩn Agent Skills, xuất Artifact HTML trực quan |
-| **Cursor IDE** | [`.cursor/rules/fn-ignis.mdc`](.cursor/rules/fn-ignis.mdc), [`.cursorrules`](.cursorrules) | Nhận diện ngữ cảnh nghiên cứu thị trường đa nền tảng |
-| **Windsurf IDE** | [`.windsurfrules`](.windsurfrules) | Giao thức quy tắc nghiên cứu từng bước cho Cascade |
 | **Antigravity / Gemini Code** | [`AGENTS.md`](AGENTS.md) + Agent Skills | Radar liên tục Dual-Track & nạp từ điển động |
 | **OpenAI Codex** | [`.codex/instructions.md`](.codex/instructions.md), [`.codexrules`](.codexrules) | Duy trì ngữ cảnh phiên chat (`codex://threads/...`), Structured Tools |
 | **OpenClaw** | [`openclaw.json`](openclaw.json), [`.openclaw/config.yaml`](.openclaw/config.yaml) | Chuẩn OpenClaw Plugin v1 với Lifecycle Hooks |
 | **Nous Hermes** | [`.hermes/tools.json`](.hermes/tools.json), [`hermes_manifest.json`](hermes_manifest.json) | Định dạng Function-Calling JSON Schema tiêu chuẩn |
+| **Pi Agent** | [`openclaw.json`](openclaw.json), [`hermes_manifest.json`](hermes_manifest.json) | Tiêu chuẩn OpenAPI & Tool-Calling qua FastMCP hoặc Manifest |
 
 ---
 
-## 🛠️ Danh mục 34 FastMCP Tools, Prompts & Resources
+## 📡 Ma trận Nguồn Dữ liệu & Công cụ FastMCP Liên kết
+
+| Nguồn Dữ liệu | Tín hiệu Thu thập | Cơ chế Ingress | Công cụ FastMCP Liên kết |
+| :--- | :--- | :--- | :--- |
+| **Meta Threads** | • Chủ đề thịnh hành (Trending Topics) trên `threads.net/search`<br>• Từ khóa gợi ý tìm kiếm (Autocomplete Suggestions)<br>• Bài viết văn bản, captions & thông tin tác giả<br>• Tương tác (lượt thích, phản hồi, chia sẻ lại, trích dẫn, lượt xem) | • **Tier 1 (Mặc định)**: Direct GraphQL qua `httpx` dùng session cookies + Tự phục hồi qua Playwright tự động sniff `doc_id`<br>• **Tier 2**: Graph API OAuth 2.0 (`/keyword_search`, `/me/threads`) | • `authenticate_threads`<br>• `get_threads_auth_status`<br>• `clear_threads_auth`<br>• `get_threads_trending_topics`<br>• `get_threads_search_suggestions` |
+| **TikTok** | • Xếp hạng ngành vĩ mô (Creative Center)<br>• Từ khóa tìm kiếm gợi ý (Autocomplete Suggestions)<br>• Thẻ video (lượt xem, lượt thích, chia sẻ, hashtags)<br>• Bình luận công khai & phản hồi từ khách hàng | • **Tier 1**: Playwright Chromium (bắt phiên đăng nhập 1 chạm qua mã QR)<br>• **Public Probe**: API Creative Center & endpoints tìm kiếm | • `authenticate_tiktok`<br>• `get_platform_auth_status`<br>• `clear_platform_auth`<br>• `get_tiktok_creative_center_trends`<br>• `get_tiktok_search_suggestions`<br>• `get_tiktok_video_comments`<br>• `extract_customer_pain_points` |
+| **YouTube** | • Video chuyên sâu dạng dài (hướng dẫn, nghiên cứu tình huống)<br>• Khối lượng nội dung đối thủ & độ sâu bài học<br>• Lượt xem, lượt thích và số lượng bình luận | • **API v3 Chính thức**: Khóa Google Cloud API Key kèm bộ đệm in-memory TTL | Được kích hoạt trong các chiến dịch nghiên cứu: `create_research_mission`, `execute_mission_ingress`, `trigger_autonomous_discovery` |
+| **Google Trends** | • Tốc độ tăng trưởng khối lượng tìm kiếm vĩ mô<br>• Từ khóa đột phá (rising queries) & mức độ quan tâm theo khu vực | • **RSS / Atom Ingress**: Phân tích nguồn cấp dữ liệu công khai (không tốn token) | Được kích hoạt trong chu kỳ nạp dữ liệu: `trigger_ingress_refresh`, `trigger_autonomous_discovery`, `execute_mission_ingress` |
+| **Meta Instagram** | • Thước phim ngắn Reels (captions, âm thanh, hashtags)<br>• Lượt xem, lượt thích, thời gian đăng tải | • **Tier 1**: Bắt phiên đăng nhập qua Playwright Chromium<br>• **Tier 2**: Instagram Graph API OAuth 2.0 | • `authenticate_instagram`<br>• `get_instagram_auth_status`<br>• `clear_instagram_auth` |
+
+---
+
+## 🛠️ Danh mục 39 FastMCP Tools, Prompts & Resources
 
 ### 1. Nghiên cứu Thị trường & Tổng hợp Chiến lược
 - **`run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)`**: Khởi tạo chiến dịch, thu thập dữ liệu đa nguồn, tính toán Opportunity Index và xuất báo cáo trong 1 bước.
@@ -146,13 +157,18 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 - **`trigger_autonomous_discovery(geo)`**: Kích hoạt chu kỳ tự động quét xu hướng toàn quốc.
 - **`get_latest_daily_discovery(geo)`**: Lấy bản tin tổng hợp cơ hội thị trường hàng ngày mới nhất.
 
-### 2. Lắng nghe Xã hội & Tiếng nói Khách hàng (Voice of Customer)
+### 2. Lắng nghe Xã hội, Threads & Tiếng nói Khách hàng (Voice of Customer)
+- **`get_threads_trending_topics(geo, limit)`**: Lấy danh sách các chủ đề thịnh hành thời gian thực từ trang tìm kiếm Threads (`threads.net/search`).
+- **`get_threads_search_suggestions(keyword, geo, limit)`**: Lấy từ khóa gợi ý tìm kiếm (autocomplete) và các truy vấn phát sinh từ Threads.
 - **`get_tiktok_creative_center_trends(geo, period, limit, industry)`**: Lấy xếp hạng xu hướng chính thức từ TikTok Creative Center có lọc theo ngành hàng.
 - **`get_tiktok_search_suggestions(keywords, geo)`**: Lấy từ khóa gợi ý tìm kiếm (autocomplete) thực tế của người dùng.
 - **`get_tiktok_video_comments(video_url, limit)`**: Cào bình luận công khai từ một video TikTok cụ thể.
 - **`extract_customer_pain_points(keywords, geo, max_videos, inquiry_patterns)`**: Bóc tách phản đối mua hàng, câu hỏi về giá và nhu cầu chưa được đáp ứng từ bình luận.
 
-### 3. Từ điển Động & Chẩn đoán Hạ tầng
+### 3. Từ điển Động, Cấu hình Runtime & Chẩn đoán Hạ tầng
+- **`get_runtime_config(key, category)`**: Tra cứu tham số cấu hình động (`threads_web_client_id`, `threads_graphql_endpoint`, `doc_id`) từ DB và RAM cache.
+- **`update_runtime_config(key, value, category, description)`**: Cho phép AI Agent tự động cập nhật tham số giao thức khi client thay đổi build version.
+- **`refresh_runtime_config_cache()`**: Xóa và nạp lại toàn bộ cấu hình động từ database vào in-memory cache siêu tốc (~0.01ms).
 - **`register_domain_lexicon(domain, terms, category)`**: Đăng ký từ khóa/slang chuyên ngành vào cơ sở dữ liệu.
 - **`register_noise_blacklist(terms)`**: Đăng ký từ khóa rác/spam cần loại bỏ.
 - **`list_domain_lexicons(domain)`**: Tra cứu từ điển chuyên ngành đang hoạt động.
@@ -189,12 +205,12 @@ Xem trực tiếp các báo cáo tương tác trực quan được kết xuất 
 ## ⚡ Cài đặt & Bắt đầu Nhanh
 
 ### 🤖 1. Cài đặt Tự động 1-Lệnh cho AI Agent (Khuyến nghị)
-Nếu bạn là AI Agent (**Claude Code, Cursor, Windsurf, Devin, Antigravity, OpenClaw, Hermes**) hoặc muốn cài đặt tự động 1 lệnh trên máy:
+Nếu bạn là AI Agent (**Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, Pi Agent**) hoặc muốn cài đặt tự động 1 lệnh trên máy:
 ```bash
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
 ./scripts/bootstrap.sh
 ```
-*Script sẽ tự động khởi tạo môi trường Python virtualenv, SQLite database, sinh file `.env` với khóa bảo mật Fernet AES-256, tự động đăng ký MCP vào Claude Desktop, Cursor, VS Code và chạy kiểm tra hệ thống.*
+*Script sẽ tự động khởi tạo môi trường Python virtualenv, SQLite database, sinh file `.env` với khóa bảo mật Fernet AES-256, tự động đăng ký FastMCP vào Claude Desktop, Antigravity, Codex và chạy kiểm tra hệ thống.*
 
 ---
 

@@ -22,7 +22,7 @@ uv pip install -e ".[dev,browser,ai]"
 
 ### 2. Configure Environment
 ```bash
-cp .env.example .env
+cp env.example .env
 # Edit .env with your local PostgreSQL/TimescaleDB and API credentials
 ```
 

@@ -11,7 +11,7 @@
 >
 > 🌐 [Tiếng Việt](README.vi.md) · [Comprehensive User Guide](docs/USER_GUIDE.md)
 
-`fnIgnis` (`fn-ignis`) is a high-performance, self-hosted market listening and strategic research engine developed by **FINOLABS**. It empowers AI Agents (**Claude Desktop, Claude Code, Cursor, Windsurf, Antigravity, OpenAI Codex, OpenClaw, and Nous Hermes**) and human strategists to discover high-value market white spaces across Google Trends, YouTube, TikTok Creative Center, TikTok Search Suggestions, and raw Voice-of-Customer comments with **$0 token ingress costs**, deterministic mathematical scoring (**Opportunity Index**), autonomous lexicon expansion, and pixel-perfect interactive HTML Dashboard artifacts.
+`fnIgnis` (`fn-ignis`) is a high-performance, self-hosted market listening and strategic research engine developed by **FINOLABS**. It empowers AI Agents (**Claude Desktop, Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, and Pi Agent**) and human strategists to discover high-value market white spaces across Google Trends, YouTube, TikTok Creative Center, TikTok Search Suggestions, and raw Voice-of-Customer comments with **$0 token ingress costs**, deterministic mathematical scoring (**Opportunity Index**), autonomous lexicon expansion, and pixel-perfect interactive HTML Dashboard artifacts.
 
 
 ---
@@ -23,7 +23,7 @@
 - **📊 Mathematical Opportunity Index**: Quantifies market white spaces (+100 to -100) by mathematically comparing macro search demand velocity against localized content supply volume.
 - **🗣️ Voice of Customer Ingress**: Scrapes and synthesizes real customer pain points, pricing inquiries, and unmet objections directly from public video comment sections.
 - **🧠 Autonomous Dynamic Lexicon Engine**: Persistent PostgreSQL registry allowing agents to dynamically register niche slang, brand names, and vernacular on-the-fly without modifying source code.
-- **🤖 Universal Agent Ecosystem**: Native out-of-the-box support for Claude, Cursor, Windsurf, Antigravity, Codex, OpenClaw, and Hermes.
+- **🤖 Universal Agent Ecosystem**: Native out-of-the-box support for Claude (Desktop & Code), Antigravity, Codex, OpenClaw, Hermes, and Pi Agent.
 
 ---
 
@@ -52,7 +52,7 @@ flowchart TB
 
     subgraph T2["🎯 Track 2: On-Demand Deep Probes"]
         direction TB
-        User(["<b>User / Strategist</b>"]) <--> Agent["<b>AI Agent Harness</b><br/>Claude · Cursor · Codex · Hermes"]
+        User(["<b>User / Strategist</b>"]) <--> Agent["<b>AI Agent Harness</b><br/>Claude · Codex · Antigravity · Hermes"]
         P2["<b>Targeted Probes</b><br/>Live Autocomplete · Video Grid · VoC"]
         Agent -->|Deploy Probes| P2
     end
@@ -121,20 +121,31 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 | AI Agent / Client | Configuration & Standards | Capabilities Supported |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 34 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 39 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
 | **Claude Code** | [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Agent Skills Standard, Native In-Chat Artifacts |
-| **Cursor IDE** | [`.cursor/rules/fn-ignis.mdc`](.cursor/rules/fn-ignis.mdc), [`.cursorrules`](.cursorrules) | Context-Aware Multi-Platform Market Intelligence |
-| **Windsurf IDE** | [`.windsurfrules`](.windsurfrules) | Cascade Step-by-Step Research Rule Protocol |
 | **Antigravity / Gemini Code** | [`AGENTS.md`](AGENTS.md) + Agent Skills | Dual-Track Continuous Radar & Dynamic Lexicon Ingress |
 | **OpenAI Codex** | [`.codex/instructions.md`](.codex/instructions.md), [`.codexrules`](.codexrules) | Thread Session Continuity (`codex://threads/...`), Structured Tools |
 | **OpenClaw** | [`openclaw.json`](openclaw.json), [`.openclaw/config.yaml`](.openclaw/config.yaml) | OpenClaw Plugin v1 Schema with Lifecycle Hooks |
 | **Nous Hermes** | [`.hermes/tools.json`](.hermes/tools.json), [`hermes_manifest.json`](hermes_manifest.json) | Native Structured Function-Calling JSON Schema |
+| **Pi Agent** | [`openclaw.json`](openclaw.json), [`hermes_manifest.json`](hermes_manifest.json) | OpenAPI & Tool-Calling Standard via FastMCP or Manifest |
 
 <!-- mcp-name: io.github.fioenix/fn-ignis -->
 
 ---
 
-## 🛠️ FastMCP Tool & Resource Catalog
+## 📡 Data Sources & Connected Tools Matrix
+
+| Data Source | Signals Captured | Ingress Mechanism | Connected FastMCP Tools |
+| :--- | :--- | :--- | :--- |
+| **Meta Threads** | • Trending Topics on `threads.net/search`<br>• Autocomplete search suggestions<br>• Text posts, captions & authors<br>• Engagement metrics (likes, replies, reposts, quotes, views) | • **Tier 1 (Default)**: Direct GraphQL via `httpx` with session cookies + Playwright fallback with auto doc_id sniffing<br>• **Tier 2**: Graph API OAuth 2.0 (`/keyword_search`, `/me/threads`) | • `authenticate_threads`<br>• `get_threads_auth_status`<br>• `clear_threads_auth`<br>• `get_threads_trending_topics`<br>• `get_threads_search_suggestions` |
+| **TikTok** | • Macro industry rankings (Creative Center)<br>• Search autocomplete suggestions<br>• Video cards (views, likes, shares, hashtags)<br>• Public video comments & feedback | • **Tier 1**: Playwright Chromium (1-click QR session capture)<br>• **Public Probe**: Creative Center API & search endpoints | • `authenticate_tiktok`<br>• `get_platform_auth_status`<br>• `clear_platform_auth`<br>• `get_tiktok_creative_center_trends`<br>• `get_tiktok_search_suggestions`<br>• `get_tiktok_video_comments`<br>• `extract_customer_pain_points` |
+| **YouTube** | • In-depth long-form videos (tutorials, case studies)<br>• Competitor supply volume & tutorial depth<br>• Views, likes, and comment counts | • **Official API v3**: Google Cloud API Key with in-memory TTL caching | Triggered in research missions: `create_research_mission`, `execute_mission_ingress`, `trigger_autonomous_discovery` |
+| **Google Trends** | • Macro search volume velocity<br>• Breakout rising queries & geographic interest | • **RSS / Atom Ingress**: Zero-token public feed parsing | Triggered in ingress cycles: `trigger_ingress_refresh`, `trigger_autonomous_discovery`, `execute_mission_ingress` |
+| **Meta Instagram** | • Short-form Reels (captions, audio, hashtags)<br>• Views, likes, published timestamps | • **Tier 1**: Playwright Chromium session capture<br>• **Tier 2**: Instagram Graph API OAuth 2.0 | • `authenticate_instagram`<br>• `get_instagram_auth_status`<br>• `clear_instagram_auth` |
+
+---
+
+## 🛠️ FastMCP Tool & Resource Catalog (39 Tools)
 
 ### 1. Market Research & Strategic Synthesis
 - **`run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)`**: End-to-end mission creation, multi-platform refinement loop, and white space synthesis.
@@ -149,13 +160,18 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **`trigger_autonomous_discovery(geo)`**: Trigger an on-demand full autonomous discovery cycle.
 - **`get_latest_daily_discovery(geo)`**: Retrieve the latest automated daily discovery digest.
 
-### 2. Social Listening & Voice of Customer
+### 2. Social Listening, Threads & Voice of Customer
+- **`get_threads_trending_topics(geo, limit)`**: Fetch real-time Trending Topics from Threads search surface (`threads.net/search`).
+- **`get_threads_search_suggestions(keyword, geo, limit)`**: Fetch search autocomplete suggestions and derivative queries from Threads search.
 - **`get_tiktok_creative_center_trends(geo, period, limit, industry)`**: Fetch official nationwide industry ranking benchmarks with optional vertical filtering.
 - **`get_tiktok_search_suggestions(keywords, geo)`**: Fetch live autocomplete search suggestions and trending hashtags.
 - **`get_tiktok_video_comments(video_url, limit)`**: Scrape raw public comments for a specific video.
 - **`extract_customer_pain_points(keywords, geo, max_videos, inquiry_patterns)`**: Extract customer objections, pricing inquiries, and unmet needs from comments.
 
-### 3. Dynamic Lexicon & Infrastructure Diagnostics
+### 3. Dynamic Lexicon, Runtime Config & Infrastructure Diagnostics
+- **`get_runtime_config(key, category)`**: Inspect dynamic runtime parameters (`threads_web_client_id`, `threads_graphql_endpoint`, `doc_id`) from DB and RAM cache.
+- **`update_runtime_config(key, value, category, description)`**: Allow AI Agents to dynamically update protocol parameters when web clients rotate builds.
+- **`refresh_runtime_config_cache()`**: Force invalidate and reload all dynamic runtime configurations from database into active memory cache (~0.01ms).
 - **`register_domain_lexicon(domain, terms, category)`**: Dynamically register new niche vocabulary/slang into database.
 - **`register_noise_blacklist(terms)`**: Register unwanted viral spam words into the blacklist.
 - **`list_domain_lexicons(domain)`**: Query active domain vocabularies and industry mappings.
@@ -163,12 +179,9 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **`get_system_logs(limit, level)`**: Inspect audit event trails.
 - **`verify_connectors_health()`**: Run real-time synthetic diagnostics on YouTube quota, Google RSS, TikTok Playwright contexts, database pool, and proxy connectivity.
 - **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Managed browser credential lifecycle.
-- **`authenticate_threads(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: Dual-UX Meta connect. Called with no `auth_code` (or `browser_login=true`) it runs the Tier 1 1-click browser session capture — an ordinary personal account, no Meta Developer App. With an `auth_code` it runs the Tier 2 Graph API OAuth 2.0 flow (authorization code → short-lived token → 60-day long-lived user token), persisted AES-encrypted.
-- **`get_threads_auth_status()`**: Inspect both tiers — token active/expired state, scopes, `key_version`, days remaining, refresh due, plus any captured browser session.
-- **`clear_threads_auth()`**: Revoke and delete the stored Threads OAuth credentials and browser session.
-- **`authenticate_instagram(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: The same Dual-UX connect for Instagram, backing Reels ingress.
-- **`get_instagram_auth_status()`**: Inspect the stored Instagram credentials across both tiers.
-- **`clear_instagram_auth()`**: Revoke and delete the stored Instagram OAuth credentials and browser session.
+- **`authenticate_threads(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: Dual-UX Meta connect (Tier 1 browser session or Tier 2 Graph API OAuth 2.0).
+- **`get_threads_auth_status()`**, **`clear_threads_auth()`**: Inspect or revoke Threads credentials and browser sessions.
+- **`authenticate_instagram(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**, **`get_instagram_auth_status()`**, **`clear_instagram_auth()`**: Managed Instagram credentials lifecycle.
 - **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo)`**, **`trigger_ingress_refresh(geo)`**: Real-time trend exploration.
 
 ### 4. FastMCP Native Resources & Prompts
@@ -196,12 +209,12 @@ Explore sample interactive Infographic HTML reports generated directly by `fn-ig
 ## ⚡ Quickstart & Installation
 
 ### 🤖 1. Zero-Touch AI Agent Bootstrap (Recommended)
-If you are an AI Agent (**Claude Code, Cursor, Windsurf, Devin, Antigravity, OpenClaw, Hermes**) or setting up locally with 1 command:
+If you are an AI Agent (**Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, Pi Agent**) or setting up locally with 1 command:
 ```bash
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
 ./scripts/bootstrap.sh
 ```
-*Automatically sets up Python virtualenv, SQLite database, generates `.env` with encryption keys, registers MCP in Claude Desktop, Cursor, and VS Code, and verifies all connectors.*
+*Automatically sets up Python virtualenv, SQLite database, generates `.env` with encryption keys, registers FastMCP for Claude Desktop, Antigravity, Codex, and verifies all connectors.*
 
 ---
 

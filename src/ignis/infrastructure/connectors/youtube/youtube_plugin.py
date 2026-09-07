@@ -123,7 +123,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
                 resp = await client.get(self.BASE_API_URL, params=params)
                 return resp.status_code == 200
         except Exception as e:
-            logger.warning(f"YouTube Plugin Health Check thất bại: {e}")
+            logger.warning(f"YouTube Plugin health check failed: {e}")
             return False
 
     async def fetch_signals(
@@ -169,7 +169,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
         except ConnectorQuotaExceededException:
             raise
         except Exception as e:
-            logger.error(f"Lỗi khi gọi YouTube Data API: {e}")
+            logger.error(f"Error calling YouTube Data API: {e}")
             raise ConnectorExecutionException(f"Failed to fetch YouTube trending videos: {e}") from e
 
         signals: List[TrendSignal] = []

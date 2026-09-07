@@ -1,418 +1,300 @@
-# fnIgnis 🔥 — Cẩm nang Hướng dẫn Cài đặt, Cấu hình & Sử dụng Thủ công (User Guide)
+# fnIgnis 🔥 — Setup, Configuration & Manual Usage Guide (User Guide)
 
-Tài liệu này cung cấp hướng dẫn đầy đủ, chi tiết từng bước cho người dùng (developers, data analysts, product strategists) muốn tự tay cài đặt, cấu hình các biến môi trường và sử dụng `fn-ignis` thủ công (không bắt buộc qua AI Agent).
-
----
-
-## 📑 Mục lục
-
-1. [Tổng quan Kiến trúc](#1-tổng-quan-kiến-trúc)
-2. [Các Chế độ Cài đặt Thủ công](#2-các-chế-độ-cài-đặt-thủ-công)
-   - [Chế độ 1: Zero-Docker Local Mode (SQLite)](#chế-độ-1-zero-docker-local-mode-sqlite)
-   - [Chế độ 2: Production Self-Hosted Stack (Docker Compose)](#chế-độ-2-production-self-hosted-stack-docker-compose)
-   - [Chế độ 3: Cấu hình MCP Server thủ công cho IDE / Desktop App](#chế-độ-3-cấu-hình-mcp-server-thủ-công-cho-ide--desktop-app)
-3. [Chi tiết Biến Môi trường & Cấu hình](#3-chi-tiết-biến-môi-trường--cấu-hình)
-4. [Sử dụng Thủ công qua Command Line (CLI)](#4-sử-dụng-thủ-công-qua-command-line-cli)
-5. [Sử dụng Thủ công qua Python Scripting](#5-sử-dụng-thủ-công-qua-python-scripting)
-6. [Quản lý Báo cáo & Nginx Report Portal](#6-quản-lý-báo-cáo--nginx-report-portal)
-7. [Xử lý Sự cố Thường gặp (Troubleshooting)](#7-xử-lý-sự-cố-thường-gặp-troubleshooting)
-8. [Danh mục 28 FastMCP Tools & Khả năng Nghiên cứu Toàn diện](#8-danh-mục-28-fastmcp-tools--khả-năng-nghiên-cứu-toàn-diện)
+This document provides a comprehensive, step-by-step guide for developers, data analysts, and product strategists who wish to install, configure environment variables, and use `fn-ignis` manually without requiring an AI Agent.
 
 ---
 
-## 1. Tổng quan Kiến trúc
+## 📑 Table of Contents
 
-`fn-ignis` được thiết kế theo mô hình **Dual-Track**:
-
-- **Track 1 (Continuous Radar)**: Chạy nền 24/7 bằng daemon scheduler để thu thập dữ liệu macro từ Google Trends, YouTube và TikTok, tự động phát hiện xu hướng mới mỗi 12h-24h và ghi vào cơ sở dữ liệu.
-- **Track 2 (On-Demand Deep Research)**: Chạy chủ động theo nhu cầu nghiên cứu từng chiến dịch cụ thể. Hệ thống sẽ cào gợi ý tìm kiếm (autocomplete), quét lưới video, bóc tách Voice-of-Customer từ bình luận, tính toán **Opportunity Index** (+100 đến -100) và xuất Dashboard HTML tương tác.
+1. [Architecture Overview](#1-architecture-overview)
+2. [Manual Installation Modes](#2-manual-installation-modes)
+   - [Mode 1: Zero-Docker Local Mode (SQLite)](#mode-1-zero-docker-local-mode-sqlite)
+   - [Mode 2: Production Self-Hosted Stack (Docker Compose)](#mode-2-production-self-hosted-stack-docker-compose)
+   - [Mode 3: Manual MCP Server Configuration for IDE / Desktop Apps](#mode-3-manual-mcp-server-configuration-for-ide--desktop-apps)
+3. [Environment Variables & Configuration Reference](#3-environment-variables--configuration-reference)
+4. [Manual Usage via Command Line (CLI)](#4-manual-usage-via-command-line-cli)
+5. [Manual Usage via Python Scripting](#5-manual-usage-via-python-scripting)
+6. [Report Management & Nginx Report Portal](#6-report-management--nginx-report-portal)
+7. [Troubleshooting & Common Issues](#7-troubleshooting--common-issues)
+8. [Catalog of 39 FastMCP Tools & Comprehensive Research Capabilities](#8-catalog-of-39-fastmcp-tools--comprehensive-research-capabilities)
 
 ---
 
-## 2. Các Chế độ Cài đặt Thủ công
+## 1. Architecture Overview
 
-### Chế độ 1: Zero-Docker Local Mode (SQLite)
+`fn-ignis` is architected around a **Dual-Track Engine**:
 
-Chế độ này phù hợp để chạy ngay trên máy tính cá nhân (macOS, Linux, Windows) mà **không cần cài đặt Docker hay PostgreSQL**. Toàn bộ dữ liệu được lưu tự động trong file `ignis.db`.
+```
+                         ┌────────────────────────────────────────────────────────┐
+                         │                     Data Ingress                       │
+                         │   Google Trends • YouTube • TikTok • Threads • Reels   │
+                         └───────────────────────────┬────────────────────────────┘
+                                                     │
+                                                     ▼
+┌──────────────────────────────────────┐     ┌────────────────────────────────────┐
+│ Track 1: Always-On Autonomous Radar  │     │ Track 2: On-Demand Deep Probes     │
+│ - Continuous surveillance worker     │     │ - Triggered by user or agent       │
+│ - Ingests hourly macro data          │     │ - Search suggestions, live grids   │
+│ - Daily digests at 07:00 AM          │     │ - Raw comment & VoC extraction     │
+└──────────────────┬───────────────────┘     └─────────────────┬──────────────────┘
+                   │                                           │
+                   └─────────────────────┬─────────────────────┘
+                                         │
+                                         ▼
+                     ┌───────────────────────────────────────┐
+                     │ Persistence: SQLite / PostgreSQL      │
+                     │ Encryption: AES-256 Fernet (Tokens)   │
+                     └───────────────────┬───────────────────┘
+                                         │
+                                         ▼
+                     ┌───────────────────────────────────────┐
+                     │ Strategic Reasoner & Opportunity Math │
+                     │ Multi-Source Gap Analysis & Artifacts │
+                     └───────────────────────────────────────┘
+```
 
-#### Bước 1: Yêu cầu môi trường
-- Python $\ge 3.11$ (Khuyến nghị Python 3.11 hoặc 3.12).
-- Trình quản lý gói `uv` (khuyên dùng để cài đặt siêu tốc) hoặc `pip` tiêu chuẩn.
+---
 
-#### Bước 2: Clone repository & Tạo Virtual Environment
+## 2. Manual Installation Modes
+
+### Mode 1: Zero-Docker Local Mode (SQLite)
+
+Ideal for quick evaluation, local research, and single-user workflows with zero infrastructure dependencies.
+
 ```bash
-# Clone source code
+# 1. Clone repository
 git clone https://github.com/fioenix/fn-ignis.git
 cd fn-ignis
 
-# Tạo và kích hoạt môi trường ảo bằng uv (khuyến nghị)
-uv venv
-source .venv/bin/activate    # Trên macOS/Linux
-# Hoặc trên Windows PowerShell: .venv\Scripts\Activate.ps1
-
-# Cài đặt package fn-ignis ở editable mode
-uv pip install -e .
+# 2. Run automated bootstrap
+./scripts/bootstrap.sh
 ```
 
-*(Nếu dùng pip thông thường: `python3 -m venv .venv && source .venv/bin/activate && pip install -e .`)*
+The bootstrap script will automatically:
+- Create the Python virtual environment (`.venv`).
+- Generate `.env` with SQLite defaults (`sqlite:///ignis.db`).
+- Generate an AES-256 Fernet encryption key.
+- Initialize database schemas and load 84+ domain lexicons and noise filters.
+- Register the FastMCP server in all supported agent environments.
 
-#### Bước 3: Thiết lập file `.env`
-Sao chép file mẫu:
+To activate the environment manually:
 ```bash
-cp .env.example .env
-```
-Mặc định `.env` đã được cấu hình `DATABASE_URL=sqlite:///ignis.db`. Bạn có thể điền thêm `YOUTUBE_API_KEY` nếu muốn thu thập dữ liệu YouTube.
-
-#### Bước 4: Khởi tạo Database & Chạy thử
-```bash
-# Chạy script setup để tự sinh key mã hóa và khởi tạo bảng SQLite
-ignis-setup
-
-# Kiểm tra FastMCP server chạy thành công
-ignis-mcp
+source .venv/bin/activate
+ignis --help
 ```
 
 ---
 
-### Chế độ 2: Production Self-Hosted Stack (Docker Compose)
+### Mode 2: Production Self-Hosted Stack (Docker Compose)
 
-Chế độ này triển khai toàn bộ hệ thống doanh nghiệp gồm:
-1. **PostgreSQL / TimescaleDB (`fn-ignis-db`)**: Cơ sở dữ liệu chuỗi thời gian tối ưu cho hàng triệu tín hiệu social listening.
-2. **Worker Daemon (`fn-ignis-worker`)**: Daemon chạy ngầm liên tục cào dữ liệu định kỳ mỗi 15 phút.
-3. **Nginx Report Portal (`fn-ignis-reports`)**: Web server tĩnh phân phối các báo cáo HTML tại cổng `53080`.
+Designed for continuous 24/7 autonomous monitoring with PostgreSQL, Redis, and an automated Nginx reporting dashboard.
 
-#### Bước 1: Chuẩn bị file `.env`
 ```bash
-cp .env.example .env
-```
-Chỉnh sửa `.env` cho chế độ Docker:
-```env
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_DB=ignis
-POSTGRES_PORT=5432
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ignis
-DEFAULT_GEO=VN
-YOUTUBE_API_KEY=your_google_cloud_youtube_api_key_here
-REPORTS_PORT=53080
-```
+# 1. Prepare environment configuration
+cp env.example .env
+# Edit .env and configure DATABASE_URL, REDIS_URL, API keys, and credentials
 
-#### Bước 2: Khởi chạy toàn bộ dịch vụ
-```bash
-# Khởi chạy full stack ở chế độ background
+# 2. Launch production containers
 docker compose -f docker-compose.prod.yml up -d --build
-```
 
-#### Bước 3: Kiểm tra trạng thái
-```bash
-# Xem logs của worker daemon
-docker compose -f docker-compose.prod.yml logs -f worker
-
-# Kiểm tra các container đang chạy
+# 3. Verify services
 docker compose -f docker-compose.prod.yml ps
 ```
 
-Sau khi khởi chạy, bạn có thể mở trình duyệt truy cập `http://localhost:53080/` để xem danh sách các báo cáo HTML đã xuất bản.
+Services started:
+- `fn-ignis-db`: PostgreSQL database.
+- `fn-ignis-redis`: Redis message queue and caching.
+- `fn-ignis-worker`: Always-On continuous radar ingestion daemon.
+- `fn-ignis-nginx`: Static HTML report server on port 8080.
 
 ---
 
-### Chế độ 3: Cấu hình MCP Server thủ công cho IDE / Desktop App
+### Mode 3: Manual MCP Server Configuration for IDE / Desktop Apps
 
-Nếu bạn muốn kết nối `fn-ignis` làm công cụ FastMCP cho các ứng dụng AI Desktop:
+If you want to manually connect `fn-ignis` to your MCP client without using `bootstrap.sh`:
 
-#### 1. Cấu hình cho Claude Desktop
-Mở file cấu hình Claude Desktop:
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
-
-Thêm khối cấu hình:
+#### Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`)
 ```json
 {
   "mcpServers": {
     "fn-ignis": {
-      "command": "/ĐƯỜNG_DẪN_TUYỆT_ĐỐI/fn-ignis/.venv/bin/python",
+      "command": "/ABSOLUTE/PATH/TO/fn-ignis/.venv/bin/python",
       "args": ["-m", "ignis.interfaces.mcp.server"],
+      "cwd": "/ABSOLUTE/PATH/TO/fn-ignis",
       "env": {
-        "DATABASE_URL": "sqlite:////ĐƯỜNG_DẪN_TUYỆT_ĐỐI/fn-ignis/ignis.db",
-        "DEFAULT_GEO": "VN",
-        "YOUTUBE_API_KEY": ""
+        "PYTHONPATH": "/ABSOLUTE/PATH/TO/fn-ignis/src"
       }
     }
   }
 }
 ```
 
-#### 2. Cấu hình cho Cursor IDE
-Tạo hoặc sửa file `.cursor/mcp.json` trong workspace của bạn:
+#### Google Antigravity / Claude Code (`.mcp.json` in workspace root)
 ```json
 {
   "mcpServers": {
     "fn-ignis": {
-      "command": "/ĐƯỜNG_DẪN_TUYỆT_ĐỐI/fn-ignis/.venv/bin/python",
+      "command": ".venv/bin/python",
       "args": ["-m", "ignis.interfaces.mcp.server"],
       "env": {
-        "DATABASE_URL": "sqlite:////ĐƯỜNG_DẪN_TUYỆT_ĐỐI/fn-ignis/ignis.db",
-        "DEFAULT_GEO": "VN"
+        "PYTHONPATH": "src"
       }
     }
   }
 }
 ```
 
-*(Mẹo: Bạn chỉ cần chạy lệnh `ignis-setup` hoặc `./scripts/bootstrap.sh`, hệ thống sẽ tự động điền đường dẫn chính xác vào các file trên).*
+---
+
+## 3. Environment Variables & Configuration Reference
+
+All settings can be placed in `.env` at the project root:
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | String | `sqlite:///ignis.db` | Connection string (`sqlite:///...` or `postgresql://user:pass@host:5432/db`) |
+| `ENCRYPTION_KEY` | String | Auto-generated | 32-byte url-safe Fernet key for encrypting social platform credentials |
+| `YOUTUBE_API_KEY` | String | Optional | Official YouTube Data API v3 key |
+| `TIKTOK_SESSION_ID` | String | Optional | TikTok session cookie for deep video & comment scraping |
+| `THREADS_APP_ID` | String | Optional | Meta Developer App ID for official Threads Graph API |
+| `THREADS_APP_SECRET`| String | Optional | Meta Developer App Secret |
+| `INSTAGRAM_APP_ID` | String | Optional | Meta Developer App ID for Instagram Graph API |
+| `INSTAGRAM_APP_SECRET`| String | Optional | Meta Developer App Secret |
+| `IGNIS_ENVIRONMENT`| String | `development` | Runtime environment (`development`, `production`, `testing`) |
+| `LOG_LEVEL` | String | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 
 ---
 
-## 3. Chi tiết Biến Môi trường & Cấu hình
+## 4. Manual Usage via Command Line (CLI)
 
-Tất cả các biến môi trường được định nghĩa trong file `.env`:
+`fn-ignis` provides a rich command-line interface:
 
-| Tên biến | Kiểu dữ liệu | Mặc định | Bắt buộc | Mục đích & Giải thích |
-|---|---|---|:---:|---|
-| `DATABASE_URL` | String | `sqlite:///ignis.db` | Có | URI kết nối database. Dùng `sqlite:///ignis.db` cho Zero-Docker hoặc `postgresql://user:pass@host:5432/db` cho Postgres/TimescaleDB. |
-| `DEFAULT_GEO` | String (ISO) | `VN` | Không | Mã quốc gia 2 ký tự mặc định để quét xu hướng (`VN`, `US`, `JP`, `UK`,...). |
-| `YOUTUBE_API_KEY` | String | `""` | Khuyến nghị | Key Google Cloud YouTube Data API v3 để cào video tutorials & case studies. |
-| `IGNIS_ENCRYPTION_KEY` | Base64 String | *(Tự sinh)* | Không | Khóa Fernet AES-256 để mã hóa cookie/phiên đăng nhập TikTok lưu trong database. |
-| `SCHEDULER_INTERVAL_SECONDS` | Integer | `900` (15m) | Không | Tần suất heartbeat kiểm tra trạng thái của worker daemon. |
-| `DISCOVERY_INTERVAL_HOURS` | Integer | `24` | Không | Khoảng cách giữa các đợt tự động quét toàn diện Creative Center và phát hiện white space. |
-| `SYNC_INTERVAL_MINUTES` | Integer | `60` | Không | Chu kỳ cào dữ liệu Google Trends RSS định kỳ. |
-| `YOUTUBE_CACHE_TTL_SECONDS` | Integer | `86400` (24h) | Không | Thời gian lưu cache kết quả tìm kiếm YouTube để tiết kiệm quota 10,000 unit/ngày. |
-| `PLAYWRIGHT_PROXY_SERVER` | String | `""` | Không | Proxy server HTTP/SOCKS5 (ví dụ: `http://user:pass@proxy.ip:port`) để cào TikTok không bị chặn. |
-| `CONFIDENCE_HIGH_THRESHOLD` | Float | `80.0` | Không | Ngưỡng điểm để đánh giá chất lượng dữ liệu chiến dịch ở mức HIGH. |
-| `CONFIDENCE_MEDIUM_THRESHOLD`| Float | `60.0` | Không | Ngưỡng điểm để đánh giá chất lượng dữ liệu chiến dịch ở mức MEDIUM. |
-| `THREADS_APP_ID` | String | `""` | Không | Meta App ID cho Threads Graph API (chi tiết xem [META_INTEGRATION_GUIDE.md](META_INTEGRATION_GUIDE.md)). |
-| `THREADS_APP_SECRET` | String | `""` | Không | Meta App Secret cho Threads Graph API (chi tiết xem [META_INTEGRATION_GUIDE.md](META_INTEGRATION_GUIDE.md)). |
-| `THREADS_REDIRECT_URI` | String | `http://localhost:8000/oauth/callback` | Không | OAuth redirect callback URL cho Threads. |
-
-### Cách lấy `YOUTUBE_API_KEY` miễn phí:
-1. Truy cập [Google Cloud Console](https://console.cloud.google.com/).
-2. Tạo dự án mới (ví dụ: `fn-ignis-research`).
-3. Vào **APIs & Services** $\rightarrow$ **Library** $\rightarrow$ Tìm `YouTube Data API v3` và bấm **Enable**.
-4. Vào mục **Credentials** $\rightarrow$ **Create Credentials** $\rightarrow$ **API Key**.
-5. Dán key vào `.env`: `YOUTUBE_API_KEY=AIzaSy...`
-
----
-
-## 4. Sử dụng Thủ công qua Command Line (CLI)
-
-`fn-ignis` cung cấp 3 lệnh CLI chính:
-
-### 1. `ignis-setup`: Auto-provisioning & Cấu hình môi trường
 ```bash
-# Chạy setup tự động và hiển thị báo cáo dạng Markdown
-ignis-setup
+# Execute macro ingestion radar across channels
+ignis run-pipeline --geo VN --timeframe 7d
 
-# Chạy setup và xuất JSON (dành cho automation script)
-ignis-setup --json
-```
+# Execute targeted research mission for a specific topic
+ignis mission create --title "AI Customer Service Agents" --query "ai customer service" --geo VN
+ignis mission ingress --id <mission_id>
+ignis mission analyze --id <mission_id>
+ignis mission export --id <mission_id> --output reports/
 
-### 2. `ignis`: Kích hoạt Ingress thu thập xu hướng một lần (One-shot ETL)
-```bash
-# Thu thập xu hướng mới nhất tại Việt Nam (VN)
-ignis VN
-
-# Thu thập xu hướng tại thị trường Mỹ (US)
-ignis US
-```
-
-### 3. `ignis-mcp`: Khởi động FastMCP Server
-```bash
-# Khởi chạy server trên cổng Standard I/O (Stdio)
-ignis-mcp
+# System health diagnostics
+ignis doctor
 ```
 
 ---
 
-## 5. Sử dụng Thủ công qua Python Scripting
+## 5. Manual Usage via Python Scripting
 
-Bạn có thể viết script Python độc lập để tích hợp `fn-ignis` vào hệ thống nội bộ của bạn:
-
-### Ví dụ: Tạo chiến dịch nghiên cứu, cào dữ liệu và xuất HTML Report
-
-Tạo file `run_research.py`:
+You can import `fn-ignis` services directly into custom scripts:
 
 ```python
 import asyncio
-from uuid import uuid4
-from ignis.config import settings
-from ignis.domain.value_objects import GeoCode, Timeframe
-from ignis.infrastructure.persistence import create_repository
-from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
-from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
-from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin
-from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
-from ignis.application.use_cases.create_mission import CreateMissionUseCase
-from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
-from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
-from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
-
+from ignis.application.services.research_mission_service import ResearchMissionService
+from ignis.infrastructure.persistence.sqlite_repository import SqliteRepository
 
 async def main():
-    # 1. Khởi tạo Repository (SQLite hoặc Postgres tùy cấu hình)
-    repo = create_repository()
+    repo = SqliteRepository("sqlite:///ignis.db")
+    service = ResearchMissionService(repository=repo)
     
-    # 2. Đăng ký các Connector Ingress
-    registry = ConnectorPluginRegistry()
-    registry.register(GoogleTrendsRssPlugin())
-    registry.register(TikTokCreativeCenterPlugin())
-    if settings.YOUTUBE_API_KEY:
-        registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
-
-    # 3. Tạo Chiến dịch Nghiên cứu mới
-    create_uc = CreateMissionUseCase(repository=repo)
-    mission = await create_uc.execute(
-        title="AI Agent Chăm sóc Khách hàng tại Việt Nam",
-        keywords=["ai agent", "cskh tự động", "chatbot bán hàng", "tự động hóa chốt đơn"],
-        geo=GeoCode.VN,
-        timeframe=Timeframe.LAST_30D,
-        hypothesis="Thị trường có nhu cầu cao về bot CSKH nhưng thiếu giải pháp tích hợp sâu vào CRM nội địa."
+    # 1. Create strategic mission
+    mission = await service.create_mission(
+        title="B2B SaaS Automation in Vietnam",
+        query="phan mem quan ly ban hang",
+        geo="VN"
     )
-    print(f"✅ Đã tạo Mission ID: {mission.id}")
-
-    # 4. Thực thi cào dữ liệu đa nền tảng
-    execute_uc = ExecuteMissionUseCase(registry=registry, repository=repo)
-    scorecard = await execute_uc.execute(mission_id=mission.id)
-    print(f"📊 Chất lượng dữ liệu: {scorecard.confidence_level} ({scorecard.overall_score}/100)")
-
-    # 5. Tổng hợp phân tích chiến lược & Opportunity Index
-    analysis_uc = GetMissionAnalysisUseCase(repository=repo)
-    analysis = await analysis_uc.execute(mission_id=mission.id)
-    print("\n💡 Các cơ hội thị trường (White Spaces) phát hiện được:")
-    for opp in analysis.get("opportunities", []):
-        print(f"  • [{opp['category']}] {opp['title']} (Opportunity Index: {opp['opportunity_index']})")
-
-    # 6. Xuất bản Interactive HTML Report Dashboard
-    builder = HtmlArtifactBuilder()
-    html_path = builder.build_mission_report(
-        mission=mission,
-        scorecard=scorecard,
-        analysis=analysis,
-        signals=await repo.get_mission_signals(mission.id)
-    )
-    print(f"\n🎉 Báo cáo HTML đã xuất ra: {html_path}")
-
-    await repo.close()
-
+    print(f"Created mission: {mission.id}")
+    
+    # 2. Execute ingress & strategic analysis
+    await service.execute_ingress(mission.id)
+    analysis = await service.analyze_mission(mission.id)
+    print(f"Opportunity Index: {analysis.opportunity_index}")
 
 if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-Chạy script:
-```bash
-uv run python run_research.py
-```
+---
+
+## 6. Report Management & Nginx Report Portal
+
+When running in Docker mode, generated artifacts are saved in `reports/` and served via Nginx:
+- Open `http://localhost:8080/` in your browser.
+- Interactive dashboards display radar maturity, opportunity matrices, customer pain points, and full source citation pills.
 
 ---
 
-## 6. Quản lý Báo cáo & Nginx Report Portal
+## 7. Troubleshooting & Common Issues
 
-Mọi báo cáo Infographic HTML sau khi tạo ra đều được lưu vĩnh viễn trong thư mục:
-```
-reports/mission_<shortcode>.html
-```
+### Issue 1: SQLite Database Locked
+- **Cause**: Concurrent write access across multiple processes.
+- **Fix**: Upgrade to PostgreSQL via Docker Compose or ensure single-process execution.
 
-### Xem báo cáo:
-- **Cách 1 (Trực tiếp)**: Mở trực tiếp file HTML bằng bất kỳ trình duyệt nào:
-  ```bash
-  open reports/case_study_ai_agents_vn.html      # Trên macOS
-  xdg-open reports/case_study_ai_agents_vn.html  # Trên Linux
-  start reports/case_study_ai_agents_vn.html     # Trên Windows
-  ```
-- **Cách 2 (Nginx Web Portal trong Docker)**:
-  Truy cập `http://localhost:53080/` để xem và chia sẻ báo cáo qua mạng nội bộ.
+### Issue 2: PII Text Filter Triggered
+- **Behavior**: Sensitive user info (emails, phone numbers, account tokens) is masked as `[REDACTED_PII]`.
+- **Note**: This is an intentional security safeguard enforced at both ingress and presentation layers.
+
+### Issue 3: Rate Limiting on Social Channels
+- **Fix**: Add official API credentials (`YOUTUBE_API_KEY`, Meta Developer Apps) or use authenticated session cookies for TikTok.
 
 ---
 
-## 7. Xử lý Sự cố Thường gặp (Troubleshooting)
+## 8. Catalog of 39 FastMCP Tools & Comprehensive Research Capabilities
 
-### 1. `YOUTUBE_API_KEY not configured`
-- **Hiện tượng**: Log hiển thị cảnh báo `YOUTUBE_API_KEY not configured. Skipping YouTube Plugin.`
-- **Khắc phục**: Đây chỉ là cảnh báo (warning). `fn-ignis` vẫn hoạt động bình thường với Google Trends và TikTok. Để lấy thêm tín hiệu YouTube, hãy cấu hình `YOUTUBE_API_KEY` vào file `.env`.
+The `fn-ignis` FastMCP server exposes **39 atomic and strategic tools**:
 
-### 2. Lỗi `playwright not installed` khi cào chi tiết bình luận TikTok
-- **Khắc phục**: Cài đặt browser binary cho Playwright:
-  ```bash
-  uv run playwright install chromium
-  ```
+### 1. Research Mission Orchestration & Analysis (8 Tools)
+- `create_research_mission`: Initialize a new targeted research campaign.
+- `execute_mission_ingress`: Deploy active multi-channel data harvesting.
+- `get_mission_analysis`: Calculate Opportunity Index, Demand vs Supply matrix, and White Spaces.
+- `generate_mission_artifact`: Render an interactive, standalone HTML Infographic Dashboard.
+- `list_research_missions`: List all missions with filters for status, query, and date range.
+- `get_current_session_mission`: Retrieve or auto-link active mission for current agent session.
+- `run_autonomous_research_mission`: Execute complete 6-step campaign in a single automated step.
+- `evaluate_mission_quality`: Audit data ingress health, signal coverage, and source diversity.
 
-### 3. Khôi phục / Reset Database SQLite
-- Nếu muốn làm mới toàn bộ dữ liệu SQLite:
-  ```bash
-  rm -f ignis.db
-  ignis-setup
-  ```
+### 2. Macro Trend Surveillance & Exploration (4 Tools)
+- `get_trending_topics`: Retrieve breakout topics scored by composite momentum.
+- `get_topic_detail`: Retrieve deep multi-channel telemetry for a specific topic.
+- `generate_trend_artifact`: Export interactive trend card artifact.
+- `trigger_ingress_refresh`: Manually trigger macro pipeline scan.
 
-### 4. Kiểm tra sức khỏe hệ thống (Health Check)
-Chạy bộ test suite 85 kiểm thử tự động:
-```bash
-uv run pytest
-```
+### 3. TikTok Live Probes & Pain Point Mining (5 Tools)
+- `get_tiktok_search_suggestions`: Query autocomplete suggestions for slang & long-tail intent.
+- `get_tiktok_creative_center_trends`: Discover top surging hashtags and industry verticals.
+- `get_tiktok_video_comments`: Scrape raw user comments for sentiment and objections.
+- `extract_customer_pain_points`: Analyze friction, price resistance, and competitor shortcomings.
+- `authenticate_tiktok`: Authenticate TikTok session credentials with AES-256 encryption.
 
----
+### 4. Threads Social Listening & Graph API (5 Tools)
+- `get_threads_trending_topics`: Extract trending public discussion topics.
+- `get_threads_search_suggestions`: Uncover colloquial search intent and phrases.
+- `authenticate_threads`: Complete OAuth 2.0 flow or set access tokens.
+- `get_threads_auth_status`: Check health, expiration, and token validity.
+- `clear_threads_auth`: Revoke and wipe stored Threads credentials.
 
-## 8. Danh mục 34 FastMCP Tools & Khả năng Nghiên cứu Toàn diện
+### 5. Instagram Reels Intelligence (3 Tools)
+- `authenticate_instagram`: Authenticate Instagram Graph API credentials.
+- `get_instagram_auth_status`: Verify connection and token health.
+- `clear_instagram_auth`: Revoke and wipe Instagram credentials.
 
-Khi FastMCP Server khởi chạy (`ignis-mcp`), 34 tools, 2 prompts và 2 resources sau đây luôn sẵn sàng cho AI Agents hoặc MCP clients:
+### 6. Dynamic Configuration & System Health (6 Tools)
+- `diagnose_system_health`: Full synthetic diagnostics of database, connectors, and encryption.
+- `get_system_logs`: View recent application runtime logs.
+- `get_platform_auth_status`: Unified status overview across all social platforms.
+- `clear_platform_auth`: Generic credential reset tool.
+- `get_runtime_config`: Inspect live operational thresholds and timeouts.
+- `update_runtime_config`: Adjust thresholds (quality gate, limits, timeouts) dynamically without restart.
 
-### 1. Nhóm Chiến dịch & Nghiên cứu Chiến lược (Research & White Space)
-| Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
-|---|---|---|
-| `run_autonomous_research_mission` | `topic, keywords, geo, timeframe, min_signals` | Tạo mission, chạy ingress đa nền tảng, tính Opportunity Index và xuất dashboard trong 1 bước. |
-| `create_research_mission` | `title, keywords, geo, timeframe, hypothesis` | Khởi tạo chiến dịch nghiên cứu mới với giả thuyết kiểm chứng. |
-| `execute_mission_ingress` | `mission_id` | Thực thi cào dữ liệu đa nguồn và đánh giá Quality Scorecard (Confidence $\ge 70\%$). |
-| `evaluate_mission_quality` | `mission_id` | Đánh giá lại 4 chiều chất lượng dữ liệu (Coverage, Language, Freshness, Diversity). |
-| `discover_market_opportunities` | `mission_id` | Khám phá các khoảng trống thị trường (Unserved White Spaces) và xếp hạng tiềm năng. |
-| `get_mission_analysis` | `mission_id` | Trích xuất phân tích chiến lược tổng hợp (cung/cầu, Opportunity Index, rào cản gia nhập, kế hoạch MVP). |
-| `generate_mission_artifact` | `mission_id` | Xuất bản file HTML Dashboard Infographic tương tác trực quan vào thư mục `reports/`. |
-| `list_research_missions` | `limit` | Liệt kê lịch sử các chiến dịch nghiên cứu đã thực hiện. |
-| `get_current_session_mission` | `session_id` | Khôi phục ngữ cảnh chiến dịch gắn với phiên chat của agent. |
-| `trigger_autonomous_discovery` | `geo` | Kích hoạt chu kỳ tự động phát hiện xu hướng và tổng hợp cơ hội trên toàn quốc gia. |
-| `get_latest_daily_discovery` | `geo` | Lấy bản tin tổng hợp cơ hội thị trường hàng ngày mới nhất. |
+### 7. Domain Knowledge & Lexicon Governance (4 Tools)
+- `register_domain_lexicon`: Register specialized vertical terminology dynamically.
+- `register_noise_blacklist`: Register noise filters to exclude irrelevant signals.
+- `list_domain_lexicons`: Inspect active lexicons and filters.
+- `verify_connectors_health`: Health check across all external platform connectors.
 
-### 2. Nhóm Lắng nghe Xã hội & Voice of Customer (Social Listening)
-| Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
-|---|---|---|
-| `get_tiktok_creative_center_trends` | `geo, period, limit, industry` | Lấy bảng xếp hạng hashtag, nhạc nền, creator chính thức từ TikTok Creative Center. |
-| `get_tiktok_search_suggestions` | `keywords, geo` | Lấy từ khóa gợi ý tìm kiếm (autocomplete) và sub-hashtags thực tế của người dùng. |
-| `get_tiktok_video_comments` | `video_url, limit` | Cào bình luận công khai từ một video TikTok cụ thể. |
-| `extract_customer_pain_points` | `keywords, geo, max_videos, inquiry_patterns` | Bóc tách phản đối mua hàng, câu hỏi về giá và nhu cầu chưa được đáp ứng từ bình luận. |
-| `get_trending_topics` | `geo, timeframe, limit` | Lấy danh sách các chủ đề đang thịnh hành kèm điểm tín hiệu. |
-| `get_topic_detail` | `topic_id` | Xem chi tiết cụm chủ đề và danh sách tín hiệu liên quan. |
-| `generate_trend_artifact` | `topic_id, geo` | Xuất báo cáo HTML độc lập cho một chủ đề cụ thể. |
-| `trigger_ingress_refresh` | `geo` | Buộc quét và làm mới toàn bộ nguồn dữ liệu cho một khu vực. |
-
-### 3. Nhóm Xác thực Meta (Threads OAuth 2.0)
-| Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
-|---|---|---|
-| `authenticate_threads` | `auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?, headless?, timeout_seconds?` | Kết nối Threads theo Dual-UX: không có `auth_code` (hoặc `browser_login=true`) chạy Tier 1 bắt phiên trình duyệt 1 chạm; có `auth_code` chạy Tier 2 OAuth 2.0 nâng cấp Long-Lived Token 60 ngày, mã hóa AES. |
-| `get_threads_auth_status` | Không | Kiểm tra Threads trên cả hai tier: trạng thái token, scopes, key_version, số ngày còn lại, có cần refresh không, kèm phiên trình duyệt. |
-| `clear_threads_auth` | Không | Thu hồi và xóa an toàn thông tin xác thực Threads (OAuth và phiên trình duyệt) khỏi bộ lưu trữ mã hóa. |
-| `authenticate_instagram` | `auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?, headless?, timeout_seconds?` | Kết nối Instagram theo Dual-UX: Tier 1 bắt phiên trình duyệt 1 chạm hoặc Tier 2 OAuth 2.0 Instagram Graph API với Long-Lived Token 60 ngày. |
-| `get_instagram_auth_status` | Không | Kiểm tra Instagram trên cả hai tier: trạng thái token, scopes, số ngày còn lại, kèm phiên trình duyệt. |
-| `clear_instagram_auth` | Không | Thu hồi và xóa an toàn thông tin xác thực Instagram (OAuth và phiên trình duyệt) khỏi bộ lưu trữ mã hóa. |
-
-*(Hướng dẫn chi tiết tích hợp Threads & Instagram Reels xem tại [META_INTEGRATION_GUIDE.md](META_INTEGRATION_GUIDE.md))*
-
-### 4. Nhóm Dynamic Lexicon & Chẩn đoán Hạ tầng (Platform & Telemetry)
-| Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
-|---|---|---|
-| `register_domain_lexicon` | `domain, terms, category` | Đăng ký thuật ngữ/slang chuyên ngành vào cơ sở dữ liệu để Quality Gate nhận diện. |
-| `register_noise_blacklist` | `terms` | Đăng ký từ khóa rác/spam để tự động loại bỏ trong các đợt cào tiếp theo. |
-| `list_domain_lexicons` | `domain` | Tra cứu danh mục từ điển chuyên ngành và phân loại ngành hàng đang kích hoạt. |
-| `diagnose_system_health` | Không | Kiểm tra telemetry toàn diện, circuit breakers và trạng thái các thành phần. |
-| `get_system_logs` | `limit, level` | Truy vấn nhật ký sự kiện kiểm toán hệ thống. |
-| `verify_connectors_health` | Không | Chạy synthetic diagnostics trên YouTube quota, Google RSS, DB pool, Playwright contexts. |
-| `authenticate_tiktok` | `headless, timeout_seconds` | Quản lý vòng đời xác thực trình duyệt TikTok có mã hóa AES-256. |
-| `get_platform_auth_status` | `platform` | Kiểm tra trạng thái phiên đăng nhập của các nền tảng mạng xã hội. |
-| `clear_platform_auth` | `platform` | Xóa thông tin xác thực đã lưu của nền tảng. |
-
-### 5. FastMCP Native Prompts & Resources
-- **Prompts**:
-  - `market_research_pipeline`: Tiêm kịch bản nghiên cứu chuẩn 6 bước SOP.
-  - `voice_of_customer_audit`: Tiêm quy trình kiểm toán Voice of Customer & phản đối mua hàng.
-- **Resources**:
-  - `fn-ignis://sop/market-research`: Toàn văn hướng dẫn SOP nghiên cứu thị trường.
-  - `fn-ignis://methodology/opportunity-index`: Công thức toán học và giải thích Opportunity Index (+100 đến -100).
-
+### 8. Autonomous Discovery & Opportunity Hunting (4 Tools)
+- `discover_market_opportunities`: Cross-source market gap discovery.
+- `trigger_autonomous_discovery`: Trigger unguided exploration for whitespace opportunities.
+- `get_latest_daily_discovery`: Inspect latest automated daily digest.
+- `export_mission_dossier`: Export complete mission dossier in structured formats.

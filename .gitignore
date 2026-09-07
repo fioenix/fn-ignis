@@ -72,7 +72,7 @@ pgdata/
 # Reports & Generated Artifacts
 reports/*.html
 reports/*.db
-!reports/mission_test1234.html
+!reports/.gitkeep
 !reports/case_study_*.html
 src/reports/
 supabase/.temp/

@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime
@@ -18,38 +19,26 @@ def get_project_root() -> Path:
 
 def ensure_environment_file(project_root: Path) -> Tuple[bool, str]:
     """
-    Ensure .env file exists. If not, create from .env.example with auto-generated encryption key.
+    Ensure .env file exists with essential defaults and auto-generated encryption key.
     Returns (created_or_updated: bool, message: str).
     """
     env_file = project_root / ".env"
-    env_example = project_root / ".env.example"
     fernet_key = Fernet.generate_key().decode()
 
     if not env_file.exists():
-        if env_example.exists():
-            content = env_example.read_text(encoding="utf-8")
-            if "IGNIS_ENCRYPTION_KEY=" in content:
-                content = content.replace("IGNIS_ENCRYPTION_KEY=", f"IGNIS_ENCRYPTION_KEY={fernet_key}")
-            else:
-                content += f"\nIGNIS_ENCRYPTION_KEY={fernet_key}\n"
-            
-            if "DATABASE_URL=postgresql://" in content and "DATABASE_URL=sqlite://" not in content:
-                content = content.replace(
-                    "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ignis",
-                    "DATABASE_URL=sqlite:///ignis.db"
-                )
-            env_file.write_text(content, encoding="utf-8")
-            return True, "Created .env from .env.example with SQLite default & generated Fernet key."
-        else:
-            default_env = (
-                f"DATABASE_URL=sqlite:///ignis.db\n"
-                f"DEFAULT_GEO=VN\n"
-                f"IGNIS_ENCRYPTION_KEY={fernet_key}\n"
-                f"YOUTUBE_API_KEY=\n"
-                f"SCHEDULER_INTERVAL_SECONDS=900\n"
-            )
-            env_file.write_text(default_env, encoding="utf-8")
-            return True, "Created minimal .env with SQLite default & generated Fernet key."
+        default_env = (
+            "# ==============================================================================\n"
+            "# fn-ignis Configuration\n"
+            "# ==============================================================================\n"
+            "DATABASE_URL=sqlite:///ignis.db\n"
+            "DEFAULT_GEO=VN\n"
+            f"IGNIS_ENCRYPTION_KEY={fernet_key}\n"
+            "YOUTUBE_API_KEY=\n"
+            "SCHEDULER_INTERVAL_SECONDS=900\n"
+            "DISCOVERY_INTERVAL_HOURS=24\n"
+        )
+        env_file.write_text(default_env, encoding="utf-8")
+        return True, "Created .env with SQLite default & generated Fernet key."
 
     existing_content = env_file.read_text(encoding="utf-8")
     lines = existing_content.splitlines()
@@ -96,24 +85,32 @@ def get_claude_desktop_config_path() -> Path:
         return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
 
 
-def get_cline_config_path() -> Path:
-    """Resolve OS-specific path to Cline MCP configuration file."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Code" / "User" / "globalStorage" / "saoudrizwan.claude-dev" / "settings" / "cline_mcp_settings.json"
-    elif sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", "")) / "Code" / "User" / "globalStorage" / "saoudrizwan.claude-dev" / "settings" / "cline_mcp_settings.json"
-    else:
-        return Path.home() / ".config" / "Code" / "User" / "globalStorage" / "saoudrizwan.claude-dev" / "settings" / "cline_mcp_settings.json"
+def register_mcp_to_codex_toml(config_path: Path, entry: Dict[str, Any]) -> bool:
+    """Safely register or update fn-ignis entry in Codex TOML configuration file."""
+    try:
+        if not config_path.exists():
+            return False
 
+        content = config_path.read_text(encoding="utf-8")
+        command_str = entry.get("command", "")
+        args_str = json.dumps(entry.get("args", []))
+        env_dict = entry.get("env", {})
 
-def get_roo_code_config_path() -> Path:
-    """Resolve OS-specific path to Roo Code MCP configuration file."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Code" / "User" / "globalStorage" / "rooveterinaryinc.roo-cline" / "settings" / "cline_mcp_settings.json"
-    elif sys.platform == "win32":
-        return Path(os.environ.get("APPDATA", "")) / "Code" / "User" / "globalStorage" / "rooveterinaryinc.roo-cline" / "settings" / "cline_mcp_settings.json"
-    else:
-        return Path.home() / ".config" / "Code" / "User" / "globalStorage" / "rooveterinaryinc.roo-cline" / "settings" / "cline_mcp_settings.json"
+        toml_block = f"""\n[mcp_servers.fn-ignis]\ncommand = "{command_str}"\nargs = {args_str}\n\n[mcp_servers.fn-ignis.env]\n"""
+        for k, v in env_dict.items():
+            toml_block += f'{k} = "{v}"\n'
+
+        if "[mcp_servers.fn-ignis]" in content:
+            pattern = re.compile(r"\[mcp_servers\.fn-ignis\][\s\S]*?(?=(\n\[|\Z))")
+            content = pattern.sub(toml_block.strip(), content)
+        else:
+            content = content.rstrip() + "\n" + toml_block
+
+        config_path.write_text(content, encoding="utf-8")
+        return True
+    except Exception as e:
+        print(f"  ⚠️ Failed to write to Codex config {config_path}: {e}")
+        return False
 
 
 def build_mcp_entry(python_bin: str, project_root: Path) -> Dict[str, Any]:
@@ -141,8 +138,6 @@ def register_mcp_to_json_file(config_path: Path, entry: Dict[str, Any], key_name
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     config_data = json.load(f)
-                backup_path = config_path.with_suffix(f".backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-                shutil.copy2(config_path, backup_path)
             except Exception:
                 config_data = {}
 
@@ -160,49 +155,19 @@ def register_mcp_to_json_file(config_path: Path, entry: Dict[str, Any], key_name
 
 
 def setup_all_mcp_clients(project_root: Path, python_bin: str) -> List[Dict[str, Any]]:
-    """Register fn-ignis across all supported and detected agent environments."""
+    """Register fn-ignis across target local agents: Google Antigravity, Claude Desktop, OpenAI Codex."""
     mcp_entry = build_mcp_entry(python_bin, project_root)
     results = []
 
-    # 1. Project Root .mcp.json (Standard MCP Project Config)
+    # 1. Project Root .mcp.json (Standard MCP Workspace Config)
     root_mcp = project_root / ".mcp.json"
     ok = register_mcp_to_json_file(root_mcp, mcp_entry, "mcpServers")
     results.append({"client": "Workspace (.mcp.json)", "path": str(root_mcp), "status": "configured" if ok else "failed"})
 
-    # 2. Cursor IDE (.cursor/mcp.json)
-    cursor_mcp = project_root / ".cursor" / "mcp.json"
-    ok = register_mcp_to_json_file(cursor_mcp, mcp_entry, "mcpServers")
-    results.append({"client": "Cursor IDE (.cursor/mcp.json)", "path": str(cursor_mcp), "status": "configured" if ok else "failed"})
-
-    # 3. VS Code Workspace (.vscode/mcp.json)
-    vscode_mcp = project_root / ".vscode" / "mcp.json"
-    ok = register_mcp_to_json_file(vscode_mcp, mcp_entry, "mcpServers")
-    results.append({"client": "VS Code Workspace (.vscode/mcp.json)", "path": str(vscode_mcp), "status": "configured" if ok else "failed"})
-
-    # 4. Claude Desktop
-    claude_path = get_claude_desktop_config_path()
-    claude_parent = claude_path.parent
-    if claude_parent.exists() or sys.platform in ("darwin", "win32"):
-        ok = register_mcp_to_json_file(claude_path, mcp_entry, "mcpServers")
-        results.append({"client": "Claude Desktop", "path": str(claude_path), "status": "configured" if ok else "failed"})
-
-    # 5. Cline (Claude Dev)
-    cline_path = get_cline_config_path()
-    if cline_path.parent.exists():
-        ok = register_mcp_to_json_file(cline_path, mcp_entry, "mcpServers")
-        results.append({"client": "Cline Extension", "path": str(cline_path), "status": "configured" if ok else "failed"})
-
-    # 6. Roo Code
-    roo_path = get_roo_code_config_path()
-    if roo_path.parent.exists():
-        ok = register_mcp_to_json_file(roo_path, mcp_entry, "mcpServers")
-        results.append({"client": "Roo Code Extension", "path": str(roo_path), "status": "configured" if ok else "failed"})
-
-    # 7. Google Antigravity IDE & AI Assistant
+    # 2. Google Antigravity IDE & AI Assistant
     agy_config = Path.home() / ".gemini" / "config" / "mcp_config.json"
     if agy_config.parent.exists():
         ok = register_mcp_to_json_file(agy_config, mcp_entry, "mcpServers")
-        # Also provision lazy tool schemas in ~/.gemini/antigravity/mcp/fn-ignis
         schema_dir = Path.home() / ".gemini" / "antigravity" / "mcp" / "fn-ignis"
         try:
             schema_dir.mkdir(parents=True, exist_ok=True)
@@ -219,12 +184,25 @@ def setup_all_mcp_clients(project_root: Path, python_bin: str) -> List[Dict[str,
                     inf.write(
                         "# fn-ignis MCP Server\n"
                         "Autonomous Trend Intelligence & Market Opportunity Platform. "
-                        "Provides 34 tools for multi-platform social listening (Google Trends, YouTube, TikTok, Threads, Instagram Reels), "
+                        "Provides 39 tools for multi-platform social listening (Google Trends, YouTube, TikTok, Threads, Instagram Reels), "
                         "White Space Opportunity Index calculation (+100 to -100), and interactive infographic HTML dossier generation.\n"
                     )
         except Exception:
             pass
         results.append({"client": "Google Antigravity (~/.gemini/config/mcp_config.json)", "path": str(agy_config), "status": "configured" if ok else "failed"})
+
+    # 3. Claude Desktop
+    claude_path = get_claude_desktop_config_path()
+    claude_parent = claude_path.parent
+    if claude_parent.exists() or sys.platform in ("darwin", "win32"):
+        ok = register_mcp_to_json_file(claude_path, mcp_entry, "mcpServers")
+        results.append({"client": "Claude Desktop", "path": str(claude_path), "status": "configured" if ok else "failed"})
+
+    # 4. OpenAI Codex
+    codex_config = Path.home() / ".codex" / "config.toml"
+    if codex_config.exists():
+        ok = register_mcp_to_codex_toml(codex_config, mcp_entry)
+        results.append({"client": "OpenAI Codex (~/.codex/config.toml)", "path": str(codex_config), "status": "configured" if ok else "failed"})
 
     return results
 
@@ -271,6 +249,17 @@ def auto_provision(json_output: bool = False) -> Dict[str, Any]:
     # 4. Run Diagnostics
     diag = asyncio.run(run_synthetic_diagnostics())
 
+    tools_cnt = 39
+    prompts_cnt = 2
+    resources_cnt = 2
+    try:
+        from ignis.interfaces.mcp.server import mcp
+        tools_cnt = len(asyncio.run(mcp.list_tools()))
+        prompts_cnt = len(asyncio.run(mcp.list_prompts()))
+        resources_cnt = len(asyncio.run(mcp.list_resources()))
+    except Exception:
+        pass
+
     report = {
         "status": "success" if db_ok else "warning",
         "project_root": str(project_root),
@@ -280,10 +269,10 @@ def auto_provision(json_output: bool = False) -> Dict[str, Any]:
         "clients_configured": client_results,
         "diagnostics": diag,
         "capabilities": {
-            "tools_count": 34,
-            "prompts_count": 2,
-            "resources_count": 2,
-            "sop": "6-Step Market Opportunity & White Space Standard Operating Procedure"
+            "tools_count": tools_cnt,
+            "prompts_count": prompts_cnt,
+            "resources_count": resources_cnt,
+            "framework": "6-Step Strategic Market Research Reference Framework"
         }
     }
 
@@ -307,7 +296,7 @@ def auto_provision(json_output: bool = False) -> Dict[str, Any]:
     print(f"  • Google Trends RSS: {diag.get('google_rss')}")
     print(f"  • Seed Lexicons: {diag.get('lexicon_count')} terms loaded")
 
-    print("\n🚀 Ready for AI Agents (Claude, Cursor, Windsurf, Codex, Antigravity, OpenClaw, Hermes)")
+    print("\n🚀 Ready for AI Agents (Claude Desktop, Claude Code, Codex, Antigravity, OpenClaw, Hermes, Pi Agent)")
     print("Quickstart prompt for agent:")
     print('  "Run a research mission on AI customer service agents in VN for the last 30 days"')
     print("=" * 64 + "\n")

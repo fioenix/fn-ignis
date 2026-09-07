@@ -5,11 +5,14 @@ description: Autonomous Trend Intelligence & Market Opportunity Agent Harness fo
 
 # fn-ignis Trend Intelligence & Market Opportunity Agent Harness 🚀
 
-This skill equips AI agents with an autonomous trend intelligence harness following the **6-Step Standard Operating Procedure (SOP)**:
+This skill equips AI agents with an autonomous social intelligence harness providing tools, mathematical methodologies, domain knowledge, and reporting scaffolds. It operates in two flexible modes:
+
+1. **Tactical Ad-Hoc Mode**: Freely invoke atomic tools (`get_threads_trending_topics`, `extract_customer_pain_points`, `get_tiktok_search_suggestions`, `get_runtime_config`) to address ad-hoc user queries without overhead.
+2. **Strategic Research Mode (6-Step Reference Framework)**: When conducting comprehensive market opportunity or white-space discovery, agents are recommended to follow the 6-Step analytical blueprint below.
 
 ---
 
-## 🧭 Standard Operating Procedure (6-Step SOP)
+## 🧭 6-Step Strategic Research Reference Framework
 
 ### 1. Step 1: Clarify Research Objectives & Core Hypothesis
 - Clarify business model (SaaS, Retail, Agency, Content), target audience (B2B/B2C), target geography (supports any ISO-3166 code e.g. `VN`, `US`, `JP`, `GB`, `DE`, `GLOBAL`), and timeframe.

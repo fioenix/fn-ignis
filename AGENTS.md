@@ -1,10 +1,10 @@
 # fn-ignis Agent Operating Guidelines & Interface Protocol 🤖
 
-This document defines the operational protocol, architectural guidelines, and tool selection principles for AI Agents (**Claude Desktop, Claude Code, Cursor, Windsurf, Antigravity, OpenAI Codex, OpenClaw, and Hermes**) interacting with `fn-ignis`.
+This document defines the operational protocol, architectural guidelines, and tool selection principles for AI Agents (**Claude Desktop, Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, and Pi Agent**) interacting with `fn-ignis`.
 
 ---
 
-## ⚡ 0. Zero-Touch Agent Bootstrap Protocol (Setup Tự Động)
+## ⚡ 0. Zero-Touch Agent Bootstrap Protocol (Automated Setup)
 
 > **MANDATORY INSTRUCTION FOR ALL AI AGENTS:**  
 > When given this repository link (`https://github.com/fioenix/fn-ignis`) or instructed to set up `fn-ignis` for the user, execute this command immediately:
@@ -17,7 +17,7 @@ This document defines the operational protocol, architectural guidelines, and to
 > 1. Provisions virtual environment (`.venv`) and installs `fn-ignis` in editable mode.
 > 2. Creates `.env` with SQLite default (`DATABASE_URL=sqlite:///ignis.db`) and generates a persistent Fernet AES-256 key.
 > 3. Bootstraps SQLite database schemas and loads 84+ seed domain lexicons & noise filters.
-> 4. Auto-configures FastMCP server in all detected agent environments (`claude_desktop_config.json`, `.cursor/mcp.json`, `.vscode/mcp.json`, Cline, Roo Code, `.mcp.json`).
+> 4. Auto-configures FastMCP server in all supported agent environments (`.mcp.json`, `claude_desktop_config.json`, Google Antigravity, OpenAI Codex `config.toml`).
 > 5. Runs synthetic diagnostics and outputs structured readiness confirmation.
 >
 > *No user input or external database installation is required.*
@@ -41,88 +41,97 @@ Agents must understand the dual-track design of `fn-ignis`:
 
 ---
 
-## 🧭 2. Standard Operating Procedure (6-Step SOP)
+## 🧭 2. Frameworks & Operational Modes
 
-When a user requests a market research, trend analysis, or white-space evaluation task, agents **MUST STRICTLY FOLLOW** this 6-step SOP:
+`fn-ignis` is a modular Agent Harness providing tools, mathematical methodologies, domain knowledge, and reporting scaffolds. The harness **does NOT enforce rigid workflows or dictate agent deliverables**. Agents have full autonomy to select operational modes based on user intent:
 
-### Step 1: Clarify Research Objectives & Formulate Core Hypothesis
+### A. Tactical & Ad-Hoc Probes (Fast & Unbundled Mode)
+Agents can independently invoke any atomic FastMCP tool without initializing a research mission:
+- **Instant Trend Spotting**: Call `get_threads_trending_topics` or `get_tiktok_creative_center_trends` to capture breakout daily topics.
+- **Voice of Customer (VoC) Extraction**: Call `extract_customer_pain_points` or `get_tiktok_video_comments` to dissect customer objections, pricing inquiries, and unmet needs.
+- **Keyword & Slang Expansion**: Call `get_tiktok_search_suggestions` or `get_threads_search_suggestions` to uncover colloquial phrasing and long-tail search intent.
+- **Dynamic Configuration & Diagnostics**: Call `get_runtime_config`, `update_runtime_config`, `diagnose_system_health`.
+
+Agents are free to synthesize and present responses as concise summaries, tables, or charts matching user conversational context.
+
+### B. Strategic Research Reference Framework (6-Step Blueprint)
+When users request a **comprehensive research campaign, market white-space analysis, or commercial viability dossier**, agents are recommended to follow the 6-Step analytical blueprint:
+
+#### Step 1: Clarify Objectives & Establish Core Hypothesis
 - Clarify business model (SaaS, Retail, Agency, Content), target audience (B2B/B2C), geography, and timeframe.
-- Establish a clear, falsifiable **Core Hypothesis** (e.g., *"Market demand for customer service AI agents is accelerating, but businesses are blocked by setup complexity and high monthly SaaS fees"*).
-- **Autonomous Lexicon Registration**: If the target topic belongs to a specific vertical (e.g., Fashion, Crypto, Healthcare, Logistics), call `register_domain_lexicon(domain="...", terms=[...])` to ensure the Quality Gate recognizes niche vernacular dynamically.
+- Establish a falsifiable **Core Hypothesis** (e.g., *"Market demand for customer service AI agents is accelerating, but adoption is blocked by setup complexity and high SaaS fees"*).
+- **Dynamic Lexicon Ingestion**: For specialized verticals, call `register_domain_lexicon(domain="...", terms=[...])` so the Quality Gate recognizes domain vernacular dynamically.
 
-### Step 2: Macro Scan & Real-World Keyword Expansion
-- Call `get_tiktok_creative_center_trends(geo, period, limit, industry)` with vertical filter.
-- Call `get_tiktok_search_suggestions` on seed keywords to capture authentic user slang, tool names, and sub-niches.
-- *Feedback Loop*: Update research keywords and register newly discovered slang via `register_domain_lexicon` before deep crawling.
+#### Step 2: Macro Scan & Real-World Keyword Expansion
+- Call `get_tiktok_creative_center_trends` or `get_threads_trending_topics` to establish macro benchmarks.
+- Call `get_tiktok_search_suggestions` and `get_threads_search_suggestions` on root keywords to discover authentic user slang, competitor tool names, and sub-niches.
+- Register newly discovered terminology via `register_domain_lexicon` prior to deep crawling.
 
-### Step 3: Deep Multi-Platform Ingress & Quality Gate
+#### Step 3: Multi-Platform Ingestion & Quality Gate
 - Call `create_research_mission` and `execute_mission_ingress`.
-- Verify the `QualityScorecard` (Coverage, Precision, Freshness, Diversity) has confidence $\ge 70\%$.
+- Verify `QualityScorecard` (Coverage, Precision, Freshness, Creator Diversity) achieves Confidence Score $\ge 70\%$.
 
-### Step 4: Single-Source 4-Lens Breakdown
+#### Step 4: Single-Source 4-Lens Breakdown
 - **Google Lens**: Macro search demand velocity and search volume growth.
-- **YouTube Lens**: Long-form supply, case study and tutorial depth of competitors.
-- **TikTok Search Lens**: Micro short-form intent and trending sub-hashtags.
-- **Voice of Customer Lens**: Real objections, pricing questions, and unmet needs from comments via `extract_customer_pain_points`.
+- **YouTube Lens**: Long-form supply depth, case studies, and tutorial maturity of competitors.
+- **TikTok / Threads Lens**: Micro short-form intent, trending hashtags, and real-time public conversations.
+- **Voice of Customer Lens**: Real purchase friction, pricing objections, and unmet needs via `extract_customer_pain_points`.
 
-### Step 5: Cross-Source Synthesis & Opportunity Index Matrix
+#### Step 5: Cross-Source Synthesis & Opportunity Index Matrix
 - Call `get_mission_analysis(mission_id)`.
-- Correlate Demand vs. Supply, evaluate `Opportunity Index` (+100 to -100), identify `HIGH_DEMAND_LOW_SUPPLY` golden opportunities, and determine Trend Maturity Stage.
+- Correlate Demand vs. Supply, calculate `Opportunity Index` (+100 to -100), identify `HIGH_DEMAND_LOW_SUPPLY` white spaces, and determine Trend Maturity Stage.
 
-### Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation
+#### Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation
 - Synthesize 3-5 grounded market truths (Key Takeaways).
-- Evaluate entry barriers and competitive moats (Why hasn't this been built? What if big tech enters?).
+- Assess entry barriers and economic moats (Why hasn't the market solved this? What if Big Tech enters?).
 - Formulate a 3-7 day fast low-cost MVP validation plan.
-- Call `generate_mission_artifact(mission_id)` to render and export the interactive Infographic HTML Dashboard.
+- Call `generate_mission_artifact(mission_id)` to render and export an interactive Infographic HTML Dashboard.
 
 ---
 
-## 🎨 3. Presentation Standards
+## 🎨 3. Presentation & Evidence Attribution Standards
 
 ### Campaign Identification Banner
-Always prefix analysis outputs with the campaign identification banner:
+When executing a formal Strategic Research Campaign, prefix the analysis with the campaign identifier banner:
 
 > **🎯 Campaign:** `[VN-AI-AGENT-90D]` — *AI Agents & Automation in Vietnam*  
 > **Shortcode:** `VN-AI-AGENT-90D` *(or `fb16c5ee`)*  
 > **Session ID:** `codex://threads/01a05666...` *(if available)*
 
 ### Native Artifacts First
-- Render summaries, scorecards, white space matrices, and actionable roadmaps directly in the chat interface using high-contrast Light Mode markdown tables and cards.
-- Export standalone HTML files to `reports/` via `generate_mission_artifact` for permanent local storage.
+- Render summaries, scorecards, and white-space matrices directly inside the chat interface (using markdown tables and cards).
+- Export standalone HTML files to `reports/` via `generate_mission_artifact` when the user requests a persistent local dossier.
 
-### 📊 Mandatory Data Ingress & Evidence Attribution Standards
-Every strategic research analysis presented to the user **MUST STRICTLY INCLUDE**:
-1. **Data Ingress & Channel Health Summary Table** placed right after the campaign banner:
-   - Must disclose every platform checked (Google Trends, YouTube, TikTok Video Grid, TikTok Comments, Threads, Instagram Reels).
-   - Must disclose signals count, status (`HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`, `RATE_LIMITED`, `DEGRADED`), and top citation reference.
-   - Read it straight from the `channel_summaries` field returned by `get_mission_analysis` / `generate_mission_artifact`; never reconstruct it by hand.
-   - If a channel captured 0 signals, explicitly state why so users know whether a channel was skipped/failed.
+### 📊 Evidence Attribution Standards
+When presenting strategic conclusions, agents must maintain evidentiary integrity:
+1. **Data Ingress Summary Table**:
+   - Explicitly list all probed channels (Google Trends, YouTube, TikTok Video, TikTok Comments, Threads, Instagram Reels).
+   - Display signal counts and channel status (`HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`, `RATE_LIMITED`, `DEGRADED`) from `channel_summaries` returned by `get_mission_analysis`.
 2. **Inline Evidence Citations**:
-   - Every market truth, consumer friction, or strategic takeaway MUST cite concrete source evidence (e.g. `[YouTube: "Build AI Agent" (45K views)]`, `[TikTok Comments: 35/84 comments on @creator video]`, `[Google Trends: +180% velocity]`).
-   - Strictly prohibit vague, unsupported statements without provenance attribution.
-   - `strategic_insights` is returned as objects `{statement, citations[]}`; render each `citation` as an inline pill next to the claim it supports. An insight with an empty `citations` list MUST be labelled as unverified.
+   - Every market claim and friction point MUST be backed by concrete citations (e.g. `[YouTube: "Build AI Agent" (45K views)]`, `[TikTok Comments: 35/84 comments on @creator video]`, `[Google Trends: +180% velocity]`).
+   - Disallow vague, unsourced generalizations without origin attribution.
 
-### 🧾 Mandatory Chat Report Structure
-Every research report written to the chat window MUST follow this exact order:
+### 🧾 Recommended Full Strategic Report Structure
+When compiling a Comprehensive Strategic Dossier, the following standard structure is recommended:
 1. **Campaign Identification Banner**
 2. **Data Ingress Summary Table** (from `channel_summaries`)
 3. **Quality Scorecard**
-4. **Single-Source 4-Lens Breakdown** — each lens carries its own source citations
-5. **Market Opportunities & Demand vs. Supply Matrix** — each claim carries its numeric evidence
+4. **Single-Source 4-Lens Breakdown** (with source citations)
+5. **Market Opportunities & Demand vs. Supply Matrix** (with numeric evidence)
 6. **Fast MVP Action Plan**
 
-### 🌐 Language & Localization Protocol (CRITICAL)
-- **ReAct & Internal Reasoning**: Agents MAY think and reason internally in English for speed and token precision.
-- **User-Facing Deliverables & Responses**:
-  - All deliverables presented to the user (chat text, markdown tables, roadmaps, and HTML reports in `reports/`) **MUST STRICTLY MATCH THE USER'S CURRENT LANGUAGE** (Vietnamese by default when targeting Vietnam or communicating with Vietnamese users).
-  - English is permitted ONLY for technical terms, proper nouns, and technology/brand names.
-  - Generating raw English HTML report files or English preview summaries when the user interacts in Vietnamese is STRICTLY PROHIBITED. Localize all titles, takeaways, and status notes to the target audience.
+*(For ad-hoc queries, agents should adjust output format flexibly to match the user's specific conversational need).*
+
+### 🌐 Language & Localization Protocol
+- **Internal Reasoning**: Agents may reason internally in English for speed and token precision.
+- **Target Audience Alignment**: Deliverables presented to users (chat responses, roadmaps, and HTML reports in `reports/`) should strictly match the user's conversational language (e.g., Vietnamese when researching the Vietnam market or conversing in Vietnamese).
+- **International Open-Source Standard**: Source code, docstrings, developer guides, and commit messages follow standard English conventions to ensure accessibility for global open-source contributors. Regional documentations (e.g., `README.vi.md`) are maintained alongside the canonical English docs.
 
 ---
 
 ## 🏷️ 4. Release Versioning Principles & SemVer Guardrails
 
-All agents (**Claude Desktop, Claude Code, Cursor, Windsurf, Antigravity, Codex, OpenClaw, Hermes**) must strictly adhere to **Semantic Versioning 2.0.0 (`MAJOR.MINOR.PATCH`)**:
+All agents (**Claude Desktop, Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, Pi Agent**) must strictly adhere to **Semantic Versioning 2.0.0 (`MAJOR.MINOR.PATCH`)**:
 
 ```
 v MAJOR . MINOR . PATCH
@@ -150,13 +159,45 @@ Breaking Feature   Bugfix / Optimization
 
 ---
 
-## 🗑️ 5. Ephemeral Agent Handoff & Review Protocol (Giao Ban Tạm Thời)
+## 🗑️ 5. Ephemeral Agent Handoff & Review Protocol
 
 > **MANDATORY RULE FOR TEMPORARY WORKING ARTIFACTS:**
-> Any interim review notes, audit summaries, handoff memos, or scratchpads exchanged between AI agents (Claude Code, Antigravity, Cursor, Codex) **MUST be written exclusively into `.handoff/` (or named `*.handoff.md` / `*.ephemeral.md`)**.
+> Any interim review notes, audit summaries, handoff memos, or scratchpads exchanged between AI agents (Claude Code, Antigravity, OpenAI Codex) **MUST be written exclusively into `.handoff/` (or named `*.handoff.md` / `*.ephemeral.md`)**.
 >
 > - **DO NOT** create temporary audit or review files directly inside `docs/` or project root.
 > - `docs/` is reserved **strictly for permanent product documentation** (e.g. `USER_GUIDE.md`, architecture manuals).
 > - `.handoff/` is 100% ignored by Git and will be purged periodically without affecting repository history.
+
+---
+
+## 🛡️ 6. Pre-Flight & Operational Release Checklists
+
+Every AI Agent modifying this repository or preparing a release must verify compliance against these three mandatory checklists:
+
+### Checklist A: Open-Source Codebase & Documentation Standards
+- [ ] **Global Codebase Convention**: All source code (`src/`), test suites (`tests/`), variable/function names, docstrings, and inline comments follow standard English for global open-source contributors.
+- [ ] **Developer Meta-Guidance**: Core developer instructions (`AGENTS.md`, `CLAUDE.md`, skills) are maintained in English.
+- [ ] **Git Commits & Branching**: 100% English imperative commit messages (e.g., `Add`, `Fix`, `Refactor`, `Update`).
+- [ ] **Regional Documentation**: Dedicated localized documentation (such as `README.vi.md`) and market dossiers in `reports/` are accurately maintained for regional audiences.
+
+### Checklist B: Harness Autonomy & Non-Prescriptive Decoupling
+- [ ] **Non-Prescriptive Instructions**: Verify FastMCP server instructions and tool docstrings do NOT coerce agents into forced pipelines (no "MUST STRICTLY FOLLOW").
+- [ ] **Atomic Independence**: Ensure all 39 FastMCP tools remain callable independently for ad-hoc tactical operations.
+- [ ] **Framework Separation**: The 6-Step SOP is exposed as an analytical reference recipe (via resources/prompts), never as an unskippable constraint.
+- [ ] **Contextual Deliverables**: Deliverables match user intent (concise text, cards, tables, or full HTML dashboards) without forcing boilerplate templates for trivial queries.
+
+### Checklist C: Formal Release & Version Bump Gate
+- [ ] **Automated Test Gate**: Run `.venv/bin/pytest tests/unit/` (or `uv run pytest`) with 100% pass rate before committing release changes.
+- [ ] **Docs & Specs Sync**: Verify `docs/` (e.g., `USER_GUIDE.md`, architecture specs) and tool catalogs (`README.md`, `README.vi.md`) are fully updated with newly introduced tools, parameters, or schemas.
+- [ ] **Clean Working Tree**: Verify no uncommitted scratchpads, no leaked credentials/`.env`, and no temporary audit notes placed in `docs/` (strictly `.handoff/`).
+- [ ] **Branch Merge to Main**: Ensure the feature or maintenance branch is fully merged into `main` before tagging.
+- [ ] **Packaging Verification**: Run distribution build check (`python -m build` or `uv build`) to verify clean package artifacts without missing assets.
+- [ ] **Atomic Triple Synchronization**: Synchronously update version strings across all 3 files in a single atomic commit:
+  - `pyproject.toml` (`version = "X.Y.Z"`)
+  - `openclaw.json` (`"version": "X.Y.Z"`)
+  - Git Tag (`vX.Y.Z`) on `main`
+- [ ] **GitHub Release Tagging**: Tag and push release commit (`git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`) and publish the GitHub Release note.
+- [ ] **SemVer Guardrail**: Increment strictly by `+1` (`PATCH`, `MINOR`, `MAJOR`) according to Section 4 criteria. Never jump versions arbitrarily.
+
 
 

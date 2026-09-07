@@ -92,10 +92,10 @@ class PostgresTimescaleRepository(ITrendRepository):
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.executemany(query, params)
-            logger.info(f"Đã lưu thành công {len(signals)} signals vào Database.")
+            logger.info(f"Successfully saved {len(signals)} signals to database.")
             return len(signals)
         except Exception as e:
-            logger.error(f"Lỗi khi lưu signals vào Database: {e}", exc_info=True)
+            logger.error(f"Error saving signals to database: {e}", exc_info=True)
             raise RepositoryException(f"Failed to batch insert signals: {e}") from e
 
     async def save_clusters(self, clusters: List[TopicCluster]) -> None:
@@ -138,9 +138,9 @@ class PostgresTimescaleRepository(ITrendRepository):
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.executemany(query, params)
-            logger.info(f"Đã upsert thành công {len(clusters)} topic clusters.")
+            logger.info(f"Successfully upserted {len(clusters)} topic clusters.")
         except Exception as e:
-            logger.error(f"Lỗi khi upsert topic clusters: {e}", exc_info=True)
+            logger.error(f"Error upserting topic clusters: {e}", exc_info=True)
             raise RepositoryException(f"Failed to upsert topic clusters: {e}") from e
 
     async def get_top_clusters(
@@ -185,7 +185,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 clusters.append(cluster)
             return clusters
         except Exception as e:
-            logger.error(f"Lỗi khi truy vấn top clusters: {e}", exc_info=True)
+            logger.error(f"Error querying top clusters: {e}", exc_info=True)
             raise RepositoryException(f"Failed to query top clusters: {e}") from e
 
     async def get_cluster_signals(
@@ -781,5 +781,87 @@ class PostgresTimescaleRepository(ITrendRepository):
         except Exception as e:
             logger.error(f"Error fetching industry taxonomies: {e}")
             return []
+
+    async def get_runtime_config(self, key: str) -> Optional[str]:
+        pool = await self._get_pool()
+        query = "SELECT value FROM runtime_configs WHERE key = %s;"
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    await cur.execute(query, (key,))
+                    row = await cur.fetchone()
+                    return str(row[0]) if row else None
+        except Exception as e:
+            logger.error(f"Error fetching runtime config for {key}: {e}")
+            return None
+
+    async def get_all_runtime_configs(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        pool = await self._get_pool()
+        if category:
+            query = "SELECT key, value, category, description, updated_by, created_at, updated_at FROM runtime_configs WHERE category = %s ORDER BY key ASC;"
+            params = (category,)
+        else:
+            query = "SELECT key, value, category, description, updated_by, created_at, updated_at FROM runtime_configs ORDER BY category ASC, key ASC;"
+            params = ()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    await cur.execute(query, params)
+                    rows = await cur.fetchall()
+            return [
+                {
+                    "key": r[0],
+                    "value": r[1],
+                    "category": r[2],
+                    "description": r[3],
+                    "updated_by": r[4],
+                    "created_at": str(r[5]),
+                    "updated_at": str(r[6]),
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"Error fetching runtime configs: {e}")
+            return []
+
+    async def set_runtime_config(
+        self,
+        key: str,
+        value: str,
+        category: str = "connector",
+        description: Optional[str] = None,
+        updated_by: str = "system",
+    ) -> None:
+        pool = await self._get_pool()
+        query = """
+            INSERT INTO runtime_configs (key, value, category, description, updated_by, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (key) DO UPDATE SET
+                value = EXCLUDED.value,
+                category = COALESCE(EXCLUDED.category, runtime_configs.category),
+                description = COALESCE(EXCLUDED.description, runtime_configs.description),
+                updated_by = EXCLUDED.updated_by,
+                updated_at = NOW();
+        """
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(query, (key, str(value), category, description, updated_by))
+        except Exception as e:
+            logger.error(f"Error setting runtime config for {key}: {e}")
+            raise RepositoryException(f"Failed to set runtime config: {e}") from e
+
+    async def delete_runtime_config(self, key: str) -> bool:
+        pool = await self._get_pool()
+        query = "DELETE FROM runtime_configs WHERE key = %s;"
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(query, (key,))
+                    return cur.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting runtime config {key}: {e}")
+            return False
+
 
 

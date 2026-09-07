@@ -92,3 +92,70 @@ def test_pii_two_column_matrix_guardrails():
         res = sanitize_pii_text(raw_input)
         assert "[REDACTED_PHONE]" not in res, f"False positive redaction in: {raw_input} -> {res}"
         assert res == raw_input, f"Content altered incorrectly: {raw_input} -> {res}"
+
+
+def test_threads_and_reels_pii_sanitization():
+    from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
+    from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
+    from ignis.domain.value_objects import GeoCode
+
+    threads_plugin = ThreadsPlugin()
+    reels_plugin = ReelsPlugin()
+
+    # Simulate GraphQL raw node with phone in caption/text
+    raw_threads_node = {
+        "id": "123456",
+        "code": "CxYz123",
+        "caption": {"text": "Khóa học AI Agent liên hệ Zalo 0931405002 ngay hôm nay!"},
+        "user": {"username": "agent_expert"},
+        "text_post_app_info": {"direct_reply_count": 5, "repost_count": 2, "quote_count": 1},
+        "like_count": 150,
+    }
+    threads_sig = threads_plugin._map_browser_post(raw_threads_node, geo=GeoCode.VN, keyword="ai")
+    assert threads_sig is not None
+    assert "0931405002" not in threads_sig.raw_title
+    assert "[REDACTED_PHONE]" in threads_sig.raw_title
+
+    # Simulate Reels DOM / graph node with phone in caption
+    raw_reels_node = {
+        "id": "789012",
+        "code": "RyZ789",
+        "caption": {"text": "Tư vấn thiết kế hotline (+84) 931 405 002 email ceo@startup.vn"},
+        "user": {"username": "fashion_brand"},
+        "play_count": 5000,
+        "like_count": 300,
+        "comment_count": 20,
+    }
+    reels_sig = reels_plugin._map_browser_reel(raw_reels_node, geo=GeoCode.VN, keyword="fashion")
+    assert reels_sig is not None
+    assert "0931405002" not in reels_sig.raw_title
+    assert "ceo@startup.vn" not in reels_sig.raw_title
+    assert "[REDACTED_PHONE]" in reels_sig.raw_title
+    assert "[REDACTED_EMAIL]" in reels_sig.raw_title
+
+
+def test_html_builder_defense_in_depth_sanitizes_pii():
+    from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
+    from ignis.domain.entities import TrendSignal, TopicCluster
+    from ignis.domain.value_objects import PlatformType, GeoCode
+    from uuid import uuid4
+
+    builder = HtmlArtifactBuilder()
+    cluster = TopicCluster(
+        id=uuid4(),
+        canonical_name="Hotline Test 0938940397",
+        summary_text="Liên hệ 0938940397",
+        category="test",
+        cross_platform_score=80.0,
+    )
+    # Even if raw_title was unsanitized (defence-in-depth)
+    sig = TrendSignal(
+        platform=PlatformType.THREADS,
+        raw_title="Liên hệ tư vấn Zalo 0938.940.397",
+        metric_value=100.0,
+        growth_velocity=0.0,
+        geo_code=GeoCode.VN,
+    )
+    rendered = builder.build_topic_card_artifact(cluster, [sig])
+    assert "0938.940.397" not in rendered
+    assert "[REDACTED_PHONE]" in rendered

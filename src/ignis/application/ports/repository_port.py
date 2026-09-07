@@ -144,4 +144,32 @@ class ITrendRepository(ABC):
         """Retrieve all active industry taxonomies and category keyword mappings."""
         pass
 
+    @abstractmethod
+    async def get_runtime_config(self, key: str) -> Optional[str]:
+        """Retrieve dynamic runtime configuration value by key."""
+        pass
+
+    @abstractmethod
+    async def get_all_runtime_configs(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Retrieve all stored runtime configurations, optionally filtered by category."""
+        pass
+
+    @abstractmethod
+    async def set_runtime_config(
+        self,
+        key: str,
+        value: str,
+        category: str = "connector",
+        description: Optional[str] = None,
+        updated_by: str = "system",
+    ) -> None:
+        """Upsert dynamic runtime configuration parameter."""
+        pass
+
+    @abstractmethod
+    async def delete_runtime_config(self, key: str) -> bool:
+        """Delete a dynamic runtime configuration parameter."""
+        pass
+
+
 

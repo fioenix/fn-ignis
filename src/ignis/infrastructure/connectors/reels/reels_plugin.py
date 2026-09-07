@@ -16,6 +16,7 @@ from ignis.domain.exceptions import (
     ConnectorQuotaExceededException,
 )
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, timeframe_to_days
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 from ignis.infrastructure.auth.meta_browser_auth import InstagramBrowserAuthManager
 from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager
 from ignis.infrastructure.cache.insights_cache import InsightsTTLCache
@@ -262,7 +263,7 @@ class ReelsPlugin(IConnectorPlugin):
             signals.append(
                 TrendSignal(
                     platform=PlatformType.REELS,
-                    raw_title=caption[:200] or f"Instagram Reel #{reel_id}",
+                    raw_title=sanitize_pii_text(caption[:200]) or f"Instagram Reel #{reel_id}",
                     metric_value=metric_value,
                     growth_velocity=0.0,
                     source_url=item.get("permalink"),
@@ -503,7 +504,7 @@ class ReelsPlugin(IConnectorPlugin):
 
         return TrendSignal(
             platform=PlatformType.REELS,
-            raw_title=caption[:200] or f"Instagram Reel #{reel_id}",
+            raw_title=sanitize_pii_text(caption[:200]) or f"Instagram Reel #{reel_id}",
             metric_value=float(play_count) if play_count > 0 else float(like_count),
             growth_velocity=0.0,
             source_url=f"https://www.instagram.com/reel/{code}/" if code else None,
@@ -552,7 +553,7 @@ class ReelsPlugin(IConnectorPlugin):
                     return []
                 data = resp.json()
         except Exception as e:
-            logger.error(f"Lỗi khi cào Reels: {e}")
+            logger.error(f"Error fetching Reels: {e}")
             raise ConnectorExecutionException(f"Failed to fetch Reels signals: {e}") from e
 
         signals: List[TrendSignal] = []
@@ -576,7 +577,7 @@ class ReelsPlugin(IConnectorPlugin):
             signals.append(
                 TrendSignal(
                     platform=PlatformType.REELS,
-                    raw_title=caption[:200] or f"Instagram Reel #{reel_id}",
+                    raw_title=sanitize_pii_text(caption[:200]) or f"Instagram Reel #{reel_id}",
                     metric_value=play_count,
                     growth_velocity=0.0,
                     source_url=url,

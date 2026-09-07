@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # fn-ignis 🔥 Zero-Touch Agent Bootstrap & Auto-Provisioning Script
-# Designed for AI Agents (Claude Code, Cursor, Windsurf, Antigravity, OpenClaw, Hermes, Devin)
+# Designed for AI Agents (Claude Desktop, Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, Pi Agent)
 # ==============================================================================
 set -euo pipefail
 
