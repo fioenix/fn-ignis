@@ -58,3 +58,17 @@ async def test_bug09_sqlite_bootstrap_seeds_industry_taxonomies(tmp_path):
     taxonomies = await repo.get_industry_taxonomies()
     assert taxonomies, "SQLite bootstrap phai seed industry_taxonomies"
     assert all(t["keywords"] for t in taxonomies)
+
+
+@pytest.mark.asyncio
+async def test_bug09_taxonomy_match_is_diacritics_insensitive():
+    """Lexicon luu khong dau ('khoa hoc'), tieu de co dau van phai khop."""
+    clusterer = SemanticClusterer()
+    clusterer.register_taxonomies([
+        {"industry_code": "education", "industry_name": "Education", "keywords": ["khoa hoc", "dao tao"]},
+    ])
+    signals = [
+        TrendSignal(platform=PlatformType.YOUTUBE, raw_title="Khóa học đào tạo marketing 2026", geo_code=GeoCode.VN),
+    ]
+    clusters = await clusterer.cluster_signals(signals)
+    assert clusters[0].category == "education"

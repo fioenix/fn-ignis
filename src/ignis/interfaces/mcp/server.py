@@ -1157,6 +1157,7 @@ async def handle_generate_trend_artifact(
 
 async def handle_trigger_ingress_refresh(geo: str = "VN") -> str:
     comp = get_components()
+    await _sync_lexicons_from_db(comp)
     geo_val = resolve_geo(geo)
 
     signals = await comp["registry"].fetch_from_all(geo=geo_val)

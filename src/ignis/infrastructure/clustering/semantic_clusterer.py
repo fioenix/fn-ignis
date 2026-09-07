@@ -1,5 +1,6 @@
 import math
 import re
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Set, Tuple
@@ -47,6 +48,12 @@ class SemanticClusterer(IClusteringEngine):
                 loaded.append((code, keywords))
         self._taxonomies = loaded
 
+    @staticmethod
+    def _fold_accents(text: str) -> str:
+        """Fold Vietnamese diacritics so 'khóa học' matches the ASCII lexicon entry 'khoa hoc'."""
+        decomposed = unicodedata.normalize("NFD", text.replace("đ", "d").replace("Đ", "D"))
+        return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
     def _classify_category(self, group: List[TrendSignal]) -> str:
         """Resolve a cluster category: source-provided first, then taxonomy match, else unclassified."""
         source_categories: List[str] = []
@@ -58,10 +65,11 @@ class SemanticClusterer(IClusteringEngine):
             return max(set(source_categories), key=source_categories.count)
 
         if self._taxonomies:
+            # Taxonomy keywords are stored without diacritics, so fold both sides before matching.
             tokens: Set[str] = set()
             for s in group:
-                tokens |= self._tokenize(s.raw_title)
-            haystack = " ".join(self._clean_title(s.raw_title).lower() for s in group)
+                tokens |= {self._fold_accents(t) for t in self._tokenize(s.raw_title)}
+            haystack = self._fold_accents(" ".join(self._clean_title(s.raw_title).lower() for s in group))
             best_code, best_hits = "", 0
             for code, keywords in self._taxonomies:
                 hits = sum(1 for kw in keywords if (kw in tokens) or (" " in kw and kw in haystack))
