@@ -1313,8 +1313,40 @@ async def handle_get_threads_trending_topics(geo: str = "VN", limit: int = 15) -
     if not threads_plugin or not hasattr(threads_plugin, "fetch_trending_topics"):
         return json.dumps({"status": "ERROR", "message": "Threads plugin not available or does not support trending topics."}, ensure_ascii=False)
 
+    # Check authentication state first
+    if hasattr(threads_plugin, "resolve_auth_tier") and callable(threads_plugin.resolve_auth_tier):
+        try:
+            auth_res = await threads_plugin.resolve_auth_tier()
+            if isinstance(auth_res, tuple) and len(auth_res) == 2:
+                tier, cred = auth_res
+                if tier == "none":
+                    return json.dumps({
+                        "status": "AUTH_REQUIRED",
+                        "platform": "THREADS",
+                        "geo": geo_code.value,
+                        "total_topics": 0,
+                        "topics": [],
+                        "message": "Threads is not authenticated. Run authenticate_threads(browser_login=True) to capture browser session.",
+                    }, ensure_ascii=False, indent=2)
+        except Exception as auth_err:
+            logger.debug(f"Auth tier check error: {auth_err}")
+
     try:
         topics = await threads_plugin.fetch_trending_topics(geo=geo_code, limit=max(1, min(limit, 30)))
+        if not topics:
+            return json.dumps(
+                {
+                    "status": "PARSE_EMPTY",
+                    "platform": "THREADS",
+                    "geo": geo_code.value,
+                    "total_topics": 0,
+                    "topics": [],
+                    "message": "Meta Threads does not currently surface 'Today's Topics' in this region or no trending topics were returned by GraphQL.",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
         return json.dumps(
             {
                 "status": "SUCCESS",
@@ -1343,8 +1375,40 @@ async def handle_get_threads_search_suggestions(keyword: str, geo: str = "VN", l
     if not threads_plugin or not hasattr(threads_plugin, "fetch_search_suggestions"):
         return json.dumps({"status": "ERROR", "message": "Threads plugin not available or does not support search suggestions."}, ensure_ascii=False)
 
+    # Check authentication state first
+    if hasattr(threads_plugin, "resolve_auth_tier") and callable(threads_plugin.resolve_auth_tier):
+        try:
+            auth_res = await threads_plugin.resolve_auth_tier()
+            if isinstance(auth_res, tuple) and len(auth_res) == 2:
+                tier, cred = auth_res
+                if tier == "none":
+                    return json.dumps({
+                        "status": "AUTH_REQUIRED",
+                        "platform": "THREADS",
+                        "keyword": keyword,
+                        "total_suggestions": 0,
+                        "suggestions": [],
+                        "message": "Threads is not authenticated. Run authenticate_threads(browser_login=True) to capture browser session.",
+                    }, ensure_ascii=False, indent=2)
+        except Exception as auth_err:
+            logger.debug(f"Auth tier check error: {auth_err}")
+
     try:
         suggestions = await threads_plugin.fetch_search_suggestions(keyword=keyword, geo=geo_code, limit=max(1, min(limit, 20)))
+        if not suggestions:
+            return json.dumps(
+                {
+                    "status": "PARSE_EMPTY",
+                    "platform": "THREADS",
+                    "keyword": keyword,
+                    "total_suggestions": 0,
+                    "suggestions": [],
+                    "message": f"No search suggestions returned by Threads for keyword '{keyword}'.",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+
         return json.dumps(
             {
                 "status": "SUCCESS",
