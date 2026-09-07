@@ -188,6 +188,18 @@
       neighbours.get(e.target.id).add(e.source.id);
     });
 
+    // A topic's prominence: how many signals carry it, how entangled it is with other topics, and
+    // its momentum score. Type size and label priority both read this, so a hub topic reads as a
+    // hub rather than every label shouting at the same volume.
+    nodes.forEach((n) => {
+      const degree = neighbours.get(n.id).size;
+      n.degree = degree;
+      n.prominence = Math.log1p(n.signal_count) / Math.log(40)
+        + Math.log1p(degree) / Math.log(12) * 0.7
+        + (n.score / 100) * 0.5;
+    });
+    const maxProminence = Math.max(0.001, ...nodes.map((n) => n.prominence));
+
     let scale = 0.9, offsetX = 0, offsetY = 0;
     let hovered = null, hoveredDot = null, selected = null, dragging = null, panning = false;
     let alpha = 1;
@@ -332,10 +344,16 @@
     // paint over a label, and each one claims a rectangle: a label that would collide with one
     // already placed is dropped. Zooming in spreads the nodes apart, which frees rectangles and
     // reveals more labels — instead of stacking them all on top of each other.
-    const LABEL_FONT_PX = 11;
+    const LABEL_FONT_MIN_PX = 10;
+    const LABEL_FONT_MAX_PX = 18;
     const LABEL_MAX_CHARS = 34;
     const LABEL_PADDING = 3;
     const LABEL_BUDGET = 90;
+
+    function labelFontSize(n) {
+      const share = Math.min(1, n.prominence / maxProminence);
+      return Math.round(LABEL_FONT_MIN_PX + (LABEL_FONT_MAX_PX - LABEL_FONT_MIN_PX) * Math.pow(share, 1.3));
+    }
 
     function occupiedPanels() {
       const margin = 6;
@@ -354,20 +372,22 @@
       if (!candidates.length) return;
 
       const priority = (n) => (n === selected ? 3 : n === hovered ? 2 : 0);
-      candidates.sort((a, b) => (priority(b) - priority(a)) || (b.r - a.r));
+      candidates.sort((a, b) => (priority(b) - priority(a)) || (b.prominence - a.prominence));
 
       ctx.save();
-      ctx.font = "600 " + LABEL_FONT_PX + "px " + token("--font-sans");
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.lineJoin = "round";
       const halo = token("--color-background") || "#FFFFFF";
       const ink = token("--color-foreground") || "#0B0B17";
+      const fontStack = token("--font-sans");
 
       const placed = occupiedPanels();
       let drawn = 0;
       for (const n of candidates) {
         if (drawn >= LABEL_BUDGET) break;
+        const fontPx = labelFontSize(n);
+        ctx.font = (fontPx >= 14 ? "700 " : "600 ") + fontPx + "px " + fontStack;
         const text = n.label.length > LABEL_MAX_CHARS ? n.label.slice(0, LABEL_MAX_CHARS - 1) + "…" : n.label;
         const width = ctx.measureText(text).width;
         const cx = n.x * scale + canvas.clientWidth / 2 + offsetX;
@@ -375,7 +395,7 @@
         const centreY = n.y * scale + canvas.clientHeight / 2 + offsetY;
         // Below the node first, then above it: a label blocked by a neighbour or by a panel gets
         // a second chance on the other side before it is dropped.
-        const options = [centreY + outerRadius + 5, centreY - outerRadius - 5 - LABEL_FONT_PX];
+        const options = [centreY + outerRadius + 5, centreY - outerRadius - 5 - fontPx];
 
         let box = null;
         for (const cy of options) {
@@ -383,7 +403,7 @@
             left: cx - width / 2 - LABEL_PADDING,
             right: cx + width / 2 + LABEL_PADDING,
             top: cy - LABEL_PADDING,
-            bottom: cy + LABEL_FONT_PX + LABEL_PADDING,
+            bottom: cy + fontPx + LABEL_PADDING,
             y: cy,
           };
           if (candidate.right < 0 || candidate.left > canvas.clientWidth) break;
@@ -397,7 +417,7 @@
         placed.push(box);
         drawn++;
         ctx.strokeStyle = halo;
-        ctx.lineWidth = 3.5;
+        ctx.lineWidth = 2 + fontPx * 0.14;
         ctx.strokeText(text, cx, box.y);
         ctx.fillStyle = ink;
         ctx.fillText(text, cx, box.y);

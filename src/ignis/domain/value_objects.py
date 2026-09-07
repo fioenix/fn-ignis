@@ -1,5 +1,44 @@
 from enum import Enum
 
+class IngressScope(str, Enum):
+    """Whose content an ingress pass is allowed to collect.
+
+    Market listening must never mix in the operator's own posts: an authenticated connector can
+    read both the public surface and the account's own timeline, and the cheapest endpoint is
+    usually the account one. PUBLIC_MARKET is the default everywhere; the account surface is only
+    read when a caller asks for it explicitly.
+    """
+
+    PUBLIC_MARKET = "public_market"
+    OWN_PROFILE = "own_profile"
+    BOTH = "both"
+
+    @property
+    def includes_public(self) -> bool:
+        return self in (IngressScope.PUBLIC_MARKET, IngressScope.BOTH)
+
+    @property
+    def includes_own(self) -> bool:
+        return self in (IngressScope.OWN_PROFILE, IngressScope.BOTH)
+
+    @classmethod
+    def _missing_(cls, value: object):
+        text = str(value or "").strip().lower().replace("-", "_")
+        for member in cls:
+            if member.value == text:
+                return member
+        aliases = {
+            "public": cls.PUBLIC_MARKET,
+            "market": cls.PUBLIC_MARKET,
+            "own": cls.OWN_PROFILE,
+            "self": cls.OWN_PROFILE,
+            "mine": cls.OWN_PROFILE,
+            "my_profile": cls.OWN_PROFILE,
+            "all": cls.BOTH,
+        }
+        return aliases.get(text)
+
+
 class PlatformType(str, Enum):
     """
     Extensible connector platform identifier.
