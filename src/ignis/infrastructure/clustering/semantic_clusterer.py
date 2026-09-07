@@ -151,10 +151,12 @@ class SemanticClusterer(IClusteringEngine):
                     group.append(sig_b)
                     visited.add(j)
 
-            canonical_name = self._select_canonical_name(group)
+            from ignis.domain.normalization import normalize_cluster_name
 
-            # Deterministic cluster UUID based on canonical_name to prevent duplicate cluster records across runs
-            cluster_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"cluster:{canonical_name.lower()}")
+            canonical_name = normalize_cluster_name(self._select_canonical_name(group))
+
+            # Deterministic cluster UUID based on normalized canonical_name to prevent duplicate cluster records across runs
+            cluster_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"cluster:{canonical_name}")
             for s in group:
                 s.cluster_id = cluster_id
 

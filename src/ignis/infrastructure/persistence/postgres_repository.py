@@ -130,51 +130,71 @@ class PostgresTimescaleRepository(ITrendRepository):
             ) VALUES (%s, %s, %s, %s, %s, %s, %s);
         """
 
+        from ignis.domain.normalization import normalize_cluster_name
+
+        # Deduplicate clusters within the batch before saving
+        deduped: Dict[str, TopicCluster] = {}
+        for c in clusters:
+            norm_name = normalize_cluster_name(c.canonical_name)
+            if norm_name in deduped:
+                target = deduped[norm_name]
+                target.signals.extend(c.signals)
+                target.cross_platform_score = max(target.cross_platform_score, c.cross_platform_score)
+            else:
+                c.canonical_name = norm_name
+                deduped[norm_name] = c
+
         try:
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
-                    for c in clusters:
-                        c_first_seen = c.first_seen_at or datetime.now(timezone.utc)
-                        c_last_updated = c.last_updated_at or datetime.now(timezone.utc)
-                        clean_name = c.canonical_name.strip()
-                        c_id_str = str(c.id)
+                    for c in deduped.values():
+                        try:
+                            async with conn.transaction():
+                                c_first_seen = c.first_seen_at or datetime.now(timezone.utc)
+                                c_last_updated = c.last_updated_at or datetime.now(timezone.utc)
+                                clean_name = c.canonical_name
+                                c_id_str = str(c.id)
 
-                        await cur.execute(find_query, (c_id_str, clean_name))
-                        row = await cur.fetchone()
+                                await cur.execute(find_query, (c_id_str, clean_name))
+                                row = await cur.fetchone()
 
-                        if row:
-                            actual_id = row[0]
-                            await cur.execute(
-                                update_query,
-                                (
-                                    clean_name,
-                                    c.summary_text,
-                                    c.category,
-                                    c.cross_platform_score,
-                                    c_last_updated,
-                                    actual_id,
-                                ),
+                                if row:
+                                    actual_id = row[0]
+                                    await cur.execute(
+                                        update_query,
+                                        (
+                                            clean_name,
+                                            c.summary_text,
+                                            c.category,
+                                            c.cross_platform_score,
+                                            c_last_updated,
+                                            actual_id,
+                                        ),
+                                    )
+                                else:
+                                    actual_id = c.id
+                                    await cur.execute(
+                                        insert_query,
+                                        (
+                                            c_id_str,
+                                            clean_name,
+                                            c.summary_text,
+                                            c.category,
+                                            c.cross_platform_score,
+                                            c_first_seen,
+                                            c_last_updated,
+                                        ),
+                                    )
+
+                                c.id = actual_id
+                                for s in c.signals:
+                                    s.cluster_id = actual_id
+                        except Exception as row_err:
+                            logger.warning(
+                                f"Failed to upsert individual cluster '{c.canonical_name}', rolling back savepoint: {row_err}"
                             )
-                        else:
-                            actual_id = c.id
-                            await cur.execute(
-                                insert_query,
-                                (
-                                    c_id_str,
-                                    clean_name,
-                                    c.summary_text,
-                                    c.category,
-                                    c.cross_platform_score,
-                                    c_first_seen,
-                                    c_last_updated,
-                                ),
-                            )
 
-                        c.id = actual_id
-                        for s in c.signals:
-                            s.cluster_id = actual_id
-
-            logger.info(f"Successfully upserted {len(clusters)} topic clusters.")
+            logger.info(f"Successfully upserted {len(deduped)} topic clusters.")
         except Exception as e:
             logger.error(f"Error upserting topic clusters: {e}", exc_info=True)
             raise RepositoryException(f"Failed to upsert topic clusters: {e}") from e
