@@ -1,8 +1,11 @@
+import logging
 import re
 import math
 from typing import List, Dict, Any, Tuple, Optional, Set
 
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 from ignis.config import settings
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
@@ -415,27 +418,50 @@ class StrategicMarketReasoner:
     def _is_vietnamese(self, title: str) -> bool:
         return self._is_localized(title, geo=GeoCode.VN)
 
+    KEYWORD_SYNONYMS: Dict[str, Set[str]] = {
+        "ai agent": {"ai", "trí tuệ nhân tạo", "agent", "trợ lý ảo", "chatbot", "bot", "tự động hóa", "tự động"},
+        "ai": {"ai", "trí tuệ nhân tạo", "artificial intelligence", "agent", "bot"},
+        "chatbot": {"chat bot", "chatbot", "trợ lý ảo", "bot", "ai"},
+        "automation": {"tự động hóa", "tự động", "automation", "quy trình", "auto"},
+        "ecommerce": {"thương mại điện tử", "e-commerce", "bán hàng online", "shop", "tiktok shop"},
+        "tiktok shop": {"tiktokshop", "tiktok shop", "bán hàng tiktok", "shop"},
+    }
+
     def _matches_topic_strictly(self, title: str, kw: str) -> bool:
         if self._is_garbage(title):
             return False
 
-        t = title.lower()
-        k = kw.lower().strip()
+        import unicodedata
+        t = unicodedata.normalize("NFC", title).lower()
+        k = unicodedata.normalize("NFC", kw).lower().strip()
 
         # Word boundary regex for short acronyms/words (<=4 chars or single word)
         if len(k) <= 4 or " " not in k:
             pattern = rf"\b{re.escape(k)}\b"
             if re.search(pattern, t):
                 return True
-        
+
         # Substring match for multi-word phrases
         if k in t:
             return True
 
-        # Token set match: all key content tokens exist in title
-        kw_tokens = [w for w in k.split() if len(w) > 2]
-        if len(kw_tokens) >= 2:
-            return all(w in t for w in kw_tokens)
+        # Check domain synonyms / expansions
+        synonyms = self.KEYWORD_SYNONYMS.get(k, set())
+        for syn in synonyms:
+            if len(syn) <= 4 or " " not in syn:
+                if re.search(rf"\b{re.escape(syn)}\b", t):
+                    return True
+            elif syn in t:
+                return True
+
+        # Token set match preserving 2-letter tokens like 'ai'
+        kw_tokens = [w for w in k.split() if len(w) >= 2]
+        if kw_tokens:
+            distinctive_tokens = [w for w in kw_tokens if w in ("ai", "bot", "app", "seo", "ads", "crm", "erp")]
+            if any(re.search(rf"\b{re.escape(dt)}\b", t) for dt in distinctive_tokens):
+                return True
+            if len(kw_tokens) >= 2 and all(w in t for w in kw_tokens):
+                return True
 
         return False
 
@@ -461,15 +487,19 @@ class StrategicMarketReasoner:
             return opportunities
 
         # Extract search demand values per keyword
-        demand_signals = [s for s in signals if s.platform == PlatformType.GOOGLE_TRENDS]
+        demand_signals = [s for s in signals if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "google"]
+        video_signals = [s for s in signals if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) in ("youtube", "tiktok", "reels")]
+        logger.info(f"Evaluating {len(target_keywords)} mission keywords against {len(signals)} candidate signals (demand: {len(demand_signals)}, video: {len(video_signals)}).")
+
         demand_map: Dict[str, float] = {}
         for s in demand_signals:
             kw_meta = s.metadata.get("keyword", "")
             if kw_meta:
                 demand_map[kw_meta.lower().strip()] = float(s.metric_value)
             for raw_kw in target_keywords:
-                if raw_kw.lower() in s.raw_title.lower():
-                    demand_map[raw_kw.lower().strip()] = max(demand_map.get(raw_kw.lower().strip(), 0.0), float(s.metric_value))
+                kw_clean = raw_kw.lower().strip()
+                if self._matches_topic_strictly(s.raw_title, kw_clean):
+                    demand_map[kw_clean] = max(demand_map.get(kw_clean, 0.0), float(s.metric_value))
 
         for raw_kw in target_keywords:
             kw_clean = raw_kw.lower().strip()
