@@ -15,6 +15,12 @@ class SemanticClusterer(IClusteringEngine):
     Sub-50ms deterministic execution without external LLM dependency.
     """
 
+    AMBIGUOUS_UNIGRAMS: Set[str] = {
+        "người", "đại", "việt", "nam", "mới", "hay", "làm", "nhất", "cực",
+        "quá", "siêu", "top", "tin", "xem", "cho", "của", "và", "các", "những",
+        "một", "hai", "ba", "bốn", "năm", "ngày", "đêm", "giờ", "phút", "vs", "new"
+    }
+
     def __init__(
         self,
         similarity_threshold: float = 0.25,
@@ -30,25 +36,30 @@ class SemanticClusterer(IClusteringEngine):
             if clean:
                 self._custom_stopwords.add(clean)
 
-    @staticmethod
-    def _clean_title(text: str) -> str:
+    @classmethod
+    def _clean_title(cls, text: str) -> str:
         """
         Strip hashtags (#tag), mentions (@user), URLs, emojis, and noise artifacts
         to extract core semantic phrase without relying on static dictionaries.
         """
         if not text:
             return ""
+        import unicodedata
+        text = unicodedata.normalize("NFC", text)
         # 1. Remove URLs
         s = re.sub(r"https?://\S+|www\.\S+", " ", text)
         # 2. Remove hashtags entirely (strip # and following tag characters)
         s = re.sub(r"#\w+", " ", s)
-        # 3. Remove user mentions
+        # 3. Remove standalone viral noise words
+        s = re.sub(r"\b(xuhuong|fyp|foryou|foryoupage|viral|trending|shorts|reels)\b", " ", s, flags=re.IGNORECASE)
+        # 4. Remove user mentions
         s = re.sub(r"@\w+", " ", s)
-        # 4. Remove emojis & unicode surrogate/pictograph blocks
+        # 5. Remove emojis & unicode surrogate/pictograph blocks
         s = re.sub(r"[\U00010000-\U0010ffff]", " ", s)
-        # 5. Remove repeated emoticon artifacts like =)) :)) ^^
+        s = re.sub(r"[\u2600-\u27bf]", " ", s)
+        # 6. Remove repeated emoticon artifacts like =)) :)) ^^
         s = re.sub(r"[=:]\)+|\^\^|(?::|;|=)-?[)(/\\dDpP]", " ", s)
-        # 6. Normalize whitespaces and strip leading/trailing punctuation
+        # 7. Normalize whitespaces and strip leading/trailing punctuation
         s = re.sub(r"\s+", " ", s).strip(" \t\n\r-_:;.,/\\|~`!@#$%^&*()+=[]{}<>\"'")
         return s
 
@@ -73,7 +84,7 @@ class SemanticClusterer(IClusteringEngine):
             # Fallback: take signal with shortest raw title after basic hashtag removal
             fallback_title = min(group, key=lambda s: len(s.raw_title)).raw_title
             canonical = re.sub(r"[#@]", "", fallback_title)
-            canonical = re.sub(r"\s+", " ", canonical).strip(" \t\n\r-_:;.,/\\|~`!@#$%^&*()+=[]{}<>\"'")
+            canonical = cls._clean_title(canonical)
 
         if not canonical:
             canonical = "Chủ đề xu hướng tổng hợp"
@@ -81,7 +92,7 @@ class SemanticClusterer(IClusteringEngine):
         # Capitalize first character for clean presentation
         canonical = canonical[0].upper() + canonical[1:] if len(canonical) > 1 else canonical.upper()
         if len(canonical) > 80:
-            canonical = canonical[:77] + "..."
+            canonical = canonical[:77].rsplit(" ", 1)[0] + "..." if " " in canonical[:77] else canonical[:77] + "..."
         return canonical
 
     def _tokenize(self, text: str) -> Set[str]:
@@ -105,7 +116,16 @@ class SemanticClusterer(IClusteringEngine):
             return 0.0
         
         # Guardrail against single short token false matches across titles with distinct semantic meaning
-        # If intersection only has 1 token and either title has 3+ tokens, require higher threshold
+        if len(intersection) == 1:
+            shared_token = next(iter(intersection))
+            # If both titles have 2 or more tokens, a single shared token is insufficient
+            # to declare identical topics (e.g. 'người lao động' vs 'người mẫu', 'đại học' vs 'triều đại')
+            if len(tokens_a) >= 2 and len(tokens_b) >= 2:
+                return 0.0
+            # If one side is a single token, reject ambiguous/generic single unigrams
+            if shared_token.lower() in self.AMBIGUOUS_UNIGRAMS:
+                return 0.0
+
         overlap = len(intersection) / min(len(tokens_a), len(tokens_b))
         jaccard = len(intersection) / len(tokens_a.union(tokens_b))
         
