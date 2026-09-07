@@ -86,3 +86,47 @@ async def test_handle_get_tiktok_creative_center_trends():
             assert resp["geo_code"] == "VN"
             assert resp["total_hashtags"] == 1
             assert resp["trending_hashtags"][0]["hashtag"] == "#golivegrowfast"
+
+
+def _fake_row_lines(count: int) -> list:
+    lines = ["Trending Hashtags", "Hashtag", "Posts", "Views"]
+    for rank in range(1, count + 1):
+        lines += [str(rank), f"#tag{rank}", "News & Entertainment", f"{rank}K", "POSTS", f"{rank}M", "VIEWS"]
+    return lines
+
+
+def test_bug10_parser_reads_every_rendered_row_not_only_three():
+    plugin = TikTokCreativeCenterPlugin()
+    rows = plugin._parse_trend_rows(_fake_row_lines(20), limit=30)
+    assert len(rows) == 20, f"Parser chi doc duoc {len(rows)} hashtag"
+    assert rows[0]["hashtag"] == "#tag1"
+    assert rows[-1]["rank"] == 20
+    assert rows[4]["views_count"] == 5_000_000.0
+
+
+def test_bug10_parser_respects_limit_and_industry_filter():
+    plugin = TikTokCreativeCenterPlugin()
+    assert len(plugin._parse_trend_rows(_fake_row_lines(20), limit=5)) == 5
+    assert plugin._parse_trend_rows(_fake_row_lines(20), limit=30, industry="Apparel") == []
+
+
+@pytest.mark.asyncio
+async def test_bug10_load_all_rows_paginates_until_no_new_rows():
+    """Trang lazy-load: phai scroll/click 'View More' cho den khi khong sinh them row."""
+    plugin = TikTokCreativeCenterPlugin()
+    pages_text = [
+        "\n".join(_fake_row_lines(3)),
+        "\n".join(_fake_row_lines(9)),
+        "\n".join(_fake_row_lines(15)),
+        "\n".join(_fake_row_lines(15)),
+    ]
+    page = MagicMock()
+    page.inner_text = AsyncMock(side_effect=pages_text)
+    page.query_selector = AsyncMock(return_value=None)
+    page.evaluate = AsyncMock()
+    page.wait_for_timeout = AsyncMock()
+
+    text = await plugin._load_all_rows(page, limit=30)
+    rows = plugin._parse_trend_rows([t.strip() for t in text.split("\n") if t.strip()], limit=30)
+    assert len(rows) == 15
+    assert page.evaluate.await_count >= 2

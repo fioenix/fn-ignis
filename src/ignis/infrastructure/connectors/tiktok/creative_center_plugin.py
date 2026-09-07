@@ -102,6 +102,92 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
 
         return signals
 
+    # The ranking list is lazy-loaded: rows appear only as the page is scrolled or "View More" is clicked.
+    LOAD_MORE_SELECTORS = (
+        'button:has-text("View More")',
+        'button:has-text("Xem thêm")',
+        '[class*="ViewMore"]',
+        '[data-testid*="loadMore"]',
+    )
+    MAX_LOAD_MORE_ROUNDS = 12
+
+    def _parse_trend_rows(
+        self,
+        lines: List[str],
+        limit: int = 30,
+        industry: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Parse the flattened ranking table (rank, hashtag, category, posts, views) into rows."""
+        results: List[Dict[str, Any]] = []
+        i = 0
+        while i < len(lines) - 3:
+            if not (lines[i].isdigit() and lines[i + 1].startswith("#")):
+                i += 1
+                continue
+
+            rank = int(lines[i])
+            hashtag_raw = lines[i + 1]
+            category = lines[i + 2]
+
+            posts_str = ""
+            views_str = ""
+            j = i + 3
+            while j < min(i + 8, len(lines)):
+                if lines[j].upper() == "POSTS" and j > i + 3:
+                    posts_str = lines[j - 1]
+                elif lines[j].upper() == "VIEWS" and j > i + 3:
+                    views_str = lines[j - 1]
+                elif lines[j].isdigit() and j + 1 < len(lines) and lines[j + 1].startswith("#"):
+                    break
+                j += 1
+
+            if not industry or (industry.lower() in category.lower() or industry.lower() in hashtag_raw.lower()):
+                results.append({
+                    "rank": rank,
+                    "hashtag": hashtag_raw,
+                    "category": category,
+                    "posts": posts_str,
+                    "views": views_str,
+                    "posts_count": self._parse_metric_number(posts_str),
+                    "views_count": self._parse_metric_number(views_str),
+                })
+                if len(results) >= limit:
+                    break
+
+            i = j
+        return results
+
+    async def _load_all_rows(self, page: Any, limit: int) -> str:
+        """Scroll and click "View More" until the page stops yielding new rows or limit is covered."""
+        text = await page.inner_text("body")
+        previous_count = -1
+        for _ in range(self.MAX_LOAD_MORE_ROUNDS):
+            lines = [t.strip() for t in text.split("\n") if t.strip()]
+            count = len(self._parse_trend_rows(lines, limit=limit))
+            if count >= limit or count == previous_count:
+                break
+            previous_count = count
+
+            clicked = False
+            for selector in self.LOAD_MORE_SELECTORS:
+                try:
+                    button = await page.query_selector(selector)
+                    if button:
+                        await button.click()
+                        clicked = True
+                        break
+                except Exception:
+                    continue
+            if not clicked:
+                try:
+                    await page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
+                except Exception:
+                    pass
+
+            await page.wait_for_timeout(2000)
+            text = await page.inner_text("body")
+        return text
+
     async def fetch_macro_trends(
         self,
         geo: GeoCode = GeoCode.VN,
@@ -170,56 +256,9 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
                     except Exception as e:
                         logger.debug(f"Country selection handled via params: {e}")
 
-                # Scroll slightly to trigger dynamic lazy loading
-                try:
-                    await page.evaluate("window.scrollBy(0, 800)")
-                    await page.wait_for_timeout(1500)
-                except Exception:
-                    pass
-
-                text = await page.inner_text("body")
+                text = await self._load_all_rows(page, limit=limit)
                 lines = [t.strip() for t in text.split("\n") if t.strip()]
-
-                # Parse row structure containing rank and hashtag
-                i = 0
-                while i < len(lines) - 3:
-                    if lines[i].isdigit() and lines[i + 1].startswith("#"):
-                        rank = int(lines[i])
-                        hashtag_raw = lines[i + 1]
-                        category = lines[i + 2]
-                        
-                        posts_str = ""
-                        views_str = ""
-                        
-                        # Scan adjacent lines for posts and views count
-                        j = i + 3
-                        while j < min(i + 8, len(lines)):
-                            if lines[j].upper() == "POSTS" and j > i + 3:
-                                posts_str = lines[j - 1]
-                            elif lines[j].upper() == "VIEWS" and j > i + 3:
-                                views_str = lines[j - 1]
-                            elif lines[j].isdigit() and j + 1 < len(lines) and lines[j + 1].startswith("#"):
-                                break
-                            j += 1
-
-
-                        # Apply industry filter if specified
-                        if not industry or (industry.lower() in category.lower() or industry.lower() in hashtag_raw.lower()):
-                            results.append({
-                                "rank": rank,
-                                "hashtag": hashtag_raw,
-                                "category": category,
-                                "posts": posts_str,
-                                "views": views_str,
-                                "posts_count": self._parse_metric_number(posts_str),
-                                "views_count": self._parse_metric_number(views_str),
-                            })
-                        i = j
-                    else:
-                        i += 1
-
-                    if len(results) >= limit:
-                        break
+                results = self._parse_trend_rows(lines, limit=limit, industry=industry)
 
                 await browser.close()
 

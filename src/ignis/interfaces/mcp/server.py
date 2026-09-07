@@ -27,6 +27,12 @@ from ignis.domain.entities import TopicCluster
 
 from ignis.config import settings
 
+from ignis.domain.token_rotation import (
+    STATUS_EXPIRED,
+    STATUS_EXPIRING_SOON,
+    build_expiry_alerts,
+    plan_staggered_refresh,
+)
 from ignis.domain.value_objects import (
     GeoCode,
     PlatformType,
@@ -548,11 +554,15 @@ async def handle_get_platform_auth_status() -> str:
     comp = get_components()
     repo: ITrendRepository = comp["repository"]
     creds = await repo.list_platform_credentials()
+    refresh_plan = plan_staggered_refresh(creds)
+    warnings = [e for e in refresh_plan if e["status"] in (STATUS_EXPIRING_SOON, STATUS_EXPIRED)]
     return json.dumps(
         {
             "status": "SUCCESS",
             "platforms": creds,
             "count": len(creds),
+            "expiry_warnings": warnings,
+            "refresh_plan": refresh_plan,
         },
         ensure_ascii=False,
         indent=2
@@ -2015,14 +2025,6 @@ async def handle_verify_connectors_health() -> str:
                     try:
                         exp_dt = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
                         days_remaining = (exp_dt - now).days
-                        if days_remaining < 7:
-                            alerts.append({
-                                "level": "WARNING",
-                                "type": "TOKEN_EXPIRING_SOON",
-                                "component": plugin.name,
-                                "message": f"Credential for {plugin.name} expires in {days_remaining} days ({expires_at_str}).",
-                                "timestamp": now.isoformat(),
-                            })
                     except Exception:
                         pass
             except Exception:
@@ -2127,6 +2129,17 @@ async def handle_verify_connectors_health() -> str:
                 "remediation": "Check system logs or network access to diagnose connector failure.",
             }
             diagnostics["overall_status"] = "DEGRADED"
+
+    # 3. Credential expiry & staggered refresh planning across every stored Tier-1 session
+    try:
+        refresh_plan = plan_staggered_refresh(await repo.list_platform_credentials(), now=now)
+        diagnostics["credential_refresh_plan"] = refresh_plan
+        expiry_alerts = build_expiry_alerts(refresh_plan, now=now)
+        alerts.extend(expiry_alerts)
+        if any(a["level"] == "CRITICAL" for a in expiry_alerts):
+            diagnostics["overall_status"] = "DEGRADED"
+    except Exception as e:
+        logger.warning(f"Could not build credential refresh plan: {e}")
 
     # Persist alerts to audit log
     diagnostics["alerts"] = alerts
