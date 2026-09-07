@@ -405,7 +405,7 @@ Khi FastMCP Server khởi chạy (`ignis-mcp`), 39 tools, 2 prompts và 2 resour
 | `get_system_logs` | `limit, level` | Truy vấn nhật ký sự kiện kiểm toán hệ thống. |
 | `verify_connectors_health` | Không | Chạy synthetic diagnostics trên YouTube quota, Google RSS, DB pool, Playwright contexts. |
 | `authenticate_tiktok` | `headless, timeout_seconds` | Quản lý vòng đời xác thực trình duyệt TikTok có mã hóa Fernet (AES-128-CBC + HMAC-SHA256). |
-| `get_platform_auth_status` | `platform` | Kiểm tra trạng thái phiên đăng nhập của các nền tảng mạng xã hội. |
+| `get_platform_auth_status` | `platform` | Kiểm tra trạng thái phiên đăng nhập của các nền tảng mạng xã hội, kèm cảnh báo token sắp hết hạn (< 7 ngày) và lịch `refresh_plan` giãn cách để không làm mới nhiều phiên Tier-1 cùng lúc. |
 | `clear_platform_auth` | `platform` | Xóa thông tin xác thực đã lưu của nền tảng. |
 
 ### 5. FastMCP Native Prompts & Resources

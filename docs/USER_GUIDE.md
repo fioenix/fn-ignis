@@ -282,7 +282,7 @@ The `fn-ignis` FastMCP server exposes **39 atomic and strategic tools**:
 ### 6. Dynamic Configuration & System Health (6 Tools)
 - `diagnose_system_health`: Full synthetic diagnostics of database, connectors, and encryption.
 - `get_system_logs`: View recent application runtime logs.
-- `get_platform_auth_status`: Unified status overview across all social platforms.
+- `get_platform_auth_status`: Unified status overview across all social platforms, including expiry warnings (< 7 days) and a staggered `refresh_plan` that keeps two Tier-1 sessions from being refreshed on the same day.
 - `clear_platform_auth`: Generic credential reset tool.
 - `get_runtime_config`: Inspect live operational thresholds and timeouts.
 - `update_runtime_config`: Adjust thresholds (quality gate, limits, timeouts) dynamically without restart.
