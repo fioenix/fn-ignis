@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FN-IGNIS Trend Graph</title>
+  <!--
+    Dependency-free by design: the canvas renderer and the force layout are implemented inline so the
+    exported file stays a single self-contained artifact that opens offline, without a CDN round trip.
+  -->
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #ea580c;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+    }
+    #stage { position: fixed; inset: 0; }
+    canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+    canvas.dragging { cursor: grabbing; }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, .06);
+    }
+    #toolbar {
+      position: fixed; top: 16px; left: 16px; right: 16px;
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      padding: 10px 14px;
+    }
+    #toolbar .brand { font-weight: 800; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+    #toolbar .chip { font-size: 11px; font-weight: 700; color: var(--muted); background: #f1f5f9; border-radius: 999px; padding: 3px 10px; }
+    #toolbar input, #toolbar select {
+      font: inherit; font-size: 12px; padding: 6px 10px;
+      border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text);
+    }
+    #toolbar input[type="range"] { padding: 0; width: 110px; }
+    #toolbar label { font-size: 11px; font-weight: 700; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+    #toolbar button {
+      font: inherit; font-size: 12px; font-weight: 700; padding: 6px 12px; cursor: pointer;
+      border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text);
+    }
+    #toolbar button:hover { border-color: #cbd5e1; }
+
+    #details {
+      position: fixed; top: 88px; right: 16px; width: 310px; max-height: calc(100vh - 120px);
+      overflow-y: auto; padding: 16px; display: none;
+    }
+    #details h2 { margin: 0 0 6px; font-size: 15px; line-height: 1.35; }
+    #details .meta { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
+    #details .summary { font-size: 12px; color: #475569; line-height: 1.55; margin-bottom: 14px; }
+    #details .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 11px; }
+    #details .bar-row .name { width: 74px; font-weight: 700; color: var(--muted); }
+    #details .bar { height: 8px; border-radius: 999px; flex: 1; background: #f1f5f9; overflow: hidden; }
+    #details .bar span { display: block; height: 100%; border-radius: 999px; }
+    #details .close { position: absolute; top: 12px; right: 14px; border: 0; background: none; font-size: 18px; color: var(--muted); cursor: pointer; }
+
+    #legend { position: fixed; bottom: 16px; left: 16px; padding: 12px 14px; font-size: 11px; }
+    #legend .row { display: flex; align-items: center; gap: 7px; margin-top: 5px; color: var(--muted); font-weight: 600; }
+    #legend .dot { width: 9px; height: 9px; border-radius: 50%; }
+    #legend .title { font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--text); font-size: 10px; }
+
+    #tooltip {
+      position: fixed; pointer-events: none; display: none; z-index: 20;
+      background: #0f172a; color: #f8fafc; font-size: 11px; font-weight: 600;
+      padding: 6px 10px; border-radius: 8px; max-width: 260px; line-height: 1.4;
+    }
+    #hint { position: fixed; bottom: 16px; right: 16px; font-size: 11px; color: var(--muted); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div id="stage"><canvas id="graph"></canvas></div>
+
+  <div id="toolbar" class="card">
+    <span class="brand">FN-IGNIS Graph</span>
+    <span class="chip" id="geo-chip"></span>
+    <span class="chip" id="count-chip"></span>
+    <input id="search" type="search" placeholder="Search topic..." autocomplete="off">
+    <select id="category-filter"><option value="">All categories</option></select>
+    <select id="platform-filter"><option value="">All platforms</option></select>
+    <select id="momentum-filter"><option value="">All momentum</option></select>
+    <label>Min score <input id="score-filter" type="range" min="0" max="100" value="0" step="5"><b id="score-value">0</b></label>
+    <label><input id="label-toggle" type="checkbox" checked> Labels</label>
+    <button id="reset">Reset view</button>
+  </div>
+
+  <div id="details" class="card">
+    <button class="close" id="details-close" aria-label="Close">&times;</button>
+    <h2 id="d-title"></h2>
+    <div class="meta" id="d-meta"></div>
+    <div class="summary" id="d-summary"></div>
+    <div id="d-platforms"></div>
+  </div>
+
+  <div id="legend" class="card">
+    <div class="title">Platforms</div>
+    <div id="legend-rows"></div>
+  </div>
+
+  <div id="tooltip"></div>
+  <div id="hint">Scroll to zoom · drag to pan · click a node for detail</div>
+
+  <script>
+    const GRAPH = {{ graph | tojson }};
+
+    const PLATFORM_COLORS = {
+      google: "#4285f4",
+      youtube: "#ef4444",
+      tiktok: "#0f172a",
+      threads: "#8b5cf6",
+      reels: "#ec4899",
+    };
+    const MOMENTUM_COLORS = {
+      breakout: "#e11d48",
+      surging: "#ea580c",
+      steady: "#0ea5e9",
+      declining: "#94a3b8",
+    };
+    const platformColor = (p) => PLATFORM_COLORS[p] || "#64748b";
+    const momentumColor = (m) => MOMENTUM_COLORS[(m || "").toLowerCase()] || "#94a3b8";
+
+    const canvas = document.getElementById("graph");
+    const ctx = canvas.getContext("2d");
+    const tooltip = document.getElementById("tooltip");
+
+    const nodes = GRAPH.nodes.map((n, i) => {
+      const angle = (i / Math.max(1, GRAPH.nodes.length)) * Math.PI * 2;
+      const spread = 200 + Math.sqrt(i) * 42;
+      return Object.assign({}, n, {
+        x: Math.cos(angle) * spread,
+        y: Math.sin(angle) * spread,
+        vx: 0, vy: 0,
+        r: 6 + Math.sqrt(Math.max(1, n.signal_count)) * 2.4 + n.score / 22,
+        visible: true,
+      });
+    });
+    const nodeById = new Map(nodes.map((n) => [n.id, n]));
+    // Only the larger nodes carry a label until the user zooms in, otherwise a dense day is unreadable.
+    const sortedRadii = nodes.map((n) => n.r).sort((a, b) => a - b);
+    const LABEL_MIN_RADIUS = sortedRadii.length ? sortedRadii[Math.floor(sortedRadii.length * 0.75)] : 0;
+    const edges = GRAPH.edges
+      .map((e) => ({ source: nodeById.get(e.source), target: nodeById.get(e.target), weight: e.weight }))
+      .filter((e) => e.source && e.target);
+
+    const neighbours = new Map(nodes.map((n) => [n.id, new Set()]));
+    edges.forEach((e) => {
+      neighbours.get(e.source.id).add(e.target.id);
+      neighbours.get(e.target.id).add(e.source.id);
+    });
+
+    let scale = 0.9, offsetX = 0, offsetY = 0;
+    let hovered = null, selected = null, dragging = null, panning = false;
+    let alpha = 1;
+    let pointer = { x: 0, y: 0 };
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = canvas.clientWidth * dpr;
+      canvas.height = canvas.clientHeight * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    window.addEventListener("resize", () => { resize(); draw(); });
+
+    const toWorld = (sx, sy) => ({
+      x: (sx - canvas.clientWidth / 2 - offsetX) / scale,
+      y: (sy - canvas.clientHeight / 2 - offsetY) / scale,
+    });
+
+    // --- Force layout: repulsion + link springs + centering, cheap enough for a few hundred nodes.
+    function tick() {
+      if (alpha < 0.005) return false;
+      alpha *= 0.985;
+
+      for (let i = 0; i < nodes.length; i++) {
+        const a = nodes[i];
+        for (let j = i + 1; j < nodes.length; j++) {
+          const b = nodes[j];
+          let dx = b.x - a.x, dy = b.y - a.y;
+          let dist2 = dx * dx + dy * dy;
+          if (dist2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; dist2 = 1; }
+          const minDist = (a.r + b.r + 26);
+          const force = (2600 + minDist * 18) / dist2;
+          const dist = Math.sqrt(dist2);
+          const fx = (dx / dist) * force, fy = (dy / dist) * force;
+          a.vx -= fx; a.vy -= fy;
+          b.vx += fx; b.vy += fy;
+        }
+      }
+
+      edges.forEach((e) => {
+        const dx = e.target.x - e.source.x, dy = e.target.y - e.source.y;
+        const dist = Math.max(1, Math.hypot(dx, dy));
+        const target = 120 - e.weight * 55;
+        const k = (dist - target) * 0.012 * (0.4 + e.weight);
+        const fx = (dx / dist) * k, fy = (dy / dist) * k;
+        e.source.vx += fx; e.source.vy += fy;
+        e.target.vx -= fx; e.target.vy -= fy;
+      });
+
+      nodes.forEach((n) => {
+        n.vx -= n.x * 0.0016;
+        n.vy -= n.y * 0.0016;
+        if (n === dragging) { n.vx = 0; n.vy = 0; return; }
+        n.vx *= 0.86; n.vy *= 0.86;
+        n.x += Math.max(-24, Math.min(24, n.vx * alpha));
+        n.y += Math.max(-24, Math.min(24, n.vy * alpha));
+      });
+      return true;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+      ctx.save();
+      ctx.translate(canvas.clientWidth / 2 + offsetX, canvas.clientHeight / 2 + offsetY);
+      ctx.scale(scale, scale);
+
+      const focusIds = selected ? neighbours.get(selected.id) : null;
+      const isFocused = (n) => !selected || n.id === selected.id || focusIds.has(n.id);
+
+      ctx.lineWidth = 1 / scale;
+      edges.forEach((e) => {
+        const lit = e.source.visible && e.target.visible && isFocused(e.source) && isFocused(e.target);
+        ctx.strokeStyle = lit ? "rgba(100,116,139," + (0.25 + e.weight * 0.5) + ")" : "rgba(148,163,184,0.08)";
+        ctx.beginPath();
+        ctx.moveTo(e.source.x, e.source.y);
+        ctx.lineTo(e.target.x, e.target.y);
+        ctx.stroke();
+      });
+
+      // Detail is gated on the node's on-screen size, not on the zoom level alone, so a fitted
+      // overview still labels its biggest topics while a dense field never turns into soup.
+      const labelsEnabled = document.getElementById("label-toggle").checked;
+
+      nodes.forEach((n) => {
+        const dim = !n.visible || !isFocused(n);
+        const alphaMul = dim ? 0.13 : 1;
+
+        if (n.dots.length && n.r * scale >= 5) {
+          // The signal layer is a density halo: dots are aggregated, never individually addressable.
+          const ring = n.r + 7;
+          n.dots.forEach((platform, i) => {
+            const a = (i / n.dots.length) * Math.PI * 2 + n.r;
+            ctx.globalAlpha = alphaMul * 0.75;
+            ctx.fillStyle = platformColor(platform);
+            ctx.beginPath();
+            ctx.arc(n.x + Math.cos(a) * ring, n.y + Math.sin(a) * ring, 1.9, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+
+        ctx.globalAlpha = alphaMul;
+        ctx.fillStyle = momentumColor(n.momentum);
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (n === hovered || n === selected) {
+          ctx.strokeStyle = "#0f172a";
+          ctx.lineWidth = 2 / scale;
+          ctx.stroke();
+        }
+
+        const labelWorthy = n === hovered || n === selected || scale > 1.6
+          || (n.r >= LABEL_MIN_RADIUS && n.r * scale >= 4.5);
+        if (labelsEnabled && !dim && labelWorthy) {
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = "#0f172a";
+          ctx.font = (11 / scale) + "px 'Plus Jakarta Sans', system-ui, sans-serif";
+          ctx.textAlign = "center";
+          const label = n.label.length > 34 ? n.label.slice(0, 33) + "…" : n.label;
+          ctx.fillText(label, n.x, n.y + n.r + 13 / scale);
+        }
+      });
+
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    let didFit = false;
+    function fitToView(padding = 90) {
+      const shown = nodes.filter((n) => n.visible);
+      if (!shown.length) return;
+      const xs = shown.map((n) => n.x), ys = shown.map((n) => n.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const width = Math.max(1, maxX - minX), height = Math.max(1, maxY - minY);
+      scale = Math.min(2, Math.max(0.12,
+        Math.min((canvas.clientWidth - padding * 2) / width, (canvas.clientHeight - padding * 2) / height)));
+      offsetX = -((minX + maxX) / 2) * scale;
+      offsetY = -((minY + maxY) / 2) * scale;
+    }
+
+    function frame() {
+      const moved = tick();
+      if (!didFit && alpha < 0.2) { fitToView(); didFit = true; }
+      if (moved) draw();
+      requestAnimationFrame(frame);
+    }
+
+    function nodeAt(sx, sy) {
+      const w = toWorld(sx, sy);
+      let best = null, bestDist = Infinity;
+      for (const n of nodes) {
+        if (!n.visible) continue;
+        const d = Math.hypot(n.x - w.x, n.y - w.y);
+        if (d < n.r + 4 && d < bestDist) { best = n; bestDist = d; }
+      }
+      return best;
+    }
+
+    canvas.addEventListener("mousemove", (ev) => {
+      pointer = { x: ev.clientX, y: ev.clientY };
+      if (dragging) {
+        const w = toWorld(ev.clientX, ev.clientY);
+        dragging.x = w.x; dragging.y = w.y;
+        alpha = Math.max(alpha, 0.35);
+        return;
+      }
+      if (panning) {
+        offsetX += ev.movementX; offsetY += ev.movementY;
+        draw();
+        return;
+      }
+      const hit = nodeAt(ev.clientX, ev.clientY);
+      if (hit !== hovered) {
+        hovered = hit;
+        draw();
+      }
+      if (hovered) {
+        tooltip.style.display = "block";
+        tooltip.style.left = (ev.clientX + 14) + "px";
+        tooltip.style.top = (ev.clientY + 14) + "px";
+        tooltip.textContent = hovered.label + "  ·  " + hovered.score + "  ·  " + hovered.signal_count + " signals";
+      } else {
+        tooltip.style.display = "none";
+      }
+    });
+
+    canvas.addEventListener("mousedown", (ev) => {
+      const hit = nodeAt(ev.clientX, ev.clientY);
+      if (hit) { dragging = hit; } else { panning = true; canvas.classList.add("dragging"); }
+    });
+    window.addEventListener("mouseup", () => { dragging = null; panning = false; canvas.classList.remove("dragging"); });
+
+    canvas.addEventListener("click", (ev) => {
+      const hit = nodeAt(ev.clientX, ev.clientY);
+      selected = hit && hit === selected ? null : hit;
+      renderDetails();
+      draw();
+    });
+
+    canvas.addEventListener("wheel", (ev) => {
+      ev.preventDefault();
+      const before = toWorld(ev.clientX, ev.clientY);
+      scale = Math.min(4, Math.max(0.15, scale * (ev.deltaY < 0 ? 1.12 : 0.89)));
+      const after = toWorld(ev.clientX, ev.clientY);
+      offsetX += (after.x - before.x) * scale;
+      offsetY += (after.y - before.y) * scale;
+      draw();
+    }, { passive: false });
+
+    function renderDetails() {
+      const panel = document.getElementById("details");
+      if (!selected) { panel.style.display = "none"; return; }
+      panel.style.display = "block";
+      document.getElementById("d-title").textContent = selected.label;
+      document.getElementById("d-meta").textContent =
+        selected.momentum.toUpperCase() + " · score " + selected.score +
+        " · " + selected.category + " · " + selected.signal_count + " signals";
+      document.getElementById("d-summary").textContent = selected.summary || "";
+
+      const holder = document.getElementById("d-platforms");
+      holder.innerHTML = "";
+      const total = Math.max(1, selected.signal_count);
+      Object.entries(selected.platforms).sort((a, b) => b[1] - a[1]).forEach(([platform, count]) => {
+        const row = document.createElement("div");
+        row.className = "bar-row";
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = platform;
+        const bar = document.createElement("div");
+        bar.className = "bar";
+        const fill = document.createElement("span");
+        fill.style.width = Math.round((count / total) * 100) + "%";
+        fill.style.background = platformColor(platform);
+        bar.appendChild(fill);
+        const value = document.createElement("b");
+        value.textContent = count;
+        row.append(name, bar, value);
+        holder.appendChild(row);
+      });
+    }
+    document.getElementById("details-close").addEventListener("click", () => { selected = null; renderDetails(); draw(); });
+
+    // --- Filters: matching nodes stay in place and dim, so the layout never jumps under the user.
+    const searchInput = document.getElementById("search");
+    const categoryFilter = document.getElementById("category-filter");
+    const platformFilter = document.getElementById("platform-filter");
+    const momentumFilter = document.getElementById("momentum-filter");
+    const scoreFilter = document.getElementById("score-filter");
+
+    function applyFilters() {
+      const q = searchInput.value.trim().toLowerCase();
+      const cat = categoryFilter.value;
+      const plat = platformFilter.value;
+      const mom = momentumFilter.value;
+      const minScore = Number(scoreFilter.value);
+      document.getElementById("score-value").textContent = minScore;
+
+      let shown = 0;
+      nodes.forEach((n) => {
+        n.visible = (!q || n.label.toLowerCase().includes(q))
+          && (!cat || n.category === cat)
+          && (!plat || Object.prototype.hasOwnProperty.call(n.platforms, plat))
+          && (!mom || n.momentum.toLowerCase() === mom)
+          && n.score >= minScore;
+        if (n.visible) shown++;
+      });
+      document.getElementById("count-chip").textContent = shown + " / " + nodes.length + " topics";
+      draw();
+    }
+    [searchInput, categoryFilter, platformFilter, momentumFilter, scoreFilter]
+      .forEach((el) => el.addEventListener("input", applyFilters));
+
+    document.getElementById("label-toggle").addEventListener("change", draw);
+    document.getElementById("reset").addEventListener("click", () => {
+      selected = null;
+      searchInput.value = ""; categoryFilter.value = ""; platformFilter.value = "";
+      momentumFilter.value = ""; scoreFilter.value = 0;
+      renderDetails(); applyFilters(); fitToView(); draw();
+    });
+
+    function bootstrapControls() {
+      document.getElementById("geo-chip").textContent = GRAPH.geo + " · " + GRAPH.generated_at;
+      const categories = [...new Set(nodes.map((n) => n.category))].sort();
+      const platforms = [...new Set(nodes.flatMap((n) => Object.keys(n.platforms)))].sort();
+      const momentums = [...new Set(nodes.map((n) => n.momentum.toLowerCase()))].sort();
+      const fill = (select, values) => values.forEach((v) => {
+        const opt = document.createElement("option");
+        opt.value = v; opt.textContent = v;
+        select.appendChild(opt);
+      });
+      fill(categoryFilter, categories);
+      fill(platformFilter, platforms);
+      fill(momentumFilter, momentums);
+
+      const rows = document.getElementById("legend-rows");
+      platforms.forEach((p) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        const dot = document.createElement("span");
+        dot.className = "dot";
+        dot.style.background = platformColor(p);
+        row.append(dot, document.createTextNode(p));
+        rows.appendChild(row);
+      });
+      const momentumTitle = document.createElement("div");
+      momentumTitle.className = "title";
+      momentumTitle.style.marginTop = "10px";
+      momentumTitle.textContent = "Momentum";
+      rows.appendChild(momentumTitle);
+      momentums.forEach((m) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        const dot = document.createElement("span");
+        dot.className = "dot";
+        dot.style.background = momentumColor(m);
+        row.append(dot, document.createTextNode(m));
+        rows.appendChild(row);
+      });
+    }
+
+    resize();
+    bootstrapControls();
+    applyFilters();
+    frame();
+  </script>
+</body>
+</html>

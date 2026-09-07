@@ -95,6 +95,103 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         )
 
+    # A cluster only draws this many satellite dots: the signal layer is a density hint, not a
+    # navigable level, so the canvas stays cheap no matter how many rows a cluster accumulated.
+    MAX_SIGNAL_DOTS_PER_CLUSTER = 24
+    # Each node keeps its strongest neighbours only, otherwise dense days render as a hairball.
+    MAX_EDGES_PER_NODE = 4
+
+    def build_graph_artifact(
+        self,
+        clusters: List[TopicCluster],
+        geo: GeoCode = GeoCode.VN,
+        similarity_threshold: float = 0.12,
+    ) -> str:
+        """Render an interactive force-directed graph of clusters and their signal density.
+
+        Clusters are the navigable level: they can be hovered, clicked, filtered and searched.
+        Signals are aggregated into satellite dots around their cluster and are deliberately not
+        addressable, which keeps the node count bounded on days with tens of thousands of rows.
+        """
+        from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
+
+        clusterer = SemanticClusterer()
+        nodes: List[Dict[str, Any]] = []
+        token_sets: List[Any] = []
+
+        for cluster in clusters:
+            platform_counts: Dict[str, int] = {}
+            for signal in cluster.signals or []:
+                platform = signal.platform.value if hasattr(signal.platform, "value") else str(signal.platform)
+                platform_counts[platform] = platform_counts.get(platform, 0) + 1
+
+            signal_count = len(cluster.signals or [])
+            momentum = cluster.momentum_category
+            nodes.append({
+                "id": str(cluster.id),
+                "label": sanitize_pii_text(cluster.canonical_name or ""),
+                "summary": sanitize_pii_text(cluster.summary_text or ""),
+                "category": cluster.category or "unclassified",
+                "momentum": momentum.value if hasattr(momentum, "value") else str(momentum),
+                "score": round(float(cluster.cross_platform_score or 0.0), 1),
+                "signal_count": signal_count,
+                "platforms": platform_counts,
+                "dots": self._build_signal_dots(platform_counts, signal_count),
+                "last_updated_at": cluster.last_updated_at.isoformat() if cluster.last_updated_at else None,
+            })
+            token_sets.append(clusterer._tokenize(cluster.canonical_name or ""))
+
+        edges = self._build_similarity_edges(clusterer, nodes, token_sets, similarity_threshold)
+
+        template = self._env.get_template("trend_graph.html")
+        return template.render(
+            graph={
+                "nodes": nodes,
+                "edges": edges,
+                "geo": geo.value if hasattr(geo, "value") else str(geo),
+                "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            },
+            geo=geo.value if hasattr(geo, "value") else str(geo),
+            generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        )
+
+    @classmethod
+    def _build_signal_dots(cls, platform_counts: Dict[str, int], signal_count: int) -> List[str]:
+        """Down-sample the signal layer into at most MAX_SIGNAL_DOTS_PER_CLUSTER platform-coloured dots."""
+        if signal_count <= cls.MAX_SIGNAL_DOTS_PER_CLUSTER:
+            return [p for p, count in platform_counts.items() for _ in range(count)]
+
+        dots: List[str] = []
+        for platform, count in platform_counts.items():
+            share = max(1, round(count / signal_count * cls.MAX_SIGNAL_DOTS_PER_CLUSTER))
+            dots.extend([platform] * share)
+        return dots[: cls.MAX_SIGNAL_DOTS_PER_CLUSTER]
+
+    @classmethod
+    def _build_similarity_edges(
+        cls,
+        clusterer: Any,
+        nodes: List[Dict[str, Any]],
+        token_sets: List[Any],
+        threshold: float,
+    ) -> List[Dict[str, Any]]:
+        """Link clusters by title similarity, keeping only each node's strongest neighbours."""
+        candidates: Dict[int, List[Dict[str, Any]]] = {}
+        for i in range(len(nodes)):
+            for j in range(i + 1, len(nodes)):
+                weight = clusterer._calculate_similarity(token_sets[i], token_sets[j])
+                if weight < threshold:
+                    continue
+                edge = {"source": nodes[i]["id"], "target": nodes[j]["id"], "weight": round(weight, 3)}
+                candidates.setdefault(i, []).append(edge)
+                candidates.setdefault(j, []).append(edge)
+
+        kept: Dict[tuple, Dict[str, Any]] = {}
+        for edge_list in candidates.values():
+            for edge in sorted(edge_list, key=lambda e: e["weight"], reverse=True)[: cls.MAX_EDGES_PER_NODE]:
+                kept[(edge["source"], edge["target"])] = edge
+        return list(kept.values())
+
     def build_topic_card_artifact(
         self,
         cluster: TopicCluster,

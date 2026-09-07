@@ -1098,11 +1098,35 @@ async def handle_get_topic_detail(topic_id: str, limit: int = 20) -> str:
 async def handle_generate_trend_artifact(
     topic_id: str = "",
     geo: str = "VN",
+    format: str = "dashboard",
 ) -> str:
     comp = get_components()
     builder = comp["artifact_builder"]
     geo_val = resolve_geo(geo)
     reports_dir = _get_secure_reports_dir()
+
+    if format.strip().lower() == "graph" and not topic_id.strip():
+        clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=150)
+        html_content = builder.build_graph_artifact(clusters, geo=geo_val)
+        report_file = reports_dir / f"trend_graph_{geo_val.value.lower()}.html"
+        report_file.write_text(html_content, encoding="utf-8")
+        abs_path = str(report_file.resolve())
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "type": "GRAPH",
+                "total_clusters": len(clusters),
+                "total_signals": sum(len(c.signals) for c in clusters),
+                "artifact_file": abs_path,
+                "file_url": f"file://{abs_path}",
+                "message": (
+                    f"Interactive trend graph exported to: file://{abs_path}. "
+                    "Clusters are navigable; signals are aggregated into density halos."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2
+        )
 
     if not topic_id.strip():
         clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=10)
@@ -1272,9 +1296,9 @@ async def get_topic_detail(topic_id: str, limit: int = 20) -> str:
     return await handle_get_topic_detail(topic_id=topic_id, limit=limit)
 
 
-@mcp.tool(name="generate_trend_artifact", description="Generate a standalone single-file HTML dashboard or topic card artifact (Tailwind + Chart.js).")
-async def generate_trend_artifact(topic_id: str = "", geo: str = "VN") -> str:
-    return await handle_generate_trend_artifact(topic_id=topic_id, geo=geo)
+@mcp.tool(name="generate_trend_artifact", description="Generate a standalone single-file HTML artifact: a trend dashboard, a single topic card (pass topic_id), or an interactive force-directed trend graph (pass format='graph').")
+async def generate_trend_artifact(topic_id: str = "", geo: str = "VN", format: str = "dashboard") -> str:
+    return await handle_generate_trend_artifact(topic_id=topic_id, geo=geo, format=format)
 
 
 @mcp.tool(name="trigger_ingress_refresh", description="Trigger immediate multi-platform ETL trend ingestion and clustering (zero-token background).")

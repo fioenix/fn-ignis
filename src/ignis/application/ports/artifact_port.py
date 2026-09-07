@@ -12,6 +12,13 @@ class IArtifactBuilder(ABC):
         """Generate a single-file interactive HTML dashboard of cross-platform trends."""
         pass
 
+    def build_graph_artifact(self, clusters: List[TopicCluster], geo: GeoCode = GeoCode.VN) -> str:
+        """Generate a single-file interactive force-directed graph of clusters and signal density.
+
+        Optional capability: builders that only produce static reports may leave it unimplemented.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     def build_topic_card_artifact(self, cluster: TopicCluster, signals: List[TrendSignal]) -> str:
         """Generate a single-file interactive HTML card for a specific trend cluster."""
