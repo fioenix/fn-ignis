@@ -1,7 +1,7 @@
 import json
 import logging
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -303,9 +303,13 @@ async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
         if stop_terms:
             comp["quality_evaluator"].register_foreign_stopwords(stop_terms)
             comp["strategic_reasoner"].register_foreign_stopwords(stop_terms)
+            if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
+                comp["clusterer"].register_stopwords(stop_terms)
         if noise_terms:
             comp["quality_evaluator"].register_noise_blacklist(noise_terms)
             comp["strategic_reasoner"].register_noise_blacklist(noise_terms)
+            if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
+                comp["clusterer"].register_stopwords(noise_terms)
     except Exception as e:
         logger.warning(f"Could not sync dynamic lexicons from DB: {e}")
 
@@ -598,10 +602,21 @@ async def _run_meta_auth(
 
 
 async def _meta_auth_status(oauth_manager: Any, browser_manager: Any) -> Dict[str, Any]:
-    """Report both tiers so the agent can see which ingress path is actually live."""
+    """Report both tiers and the active_tier so the agent can see which ingress path is live."""
     status = await oauth_manager.get_auth_status()
+    browser_status = None
     if browser_manager:
-        status["browser_session"] = await browser_manager.get_auth_status()
+        browser_status = await browser_manager.get_auth_status()
+        status["browser_session"] = browser_status
+
+    # Resolve active tier
+    if status.get("authenticated"):
+        status["active_tier"] = "TIER_2_GRAPH_API"
+    elif browser_status and browser_status.get("authenticated"):
+        status["active_tier"] = "TIER_1_BROWSER_SESSION"
+    else:
+        status["active_tier"] = "NONE"
+
     return status
 
 
@@ -989,9 +1004,13 @@ async def handle_get_trending_topics(
     geo_val = resolve_geo(geo)
     tf_val = resolve_timeframe(timeframe)
 
+    now = datetime.now(timezone.utc)
+    tf_days = timeframe_to_days(tf_val)
+    window_start = now - timedelta(days=tf_days)
+
     safe_limit = max(1, min(limit, 30))
     clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, timeframe=tf_val, limit=safe_limit)
-    result = [
+    topics = [
         {
             "id": str(c.id),
             "topic_name": c.canonical_name,
@@ -1003,7 +1022,16 @@ async def handle_get_trending_topics(
         }
         for c in clusters
     ]
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    envelope = {
+        "status": "SUCCESS",
+        "geo": geo_val.value,
+        "timeframe_used": tf_val.value,
+        "window_start": window_start.isoformat(),
+        "window_end": now.isoformat(),
+        "total_topics": len(topics),
+        "topics": topics,
+    }
+    return json.dumps(envelope, ensure_ascii=False, indent=2)
 
 
 async def handle_get_topic_detail(topic_id: str, limit: int = 20) -> str:
@@ -1606,11 +1634,15 @@ async def handle_register_domain_lexicon(
                 comp["quality_evaluator"].register_noise_blacklist(terms)
             if "strategic_reasoner" in comp:
                 comp["strategic_reasoner"].register_noise_blacklist(terms)
+            if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
+                comp["clusterer"].register_stopwords(terms)
         elif d_lower == "foreign_stopwords":
             if "quality_evaluator" in comp:
                 comp["quality_evaluator"].register_foreign_stopwords(terms)
             if "strategic_reasoner" in comp:
                 comp["strategic_reasoner"].register_foreign_stopwords(terms)
+            if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
+                comp["clusterer"].register_stopwords(terms)
         else:
             if "quality_evaluator" in comp:
                 comp["quality_evaluator"].register_terms(terms)
@@ -1676,6 +1708,17 @@ async def handle_get_runtime_config(key: Optional[str] = None, category: Optiona
     try:
         if key:
             val = await mgr.get(key)
+            if val is None:
+                return json.dumps(
+                    {
+                        "status": "NOT_FOUND",
+                        "key": key,
+                        "value": None,
+                        "message": f"Configuration key '{key}' is not set in runtime config store.",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
             return json.dumps(
                 {
                     "status": "SUCCESS",
@@ -1686,6 +1729,19 @@ async def handle_get_runtime_config(key: Optional[str] = None, category: Optiona
                 indent=2,
             )
         configs = await mgr.get_all(category=category)
+        if not configs:
+            return json.dumps(
+                {
+                    "status": "WARNING",
+                    "warning_type": "STORE_EMPTY",
+                    "total_configs": 0,
+                    "category_filter": category,
+                    "configs": {},
+                    "message": "Runtime config store is empty. No dynamic configurations found in database or cache.",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
         return json.dumps(
             {
                 "status": "SUCCESS",
@@ -1814,19 +1870,44 @@ async def handle_verify_connectors_health() -> str:
         platform_value = plugin.platform.value if hasattr(plugin.platform, "value") else str(plugin.platform)
         try:
             is_ok = await plugin.is_healthy()
-            diagnostics["connectors"][plugin.name] = {
-                "plugin_id": plugin_id,
-                "platform": platform_value,
-                "status": "HEALTHY" if is_ok else "UNHEALTHY",
-            }
-            if not is_ok:
+            if is_ok:
+                diagnostics["connectors"][plugin.name] = {
+                    "plugin_id": plugin_id,
+                    "platform": platform_value,
+                    "status": "HEALTHY",
+                    "remediation": None,
+                }
+            else:
+                # Determine reason: missing config vs expired vs unhealthy
+                status_label = "UNHEALTHY"
+                remediation = "Inspect connector connectivity, logs, and API status."
+
+                if hasattr(plugin, "resolve_auth_tier"):
+                    tier, cred = await plugin.resolve_auth_tier()
+                    if tier == "none":
+                        status_label = "NOT_CONFIGURED"
+                        remediation = f"Platform is not authenticated. Run authenticate_{platform_value}(browser_login=True) or supply OAuth credentials."
+                    else:
+                        status_label = "CREDENTIAL_EXPIRED"
+                        remediation = f"Credentials for {platform_value} appear expired or invalid. Re-authenticate using authenticate_{platform_value}()."
+                elif plugin.platform == PlatformType.YOUTUBE and not getattr(plugin, "_api_key", None):
+                    status_label = "NOT_CONFIGURED"
+                    remediation = "YOUTUBE_API_KEY is not set in environment or config. Set YOUTUBE_API_KEY to enable YouTube Data API."
+
+                diagnostics["connectors"][plugin.name] = {
+                    "plugin_id": plugin_id,
+                    "platform": platform_value,
+                    "status": status_label,
+                    "remediation": remediation,
+                }
                 diagnostics["overall_status"] = "DEGRADED"
         except Exception as e:
             diagnostics["connectors"][plugin.name] = {
                 "plugin_id": plugin_id,
                 "platform": platform_value,
                 "status": "ERROR",
-                "error": str(e)
+                "error": str(e),
+                "remediation": "Check system logs or network access to diagnose connector failure.",
             }
             diagnostics["overall_status"] = "DEGRADED"
 

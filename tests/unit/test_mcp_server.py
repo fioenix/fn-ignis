@@ -20,9 +20,13 @@ async def test_mcp_get_trending_topics(sample_topic_cluster):
         res_str = await handle_get_trending_topics(geo="VN", limit=5)
         res = json.loads(res_str)
 
-        assert len(res) == 1
-        assert res[0]["topic_name"] == sample_topic_cluster.canonical_name
-        assert res[0]["cross_platform_score"] == sample_topic_cluster.cross_platform_score
+        assert res["status"] == "SUCCESS"
+        assert res["timeframe_used"] == "24h"
+        assert "window_start" in res
+        assert "window_end" in res
+        assert len(res["topics"]) == 1
+        assert res["topics"][0]["topic_name"] == sample_topic_cluster.canonical_name
+        assert res["topics"][0]["cross_platform_score"] == sample_topic_cluster.cross_platform_score
 
 
 @pytest.mark.asyncio

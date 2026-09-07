@@ -150,18 +150,62 @@ class PostgresTimescaleRepository(ITrendRepository):
         limit: int = 10,
     ) -> List[TopicCluster]:
         pool = await self._get_pool()
-        query = """
+        interval_map = {
+            Timeframe.LAST_24H: "24 hours",
+            Timeframe.LAST_7D: "7 days",
+            Timeframe.LAST_30D: "30 days",
+        }
+        interval = interval_map.get(timeframe, "24 hours")
+
+        query = f"""
+            WITH ranked_clusters AS (
+                SELECT 
+                    tc.id,
+                    tc.canonical_name,
+                    tc.summary_text,
+                    tc.category,
+                    tc.first_seen_at,
+                    tc.last_updated_at,
+                    COUNT(ts.id) AS sig_count,
+                    COUNT(DISTINCT ts.platform) AS plat_count,
+                    COALESCE(SUM(ts.metric_value), 0.0) AS total_metric,
+                    COALESCE(AVG(ts.growth_velocity), 0.0) AS avg_velocity,
+                    ROUND(LEAST(100.0, 
+                        (COUNT(DISTINCT ts.platform) / 5.0 * 40.0) +
+                        LEAST(40.0, (LOG(GREATEST(1.0, COALESCE(SUM(ts.metric_value), 0.0) + 1.0)) / 7.0) * 40.0) +
+                        LEAST(20.0, GREATEST(0.0, COALESCE(AVG(ts.growth_velocity), 0.0) * 0.5))
+                    )::numeric, 1) AS dynamic_score
+                FROM topic_clusters tc
+                INNER JOIN trend_signals ts ON ts.cluster_id = tc.id
+                WHERE ts.captured_at >= NOW() - INTERVAL '{interval}'
+                GROUP BY tc.id, tc.canonical_name, tc.summary_text, tc.category, tc.first_seen_at, tc.last_updated_at
+                ORDER BY dynamic_score DESC, sig_count DESC
+                LIMIT %s
+            )
             SELECT 
-                id,
-                canonical_name,
-                summary_text,
-                category,
-                cross_platform_score,
-                first_seen_at,
-                last_updated_at
-            FROM topic_clusters
-            ORDER BY cross_platform_score DESC, last_updated_at DESC
-            LIMIT %s;
+                rc.id,
+                rc.canonical_name,
+                rc.summary_text,
+                rc.category,
+                rc.dynamic_score,
+                rc.first_seen_at,
+                rc.last_updated_at,
+                rc.sig_count,
+                JSON_AGG(JSON_BUILD_OBJECT(
+                    'platform', ts.platform,
+                    'raw_title', ts.raw_title,
+                    'metric_value', ts.metric_value,
+                    'growth_velocity', ts.growth_velocity,
+                    'source_url', ts.source_url,
+                    'geo_code', ts.geo_code,
+                    'metadata', ts.metadata,
+                    'captured_at', ts.captured_at
+                )) AS signals
+            FROM ranked_clusters rc
+            INNER JOIN trend_signals ts ON ts.cluster_id = rc.id
+            WHERE ts.captured_at >= NOW() - INTERVAL '{interval}'
+            GROUP BY rc.id, rc.canonical_name, rc.summary_text, rc.category, rc.dynamic_score, rc.first_seen_at, rc.last_updated_at, rc.sig_count
+            ORDER BY rc.dynamic_score DESC, rc.sig_count DESC;
         """
 
         try:
@@ -172,13 +216,43 @@ class PostgresTimescaleRepository(ITrendRepository):
 
             clusters = []
             for row in rows:
-                c_id, name, summary, cat, score, first_seen, last_updated = row
+                c_id, name, summary, cat, score, first_seen, last_updated = row[:7]
+                _sig_count = row[7] if len(row) > 7 else 0
+                sigs_raw = row[8] if len(row) > 8 else "[]"
+                
+                signals_list: List[TrendSignal] = []
+                sigs_data = sigs_raw if isinstance(sigs_raw, list) else json.loads(sigs_raw or "[]")
+                for s_dict in sigs_data:
+                    c_at = s_dict.get("captured_at")
+                    if isinstance(c_at, str):
+                        c_at = datetime.fromisoformat(c_at)
+                    sig_meta = s_dict.get("metadata") or {}
+                    if isinstance(sig_meta, str):
+                        try:
+                            sig_meta = json.loads(sig_meta)
+                        except Exception:
+                            sig_meta = {}
+                    signals_list.append(
+                        TrendSignal(
+                            platform=PlatformType(s_dict["platform"]),
+                            raw_title=s_dict["raw_title"],
+                            metric_value=float(s_dict.get("metric_value", 0.0)),
+                            growth_velocity=float(s_dict.get("growth_velocity", 0.0)),
+                            source_url=s_dict.get("source_url", ""),
+                            geo_code=GeoCode(s_dict.get("geo_code", "VN")),
+                            cluster_id=UUID(str(c_id)),
+                            metadata=sig_meta,
+                            captured_at=c_at or datetime.now(timezone.utc),
+                        )
+                    )
+
                 cluster = TopicCluster(
                     id=UUID(str(c_id)),
                     canonical_name=name,
                     summary_text=summary,
                     category=cat or "general",
                     cross_platform_score=float(score or 0.0),
+                    signals=signals_list,
                     first_seen_at=first_seen,
                     last_updated_at=last_updated,
                 )

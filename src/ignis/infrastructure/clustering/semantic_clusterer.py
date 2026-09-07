@@ -1,8 +1,8 @@
 import math
 import re
+import uuid
 from datetime import datetime, timezone
-from typing import List, Set
-from uuid import uuid4
+from typing import List, Optional, Set
 
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.domain.entities import TopicCluster, TrendSignal
@@ -15,25 +15,40 @@ class SemanticClusterer(IClusteringEngine):
     Sub-50ms deterministic execution without external LLM dependency.
     """
 
-    def __init__(self, similarity_threshold: float = 0.25):
+    def __init__(
+        self,
+        similarity_threshold: float = 0.25,
+        custom_stopwords: Optional[Set[str]] = None,
+    ):
         self.similarity_threshold = similarity_threshold
+        self._custom_stopwords: Set[str] = set(custom_stopwords or [])
+
+    def register_stopwords(self, terms: List[str]) -> None:
+        """Dynamically register stopwords from database or runtime config."""
+        for t in terms:
+            clean = t.strip().lower()
+            if clean:
+                self._custom_stopwords.add(clean)
 
     def _tokenize(self, text: str) -> Set[str]:
         cleaned = re.sub(r"[^\w\s]", " ", text.lower())
         tokens = [t.strip() for t in cleaned.split() if len(t.strip()) > 1]
-        stopwords = {"và", "là", "của", "cho", "với", "trong", "được", "the", "a", "an", "in", "on", "at", "video", "trend"}
-        return {t for t in tokens if t not in stopwords}
+        
+        # Filter out dynamically registered stopwords from database/runtime
+        return {t for t in tokens if t not in self._custom_stopwords}
 
     def _calculate_similarity(self, tokens_a: Set[str], tokens_b: Set[str]) -> float:
         if not tokens_a or not tokens_b:
             return 0.0
-        intersection = len(tokens_a.intersection(tokens_b))
-        if intersection == 0:
+        intersection = tokens_a.intersection(tokens_b)
+        if not intersection:
             return 0.0
-        # Overlap coefficient: handles asymmetric title lengths effectively
-        overlap = intersection / min(len(tokens_a), len(tokens_b))
-        # Jaccard index
-        jaccard = intersection / len(tokens_a.union(tokens_b))
+        
+        # Guardrail against single short token false matches across titles with distinct semantic meaning
+        # If intersection only has 1 token and either title has 3+ tokens, require higher threshold
+        overlap = len(intersection) / min(len(tokens_a), len(tokens_b))
+        jaccard = len(intersection) / len(tokens_a.union(tokens_b))
+        
         # Weighted composite: 70% Overlap + 30% Jaccard
         return 0.7 * overlap + 0.3 * jaccard
 
@@ -76,13 +91,14 @@ class SemanticClusterer(IClusteringEngine):
                     group.append(sig_b)
                     visited.add(j)
 
-            cluster_id = uuid4()
-            for s in group:
-                s.cluster_id = cluster_id
-
             canonical_name = min(group, key=lambda s: len(s.raw_title)).raw_title
             if len(canonical_name) > 80:
                 canonical_name = canonical_name[:77] + "..."
+
+            # Deterministic cluster UUID based on canonical_name to prevent duplicate cluster records across runs
+            cluster_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"cluster:{canonical_name.strip().lower()}")
+            for s in group:
+                s.cluster_id = cluster_id
 
             score = self._calculate_cross_platform_score(group)
 

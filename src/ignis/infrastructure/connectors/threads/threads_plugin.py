@@ -116,15 +116,33 @@ class ThreadsPlugin(IConnectorPlugin):
             logger.warning(f"Could not load the Threads browser session: {e}")
             return None
 
+    async def resolve_auth_tier(self) -> Tuple[str, Optional[Any]]:
+        """
+        Resolve the active authentication tier.
+        Returns:
+            ("oauth2", access_token) if Graph API token is valid.
+            ("session_cookies", storage_state) if Playwright browser session exists.
+            ("none", None) if neither is configured.
+        """
+        if self._auth_manager:
+            try:
+                token = await self._auth_manager.get_access_token()
+                if token:
+                    return "oauth2", token
+            except Exception as e:
+                logger.warning(f"Threads OAuth token lookup error: {e}")
+
+        storage_state = await self._browser_storage_state()
+        if storage_state:
+            logger.info("Threads: Graph OAuth token absent, active tier is Tier 1 Browser Session.")
+            return "session_cookies", storage_state
+
+        return "none", None
+
     async def _has_graph_token(self) -> bool:
         """Whether the Tier 2 Graph API path is usable right now."""
-        if not self._auth_manager:
-            return False
-        try:
-            return (await self._auth_manager.get_access_token()) is not None
-        except Exception as e:
-            logger.warning(f"Threads OAuth token lookup failed: {e}")
-            return False
+        tier, _ = await self.resolve_auth_tier()
+        return tier == "oauth2"
 
     # --- Ingress ---
 
@@ -432,13 +450,15 @@ class ThreadsPlugin(IConnectorPlugin):
     # --- HTTP + error classification ---
 
     async def _require_token(self) -> str:
-        token = await self._auth_manager.get_access_token()
-        if not token:
-            raise ConnectorAuthenticationException(
-                "No valid Threads OAuth token available. Run the `authenticate_threads` MCP tool "
-                "to complete the Graph API OAuth 2.0 flow."
-            )
-        return token
+        tier, credential = await self.resolve_auth_tier()
+        if tier == "oauth2" and credential:
+            return credential
+
+        raise ConnectorAuthenticationException(
+            "No valid Threads credentials available across all auth tiers. "
+            "Tier 1 (Personal / Browser): Run `authenticate_threads(browser_login=True)`. "
+            "Tier 2 (Enterprise / Developer): Run `authenticate_threads(auth_code=...)`."
+        )
 
     async def _graph_get(self, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
         try:

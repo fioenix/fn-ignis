@@ -523,15 +523,21 @@ class TikTokPlugin(IConnectorPlugin):
                     if any(k in response.url for k in ["item_list", "search/item", "search/general"]):
                         try:
                             ct = response.headers.get("content-type", "")
-                            if "json" in ct:
-                                body = await response.json()
+                            if "json" in ct or "application/json" in ct:
+                                try:
+                                    body = await response.json()
+                                except Exception as parse_err:
+                                    logger.debug(f"Failed to decode TikTok JSON response from {response.url}: {parse_err}")
+                                    return
+                                if not isinstance(body, dict):
+                                    return
                                 items = body.get("itemList") or body.get("data", {}).get("list", []) or body.get("data", [])
                                 if isinstance(items, list):
                                     for item in items:
                                         if isinstance(item, dict):
                                             captured_items.append(item)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Error reading TikTok response payload: {e}")
 
                 page.on("response", handle_response)
 

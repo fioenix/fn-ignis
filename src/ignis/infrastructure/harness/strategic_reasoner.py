@@ -16,8 +16,9 @@ from ignis.domain.harness_models import (
     HarnessResearchReport,
     QualityScorecard,
 )
+from ignis.application.ports.language_detector_port import ILanguageDetector
+from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.domain.value_objects import PlatformType, GeoCode
-
 
 
 class StrategicMarketReasoner:
@@ -26,36 +27,6 @@ class StrategicMarketReasoner:
     Parameters and thresholds are configurable via environment variables.
     """
 
-    VIETNAMESE_CHARS_PATTERN = re.compile(
-        r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]",
-        re.IGNORECASE
-    )
-
-    TECH_LOAN_WORDS = {
-        "ai", "bot", "chat", "agent", "app", "tool", "pro", "plus", "hub", "lab",
-        "tech", "online", "code", "dev", "web", "net", "top", "mini", "shop", "store"
-    }
-
-    VI_CORE_WORDS = {
-        "va", "cua", "la", "trong", "cho", "voi", "ve", "tu", "dong", "hoa",
-        "huong", "dan", "cach", "lam", "chu", "doanh", "nghiep", "ung", "dung",
-        "giai", "phap", "phan", "mem", "tri", "tue", "nhan", "tao", "tro", "ly",
-        "kiem", "tien", "nguoi", "viet", "nam", "danh", "bai", "hoc", "khoa",
-        "thuc", "chien", "tong", "quan", "chi", "tiet", "zalo", "acc", "clone",
-        "shop", "gia", "ban", "mua", "setup", "chot", "don", "kho", "hang",
-        "sao", "gi", "tai", "bao", "nhieu", "cskh", "dai", "phi", "khong",
-        "duoc", "nay", "moi", "tot", "nhat", "hay", "chia", "se", "kinh",
-        "nghiem", "tai", "lieu", "phan", "tich", "xay", "dung", "tu", "van",
-        "khach", "hang", "dich", "vu", "cong", "nghe", "nen", "tang"
-    }
-
-    # Characters strictly unique to Vietnamese
-    VI_EXCLUSIVE_CHARS_PATTERN = re.compile(
-        r"[ơớờởỡợưứừửữựđĐắằẳẵặấầẩẫậếềểễệốồổỗộớờởỡợứừửữựỳỹỷỵảẻỉỏủẽĩạẹịọụ]",
-        re.IGNORECASE
-    )
-
-
     FOREIGN_SCRIPTS_PATTERN = re.compile(r"[\uac00-\ud7af\u4e00-\u9fff\u3040-\u30ff\u0e00-\u0e7f\u0400-\u04ff]")
 
     # Channels that cannot ingest anything without a bound token or browser session.
@@ -63,25 +34,17 @@ class StrategicMarketReasoner:
     VIDEO_PLATFORMS = ("youtube", "tiktok", "reels")
     RATE_LIMIT_HINTS = ("429", "quota", "rate limit", "ratelimit", "too many requests")
 
-    FOREIGN_STOPWORDS = {
-        "formation", "complete", "complète", "avec", "cours", "pour", "dans", "tuto", "debutant", "débutant",
-        "como", "funcionam", "chegou", "novos", "veja", "agentes", "autonomos", "autônomos",
-        "para", "com", "por", "sobre", "este", "esta", "todos", "agora", "fazer", "curso",
-        "gratis", "completo", "você", "voce", "seus", "suas", "criar", "criando",
-        "ferramenta", "passo", "inteligencia", "artificial", "automatizar",
-        "cara", "yang", "untuk", "bisa"
-    }
-
-
     def __init__(
         self,
         custom_lexicon: Optional[Set[str]] = None,
         custom_stopwords: Optional[Set[str]] = None,
         custom_noise: Optional[Set[str]] = None,
+        detector: Optional[ILanguageDetector] = None,
     ):
         self._custom_lexicon: Set[str] = set(custom_lexicon or [])
         self._custom_stopwords: Set[str] = set(custom_stopwords or [])
         self._custom_noise: Set[str] = set(custom_noise or [])
+        self._detector: ILanguageDetector = detector or HeuristicLanguageDetector()
 
     def register_noise_blacklist(self, terms: List[str]) -> None:
         """Dynamically register mission-specific noise terms."""
@@ -450,44 +413,7 @@ class StrategicMarketReasoner:
                 self._custom_stopwords.add(clean)
 
     def _is_vietnamese(self, title: str) -> bool:
-        if not title:
-            return False
-
-        if self.FOREIGN_SCRIPTS_PATTERN.search(title):
-            return False
-
-        if self._custom_noise:
-            t_low = title.lower()
-            for term in self._custom_noise:
-                if not term:
-                    continue
-                clean_term = term.lstrip("#").strip()
-                if not clean_term:
-                    continue
-                pattern = rf"(?:\b|#){re.escape(clean_term)}\b"
-                if re.search(pattern, t_low):
-                    return False
-
-        title_lower = title.lower()
-        words = set(re.findall(r"\b[a-zA-ZàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐ]+\b", title_lower))
-        
-        # Layer 1: Reject foreign stopwords (Static + Dynamic DB)
-        all_stopwords = self.FOREIGN_STOPWORDS | self._custom_stopwords
-        if any(fw in words for fw in all_stopwords):
-            return False
-
-        # Layer 2: Exclusive Vietnamese characters with diacritics
-        if self.VI_EXCLUSIVE_CHARS_PATTERN.search(title):
-            return True
-
-        # Layer 3: Unaccented text verification
-        # Exclude international tech loan words from proof of Vietnamese localization
-        pure_words = words - self.TECH_LOAN_WORDS
-        active_core = self.VI_CORE_WORDS | self._custom_lexicon
-        vi_core_count = sum(1 for w in pure_words if w in active_core)
-        
-        # Requires at least 2 genuine core Vietnamese words for unaccented titles
-        return vi_core_count >= 2
+        return self._is_localized(title, geo=GeoCode.VN)
 
     def _matches_topic_strictly(self, title: str, kw: str) -> bool:
         if self._is_garbage(title):
@@ -516,25 +442,13 @@ class StrategicMarketReasoner:
     def _is_localized(self, title: str, geo: GeoCode = GeoCode.VN) -> bool:
         if not title:
             return False
-        geo_val = geo.value if hasattr(geo, "value") else str(geo)
-        if geo_val.upper() == "VN":
-            return self._is_vietnamese(title)
-
-        # Generalized international localization: reject noise and empty signals
-        if self._custom_noise:
-            t_low = title.lower()
-            for term in self._custom_noise:
-                if not term:
-                    continue
-                clean_term = term.lstrip("#").strip()
-                if not clean_term:
-                    continue
-                pattern = rf"(?:\b|#){re.escape(clean_term)}\b"
-                if re.search(pattern, t_low):
-                    return False
-        return len(title.strip()) >= 3
-
-
+        return self._detector.is_localized(
+            text=title,
+            geo=geo,
+            extra_terms=self._custom_lexicon,
+            extra_stopwords=self._custom_stopwords,
+            extra_noise=self._custom_noise,
+        )
 
     def _discover_market_opportunities(
         self,
@@ -559,7 +473,8 @@ class StrategicMarketReasoner:
 
         for raw_kw in target_keywords:
             kw_clean = raw_kw.lower().strip()
-            demand_score = demand_map.get(kw_clean, 50.0)
+            has_demand_signal = kw_clean in demand_map
+            demand_score = demand_map.get(kw_clean, 0.0)
 
             # Strict topic matching across all video content platforms
             matching_videos = [
@@ -596,7 +511,16 @@ class StrategicMarketReasoner:
             v_str = f"{loc_count} video{plat_str}"
 
             # Strict Opportunity Index with Inverted Sample Size Damping & Label Alignment
-            if loc_count == 0:
+            if not has_demand_signal:
+                if loc_count == 0:
+                    opportunity_index = 0.0
+                    opp_type = "NO_DATA_RECORDED"
+                    rec = f"No search interest signals on Google Trends and zero local video supply recorded for '{raw_kw}' ({v_str}). Insufficient data to verify market opportunity (Opportunity Index: {opportunity_index:+0.1f})."
+                else:
+                    opportunity_index = round(-supply_score * 0.5, 1)
+                    opp_type = "SUPPLY_DRIVEN_UNASSESSED"
+                    rec = f"Local supply detected ({v_str}), but no active Google search interest signals were recorded for '{raw_kw}'. Topic may be platform-specific or emerging via social feeds rather than active search (Opportunity Index: {opportunity_index:+0.1f})."
+            elif loc_count == 0:
                 opportunity_index = round(demand_score * 0.15, 1)
                 opp_type = "UNVERIFIED_DEMAND_GAP"
                 rec = f"Search demand for '{raw_kw}' reached {demand_score:.0f}/100 with zero local video supply recorded ({v_str}). Unverified demand gap requiring VoC interviews (Effective Opportunity Index: {opportunity_index:+0.1f})."

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import math
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,7 +82,7 @@ class SqliteTrendRepository(ITrendRepository):
 
             CREATE TABLE IF NOT EXISTS topic_clusters (
                 id TEXT PRIMARY KEY,
-                canonical_name TEXT NOT NULL,
+                canonical_name TEXT NOT NULL UNIQUE,
                 cross_platform_score REAL DEFAULT 0.0,
                 summary_text TEXT,
                 category TEXT DEFAULT 'general',
@@ -154,80 +156,39 @@ class SqliteTrendRepository(ITrendRepository):
             );
         """)
 
-        # Seed Initial Lexicons if table is empty
+        # Seed Initial Lexicons & Configs from SQL files if table is empty
         cur.execute("SELECT COUNT(*) FROM market_lexicons")
         count = cur.fetchone()[0]
         if count == 0:
             now_str = datetime.now(timezone.utc).isoformat()
-            initial_seeds = [
-                ("common_vi", "huong dan", "intent"),
-                ("common_vi", "cach lam", "intent"),
-                ("common_vi", "kinh nghiem", "intent"),
-                ("common_vi", "chot don", "vernacular"),
-                ("tech", "ai agent", "topic"),
-                ("tech", "chatbot", "topic"),
-                ("tech", "n8n", "tool"),
-                ("tech", "dify", "tool"),
-                ("tech", "make", "tool"),
-                ("tech", "rpa", "tool"),
-                ("tech", "tu dong hoa", "technical"),
-                ("ecommerce", "tiktok shop", "platform"),
-                ("ecommerce", "affiliate", "vernacular"),
-                ("fashion", "local brand", "vernacular"),
-                ("fashion", "linen", "material"),
-                ("fashion", "ao linen", "product"),
-                # Portuguese Stopwords
-                ("foreign_stopwords", "como", "stopwords_pt"),
-                ("foreign_stopwords", "funcionam", "stopwords_pt"),
-                ("foreign_stopwords", "chegou", "stopwords_pt"),
-                ("foreign_stopwords", "novos", "stopwords_pt"),
-                ("foreign_stopwords", "veja", "stopwords_pt"),
-                ("foreign_stopwords", "agentes", "stopwords_pt"),
-                ("foreign_stopwords", "autonomos", "stopwords_pt"),
-                ("foreign_stopwords", "autônomos", "stopwords_pt"),
-                # Generic Entertainment & Social Noise Blacklist
-                ("noise_blacklist", "fyp", "generic_social_noise"),
-                ("noise_blacklist", "foryou", "generic_social_noise"),
-                ("noise_blacklist", "foryoupage", "generic_social_noise"),
-                ("noise_blacklist", "xuhuong", "generic_social_noise"),
-                ("noise_blacklist", "haihuoc", "entertainment_noise"),
-                ("noise_blacklist", "funny", "entertainment_noise"),
-                ("noise_blacklist", "troll", "entertainment_noise"),
-                ("noise_blacklist", "nhactre", "entertainment_noise"),
-                ("noise_blacklist", "vlog", "entertainment_noise"),
-                ("noise_blacklist", "chuyenma", "entertainment_noise"),
-                ("noise_blacklist", "kinhdi", "entertainment_noise"),
-                ("noise_blacklist", "phimngan", "entertainment_noise"),
-                ("noise_blacklist", "reviewphim", "entertainment_noise"),
-                ("noise_blacklist", "ngontinh", "entertainment_noise"),
-                ("noise_blacklist", "namthankinh", "entertainment_noise"),
-                ("noise_blacklist", "vietnamvodich", "entertainment_noise"),
-                ("noise_blacklist", "golivegrowfast", "entertainment_noise"),
-                ("noise_blacklist", "duet", "entertainment_noise"),
-                ("noise_blacklist", "chuyenhai", "entertainment_noise"),
-            ]
-            for dom, term, cat in initial_seeds:
-                cur.execute(
-                    "INSERT OR IGNORE INTO market_lexicons (id, domain, term, category, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (str(uuid4()), dom, term, cat, "system", now_str),
-                )
+            sql_dir = Path(__file__).resolve().parents[4] / "sql"
+            if sql_dir.exists():
+                for sql_filename in ("003_market_lexicons.sql", "004_global_lexicons.sql"):
+                    sql_path = sql_dir / sql_filename
+                    if sql_path.exists():
+                        content = sql_path.read_text(encoding="utf-8")
+                        matches = re.findall(r"\('([^']+)',\s*'([^']+)',\s*'([^']+)'", content)
+                        for dom, term, cat in matches:
+                            cur.execute(
+                                "INSERT OR IGNORE INTO market_lexicons (id, domain, term, category, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                                (str(uuid4()), dom, term, cat, "system", now_str),
+                            )
 
-        # Seed Initial Runtime Configs if table is empty
         cur.execute("SELECT COUNT(*) FROM runtime_configs")
         rc_count = cur.fetchone()[0]
         if rc_count == 0:
-            now_str = datetime.now(timezone.utc).isoformat()
-            initial_configs = [
-                ("threads_web_client_id", "238260118693652", "threads", "Meta internal web client ID for Threads web requests (X-IG-App-ID)", "system", now_str, now_str),
-                ("threads_graphql_endpoint", "https://www.threads.net/api/graphql", "threads", "Meta Threads Web GraphQL endpoint", "system", now_str, now_str),
-                ("threads_doc_id_trending_topics", "", "threads", "Persisted GraphQL doc_id for Threads Trending Topics query", "system", now_str, now_str),
-                ("threads_doc_id_search_posts", "", "threads", "Persisted GraphQL doc_id for Threads Keyword Search query", "system", now_str, now_str),
-                ("threads_doc_id_search_suggestions", "", "threads", "Persisted GraphQL doc_id for Threads Search Suggestions query", "system", now_str, now_str),
-            ]
-            cur.executemany(
-                "INSERT INTO runtime_configs (key, value, category, description, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                initial_configs,
-            )
+            sql_dir = Path(__file__).resolve().parents[4] / "sql"
+            if sql_dir.exists():
+                rc_path = sql_dir / "007_runtime_configs.sql"
+                if rc_path.exists():
+                    rc_content = rc_path.read_text(encoding="utf-8")
+                    rc_matches = re.findall(r"\('([^']+)',\s*'([^']*)',\s*'([^']+)',\s*'([^']+)',\s*'([^']+)'\)", rc_content)
+                    now_str = datetime.now(timezone.utc).isoformat()
+                    for k, v, cat, desc, updater in rc_matches:
+                        cur.execute(
+                            "INSERT OR IGNORE INTO runtime_configs (key, value, category, description, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (k, v, cat, desc, updater, now_str, now_str),
+                        )
 
         conn.commit()
         if self._mem_conn is None:
@@ -324,31 +285,117 @@ class SqliteTrendRepository(ITrendRepository):
     ) -> List[TopicCluster]:
         await self._ensure_schema()
 
+        interval_map = {
+            Timeframe.LAST_24H: "-24 hours",
+            Timeframe.LAST_7D: "-7 days",
+            Timeframe.LAST_30D: "-30 days",
+        }
+        interval_modifier = interval_map.get(timeframe, "-24 hours")
+
         def _sync_get():
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                cur.execute(
-                    "SELECT id, canonical_name, cross_platform_score, summary_text, category, first_seen_at, last_updated_at FROM topic_clusters ORDER BY cross_platform_score DESC LIMIT ?",
-                    (limit,)
-                )
+                query = f"""
+                    WITH ranked_clusters AS (
+                        SELECT 
+                            tc.id,
+                            tc.canonical_name,
+                            tc.summary_text,
+                            tc.category,
+                            tc.cross_platform_score,
+                            tc.first_seen_at,
+                            tc.last_updated_at,
+                            COUNT(ts.id) AS sig_count,
+                            COUNT(DISTINCT ts.platform) AS plat_count,
+                            COALESCE(SUM(ts.metric_value), 0.0) AS total_metric,
+                            COALESCE(AVG(ts.growth_velocity), 0.0) AS avg_velocity
+                        FROM topic_clusters tc
+                        INNER JOIN trend_signals ts ON ts.cluster_id = tc.id
+                        WHERE datetime(ts.captured_at) >= datetime('now', '{interval_modifier}')
+                        GROUP BY tc.id, tc.canonical_name, tc.summary_text, tc.category, tc.cross_platform_score, tc.first_seen_at, tc.last_updated_at
+                        ORDER BY sig_count DESC
+                        LIMIT ?
+                    )
+                    SELECT 
+                        rc.id,
+                        rc.canonical_name,
+                        rc.summary_text,
+                        rc.category,
+                        rc.cross_platform_score,
+                        rc.first_seen_at,
+                        rc.last_updated_at,
+                        rc.sig_count,
+                        rc.plat_count,
+                        rc.total_metric,
+                        rc.avg_velocity
+                    FROM ranked_clusters rc;
+                """
+                cur.execute(query, (limit,))
                 rows = cur.fetchall()
+
                 clusters: List[TopicCluster] = []
                 for row in rows:
+                    c_id = row["id"]
                     first_seen = datetime.fromisoformat(row["first_seen_at"]) if row["first_seen_at"] else datetime.now(timezone.utc)
                     last_updated = datetime.fromisoformat(row["last_updated_at"]) if row["last_updated_at"] else datetime.now(timezone.utc)
+
+                    # Fetch signals captured within the timeframe window for this cluster
+                    sig_query = f"""
+                        SELECT platform, raw_title, metric_value, growth_velocity, source_url, geo_code, metadata, captured_at
+                        FROM trend_signals
+                        WHERE cluster_id = ? AND datetime(captured_at) >= datetime('now', '{interval_modifier}')
+                        ORDER BY captured_at DESC;
+                    """
+                    cur.execute(sig_query, (c_id,))
+                    sig_rows = cur.fetchall()
+
+                    signals_list: List[TrendSignal] = []
+                    for sr in sig_rows:
+                        meta = json.loads(sr["metadata"]) if sr["metadata"] else {}
+                        cap_at = datetime.fromisoformat(sr["captured_at"]) if sr["captured_at"] else datetime.now(timezone.utc)
+                        signals_list.append(
+                            TrendSignal(
+                                platform=PlatformType(sr["platform"]),
+                                raw_title=sr["raw_title"],
+                                metric_value=sr["metric_value"],
+                                growth_velocity=sr["growth_velocity"],
+                                source_url=sr["source_url"],
+                                geo_code=GeoCode(sr["geo_code"]),
+                                cluster_id=UUID(c_id),
+                                metadata=meta,
+                                captured_at=cap_at,
+                            )
+                        )
+
+                    # Calculate dynamic cross-platform score matching SemanticClusterer equation
+                    plat_count = row["plat_count"]
+                    total_metric = row["total_metric"]
+                    avg_velocity = row["avg_velocity"]
+
+                    platform_diversity_score = (plat_count / 5.0) * 40.0
+                    metric_score = min(40.0, (math.log10(max(1.0, total_metric + 1.0)) / 7.0) * 40.0)
+                    velocity_score = min(20.0, max(0.0, avg_velocity * 0.5))
+                    dynamic_score = round(min(100.0, platform_diversity_score + metric_score + velocity_score), 1)
+
+                    persisted_score = row["cross_platform_score"]
+                    final_score = persisted_score if (persisted_score is not None and persisted_score > 0) else dynamic_score
+
                     clusters.append(
                         TopicCluster(
-                            id=UUID(row["id"]),
+                            id=UUID(c_id),
                             canonical_name=row["canonical_name"],
-                            cross_platform_score=row["cross_platform_score"],
+                            cross_platform_score=final_score,
                             summary_text=row["summary_text"],
                             category=row["category"] or "general",
                             first_seen_at=first_seen,
                             last_updated_at=last_updated,
-                            signals=[],
+                            signals=signals_list,
                         )
                     )
+
+                # Sort by dynamic cross platform score descending
+                clusters.sort(key=lambda c: (c.cross_platform_score, len(c.signals)), reverse=True)
                 return clusters
             finally:
                 if self._mem_conn is None:
@@ -363,15 +410,22 @@ class SqliteTrendRepository(ITrendRepository):
     ) -> List[TrendSignal]:
         await self._ensure_schema()
 
+        interval_map = {
+            Timeframe.LAST_24H: "-24 hours",
+            Timeframe.LAST_7D: "-7 days",
+            Timeframe.LAST_30D: "-30 days",
+        }
+        interval_modifier = interval_map.get(timeframe, "-7 days")
+
         def _sync_get():
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    """
+                    f"""
                     SELECT platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at
                     FROM trend_signals
-                    WHERE cluster_id = ?
+                    WHERE cluster_id = ? AND datetime(captured_at) >= datetime('now', '{interval_modifier}')
                     ORDER BY captured_at DESC
                     """,
                     (str(cluster_id),)
