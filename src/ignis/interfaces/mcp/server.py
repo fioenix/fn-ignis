@@ -1971,8 +1971,61 @@ Use the `extract_customer_pain_points` tool across top market videos to synthesi
 """
 
 
+def _cleanup_stale_instances():
+    """Terminate any orphan/stale MCP server instances from previous sessions."""
+    import os
+    import signal
+    import subprocess
+    current_pid = os.getpid()
+    try:
+        # Check running python processes executing ignis.interfaces.mcp.server
+        output = subprocess.check_output(
+            ["pgrep", "-f", "ignis.interfaces.mcp.server"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        for line in output.strip().split():
+            try:
+                pid = int(line.strip())
+                if pid != current_pid:
+                    os.kill(pid, signal.SIGTERM)
+                    logger.info(f"Cleaned up stale MCP server process (PID: {pid}).")
+            except (ValueError, ProcessLookupError, PermissionError):
+                pass
+    except (subprocess.SubprocessError, FileNotFoundError):
+        pass
+
+
+def _register_shutdown_handlers():
+    """Register graceful teardown on SIGINT/SIGTERM to close connection pool."""
+    import asyncio
+    import signal
+
+    def _on_signal():
+        logger.info("Received termination signal, shutting down ignis MCP server...")
+        global _COMPONENTS
+        if _COMPONENTS and "repository" in _COMPONENTS:
+            repo = _COMPONENTS["repository"]
+            if hasattr(repo, "close"):
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(repo.close())
+                except Exception:
+                    pass
+
+    try:
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, _on_signal)
+    except (NotImplementedError, RuntimeError):
+        pass
+
+
 def main():
     """Main CLI entry point for the fn-ignis FastMCP server."""
+    _cleanup_stale_instances()
+    _register_shutdown_handlers()
     mcp.run()
 
 
