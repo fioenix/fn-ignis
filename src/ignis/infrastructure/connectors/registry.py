@@ -232,6 +232,7 @@ class ConnectorPluginRegistry:
         target_platforms: Optional[List[PlatformType]] = None,
         custom_timeframe: Optional[str] = None,
         scope: IngressScope = IngressScope.PUBLIC_MARKET,
+        limit: int = 20,
     ) -> List[TrendSignal]:
         """Probe every keyword-capable connector.
 
@@ -264,7 +265,7 @@ class ConnectorPluginRegistry:
                 continue
 
             enabled_plugins.append(plugin)
-            tasks.append(self._safe_search(plugin, breaker, keywords, geo, timeframe, custom_timeframe))
+            tasks.append(self._safe_search(plugin, breaker, keywords, geo, timeframe, custom_timeframe, limit))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_signals: List[TrendSignal] = []
@@ -375,14 +376,17 @@ class ConnectorPluginRegistry:
         geo: GeoCode, 
         timeframe: Timeframe,
         custom_timeframe: Optional[str] = None,
+        limit: Optional[int] = None,
     ) -> List[TrendSignal]:
         try:
             import inspect
             sig = inspect.signature(plugin.search_signals)
+            kwargs = {"keywords": keywords, "geo": geo, "timeframe": timeframe}
             if "custom_timeframe" in sig.parameters:
-                signals = await plugin.search_signals(keywords=keywords, geo=geo, timeframe=timeframe, custom_timeframe=custom_timeframe)
-            else:
-                signals = await plugin.search_signals(keywords=keywords, geo=geo, timeframe=timeframe)
+                kwargs["custom_timeframe"] = custom_timeframe
+            if limit is not None and "limit" in sig.parameters:
+                kwargs["limit"] = limit
+            signals = await plugin.search_signals(**kwargs)
             breaker.record_success()
             return signals
         except Exception as e:

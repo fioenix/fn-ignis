@@ -28,6 +28,7 @@ class _BasePlugin(IConnectorPlugin):
     def __init__(self):
         self.fetch_calls = 0
         self.search_calls: List[List[str]] = []
+        self.search_limits: List[int] = []
         self.suggestion_calls = 0
 
     @property
@@ -58,6 +59,7 @@ class VideoGridPlugin(_BasePlugin):
 
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20) -> List[TrendSignal]:
         self.search_calls.append(list(keywords))
+        self.search_limits.append(limit)
         return [TrendSignal(platform=self._platform, raw_title=f"grid: {keywords[0]}", metric_value=2.0, geo_code=geo)]
 
     async def fetch_suggestions(self, keywords, geo=GeoCode.VN) -> List[dict]:
@@ -256,3 +258,21 @@ async def test_circuit_breaker_isolation_between_plugins_on_one_platform():
     signals = await registry.fetch_from_all()
     assert len(signals) == 1
     assert creative.fetch_calls == 4
+
+
+@pytest.mark.asyncio
+async def test_search_across_all_accepts_and_forwards_a_result_limit():
+    """AutonomousDiscoveryUseCase has always passed limit=30.
+
+    search_across_all never declared it, so every daily discovery raised TypeError inside a
+    try/except and produced a dossier with zero signals.
+    """
+    grid = VideoGridPlugin()
+    registry = ConnectorPluginRegistry()
+    registry.register(grid)
+
+    signals = await registry.search_across_all(keywords=["ai agent"], limit=30)
+
+    assert len(signals) == 1
+    assert grid.search_calls == [["ai agent"]]
+    assert grid.search_limits == [30], "The cap must reach the connector, not be dropped"

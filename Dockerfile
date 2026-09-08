@@ -5,6 +5,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
+# The wheel force-includes the SQL seeds as ignis/sql, so the build needs them present.
+COPY sql/ ./sql/
 
 RUN uv venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv
