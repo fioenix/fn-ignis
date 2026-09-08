@@ -8,6 +8,11 @@ from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.config import settings
 from ignis.domain.value_objects import GeoCode, IngressScope
+from ignis.infrastructure.auth.meta_browser_auth import (
+    InstagramBrowserAuthManager,
+    ThreadsBrowserAuthManager,
+)
+from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager, ThreadsAuthManager
 from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
@@ -133,8 +138,21 @@ class IngressScheduler:
         registry.register(GoogleTrendsRssPlugin())
         registry.register(tiktok_plugin)
         registry.register(creative_center_plugin)
-        registry.register(ThreadsPlugin())
-        registry.register(ReelsPlugin())
+        # The worker must bind the same auth managers the MCP server does. Without them the
+        # plugins cannot reach the Tier-1 browser sessions stored in platform_credentials, so the
+        # radar reported "no valid credentials" for Instagram and collected nothing from Threads.
+        registry.register(
+            ThreadsPlugin(
+                auth_manager=ThreadsAuthManager(repository=repository),
+                browser_auth_manager=ThreadsBrowserAuthManager(repository=repository),
+            )
+        )
+        registry.register(
+            ReelsPlugin(
+                auth_manager=InstagramAuthManager(repository=repository),
+                browser_auth_manager=InstagramBrowserAuthManager(repository=repository),
+            )
+        )
 
         if settings.YOUTUBE_API_KEY:
             registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
