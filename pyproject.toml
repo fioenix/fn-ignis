@@ -82,6 +82,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/ignis"]
 
+# The SQL seeds live at the repository root, where the bootstrap script and the Postgres
+# migration flow read them. A wheel cannot reach outside the package, so ship a copy inside it;
+# ignis.resources resolves whichever layout is present at runtime.
+[tool.hatch.build.targets.wheel.force-include]
+"sql" = "ignis/sql"
+
 [tool.hatch.build.targets.sdist]
 exclude = [
     ".specify",

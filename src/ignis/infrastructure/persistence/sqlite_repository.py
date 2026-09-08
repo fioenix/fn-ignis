@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.resources import sql_seed_file
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_timeframe
 
@@ -170,24 +171,22 @@ class SqliteTrendRepository(ITrendRepository):
         count = cur.fetchone()[0]
         if count == 0:
             now_str = datetime.now(timezone.utc).isoformat()
-            sql_dir = Path(__file__).resolve().parents[4] / "sql"
-            if sql_dir.exists():
-                for sql_filename in ("003_market_lexicons.sql", "004_global_lexicons.sql"):
-                    sql_path = sql_dir / sql_filename
-                    if sql_path.exists():
-                        content = sql_path.read_text(encoding="utf-8")
-                        matches = re.findall(r"\('([^']+)',\s*'([^']+)',\s*'([^']+)'", content)
-                        for dom, term, cat in matches:
-                            cur.execute(
-                                "INSERT OR IGNORE INTO market_lexicons (id, domain, term, category, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                                (str(uuid4()), dom, term, cat, "system", now_str),
-                            )
+            for sql_filename in ("003_market_lexicons.sql", "004_global_lexicons.sql"):
+                sql_path = sql_seed_file(sql_filename)
+                if not sql_path:
+                    continue
+                content = sql_path.read_text(encoding="utf-8")
+                matches = re.findall(r"\('([^']+)',\s*'([^']+)',\s*'([^']+)'", content)
+                for dom, term, cat in matches:
+                    cur.execute(
+                        "INSERT OR IGNORE INTO market_lexicons (id, domain, term, category, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                        (str(uuid4()), dom, term, cat, "system", now_str),
+                    )
 
         cur.execute("SELECT COUNT(*) FROM industry_taxonomies")
         if cur.fetchone()[0] == 0:
-            sql_dir = Path(__file__).resolve().parents[4] / "sql"
-            tax_path = sql_dir / "003_market_lexicons.sql"
-            if tax_path.exists():
+            tax_path = sql_seed_file("003_market_lexicons.sql")
+            if tax_path:
                 now_str = datetime.now(timezone.utc).isoformat()
                 content = tax_path.read_text(encoding="utf-8")
                 tax_matches = re.findall(r"\('([^']+)',\s*'([^']+)',\s*ARRAY\[([^\]]+)\]\)", content)
@@ -201,18 +200,16 @@ class SqliteTrendRepository(ITrendRepository):
         cur.execute("SELECT COUNT(*) FROM runtime_configs")
         rc_count = cur.fetchone()[0]
         if rc_count == 0:
-            sql_dir = Path(__file__).resolve().parents[4] / "sql"
-            if sql_dir.exists():
-                rc_path = sql_dir / "007_runtime_configs.sql"
-                if rc_path.exists():
-                    rc_content = rc_path.read_text(encoding="utf-8")
-                    rc_matches = re.findall(r"\('([^']+)',\s*'([^']*)',\s*'([^']+)',\s*'([^']+)',\s*'([^']+)'\)", rc_content)
-                    now_str = datetime.now(timezone.utc).isoformat()
-                    for k, v, cat, desc, updater in rc_matches:
-                        cur.execute(
-                            "INSERT OR IGNORE INTO runtime_configs (key, value, category, description, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (k, v, cat, desc, updater, now_str, now_str),
-                        )
+            rc_path = sql_seed_file("007_runtime_configs.sql")
+            if rc_path:
+                rc_content = rc_path.read_text(encoding="utf-8")
+                rc_matches = re.findall(r"\('([^']+)',\s*'([^']*)',\s*'([^']+)',\s*'([^']+)',\s*'([^']+)'\)", rc_content)
+                now_str = datetime.now(timezone.utc).isoformat()
+                for k, v, cat, desc, updater in rc_matches:
+                    cur.execute(
+                        "INSERT OR IGNORE INTO runtime_configs (key, value, category, description, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (k, v, cat, desc, updater, now_str, now_str),
+                    )
 
         conn.commit()
         if self._mem_conn is None:
