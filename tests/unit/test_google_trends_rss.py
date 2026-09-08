@@ -86,3 +86,38 @@ async def test_google_trends_rss_is_healthy():
 
     with patch("httpx.AsyncClient.get", side_effect=httpx.ConnectError("Network down")):
         assert await plugin.is_healthy() is False
+
+
+@pytest.mark.asyncio
+async def test_each_trending_topic_gets_its_own_url_not_the_feed_url():
+    """Google repeats the feed URL in every item's <link>, which is not a per-topic identity."""
+    rss = """<?xml version="1.0"?>
+    <rss version="2.0" xmlns:ht="https://trends.google.com/trending/rss">
+      <channel>
+        <item>
+          <title>gia vang</title>
+          <link>https://trends.google.com/trending/rss?geo=VN</link>
+          <ht:approx_traffic>50,000+</ht:approx_traffic>
+        </item>
+        <item>
+          <title>us open</title>
+          <link>https://trends.google.com/trending/rss?geo=VN</link>
+          <ht:approx_traffic>20,000+</ht:approx_traffic>
+        </item>
+      </channel>
+    </rss>"""
+
+    plugin = GoogleTrendsRssPlugin()
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = rss
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        signals = await plugin.fetch_signals(geo=GeoCode.VN, limit=10)
+
+    urls = [s.source_url for s in signals]
+    assert len(set(urls)) == len(urls), f"Every trending topic needs its own URL: {urls}"
+    assert all("/trending/rss" not in (u or "") for u in urls)
+    assert "q=gia%20vang" in urls[0]

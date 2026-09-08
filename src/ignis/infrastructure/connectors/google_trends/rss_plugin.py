@@ -162,6 +162,14 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
             "unique_variants": total_unique_variants,
         }
 
+    def _explore_url(self, query: str, geo: GeoCode) -> str:
+        """The Google Trends explore URL for one keyword, used as that topic's stable address."""
+        geo_param = geo.value if hasattr(geo, "value") else str(geo)
+        return (
+            "https://trends.google.com/trends/explore?"
+            f"date=now%207-d&geo={urllib.parse.quote(geo_param)}&q={urllib.parse.quote(query)}"
+        )
+
     async def fetch_signals(
         self,
         geo: GeoCode = GeoCode.VN,
@@ -193,7 +201,12 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
                 pub_date = self._parse_pub_date(pub_date_elem.text if pub_date_elem is not None else None)
 
                 link_elem = item.find("link")
-                source_url = link_elem.text if link_elem is not None and link_elem.text else ""
+                item_link = (link_elem.text or "").strip() if link_elem is not None else ""
+                # Google repeats the feed's own URL in every item's <link>, so it identifies the
+                # feed rather than the topic. Fall back to the keyword's explore URL, which is
+                # distinct per trending topic and stable across polls.
+                source_url = item_link if item_link and "/trending/rss" not in item_link \
+                    else self._explore_url(title, geo)
 
                 metadata: Dict[str, Any] = {
                     "raw_traffic": traffic_str,
