@@ -34,33 +34,33 @@ def _signal(platform=PlatformType.THREADS, title="post", url=None, **metadata) -
 # --- Domain: recognising own content ------------------------------------------------------------
 
 def test_matches_own_account_by_username_metadata():
-    identity = SelfIdentity(platform="threads", username="im.fioenix")
-    assert is_self_authored(_signal(username="im.fioenix"), [identity])
-    assert is_self_authored(_signal(username="@Im.Fioenix"), [identity])
+    identity = SelfIdentity(platform="threads", username="own.account")
+    assert is_self_authored(_signal(username="own.account"), [identity])
+    assert is_self_authored(_signal(username="@Own.Account"), [identity])
     assert not is_self_authored(_signal(username="someone.else"), [identity])
 
 
 def test_matches_own_account_by_numeric_id_when_the_handle_is_unknown():
     """A browser session knows its numeric account id but not always its handle."""
-    identity = SelfIdentity(platform="threads", account_id="63419142080")
-    assert is_self_authored(_signal(user_id="63419142080"), [identity])
-    assert not is_self_authored(_signal(user_id="25945555275"), [identity])
+    identity = SelfIdentity(platform="threads", account_id="1000000000001")
+    assert is_self_authored(_signal(user_id="1000000000001"), [identity])
+    assert not is_self_authored(_signal(user_id="2000000000002"), [identity])
 
 
 def test_matches_own_account_from_the_post_url():
-    identity = SelfIdentity(platform="threads", username="im.fioenix")
-    assert is_self_authored(_signal(url="https://www.threads.net/@im.fioenix/post/DaH1iwmk3oa"), [identity])
+    identity = SelfIdentity(platform="threads", username="own.account")
+    assert is_self_authored(_signal(url="https://www.threads.net/@own.account/post/DaH1iwmk3oa"), [identity])
     assert not is_self_authored(_signal(url="https://www.threads.net/@other/post/DaH1iwmk3oa"), [identity])
 
-    ig = SelfIdentity(platform="reels", username="fioenix")
+    ig = SelfIdentity(platform="reels", username="own.account")
     assert is_self_authored(
-        _signal(platform=PlatformType.REELS, url="https://www.instagram.com/fioenix/reel/abc/"), [ig]
+        _signal(platform=PlatformType.REELS, url="https://www.instagram.com/own.account/reel/abc/"), [ig]
     )
 
 
 def test_identity_never_leaks_across_platforms():
-    identity = SelfIdentity(platform="threads", username="im.fioenix")
-    assert not is_self_authored(_signal(platform=PlatformType.TIKTOK, username="im.fioenix"), [identity])
+    identity = SelfIdentity(platform="threads", username="own.account")
+    assert not is_self_authored(_signal(platform=PlatformType.TIKTOK, username="own.account"), [identity])
 
 
 def test_partition_preserves_order_on_both_sides():
@@ -85,11 +85,11 @@ async def test_identity_discovered_from_a_browser_session_cookie():
     repo.list_platform_credentials.return_value = [{"platform": "threads_browser"}]
     repo.get_platform_credentials.return_value = {
         "platform": "threads_browser",
-        "credentials_data": {"cookies": [{"name": "ds_user_id", "value": "63419142080"}], "origins": []},
+        "credentials_data": {"cookies": [{"name": "ds_user_id", "value": "1000000000001"}], "origins": []},
     }
 
     identities = await SelfIdentityRegistry(repo).load()
-    assert [i.normalized_account_id for i in identities] == ["63419142080"]
+    assert [i.normalized_account_id for i in identities] == ["1000000000001"]
     assert identities[0].platform == "threads"
     assert identities[0].source == "session_cookie"
 
@@ -97,12 +97,12 @@ async def test_identity_discovered_from_a_browser_session_cookie():
 @pytest.mark.asyncio
 async def test_explicit_runtime_config_covers_what_no_api_reports():
     repo = AsyncMock()
-    repo.get_runtime_config.return_value = json.dumps({"threads": ["im.fioenix"], "tiktok": ["fioenix"]})
+    repo.get_runtime_config.return_value = json.dumps({"threads": ["own.account"], "tiktok": ["own.account"]})
     repo.list_platform_credentials.return_value = []
 
     identities = await SelfIdentityRegistry(repo).load()
     by_platform = {i.platform: i.normalized_username for i in identities}
-    assert by_platform == {"threads": "im.fioenix", "tiktok": "fioenix"}
+    assert by_platform == {"threads": "own.account", "tiktok": "own.account"}
 
 
 # --- Registry: routing and the guard ------------------------------------------------------------
@@ -110,7 +110,7 @@ async def test_explicit_runtime_config_covers_what_no_api_reports():
 class _AccountFeedPlugin(IConnectorPlugin):
     """Stands in for Threads and Reels: its feed is the authenticated account's own."""
 
-    def __init__(self, own_username="im.fioenix"):
+    def __init__(self, own_username="own.account"):
         self.fetch_scopes: List[IngressScope] = []
         self.search_calls: List[List[str]] = []
         self._own_username = own_username
@@ -150,7 +150,7 @@ async def test_public_pass_uses_the_keyword_probe_instead_of_the_account_feed():
     plugin = _AccountFeedPlugin()
     registry = ConnectorPluginRegistry()
     registry.register(plugin)
-    registry.register_self_identities([SelfIdentity(platform="threads", username="im.fioenix")])
+    registry.register_self_identities([SelfIdentity(platform="threads", username="own.account")])
 
     signals = await registry.fetch_from_all(scope=IngressScope.PUBLIC_MARKET, seed_keywords=["ai agent"])
 
@@ -178,7 +178,7 @@ async def test_own_profile_pass_reads_the_account_feed_and_keeps_only_own_conten
     plugin = _AccountFeedPlugin()
     registry = ConnectorPluginRegistry()
     registry.register(plugin)
-    registry.register_self_identities([SelfIdentity(platform="threads", username="im.fioenix")])
+    registry.register_self_identities([SelfIdentity(platform="threads", username="own.account")])
 
     signals = await registry.fetch_from_all(scope=IngressScope.OWN_PROFILE)
 
@@ -191,7 +191,7 @@ async def test_keyword_search_across_all_is_guarded_too():
     plugin = _AccountFeedPlugin()
     registry = ConnectorPluginRegistry()
     registry.register(plugin)
-    registry.register_self_identities([SelfIdentity(platform="threads", username="im.fioenix")])
+    registry.register_self_identities([SelfIdentity(platform="threads", username="own.account")])
 
     signals = await registry.search_across_all(keywords=["ai agent"])
 
