@@ -14,6 +14,17 @@ class ITrendRepository(ABC):
         """Save a batch of trend signals into the database. Returns the number of inserted records."""
         pass
 
+    async def prune_empty_clusters(self) -> int:
+        """Delete clusters that no longer have a single signal, returning how many were removed.
+
+        Re-clustering moves a signal from the cluster it was in to the one it now belongs to, so a
+        stale cluster can be left holding nothing. Those rows are invisible to every read path
+        (which joins signals) yet keep growing, and their canonical_name is a copy of the text that
+        formed them. Cluster ids are derived from the canonical name, so a topic that comes back is
+        stored under the same id again.
+        """
+        return 0
+
     @abstractmethod
     async def save_clusters(self, clusters: List[TopicCluster]) -> None:
         """Upsert topic clusters and their metadata."""

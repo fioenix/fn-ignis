@@ -26,6 +26,13 @@ class ClusterSignalsUseCase:
         # Update signals with assigned cluster IDs
         await self._repo.save_signals(signals)
 
+        # Re-clustering can leave a stale cluster holding nothing, since its last signal has just
+        # moved to the cluster it now belongs to. Those rows are invisible to every read path and
+        # would otherwise accumulate on every pass, so the pipeline clears them as it goes.
+        removed = await self._repo.prune_empty_clusters()
+        if removed:
+            logger.info(f"Pruned {removed} topic clusters left without any signal.")
+
         logger.info(f"Successfully generated and stored {len(clusters)} Topic Clusters.")
         return clusters
 

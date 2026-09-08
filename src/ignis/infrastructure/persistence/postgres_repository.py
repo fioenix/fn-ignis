@@ -64,33 +64,40 @@ class PostgresTimescaleRepository(ITrendRepository):
                     no_url_signals = []
                     all_metric_points = []
 
+                    # The identity of a signal is its platform, its URL and its title together.
+                    # Several connectors report a feed-level URL that every item shares — Google
+                    # Trends returns one RSS URL for every trending keyword — so keying on the URL
+                    # alone collapsed distinct keywords onto a single row and overwrote it on every
+                    # poll, destroying the demand history it was supposed to accumulate.
                     for s in signals:
                         plat = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
                         url = s.source_url.strip() if s.source_url else ""
                         if url:
-                            url_signals[(plat, url)] = s
+                            url_signals[(plat, url, (s.raw_title or "").strip())] = s
                         else:
                             no_url_signals.append(s)
 
                     existing_map = {}
                     if url_signals:
-                        urls_list = list(url_signals.keys())
-                        conds = " OR ".join(["(platform = %s AND source_url = %s)"] * len(urls_list))
+                        keys_list = list(url_signals.keys())
+                        conds = " OR ".join(
+                            ["(platform = %s AND source_url = %s AND raw_title = %s)"] * len(keys_list)
+                        )
                         params = []
-                        for p, u in urls_list:
-                            params.extend([p, u])
+                        for p, u, t in keys_list:
+                            params.extend([p, u, t])
                         await cur.execute(
-                            f"SELECT id, platform, source_url FROM trend_signals WHERE {conds};",
+                            f"SELECT id, platform, source_url, raw_title FROM trend_signals WHERE {conds};",
                             params,
                         )
                         rows = await cur.fetchall()
                         for r in rows:
-                            existing_map[(r[1], r[2])] = r[0]
+                            existing_map[(r[1], r[2], (r[3] or "").strip())] = r[0]
 
                     updates = []
-                    for (plat, url), s in url_signals.items():
-                        if (plat, url) in existing_map:
-                            sig_id = existing_map[(plat, url)]
+                    for key, s in url_signals.items():
+                        if key in existing_map:
+                            sig_id = existing_map[key]
                             meta_json = json.dumps(s.metadata or {})
                             cap_at = s.captured_at or datetime.now(timezone.utc)
                             c_id = str(s.cluster_id) if s.cluster_id else None
@@ -105,7 +112,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                         """
                         await cur.executemany(update_query, updates)
 
-                    to_insert = [s for (plat, url), s in url_signals.items() if (plat, url) not in existing_map]
+                    to_insert = [s for key, s in url_signals.items() if key not in existing_map]
                     to_insert.extend(no_url_signals)
 
                     if to_insert:
@@ -154,6 +161,48 @@ class PostgresTimescaleRepository(ITrendRepository):
             logger.error(f"Error saving signals to database: {e}", exc_info=True)
             raise RepositoryException(f"Failed to batch insert signals: {e}") from e
 
+    async def prune_empty_clusters(self) -> int:
+        """Remove clusters left holding no signals after re-clustering."""
+        pool = await self._get_pool()
+        query = """
+            DELETE FROM topic_clusters tc
+            WHERE NOT EXISTS (SELECT 1 FROM trend_signals ts WHERE ts.cluster_id = tc.id);
+        """
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(query)
+                    return cur.rowcount or 0
+        except Exception as e:
+            logger.warning(f"Could not prune empty clusters: {e}")
+            return 0
+
+    @staticmethod
+    def _deduplicate_clusters(clusters: List[TopicCluster]) -> Dict[str, TopicCluster]:
+        """Merge clusters that normalise to the same canonical name, keyed by that name.
+
+        A merged-away cluster is never persisted, so its signals must be re-pointed at the
+        surviving cluster. Leaving them on the dropped id sent them to whatever row already
+        carried it, and the surviving cluster was then stored with no signals at all — which is
+        where the empty topic_clusters rows came from, roughly a dozen per ingress pass.
+        """
+        from ignis.domain.normalization import normalize_cluster_name
+
+        deduped: Dict[str, TopicCluster] = {}
+        for c in clusters:
+            norm_name = normalize_cluster_name(c.canonical_name)
+            target = deduped.get(norm_name)
+            if target is None:
+                c.canonical_name = norm_name
+                deduped[norm_name] = c
+                continue
+
+            for signal in c.signals:
+                signal.cluster_id = target.id
+            target.signals.extend(c.signals)
+            target.cross_platform_score = max(target.cross_platform_score, c.cross_platform_score)
+        return deduped
+
     async def save_clusters(self, clusters: List[TopicCluster]) -> None:
         if not clusters:
             return
@@ -186,19 +235,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             ) VALUES (%s, %s, %s, %s, %s, %s, %s);
         """
 
-        from ignis.domain.normalization import normalize_cluster_name
-
-        # Deduplicate clusters within the batch before saving
-        deduped: Dict[str, TopicCluster] = {}
-        for c in clusters:
-            norm_name = normalize_cluster_name(c.canonical_name)
-            if norm_name in deduped:
-                target = deduped[norm_name]
-                target.signals.extend(c.signals)
-                target.cross_platform_score = max(target.cross_platform_score, c.cross_platform_score)
-            else:
-                c.canonical_name = norm_name
-                deduped[norm_name] = c
+        deduped = self._deduplicate_clusters(clusters)
 
         try:
             async with pool.connection() as conn:

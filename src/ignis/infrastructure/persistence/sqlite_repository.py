@@ -239,9 +239,12 @@ class SqliteTrendRepository(ITrendRepository):
 
                     existing_id = None
                     if url:
+                        # Title is part of the identity: a feed-level URL is shared by every item
+                        # it lists, so matching on the URL alone overwrote unrelated signals.
                         cur.execute(
-                            "SELECT id FROM trend_signals WHERE platform = ? AND source_url = ? ORDER BY captured_at DESC LIMIT 1;",
-                            (plat, url),
+                            "SELECT id FROM trend_signals WHERE platform = ? AND source_url = ? "
+                            "AND raw_title = ? ORDER BY captured_at DESC LIMIT 1;",
+                            (plat, url, s.raw_title),
                         )
                         found = cur.fetchone()
                         if found:
@@ -283,6 +286,31 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.close()
 
         return await asyncio.to_thread(_sync_save)
+
+    async def prune_empty_clusters(self) -> int:
+        """Remove clusters left holding no signals after re-clustering."""
+        await self._ensure_schema()
+
+        def _sync_prune():
+            conn = self._get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    DELETE FROM topic_clusters
+                    WHERE id NOT IN (
+                        SELECT DISTINCT cluster_id FROM trend_signals WHERE cluster_id IS NOT NULL
+                    );
+                    """
+                )
+                removed = cur.rowcount or 0
+                conn.commit()
+                return removed
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_prune)
 
     async def save_clusters(self, clusters: List[TopicCluster]) -> None:
         if not clusters:

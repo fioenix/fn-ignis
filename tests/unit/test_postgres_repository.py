@@ -153,3 +153,40 @@ async def test_platform_credentials_crud():
     deleted = await repo.delete_platform_credentials("tiktok")
     assert deleted is True
 
+
+
+def test_cluster_batch_dedup_repoints_signals_to_the_surviving_cluster():
+    """A merged-away cluster is never stored, so its signals must move to the survivor.
+
+    Leaving them behind was what produced empty topic_clusters rows: the signals went to whatever
+    row already carried the dropped id, and the cluster that was stored ended up with none.
+    """
+    from uuid import uuid4
+
+    from ignis.domain.entities import TopicCluster, TrendSignal
+    from ignis.domain.value_objects import GeoCode, PlatformType
+    from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+
+    def signal(title: str, cluster_id) -> TrendSignal:
+        return TrendSignal(
+            platform=PlatformType.THREADS,
+            raw_title=title,
+            metric_value=1.0,
+            geo_code=GeoCode.VN,
+            cluster_id=cluster_id,
+        )
+
+    survivor_id, dropped_id = uuid4(), uuid4()
+    survivor = TopicCluster(id=survivor_id, canonical_name="US Open", cross_platform_score=40.0)
+    survivor.signals = [signal("first", survivor_id)]
+    dropped = TopicCluster(id=dropped_id, canonical_name="us open", cross_platform_score=55.0)
+    dropped.signals = [signal("second", dropped_id), signal("third", dropped_id)]
+
+    deduped = PostgresTimescaleRepository._deduplicate_clusters([survivor, dropped])
+
+    assert len(deduped) == 1
+    merged = next(iter(deduped.values()))
+    assert merged.id == survivor_id
+    assert len(merged.signals) == 3
+    assert {s.cluster_id for s in merged.signals} == {survivor_id}
+    assert merged.cross_platform_score == 55.0
