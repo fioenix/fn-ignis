@@ -1,6 +1,6 @@
 [project]
 name = "fn-ignis"
-version = "0.3.0"
+version = "0.3.5"
 description = "fnIgnis — Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform with FastMCP Server"
 readme = "README.md"
 license = { text = "MIT" }

@@ -1,5 +1,5 @@
 name: fn-ignis
-version: 0.3.0
+version: 0.3.5
 type: intelligence-harness
 entrypoint: src/ignis/interfaces/mcp/server.py
 lifecycle:

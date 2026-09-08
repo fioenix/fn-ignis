@@ -256,10 +256,15 @@ Every AI Agent modifying this repository or preparing a release must verify comp
 - [ ] **Clean Working Tree**: Verify no uncommitted scratchpads, no leaked credentials/`.env`, and no temporary audit notes placed in `docs/` (strictly `.handoff/`).
 - [ ] **Branch Merge to Main**: Ensure the feature or maintenance branch is fully merged into `main` before tagging.
 - [ ] **Packaging Verification**: Run distribution build check (`python -m build` or `uv build`) to verify clean package artifacts without missing assets.
-- [ ] **Atomic Triple Synchronization**: Synchronously update version strings across all 3 files in a single atomic commit:
+- [ ] **Atomic Version Synchronization**: Six files carry the version string, not three. Update every one of them in a single atomic commit, then tag:
   - `pyproject.toml` (`version = "X.Y.Z"`)
   - `openclaw.json` (`"version": "X.Y.Z"`)
+  - `server.json` (twice: the manifest version and the package version)
+  - `CITATION.cff` (`version: X.Y.Z`)
+  - `.openclaw/config.yaml` (`version: X.Y.Z`)
+  - `BACKLOG.md` (the version banner)
   - Git Tag (`vX.Y.Z`) on `main`
+  - Verify with `grep -rn "<previous version>" --include="*.toml" --include="*.json" --include="*.yaml" --include="*.cff" --include="*.md" .` returning nothing
 - [ ] **GitHub Release Tagging**: Tag and push release commit (`git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`) and publish the GitHub Release note.
 - [ ] **SemVer Guardrail**: Increment strictly by `+1` (`PATCH`, `MINOR`, `MAJOR`) according to Section 4 criteria. Never jump versions arbitrarily.
 

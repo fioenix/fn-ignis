@@ -1,7 +1,7 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
 > **Cập nhật lần cuối:** 03/09/2026  
-> **Phiên bản:** `v0.3.0`  
+> **Phiên bản:** `v0.3.5`  
 > **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite) + FastMCP Server (34 Handlers & Tools)  
 > **Trạng thái Tests:** 147/147 unit & integration tests PASSED (100%) | Ruff Linter Clean
 
