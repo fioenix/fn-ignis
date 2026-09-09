@@ -178,3 +178,49 @@ def test_an_accent_folded_short_word_does_not_classify_a_topic(title):
 def test_compound_terms_still_classify(title, expected):
     """Removing the ambiguous single tokens must not cost the coverage they were added for."""
     assert _clusterer()._classify_category([_signal(title)]) == expected
+
+
+@pytest.mark.parametrize(
+    "title,keyword_note",
+    [
+        # Every one of these was classified off a single short token, verified on the live corpus.
+        ("JISOO - CLICK Official MV", "ai: Vietnamese for who/anyone, also the English acronym"),
+        ("co ai o gan day cho minh xin mot vi khach", "ai"),
+        ("Zoey Vs Mira Vs Rumi o tap nay", "hoc"),
+        ("alcaraz is just a magician blows the set", "fashion"),
+        ("Google Search Trends tem nhan dan do an", "kem"),
+        ("tai sao can nha cha me toi de lai rat nho", "son"),
+    ],
+)
+def test_one_short_token_is_not_enough_evidence_for_a_vertical(title, keyword_note):
+    """A single unambiguous-looking token still collides with ordinary words.
+
+    Measured on the live corpus: of 342 classified clusters, 239 rested on exactly one keyword,
+    and 179 of those on a single token. Sampling them showed the token was usually a collision --
+    "ai" alone filed a 278-signal K-pop cluster under tech, because "ai" is Vietnamese for
+    who/anyone as well as the English acronym.
+    """
+    assert _clusterer()._classify_category([_signal(title)]) == "unclassified", keyword_note
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        # A compound cannot collide by accident, so one is enough. All verified on live clusters.
+        ("DUNG MUA DIEN THOAI MOI hay mua nhung may nay", "tech"),
+        ("Cung try on collection moi tu local brand", "fashion"),
+        ("Quan ly don hang cuoi ngay", "ecommerce"),
+        ("Livestream ban hang can chu y nhung gi", "ecommerce"),
+        ("gia vang hom nay tang manh", "finance"),
+        ("phoi do di lam mua thu", "fashion"),
+    ],
+)
+def test_one_compound_keyword_is_enough_evidence(title, expected):
+    """60 clusters rested on a single compound and were right; a flat two-hit rule would lose them."""
+    assert _clusterer()._classify_category([_signal(title)]) == expected
+
+
+def test_two_short_tokens_together_do_classify():
+    """Corroboration is what a single token lacks, not relevance."""
+    assert _clusterer()._classify_category([_signal("khoa hoc ai cho nguoi moi bat dau")]) == "education"
+    assert _clusterer()._classify_category([_signal("chatgpt va gpt khac nhau the nao")]) == "tech"

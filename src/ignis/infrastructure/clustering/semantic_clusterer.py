@@ -55,6 +55,10 @@ class SemanticClusterer(IClusteringEngine):
         decomposed = unicodedata.normalize("NFD", text.replace("đ", "d").replace("Đ", "D"))
         return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
+    # How many distinct taxonomy keywords a vertical needs before it may claim a cluster, when
+    # the evidence is bare single tokens rather than compounds.
+    MIN_CATEGORY_KEYWORD_HITS = 2
+
     # A category shorter than this is an abbreviation or a stray fragment, not a label.
     MIN_CATEGORY_CHARS = 3
 
@@ -91,9 +95,19 @@ class SemanticClusterer(IClusteringEngine):
             haystack = self._fold_accents(" ".join(self._clean_title(s.raw_title).lower() for s in group))
             best_code, best_hits = "", 0
             for code, keywords in self._taxonomies:
-                hits = sum(1 for kw in keywords if (kw in tokens) or (" " in kw and kw in haystack))
-                if hits > best_hits:
-                    best_code, best_hits = code, hits
+                matched = [kw for kw in keywords if (kw in tokens) or (" " in kw and kw in haystack)]
+                # One keyword is enough only when it cannot have collided by accident. A compound
+                # qualifies: no ordinary phrase folds onto "gia vang" or "local brand". A single
+                # token does not -- measured on the live corpus, 179 of 342 classified clusters
+                # rested on one bare token and sampling showed it was usually a collision, with
+                # "ai" alone filing a 278-signal K-pop cluster under tech because "ai" is
+                # Vietnamese for who/anyone as well as the English acronym.
+                if not matched:
+                    continue
+                if len(matched) < self.MIN_CATEGORY_KEYWORD_HITS and not any(" " in kw for kw in matched):
+                    continue
+                if len(matched) > best_hits:
+                    best_code, best_hits = code, len(matched)
             if best_code:
                 return best_code
 

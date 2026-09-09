@@ -46,11 +46,21 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [x] **Token số không còn headline nhãn:** nhánh fallback từng cho ra "vietinbank · 100 · chi".
   Chữ số vẫn nằm trong token để clustering phân biệt "iPhone 17" với "iPhone 16", chỉ bị cấm làm
   từ đứng đầu nhãn. Số nằm giữa một cụm mà cluster thật sự chia sẻ thì vẫn giữ ("Top 10 salon").
-- [ ] **Classifier nổ chỉ với một keyword hit trong cả cluster.** Cluster giờ nhóm theo probe
-  keyword nên chứa tiêu đề khá dị biệt nhau, một signal thiểu số có thể quyết category cho cả
-  cluster. Nên cân theo tỷ lệ hoặc yêu cầu tối thiểu 2 hit.
-- [ ] **`son` và `kem` trong taxonomy `beauty` cũng mơ hồ khi mất dấu** (sơn/son, kem/kém). Đây
-  là nợ có sẵn từ seed gốc, chưa sửa để không đổi hành vi ngoài phạm vi.
+- [x] **Classifier yêu cầu bằng chứng có đối chứng:** một keyword là đủ chỉ khi nó **không thể
+  trùng ngẫu nhiên**, tức là cụm ghép. Token đơn cần hit thứ hai. Lý do: đo trên corpus thật,
+  179/342 cluster được phân loại chỉ dựa vào một token đơn, và mẫu cho thấy phần lớn là trùng
+  ngẫu nhiên. Nặng nhất là `ai` — nó vừa là acronym tiếng Anh vừa là đại từ nghi vấn tiếng Việt,
+  và một mình nó đưa cluster 278 signal "JISOO - CLICK (Official MV)" vào `tech`.
+  Sau khi áp: **0** cluster còn được phân loại bằng một token đơn. JISOO và Alcaraz về
+  `unclassified`. Vertical thật 68 → **172** (thay vì 348 lúc còn false positive).
+  **Đánh đổi:** recall giảm từ 348 xuống 172, đổi lấy precision. Với dossier ra quyết định thì
+  category sai tệ hơn category trống.
+- [ ] **Cụm ghép vẫn còn nhiễu trên cluster dị biệt:** `mat na` khớp một post triết lý, `sinh vien`
+  khớp một post tẩy tóc. Cluster nhóm theo probe keyword nên chứa nhiều tiêu đề khác nhau, và
+  category tính trên hợp của tất cả. Nhỏ hơn trước nhiều nhưng chưa hết. Hướng: cân theo số signal
+  thật sự chứa hit, không chỉ theo số keyword khớp.
+- [ ] **`son` và `kem` trong taxonomy `beauty` mơ hồ khi mất dấu** (sơn/son, kém/kem). Luật đối
+  chứng đã vô hiệu hoá tác hại của chúng, nên không còn gấp. Nợ có sẵn từ seed gốc.
 - [ ] **Taxonomy chưa phủ các vertical ngoài thị trường:** tin tức, thể thao, người nổi tiếng,
   sức khoẻ/wellness vẫn rơi vào `unclassified`. Đây là **câu hỏi phạm vi sản phẩm**, không phải
   bug: một harness về cơ hội thị trường có nên theo dõi bóng đá không? Chờ Fio quyết.

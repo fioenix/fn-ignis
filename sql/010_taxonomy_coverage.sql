@@ -17,7 +17,7 @@
 -- have no unaccented twin, and reserve single tokens for unambiguous loanwords and brand names.
 
 INSERT INTO industry_taxonomies (industry_code, industry_name, keywords) VALUES
-('tech', 'Tech & Electronics', ARRAY['ai', 'software', 'agent', 'bot', 'app', 'tool', 'hardware', 'laptop', 'phone', 'chatgpt', 'gpt', 'claude', 'gemini', 'automation', 'tu dong hoa', 'cong nghe', 'may tinh', 'dien thoai', 'phan mem', 'lap trinh', 'saas', 'api', 'cloud', 'no code', 'chatbot', 'prompt']),
+('tech', 'Tech & Electronics', ARRAY['ai', 'software', 'agent', 'bot', 'app', 'tool', 'hardware', 'laptop', 'phone', 'chatgpt', 'gpt', 'claude', 'gemini', 'automation', 'tu dong hoa', 'cong nghe', 'may tinh', 'dien thoai', 'phan mem', 'lap trinh', 'saas', 'api', 'cloud', 'no code', 'chatbot', 'prompt', 'blender', 'figma', 'notion']),
 ('ecommerce', 'E-Commerce & Retail', ARRAY['shop', 'shopee', 'lazada', 'order', 'shipping', 'don hang', 'chot don', 'tiki', 'sendo', 'tiktok shop', 'ban hang', 'gian hang', 'ton kho', 'gia si', 'nhap hang', 'affiliate', 'ma giam gia', 'freeship', 'khach hang', 'doanh thu', 'ty le chuyen doi']),
 ('fashion', 'Apparel & Accessories', ARRAY['fashion', 'clothing', 'linen', 'dress', 'shirt', 'outfit', 'style', 'local brand', 'quan ao', 'thoi trang', 'phoi do', 'phu kien', 'chat lieu', 'cotton', 'jeans', 'streetwear', 'mix do', 'do ni', 'so mi']),
 ('education', 'Education & Training', ARRAY['course', 'khoa hoc', 'hoc', 'tutorial', 'dao tao', 'huong dan', 'tieng anh', 'phat am', 'ngu phap', 'tu vung', 'luyen thi', 'ielts', 'toeic', 'giao vien', 'hoc sinh', 'sinh vien', 'bai giang', 'ky nang', 'chung chi', 'lop hoc', 'tu hoc', 'giao trinh']),
