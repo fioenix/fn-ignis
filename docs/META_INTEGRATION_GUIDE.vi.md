@@ -218,6 +218,6 @@ Hệ thống `fn-ignis` đã tích hợp sẵn công cụ tự động hóa toà
 ### Q3: Bị lỗi `Rate Limited (HTTP 429)` từ Meta Graph API?
 **Khắc phục**:
 Meta Graph API giới hạn 200 lượt gọi/người dùng/giờ. Hệ thống `fn-ignis` đã tích hợp sẵn:
-- **Insights TTL Cache (2 giờ)**: Chỉ số của từng bài viết (`views, likes, replies, reposts, quotes` với Threads; `plays, reach, total_interactions` với Reels) được lưu trong bộ nhớ với TTL 2 giờ. Worker daemon quét lại cùng một cửa sổ dữ liệu sau mỗi 15 phút sẽ đọc từ cache thay vì phát lại N+1 request, triệt tiêu nguồn tiêu thụ quota lớn nhất. Điều chỉnh qua biến môi trường `META_INSIGHTS_CACHE_TTL_SECONDS`.
+- **Insights TTL Cache (2 giờ)**: Chỉ số của từng bài viết (`views, likes, replies, reposts, quotes` với Threads; `plays, reach, total_interactions` với Reels) được lưu trong bộ nhớ với TTL 2 giờ. Worker daemon quét lại cùng một cửa sổ dữ liệu trong vòng TTL sẽ đọc từ cache thay vì phát lại N+1 request, triệt tiêu nguồn tiêu thụ quota lớn nhất. Điều chỉnh qua biến môi trường `META_INSIGHTS_CACHE_TTL_SECONDS`.
 - **Semaphore(5)**: Giới hạn tối đa 5 requests insights đồng thời.
 - **Circuit Breaker**: Sau 3 lần chạm ngưỡng 429, Circuit Breaker sẽ tự động chuyển sang trạng thái `OPEN` để cách ly plugin trong 300 giây, bảo vệ tài khoản của bạn không bị Meta khóa tạm thời.

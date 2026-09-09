@@ -51,7 +51,9 @@ If the user gives you this repository link or asks you to set up `fn-ignis`, exe
 
 1. **Track 1: Always-On Autonomous Radar (Optional, Continuous Baseline)**
    - Operated by the Docker daemon (`fn-ignis-worker`) — optional, not required. On-demand research works without it.
-   - Ingests every 15 minutes through **official HTTP APIs only**: Google Trends RSS and the YouTube Data API.
+   - Ingests through **official HTTP APIs only**: Google Trends RSS and the YouTube Data API. The default tick is
+     `SCHEDULER_INTERVAL_SECONDS=8640` (~2.4h), not a fixed 15 minutes: one pass probes up to 10 keywords and a
+     YouTube `search.list` costs 100 units, so 10 passes a day is what fits inside the 10,000-unit daily quota.
    - The worker image ships no browser runtime, so connectors that can only reach their data by driving a browser (TikTok, and Threads/Instagram without a Graph token) are left out of its registry and handled by Track 2 instead. Each connector decides this itself via `resolve_ingest_runtime()`.
 2. **Track 2: On-Demand Targeted Deep Research (Active Strategic Probes)**
    - Deployed directly by you (the Agent) upon user prompt.
@@ -86,8 +88,8 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 ## 🛠️ Essential Development & Verification Commands
 
 ```bash
-# Run complete test suite (240+ tests, 100% async coverage)
-.venv/bin/pytest tests/unit/
+# Run the complete suite the way CI does -- tests/, not tests/unit/, which is 4 integration tests short
+.venv/bin/pytest tests/
 
 # Run auto-provisioner with JSON output
 python -m ignis.interfaces.cli.setup_bundle --json

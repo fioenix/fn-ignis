@@ -35,63 +35,6 @@
   <small><em>Sơ đồ: Kiến trúc Tình báo Xu hướng & Nghiên cứu Thị trường Mô hình Song hành (<a href="docs/assets/architecture.svg">Vector SVG</a> · <a href="docs/assets/architecture.html">Bản HTML Độc lập</a>)</em></small>
 </p>
 
-<details>
-  <summary>📄 <b>Xem mã nguồn sơ đồ Mermaid</b></summary>
-
-```mermaid
-%%{init: {'theme': 'base', 'themeVariables': { 'fontFamily': 'ui-sans-serif, system-ui, sans-serif', 'fontSize': '13px', 'primaryColor': '#F8FAFC', 'primaryTextColor': '#0F172A', 'primaryBorderColor': '#CBD5E1', 'lineColor': '#64748B', 'secondaryColor': '#F1F5F9', 'tertiaryColor': '#F8FAFC'}}}%%
-flowchart TB
-    %% Inputs
-    subgraph T1["📡 Track 1: Radar Ngầm 24/7 (Continuous Surveillance)"]
-        direction TB
-        W["<b>Worker Daemon</b><br/>Docker Background Cron"]
-        P1["<b>Thu thập Vĩ mô</b><br/>TikTok Creative + Google Trends"]
-        W -->|Mỗi 15 phút| P1
-    end
-
-    subgraph T2["🎯 Track 2: Nghiên cứu Sâu Theo Yêu cầu (Active Probes)"]
-        direction TB
-        User(["<b>Người dùng / Chiến lược gia</b>"]) <--> Agent["<b>AI Agent Harness</b><br/>Claude · Codex · Antigravity · Hermes"]
-        P2["<b>Đầu dò Mục tiêu</b><br/>Gợi ý Tìm kiếm · Lưới Video · VoC"]
-        Agent -->|Triển khai Đầu dò| P2
-    end
-
-    %% Engine & Gate
-    subgraph Core["⚡ fn-ignis Core Intelligence"]
-        QGate{"<b>Quality Gate</b><br/>Độ chính xác &ge; 70%?"}
-        Synth["<b>Bộ máy Tổng hợp Chiến lược</b><br/>Opportunity Index (-100 đến +100)"]
-    end
-
-    %% Persistence & Outputs
-    subgraph Storage["💾 Lưu trữ Chung & Báo cáo"]
-        direction LR
-        DB[("<b>Cơ sở Dữ liệu Chung</b><br/>PostgreSQL / SQLite")]
-        Artifact["<b>Báo cáo Dossier Tương tác</b><br/>reports/*.html Dashboard"]
-    end
-
-    %% Cross connections
-    P1 --> QGate
-    P2 --> QGate
-    QGate -->|Tín hiệu Sạch| DB
-    DB -.->|Dữ liệu Lịch sử| Synth
-    Synth -->|Dữ liệu Tổng hợp| Agent
-    Synth -->|Xuất bản| Artifact
-
-    %% Styling classes
-    classDef radar fill:#EEF2FF,stroke:#6366F1,stroke-width:1.5px,color:#312E81;
-    classDef probe fill:#ECFDF5,stroke:#10B981,stroke-width:1.5px,color:#064E3B;
-    classDef core fill:#FFFBEB,stroke:#F59E0B,stroke-width:1.5px,color:#78350F;
-    classDef storage fill:#F1F5F9,stroke:#64748B,stroke-width:1.5px,color:#0F172A;
-    classDef highlight fill:#FAFAFA,stroke:#0F172A,stroke-width:2px,color:#0F172A;
-
-    class W,P1 radar;
-    class Agent,P2 probe;
-    class QGate,Synth core;
-    class DB,Artifact storage;
-    class User highlight;
-```
-</details>
-
 ---
 
 ## 🧭 Quy trình Vận hành Chuẩn 6 Bước (SOP)
@@ -247,7 +190,7 @@ docker compose -f docker-compose.prod.yml up -d
 | `DATABASE_URL` | Chuỗi kết nối SQLite (`sqlite:///ignis.db`) hoặc PostgreSQL/TimescaleDB | `sqlite:///ignis.db` | **Có** |
 | `YOUTUBE_API_KEY` | Google Cloud YouTube Data API v3 Key | `""` | Tùy chọn |
 | `DEFAULT_GEO` | Mã quốc gia ISO mặc định cho nghiên cứu xu hướng | `VN` | Không |
-| `SCHEDULER_INTERVAL_SECONDS` | Tần suất heartbeat của daemon scheduler (giây) | `900` (15 phút) | Không |
+| `SCHEDULER_INTERVAL_SECONDS` | Nhịp chạy ingress của worker, tính bằng giây. Mặc định suy ra từ quota YouTube: 10 từ khoá x 100 unit nên một ngày chỉ đủ 10 lượt | `8640` (~2,4 giờ) | Không |
 | `DISCOVERY_INTERVAL_HOURS` | Khoảng cách giữa các đợt tự động quét toàn diện (giờ) | `24` (hàng ngày) | Không |
 | `SYNC_INTERVAL_MINUTES` | Tùy chọn ghi đè chu kỳ đồng bộ ingress (phút; 0 = dùng SCHEDULER_INTERVAL_SECONDS) | `0` | Không |
 | `YOUTUBE_CACHE_TTL_SECONDS` | Thời gian cache kết quả tìm kiếm YouTube để bảo vệ quota API | `86400` (24h) | Không |

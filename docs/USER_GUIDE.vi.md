@@ -78,7 +78,7 @@ ignis-mcp
 
 Chế độ này triển khai toàn bộ hệ thống doanh nghiệp gồm:
 1. **PostgreSQL / TimescaleDB (`fn-ignis-db`)**: Cơ sở dữ liệu chuỗi thời gian tối ưu cho hàng triệu tín hiệu social listening.
-2. **Worker Daemon (`fn-ignis-worker`)** — *tùy chọn*: daemon chạy ngầm, thu dữ liệu nền mỗi 15 phút qua các API chính thống (Google Trends RSS, YouTube Data API). Image không kèm browser runtime, nên các kênh chỉ lấy được bằng cách điều khiển browser (TikTok, và Threads/Instagram khi chưa có Graph token) không nằm trong worker mà thuộc Track 2 — chạy trên máy của bạn với session của bạn.
+2. **Worker Daemon (`fn-ignis-worker`)** — *tùy chọn*: daemon chạy ngầm, thu dữ liệu nền qua các API chính thống (Google Trends RSS, YouTube Data API) theo nhịp mặc định ~2,4 giờ một lượt. Image không kèm browser runtime, nên các kênh chỉ lấy được bằng cách điều khiển browser (TikTok, và Threads/Instagram khi chưa có Graph token) không nằm trong worker mà thuộc Track 2 — chạy trên máy của bạn với session của bạn.
 3. **Nginx Report Portal (`fn-ignis-reports`)**: Web server tĩnh phân phối các báo cáo HTML tại cổng `53080`.
 
 #### Bước 1: Chuẩn bị file `.env`
@@ -169,7 +169,7 @@ Tất cả các biến môi trường được định nghĩa trong file `.env`:
 | `DEFAULT_GEO` | String (ISO) | `VN` | Không | Mã quốc gia 2 ký tự mặc định để quét xu hướng (`VN`, `US`, `JP`, `UK`,...). |
 | `YOUTUBE_API_KEY` | String | `""` | Khuyến nghị | Key Google Cloud YouTube Data API v3 để cào video tutorials & case studies. |
 | `IGNIS_ENCRYPTION_KEY` | Base64 String | *(Tự sinh)* | Không | Khóa Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) để mã hóa cookie/phiên đăng nhập TikTok lưu trong database. |
-| `SCHEDULER_INTERVAL_SECONDS` | Integer | `900` (15m) | Không | Tần suất heartbeat kiểm tra trạng thái của worker daemon. |
+| `SCHEDULER_INTERVAL_SECONDS` | Integer | `8640` (~2,4 giờ) | Không | Nhịp chạy một lượt ingress của worker. Mặc định suy ra từ quota YouTube search: 10 từ khoá x 100 unit, tức một ngày chỉ đủ 10 lượt trong 10.000 unit. |
 | `DISCOVERY_INTERVAL_HOURS` | Integer | `24` | Không | Khoảng cách giữa các đợt tự động quét toàn diện Creative Center và phát hiện white space. |
 | `SYNC_INTERVAL_MINUTES` | Integer | `60` | Không | Chu kỳ cào dữ liệu Google Trends RSS định kỳ. |
 | `YOUTUBE_CACHE_TTL_SECONDS` | Integer | `86400` (24h) | Không | Thời gian lưu cache kết quả tìm kiếm YouTube để tiết kiệm quota 10,000 unit/ngày. |
