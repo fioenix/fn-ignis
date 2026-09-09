@@ -28,8 +28,12 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   interval đang dùng sẽ đốt hết quota trước khi hết ngày.
 - [x] **`topic_clusters.topic_label`:** cluster được đặt tên theo chủ đề thay vì nguyên văn một
   post. `canonical_name` giữ vai trò identity key nên 1.030 cluster hiện có không bị đổi ID.
-- [x] **Locale guard ở tầng ingress:** một pass VN từng lưu tiêu đề tiếng Ukraina và tiếng Ả Rập.
-  `HeuristicLanguageDetector` đã có sẵn nhưng chỉ được nối vào mission analysis.
+- [x] **Market-profile guard ở tầng ingress:** một pass VN từng lưu tiêu đề tiếng Ukraina và
+  tiếng Ả Rập. `HeuristicLanguageDetector` đã có sẵn nhưng chỉ được nối vào mission analysis.
+  Lưu ý về bản chất: cổng này **không phải bộ lọc ngôn ngữ**. Nó cân ngôn ngữ, domain vocabulary
+  và noise blacklist cùng lúc, và trên corpus thật thì noise blacklist mới là thứ loại nhiều
+  nhất, vì nó chứa các dấu hiệu content farm như "cover" hay "full". Một tiêu đề bolero tiếng
+  Việt hoàn hảo vẫn bị loại trong pass VN.
 - [x] **Ngừng ghi API key vào log:** httpx log toàn bộ URL ở mức INFO và YouTube xác thực bằng
   key trong query string.
 - [x] **Cluster theo keyword đã probe, không chỉ theo cách diễn đạt tiêu đề:** mọi connector đều
@@ -38,8 +42,9 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   và 3,4% ban đầu. 18 cluster đạt mức SURGING.
 
 ### Còn lại
-- [ ] **Tín hiệu cũ trong DB vẫn lẫn ngoại ngữ:** locale guard chặn ở tầng ingress nên các row
-  ghi trước đó vẫn còn. Cần Fio xác nhận trước khi xoá.
+- [x] **Đã xoá tín hiệu cũ viết bằng chữ viết ngoại ngữ:** 245 row (1,6%), gồm Hangul 162,
+  CJK 49, Cyrillic 24, Katakana/Hiragana 15, Arabic 8, còn lại Thai/Devanagari/Lao/Myanmar.
+  Corpus 15.800 xuống 15.555. Đã backup toàn bộ cột trước khi xoá.
 - [ ] **Token số lọt vào nhãn:** nhãn dạng fallback cho ra "vietinbank · 100 · chi"; cần loại
   token toàn chữ số khỏi bảng xếp hạng nhãn.
 - [ ] **Chưa cluster nào đạt BREAKOUT (>= 80):** cần 4-5 platform cùng nói về một chủ đề, hiện
@@ -50,8 +55,11 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [ ] **Chất lượng nhãn trên corpus thật:** nhiều nhãn rút về dạng mảnh có dấu ba chấm
   ("… em theo …"). Thuật toán đúng nhưng đầu vào là câu nói thường ngày, không phải cụm chủ đề.
 - [ ] **Phân loại category:** phần lớn cluster vẫn là `unclassified`; taxonomy không khớp.
-- [ ] **Locale guard lọc 65%:** đúng chức năng nhưng cần đánh giá lại xem có loại bỏ nội dung
-  tiếng Anh hợp lệ của thị trường VN hay không.
+- [ ] **Quyết định đang chờ: cổng ingress nên xét gì.** Hiện nó xét độ liên quan theo
+  `market_lexicons`, nên loại mọi chủ đề chưa được seed vào lexicon. Điều đó mâu thuẫn trực tiếp
+  với nhiệm vụ của một cái radar xu hướng là tìm ra chủ đề chưa ai seed. Hai hướng: (a) giữ như
+  hiện tại, corpus sạch nhưng radar chỉ thấy thứ đã biết; (b) ở ingress chỉ chặn theo ngôn ngữ,
+  đẩy phần xét độ liên quan xuống Quality Gate ở hạ nguồn. **Chưa quyết**, đang chờ Fio.
 - [ ] **`AMBIGUOUS_UNIGRAMS`** vẫn hardcode trong `semantic_clusterer.py`, đang được theo dõi
   như nợ kỹ thuật trong `test_repo_conventions.py`.
 

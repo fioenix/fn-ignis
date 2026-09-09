@@ -233,16 +233,17 @@ class IngressScheduler:
             positive = [term for terms in by_domain.values() for term in terms]
             clusterer.register_stopwords(stopwords + noise)
             # A keyword probe reaches the whole platform, so a VN pass comes back with titles in
-            # other languages. The guard keeps them out of the corpus the radar accumulates.
-            registry.register_locale_vocabulary(
+            # other languages. The guard keeps those out, and also anything the persisted domain
+            # vocabulary cannot place in this market.
+            registry.register_market_profile_vocabulary(
                 terms=positive, stopwords=stopwords, noise=noise
             )
             logger.info(
-                f"Locale guard armed with {len(positive)} domain terms, "
+                f"Market-profile guard armed with {len(positive)} domain terms, "
                 f"{len(stopwords)} foreign stopwords and {len(noise)} noise terms."
             )
         except Exception as e:
-            logger.warning(f"Could not arm the ingress locale guard: {e}")
+            logger.warning(f"Could not arm the ingress market-profile guard: {e}")
         try:
             identities = await SelfIdentityRegistry(repository).load()
             registry.register_self_identities(identities)

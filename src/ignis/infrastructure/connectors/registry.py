@@ -69,31 +69,43 @@ class ConnectorPluginRegistry:
         self._repository = repository
         self._self_identities: List[SelfIdentity] = []
         self._detector: Optional[ILanguageDetector] = None
-        self._locale_terms: Set[str] = set()
-        self._locale_stopwords: Set[str] = set()
-        self._locale_noise: Set[str] = set()
+        self._profile_terms: Set[str] = set()
+        self._profile_stopwords: Set[str] = set()
+        self._profile_noise: Set[str] = set()
         self.last_pass_report: Dict[str, Any] = {}
 
     def register_self_identities(self, identities: List[SelfIdentity]) -> None:
         """Bind the operator's own accounts so their content can be kept out of market passes."""
         self._self_identities = [i for i in identities if i.is_usable]
 
-    def register_locale_vocabulary(
+    def register_market_profile_vocabulary(
         self,
         terms: Optional[List[str]] = None,
         stopwords: Optional[List[str]] = None,
         noise: Optional[List[str]] = None,
     ) -> None:
-        """Arm the locale guard with the domain vocabulary persisted in `market_lexicons`.
+        """Arm the market-profile guard with the vocabulary persisted in `market_lexicons`.
 
-        Registering the vocabulary is what arms the guard, and that order is deliberate. The
-        detector rejects any title it cannot place in the region, so without the domain whitelist
-        it also rejects legitimate titles built out of English brand and product names, which are
-        ordinary in the VN tech and fashion markets. An unarmed registry does not filter at all.
+        The guard is not a language filter, and calling it one is a mistake with a measured cost:
+        `is_localized` weighs language, this domain vocabulary and the noise blacklist together,
+        and on a real corpus the noise blacklist does most of the rejecting -- it holds generic
+        content-farm markers such as "cover" and "full", so a perfectly Vietnamese bolero title
+        is rejected in a VN pass just as a Ukrainian one is. Reading the filtered count as
+        "off-locale" once led to a proposed cleanup that would have deleted 10,790 of 15,800
+        stored rows, nearly all Vietnamese, when only 245 were in a non-Vietnamese script.
+
+        Registering the vocabulary is what arms the guard, and that order is deliberate: without
+        the whitelist the detector also rejects legitimate titles built out of English brand and
+        product names, which are ordinary in the VN tech and fashion markets. An unarmed registry
+        does not filter at all.
+
+        Known trade-off: relevance is judged against the persisted lexicon, so a genuinely new
+        topic is rejected until someone seeds it -- which is in tension with a radar whose job is
+        to find topics nobody seeded yet.
         """
-        self._locale_terms = {t.strip().lower() for t in (terms or []) if t and t.strip()}
-        self._locale_stopwords = {t.strip().lower() for t in (stopwords or []) if t and t.strip()}
-        self._locale_noise = {t.strip().lower() for t in (noise or []) if t and t.strip()}
+        self._profile_terms = {t.strip().lower() for t in (terms or []) if t and t.strip()}
+        self._profile_stopwords = {t.strip().lower() for t in (stopwords or []) if t and t.strip()}
+        self._profile_noise = {t.strip().lower() for t in (noise or []) if t and t.strip()}
         if self._detector is None:
             from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 
@@ -285,10 +297,10 @@ class ConnectorPluginRegistry:
                     "lexicon nor the discovery feeds produced one this pass."
                 )
 
-        all_signals, off_locale = await self._apply_locale_guard(all_signals, geo)
+        all_signals, off_profile = await self._apply_market_profile_guard(all_signals, geo)
         kept = await self._apply_scope_guard(all_signals, scope, account_scoped_skipped)
         self.last_pass_report["untargeted_feed_skipped"] = no_probe_skipped
-        self.last_pass_report["off_locale_filtered"] = off_locale
+        self.last_pass_report["off_profile_filtered"] = off_profile
         return kept
 
     @staticmethod
@@ -443,17 +455,19 @@ class ConnectorPluginRegistry:
 
         return await self._apply_scope_guard(all_signals, scope, [])
 
-    async def _apply_locale_guard(
+    async def _apply_market_profile_guard(
         self,
         signals: List[TrendSignal],
         geo: GeoCode,
     ) -> Tuple[List[TrendSignal], int]:
-        """Drop signals whose title does not belong to the region this pass is about.
+        """Drop signals whose title does not fit the market profile this pass is about.
 
         A keyword probe queries the whole platform: `q=` is a search term, not a region filter,
-        so a VN pass legitimately comes back with titles in other languages. The always-on radar
-        wrote those straight to the corpus because the language detector was only ever wired into
-        mission analysis. GLOBAL passes want everything and are left alone.
+        so a VN pass legitimately comes back with titles in other languages, and the always-on
+        radar wrote those straight to the corpus because the detector was only ever wired into
+        mission analysis. The guard rejects more than that though -- see
+        `register_market_profile_vocabulary` for what it actually weighs and what that costs.
+        GLOBAL passes want everything and are left alone.
         """
         if self._detector is None or not signals:
             return signals, 0
@@ -466,9 +480,9 @@ class ConnectorPluginRegistry:
             localized = self._detector.is_localized(
                 signal.raw_title or "",
                 geo=geo,
-                extra_terms=self._locale_terms or None,
-                extra_stopwords=self._locale_stopwords or None,
-                extra_noise=self._locale_noise or None,
+                extra_terms=self._profile_terms or None,
+                extra_stopwords=self._profile_stopwords or None,
+                extra_noise=self._profile_noise or None,
             )
             (kept if localized else dropped).append(signal)
 
@@ -478,16 +492,17 @@ class ConnectorPluginRegistry:
                 for s in dropped
             })
             logger.info(
-                f"Filtered {len(dropped)} signals that do not match the {geo.value} linguistic "
+                f"Filtered {len(dropped)} signals that do not fit the {geo.value} market "
                 f"profile ({', '.join(platforms)})."
             )
             if self._repository:
                 await self._repository.log_event(
                     component="ingress",
-                    event_type="OFF_LOCALE_FILTERED",
+                    event_type="OFF_PROFILE_FILTERED",
                     message=(
-                        f"Dropped {len(dropped)} signals whose title does not belong to "
-                        f"{geo.value}; a keyword probe reaches the whole platform, not one region."
+                        f"Dropped {len(dropped)} signals whose title does not fit the "
+                        f"{geo.value} market profile: language, domain vocabulary and noise "
+                        f"filters weighed together, not language alone."
                     ),
                     level="INFO",
                     details={"count": len(dropped), "platforms": platforms, "geo": geo.value},

@@ -281,7 +281,7 @@ async def test_a_vn_pass_does_not_store_titles_from_another_language():
     """
     repo = _repository(["mau toc"])
     registry = ConnectorPluginRegistry(repository=repo)
-    registry.register_locale_vocabulary(terms=["mau toc", "salon"])
+    registry.register_market_profile_vocabulary(terms=["mau toc", "salon"])
     registry.register(DiscoveryFeedPlugin(["mau toc"]))
     registry.register(
         ForeignLanguagePlugin(
@@ -331,3 +331,46 @@ async def test_a_discovered_topic_joins_the_cluster_its_own_keyword_produced():
     clusters = await SemanticClusterer().cluster_signals(signals)
     assert len(clusters) == 1
     assert len({s.platform for s in clusters[0].signals}) == 2
+
+
+@pytest.mark.asyncio
+async def test_the_ingress_gate_rejects_on_market_profile_not_only_on_language():
+    """The gate is not a language detector, and naming it one cost a real misreading.
+
+    `is_localized` weighs language, the persisted domain vocabulary and the noise blacklist
+    together. On the live corpus the noise blacklist does most of the rejecting: it holds generic
+    content-farm markers such as "cover" and "full", so a perfectly Vietnamese bolero title is
+    rejected in a VN pass the same as a Ukrainian one. Reading the gate's filtered count as
+    "off-locale signals" led to a proposed cleanup that would have deleted 10,790 of 15,800
+    stored rows, 68% of the corpus, nearly all of it Vietnamese. Only 245 rows were actually
+    written in a non-Vietnamese script.
+
+    The trade-off this pins: relevance is judged against `market_lexicons`, so a genuinely new
+    topic is rejected until someone seeds it. That is a live constraint, not a bug fixed here.
+    """
+    repo = _repository()
+    registry = ConnectorPluginRegistry(repository=repo)
+    registry.register_market_profile_vocabulary(
+        terms=["khoa hoc ai"], noise=["cover", "full"]
+    )
+    registry.register(DiscoveryFeedPlugin(["khoa hoc ai"]))
+    registry.register(
+        ForeignLanguagePlugin(
+            [
+                "Khoa hoc AI cho nguoi moi bat dau",
+                "Nhac tru tinh cover hay nhat 2026",  # Vietnamese, rejected by the noise list
+            ]
+        )
+    )
+
+    signals = await registry.fetch_from_all(
+        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, seed_keywords=["khoa hoc ai"]
+    )
+    titles = [s.raw_title for s in signals]
+
+    assert "Khoa hoc AI cho nguoi moi bat dau" in titles
+    assert "Nhac tru tinh cover hay nhat 2026" not in titles, (
+        "The gate also rejects Vietnamese titles the vocabulary cannot place; a report field "
+        "named after locale hides that."
+    )
+    assert registry.last_pass_report["off_profile_filtered"] >= 1
