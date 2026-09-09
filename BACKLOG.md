@@ -114,6 +114,23 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   Character class vẫn nằm trong code vì ở đó ký tự chính là thuật toán.
   Còn `VI_CORE_WORDS` và `TECH_LOAN_WORDS` chưa chuyển, nhưng giờ **được ghi tên** trong
   `KNOWN_VOCABULARY_CONSTANTS` thay vì vô hình với gate.
+- [ ] **`captured_at` mang hai nghĩa khác nhau tuỳ connector.** Đây là phát hiện nặng nhất
+  ngày 09/09/2026. 13 trong 15 chỗ gán `captured_at=datetime.now(timezone.utc)`, tức thời điểm
+  thu thập. Ba chỗ còn lại gán thời điểm **nội dung được đăng**:
+  `youtube_plugin.py:223` (`published_at`), `youtube_plugin.py:373` (`pub_at`) và
+  `google_trends/rss_plugin.py:268` (`pub_date` của RSS). Ngay trong `rss_plugin` cũng có hai
+  nghĩa: dòng 268 dùng pubDate, dòng 317 dùng `now()`.
+
+  Hệ quả: **mọi truy vấn theo timeframe đang trộn hai đồng hồ.** `get_trending_topics(30d)` lọc
+  trên `captured_at`, nên với YouTube nó nghĩa là "video đăng trong 30 ngày", còn với Threads là
+  "bài mình cào trong 30 ngày". Hai câu hỏi khác nhau.
+
+  Nó cũng giải thích vì sao YouTube chiếm 94% corpus 30 ngày: 14.813 dòng rải từ 08/06 đến
+  09/09 nhưng chỉ 1.039 mốc thời gian khác nhau, tức nó lấp kín cả cửa sổ ngay lập tức, còn
+  connector browser chỉ lấp những ngày thật sự chạy pass.
+
+  Cần quyết: tách thành hai cột (`captured_at` cho lúc thu thập, `published_at` cho lúc đăng),
+  hay chuẩn hoá `captured_at` về thời điểm thu thập và bỏ hẳn thời điểm đăng.
 - [ ] **`autonomous_discovery.py:116` hardcode 5 từ khoá làm fallback.** Khi macro scan qua
   Creative Center trả rỗng, `macro_keywords` bị gán
   `["ai agent", "chatbot", "automation", "ecommerce", "tiktok shop"]` mà không log gì. Nghĩa là
