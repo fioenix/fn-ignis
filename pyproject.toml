@@ -46,7 +46,6 @@ dependencies = [
 [project.scripts]
 fn-ignis = "ignis.interfaces.mcp.server:main"
 fn-ignis-worker = "ignis.interfaces.cli.scheduler:main"
-ignis = "ignis.interfaces.cli.runner:main"
 ignis-mcp = "ignis.interfaces.mcp.server:main"
 ignis-worker = "ignis.interfaces.cli.scheduler:main"
 ignis-setup = "ignis.interfaces.cli.setup_bundle:main"

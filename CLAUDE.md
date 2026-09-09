@@ -95,8 +95,9 @@ python -m ignis.interfaces.cli.setup_bundle --json
 # Run FastMCP server directly via stdio
 ignis-mcp
 
-# Run single ingress pass via CLI
-ignis --geo VN --timeframe 24h
+# Trigger one ingress pass (through the MCP tool, or the worker for the continuous baseline)
+#   trigger_ingress_refresh(geo="VN")   -- an ingress pass exists to answer a question; there is
+#                                          no standalone "listen to everything once" command.
 ```
 
 ---
