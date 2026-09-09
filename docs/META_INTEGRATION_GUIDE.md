@@ -25,13 +25,26 @@ This document defines the integration architecture, step-by-step instructions, a
 
 `fn-ignis` solves the friction of developer account setup through a two-tier approach:
 
-| Capability | Tier 1: Zero-Setup Ingress (Default) | Tier 2: Deep Graph API (Enterprise) |
+| Capability | Tier 1: Zero-Setup Ingress (Default) | Tier 2: Deep Graph API (Advanced) |
 |---|---|---|
 | **Target Audience** | Marketers, Indie Founders, Casual Analysts | Tech Leads, Data Engineers, Enterprise Ops |
 | **Setup Time** | 0 minutes (instant) | 15–30 minutes (app registration required) |
 | **Meta App Required** | No | Yes (Threads API & Instagram Basic Display) |
-| **Data Yield** | Public trending topics, search autocomplete, top public posts | Full user profiles, engagement metrics, private media |
-| **Reliability** | Public endpoints with defensive rate limiting | Official SLAs and higher rate limits |
+| **Data Yield** | Public trending topics, search autocomplete, top public posts | The authenticated account's own posts and their insights |
+| **Public market listening** | Yes | **Only with `threads_keyword_search` approved through Meta App Review** |
+| **Reliability** | Public endpoints with defensive rate limiting | Official SLAs, but capped at 2,200 keyword searches per 24h |
+
+> **Which tier listens to the market?** Tier 1. This matters more than the table suggests: Meta
+> grants `threads_keyword_search` only after App Review, and until it is granted the endpoint still
+> answers HTTP 200 while searching **the authenticated account's own posts only**. A Tier-2 install
+> without that approval therefore listens to itself. `authenticate_threads()` probes for this and
+> reports `keyword_search_access`; a `SELF_ONLY` or `NOT_PERMITTED` verdict means the Graph tier
+> cannot do market listening on that app.
+>
+> `fn-ignis` is self-hosted open source, so App Review is not treated as a prerequisite for
+> anything. Tier 1 — a one-click browser login on the operator's own machine, no app, no review —
+> is the supported path for Threads and Instagram listening. Tier 2 is worth having for insights on
+> your own content, and for the rare install that already holds the approval.
 
 ---
 

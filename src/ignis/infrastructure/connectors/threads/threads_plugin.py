@@ -298,6 +298,109 @@ class ThreadsPlugin(IConnectorPlugin):
 
         return all_signals
 
+    # Outcomes of the keyword-search access probe below.
+    KEYWORD_SEARCH_PUBLIC = "PUBLIC_SEARCH_ENABLED"
+    KEYWORD_SEARCH_SELF_ONLY = "SELF_ONLY"
+    KEYWORD_SEARCH_NOT_PERMITTED = "NOT_PERMITTED"
+    KEYWORD_SEARCH_INCONCLUSIVE = "INCONCLUSIVE"
+    KEYWORD_SEARCH_NO_TOKEN = "NO_GRAPH_TOKEN"
+
+    async def check_keyword_search_access(self, query: str) -> Dict[str, Any]:
+        """Establish whether this token can actually search public Threads posts.
+
+        Meta grants `threads_keyword_search` only after App Review. Without it the endpoint still
+        answers HTTP 200 — but the search runs over the authenticated account's own posts only, so
+        an install that assumes otherwise ends up listening to itself and calling it market data.
+        Nothing in the API reports the granted scopes (the token exchange returns only
+        access_token, token_type and expires_in, and graph.threads.net exposes no debug_token), so
+        this probes the behaviour instead of introspecting the grant, and reports INCONCLUSIVE
+        rather than guessing when the evidence is thin.
+        """
+        if not query or not query.strip():
+            return {
+                "status": self.KEYWORD_SEARCH_INCONCLUSIVE,
+                "detail": "No probe keyword was supplied, so public search access was not tested.",
+            }
+
+        if not await self._has_graph_token():
+            return {
+                "status": self.KEYWORD_SEARCH_NO_TOKEN,
+                "detail": "No Threads Graph token is configured; the Tier-1 browser session is the active path.",
+            }
+
+        token = await self._require_token()
+        try:
+            own = await self._graph_get(
+                f"{self._api_root}/me",
+                params={"fields": "id,username", "access_token": token},
+            )
+        except Exception as e:
+            own = {}
+            logger.warning(f"Could not read the authenticated Threads account: {e}")
+
+        own_id = str(own.get("id") or "")
+        own_username = str(own.get("username") or "").lstrip("@").lower()
+
+        try:
+            payload = await self._graph_get(
+                f"{self._api_root}/keyword_search",
+                params={
+                    "q": query.strip(),
+                    "search_type": "TOP",
+                    "fields": self.THREAD_FIELDS,
+                    "limit": 25,
+                    "access_token": token,
+                },
+            )
+        except ConnectorAuthenticationException as e:
+            return {
+                "status": self.KEYWORD_SEARCH_NOT_PERMITTED,
+                "detail": f"The keyword search endpoint rejected this token: {e}",
+            }
+        except Exception as e:
+            return {
+                "status": self.KEYWORD_SEARCH_INCONCLUSIVE,
+                "detail": f"The keyword search probe could not complete: {e}",
+            }
+
+        items = payload.get("data") or []
+        if not items:
+            return {
+                "status": self.KEYWORD_SEARCH_INCONCLUSIVE,
+                "detail": (
+                    f"The keyword search for '{query.strip()}' returned nothing, which is equally "
+                    "consistent with an unapproved scope and with a term nobody posted about."
+                ),
+                "probe_keyword": query.strip(),
+            }
+
+        authors = {str(it.get("username") or "").lstrip("@").lower() for it in items}
+        authors.discard("")
+        foreign_authors = {a for a in authors if a and a != own_username}
+
+        if foreign_authors:
+            return {
+                "status": self.KEYWORD_SEARCH_PUBLIC,
+                "detail": (
+                    f"Public search is active: {len(items)} results from "
+                    f"{len(foreign_authors)} other accounts."
+                ),
+                "probe_keyword": query.strip(),
+            }
+
+        return {
+            "status": self.KEYWORD_SEARCH_SELF_ONLY,
+            "detail": (
+                f"Every one of the {len(items)} results belongs to the authenticated account"
+                + (f" (@{own_username})" if own_username else "")
+                + (f" [id {own_id}]" if own_id and not own_username else "")
+                + ". Meta grants threads_keyword_search only after App Review, so this token "
+                "searches its own posts. Use the Tier-1 browser session for Threads listening "
+                "instead: authenticate_threads(browser_login=True)."
+            ),
+            "probe_keyword": query.strip(),
+        }
+
     async def fetch_trending_topics(
         self,
         geo: GeoCode = GeoCode.VN,

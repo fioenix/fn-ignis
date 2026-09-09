@@ -691,7 +691,35 @@ async def handle_authenticate_threads(
         headless=headless,
         timeout_seconds=timeout_seconds,
     )
+    if isinstance(result, dict) and not browser_login:
+        result["keyword_search_access"] = await _probe_threads_keyword_search(comp)
     return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def _probe_threads_keyword_search(comp: Dict[str, Any]) -> Dict[str, Any]:
+    """Report whether the Threads Graph token can search public posts at all.
+
+    The probe keyword comes from the persisted market lexicon rather than a constant, and the
+    result carries its own remediation: the Tier-1 browser session needs no App Review, which is
+    what a self-hosted install can realistically obtain.
+    """
+    # An auxiliary probe must never break the authentication it reports on.
+    registry = comp.get("registry")
+    plugin = registry.get_plugin(PlatformType.THREADS) if registry else None
+    if plugin is None or not hasattr(plugin, "check_keyword_search_access"):
+        return {"status": "UNAVAILABLE", "detail": "No Threads connector is registered."}
+
+    try:
+        ingest_use_case = comp.get("ingest_use_case")
+        seeds = await ingest_use_case.load_seed_keywords() if ingest_use_case else []
+        report = await plugin.check_keyword_search_access(seeds[0] if seeds else "")
+    except Exception as e:
+        return {"status": "INCONCLUSIVE", "detail": f"The keyword search probe failed: {e}"}
+
+    if report.get("status") in (plugin.KEYWORD_SEARCH_SELF_ONLY, plugin.KEYWORD_SEARCH_NOT_PERMITTED):
+        logger.warning(f"Threads public keyword search is unavailable: {report.get('detail')}")
+        report["recommended_path"] = "authenticate_threads(browser_login=True)"
+    return report
 
 
 async def handle_get_threads_auth_status() -> str:
