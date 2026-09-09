@@ -1,5 +1,5 @@
 import pytest
-import numpy as np
+from statistics import pvariance
 from ignis.domain.entities import TrendSignal, TopicCluster
 from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
@@ -39,7 +39,7 @@ def test_bug05_variance_of_scores_is_non_zero():
     # The previous formula hard-capped every topic at 40.0 + 20.0 + 16.0 = 76.0
     assert all(s != 76.0 for s in scores), f"A topic is stuck at the old saturated 76.0: {scores}"
     assert len(set(scores)) == len(scores), f"All five scores must differ: {scores}"
-    variance = float(np.var(scores))
+    variance = pvariance(scores)
     assert variance > 0.5, f"Variance must exceed 0.5, actual {variance}"
 
 
