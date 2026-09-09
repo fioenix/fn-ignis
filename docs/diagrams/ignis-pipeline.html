@@ -31,15 +31,17 @@
   <p class="eyebrow">FINOLABS · FN-IGNIS</p>
   <h1>Ingress to dossier</h1>
   <p class="sub">Track 1 discovers topics and fans them out as keyword probes; Track 2 does the same
-     on demand. Everything meets in one core: gates that judge only whether the data belongs, then
-     storage, clustering and scoring. Relevance is decided at the quality gate, not at ingress.</p>
+     on demand. The unattended radar passes an ingress gate that judges only the script a title is
+     written in, since it accumulates a corpus nobody is watching; Latin script always passes, so
+     English reaches the corpus like Vietnamese does. An agent probe skips that gate entirely and
+     keeps whatever language it found. Relevance is decided at the quality gate, never at ingress.</p>
 
 <svg viewBox="0 0 840 456" role="img" aria-labelledby="ignis-pipeline-title ignis-pipeline-desc"
      xmlns="http://www.w3.org/2000/svg">
   <title id="ignis-pipeline-title">fn-ignis ingress and analysis pipeline</title>
   <desc id="ignis-pipeline-desc">Role-scoped data flow across four lanes and six steps: an optional
     radar discovers candidate topics and builds a capped probe-keyword budget, on-demand agent probes
-    join at the same gate, and a shared core applies ingress gates, stores signals, clusters them by
+    skip that gate and reach the store directly, and a shared core stores signals, clusters them by
     probe provenance, then hands scored topics to a quality gate and on to dossier and graph
     artifacts.</desc>
   <defs>
@@ -105,8 +107,12 @@
   <!-- ARROWS (before boxes) -->
   <!-- RDR/0 -> RDR/1 -->
   <line x1="246" y1="76" x2="254" y2="76" stroke="#5B5B79" stroke-width="1" marker-end="url(#arr-muted)"/>
-  <!-- AGT/1 -> CORE/2 : exit right, corridor x=396, drop -->
-  <path d="M358,156 H388 Q396,156 396,164 V200" fill="none" stroke="#5B5B79" stroke-width="1" marker-end="url(#arr-muted)"/>
+  <!-- AGT/1 -> CORE/3 : bypasses the gate; an agent probe keeps whatever language it found -->
+  <path d="M358,156 H524 Q532,156 532,164 V200" fill="none" stroke="#5B5B79" stroke-width="1"
+        stroke-dasharray="5,4" marker-end="url(#arr-muted)"/>
+  <rect x="404" y="130" width="88" height="12" rx="2" fill="#F7F7FB"/>
+  <text x="448" y="139" font-family="'JetBrains Mono',monospace" font-size="8" fill="#5B5B79"
+        text-anchor="middle" letter-spacing="0.06em">NO SCRIPT GATE</text>
   <!-- RDR/1 -> CORE/2 : focal accent, corridor x=444, drop -->
   <path d="M358,76 H436 Q444,76 444,84 V200" fill="none" stroke="#4B1E73" stroke-width="1.2" marker-end="url(#arr-accent)"/>
   <rect x="452" y="104" width="80" height="12" rx="2" fill="#F7F7FB"/>
@@ -162,7 +168,7 @@
   <text x="383" y="215" font-family="'JetBrains Mono',monospace" font-size="6" font-weight="600" fill="#b85450" text-anchor="middle">CORE</text>
   <text x="420" y="227" font-family="'Space Grotesk',sans-serif" font-size="9" font-weight="600" fill="#b85450" text-anchor="middle">Ingress Gates</text>
   <text x="420" y="239" font-family="'JetBrains Mono',monospace" font-size="6.5" fill="#5B5B79" text-anchor="middle">regional script · own account</text>
-  <text x="420" y="251" font-family="'JetBrains Mono',monospace" font-size="6.5" fill="#8B8BA6" text-anchor="middle">no relevance judged here</text>
+  <text x="420" y="251" font-family="'JetBrains Mono',monospace" font-size="6.5" fill="#8B8BA6" text-anchor="middle">track 1 only · latin passes</text>
   <rect x="374" y="258" width="16" height="8" rx="3" fill="#4a7c59"/>
   <text x="382" y="264" font-family="'JetBrains Mono',monospace" font-size="5" font-weight="700" fill="#fff" text-anchor="middle">LS</text>
   <rect x="450" y="258" width="16" height="8" rx="3" fill="#5e7a9b"/>
@@ -238,10 +244,12 @@
     <text x="288" y="415" font-size="7" fill="#8B8BA6" letter-spacing="0.06em">topic-coupled fan-out</text>
     <line x1="416" y1="412" x2="444" y2="412" stroke="#14627A" stroke-width="1"/>
     <text x="452" y="415" font-size="7" fill="#8B8BA6" letter-spacing="0.06em">published to consumers</text>
+    <line x1="620" y1="412" x2="648" y2="412" stroke="#5B5B79" stroke-width="1" stroke-dasharray="5,4"/>
+    <text x="656" y="415" font-size="7" fill="#8B8BA6" letter-spacing="0.06em">bypasses the gate</text>
 
     <text x="30" y="436" font-size="8" fill="#5B5B79">CONCERN</text>
     <rect x="144" y="429" width="10" height="10" rx="2" fill="rgba(184,84,80,0.06)" stroke="rgba(184,84,80,0.35)"/>
-    <text x="162" y="436" font-size="7" fill="#8B8BA6" letter-spacing="0.06em">boundary — decides whether data belongs, never whether it is interesting</text>
+    <text x="162" y="436" font-size="7" fill="#8B8BA6" letter-spacing="0.06em">boundary, radar only: judges the script a title is written in, never whether it is interesting</text>
   </g>
 </svg>
 

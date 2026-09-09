@@ -86,3 +86,70 @@ def test_text_with_no_letters_is_rejected(detector):
 def test_scripts_the_older_pattern_missed_are_still_rejected(detector, title):
     """Devanagari, Lao and Myanmar rows did reach the stored corpus and had to be deleted."""
     assert not detector.uses_regional_script(title, geo=GeoCode.VN)
+
+
+@pytest.mark.asyncio
+async def test_an_agent_probe_fetches_foreign_language_content_freely():
+    """The script gate belongs to the unattended radar, not to a probe an agent asked for.
+
+    Track 1 accumulates a corpus nobody is watching, so a Korean title in a Vietnam pass is
+    noise it would carry forever. Track 2 runs because an agent asked a specific question, and
+    the answer may well be in another language: Vietnamese social content mixes English
+    constantly, and a market question can legitimately reach Korean or Chinese sources.
+
+    `search_across_all` therefore applies only the self-content scope guard. This test exists so
+    that stays deliberate rather than becoming an oversight someone later "fixes".
+    """
+    from unittest.mock import AsyncMock
+
+    from ignis.application.ports.connector_port import IConnectorPlugin
+    from ignis.domain.entities import TrendSignal
+    from ignis.domain.value_objects import PlatformType, Timeframe
+    from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+
+    class MultilingualPlugin(IConnectorPlugin):
+        @property
+        def platform(self):
+            return PlatformType.YOUTUBE
+
+        @property
+        def name(self):
+            return "Multilingual Probe"
+
+        async def is_healthy(self):
+            return True
+
+        async def fetch_signals(self, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=50, scope=None):
+            return []
+
+        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+            return [
+                TrendSignal(
+                    platform=self.platform,
+                    raw_title=title,
+                    metric_value=100.0,
+                    geo_code=GeoCode.VN,
+                    source_url=f"https://example.test/{i}",
+                    metadata={"keyword": keywords[0] if keywords else None},
+                )
+                for i, title in enumerate(
+                    [
+                        "Best AI agent frameworks for e-commerce",   # English, always fine
+                        "K-beauty 스킨케어 루틴 추천",                   # Korean
+                        "跨境电商 选品 技巧",                            # Chinese
+                    ]
+                )
+            ]
+
+    repo = AsyncMock()
+    repo.log_event = AsyncMock()
+    repo.get_self_accounts = AsyncMock(return_value=[])
+    registry = ConnectorPluginRegistry(repository=repo)
+    registry.register(MultilingualPlugin())
+
+    signals = await registry.search_across_all(keywords=["skincare"], geo=GeoCode.VN)
+
+    assert len(signals) == 3, (
+        "An agent probe must return what it found, whatever language it is in: "
+        f"{[s.raw_title for s in signals]}"
+    )
