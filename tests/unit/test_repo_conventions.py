@@ -23,23 +23,19 @@ def _non_ascii_letters(text: str) -> str:
 SRC_NON_ASCII_ALLOWLIST = {
     # Character classes are the language-detection algorithm itself.
     "ignis/infrastructure/harness/language_detector.py",
+    # Transliterating d-with-stroke is a step of the diacritic folding algorithm, not vocabulary.
+    "ignis/infrastructure/clustering/semantic_clusterer.py",
     # Third-party UI selectors that must match TikTok's rendered text verbatim.
     "ignis/infrastructure/auth/tiktok_auth.py",
     "ignis/infrastructure/connectors/tiktok/creative_center_plugin.py",
     "ignis/infrastructure/connectors/meta_browser_ingress.py",
     # Legacy hardcoded vocabulary, tracked as debt: must move into market_lexicons.
-    "ignis/infrastructure/clustering/semantic_clusterer.py",
     "ignis/infrastructure/connectors/tiktok/tiktok_plugin.py",
-    "ignis/infrastructure/connectors/google_trends/rss_plugin.py",
-    "ignis/application/use_cases/autonomous_discovery.py",
-    "ignis/interfaces/mcp/server.py",
 }
 
 # Vocabulary constants that predate the Data-Driven Vocabulary Protocol.
 KNOWN_VOCABULARY_CONSTANTS = {
-    ("ignis/infrastructure/clustering/semantic_clusterer.py", "AMBIGUOUS_UNIGRAMS"),
     ("ignis/infrastructure/connectors/tiktok/tiktok_plugin.py", "NOTIFICATION_NOISE_PATTERNS"),
-    ("ignis/infrastructure/connectors/google_trends/rss_plugin.py", "DEFAULT_GEO_PROBES"),
     ("ignis/infrastructure/harness/language_detector.py", "FOREIGN_STOPWORD_PHRASES"),
     ("ignis/infrastructure/harness/language_detector.py", "PORTUGUESE_MARKERS"),
     ("ignis/infrastructure/connectors/reels/reels_plugin.py", "BROWSER_API_MARKERS"),

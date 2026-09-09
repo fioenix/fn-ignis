@@ -20,6 +20,7 @@ from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager, ThreadsAu
 from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
+from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
@@ -69,8 +70,19 @@ async def build_connector_registry(
         browser_available = browser_runtime_available()
 
     tiktok_auth_manager = TikTokAuthManager(repository=repository)
+
+    # The probe templates and intent markers are market vocabulary, so the plugin cannot carry
+    # them: they are read here, where the repository is already in hand.
+    google_trends_plugin = GoogleTrendsRssPlugin()
+    try:
+        vocabulary = await load_market_vocabulary(repository)
+        google_trends_plugin.register_probe_templates(vocabulary.probe_templates)
+        google_trends_plugin.register_intent_keywords(vocabulary.search_intent)
+    except Exception as e:
+        logger.warning(f"Could not load the Google Trends probe vocabulary: {e}")
+
     candidates: List[IConnectorPlugin] = [
-        GoogleTrendsRssPlugin(),
+        google_trends_plugin,
         TikTokPlugin(auth_manager=tiktok_auth_manager),
         TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager),
         # The worker binds the same auth managers the MCP server does, otherwise the plugins
@@ -224,18 +236,17 @@ class IngressScheduler:
         except Exception as e:
             logger.warning(f"Could not load industry taxonomies for classification: {e}")
         try:
-            lexicons = await repository.get_domain_lexicons()
-            by_domain: Dict[str, List[str]] = {}
-            for item in lexicons or []:
-                by_domain.setdefault(str(item.get("domain") or ""), []).append(item["term"])
-            stopwords = by_domain.pop("foreign_stopwords", [])
-            noise = by_domain.pop("noise_blacklist", [])
-            positive = [term for terms in by_domain.values() for term in terms]
-            clusterer.register_stopwords(stopwords + noise)
+            vocabulary = await load_market_vocabulary(repository)
+            clusterer.register_stopwords(
+                vocabulary.foreign_stopwords + vocabulary.noise_blacklist
+            )
+            clusterer.register_ambiguous_unigrams(vocabulary.ambiguous_unigrams)
             logger.info(
-                f"Clustering vocabulary loaded: {len(positive)} domain terms, "
-                f"{len(stopwords)} foreign stopwords and {len(noise)} noise terms. Relevance is "
-                f"judged downstream by the quality gate, not at ingress."
+                f"Clustering vocabulary loaded: {len(vocabulary.positive_terms)} domain terms, "
+                f"{len(vocabulary.foreign_stopwords)} foreign stopwords, "
+                f"{len(vocabulary.noise_blacklist)} noise terms and "
+                f"{len(vocabulary.ambiguous_unigrams)} ambiguous unigrams. Relevance is judged "
+                f"downstream by the quality gate, not at ingress."
             )
         except Exception as e:
             logger.warning(f"Could not load the persisted vocabulary: {e}")

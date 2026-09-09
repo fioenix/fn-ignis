@@ -63,6 +63,7 @@ from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
+from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
@@ -125,8 +126,10 @@ def _init_components():
     instagram_browser_auth_manager = InstagramBrowserAuthManager(repository=repository)
     creative_center_plugin = TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager)
 
+    google_trends_plugin = GoogleTrendsRssPlugin()
+
     registry = ConnectorPluginRegistry(repository=repository)
-    registry.register(GoogleTrendsRssPlugin())
+    registry.register(google_trends_plugin)
     registry.register(TikTokPlugin(auth_manager=tiktok_auth_manager))
     registry.register(creative_center_plugin)
     registry.register(
@@ -180,6 +183,7 @@ def _init_components():
     return {
         "repository": repository,
         "registry": registry,
+        "google_trends_plugin": google_trends_plugin,
         "tiktok_auth_manager": tiktok_auth_manager,
         "threads_auth_manager": threads_auth_manager,
         "instagram_auth_manager": instagram_auth_manager,
@@ -301,25 +305,26 @@ def _serialize_channel_summaries(summaries: Any) -> List[Dict[str, Any]]:
 
 
 async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
-    """Sync dynamic positive lexicons, foreign stopwords, and noise blacklist from DB into reasoning engines."""
+    """Sync every persisted vocabulary domain from the database into the engines that use it."""
     try:
-        db_lexicons = await comp["repository"].get_domain_lexicons()
-        pos_terms = [item["term"] for item in db_lexicons if item.get("domain") not in ("foreign_stopwords", "noise_blacklist")]
-        stop_terms = [item["term"] for item in db_lexicons if item.get("domain") == "foreign_stopwords"]
-        noise_terms = [item["term"] for item in db_lexicons if item.get("domain") == "noise_blacklist"]
-        
+        vocabulary = await load_market_vocabulary(comp["repository"])
+        pos_terms = vocabulary.positive_terms
+        stop_terms = vocabulary.foreign_stopwords
+        noise_terms = vocabulary.noise_blacklist
+
         if pos_terms:
             comp["quality_evaluator"].register_terms(pos_terms)
             comp["strategic_reasoner"].register_terms(pos_terms)
             # Terms sharing a (domain, category) bucket are treated as expansions of each other,
             # so keyword matching uses the persisted vocabulary instead of hardcoded synonyms.
-            buckets: Dict[tuple, List[str]] = {}
-            for item in db_lexicons:
-                domain = item.get("domain")
-                if domain in ("foreign_stopwords", "noise_blacklist"):
-                    continue
-                buckets.setdefault((domain, item.get("category")), []).append(item["term"])
-            comp["strategic_reasoner"].register_synonym_groups([g for g in buckets.values() if len(g) > 1])
+            comp["strategic_reasoner"].register_synonym_groups(
+                [g for g in vocabulary.by_domain_and_category.values() if len(g) > 1]
+            )
+        if "clusterer" in comp:
+            comp["clusterer"].register_ambiguous_unigrams(vocabulary.ambiguous_unigrams)
+        if "google_trends_plugin" in comp:
+            comp["google_trends_plugin"].register_probe_templates(vocabulary.probe_templates)
+            comp["google_trends_plugin"].register_intent_keywords(vocabulary.search_intent)
         if stop_terms:
             comp["quality_evaluator"].register_foreign_stopwords(stop_terms)
             comp["strategic_reasoner"].register_foreign_stopwords(stop_terms)
@@ -1722,12 +1727,20 @@ async def handle_extract_customer_pain_points(
             limit_per_video=20,
         )
         
-        # Multi-language baseline inquiry triggers
-        default_triggers = [
-            "?", "how", "what", "why", "price", "cost", "where", "help", "issue", "bug", "fail", "problem", "review",
-            "làm sao", "như thế nào", "giá", "bao nhiêu", "xin", "hướng dẫn", "ở đâu", "mua", "dùng được", "test", "lỗi"
-        ]
-        active_triggers = [t.lower() for t in (inquiry_patterns or default_triggers)]
+        # The caller may pass its own triggers; otherwise the persisted baseline is used. The
+        # same vocabulary drives the autonomous discovery pass, so both read one lexicon domain.
+        if inquiry_patterns:
+            active_triggers = [t.lower() for t in inquiry_patterns]
+        else:
+            rows = await comp["repository"].get_domain_lexicons(domain="customer_inquiry")
+            active_triggers = [
+                str(row["term"]).lower() for row in (rows or []) if row.get("term")
+            ]
+            if not active_triggers:
+                logger.warning(
+                    "No customer inquiry markers registered, so no comment can be recognised as "
+                    "a question. Check the customer_inquiry domain in market_lexicons."
+                )
 
         # Extract inquiries and top engaged comments
         all_comments = []

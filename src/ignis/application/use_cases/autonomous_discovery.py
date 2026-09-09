@@ -165,7 +165,17 @@ class AutonomousDiscoveryUseCase:
                     tiktok_plugin = plugin
                     break
 
-            if tiktok_plugin:
+            inquiry_rows = await self._repository.get_domain_lexicons(domain="customer_inquiry")
+            inquiry_markers = [
+                str(row["term"]).lower() for row in (inquiry_rows or []) if row.get("term")
+            ]
+            if not inquiry_markers:
+                logger.warning(
+                    "No customer inquiry markers registered, so no comment can be recognised as a "
+                    "question. Check the customer_inquiry domain in market_lexicons."
+                )
+
+            if tiktok_plugin and inquiry_markers:
                 voc_data = await tiktok_plugin.fetch_top_comments_for_keywords(
                     keywords=mission.keywords[:3],
                     geo=geo,
@@ -175,7 +185,7 @@ class AutonomousDiscoveryUseCase:
                 for v in voc_data:
                     for c in v.get("comments", []):
                         txt = c.get("text", "")
-                        if any(q in txt.lower() for q in ["?", "how", "what", "price", "cost", "làm sao", "giá", "bao nhiêu", "xin", "mua"]):
+                        if any(q in txt.lower() for q in inquiry_markers):
                             customer_inquiries.append({
                                 "author": c.get("author"),
                                 "inquiry": txt,

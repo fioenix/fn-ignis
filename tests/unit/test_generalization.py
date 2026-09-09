@@ -22,16 +22,26 @@ def test_extensible_enums():
 
 
 def test_google_trends_probe_generalization():
+    """A geo gets its own registered templates; every other geo falls back to DEFAULT."""
     plugin = GoogleTrendsRssPlugin()
-    
-    # VN Probes
+    plugin.register_probe_templates({
+        "VN": ["{}", "{} là gì"],
+        "DEFAULT": ["{}", "what is {}"],
+    })
+
     vn_probes = plugin._get_probe_patterns("VN")
     assert any("là gì" in p for p in vn_probes)
 
-    # US / International Probes
     us_probes = plugin._get_probe_patterns("US")
     assert any("what is" in p for p in us_probes)
     assert not any("là gì" in p for p in us_probes)
+
+
+def test_google_trends_probes_fall_back_to_the_bare_keyword():
+    """With no registered vocabulary the plugin probes the keyword itself, never a guess."""
+    plugin = GoogleTrendsRssPlugin()
+
+    assert plugin._get_probe_patterns("VN") == ["{}"]
 
 
 def test_international_quality_and_strategic_reasoning():

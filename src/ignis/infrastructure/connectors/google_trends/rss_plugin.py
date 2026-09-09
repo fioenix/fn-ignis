@@ -25,11 +25,15 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
     SUGGEST_API_URL = "https://suggestqueries.google.com/complete/search"
     HT_NAMESPACE = {"ht": "https://trends.google.com/trending/rss"}
 
-    # Localized probe variations to gauge market penetration across geographic targets
-    DEFAULT_GEO_PROBES: Dict[str, List[str]] = {
-        "VN": ["{}", "{} là gì", "{} việt nam", "cách dùng {}", "ứng dụng {}"],
-        "DEFAULT": ["{}", "what is {}", "how to use {}", "best {} tools", "{} tutorial"],
-    }
+    # The bare keyword. Not vocabulary in any language, so it is the one probe this plugin can
+    # run before anybody hands it the persisted templates.
+    BARE_KEYWORD_TEMPLATE = "{}"
+
+    def __init__(self) -> None:
+        # Both are filled from market_lexicons by whoever holds the repository: the worker in
+        # build_connector_registry, the MCP server in _sync_lexicons_from_db.
+        self._probe_templates: Dict[str, List[str]] = {}
+        self._intent_keywords: List[str] = []
 
     @property
     def platform(self) -> PlatformType:
@@ -39,8 +43,33 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
     def name(self) -> str:
         return "Google Trends Intelligence"
 
+    def register_probe_templates(self, templates: Dict[str, List[str]]) -> None:
+        """Bind the per-geo Google Suggest templates from the probe_templates_* lexicon domains.
+
+        How a market phrases a question around a keyword is market vocabulary, so it is stored
+        rather than compiled in. Keys are geo codes, plus DEFAULT for everywhere else.
+        """
+        cleaned = {
+            str(geo).upper(): [str(p) for p in patterns if "{}" in str(p)]
+            for geo, patterns in (templates or {}).items()
+        }
+        self._probe_templates = {geo: patterns for geo, patterns in cleaned.items() if patterns}
+
+    def register_intent_keywords(self, terms: List[str]) -> None:
+        """Bind the commercial and practical intent markers from the search_intent domain."""
+        self._intent_keywords = sorted({t.strip().lower() for t in terms or [] if t and t.strip()})
+
     def _get_probe_patterns(self, geo_str: str) -> List[str]:
-        return self.DEFAULT_GEO_PROBES.get(geo_str.upper(), self.DEFAULT_GEO_PROBES["DEFAULT"])
+        if not self._probe_templates:
+            logger.warning(
+                "No probe templates registered: measuring demand from the bare keyword alone. "
+                "Check the probe_templates_* domains in market_lexicons."
+            )
+            return [self.BARE_KEYWORD_TEMPLATE]
+        return self._probe_templates.get(
+            geo_str.upper(),
+            self._probe_templates.get("DEFAULT", [self.BARE_KEYWORD_TEMPLATE]),
+        )
 
     def _geo_to_param(self, geo: GeoCode) -> str:
         geo_str = geo.value if hasattr(geo, "value") else str(geo)
@@ -139,12 +168,11 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
         penetration_score = (active_probes / float(len(probe_patterns))) * 45.0
         variety_score = min(35.0, total_unique_variants * 1.4)
         
-        # Commercial / Practical intent depth bonus across VN and International markers
-        intent_keywords = [
-            "giá", "cách", "hướng dẫn", "doanh nghiệp", "tự động", "tool", "khóa học", "workflow", "cài đặt",
-            "price", "how", "guide", "tutorial", "best", "tools", "enterprise", "api", "setup", "download", "free"
-        ]
-        intent_matches = sum(1 for q in all_unique_queries if any(k in q for k in intent_keywords))
+        # Commercial / practical intent depth bonus. Without the registered markers there is
+        # no evidence of intent to score, so the bonus is zero rather than guessed.
+        intent_matches = sum(
+            1 for q in all_unique_queries if any(k in q for k in self._intent_keywords)
+        )
         intent_bonus = min(20.0, intent_matches * 2.0)
 
 

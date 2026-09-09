@@ -96,8 +96,13 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   trên analysis path, nên phần xét độ liên quan chuyển hẳn về đó.
   **Giá phải trả, đã chấp nhận:** corpus lưu thêm nội dung nội địa lệch chủ đề, và Quality Gate
   ở hạ nguồn phải gánh thật. Cần theo dõi xem nó gánh được không.
-- [ ] **`AMBIGUOUS_UNIGRAMS`** vẫn hardcode trong `semantic_clusterer.py`, đang được theo dõi
-  như nợ kỹ thuật trong `test_repo_conventions.py`.
+- [x] **Đã xong (09/09/2026): năm chỗ từ vựng hardcode đã chuyển vào `market_lexicons`.**
+  `AMBIGUOUS_UNIGRAMS`, `DEFAULT_GEO_PROBES`, danh sách từ khoá ý định của Google Trends, và
+  hai bản sao khác nhau của danh sách dấu hiệu câu hỏi (một trong `autonomous_discovery`, một
+  trong `extract_customer_pain_points`, bản sau là tập lớn hơn). Seed ở
+  `sql/012_vocabulary_from_constants.sql`, đọc qua `vocabulary_loader`, và bốn entry tương ứng
+  đã bị xoá khỏi allowlist của `test_repo_conventions.py` nên gate giờ chặn thật.
+  Còn lại một chỗ: `NOTIFICATION_NOISE_PATTERNS` trong `tiktok_plugin.py`.
 
 
 ---

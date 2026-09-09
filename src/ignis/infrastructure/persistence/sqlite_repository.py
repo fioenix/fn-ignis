@@ -208,6 +208,21 @@ class SqliteTrendRepository(ITrendRepository):
                     (str(uuid4()), code, name, json.dumps(keywords, ensure_ascii=False), now_str),
                 )
 
+        # System-owned vocabulary that replaced hardcoded Python constants. Unlike the seeds
+        # above it is re-applied on every bootstrap: no MCP tool writes these domains, so there
+        # is no user edit to preserve, and a database created before a list was widened would
+        # otherwise keep the narrow one and behave differently from Postgres.
+        vocab_path = sql_seed_file("012_vocabulary_from_constants.sql")
+        if vocab_path:
+            now_str = datetime.now(timezone.utc).isoformat()
+            vocab_content = vocab_path.read_text(encoding="utf-8")
+            for dom, term, cat in re.findall(r"\('([^']+)',\s*'([^']+)',\s*'([^']+)'", vocab_content):
+                cur.execute(
+                    "INSERT OR IGNORE INTO market_lexicons (id, domain, term, category, created_by, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (str(uuid4()), dom, term, cat, "system", now_str),
+                )
+
         cur.execute("SELECT COUNT(*) FROM runtime_configs")
         rc_count = cur.fetchone()[0]
         if rc_count == 0:

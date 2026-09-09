@@ -1,3 +1,4 @@
+import logging
 import math
 import re
 import unicodedata
@@ -9,6 +10,8 @@ from typing import Dict, List, Optional, Set, Tuple
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.domain.entities import TopicCluster, TrendSignal
 from ignis.domain.probe_provenance import probe_keyword_of
+
+logger = logging.getLogger(__name__)
 
 
 class SemanticClusterer(IClusteringEngine):
@@ -29,12 +32,6 @@ class SemanticClusterer(IClusteringEngine):
         # Every term folded, used only when the title itself carries no tones.
         folded: Dict[str, "re.Pattern[str]"]
 
-    AMBIGUOUS_UNIGRAMS: Set[str] = {
-        "người", "đại", "việt", "nam", "mới", "hay", "làm", "nhất", "cực",
-        "quá", "siêu", "top", "tin", "xem", "cho", "của", "và", "các", "những",
-        "một", "hai", "ba", "bốn", "năm", "ngày", "đêm", "giờ", "phút", "vs", "new"
-    }
-
     def __init__(
         self,
         similarity_threshold: float = 0.25,
@@ -42,7 +39,27 @@ class SemanticClusterer(IClusteringEngine):
     ):
         self.similarity_threshold = similarity_threshold
         self._custom_stopwords: Set[str] = set(custom_stopwords or [])
+        # Loaded from market_lexicons by whoever holds the repository. Empty until then, which
+        # lets a single shared token pass; register_ambiguous_unigrams says why that is loud.
+        self._ambiguous_unigrams: Set[str] = set()
         self._taxonomies: List[Tuple[str, Set[str]]] = []
+
+    def register_ambiguous_unigrams(self, terms: List[str]) -> None:
+        """Register the generic single words that cannot identify a topic on their own.
+
+        Two titles sharing exactly one token are the same topic only when that token is
+        specific. Without this vocabulary every single shared token counts as a match, so an
+        empty registration is logged rather than passed over: it means the caller could not
+        reach market_lexicons, and clustering will over-merge until it can.
+        """
+        loaded = {t.strip().lower() for t in terms or [] if t and t.strip()}
+        if not loaded:
+            logger.warning(
+                "No ambiguous unigrams registered: two titles sharing one generic word will be "
+                "treated as the same topic. Check the ambiguous_unigrams domain in market_lexicons."
+            )
+            return
+        self._ambiguous_unigrams |= loaded
 
     def register_stopwords(self, terms: List[str]) -> None:
         """Dynamically register stopwords from database or runtime config."""
@@ -267,7 +284,7 @@ class SemanticClusterer(IClusteringEngine):
             if len(tokens_a) >= 2 and len(tokens_b) >= 2:
                 return 0.0
             # If one side is a single token, reject ambiguous/generic single unigrams
-            if shared_token.lower() in self.AMBIGUOUS_UNIGRAMS:
+            if shared_token.lower() in self._ambiguous_unigrams:
                 return 0.0
 
         overlap = len(intersection) / min(len(tokens_a), len(tokens_b))
