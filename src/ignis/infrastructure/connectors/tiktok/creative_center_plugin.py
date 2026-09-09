@@ -132,7 +132,11 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
 
             rank = int(lines[i])
             hashtag_raw = lines[i + 1]
+            # The table is flattened, so a row that carries no category column puts the posts or
+            # views figure where the category should be. A value that reads as a metric is one.
             category = lines[i + 2]
+            if self._parse_metric_number(category) > 0:
+                category = ""
 
             posts_str = ""
             views_str = ""

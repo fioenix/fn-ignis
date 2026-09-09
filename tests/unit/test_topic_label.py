@@ -95,3 +95,48 @@ def test_entity_defaults_the_label_to_the_canonical_name():
     """A cluster read back from a row written before this column existed still renders."""
     cluster = TopicCluster(canonical_name="gia vang hom nay")
     assert cluster.topic_label == "gia vang hom nay"
+
+
+def test_a_bare_number_is_never_picked_as_a_headline_token():
+    """A live cluster was labelled "vietinbank \u00b7 100 \u00b7 chi": a year or a count is not a topic.
+
+    This is the fallback path, which fires when no phrase recurs across the cluster and the label
+    is assembled from the tokens the cluster leans on most. A number inside a phrase the cluster
+    genuinely shares is fine and often necessary -- "Top 10 salon", "iPhone 17" -- so the window
+    path is deliberately left alone.
+    """
+    clusterer = SemanticClusterer()
+    group = [
+        _signal("canh bao ve he thong vietinbank 100"),
+        _signal("vietinbank 100 gap su co"),
+        _signal("su co 100 vietinbank"),
+    ]
+    doc_freq = clusterer._token_document_frequency([[s] for s in group])
+
+    # A canonical name sharing nothing with the group's recurring tokens forces the fallback.
+    label = clusterer._build_topic_label("bao gio moi xong day troi oi", group, doc_freq, 40)
+
+    tokens = [t.strip() for t in label.split("\u00b7")]
+    assert tokens, label
+    assert not [t for t in tokens if t.isdigit()], (
+        f"A bare number was picked as a headline token: {label!r}"
+    )
+
+
+def test_a_number_inside_a_shared_phrase_survives():
+    """The window path keeps digits: they are part of the phrase the cluster is actually about."""
+    clusterer = SemanticClusterer()
+    group = [
+        _signal("Top 10 salon toc dep nhat Ha Noi"),
+        _signal("Top 10 salon toc dep nhat Sai Gon"),
+    ]
+    doc_freq = clusterer._token_document_frequency([[s] for s in group])
+    label = clusterer._build_topic_label("Top 10 salon toc dep nhat Ha Noi", group, doc_freq, 40)
+    assert "10" in label, label
+
+
+def test_digits_are_still_tokenized_so_product_generations_stay_apart():
+    """The fix must not reach into tokenizing, where digits carry the distinction."""
+    clusterer = SemanticClusterer()
+    assert "17" in clusterer._tokenize("iPhone 17 Pro Max gia bao nhieu")
+    assert "16" in clusterer._tokenize("iPhone 16 Pro Max gia bao nhieu")

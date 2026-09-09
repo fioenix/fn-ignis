@@ -55,12 +55,30 @@ class SemanticClusterer(IClusteringEngine):
         decomposed = unicodedata.normalize("NFD", text.replace("đ", "d").replace("Đ", "D"))
         return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
+    # A category shorter than this is an abbreviation or a stray fragment, not a label.
+    MIN_CATEGORY_CHARS = 3
+
+    @classmethod
+    def _is_usable_category(cls, raw: str) -> bool:
+        """Whether a connector-provided category is a label rather than a number.
+
+        The category arrives in connector metadata and is trusted ahead of taxonomy matching,
+        so a parser that mislabels a column poisons it: three live clusters were filed under
+        "27.6k", "6.4k" and "28k", which are view counts. The Creative Center parser is fixed at
+        source, but third-party plugins implement the same port and cannot all be relied on.
+        """
+        text = (raw or "").strip()
+        if len(text) < cls.MIN_CATEGORY_CHARS:
+            return False
+        # A metric, not a label: digits with an optional scale suffix or thousands separators.
+        return not re.fullmatch(r"[\d.,]+\s*[kKmMbB]?", text)
+
     def _classify_category(self, group: List[TrendSignal]) -> str:
         """Resolve a cluster category: source-provided first, then taxonomy match, else unclassified."""
         source_categories: List[str] = []
         for s in group:
             raw = (s.metadata or {}).get("category")
-            if raw and str(raw).strip():
+            if raw and self._is_usable_category(str(raw)):
                 source_categories.append(str(raw).strip().lower())
         if source_categories:
             return max(set(source_categories), key=source_categories.count)
@@ -243,8 +261,15 @@ class SemanticClusterer(IClusteringEngine):
         if best_score <= 0 and counts:
             # No phrase recurs across the cluster, so quoting any window would just quote one post.
             # Fall back to the tokens this cluster leans on that the rest of the corpus does not.
+            # A bare number is never a topic: a year, a count or a score carries no subject on
+            # its own. Digits stay in the tokens themselves, where they separate "iPhone 17" from
+            # "iPhone 16", and are only barred from headlining a label.
             ranked = sorted(
-                ((token, count / max(1, doc_freq.get(token, 1))) for token, count in counts.items() if count > 1),
+                (
+                    (token, count / max(1, doc_freq.get(token, 1)))
+                    for token, count in counts.items()
+                    if count > 1 and not token.isdigit()
+                ),
                 key=lambda kv: (-kv[1], kv[0]),
             )
             top = [token for token, weight in ranked[:3] if weight > self.MIN_TOKEN_DISTINCTIVENESS]

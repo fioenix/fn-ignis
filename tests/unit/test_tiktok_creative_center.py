@@ -130,3 +130,26 @@ async def test_bug10_load_all_rows_paginates_until_no_new_rows():
     rows = plugin._parse_trend_rows([t.strip() for t in text.split("\n") if t.strip()], limit=30)
     assert len(rows) == 15
     assert page.evaluate.await_count >= 2
+
+
+def test_a_row_without_a_category_column_does_not_report_a_view_count_as_its_category():
+    """The ranking table is parsed by position, so a missing column shifts a metric into place.
+
+    Three live clusters ended up filed under the categories "27.6k", "6.4k" and "28k", which are
+    view counts. `category` is taken from `lines[i + 2]`; when that row carries no category, the
+    next line is the posts or views figure.
+    """
+    plugin = TikTokCreativeCenterPlugin.__new__(TikTokCreativeCenterPlugin)
+    lines = [
+        "1", "#vietnamvodich", "27.6K", "POSTS", "1.2M", "VIEWS",
+        "2", "#tetnguyendan", "Sports", "3.4K", "POSTS", "5.6M", "VIEWS",
+    ]
+
+    rows = plugin._parse_trend_rows(lines, limit=10)
+    by_hashtag = {r["hashtag"]: r for r in rows}
+
+    assert by_hashtag["#vietnamvodich"]["category"] == "", (
+        "A metric must not be reported as a category: "
+        f"{by_hashtag['#vietnamvodich']['category']!r}"
+    )
+    assert by_hashtag["#tetnguyendan"]["category"] == "Sports", "A real category still survives"

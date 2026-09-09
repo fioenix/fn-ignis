@@ -119,10 +119,10 @@ INSERT INTO market_lexicons (domain, term, category, created_by) VALUES
 ON CONFLICT (domain, term) DO NOTHING;
 
 INSERT INTO industry_taxonomies (industry_code, industry_name, keywords) VALUES
-('tech', 'Tech & Electronics', ARRAY['ai', 'software', 'agent', 'bot', 'app', 'tool', 'hardware', 'laptop', 'phone']),
-('ecommerce', 'E-Commerce & Retail', ARRAY['shop', 'shopee', 'lazada', 'order', 'shipping', 'don hang', 'chot don']),
-('fashion', 'Apparel & Accessories', ARRAY['fashion', 'clothing', 'linen', 'dress', 'shirt', 'outfit', 'style', 'local brand']),
-('education', 'Education & Training', ARRAY['course', 'khoa hoc', 'hoc', 'tutorial', 'dao tao', 'huong dan']),
-('beauty', 'Beauty & Personal Care', ARRAY['skincare', 'makeup', 'my pham', 'son', 'kem', 'duong da', 'serum']),
-('finance', 'Financial Services', ARRAY['finance', 'tai chinh', 'dau tu', 'ngan hang', 'bank', 'chung khoan', 'crypto'])
+('tech', 'Tech & Electronics', ARRAY['ai', 'software', 'agent', 'bot', 'app', 'tool', 'hardware', 'laptop', 'phone', 'chatgpt', 'gpt', 'claude', 'gemini', 'automation', 'tu dong hoa', 'cong nghe', 'may tinh', 'dien thoai', 'phan mem', 'lap trinh', 'code', 'saas', 'api', 'cloud', 'blender', 'no code', 'chatbot', 'model', 'prompt']),
+('ecommerce', 'E-Commerce & Retail', ARRAY['shop', 'shopee', 'lazada', 'order', 'shipping', 'don hang', 'chot don', 'tiki', 'sendo', 'tiktok shop', 'ban hang', 'livestream', 'ship', 'gian hang', 'ton kho', 'gia si', 'nhap hang', 'affiliate', 'ma giam gia', 'freeship', 'khach hang', 'doanh thu', 'chuyen doi']),
+('fashion', 'Apparel & Accessories', ARRAY['fashion', 'clothing', 'linen', 'dress', 'shirt', 'outfit', 'style', 'local brand', 'quan ao', 'thoi trang', 'phoi do', 'ao', 'quan', 'vay', 'dam', 'giay', 'tui', 'phu kien', 'size', 'chat lieu', 'cotton', 'jeans', 'streetwear', 'mix do']),
+('education', 'Education & Training', ARRAY['course', 'khoa hoc', 'hoc', 'tutorial', 'dao tao', 'huong dan', 'tieng anh', 'phat am', 'ngu phap', 'tu vung', 'luyen thi', 'ielts', 'toeic', 'giao vien', 'hoc sinh', 'sinh vien', 'bai giang', 'ky nang', 'chung chi', 'lop hoc', 'tu hoc', 'giao trinh']),
+('beauty', 'Beauty & Personal Care', ARRAY['skincare', 'makeup', 'my pham', 'son', 'kem', 'duong da', 'serum', 'toner', 'sua rua mat', 'kem chong nang', 'tri mun', 'mun', 'trang diem', 'nuoc hoa', 'toc', 'nhuom toc', 'salon', 'spa', 'lam dep', 'duong am', 'tay trang', 'mat na']),
+('finance', 'Financial Services', ARRAY['finance', 'tai chinh', 'dau tu', 'ngan hang', 'bank', 'chung khoan', 'crypto', 'vang', 'gia vang', 'lai suat', 'tin dung', 'the tin dung', 'vay', 'tiet kiem', 'bao hiem', 'co phieu', 'ty gia', 'usd', 'thue', 'quy dau tu', 'trai phieu', 'vi dien tu'])
 ON CONFLICT (industry_code) DO NOTHING;

@@ -43,8 +43,12 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [x] **Đã xoá tín hiệu cũ viết bằng chữ viết ngoại ngữ:** 245 row (1,6%), gồm Hangul 162,
   CJK 49, Cyrillic 24, Katakana/Hiragana 15, Arabic 8, còn lại Thai/Devanagari/Lao/Myanmar.
   Corpus 15.800 xuống 15.555. Đã backup toàn bộ cột trước khi xoá.
-- [ ] **Token số lọt vào nhãn:** nhãn dạng fallback cho ra "vietinbank · 100 · chi"; cần loại
-  token toàn chữ số khỏi bảng xếp hạng nhãn.
+- [x] **Token số không còn headline nhãn:** nhánh fallback từng cho ra "vietinbank · 100 · chi".
+  Chữ số vẫn nằm trong token để clustering phân biệt "iPhone 17" với "iPhone 16", chỉ bị cấm làm
+  từ đứng đầu nhãn. Số nằm giữa một cụm mà cluster thật sự chia sẻ thì vẫn giữ ("Top 10 salon").
+- [ ] **Taxonomy chưa phủ các vertical ngoài thị trường:** tin tức, thể thao, người nổi tiếng,
+  sức khoẻ/wellness vẫn rơi vào `unclassified`. Đây là **câu hỏi phạm vi sản phẩm**, không phải
+  bug: một harness về cơ hội thị trường có nên theo dõi bóng đá không? Chờ Fio quyết.
 - [ ] **Chưa cluster nào đạt BREAKOUT (>= 80):** cần 4-5 platform cùng nói về một chủ đề, hiện
   tối đa là 3.
 - [ ] **Discovery source chưa đúng mục đích sản phẩm:** feed trending VN của Google Trends là tin
@@ -52,7 +56,17 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
 - [ ] **Chất lượng nhãn trên corpus thật:** nhiều nhãn rút về dạng mảnh có dấu ba chấm
   ("… em theo …"). Thuật toán đúng nhưng đầu vào là câu nói thường ngày, không phải cụm chủ đề.
-- [ ] **Phân loại category:** phần lớn cluster vẫn là `unclassified`; taxonomy không khớp.
+- [x] **Phân loại category:** matcher **không sai** — với taxonomy đã seed, nó phân loại đúng
+  6/6 vertical thị trường và đúng khi trả `unclassified` cho bóng đá hay giá vàng. Vấn đề là
+  vocabulary: 6 vertical chỉ có 44 keyword cho cả nền kinh tế, nên "chatgpt va gpt-6" và
+  "meo phat am tieng anh" đều rớt dù nằm trong vertical đang theo dõi. Đã mở lên **142 keyword**
+  trong `sql/003` và `sql/010`, kèm test chặn hai file lệch nhau.
+  Đo lại trên 1.087 cluster: cluster thuộc vertical thật đi từ **68 lên 466**, `unclassified`
+  (gộp cả `general` cũ) từ 1.018 xuống 616. **Chưa ghi vào DB** — cần Fio cho phép update 779 row.
+- [x] **Bug lộ ra khi đo lại:** 3 cluster từng bị gán category là số view (`27.6k`, `6.4k`, `28k`).
+  Parser Creative Center đọc bảng theo vị trí nên hàng thiếu cột category lấy luôn số posts/views.
+  Đã vá ở gốc, và thêm một tầng phòng vệ ở `_classify_category` vì plugin bên thứ ba cũng dùng
+  cùng port đó.
 - [x] **Đã quyết (09/09/2026): độ liên quan xét ở hạ nguồn, không xét ở ingress.** Cổng cũ xét
   độ liên quan theo `market_lexicons` nên loại mọi chủ đề chưa được seed, tức loại đúng thứ mà
   radar tồn tại để tìm. Trên corpus thật nó loại 67,8%, trong đó có cả
