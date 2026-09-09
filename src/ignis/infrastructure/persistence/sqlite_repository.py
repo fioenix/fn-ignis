@@ -212,9 +212,11 @@ class SqliteTrendRepository(ITrendRepository):
         # above it is re-applied on every bootstrap: no MCP tool writes these domains, so there
         # is no user edit to preserve, and a database created before a list was widened would
         # otherwise keep the narrow one and behave differently from Postgres.
-        vocab_path = sql_seed_file("012_vocabulary_from_constants.sql")
-        if vocab_path:
-            now_str = datetime.now(timezone.utc).isoformat()
+        now_str = datetime.now(timezone.utc).isoformat()
+        for vocab_filename in ("012_vocabulary_from_constants.sql", "013_tiktok_ui_noise.sql"):
+            vocab_path = sql_seed_file(vocab_filename)
+            if not vocab_path:
+                continue
             vocab_content = vocab_path.read_text(encoding="utf-8")
             for dom, term, cat in re.findall(r"\('([^']+)',\s*'([^']+)',\s*'([^']+)'", vocab_content):
                 cur.execute(

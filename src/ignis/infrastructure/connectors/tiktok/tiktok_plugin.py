@@ -30,19 +30,44 @@ class TikTokPlugin(IConnectorPlugin):
     EXPLORE_URL = "https://www.tiktok.com/explore"
     SEARCH_BASE_URL = "https://www.tiktok.com/search?q="
 
-    NOTIFICATION_BLACKLIST = [
-        "follow bạn", "bắt đầu follow", "thích bình luận", "thích video",
-        "đã thích", "bình luận của bạn", "đăng lại", "follow lại",
-        "tin nhắn", "hộp thư", "thông báo", "live ", "đang phát trực tiếp"
-    ]
-
     VIDEO_URL_PATTERN = re.compile(r"(https://www\.tiktok\.com)?/(@[\w\.-]+)/video/(\d+)")
 
     def __init__(self, auth_manager: Optional[TikTokAuthManager] = None):
         self._auth_manager = auth_manager
+        # TikTok's own notification, inbox and live wording, loaded from the tiktok_ui_noise
+        # lexicon domain. Held per locale in the database because a hardcoded list only ever
+        # covered Vietnamese, and a Korean session then got no filtering at all.
+        self._ui_noise: List[str] = []
+        self._warned_about_missing_ui_noise = False
+        # Commercial-intent probe phrasings, keyed by geo, from tiktok_suggest_templates_*.
+        self._suggest_templates: Dict[str, List[str]] = {}
 
     def set_auth_manager(self, auth_manager: TikTokAuthManager) -> None:
         self._auth_manager = auth_manager
+
+    def register_suggest_templates(self, templates: Dict[str, List[str]]) -> None:
+        """Bind the per-geo intent probe phrasings used against Google Suggest."""
+        cleaned = {
+            str(geo).upper(): [str(p) for p in patterns if "{}" in str(p)]
+            for geo, patterns in (templates or {}).items()
+        }
+        self._suggest_templates = {geo: p for geo, p in cleaned.items() if p}
+
+    def _intent_probe_templates(self, geo_str: str) -> List[str]:
+        """The templates for one geo, or none at all rather than another market's phrasing."""
+        if not self._suggest_templates:
+            return []
+        return self._suggest_templates.get(
+            geo_str.upper(), self._suggest_templates.get("DEFAULT", [])
+        )
+
+    def register_ui_noise(self, terms: List[str]) -> None:
+        """Bind the notification and inbox wording this plugin must never ingest.
+
+        Terms are lowercased but not stripped: "live " carries its trailing space on purpose,
+        so that it matches the live badge and not the middle of "olive".
+        """
+        self._ui_noise = [t.lower() for t in terms or [] if t and t.strip()]
 
     @property
     def platform(self) -> PlatformType:
@@ -61,11 +86,27 @@ class TikTokPlugin(IConnectorPlugin):
         return True
 
     def _is_private_or_notification(self, text: str) -> bool:
-        """Check and filter out private notification or interaction UI text."""
+        """Reject private notification, inbox or interaction UI text.
+
+        This guard is what backs the promise in the class docstring, so with no vocabulary
+        registered it rejects everything rather than letting text through. An ingress pass that
+        returns nothing is a visible failure; one that quietly starts storing the operator's own
+        notifications is not.
+        """
         if not text:
             return True
+        if not self._ui_noise:
+            # Once per instance: this runs for every card on the grid.
+            if not self._warned_about_missing_ui_noise:
+                self._warned_about_missing_ui_noise = True
+                logger.warning(
+                    "No TikTok UI noise vocabulary registered, so no card can be shown to be "
+                    "public. Rejecting every card. Check the tiktok_ui_noise domain in "
+                    "market_lexicons."
+                )
+            return True
         t_low = text.lower()
-        if any(black in t_low for black in self.NOTIFICATION_BLACKLIST):
+        if any(noise in t_low for noise in self._ui_noise):
             return True
         if re.match(r"^\s*\d+[\s\.\,kKmMbB]*\s*$", text):
             return True
@@ -284,6 +325,7 @@ class TikTokPlugin(IConnectorPlugin):
         }
         hl = "vi" if geo == GeoCode.VN else "en"
         gl = "vn" if geo == GeoCode.VN else "us"
+        geo_value = geo.value if hasattr(geo, "value") else str(geo)
 
         async with httpx.AsyncClient(timeout=8.0, headers=headers) as client:
             for kw in keywords[:10]:
@@ -308,22 +350,25 @@ class TikTokPlugin(IConnectorPlugin):
                 except Exception:
                     pass
 
-                # Probe 2: Commercial Intent Probe
-                try:
-                    resp = await client.get(
-                        "https://suggestqueries.google.com/complete/search",
-                        params={"client": "firefox", "q": f"cách làm {kw_clean}", "hl": hl, "gl": gl},
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if len(data) > 1 and isinstance(data[1], list):
-                            for q in data[1][:4]:
-                                clean_q = str(q).strip()
-                                if clean_q and clean_q.lower() not in seen_sug and len(clean_q) > 2:
-                                    seen_sug.add(clean_q.lower())
-                                    sug_entries.append({"query": clean_q, "type": "related_hashtag"})
-                except Exception:
-                    pass
+                # Probe 2: Commercial Intent Probe. Skipped when this geo has no registered
+                # phrasing, because probing a market in another market's language measures
+                # nothing.
+                for template in self._intent_probe_templates(geo_value):
+                    try:
+                        resp = await client.get(
+                            "https://suggestqueries.google.com/complete/search",
+                            params={"client": "firefox", "q": template.format(kw_clean), "hl": hl, "gl": gl},
+                        )
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if len(data) > 1 and isinstance(data[1], list):
+                                for q in data[1][:4]:
+                                    clean_q = str(q).strip()
+                                    if clean_q and clean_q.lower() not in seen_sug and len(clean_q) > 2:
+                                        seen_sug.add(clean_q.lower())
+                                        sug_entries.append({"query": clean_q, "type": "related_hashtag"})
+                    except Exception:
+                        pass
 
                 results.append({
                     "keyword": kw_clean,

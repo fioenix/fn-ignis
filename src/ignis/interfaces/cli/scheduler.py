@@ -74,16 +74,19 @@ async def build_connector_registry(
     # The probe templates and intent markers are market vocabulary, so the plugin cannot carry
     # them: they are read here, where the repository is already in hand.
     google_trends_plugin = GoogleTrendsRssPlugin()
+    tiktok_plugin = TikTokPlugin(auth_manager=tiktok_auth_manager)
     try:
         vocabulary = await load_market_vocabulary(repository)
         google_trends_plugin.register_probe_templates(vocabulary.probe_templates)
         google_trends_plugin.register_intent_keywords(vocabulary.search_intent)
+        tiktok_plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
+        tiktok_plugin.register_suggest_templates(vocabulary.tiktok_suggest_templates)
     except Exception as e:
-        logger.warning(f"Could not load the Google Trends probe vocabulary: {e}")
+        logger.warning(f"Could not load the connector vocabulary: {e}")
 
     candidates: List[IConnectorPlugin] = [
         google_trends_plugin,
-        TikTokPlugin(auth_manager=tiktok_auth_manager),
+        tiktok_plugin,
         TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager),
         # The worker binds the same auth managers the MCP server does, otherwise the plugins
         # cannot reach the Tier-1 sessions stored in platform_credentials.

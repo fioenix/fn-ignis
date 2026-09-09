@@ -13,20 +13,26 @@ import pytest
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.config.vocabulary_loader import (
     MACHINERY_DOMAINS,
-    PROBE_TEMPLATE_PREFIX,
+    TEMPLATE_PREFIXES,
     load_market_vocabulary,
 )
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
+from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
-SEED = Path(__file__).resolve().parents[2] / "sql" / "012_vocabulary_from_constants.sql"
+SQL = Path(__file__).resolve().parents[2] / "sql"
+# Both files the SQLite bootstrap re-applies. Keep in step with sqlite_repository.
+SEEDS = ("012_vocabulary_from_constants.sql", "013_tiktok_ui_noise.sql")
 
 
 def _seeded_domains():
-    rows = re.findall(r"\('([^']+)',\s*'([^']+)',\s*'([^']+)'", SEED.read_text(encoding="utf-8"))
     domains = {}
-    for domain, term, _category in rows:
-        domains.setdefault(domain, []).append(term)
+    for name in SEEDS:
+        text = (SQL / name).read_text(encoding="utf-8")
+        for domain, term, _category in re.findall(
+            r"\('([^']+)',\s*'([^']+)',\s*'([^']+)'", text
+        ):
+            domains.setdefault(domain, []).append(term)
     return domains
 
 
@@ -36,6 +42,8 @@ def test_the_seed_covers_every_domain_the_loader_reads():
     expected = (MACHINERY_DOMAINS - {"foreign_stopwords", "noise_blacklist"}) | {
         "probe_templates_vn",
         "probe_templates_default",
+        "tiktok_suggest_templates_vn",
+        "tiktok_suggest_templates_default",
     }
 
     assert expected <= seeded, f"Domains missing from the seed: {sorted(expected - seeded)}"
@@ -44,7 +52,7 @@ def test_the_seed_covers_every_domain_the_loader_reads():
 def test_every_probe_template_has_a_substitution_slot():
     """A template without {} would probe a literal string instead of the keyword."""
     for domain, templates in _seeded_domains().items():
-        if not domain.startswith(PROBE_TEMPLATE_PREFIX):
+        if not any(domain.startswith(prefix) for prefix in TEMPLATE_PREFIXES):
             continue
         for template in templates:
             assert "{}" in template, f"{domain} template cannot take a keyword: {template!r}"
@@ -110,7 +118,7 @@ async def test_machinery_domains_never_become_evidence_of_relevance(tmp_path):
 
     for domain, _category in vocabulary.by_domain_and_category:
         assert domain not in MACHINERY_DOMAINS, f"{domain} is machinery, not market evidence"
-        assert not domain.startswith(PROBE_TEMPLATE_PREFIX)
+        assert not any(domain.startswith(prefix) for prefix in TEMPLATE_PREFIXES)
 
     # Terms that exist nowhere but a machinery domain must never reach the positive vocabulary.
     market_terms = {t for terms in vocabulary.by_domain_and_category.values() for t in terms}
@@ -127,3 +135,38 @@ def test_an_empty_registration_is_refused_rather_than_armed():
     clusterer.register_ambiguous_unigrams([])
 
     assert clusterer._ambiguous_unigrams == set()
+
+
+@pytest.mark.asyncio
+async def test_load_bearing_whitespace_survives_the_database_round_trip(tmp_path):
+    """The TikTok live badge is seeded as "live " so it cannot match inside "livestream".
+
+    An earlier version of the loader stripped every term, which passed the plugin's own unit
+    test -- that one registers the list by hand -- and only showed up when the vocabulary came
+    from a real database. So this assertion goes through the repository, not around it.
+    """
+    repo = SqliteTrendRepository(db_path=str(tmp_path / "whitespace.db"))
+    vocabulary = await load_market_vocabulary(repo)
+
+    assert "live " in vocabulary.tiktok_ui_noise
+
+    plugin = TikTokPlugin()
+    plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
+
+    assert plugin._is_private_or_notification("live  ngay bay gio") is True
+    assert plugin._is_private_or_notification("livestream review") is False
+
+
+@pytest.mark.asyncio
+async def test_the_tiktok_grid_guard_is_armed_by_a_fresh_database(tmp_path):
+    """Fail-closed only works if bootstrap actually arms it; otherwise ingress returns nothing."""
+    repo = SqliteTrendRepository(db_path=str(tmp_path / "tiktok.db"))
+    vocabulary = await load_market_vocabulary(repo)
+
+    plugin = TikTokPlugin()
+    plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
+    plugin.register_suggest_templates(vocabulary.tiktok_suggest_templates)
+
+    assert plugin._is_private_or_notification("#congnghe2026 AI Agent sieu hot") is False
+    assert plugin._intent_probe_templates("VN")
+    assert plugin._intent_probe_templates("US") != plugin._intent_probe_templates("VN")

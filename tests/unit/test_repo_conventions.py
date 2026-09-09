@@ -29,13 +29,10 @@ SRC_NON_ASCII_ALLOWLIST = {
     "ignis/infrastructure/auth/tiktok_auth.py",
     "ignis/infrastructure/connectors/tiktok/creative_center_plugin.py",
     "ignis/infrastructure/connectors/meta_browser_ingress.py",
-    # Legacy hardcoded vocabulary, tracked as debt: must move into market_lexicons.
-    "ignis/infrastructure/connectors/tiktok/tiktok_plugin.py",
 }
 
 # Vocabulary constants that predate the Data-Driven Vocabulary Protocol.
 KNOWN_VOCABULARY_CONSTANTS = {
-    ("ignis/infrastructure/connectors/tiktok/tiktok_plugin.py", "NOTIFICATION_NOISE_PATTERNS"),
     ("ignis/infrastructure/harness/language_detector.py", "FOREIGN_STOPWORD_PHRASES"),
     ("ignis/infrastructure/harness/language_detector.py", "PORTUGUESE_MARKERS"),
     ("ignis/infrastructure/connectors/reels/reels_plugin.py", "BROWSER_API_MARKERS"),
@@ -44,8 +41,11 @@ KNOWN_VOCABULARY_CONSTANTS = {
     ("ignis/infrastructure/harness/strategic_reasoner.py", "VIDEO_PLATFORMS"),
 }
 
+# BLACKLIST was missing until 09/09/2026, which is how TikTok's NOTIFICATION_BLACKLIST stayed
+# invisible here while the allowlist carried an entry for a constant that never existed.
 VOCABULARY_NAME_HINT = re.compile(
-    r"(SYNONYM|LEXICON|KEYWORD|VOCAB|TERMS|PHRASES|STOPWORD|NOISE|UNIGRAM|MARKERS|PROBES|TAXONOM)"
+    r"(SYNONYM|LEXICON|KEYWORD|VOCAB|TERMS|PHRASES|STOPWORD|NOISE|UNIGRAM|MARKERS|PROBES"
+    r"|TAXONOM|BLACKLIST|WHITELIST|ALLOWLIST|TRIGGERS)"
 )
 
 

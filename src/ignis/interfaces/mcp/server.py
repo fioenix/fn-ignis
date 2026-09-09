@@ -127,10 +127,11 @@ def _init_components():
     creative_center_plugin = TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager)
 
     google_trends_plugin = GoogleTrendsRssPlugin()
+    tiktok_plugin = TikTokPlugin(auth_manager=tiktok_auth_manager)
 
     registry = ConnectorPluginRegistry(repository=repository)
     registry.register(google_trends_plugin)
-    registry.register(TikTokPlugin(auth_manager=tiktok_auth_manager))
+    registry.register(tiktok_plugin)
     registry.register(creative_center_plugin)
     registry.register(
         ThreadsPlugin(
@@ -184,6 +185,7 @@ def _init_components():
         "repository": repository,
         "registry": registry,
         "google_trends_plugin": google_trends_plugin,
+        "tiktok_plugin": tiktok_plugin,
         "tiktok_auth_manager": tiktok_auth_manager,
         "threads_auth_manager": threads_auth_manager,
         "instagram_auth_manager": instagram_auth_manager,
@@ -325,6 +327,9 @@ async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
         if "google_trends_plugin" in comp:
             comp["google_trends_plugin"].register_probe_templates(vocabulary.probe_templates)
             comp["google_trends_plugin"].register_intent_keywords(vocabulary.search_intent)
+        if "tiktok_plugin" in comp:
+            comp["tiktok_plugin"].register_ui_noise(vocabulary.tiktok_ui_noise)
+            comp["tiktok_plugin"].register_suggest_templates(vocabulary.tiktok_suggest_templates)
         if stop_terms:
             comp["quality_evaluator"].register_foreign_stopwords(stop_terms)
             comp["strategic_reasoner"].register_foreign_stopwords(stop_terms)

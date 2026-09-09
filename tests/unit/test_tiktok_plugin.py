@@ -18,6 +18,18 @@ SAMPLE_TIKTOK_ITEM = {
     }
 }
 
+
+# The grid parser rejects everything until the notification vocabulary is registered, which is
+# how it guarantees it never stores the operator's own inbox. Production registers it from
+# market_lexicons at bootstrap; these tests do the same by hand.
+UI_NOISE = ["follow bạn", "tin nhắn", "thông báo", "live "]
+
+
+def _armed_plugin() -> TikTokPlugin:
+    plugin = TikTokPlugin()
+    plugin.register_ui_noise(UI_NOISE)
+    return plugin
+
 @pytest.mark.asyncio
 async def test_tiktok_plugin_properties():
     plugin = TikTokPlugin()
@@ -27,7 +39,7 @@ async def test_tiktok_plugin_properties():
 
 @pytest.mark.asyncio
 async def test_tiktok_plugin_parse_json_item():
-    plugin = TikTokPlugin()
+    plugin = _armed_plugin()
     signal = plugin._parse_json_item(SAMPLE_TIKTOK_ITEM, geo=GeoCode.VN, keyword="ai agent")
     assert signal is not None
     assert signal.platform == PlatformType.TIKTOK
@@ -40,7 +52,7 @@ async def test_tiktok_plugin_parse_json_item():
 
 @pytest.mark.asyncio
 async def test_tiktok_plugin_parse_dom_card():
-    plugin = TikTokPlugin()
+    plugin = _armed_plugin()
     mock_card = AsyncMock()
     mock_link = AsyncMock()
     mock_link.get_attribute.return_value = "https://www.tiktok.com/@creator/video/12345"
@@ -88,3 +100,50 @@ async def test_tiktok_plugin_fetch_and_search_mocked():
         search_signals = await plugin.search_signals(keywords=["ai", "agent"], geo=GeoCode.VN)
         assert len(search_signals) == 2
 
+
+@pytest.mark.asyncio
+async def test_the_grid_parser_rejects_everything_without_its_vocabulary():
+    """Fail closed: no vocabulary means no card can be shown to be public, so none is kept."""
+    plugin = TikTokPlugin()
+
+    assert plugin._parse_json_item(SAMPLE_TIKTOK_ITEM, geo=GeoCode.VN, keyword="ai agent") is None
+
+
+@pytest.mark.asyncio
+async def test_a_notification_card_is_never_ingested():
+    """The class promises it never touches the inbox; that promise is this vocabulary."""
+    plugin = _armed_plugin()
+
+    assert plugin._is_private_or_notification("UserA đã bắt đầu follow bạn") is True
+    assert plugin._is_private_or_notification("tin nhắn mới") is True
+    assert plugin._is_private_or_notification("#congnghe2026 AI Agent sieu hot") is False
+
+
+def test_an_intent_probe_never_borrows_another_market_phrasing():
+    """A geo with no registered phrasing is skipped rather than probed in someone else's."""
+    plugin = TikTokPlugin()
+    assert plugin._intent_probe_templates("VN") == []
+
+    plugin.register_suggest_templates({
+        "VN": ["cách làm {}"],
+        "DEFAULT": ["how to make {}"],
+    })
+
+    assert plugin._intent_probe_templates("VN") == ["cách làm {}"]
+    assert plugin._intent_probe_templates("US") == ["how to make {}"]
+
+
+def test_a_trailing_space_in_a_ui_noise_term_survives_registration():
+    """The space in "live " is load-bearing, so registration must not strip it.
+
+    It stops the term matching inside a longer word like "livestream". It does NOT stop it
+    matching mid-string: "olive oil" contains "live ", so a video with that title is dropped.
+    That false positive predates moving this list into the database and is asserted here so it
+    stays visible; matching on word boundaries would be a change of behaviour, not a refactor.
+    """
+    plugin = TikTokPlugin()
+    plugin.register_ui_noise(["live "])
+
+    assert plugin._is_private_or_notification("live  ngay bay gio") is True
+    assert plugin._is_private_or_notification("livestream review") is False
+    assert plugin._is_private_or_notification("olive oil review") is True

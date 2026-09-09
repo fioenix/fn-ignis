@@ -102,7 +102,14 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   trong `extract_customer_pain_points`, bản sau là tập lớn hơn). Seed ở
   `sql/012_vocabulary_from_constants.sql`, đọc qua `vocabulary_loader`, và bốn entry tương ứng
   đã bị xoá khỏi allowlist của `test_repo_conventions.py` nên gate giờ chặn thật.
-  Còn lại một chỗ: `NOTIFICATION_NOISE_PATTERNS` trong `tiktok_plugin.py`.
+- [x] **Đã xong (09/09/2026): `tiktok_plugin.py` cũng đã sạch.** `NOTIFICATION_BLACKLIST` (13
+  chuỗi UI thông báo của TikTok) và một mẫu probe intent viết cứng bằng tiếng Việt đã chuyển vào
+  `sql/013_tiktok_ui_noise.sql`. Bộ lọc thông báo giờ **fail closed**: không có từ vựng thì loại
+  hết card thay vì để trôi, vì nó là thứ bảo đảm plugin không bao giờ lưu inbox của người dùng.
+  Mẫu probe thì bỏ qua geo nào chưa có phrasing, thay vì probe thị trường US bằng tiếng Việt.
+- [ ] **Đợi quyết: `_is_private_or_notification` khớp theo substring thô.** `"live "` khớp trong
+  `"olive oil review"`, nên một video thật bị loại như thông báo. Lỗi này có từ trước, không phải
+  do lần chuyển từ vựng. Sửa bằng cách khớp theo biên từ là đổi hành vi, nên tao chưa làm.
 
 
 ---
