@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.domain.entities import TopicCluster, TrendSignal
+from ignis.domain.probe_provenance import probe_keyword_of
 
 
 class SemanticClusterer(IClusteringEngine):
@@ -283,9 +284,23 @@ class SemanticClusterer(IClusteringEngine):
         if not signals:
             return []
 
-        tokenized_signals = [(s, self._tokenize(s.raw_title)) for s in signals]
+        # Signals retrieved by the same keyword are about the same subject by construction, which
+        # is stronger evidence than token overlap: a video title and a forum post about one topic
+        # rarely share enough words to cross the threshold. Only signals that arrived in a feed,
+        # and so carry no provenance, are matched by similarity.
+        by_probe: Dict[str, List[TrendSignal]] = {}
+        unattributed: List[TrendSignal] = []
+        for signal in signals:
+            probe = probe_keyword_of(signal)
+            if probe:
+                by_probe.setdefault(probe, []).append(signal)
+            else:
+                unattributed.append(signal)
+
+        groups: List[List[TrendSignal]] = list(by_probe.values())
+
+        tokenized_signals = [(s, self._tokenize(s.raw_title)) for s in unattributed]
         visited = set()
-        groups: List[List[TrendSignal]] = []
 
         for i, (sig_a, tokens_a) in enumerate(tokenized_signals):
             if i in visited:

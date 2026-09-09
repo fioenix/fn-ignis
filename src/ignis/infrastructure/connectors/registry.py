@@ -264,6 +264,7 @@ class ConnectorPluginRegistry:
 
         if probe_plugins:
             keywords = self._build_probe_keywords(seeds, stage_one, max_probe_keywords)
+            self._stamp_discovered_provenance(stage_one, keywords)
             if keywords:
                 probed = await asyncio.gather(
                     *[
@@ -289,6 +290,26 @@ class ConnectorPluginRegistry:
         self.last_pass_report["untargeted_feed_skipped"] = no_probe_skipped
         self.last_pass_report["off_locale_filtered"] = off_locale
         return kept
+
+    @staticmethod
+    def _stamp_discovered_provenance(
+        discovered_signals: List[TrendSignal],
+        keywords: List[str],
+    ) -> None:
+        """Record on a discovery signal the keyword it contributed, when that keyword was probed.
+
+        Google Trends reports what a region is searching for, which is the demand half of the
+        Opportunity Index, and its title *is* the keyword the other platforms were then asked
+        about. Without this the demand signal and everything it retrieved cluster separately and
+        the topic reads as single-platform. Signals whose keyword lost the budget cap are left
+        alone: nothing corroborated them this pass.
+        """
+        probed = {kw.casefold() for kw in keywords}
+        for signal in discovered_signals:
+            title = " ".join((signal.raw_title or "").split())
+            if title.casefold() in probed:
+                signal.metadata = dict(signal.metadata or {})
+                signal.metadata.setdefault("probe_keyword", title)
 
     @staticmethod
     def _build_probe_keywords(

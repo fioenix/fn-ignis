@@ -27,7 +27,7 @@ from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 
 
-def _signal(platform: PlatformType, title: str, url: str) -> TrendSignal:
+def _signal(platform: PlatformType, title: str, url: str, keyword: Optional[str] = None) -> TrendSignal:
     return TrendSignal(
         platform=platform,
         raw_title=title,
@@ -35,6 +35,7 @@ def _signal(platform: PlatformType, title: str, url: str) -> TrendSignal:
         growth_velocity=10.0,
         geo_code=GeoCode.VN,
         source_url=url,
+        metadata={"keyword": keyword} if keyword else {},
     )
 
 
@@ -98,7 +99,7 @@ class PopularityChartPlugin(IConnectorPlugin):
         out: List[TrendSignal] = []
         for kw in keywords:
             for i, title in enumerate(self._by_keyword.get(kw, [])):
-                out.append(_signal(self.platform, title, f"https://chart.example/{kw}/{i}"))
+                out.append(_signal(self.platform, title, f"https://chart.example/{kw}/{i}", keyword=kw))
         return out
 
 
@@ -265,7 +266,10 @@ class ForeignLanguagePlugin(IConnectorPlugin):
         return []
 
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
-        return [_signal(self.platform, t, f"https://f.example/{i}") for i, t in enumerate(self._titles)]
+        return [
+            _signal(self.platform, t, f"https://f.example/{i}", keyword=keywords[0] if keywords else None)
+            for i, t in enumerate(self._titles)
+        ]
 
 
 @pytest.mark.asyncio
@@ -298,3 +302,32 @@ async def test_a_vn_pass_does_not_store_titles_from_another_language():
     assert not [t for t in titles if "погода" in t or "شعره" in t], (
         f"Foreign-language titles reached the corpus: {titles}"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_discovered_topic_joins_the_cluster_its_own_keyword_produced():
+    """The demand-side signal must sit in the topic it seeded, not beside it.
+
+    Google Trends reports what a region is searching for, which is the demand half of the
+    Opportunity Index. Its own signal carries no probe keyword, so without stamping it the
+    discovery signal and every signal it retrieved end up in different clusters and the topic
+    looks single-platform.
+    """
+    from ignis.domain.probe_provenance import probe_keyword_of
+
+    repo = _repository()
+    registry = ConnectorPluginRegistry(repository=repo)
+    registry.register(DiscoveryFeedPlugin(["mau toc"]))
+    registry.register(
+        PopularityChartPlugin(chart=[], by_keyword={"mau toc": ["Nhuom mau toc tai nha"]})
+    )
+
+    signals = await registry.fetch_from_all(geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET)
+
+    discovery = [s for s in signals if s.platform == PlatformType.GOOGLE_TRENDS]
+    assert discovery, "The discovery feed's own signal must survive the pass"
+    assert probe_keyword_of(discovery[0]) == "mau toc"
+
+    clusters = await SemanticClusterer().cluster_signals(signals)
+    assert len(clusters) == 1
+    assert len({s.platform for s in clusters[0].signals}) == 2
