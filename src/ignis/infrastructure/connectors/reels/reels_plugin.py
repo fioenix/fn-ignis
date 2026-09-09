@@ -15,7 +15,7 @@ from ignis.domain.exceptions import (
     ConnectorExecutionException,
     ConnectorQuotaExceededException,
 )
-from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe, timeframe_to_days
+from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe, timeframe_to_days
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 from ignis.infrastructure.auth.meta_browser_auth import InstagramBrowserAuthManager
 from ignis.infrastructure.auth.meta_oauth import InstagramAuthManager
@@ -161,6 +161,11 @@ class ReelsPlugin(IConnectorPlugin):
         return tier == "oauth2"
 
     # --- Ingress ---
+
+    async def resolve_ingest_runtime(self) -> IngestRuntime:
+        """The Graph API tier is plain HTTP; the Tier-1 session is driven through a browser."""
+        tier, _ = await self.resolve_auth_tier()
+        return IngestRuntime.HTTP_API if tier == "oauth2" else IngestRuntime.BROWSER
 
     @property
     def default_feed_scope(self) -> IngressScope:

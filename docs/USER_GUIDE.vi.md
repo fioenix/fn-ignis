@@ -78,7 +78,7 @@ ignis-mcp
 
 Chế độ này triển khai toàn bộ hệ thống doanh nghiệp gồm:
 1. **PostgreSQL / TimescaleDB (`fn-ignis-db`)**: Cơ sở dữ liệu chuỗi thời gian tối ưu cho hàng triệu tín hiệu social listening.
-2. **Worker Daemon (`fn-ignis-worker`)**: Daemon chạy ngầm liên tục cào dữ liệu định kỳ mỗi 15 phút.
+2. **Worker Daemon (`fn-ignis-worker`)** — *tùy chọn*: daemon chạy ngầm, thu dữ liệu nền mỗi 15 phút qua các API chính thống (Google Trends RSS, YouTube Data API). Image không kèm browser runtime, nên các kênh chỉ lấy được bằng cách điều khiển browser (TikTok, và Threads/Instagram khi chưa có Graph token) không nằm trong worker mà thuộc Track 2 — chạy trên máy của bạn với session của bạn.
 3. **Nginx Report Portal (`fn-ignis-reports`)**: Web server tĩnh phân phối các báo cáo HTML tại cổng `53080`.
 
 #### Bước 1: Chuẩn bị file `.env`

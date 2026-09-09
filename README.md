@@ -19,7 +19,7 @@
 ## 🌟 Key Highlights
 
 - **⚡ Zero-Token Local Ingress**: Collects, filters, and normalizes high-volume signals locally using deterministic Python parsers without burning expensive LLM API tokens on raw scraping.
-- **🏛️ Dual-Track Architecture**: Combines a continuous 24/7 background radar daemon (`fn-ignis-worker`) with interactive, hypothesis-driven strategic deep dives on-demand.
+- **🏛️ Dual-Track Architecture**: Combines an optional 24/7 background radar daemon (`fn-ignis-worker`, official HTTP APIs only) with interactive, hypothesis-driven strategic deep dives on-demand. Browser-driven channels run in the on-demand track, on your own machine with your own session — the worker image stays lean and needs no Chromium.
 - **📊 Mathematical Opportunity Index**: Quantifies market white spaces (+100 to -100) by mathematically comparing macro search demand velocity against localized content supply volume.
 - **🗣️ Voice of Customer Ingress**: Scrapes and synthesizes real customer pain points, pricing inquiries, and unmet objections directly from public video comment sections.
 - **🧠 Autonomous Dynamic Lexicon Engine**: Persistent PostgreSQL registry allowing agents to dynamically register niche slang, brand names, and vernacular on-the-fly without modifying source code.

@@ -1,5 +1,19 @@
 from enum import Enum
 
+class IngestRuntime(str, Enum):
+    """What a connector needs in order to pull right now.
+
+    HTTP_API means an official endpoint reachable with plain HTTP. BROWSER means a headless
+    browser session — which cannot be assumed everywhere: shipping Playwright plus a Chromium
+    build turns the worker image from ~90MB into ~500MB, and driving that scraper unattended
+    around the clock is what gets an IP blocked. Deployments without a browser runtime simply
+    leave those connectors out instead of registering them to fail every cycle.
+    """
+
+    HTTP_API = "http_api"
+    BROWSER = "browser"
+
+
 class IngressScope(str, Enum):
     """Whose content an ingress pass is allowed to collect.
 

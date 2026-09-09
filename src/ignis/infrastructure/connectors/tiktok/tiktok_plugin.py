@@ -8,7 +8,7 @@ import httpx
 from ignis.application.ports.connector_port import IConnectorPlugin
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
-from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.config import settings
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
@@ -70,6 +70,10 @@ class TikTokPlugin(IConnectorPlugin):
         if re.match(r"^\s*\d+[\s\.\,kKmMbB]*\s*$", text):
             return True
         return False
+
+    async def resolve_ingest_runtime(self) -> IngestRuntime:
+        """TikTok exposes no official read API for this surface, so a browser is the only way in."""
+        return IngestRuntime.BROWSER
 
     async def fetch_signals(
         self,

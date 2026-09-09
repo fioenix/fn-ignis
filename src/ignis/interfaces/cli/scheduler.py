@@ -1,13 +1,14 @@
 import asyncio
+import importlib.util
 import logging
 import signal
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.config import settings
-from ignis.domain.value_objects import GeoCode, IngressScope
+from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope
 from ignis.infrastructure.auth.meta_browser_auth import (
     InstagramBrowserAuthManager,
     ThreadsBrowserAuthManager,
@@ -25,6 +26,7 @@ from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+from ignis.application.ports.connector_port import IConnectorPlugin
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
@@ -34,6 +36,69 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("ignis.scheduler")
+
+
+
+def browser_runtime_available() -> bool:
+    """Whether this host can drive a headless browser at all."""
+    return importlib.util.find_spec("playwright") is not None
+
+
+async def build_connector_registry(
+    repository: ITrendRepository,
+    browser_available: Optional[bool] = None,
+) -> Tuple[ConnectorPluginRegistry, List[Dict[str, str]]]:
+    """Register the connectors this host can actually pull with, and report the ones it cannot.
+
+    The worker image carries no browser: Playwright plus Chromium would take it from ~90MB to
+    ~500MB, and an unattended scraper running every 15 minutes is what gets an IP blocked. So a
+    connector joins the radar only when it can pull over an official HTTP API — which each
+    connector answers for itself through `resolve_ingest_runtime()`, since a dual-tier connector
+    like Threads is HTTP-only when a Graph token is configured and browser-bound otherwise.
+    Browser-bound channels are not broken here; they belong to Track 2, where Playwright runs on
+    the operator's own machine with their own session.
+    """
+    if browser_available is None:
+        browser_available = browser_runtime_available()
+
+    tiktok_auth_manager = TikTokAuthManager(repository=repository)
+    candidates: List[IConnectorPlugin] = [
+        GoogleTrendsRssPlugin(),
+        TikTokPlugin(auth_manager=tiktok_auth_manager),
+        TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager),
+        # The worker binds the same auth managers the MCP server does, otherwise the plugins
+        # cannot reach the Tier-1 sessions stored in platform_credentials.
+        ThreadsPlugin(
+            auth_manager=ThreadsAuthManager(repository=repository),
+            browser_auth_manager=ThreadsBrowserAuthManager(repository=repository),
+        ),
+        ReelsPlugin(
+            auth_manager=InstagramAuthManager(repository=repository),
+            browser_auth_manager=InstagramBrowserAuthManager(repository=repository),
+        ),
+    ]
+    if settings.YOUTUBE_API_KEY:
+        candidates.append(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
+
+    registry = ConnectorPluginRegistry(repository=repository)
+    skipped: List[Dict[str, str]] = []
+    for plugin in candidates:
+        try:
+            runtime = await plugin.resolve_ingest_runtime()
+        except Exception as e:
+            logger.warning(f"Could not resolve the ingest runtime for {plugin.name}: {e}")
+            runtime = IngestRuntime.HTTP_API
+
+        if runtime == IngestRuntime.BROWSER and not browser_available:
+            skipped.append({
+                "name": plugin.name,
+                "platform": plugin.platform.value,
+                "reason": "needs a browser runtime this host does not provide",
+            })
+            continue
+        registry.register(plugin)
+
+    return registry, skipped
 
 
 class IngressScheduler:
@@ -130,32 +195,12 @@ class IngressScheduler:
 
         # 1. Dependency Injection Setup
         repository = create_repository()
-        tiktok_auth_manager = TikTokAuthManager(repository=repository)
-        tiktok_plugin = TikTokPlugin(auth_manager=tiktok_auth_manager)
-        creative_center_plugin = TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager)
-
-        registry = ConnectorPluginRegistry(repository=repository)
-        registry.register(GoogleTrendsRssPlugin())
-        registry.register(tiktok_plugin)
-        registry.register(creative_center_plugin)
-        # The worker must bind the same auth managers the MCP server does. Without them the
-        # plugins cannot reach the Tier-1 browser sessions stored in platform_credentials, so the
-        # radar reported "no valid credentials" for Instagram and collected nothing from Threads.
-        registry.register(
-            ThreadsPlugin(
-                auth_manager=ThreadsAuthManager(repository=repository),
-                browser_auth_manager=ThreadsBrowserAuthManager(repository=repository),
+        registry, skipped = await build_connector_registry(repository)
+        if skipped:
+            logger.info(
+                "Connectors left out of this worker: "
+                + "; ".join(f"{item['name']} ({item['reason']})" for item in skipped)
             )
-        )
-        registry.register(
-            ReelsPlugin(
-                auth_manager=InstagramAuthManager(repository=repository),
-                browser_auth_manager=InstagramBrowserAuthManager(repository=repository),
-            )
-        )
-
-        if settings.YOUTUBE_API_KEY:
-            registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
 
         clusterer = SemanticClusterer()
         try:

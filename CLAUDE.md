@@ -49,9 +49,10 @@ If the user gives you this repository link or asks you to set up `fn-ignis`, exe
 
 ## 🏛️ Architecture: The Dual-Track Model
 
-1. **Track 1: Always-On Autonomous Radar (Continuous 24/7 Surveillance)**
-   - Operated by Docker daemon (`fn-ignis-worker`).
-   - Ingests Google Trends, YouTube, and TikTok signals every 15 minutes.
+1. **Track 1: Always-On Autonomous Radar (Optional, Continuous Baseline)**
+   - Operated by the Docker daemon (`fn-ignis-worker`) — optional, not required. On-demand research works without it.
+   - Ingests every 15 minutes through **official HTTP APIs only**: Google Trends RSS and the YouTube Data API.
+   - The worker image ships no browser runtime, so connectors that can only reach their data by driving a browser (TikTok, and Threads/Instagram without a Graph token) are left out of its registry and handled by Track 2 instead. Each connector decides this itself via `resolve_ingest_runtime()`.
 2. **Track 2: On-Demand Targeted Deep Research (Active Strategic Probes)**
    - Deployed directly by you (the Agent) upon user prompt.
    - Deploys active probes: Google search trends, TikTok autocomplete suggestions, video grid supply, and raw customer comment pain points.

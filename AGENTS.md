@@ -28,9 +28,11 @@ This document defines the operational protocol, architectural guidelines, and to
 
 Agents must understand the dual-track design of `fn-ignis`:
 
-1. **Track 1: Always-On Autonomous Radar (Continuous Surveillance)**
-   - Operated by the Docker daemon (`fn-ignis-worker`).
-   - Maintains continuous baseline data across Google Trends, YouTube, and TikTok.
+1. **Track 1: Always-On Autonomous Radar (Optional Continuous Baseline)**
+   - Operated by the Docker daemon (`fn-ignis-worker`). **Optional** — every on-demand capability works without it.
+   - Maintains baseline data through **official HTTP APIs only**: Google Trends RSS and the YouTube Data API.
+   - The image carries no browser runtime on purpose (Playwright plus Chromium would take it from ~90MB to ~500MB, and an unattended scraper on a 15-minute loop is what gets an IP blocked). `build_connector_registry()` asks each connector for its `resolve_ingest_runtime()` and registers only the ones that can pull over HTTP; the rest are reported at startup and belong to Track 2, where Playwright runs on the operator's own machine with their own session.
+   - A dual-tier connector crosses over on its own: Threads and Instagram Reels join the radar as soon as a Graph API token is configured, because that tier is plain HTTP.
    - Generates automated daily discovery digests (`reports/daily_discovery_vn_YYYY-MM-DD.html`).
    - *Agent Action*: Query `get_latest_daily_discovery()` or `get_trending_topics()` to inspect current macro dynamics.
 

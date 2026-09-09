@@ -18,7 +18,7 @@
 ## 🌟 Điểm Nhấn Nổi Bật
 
 - **⚡ Cào Dữ liệu Cục bộ $0 Token**: Thu thập, lọc và chuẩn hóa dữ liệu lớn cục bộ bằng các bộ parser Python xác định mà không làm hao tốn token API LLM đắt đỏ.
-- **🏛️ Kiến trúc Dual-Track**: Kết hợp daemon radar nền chạy 24/7 (`fn-ignis-worker`) với các đợt nghiên cứu chiến lược chuyên sâu theo giả thuyết khi cần.
+- **🏛️ Kiến trúc Dual-Track**: Kết hợp daemon radar nền chạy 24/7 (`fn-ignis-worker` — tùy chọn, chỉ dùng API chính thống) với các đợt nghiên cứu chiến lược chuyên sâu theo giả thuyết khi cần. Các kênh phải điều khiển browser thuộc track theo yêu cầu, chạy trên máy bạn với session của bạn — nhờ vậy image worker vẫn gọn, không cần Chromium.
 - **📊 Chỉ số Cơ hội Toán học (Opportunity Index)**: Định lượng khoảng trống thị trường (+100 đến -100) bằng tương quan toán học giữa tốc độ tăng trưởng nhu cầu tìm kiếm vĩ mô và khối lượng cung cấp nội dung bản địa.
 - **🗣️ Lắng nghe Khách hàng Thực tế (Voice of Customer)**: Cào và tổng hợp các rào cản mua hàng, thắc mắc về giá và nhu cầu chưa được đáp ứng trực tiếp từ phần bình luận video công khai.
 - **🧠 Cơ chế Từ điển Động Tự trị (Dynamic Lexicon)**: Bảng từ vựng lưu trữ bền vững trên SQLite/PostgreSQL cho phép agent đăng ký tiếng lóng ngành, tên thương hiệu mới ngay trong quá trình chạy mà không cần sửa code.

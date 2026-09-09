@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List
 from ignis.domain.entities import TrendSignal
-from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe
 
 
 class IConnectorPlugin(ABC):
@@ -47,6 +47,16 @@ class IConnectorPlugin(ABC):
     async def is_healthy(self) -> bool:
         """Check the operational health and reachability of the data source."""
         pass
+
+    async def resolve_ingest_runtime(self) -> IngestRuntime:
+        """Which runtime this connector needs to pull with the credentials it currently has.
+
+        Override it with `IngestRuntime.BROWSER` when the only way in is a headless browser, or
+        return it conditionally when an official API tier may or may not be configured. A host
+        without a browser runtime uses this to skip the connector rather than register one that
+        warns on every cycle and returns nothing.
+        """
+        return IngestRuntime.HTTP_API
 
     @property
     def default_feed_scope(self) -> IngressScope:
