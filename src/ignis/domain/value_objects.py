@@ -1,5 +1,20 @@
 from enum import Enum
 
+class IngressTrigger(str, Enum):
+    """Who asked for an ingress pass, which decides how strictly its content is filtered.
+
+    SCHEDULED is the unattended radar: nobody is watching, and whatever it stores it keeps, so a
+    title written in a script the region does not use is noise the corpus carries forever.
+    REQUESTED is a person or an agent asking a specific question, and the answer may legitimately
+    be in another language -- a sourcing question reaching Chinese suppliers, say. The distinction
+    is the requester, not the code path: `trigger_ingress_refresh` runs the same function as the
+    worker and is still a request.
+    """
+
+    SCHEDULED = "scheduled"
+    REQUESTED = "requested"
+
+
 class IngestRuntime(str, Enum):
     """What a connector needs in order to pull right now.
 

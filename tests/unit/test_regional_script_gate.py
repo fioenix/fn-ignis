@@ -153,3 +153,66 @@ async def test_an_agent_probe_fetches_foreign_language_content_freely():
         "An agent probe must return what it found, whatever language it is in: "
         f"{[s.raw_title for s in signals]}"
     )
+
+
+@pytest.mark.asyncio
+async def test_an_explicitly_requested_pass_is_not_script_gated():
+    """The gate keys on who asked for the pass, not on which code path served it.
+
+    `trigger_ingress_refresh` runs `fetch_from_all`, the same function the unattended worker
+    uses, but somebody typed it. An explicit request is the operator asking a question, and the
+    answer may legitimately be in another language -- the same reasoning that leaves agent probes
+    ungated. Only a scheduled sweep, whose corpus nobody is watching, is filtered.
+    """
+    from unittest.mock import AsyncMock
+
+    from ignis.application.ports.connector_port import IConnectorPlugin
+    from ignis.domain.entities import TrendSignal
+    from ignis.domain.value_objects import IngressScope, IngressTrigger, PlatformType, Timeframe
+    from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+
+    class MixedLanguageFeed(IConnectorPlugin):
+        @property
+        def platform(self):
+            return PlatformType.GOOGLE_TRENDS
+
+        @property
+        def name(self):
+            return "Mixed Language Feed"
+
+        async def is_healthy(self):
+            return True
+
+        async def fetch_signals(self, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=50, scope=None):
+            return [
+                TrendSignal(
+                    platform=self.platform,
+                    raw_title=title,
+                    metric_value=100.0,
+                    geo_code=GeoCode.VN,
+                    source_url=f"https://example.test/{i}",
+                )
+                for i, title in enumerate(["giá vàng hôm nay", "K-beauty 스킨케어 루틴"])
+            ]
+
+    def _registry():
+        repo = AsyncMock()
+        repo.log_event = AsyncMock()
+        repo.get_self_accounts = AsyncMock(return_value=[])
+        registry = ConnectorPluginRegistry(repository=repo)
+        registry.register(MixedLanguageFeed())
+        return registry
+
+    scheduled = await _registry().fetch_from_all(
+        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET
+    )
+    assert [s.raw_title for s in scheduled] == ["giá vàng hôm nay"], (
+        "An unattended sweep still drops a script the region does not use"
+    )
+
+    requested = await _registry().fetch_from_all(
+        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, trigger=IngressTrigger.REQUESTED
+    )
+    assert len(requested) == 2, (
+        f"An explicitly requested pass keeps what it found: {[s.raw_title for s in requested]}"
+    )

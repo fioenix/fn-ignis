@@ -192,6 +192,40 @@ Two narrow exceptions, both of which must carry an inline comment stating why:
 A hardcoded vocabulary is a band-aid even when it makes a test pass: it ships domain knowledge that only
 a code release can change, and it silently diverges from the database other components read.
 
+**Store vocabulary in the language as it is written.** Vietnamese terms keep their tone marks, in
+`market_lexicons` and `industry_taxonomies` alike. Stripping tones to "canonicalise" destroys the word:
+`vàng` (gold) and `vang` (resonant) fold to one string, as do `tóc`/`tốc` and `chính phủ`/`chinh phục`.
+That folding produced a run of wrong categories — a bolero playlist under finance, an esports bracket
+under beauty — and four separate rules were added to compensate before the premise itself was accepted.
+Lexicon terms are also handed to connectors as search queries, so a tone-stripped term asks the platform
+a question no Vietnamese user would type. Matching folds only when the *input* carries no tones, which is
+common and legitimate; the ambiguity then belongs to the input rather than to the system. Never fold both
+sides by default, and never match a multi-word term as a raw substring — anchor on word boundaries, or
+`ô tô` fires inside `cho tôi`.
+
+---
+
+### 🚦 Ingress Filtering Depends on Who Asked
+
+Content filtering at ingress keys on the requester, not on the code path.
+
+| Trigger | Path | Script-gated |
+|---|---|---|
+| `IngressTrigger.SCHEDULED` — unattended worker sweep | `fetch_from_all` | **Yes** |
+| `IngressTrigger.REQUESTED` — `trigger_ingress_refresh` | `fetch_from_all` | No |
+| Agent keyword probe — missions, discovery, refinement | `search_across_all` | No |
+
+A scheduled sweep accumulates a corpus nobody reviews, so a title in a script the region does not use is
+noise it carries forever. Anything a person or an agent asked for keeps what it found: social listening
+means hearing what is actually said, and a market question can legitimately be answered in another
+language. **Latin script always passes**, so the English that runs through Vietnamese social content is
+never filtered — the gate only ever excludes Hangul, Cyrillic, Arabic, CJK, Thai and similar in a
+Vietnam pass.
+
+Relevance is never judged at ingress. `QualityEvaluator` holds the domain vocabulary and decides
+relevance downstream, because judging it at ingress meant the radar could only ever store topics
+somebody had already seeded — the opposite of a trend radar's job.
+
 ---
 
 ## 🏷️ 4. Release Versioning Principles & SemVer Guardrails

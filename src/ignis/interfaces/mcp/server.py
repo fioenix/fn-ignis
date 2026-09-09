@@ -20,7 +20,7 @@ from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
-from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
+from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS, IngestTrendsUseCase
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster
@@ -35,6 +35,7 @@ from ignis.domain.token_rotation import (
     plan_staggered_refresh,
 )
 from ignis.domain.value_objects import (
+    IngressTrigger,
     GeoCode,
     IngressScope,
     PlatformType,
@@ -1254,7 +1255,15 @@ async def handle_trigger_ingress_refresh(geo: str = "VN", scope: str = "public_m
     # A public pass seeds the keyword probes from the persisted lexicon, because the connectors
     # whose only feed is the operator's own account are reached that way instead.
     seeds = await comp["ingest_use_case"].load_seed_keywords() if scope_val.includes_public else []
-    signals = await comp["registry"].fetch_from_all(geo=geo_val, scope=scope_val, seed_keywords=seeds)
+    # REQUESTED: somebody typed this, so the pass is not script-filtered -- see IngressTrigger.
+    # The keyword cap still applies: this path spends the same YouTube search quota as the worker.
+    signals = await comp["registry"].fetch_from_all(
+        geo=geo_val,
+        scope=scope_val,
+        seed_keywords=seeds,
+        max_probe_keywords=MAX_TOPIC_KEYWORDS,
+        trigger=IngressTrigger.REQUESTED,
+    )
     clusters = await comp["cluster_use_case"].execute(signals)
     guard = dict(getattr(comp["registry"], "last_pass_report", {}) or {})
 
