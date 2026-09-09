@@ -28,12 +28,10 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   interval đang dùng sẽ đốt hết quota trước khi hết ngày.
 - [x] **`topic_clusters.topic_label`:** cluster được đặt tên theo chủ đề thay vì nguyên văn một
   post. `canonical_name` giữ vai trò identity key nên 1.030 cluster hiện có không bị đổi ID.
-- [x] **Market-profile guard ở tầng ingress:** một pass VN từng lưu tiêu đề tiếng Ukraina và
-  tiếng Ả Rập. `HeuristicLanguageDetector` đã có sẵn nhưng chỉ được nối vào mission analysis.
-  Lưu ý về bản chất: cổng này **không phải bộ lọc ngôn ngữ**. Nó cân ngôn ngữ, domain vocabulary
-  và noise blacklist cùng lúc, và trên corpus thật thì noise blacklist mới là thứ loại nhiều
-  nhất, vì nó chứa các dấu hiệu content farm như "cover" hay "full". Một tiêu đề bolero tiếng
-  Việt hoàn hảo vẫn bị loại trong pass VN.
+- [x] **Cổng ingress chỉ còn chặn theo chữ viết:** một pass VN từng lưu tiêu đề tiếng Ukraina
+  và tiếng Ả Rập, vì `q=` là từ khoá tìm kiếm chứ không phải region filter.
+  `detector.uses_regional_script()` chặn đúng một thứ: chữ viết mà vùng đó không dùng. Tỷ lệ loại
+  giảm từ 65% xuống **1,7%** (1/60 trên pass thật).
 - [x] **Ngừng ghi API key vào log:** httpx log toàn bộ URL ở mức INFO và YouTube xác thực bằng
   key trong query string.
 - [x] **Cluster theo keyword đã probe, không chỉ theo cách diễn đạt tiêu đề:** mọi connector đều
@@ -55,11 +53,13 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [ ] **Chất lượng nhãn trên corpus thật:** nhiều nhãn rút về dạng mảnh có dấu ba chấm
   ("… em theo …"). Thuật toán đúng nhưng đầu vào là câu nói thường ngày, không phải cụm chủ đề.
 - [ ] **Phân loại category:** phần lớn cluster vẫn là `unclassified`; taxonomy không khớp.
-- [ ] **Quyết định đang chờ: cổng ingress nên xét gì.** Hiện nó xét độ liên quan theo
-  `market_lexicons`, nên loại mọi chủ đề chưa được seed vào lexicon. Điều đó mâu thuẫn trực tiếp
-  với nhiệm vụ của một cái radar xu hướng là tìm ra chủ đề chưa ai seed. Hai hướng: (a) giữ như
-  hiện tại, corpus sạch nhưng radar chỉ thấy thứ đã biết; (b) ở ingress chỉ chặn theo ngôn ngữ,
-  đẩy phần xét độ liên quan xuống Quality Gate ở hạ nguồn. **Chưa quyết**, đang chờ Fio.
+- [x] **Đã quyết (09/09/2026): độ liên quan xét ở hạ nguồn, không xét ở ingress.** Cổng cũ xét
+  độ liên quan theo `market_lexicons` nên loại mọi chủ đề chưa được seed, tức loại đúng thứ mà
+  radar tồn tại để tìm. Trên corpus thật nó loại 67,8%, trong đó có cả
+  "Khoa hoc AI cho nguoi moi bat dau". `QualityEvaluator` đã giữ sẵn vocabulary đó và đã chạy
+  trên analysis path, nên phần xét độ liên quan chuyển hẳn về đó.
+  **Giá phải trả, đã chấp nhận:** corpus lưu thêm nội dung nội địa lệch chủ đề, và Quality Gate
+  ở hạ nguồn phải gánh thật. Cần theo dõi xem nó gánh được không.
 - [ ] **`AMBIGUOUS_UNIGRAMS`** vẫn hardcode trong `semantic_clusterer.py`, đang được theo dõi
   như nợ kỹ thuật trong `test_repo_conventions.py`.
 

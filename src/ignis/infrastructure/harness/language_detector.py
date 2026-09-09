@@ -86,6 +86,68 @@ class HeuristicLanguageDetector(ILanguageDetector):
                 return True
         return False
 
+    # Every non-Latin script the ingress gate recognises. Deliberately wider than
+    # FOREIGN_SCRIPTS_PATTERN, which the language checks below rely on and which omits several
+    # scripts that did reach the stored corpus (Devanagari, Lao, Myanmar).
+    NON_LATIN_SCRIPTS_PATTERN = re.compile(
+        r"[\uac00-\ud7af\u4e00-\u9fff\u3040-\u30ff\u0e00-\u0e7f\u0400-\u04ff"
+        r"\u0600-\u06ff\u0900-\u097f\u0e80-\u0eff\u1000-\u109f\u0590-\u05ff]"
+    )
+
+    # Scripts each supported region actually writes in, beyond the Latin alphabet every region
+    # can use for brand and product names. These are character ranges, not vocabulary: the
+    # characters are the algorithm, so they belong in code rather than in `market_lexicons`.
+    REGIONAL_SCRIPT_RANGES = {
+        "KR": "\uac00-\ud7af",                      # Hangul
+        "JP": "\u3040-\u30ff\u4e00-\u9fff",        # Kana + Han
+        "TH": "\u0e00-\u0e7f",                      # Thai
+    }
+    # Regions that write in Latin script only. Anything outside it is data about another market.
+    LATIN_ONLY_REGIONS = ("VN", "US", "GB", "CA", "AU", "BR", "PT")
+    # Below this many characters of one foreign script, treat it as a quoted name rather than a
+    # title written in that language: Vietnamese posts cite brands in their original script.
+    MAX_QUOTED_FOREIGN_CHARS = 2
+
+    def uses_regional_script(self, text: str, geo: GeoCode = GeoCode.VN) -> bool:
+        """Whether the text is written in a script the target region actually uses.
+
+        This is the only judgement ingress makes. It catches data that is simply about another
+        market -- a Korean or Cyrillic title in a Vietnam pass, which a keyword probe returns
+        because `q=` is a search term and not a region filter. Whether a title is on-topic,
+        commercially interesting or spam is a relevance question, and relevance is decided
+        downstream by `QualityEvaluator`, which holds the domain vocabulary. Deciding it here as
+        well meant the radar could only store topics somebody had already seeded, and rejected
+        67.8% of a live corpus including titles squarely on target.
+
+        A region not listed accepts anything: guessing on its behalf would silently drop data.
+        """
+        if not text or not text.strip():
+            return False
+
+        geo_val = (geo.value if hasattr(geo, "value") else str(geo)).upper()
+        letters_only = re.sub(
+            r"[^a-zA-Z\u00C0-\u024F\u1EA0-\u1EF9\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af"
+            r"\u0e00-\u0e7f\u0400-\u04ff\u0600-\u06ff\u0900-\u097f\u0e80-\u0eff"
+            r"\u1000-\u109f\u0590-\u05ff]",
+            "",
+            text,
+        )
+        if len(letters_only) < 3:
+            return False
+
+        if geo_val in self.LATIN_ONLY_REGIONS:
+            allowed = ""
+        elif geo_val in self.REGIONAL_SCRIPT_RANGES:
+            allowed = self.REGIONAL_SCRIPT_RANGES[geo_val]
+        else:
+            return True
+
+        foreign = self.NON_LATIN_SCRIPTS_PATTERN.findall(text)
+        if allowed:
+            permitted = re.compile(f"[{allowed}]")
+            foreign = [ch for ch in foreign if not permitted.match(ch)]
+        return len(foreign) <= self.MAX_QUOTED_FOREIGN_CHARS
+
     def is_localized(
         self,
         text: str,

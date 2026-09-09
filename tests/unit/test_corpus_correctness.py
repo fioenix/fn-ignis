@@ -281,7 +281,6 @@ async def test_a_vn_pass_does_not_store_titles_from_another_language():
     """
     repo = _repository(["mau toc"])
     registry = ConnectorPluginRegistry(repository=repo)
-    registry.register_market_profile_vocabulary(terms=["mau toc", "salon"])
     registry.register(DiscoveryFeedPlugin(["mau toc"]))
     registry.register(
         ForeignLanguagePlugin(
@@ -334,43 +333,47 @@ async def test_a_discovered_topic_joins_the_cluster_its_own_keyword_produced():
 
 
 @pytest.mark.asyncio
-async def test_the_ingress_gate_rejects_on_market_profile_not_only_on_language():
-    """The gate is not a language detector, and naming it one cost a real misreading.
+async def test_ingress_stores_an_off_topic_local_title_and_leaves_relevance_downstream():
+    """A radar that only stores what somebody already seeded cannot discover anything.
 
-    `is_localized` weighs language, the persisted domain vocabulary and the noise blacklist
-    together. On the live corpus the noise blacklist does most of the rejecting: it holds generic
-    content-farm markers such as "cover" and "full", so a perfectly Vietnamese bolero title is
-    rejected in a VN pass the same as a Ukrainian one. Reading the gate's filtered count as
-    "off-locale signals" led to a proposed cleanup that would have deleted 10,790 of 15,800
-    stored rows, 68% of the corpus, nearly all of it Vietnamese. Only 245 rows were actually
-    written in a non-Vietnamese script.
+    Ingress used to ask `is_localized` with the persisted vocabulary, which weighs language,
+    domain terms and the noise blacklist together. On the live corpus that rejected 67.8% of
+    rows, including "Khoa hoc AI cho nguoi moi bat dau" -- a Vietnamese title squarely on
+    target -- because relevance was judged against `market_lexicons`. Anything not yet seeded
+    was dropped before it could be seen, which is the opposite of a trend radar's job.
 
-    The trade-off this pins: relevance is judged against `market_lexicons`, so a genuinely new
-    topic is rejected until someone seeds it. That is a live constraint, not a bug fixed here.
+    Relevance now belongs to `QualityEvaluator`, which already holds that vocabulary and runs
+    on the analysis path. Ingress keeps only the judgement about the data being wrong rather
+    than uninteresting: the script the title is written in.
+
+    The cost this accepts: the stored corpus carries off-topic local content, and the quality
+    gate has to earn its keep downstream.
     """
     repo = _repository()
     registry = ConnectorPluginRegistry(repository=repo)
-    registry.register_market_profile_vocabulary(
-        terms=["khoa hoc ai"], noise=["cover", "full"]
-    )
-    registry.register(DiscoveryFeedPlugin(["khoa hoc ai"]))
+    registry.register(DiscoveryFeedPlugin(["mau toc"]))
     registry.register(
         ForeignLanguagePlugin(
             [
-                "Khoa hoc AI cho nguoi moi bat dau",
-                "Nhac tru tinh cover hay nhat 2026",  # Vietnamese, rejected by the noise list
+                "Nhuom mau toc tai nha khong can den salon",
+                "Nhac tru tinh cover hay nhat 2026",       # local, off-topic, previously dropped
+                "Best hair colour tools for salons 2026",  # English, previously dropped
+                "워터밤 안가도 흠뻑 젖는 한강런",                    # wrong script for a VN pass
             ]
         )
     )
 
     signals = await registry.fetch_from_all(
-        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, seed_keywords=["khoa hoc ai"]
+        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, seed_keywords=["mau toc"]
     )
     titles = [s.raw_title for s in signals]
 
-    assert "Khoa hoc AI cho nguoi moi bat dau" in titles
-    assert "Nhac tru tinh cover hay nhat 2026" not in titles, (
-        "The gate also rejects Vietnamese titles the vocabulary cannot place; a report field "
-        "named after locale hides that."
+    assert "Nhuom mau toc tai nha khong can den salon" in titles
+    assert "Nhac tru tinh cover hay nhat 2026" in titles, (
+        "Off-topic local content is a relevance question, and ingress must not decide it"
     )
-    assert registry.last_pass_report["off_profile_filtered"] >= 1
+    assert "Best hair colour tools for salons 2026" in titles, (
+        "English titles are ordinary in the VN tech and fashion markets"
+    )
+    assert "워터밤 안가도 흠뻑 젖는 한강런" not in titles
+    assert registry.last_pass_report["foreign_script_filtered"] == 1
