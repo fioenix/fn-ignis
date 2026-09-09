@@ -114,6 +114,20 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   Character class vẫn nằm trong code vì ở đó ký tự chính là thuật toán.
   Còn `VI_CORE_WORDS` và `TECH_LOAN_WORDS` chưa chuyển, nhưng giờ **được ghi tên** trong
   `KNOWN_VOCABULARY_CONSTANTS` thay vì vô hình với gate.
+- [ ] **`autonomous_discovery.py:116` hardcode 5 từ khoá làm fallback.** Khi macro scan qua
+  Creative Center trả rỗng, `macro_keywords` bị gán
+  `["ai agent", "chatbot", "automation", "ecommerce", "tiktok shop"]` mà không log gì. Nghĩa là
+  một câu hỏi lắng nghe mở âm thầm biến thành một câu hỏi về AI agent và ecommerce. Chỗ này lọt
+  **cả hai** gate: tiếng Anh nên gate non-ASCII không thấy, là biến local nên gate constant
+  không thấy. Macro scan rỗng thì phải báo rỗng.
+- [ ] **`trigger_ingress_refresh` không truyền `timeframe` cho `fetch_from_all`.**
+  `fetch_from_all` có tham số đó, mặc định `LAST_24H`, và MCP tool chưa bao giờ truyền. Nên một
+  câu hỏi 30 ngày chỉ được lọc ở bước đọc, còn lượt ingress luôn chạy ở 24 giờ. Bản thân MCP
+  tool cũng không nhận tham số timeframe từ agent.
+- [ ] **`self_healing_sniffer` ghi `runtime_configs` 97 lần trong một lượt.** Đo trên lượt
+  09/09/2026: 85 lần cho `threads_doc_id_trending_topics`, 7 cho `search_posts`, 5 cho
+  `search_suggestions`, dồn trong khoảng 40 giây. Ghi cùng một giá trị lặp lại vào Postgres.
+  Cần dedupe: chỉ ghi khi giá trị thay đổi thật.
 - [ ] **CHẶN VẬN HÀNH: key YouTube trong `.env` là key cũ đã bị revoke.** Google trả về
   `400 badRequest · "API key expired. Please renew the API key."` Key mới đã tạo nhưng chưa vào
   `.env`. Hệ quả: YouTube ingress chết hoàn toàn, và YouTube là 1 trong 2 connector duy nhất
