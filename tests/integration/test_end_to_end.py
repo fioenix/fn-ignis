@@ -44,10 +44,12 @@ async def test_end_to_end_pipeline():
     builder = HtmlArtifactBuilder()
     dashboard_html = builder.build_dashboard_artifact(clusters, geo=GeoCode.VN)
     assert "<!DOCTYPE html>" in dashboard_html
-    assert c.canonical_name in dashboard_html
+    # Artifacts show the display label, not the identity key: canonical_name is the longest raw
+    # title in the cluster and stays untouched so the cluster UUID stays stable across passes.
+    assert c.topic_label in dashboard_html
     assert "fn-ignis" in dashboard_html.lower()
 
     card_html = builder.build_topic_card_artifact(c, c.signals)
     assert "<!DOCTYPE html>" in card_html
-    assert c.canonical_name in card_html
+    assert c.topic_label in card_html
     assert "Giá vàng hôm nay 9999" in card_html
