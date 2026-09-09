@@ -333,6 +333,12 @@ async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
             taxonomies = await comp["repository"].get_industry_taxonomies()
             if taxonomies:
                 comp["clusterer"].register_taxonomies(taxonomies)
+        if "registry" in comp and hasattr(comp["registry"], "register_locale_vocabulary"):
+            # Arms the ingress locale guard. It needs the positive terms to avoid rejecting
+            # legitimate English brand names, which is why it is armed here and not by default.
+            comp["registry"].register_locale_vocabulary(
+                terms=pos_terms, stopwords=stop_terms, noise=noise_terms
+            )
     except Exception as e:
         logger.warning(f"Could not sync dynamic lexicons from DB: {e}")
 

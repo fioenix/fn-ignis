@@ -14,6 +14,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# httpx logs every request URL at INFO, and several connectors authenticate with a key in the
+# query string, so at INFO the operator's own credential lands in container logs and scrollback.
+for _http_logger in ("httpx", "httpcore"):
+    logging.getLogger(_http_logger).setLevel(logging.WARNING)
 logger = logging.getLogger("ignis.cli")
 
 

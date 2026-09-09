@@ -38,6 +38,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# httpx logs every request URL at INFO, and several connectors authenticate with a key in the
+# query string, so at INFO the operator's own credential lands in container logs and scrollback.
+for _http_logger in ("httpx", "httpcore"):
+    logging.getLogger(_http_logger).setLevel(logging.WARNING)
 logger = logging.getLogger("ignis.scheduler")
 
 
@@ -219,6 +223,26 @@ class IngressScheduler:
             clusterer.register_taxonomies(await repository.get_industry_taxonomies())
         except Exception as e:
             logger.warning(f"Could not load industry taxonomies for classification: {e}")
+        try:
+            lexicons = await repository.get_domain_lexicons()
+            by_domain: Dict[str, List[str]] = {}
+            for item in lexicons or []:
+                by_domain.setdefault(str(item.get("domain") or ""), []).append(item["term"])
+            stopwords = by_domain.pop("foreign_stopwords", [])
+            noise = by_domain.pop("noise_blacklist", [])
+            positive = [term for terms in by_domain.values() for term in terms]
+            clusterer.register_stopwords(stopwords + noise)
+            # A keyword probe reaches the whole platform, so a VN pass comes back with titles in
+            # other languages. The guard keeps them out of the corpus the radar accumulates.
+            registry.register_locale_vocabulary(
+                terms=positive, stopwords=stopwords, noise=noise
+            )
+            logger.info(
+                f"Locale guard armed with {len(positive)} domain terms, "
+                f"{len(stopwords)} foreign stopwords and {len(noise)} noise terms."
+            )
+        except Exception as e:
+            logger.warning(f"Could not arm the ingress locale guard: {e}")
         try:
             identities = await SelfIdentityRegistry(repository).load()
             registry.register_self_identities(identities)

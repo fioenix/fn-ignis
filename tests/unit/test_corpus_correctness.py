@@ -209,3 +209,92 @@ def test_quota_safe_interval_matches_the_published_api_costs():
 
     # A narrower fan-out buys back cadence, which is the knob an operator actually has.
     assert quota_safe_interval_seconds(keywords_per_pass=1) < interval
+
+
+@pytest.mark.asyncio
+async def test_lexicon_seeds_do_not_crowd_out_the_topics_the_pass_discovered():
+    """With as many seeds as the budget allows, stage 1's findings must still get probed.
+
+    This is what a live pass actually did: ten lexicon seeds filled a ten-keyword budget, so the
+    ten topics Google Trends had just reported were collected and then never probed, and stage 2
+    was topic-coupled to the lexicon alone.
+    """
+    from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS
+
+    seeds = [f"seed {i}" for i in range(MAX_TOPIC_KEYWORDS)]
+    repo = _repository(seeds)
+    chart = PopularityChartPlugin(chart=[], by_keyword={})
+    registry = ConnectorPluginRegistry(repository=repo)
+    registry.register(DiscoveryFeedPlugin([f"discovered {i}" for i in range(MAX_TOPIC_KEYWORDS)]))
+    registry.register(chart)
+
+    await IngestTrendsUseCase(registry=registry, repository=repo).execute(geo=GeoCode.VN)
+
+    probed = chart.searched_keywords
+    assert len(probed) <= MAX_TOPIC_KEYWORDS
+    assert any(kw.startswith("discovered") for kw in probed), (
+        f"Only lexicon seeds were probed: {probed}"
+    )
+    assert any(kw.startswith("seed") for kw in probed), (
+        f"Only discovered topics were probed: {probed}"
+    )
+
+
+class ForeignLanguagePlugin(IConnectorPlugin):
+    """A keyword probe reaches the whole platform, not only the requested region."""
+
+    def __init__(self, titles: List[str]):
+        self._titles = titles
+
+    @property
+    def platform(self) -> PlatformType:
+        return PlatformType.YOUTUBE
+
+    @property
+    def name(self) -> str:
+        return "Foreign Language Feed"
+
+    @property
+    def feed_yields_candidate_topics(self) -> bool:
+        return False
+
+    async def is_healthy(self) -> bool:
+        return True
+
+    async def fetch_signals(self, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=50, scope=IngressScope.PUBLIC_MARKET):
+        return []
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        return [_signal(self.platform, t, f"https://f.example/{i}") for i, t in enumerate(self._titles)]
+
+
+@pytest.mark.asyncio
+async def test_a_vn_pass_does_not_store_titles_from_another_language():
+    """A live VN pass stored Ukrainian and Arabic video titles: `q=` is not a region filter.
+
+    The language detector already existed but was only wired into mission analysis, so nothing
+    checked the signals the always-on radar wrote to the corpus.
+    """
+    repo = _repository(["mau toc"])
+    registry = ConnectorPluginRegistry(repository=repo)
+    registry.register_locale_vocabulary(terms=["mau toc", "salon"])
+    registry.register(DiscoveryFeedPlugin(["mau toc"]))
+    registry.register(
+        ForeignLanguagePlugin(
+            [
+                "Nhuom mau toc tai nha khong can den salon",
+                "Чи впливала погода на колір волосся?",
+                "غيرو لون شعره واصبح لا يصدق",
+            ]
+        )
+    )
+
+    signals = await registry.fetch_from_all(
+        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, seed_keywords=["mau toc"]
+    )
+
+    titles = [s.raw_title for s in signals]
+    assert "Nhuom mau toc tai nha khong can den salon" in titles
+    assert not [t for t in titles if "погода" in t or "شعره" in t], (
+        f"Foreign-language titles reached the corpus: {titles}"
+    )

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from itertools import zip_longest
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 from ignis.application.ports.connector_port import IConnectorPlugin
+from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.self_content import SelfIdentity, partition_self_authored
 from ignis.domain.entities import TrendSignal
@@ -66,11 +68,36 @@ class ConnectorPluginRegistry:
         self._breakers: Dict[str, CircuitBreaker] = {}
         self._repository = repository
         self._self_identities: List[SelfIdentity] = []
+        self._detector: Optional[ILanguageDetector] = None
+        self._locale_terms: Set[str] = set()
+        self._locale_stopwords: Set[str] = set()
+        self._locale_noise: Set[str] = set()
         self.last_pass_report: Dict[str, Any] = {}
 
     def register_self_identities(self, identities: List[SelfIdentity]) -> None:
         """Bind the operator's own accounts so their content can be kept out of market passes."""
         self._self_identities = [i for i in identities if i.is_usable]
+
+    def register_locale_vocabulary(
+        self,
+        terms: Optional[List[str]] = None,
+        stopwords: Optional[List[str]] = None,
+        noise: Optional[List[str]] = None,
+    ) -> None:
+        """Arm the locale guard with the domain vocabulary persisted in `market_lexicons`.
+
+        Registering the vocabulary is what arms the guard, and that order is deliberate. The
+        detector rejects any title it cannot place in the region, so without the domain whitelist
+        it also rejects legitimate titles built out of English brand and product names, which are
+        ordinary in the VN tech and fashion markets. An unarmed registry does not filter at all.
+        """
+        self._locale_terms = {t.strip().lower() for t in (terms or []) if t and t.strip()}
+        self._locale_stopwords = {t.strip().lower() for t in (stopwords or []) if t and t.strip()}
+        self._locale_noise = {t.strip().lower() for t in (noise or []) if t and t.strip()}
+        if self._detector is None:
+            from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
+
+            self._detector = HeuristicLanguageDetector()
 
     def set_repository(self, repository: ITrendRepository) -> None:
         self._repository = repository
@@ -257,9 +284,11 @@ class ConnectorPluginRegistry:
                     "lexicon nor the discovery feeds produced one this pass."
                 )
 
-        self.last_pass_report = dict(getattr(self, "last_pass_report", {}) or {})
+        all_signals, off_locale = await self._apply_locale_guard(all_signals, geo)
+        kept = await self._apply_scope_guard(all_signals, scope, account_scoped_skipped)
         self.last_pass_report["untargeted_feed_skipped"] = no_probe_skipped
-        return await self._apply_scope_guard(all_signals, scope, account_scoped_skipped)
+        self.last_pass_report["off_locale_filtered"] = off_locale
+        return kept
 
     @staticmethod
     def _build_probe_keywords(
@@ -267,19 +296,25 @@ class ConnectorPluginRegistry:
         discovered_signals: List[TrendSignal],
         limit: Optional[int],
     ) -> List[str]:
-        """Merge lexicon seeds with the topics stage 1 just found, preserving order and capping.
+        """Merge lexicon seeds with the topics stage 1 just found, capped by the quota budget.
 
-        Seeds come first: they are the domains the operator declared an interest in, so they are
-        the keywords worth spending quota on when the budget cannot cover everything.
+        The two are interleaved rather than concatenated. Seeds are the domains the operator
+        declared an interest in and discovered topics are what the region is asking about today;
+        listing either one first lets it consume the whole budget and silently starve the other,
+        which is what happened when ten lexicon seeds met a ten-keyword budget.
         """
-        keywords: List[str] = []
-        for term in seeds:
-            if term and term not in keywords:
-                keywords.append(term)
+        discovered: List[str] = []
         for signal in discovered_signals:
             term = (signal.raw_title or "").strip()
-            if term and term not in keywords:
-                keywords.append(term)
+            if term and term not in discovered:
+                discovered.append(term)
+
+        keywords: List[str] = []
+        for seed, topic in zip_longest(seeds, discovered):
+            for term in (seed, topic):
+                if term and term not in keywords:
+                    keywords.append(term)
+
         if limit is not None and limit >= 0:
             return keywords[:limit]
         return keywords
@@ -386,6 +421,57 @@ class ConnectorPluginRegistry:
                     )
 
         return await self._apply_scope_guard(all_signals, scope, [])
+
+    async def _apply_locale_guard(
+        self,
+        signals: List[TrendSignal],
+        geo: GeoCode,
+    ) -> Tuple[List[TrendSignal], int]:
+        """Drop signals whose title does not belong to the region this pass is about.
+
+        A keyword probe queries the whole platform: `q=` is a search term, not a region filter,
+        so a VN pass legitimately comes back with titles in other languages. The always-on radar
+        wrote those straight to the corpus because the language detector was only ever wired into
+        mission analysis. GLOBAL passes want everything and are left alone.
+        """
+        if self._detector is None or not signals:
+            return signals, 0
+        if geo == GeoCode.GLOBAL:
+            return signals, 0
+
+        kept: List[TrendSignal] = []
+        dropped: List[TrendSignal] = []
+        for signal in signals:
+            localized = self._detector.is_localized(
+                signal.raw_title or "",
+                geo=geo,
+                extra_terms=self._locale_terms or None,
+                extra_stopwords=self._locale_stopwords or None,
+                extra_noise=self._locale_noise or None,
+            )
+            (kept if localized else dropped).append(signal)
+
+        if dropped:
+            platforms = sorted({
+                (s.platform.value if hasattr(s.platform, "value") else str(s.platform))
+                for s in dropped
+            })
+            logger.info(
+                f"Filtered {len(dropped)} signals that do not match the {geo.value} linguistic "
+                f"profile ({', '.join(platforms)})."
+            )
+            if self._repository:
+                await self._repository.log_event(
+                    component="ingress",
+                    event_type="OFF_LOCALE_FILTERED",
+                    message=(
+                        f"Dropped {len(dropped)} signals whose title does not belong to "
+                        f"{geo.value}; a keyword probe reaches the whole platform, not one region."
+                    ),
+                    level="INFO",
+                    details={"count": len(dropped), "platforms": platforms, "geo": geo.value},
+                )
+        return kept, len(dropped)
 
     async def _apply_scope_guard(
         self,
