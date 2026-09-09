@@ -114,6 +114,19 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   Character class vẫn nằm trong code vì ở đó ký tự chính là thuật toán.
   Còn `VI_CORE_WORDS` và `TECH_LOAN_WORDS` chưa chuyển, nhưng giờ **được ghi tên** trong
   `KNOWN_VOCABULARY_CONSTANTS` thay vì vô hình với gate.
+- [ ] **CHẶN VẬN HÀNH: key YouTube trong `.env` là key cũ đã bị revoke.** Google trả về
+  `400 badRequest · "API key expired. Please renew the API key."` Key mới đã tạo nhưng chưa vào
+  `.env`. Hệ quả: YouTube ingress chết hoàn toàn, và YouTube là 1 trong 2 connector duy nhất
+  worker chạy được, đồng thời chiếm 94% corpus 30 ngày. Đo ngày 09/09/2026.
+- [ ] **`is_healthy()` của hai connector TikTok là `return True` cứng.** `TikTokPlugin` và
+  `TikTokCreativeCenterPlugin` không kiểm gì cả, nên `verify_connectors_health` báo `HEALTHY`
+  cho chúng trong mọi hoàn cảnh, kể cả khi Playwright không chạy được hay session đã hết.
+  Google Trends, Threads, Reels, YouTube đều có probe thật. Bốn trên sáu là thật, hai là hằng số.
+- [ ] **Taxonomy không phủ được câu hỏi lắng nghe mở.** Một lượt Google Trends VN thật ngày
+  09/09 trả 10 signal, cluster ra 10 chủ đề, nhưng 9/10 là `unclassified`: "áp thấp nhiệt đới",
+  "hồ ngọc hà", "match day 2026", "đỗ xe". Taxonomy hình dung theo vertical thị trường, còn
+  Google Trends hằng ngày là tin tức và giải trí. Cần quyết: mở rộng taxonomy sang các nhóm
+  phi thị trường, hay chấp nhận `unclassified` là câu trả lời hợp lệ và hiển thị nó tử tế.
 - [ ] **Đợi quyết: `_is_private_or_notification` khớp theo substring thô.** `"live "` khớp trong
   `"olive oil review"`, nên một video thật bị loại như thông báo. Lỗi này có từ trước, không phải
   do lần chuyển từ vựng. Sửa bằng cách khớp theo biên từ là đổi hành vi, nên tao chưa làm.
