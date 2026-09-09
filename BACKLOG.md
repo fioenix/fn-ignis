@@ -32,11 +32,18 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   `HeuristicLanguageDetector` đã có sẵn nhưng chỉ được nối vào mission analysis.
 - [x] **Ngừng ghi API key vào log:** httpx log toàn bộ URL ở mức INFO và YouTube xác thực bằng
   key trong query string.
+- [x] **Cluster theo keyword đã probe, không chỉ theo cách diễn đạt tiêu đề:** mọi connector đều
+  đã ghi lại query trả về tín hiệu, nhưng dưới ba tên metadata khác nhau và không chỗ nào đọc.
+  Đo trên 400 tín hiệu mới nhất có provenance: **50,0% cluster đa platform (19/38)**, so với 8,0%
+  và 3,4% ban đầu. 18 cluster đạt mức SURGING.
 
 ### Còn lại
-- [ ] **Tỷ lệ cluster đa platform vẫn thấp:** 8,0% sau khi sửa, so với 3,4% trước đó. YouTube
-  vẫn trả 40/62 tín hiệu mỗi pass vì mỗi keyword cho khoảng 10 video, còn Google Trends chỉ cho
-  1 tín hiệu mỗi chủ đề. Cần cân bằng số lượng tín hiệu giữa các platform.
+- [ ] **Tín hiệu cũ trong DB vẫn lẫn ngoại ngữ:** locale guard chặn ở tầng ingress nên các row
+  ghi trước đó vẫn còn. Cần Fio xác nhận trước khi xoá.
+- [ ] **Token số lọt vào nhãn:** nhãn dạng fallback cho ra "vietinbank · 100 · chi"; cần loại
+  token toàn chữ số khỏi bảng xếp hạng nhãn.
+- [ ] **Chưa cluster nào đạt BREAKOUT (>= 80):** cần 4-5 platform cùng nói về một chủ đề, hiện
+  tối đa là 3.
 - [ ] **Discovery source chưa đúng mục đích sản phẩm:** feed trending VN của Google Trends là tin
   tức tổng hợp (bóng đá, thời sự), nên ghép chủ đề theo nó cho ra corpus tin tức chứ không phải
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
