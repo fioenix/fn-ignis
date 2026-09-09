@@ -6,8 +6,6 @@ from typing import List, Dict, Any, Tuple, Optional, Set
 
 from collections import defaultdict
 
-logger = logging.getLogger(__name__)
-
 from ignis.config import settings
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
 from ignis.domain.harness_models import (
@@ -23,6 +21,8 @@ from ignis.domain.harness_models import (
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.domain.value_objects import PlatformType, GeoCode
+
+logger = logging.getLogger(__name__)
 
 # Longest token still treated as an acronym that identifies a topic by itself (ai, seo, crm...)
 ACRONYM_MAX_LEN = 3

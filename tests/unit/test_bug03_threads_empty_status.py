@@ -2,7 +2,6 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
-from ignis.domain.value_objects import PlatformType
 from ignis.interfaces.mcp.server import (
     handle_get_threads_trending_topics,
     handle_get_threads_search_suggestions,

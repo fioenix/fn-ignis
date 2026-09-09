@@ -1,6 +1,4 @@
-import pytest
 from uuid import uuid4
-from datetime import datetime, timezone
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
 from ignis.domain.value_objects import PlatformType, GeoCode
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner

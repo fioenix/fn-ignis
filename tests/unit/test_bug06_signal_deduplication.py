@@ -4,12 +4,12 @@ from uuid import uuid4
 from ignis.domain.entities import TrendSignal, TopicCluster
 from ignis.domain.value_objects import PlatformType, GeoCode
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
-from ignis.interfaces.mcp.server import handle_get_topic_detail
 
 
 async def _query(repo, sql: str):
     """Small read helper so these tests can assert on stored rows directly."""
-    import asyncio, sqlite3
+    import asyncio
+    import sqlite3
 
     def _run():
         conn = sqlite3.connect(repo._db_path)

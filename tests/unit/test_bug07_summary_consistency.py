@@ -1,12 +1,10 @@
 import pytest
-import json
 import re
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 from ignis.domain.entities import TrendSignal, TopicCluster
-from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
+from ignis.domain.value_objects import PlatformType, Timeframe
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
-from ignis.interfaces.mcp.server import handle_get_trending_topics, get_components
 
 
 @pytest.mark.asyncio

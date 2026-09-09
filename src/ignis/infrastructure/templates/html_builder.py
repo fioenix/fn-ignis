@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ignis.application.ports.artifact_port import IArtifactBuilder
