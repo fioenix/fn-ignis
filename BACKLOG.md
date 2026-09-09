@@ -1,9 +1,52 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> **Cập nhật lần cuối:** 03/09/2026  
+> **Cập nhật lần cuối:** 09/09/2026  
 > **Phiên bản:** `v0.3.5`  
-> **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite) + FastMCP Server (34 Handlers & Tools)  
-> **Trạng thái Tests:** 147/147 unit & integration tests PASSED (100%) | Ruff Linter Clean
+> **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite) + FastMCP Server (39 Handlers & Tools)  
+> **Trạng thái Tests:** 350/350 unit tests PASSED (100%) | Ruff Linter Clean
+
+---
+
+## 0. Chất Lượng Corpus (Epic Đang Mở)
+
+Đo trực tiếp trên Postgres ngày 09/09/2026. Chi tiết trong `.handoff/2026-09-09-corpus-audit.handoff.md`.
+
+Điểm cross-platform momentum dành 40/100 điểm cho số platform cùng nói về một chủ đề, nhưng
+**96,6% cluster (995/1030) chỉ có tín hiệu từ một platform**, nên phần 40 điểm đó gần như không
+bao giờ được kích hoạt. Nguyên nhân không nằm ở thuật toán clustering: mỗi connector kéo feed riêng
+nên các platform không bao giờ nói về cùng chủ đề. Chỉ 2 trong 156 keyword Google Trends có
+video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus.
+
+### Đã xử lý
+- [x] **Ingress ghép theo chủ đề:** connector tự khai báo feed của nó có sinh ra chủ đề hay chỉ
+  xếp hạng độ phổ biến. `fetch_from_all` chạy hai tầng: kéo các discovery surface, rồi probe
+  phần còn lại bằng chính những chủ đề đó cộng seed từ `market_lexicons`.
+- [x] **Bỏ `chart=mostPopular` khỏi pass công khai:** feed này chiếm 94,8% corpus và toàn bộ là
+  nội dung giải trí quốc gia mà không platform nào khác chứng thực được.
+- [x] **Quota budget cho YouTube:** `search.list` tốn 100 unit trên hạn mức 10.000/ngày, nên
+  fan-out bị chặn ở 10 keyword và cadence mặc định chuyển sang 8640s. Scheduler cảnh báo nếu
+  interval đang dùng sẽ đốt hết quota trước khi hết ngày.
+- [x] **`topic_clusters.topic_label`:** cluster được đặt tên theo chủ đề thay vì nguyên văn một
+  post. `canonical_name` giữ vai trò identity key nên 1.030 cluster hiện có không bị đổi ID.
+- [x] **Locale guard ở tầng ingress:** một pass VN từng lưu tiêu đề tiếng Ukraina và tiếng Ả Rập.
+  `HeuristicLanguageDetector` đã có sẵn nhưng chỉ được nối vào mission analysis.
+- [x] **Ngừng ghi API key vào log:** httpx log toàn bộ URL ở mức INFO và YouTube xác thực bằng
+  key trong query string.
+
+### Còn lại
+- [ ] **Tỷ lệ cluster đa platform vẫn thấp:** 8,0% sau khi sửa, so với 3,4% trước đó. YouTube
+  vẫn trả 40/62 tín hiệu mỗi pass vì mỗi keyword cho khoảng 10 video, còn Google Trends chỉ cho
+  1 tín hiệu mỗi chủ đề. Cần cân bằng số lượng tín hiệu giữa các platform.
+- [ ] **Discovery source chưa đúng mục đích sản phẩm:** feed trending VN của Google Trends là tin
+  tức tổng hợp (bóng đá, thời sự), nên ghép chủ đề theo nó cho ra corpus tin tức chứ không phải
+  corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
+- [ ] **Chất lượng nhãn trên corpus thật:** nhiều nhãn rút về dạng mảnh có dấu ba chấm
+  ("… em theo …"). Thuật toán đúng nhưng đầu vào là câu nói thường ngày, không phải cụm chủ đề.
+- [ ] **Phân loại category:** phần lớn cluster vẫn là `unclassified`; taxonomy không khớp.
+- [ ] **Locale guard lọc 65%:** đúng chức năng nhưng cần đánh giá lại xem có loại bỏ nội dung
+  tiếng Anh hợp lệ của thị trường VN hay không.
+- [ ] **`AMBIGUOUS_UNIGRAMS`** vẫn hardcode trong `semantic_clusterer.py`, đang được theo dõi
+  như nợ kỹ thuật trong `test_repo_conventions.py`.
 
 
 ---
