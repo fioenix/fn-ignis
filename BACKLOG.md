@@ -46,6 +46,11 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [x] **Token số không còn headline nhãn:** nhánh fallback từng cho ra "vietinbank · 100 · chi".
   Chữ số vẫn nằm trong token để clustering phân biệt "iPhone 17" với "iPhone 16", chỉ bị cấm làm
   từ đứng đầu nhãn. Số nằm giữa một cụm mà cluster thật sự chia sẻ thì vẫn giữ ("Top 10 salon").
+- [ ] **Classifier nổ chỉ với một keyword hit trong cả cluster.** Cluster giờ nhóm theo probe
+  keyword nên chứa tiêu đề khá dị biệt nhau, một signal thiểu số có thể quyết category cho cả
+  cluster. Nên cân theo tỷ lệ hoặc yêu cầu tối thiểu 2 hit.
+- [ ] **`son` và `kem` trong taxonomy `beauty` cũng mơ hồ khi mất dấu** (sơn/son, kem/kém). Đây
+  là nợ có sẵn từ seed gốc, chưa sửa để không đổi hành vi ngoài phạm vi.
 - [ ] **Taxonomy chưa phủ các vertical ngoài thị trường:** tin tức, thể thao, người nổi tiếng,
   sức khoẻ/wellness vẫn rơi vào `unclassified`. Đây là **câu hỏi phạm vi sản phẩm**, không phải
   bug: một harness về cơ hội thị trường có nên theo dõi bóng đá không? Chờ Fio quyết.
@@ -59,10 +64,14 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [x] **Phân loại category:** matcher **không sai** — với taxonomy đã seed, nó phân loại đúng
   6/6 vertical thị trường và đúng khi trả `unclassified` cho bóng đá hay giá vàng. Vấn đề là
   vocabulary: 6 vertical chỉ có 44 keyword cho cả nền kinh tế, nên "chatgpt va gpt-6" và
-  "meo phat am tieng anh" đều rớt dù nằm trong vertical đang theo dõi. Đã mở lên **142 keyword**
+  "meo phat am tieng anh" đều rớt dù nằm trong vertical đang theo dõi. Đã mở lên **128 keyword**
   trong `sql/003` và `sql/010`, kèm test chặn hai file lệch nhau.
-  Đo lại trên 1.087 cluster: cluster thuộc vertical thật đi từ **68 lên 466**, `unclassified`
-  (gộp cả `general` cũ) từ 1.018 xuống 616. **Chưa ghi vào DB** — cần Fio cho phép update 779 row.
+  Đo lại trên 1.087 cluster: cluster thuộc vertical thật đi từ **68 lên 348**, `unclassified`
+  (gộp cả `general` cũ) từ 1.018 xuống 739. Đã ghi vào Postgres.
+- [x] **Không dùng token tiếng Việt ngắn làm keyword taxonomy:** `_fold_accents` xoá dấu nên
+  "vang" phủ cả nghĩa vàng và nghĩa âm vang, "toc" phủ cả tóc và tốc. Lần mở rộng đầu tiên thêm
+  đúng loại token đó và gây false positive thật: playlist bolero vào `finance`, bảng đấu esports
+  vào `beauty`. Đã bỏ, chỉ giữ cụm ghép và từ vay mượn không mơ hồ. Có test chặn.
 - [x] **Bug lộ ra khi đo lại:** 3 cluster từng bị gán category là số view (`27.6k`, `6.4k`, `28k`).
   Parser Creative Center đọc bảng theo vị trí nên hàng thiếu cột category lấy luôn số posts/views.
   Đã vá ở gốc, và thêm một tầng phòng vệ ở `_classify_category` vì plugin bên thứ ba cũng dùng

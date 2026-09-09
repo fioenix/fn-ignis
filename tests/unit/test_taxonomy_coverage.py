@@ -143,3 +143,38 @@ def test_a_connector_cannot_impose_a_meaningless_category(source_category):
     signal.metadata = {"category": source_category}
 
     assert _clusterer()._classify_category([signal]) == "education"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        # Every one of these was misclassified by a single accent-folded keyword.
+        "Ca nhac tru tinh bolero khong quang cao vang bong mot thoi",   # vang != vàng (gold)
+        "RRQ vs SGP giai dau toc do cao nhat mua nay",                  # toc != tóc (hair)
+        "24h leo rank thach dau truc tiep tren kenh",                   # livestream is a format
+        "Bo do hot o Dak Lak luc nay dam dong keo den",                 # dam != đầm (dress)
+    ],
+)
+def test_an_accent_folded_short_word_does_not_classify_a_topic(title):
+    """`_fold_accents` erases the distinction between different Vietnamese words.
+
+    Taxonomy terms are stored unaccented and both sides are folded before matching, so the
+    folded form "vang" covers both the word for gold and the unrelated word for resonant, and
+    "toc" covers both hair and speed. A bare short Vietnamese token therefore cannot carry a
+    vertical: it filed a bolero playlist under finance and an esports bracket under beauty.
+    Compounds are safe, because "gia vang" and "nhuom toc" have no unaccented twin.
+    """
+    assert _clusterer()._classify_category([_signal(title)]) == "unclassified"
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("gia vang hom nay tang manh", "finance"),
+        ("nhuom toc tai nha khong can salon", "beauty"),
+        ("phoi do di lam mua thu", "fashion"),
+    ],
+)
+def test_compound_terms_still_classify(title, expected):
+    """Removing the ambiguous single tokens must not cost the coverage they were added for."""
+    assert _clusterer()._classify_category([_signal(title)]) == expected
