@@ -2,6 +2,7 @@ import math
 import re
 import unicodedata
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -16,6 +17,17 @@ class SemanticClusterer(IClusteringEngine):
     Uses Szymkiewicz-Simpson Overlap & Jaccard index for short text title matching.
     Sub-50ms deterministic execution without external LLM dependency.
     """
+
+    @dataclass(frozen=True)
+    class _Taxonomy:
+        """One vertical's terms with their compiled matchers, accented and folded."""
+
+        # Terms written with tones, matched against the title as written.
+        accented: Dict[str, "re.Pattern[str]"]
+        # Terms stored without tones, which can only ever be matched on folded text.
+        plain: Dict[str, "re.Pattern[str]"]
+        # Every term folded, used only when the title itself carries no tones.
+        folded: Dict[str, "re.Pattern[str]"]
 
     AMBIGUOUS_UNIGRAMS: Set[str] = {
         "người", "đại", "việt", "nam", "mới", "hay", "làm", "nhất", "cực",
@@ -40,14 +52,41 @@ class SemanticClusterer(IClusteringEngine):
                 self._custom_stopwords.add(clean)
 
     def register_taxonomies(self, taxonomies: List[dict]) -> None:
-        """Load industry taxonomies (industry_code + keywords) from the database for classification."""
-        loaded: List[Tuple[str, Set[str]]] = []
+        """Load industry taxonomies from the database and compile their matchers.
+
+        A term written with Vietnamese tones is compared to the title as written, which is
+        exact. A term stored without tones can only be compared on folded text, so third-party
+        lexicons seeded that way keep working while accepting the ambiguity that choice carries.
+        Every pattern anchors on word boundaries: raw substring matching is what let "o to" fire
+        inside "cho toi".
+        """
+        loaded: List[Tuple[str, "SemanticClusterer._Taxonomy"]] = []
         for item in taxonomies or []:
             code = str(item.get("industry_code") or "").strip().lower()
-            keywords = {str(k).strip().lower() for k in (item.get("keywords") or []) if str(k).strip()}
-            if code and keywords:
-                loaded.append((code, keywords))
+            terms = [str(k).strip().lower() for k in (item.get("keywords") or []) if str(k).strip()]
+            if not code or not terms:
+                continue
+            loaded.append((code, self._Taxonomy(
+                accented={
+                    t: re.compile(rf"\b{re.escape(t)}\b")
+                    for t in terms if self._has_diacritics(t)
+                },
+                plain={
+                    t: re.compile(rf"\b{re.escape(t)}\b")
+                    for t in terms if not self._has_diacritics(t)
+                },
+                folded={
+                    t: re.compile(rf"\b{re.escape(self._fold_accents(t))}\b") for t in terms
+                },
+            )))
         self._taxonomies = loaded
+
+    @staticmethod
+    def _has_diacritics(text: str) -> bool:
+        """Whether the text carries Vietnamese tone marks, which decides how it is matched."""
+        if "đ" in text or "Đ" in text:
+            return True
+        return any(unicodedata.combining(ch) for ch in unicodedata.normalize("NFD", text))
 
     @staticmethod
     def _fold_accents(text: str) -> str:
@@ -92,42 +131,46 @@ class SemanticClusterer(IClusteringEngine):
             return max(set(source_categories), key=source_categories.count)
 
         if self._taxonomies:
-            # Taxonomy keywords are stored without diacritics, so fold both sides before matching.
-            # Folded per signal rather than pooled: a cluster groups by probe keyword and holds
-            # titles about different things, so how many signals carry the evidence matters as
-            # much as which keywords matched.
-            per_signal = [
-                (
-                    {self._fold_accents(t) for t in self._tokenize(s.raw_title)},
-                    self._fold_accents(self._clean_title(s.raw_title).lower()),
-                )
-                for s in group
-            ]
+            # Matched per signal, and with diacritics. Vietnamese tones carry the word: folding
+            # them away makes "vang" (gold) and "vang" (resonant) the same string, which is how a
+            # bolero playlist reached finance. A title the author wrote without tones is matched
+            # on folded forms instead, so the ambiguity is the input's rather than ours.
+            per_signal = []
+            for signal in group:
+                text = self._clean_title(signal.raw_title or "").lower()
+                per_signal.append((text, self._fold_accents(text), self._has_diacritics(text)))
+
             best_code, best_hits = "", 0
-            for code, keywords in self._taxonomies:
+            for code, taxonomy in self._taxonomies:
                 matched: List[str] = []
                 signals_hit = 0
-                for tokens, haystack in per_signal:
-                    hits_here = [
-                        kw for kw in keywords
-                        if (kw in tokens) or (" " in kw and kw in haystack)
-                    ]
+                for text, folded, accented in per_signal:
+                    if accented:
+                        # The title carries tones, so compare tones to tones: exact, and the
+                        # whole point. Terms stored without tones have nothing to compare
+                        # against but the folded text.
+                        hits_here = [
+                            t for t, pattern in taxonomy.accented.items() if pattern.search(text)
+                        ] + [
+                            t for t, pattern in taxonomy.plain.items() if pattern.search(folded)
+                        ]
+                    else:
+                        # The author wrote without tones. Folding is then the only option, and
+                        # the ambiguity belongs to the input rather than to this matcher.
+                        hits_here = [
+                            t for t, pattern in taxonomy.folded.items() if pattern.search(folded)
+                        ]
                     if hits_here:
                         signals_hit += 1
-                        matched.extend(kw for kw in hits_here if kw not in matched)
-                # One keyword is enough only when it cannot have collided by accident. A compound
-                # qualifies: no ordinary phrase folds onto "gia vang" or "local brand". A single
-                # token does not -- measured on the live corpus, 179 of 342 classified clusters
-                # rested on one bare token and sampling showed it was usually a collision, with
-                # "ai" alone filing a 278-signal K-pop cluster under tech because "ai" is
-                # Vietnamese for who/anyone as well as the English acronym.
+                        matched.extend(t for t in hits_here if t not in matched)
+
                 if not matched:
                     continue
-                if len(matched) < self.MIN_CATEGORY_KEYWORD_HITS and not any(" " in kw for kw in matched):
+                # One term is enough only when it cannot have collided by accident. A compound
+                # qualifies; a bare token needs a second hit.
+                if len(matched) < self.MIN_CATEGORY_KEYWORD_HITS and not any(" " in t for t in matched):
                     continue
-                # One signal out of fifteen is not what a cluster is about. Below this share the
-                # evidence is a stray member, and on the live corpus every misclassification left
-                # after the corroboration rule was of exactly that shape.
+                # One signal out of fifteen is not what a cluster is about.
                 if signals_hit < max(1, math.ceil(len(group) * self.MIN_CATEGORY_SIGNAL_SHARE)):
                     continue
                 if len(matched) > best_hits:

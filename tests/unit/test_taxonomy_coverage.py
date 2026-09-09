@@ -74,15 +74,36 @@ def test_titles_inside_a_tracked_vertical_are_classified(title, expected):
 
 
 @pytest.mark.parametrize(
-    "title",
+    "title,expected",
     [
-        "truc tiep bong da viet nam thai lan",
-        "miss world 2026",
-        "bo cong an thong bao",
+        # Understanding a market means understanding the domains around it, so the taxonomy
+        # covers general information verticals too, not only the commercial ones.
+        ("truc tiep bong da viet nam thai lan", "sports"),
+        ("lich thi dau vong bang cup chau a", "sports"),
+        ("thoi su toi nay tin nong trong ngay", "news"),
+        ("phim moi ra mat rap thang nay", "entertainment"),
+        ("suc khoe tinh than va giac ngu", "health"),
+        ("quan an ngon sai gon dang thu", "food"),
+        ("du lich da nang tu tuc 3 ngay", "travel"),
+        ("gia bat dong san phia nam", "realestate"),
+        ("danh gia xe may dien moi", "auto"),
+        # Both were unclassified while the scope was narrow; now they have a proper home.
+        ("Google Search Trends tem nhan dan do an", "food"),
     ],
 )
-def test_content_outside_every_tracked_vertical_stays_unclassified(title):
-    """`unclassified` is information: the topic is not in a market vertical this harness covers."""
+def test_general_information_verticals_are_tracked_too(title, expected):
+    assert _clusterer()._classify_category([_signal(title)]) == expected
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "khong co gi dac biet o day ca",
+        "abcdef ghijkl mnopqr stuvwx",
+    ],
+)
+def test_a_topic_matching_nothing_still_reads_unclassified(title):
+    """`unclassified` stays meaningful: it says no vertical claimed the cluster."""
     assert _clusterer()._classify_category([_signal(title)]) == "unclassified"
 
 
@@ -150,7 +171,7 @@ def test_a_connector_cannot_impose_a_meaningless_category(source_category):
     [
         # Every one of these was misclassified by a single accent-folded keyword.
         "Ca nhac tru tinh bolero khong quang cao vang bong mot thoi",   # vang != vàng (gold)
-        "RRQ vs SGP giai dau toc do cao nhat mua nay",                  # toc != tóc (hair)
+        "may bay khong nguoi lai toc do cao nhat hien nay",             # toc: hair vs speed
         "24h leo rank thach dau truc tiep tren kenh",                   # livestream is a format
         "Bo do hot o Dak Lak luc nay dam dong keo den",                 # dam != đầm (dress)
     ],
@@ -188,7 +209,6 @@ def test_compound_terms_still_classify(title, expected):
         ("co ai o gan day cho minh xin mot vi khach", "ai"),
         ("Zoey Vs Mira Vs Rumi o tap nay", "hoc"),
         ("alcaraz is just a magician blows the set", "fashion"),
-        ("Google Search Trends tem nhan dan do an", "kem"),
         ("tai sao can nha cha me toi de lai rat nho", "son"),
     ],
 )
@@ -239,7 +259,7 @@ def test_one_hit_in_a_large_mixed_cluster_does_not_decide_its_category():
     """
     clusterer = _clusterer()
     beauty_signal = "nhuom toc tai nha khong can salon"
-    filler = [f"chuyen khong lien quan gi so {i}" for i in range(14)]
+    filler = [f"khong co gi dac biet o day so {i}" for i in range(14)]
 
     assert clusterer._classify_category(_cluster(beauty_signal, *filler)) == "unclassified"
 
@@ -253,7 +273,7 @@ def test_one_hit_still_decides_a_small_cluster():
     assert clusterer._classify_category(_cluster(beauty_signal, "chuyen khac han")) == "beauty"
     assert (
         clusterer._classify_category(
-            _cluster(beauty_signal, *[f"chuyen khac han so {i}" for i in range(4)])
+            _cluster(beauty_signal, *[f"khong co gi dac biet so {i}" for i in range(4)])
         )
         == "beauty"
     )
@@ -263,6 +283,75 @@ def test_many_hits_carry_a_large_cluster():
     """Real coverage of a big cluster is exactly what the share rule is meant to let through."""
     clusterer = _clusterer()
     hits = ["nhuom toc mau khoi", "nhuom toc tai nha", "nhuom toc gia bao nhieu"]
-    filler = [f"chuyen khong lien quan so {i}" for i in range(9)]
+    filler = [f"khong co gi dac biet so {i}" for i in range(9)]
 
     assert clusterer._classify_category(_cluster(*hits, *filler)) == "beauty"
+
+
+@pytest.mark.parametrize(
+    "title,colliding_keyword",
+    [
+        ("restream thu thach chinh phuc bo quiz the last of us", "chinh phu"),
+        ("anh cho toi hoi cai nay la gi", "o to"),
+        ("giai doan nay minh hoi met", "giai dau"),
+    ],
+)
+def test_a_compound_keyword_matches_whole_words_only(title, colliding_keyword):
+    """Multi-word keywords were matched as raw substrings, with no word boundary.
+
+    That is the anti-pattern already recorded on 03/09, when "Abundance" was rejected for
+    containing "dance". It stayed invisible while six verticals held 44 keywords and became
+    severe at 250: "chinh phu" fired 279 times by sitting inside "chinh phuc", "o to" 97 times
+    inside words like "cho toi", and "ca si" 117 times inside unrelated syllable runs. A Roblox
+    cluster ended up filed under automotive.
+    """
+    assert _clusterer()._classify_category([_signal(title)]) == "unclassified", colliding_keyword
+
+
+def test_a_compound_keyword_still_matches_when_it_is_really_there():
+    clusterer = _clusterer()
+    assert clusterer._classify_category([_signal("chinh phu ban hanh nghi dinh moi")]) == "news"
+    assert clusterer._classify_category([_signal("gia o to nhap khau thang nay")]) == "auto"
+    assert clusterer._classify_category([_signal("giai dau bong da sinh vien")]) == "sports"
+
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        # Pairs that differ only by tone. Folding made each pair one string.
+        ("Giá vàng hôm nay tăng mạnh", "finance"),
+        ("Ca nhạc trữ tình bolero vang bóng một thời", "unclassified"),
+        ("Nhuộm tóc tại nhà không cần salon", "beauty"),
+        ("Máy bay không người lái tốc độ cao nhất", "unclassified"),
+        ("Chính phủ ban hành nghị định mới", "news"),
+        ("Thử thách chinh phục bộ quiz the last of us", "unclassified"),
+        ("Giá ô tô nhập khẩu tháng này", "auto"),
+        ("Anh cho tôi hỏi cái này là gì", "unclassified"),
+        ("Giải đấu bóng đá sinh viên", "sports"),
+        ("Giai đoạn này mình hơi mệt", "unclassified"),
+    ],
+)
+def test_an_accented_title_is_judged_with_its_accents(title, expected):
+    """Vietnamese tones carry the word, so they are compared rather than discarded.
+
+    Folding first and guessing afterwards produced a run of wrong categories, each patched
+    separately -- ambiguous terms removed, a corroboration rule, a signal-share rule, word
+    boundaries -- before the cause was accepted: stripping tones destroys the word. "vang" is
+    both gold and resonant, "toc" both hair and speed, "chinh phu" both the government and a
+    prefix of "chinh phuc". Comparing tones to tones is exact and needs no guessing.
+    """
+    assert _clusterer()._classify_category([_signal(title)]) == expected
+
+
+def test_a_title_written_without_tones_is_still_matched():
+    """Vietnamese is often typed without tones; folding is then the only option available."""
+    clusterer = _clusterer()
+    assert clusterer._classify_category([_signal("gia vang hom nay tang manh")]) == "finance"
+    assert clusterer._classify_category([_signal("khoa hoc ai cho nguoi moi bat dau")]) == "education"
+
+
+def test_a_term_seeded_without_tones_still_matches_an_accented_title():
+    """Third-party lexicons seed unaccented terms, and that must keep working."""
+    clusterer = SemanticClusterer()
+    clusterer.register_taxonomies([{"industry_code": "education", "keywords": ["khoa hoc", "dao tao"]}])
+    assert clusterer._classify_category([_signal("Khóa học đào tạo marketing 2026")]) == "education"
