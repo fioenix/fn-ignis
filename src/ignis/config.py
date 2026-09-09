@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     )
 
     # Scheduler Configuration
-    SCHEDULER_INTERVAL_SECONDS: int = Field(default=900, description="Daemon scheduler tick interval in seconds")
+    SCHEDULER_INTERVAL_SECONDS: int = Field(default=8640, description="Daemon scheduler tick interval in seconds; the default keeps one day of topic-coupled keyword probes inside YouTube's default quota")
     DISCOVERY_INTERVAL_HOURS: int = Field(default=24, description="Interval in hours between autonomous discovery runs")
     SYNC_INTERVAL_MINUTES: int = Field(default=0, description="Optional override for ingress sync interval in minutes; 0 = fallback to SCHEDULER_INTERVAL_SECONDS")
 

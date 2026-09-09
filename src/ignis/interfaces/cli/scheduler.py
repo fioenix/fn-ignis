@@ -6,7 +6,10 @@ from typing import Dict, List, Optional, Tuple
 
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
-from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
+from ignis.application.use_cases.ingest_trends import (
+    IngestTrendsUseCase,
+    quota_safe_interval_seconds,
+)
 from ignis.config import settings
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope
 from ignis.infrastructure.auth.meta_browser_auth import (
@@ -192,6 +195,15 @@ class IngressScheduler:
     async def start(self):
         self._running = True
         logger.info(f"Starting fn-ignis Worker Scheduler (Ingress: {self.interval_seconds}s, Discovery: {self.discovery_interval_seconds}s, Health: {self.health_check_interval_seconds}s)...")
+
+        quota_safe = quota_safe_interval_seconds()
+        if self.interval_seconds < quota_safe:
+            logger.warning(
+                f"Ingress interval {self.interval_seconds}s spends the daily YouTube search "
+                f"quota before the day ends; probes will start failing. Set "
+                f"SCHEDULER_INTERVAL_SECONDS to {quota_safe} or more, or raise the project's "
+                f"quota allowance."
+            )
 
         # 1. Dependency Injection Setup
         repository = create_repository()

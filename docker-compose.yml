@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     environment:
-      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-900}
+      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-8640}
       DEFAULT_GEO: ${DEFAULT_GEO:-VN}
     command: ["python", "-m", "ignis.interfaces.cli.scheduler"]
     volumes:

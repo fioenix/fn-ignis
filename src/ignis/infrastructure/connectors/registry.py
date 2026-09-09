@@ -140,19 +140,31 @@ class ConnectorPluginRegistry:
         timeframe: Timeframe = Timeframe.LAST_24H,
         scope: IngressScope = IngressScope.PUBLIC_MARKET,
         seed_keywords: Optional[List[str]] = None,
+        max_probe_keywords: Optional[int] = None,
     ) -> List[TrendSignal]:
-        """Run one ingress pass across every healthy connector.
+        """Run one ingress pass across every healthy connector, in two stages.
+
+        Stage 1 pulls the feeds that discover topics: what a region is searching for, which
+        hashtags are climbing. Stage 2 takes those topics, adds `seed_keywords` from the market
+        lexicon, and probes the remaining connectors by keyword. Staging them this way is what
+        lets a cluster span several platforms: every connector in stage 2 is asked about a
+        subject some other surface already showed interest in, instead of reporting its own
+        national popularity chart. `max_probe_keywords` caps the fan-out, because a keyword probe
+        costs far more API quota than an untargeted feed pull.
 
         `scope` decides which surfaces may be read. Under PUBLIC_MARKET a connector that declares
-        an account-scoped feed is not asked for its feed at all: its keyword probe is used with
-        `seed_keywords` when it has one, and otherwise it contributes nothing and says so. Whatever
+        an account-scoped feed is not asked for its feed at all; it joins stage 2 instead. Whatever
         the route, the pass ends by dropping content authored by the operator's own accounts, so a
         connector regressing to an account endpoint cannot quietly poison demand analysis.
         """
-        tasks = []
-        enabled_plugins = []
-        account_scoped_skipped: List[str] = []
         seeds = [k.strip() for k in (seed_keywords or []) if k and k.strip()]
+        discovery_plugins: List[IConnectorPlugin] = []
+        probe_plugins: List[IConnectorPlugin] = []
+        # Why each probe-routed plugin lost its untargeted pull, so a stage 2 that ends up with no
+        # keywords can still report the accurate reason rather than a generic one.
+        probe_is_account_only: Dict[str, bool] = {}
+        account_scoped_skipped: List[str] = []
+        no_probe_skipped: List[str] = []
 
         for plugin_id, plugin in self._plugins.items():
             breaker = self._breakers[plugin_id]
@@ -169,60 +181,140 @@ class ConnectorPluginRegistry:
 
             feed_scope = getattr(plugin, "default_feed_scope", IngressScope.PUBLIC_MARKET)
             account_only_feed = feed_scope == IngressScope.OWN_PROFILE
-            if account_only_feed and not scope.includes_own:
-                if plugin.supports_search and seeds:
-                    enabled_plugins.append(plugin)
-                    tasks.append(self._safe_search(plugin, breaker, seeds, geo, timeframe))
+            discovers_topics = getattr(plugin, "feed_yields_candidate_topics", True)
+
+            # Two separate reasons to refuse an untargeted pull, both routed to the keyword probe:
+            # the feed belongs to the operator's own account, or it is a popularity chart whose
+            # contents have nothing to do with the topics this pass is about.
+            if scope.includes_public and (account_only_feed or not discovers_topics):
+                if plugin.supports_search:
+                    probe_plugins.append(plugin)
+                    probe_is_account_only[plugin.name] = account_only_feed
                     continue
-                account_scoped_skipped.append(plugin.name)
-                logger.info(
-                    f"Skipping [{plugin.name}]: its feed is account-owned and this is a "
-                    f"{scope.value} pass"
-                    + (" with no seed keywords to probe with." if plugin.supports_search else ".")
-                )
+                if account_only_feed:
+                    account_scoped_skipped.append(plugin.name)
+                    reason = (
+                        f"{plugin.name} was skipped: its feed returns content owned by the "
+                        f"authenticated account, which a {scope.value} pass must not ingest."
+                    )
+                    event = "ACCOUNT_SCOPED_FEED_SKIPPED"
+                else:
+                    no_probe_skipped.append(plugin.name)
+                    reason = (
+                        f"{plugin.name} was skipped: its untargeted feed is a popularity chart "
+                        f"rather than a topic surface, and it has no keyword probe to use instead."
+                    )
+                    event = "UNTARGETED_FEED_SKIPPED"
+                logger.info(reason)
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
-                        event_type="ACCOUNT_SCOPED_FEED_SKIPPED",
-                        message=(
-                            f"{plugin.name} was skipped: its feed returns content owned by the "
-                            f"authenticated account, which a {scope.value} pass must not ingest."
-                        ),
+                        event_type=event,
+                        message=reason,
                         level="INFO",
                         details={"platform": plugin.platform.value, "scope": scope.value},
                     )
                 continue
 
-            enabled_plugins.append(plugin)
-            tasks.append(self._safe_fetch(plugin, breaker, geo, timeframe, scope))
+            if account_only_feed and not scope.includes_public:
+                # An own-profile pass wants exactly this feed.
+                discovery_plugins.append(plugin)
+                continue
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+            discovery_plugins.append(plugin)
+
         all_signals: List[TrendSignal] = []
 
-        for plugin, result in zip(enabled_plugins, results):
+        discovered = await asyncio.gather(
+            *[
+                self._safe_fetch(plugin, self._breakers[plugin.plugin_id], geo, timeframe, scope)
+                for plugin in discovery_plugins
+            ],
+            return_exceptions=True,
+        )
+        stage_one = await self._collect_pass_results(discovery_plugins, discovered, "INGRESS")
+        all_signals.extend(stage_one)
+
+        if probe_plugins:
+            keywords = self._build_probe_keywords(seeds, stage_one, max_probe_keywords)
+            if keywords:
+                probed = await asyncio.gather(
+                    *[
+                        self._safe_search(plugin, self._breakers[plugin.plugin_id], keywords, geo, timeframe)
+                        for plugin in probe_plugins
+                    ],
+                    return_exceptions=True,
+                )
+                all_signals.extend(await self._collect_pass_results(probe_plugins, probed, "INGRESS"))
+            else:
+                for plugin in probe_plugins:
+                    if probe_is_account_only.get(plugin.name):
+                        account_scoped_skipped.append(plugin.name)
+                    else:
+                        no_probe_skipped.append(plugin.name)
+                logger.info(
+                    "No topic keywords available for the keyword probes: neither the market "
+                    "lexicon nor the discovery feeds produced one this pass."
+                )
+
+        self.last_pass_report = dict(getattr(self, "last_pass_report", {}) or {})
+        self.last_pass_report["untargeted_feed_skipped"] = no_probe_skipped
+        return await self._apply_scope_guard(all_signals, scope, account_scoped_skipped)
+
+    @staticmethod
+    def _build_probe_keywords(
+        seeds: List[str],
+        discovered_signals: List[TrendSignal],
+        limit: Optional[int],
+    ) -> List[str]:
+        """Merge lexicon seeds with the topics stage 1 just found, preserving order and capping.
+
+        Seeds come first: they are the domains the operator declared an interest in, so they are
+        the keywords worth spending quota on when the budget cannot cover everything.
+        """
+        keywords: List[str] = []
+        for term in seeds:
+            if term and term not in keywords:
+                keywords.append(term)
+        for signal in discovered_signals:
+            term = (signal.raw_title or "").strip()
+            if term and term not in keywords:
+                keywords.append(term)
+        if limit is not None and limit >= 0:
+            return keywords[:limit]
+        return keywords
+
+    async def _collect_pass_results(
+        self,
+        plugins: List[IConnectorPlugin],
+        results: List[Any],
+        event_prefix: str,
+    ) -> List[TrendSignal]:
+        """Fold one gather's results into signals, isolating and logging each plugin's failure."""
+        signals: List[TrendSignal] = []
+        for plugin, result in zip(plugins, results):
             if isinstance(result, Exception):
                 logger.error(f"Plugin [{plugin.name}] encountered exception during ingress: {result}")
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
-                        event_type="INGRESS_FAILURE",
+                        event_type=f"{event_prefix}_FAILURE",
                         message=f"Error ingesting signals from {plugin.name}: {str(result)}",
                         level="ERROR",
                         details={"error": str(result), "platform": plugin.platform.value}
                     )
             elif isinstance(result, list):
-                all_signals.extend(result)
+                signals.extend(result)
                 logger.info(f"Plugin [{plugin.name}] collected {len(result)} signals.")
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
-                        event_type="INGRESS_SUCCESS",
+                        event_type=f"{event_prefix}_SUCCESS",
                         message=f"Successfully collected {len(result)} signals from {plugin.name}.",
                         level="INFO",
                         details={"count": len(result), "platform": plugin.platform.value}
                     )
-
-        return await self._apply_scope_guard(all_signals, scope, account_scoped_skipped)
+        return signals
 
     async def search_across_all(
         self,

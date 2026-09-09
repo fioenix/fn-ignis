@@ -32,7 +32,6 @@ SRC_NON_ASCII_ALLOWLIST = {
     "ignis/infrastructure/clustering/semantic_clusterer.py",
     "ignis/infrastructure/connectors/tiktok/tiktok_plugin.py",
     "ignis/infrastructure/connectors/google_trends/rss_plugin.py",
-    "ignis/infrastructure/connectors/youtube/youtube_plugin.py",
     "ignis/application/use_cases/autonomous_discovery.py",
     "ignis/interfaces/mcp/server.py",
 }

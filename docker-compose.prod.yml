@@ -31,7 +31,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-ignis}
       DEFAULT_GEO: ${DEFAULT_GEO:-VN}
-      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-900}
+      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-8640}
     volumes:
       - reports_data:/app/reports
     command: ["python", "-m", "ignis.interfaces.cli.scheduler"]

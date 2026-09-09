@@ -94,19 +94,15 @@ class YouTubeDataPlugin(IConnectorPlugin):
             return True
         return False
 
-    def _enrich_keyword(self, kw: str, geo: GeoCode) -> str:
-        """Enrich short ambiguous acronyms with contextual keywords for target region."""
-        kw_clean = kw.strip()
-        geo_val = geo.value if hasattr(geo, "value") else str(geo)
-        if geo_val.upper() == "VN":
-            if kw_clean.upper() == "RPA":
-                return "RPA tự động hóa quy trình"
-            elif kw_clean.upper() == "MCP AI":
-                return "MCP Model Context Protocol AI"
-            elif kw_clean.upper() == "AI AGENT":
-                return "AI agent tự động hóa"
-        return kw_clean
+    @property
+    def feed_yields_candidate_topics(self) -> bool:
+        """`chart=mostPopular` ranks the region's most-watched videos, whatever they are about.
 
+        It is one quota unit and returns fifty rows, so an untargeted pass fills the corpus with
+        national entertainment that no other platform corroborates. The keyword probe costs 100
+        units per query and returns videos about a subject the pass actually asked for.
+        """
+        return False
 
     async def is_healthy(self) -> bool:
         if not self._api_key:
@@ -281,7 +277,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
 
             kw_signals: List[TrendSignal] = []
 
-            search_kw = self._enrich_keyword(raw_kw, geo)
+            search_kw = raw_kw.strip()
             search_params = {
                 "part": "snippet",
                 "q": search_kw,
