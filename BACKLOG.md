@@ -55,10 +55,13 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   `unclassified`. Vertical thật 68 → **172** (thay vì 348 lúc còn false positive).
   **Đánh đổi:** recall giảm từ 348 xuống 172, đổi lấy precision. Với dossier ra quyết định thì
   category sai tệ hơn category trống.
-- [ ] **Cụm ghép vẫn còn nhiễu trên cluster dị biệt:** `mat na` khớp một post triết lý, `sinh vien`
-  khớp một post tẩy tóc. Cluster nhóm theo probe keyword nên chứa nhiều tiêu đề khác nhau, và
-  category tính trên hợp của tất cả. Nhỏ hơn trước nhiều nhưng chưa hết. Hướng: cân theo số signal
-  thật sự chứa hit, không chỉ theo số keyword khớp.
+- [x] **Cân theo số signal thật sự chứa hit:** trước đây token được gộp chung cho cả cluster nên
+  một signal thiểu số nói thay cho toàn bộ. Giờ khớp theo từng signal, và một vertical phải được
+  ít nhất **1/5 số signal** của cluster làm chứng.
+  Ngưỡng 1/5 lấy từ dữ liệu, không phải chọn bừa: trong các cluster chỉ có một signal khớp, mọi
+  cluster từ 5 signal trở xuống đều là phán đoán hợp lý, còn hai cluster lớn hơn thì sai — bảng
+  đấu esports vào `fashion` với 1/15, post ly hôn vào `beauty` với 1/9. Sau khi áp, đúng 2 row
+  đổi, cả hai ca đó về `unclassified`, và các cluster đúng đều giữ nguyên.
 - [ ] **`son` và `kem` trong taxonomy `beauty` mơ hồ khi mất dấu** (sơn/son, kém/kem). Luật đối
   chứng đã vô hiệu hoá tác hại của chúng, nên không còn gấp. Nợ có sẵn từ seed gốc.
 - [ ] **Taxonomy chưa phủ các vertical ngoài thị trường:** tin tức, thể thao, người nổi tiếng,

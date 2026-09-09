@@ -224,3 +224,45 @@ def test_two_short_tokens_together_do_classify():
     """Corroboration is what a single token lacks, not relevance."""
     assert _clusterer()._classify_category([_signal("khoa hoc ai cho nguoi moi bat dau")]) == "education"
     assert _clusterer()._classify_category([_signal("chatgpt va gpt khac nhau the nao")]) == "tech"
+
+
+def _cluster(*titles):
+    return [_signal(t) for t in titles]
+
+
+def test_one_hit_in_a_large_mixed_cluster_does_not_decide_its_category():
+    """A cluster groups by probe keyword, so a minority signal must not speak for the whole.
+
+    Measured on the live corpus: of the clusters resting on a single hitting signal, every one up
+    to five signals was a fair call, while the two larger ones were wrong -- an esports bracket
+    filed under fashion off 1 signal in 15, and a divorce post under beauty off 1 in 9.
+    """
+    clusterer = _clusterer()
+    beauty_signal = "nhuom toc tai nha khong can salon"
+    filler = [f"chuyen khong lien quan gi so {i}" for i in range(14)]
+
+    assert clusterer._classify_category(_cluster(beauty_signal, *filler)) == "unclassified"
+
+
+def test_one_hit_still_decides_a_small_cluster():
+    """At a fifth of the cluster or more the evidence is a fair share, not a stray signal."""
+    clusterer = _clusterer()
+    beauty_signal = "nhuom toc tai nha khong can salon"
+
+    assert clusterer._classify_category(_cluster(beauty_signal)) == "beauty"
+    assert clusterer._classify_category(_cluster(beauty_signal, "chuyen khac han")) == "beauty"
+    assert (
+        clusterer._classify_category(
+            _cluster(beauty_signal, *[f"chuyen khac han so {i}" for i in range(4)])
+        )
+        == "beauty"
+    )
+
+
+def test_many_hits_carry_a_large_cluster():
+    """Real coverage of a big cluster is exactly what the share rule is meant to let through."""
+    clusterer = _clusterer()
+    hits = ["nhuom toc mau khoi", "nhuom toc tai nha", "nhuom toc gia bao nhieu"]
+    filler = [f"chuyen khong lien quan so {i}" for i in range(9)]
+
+    assert clusterer._classify_category(_cluster(*hits, *filler)) == "beauty"

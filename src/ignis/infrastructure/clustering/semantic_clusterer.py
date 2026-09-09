@@ -58,6 +58,10 @@ class SemanticClusterer(IClusteringEngine):
     # How many distinct taxonomy keywords a vertical needs before it may claim a cluster, when
     # the evidence is bare single tokens rather than compounds.
     MIN_CATEGORY_KEYWORD_HITS = 2
+    # The smallest share of a cluster's signals that must carry the evidence. Calibrated on the
+    # live corpus: a single hitting signal was a fair call up to a fifth of the cluster and wrong
+    # below it (1 of 9, 1 of 15).
+    MIN_CATEGORY_SIGNAL_SHARE = 0.2
 
     # A category shorter than this is an abbreviation or a stray fragment, not a label.
     MIN_CATEGORY_CHARS = 3
@@ -89,13 +93,28 @@ class SemanticClusterer(IClusteringEngine):
 
         if self._taxonomies:
             # Taxonomy keywords are stored without diacritics, so fold both sides before matching.
-            tokens: Set[str] = set()
-            for s in group:
-                tokens |= {self._fold_accents(t) for t in self._tokenize(s.raw_title)}
-            haystack = self._fold_accents(" ".join(self._clean_title(s.raw_title).lower() for s in group))
+            # Folded per signal rather than pooled: a cluster groups by probe keyword and holds
+            # titles about different things, so how many signals carry the evidence matters as
+            # much as which keywords matched.
+            per_signal = [
+                (
+                    {self._fold_accents(t) for t in self._tokenize(s.raw_title)},
+                    self._fold_accents(self._clean_title(s.raw_title).lower()),
+                )
+                for s in group
+            ]
             best_code, best_hits = "", 0
             for code, keywords in self._taxonomies:
-                matched = [kw for kw in keywords if (kw in tokens) or (" " in kw and kw in haystack)]
+                matched: List[str] = []
+                signals_hit = 0
+                for tokens, haystack in per_signal:
+                    hits_here = [
+                        kw for kw in keywords
+                        if (kw in tokens) or (" " in kw and kw in haystack)
+                    ]
+                    if hits_here:
+                        signals_hit += 1
+                        matched.extend(kw for kw in hits_here if kw not in matched)
                 # One keyword is enough only when it cannot have collided by accident. A compound
                 # qualifies: no ordinary phrase folds onto "gia vang" or "local brand". A single
                 # token does not -- measured on the live corpus, 179 of 342 classified clusters
@@ -105,6 +124,11 @@ class SemanticClusterer(IClusteringEngine):
                 if not matched:
                     continue
                 if len(matched) < self.MIN_CATEGORY_KEYWORD_HITS and not any(" " in kw for kw in matched):
+                    continue
+                # One signal out of fifteen is not what a cluster is about. Below this share the
+                # evidence is a stray member, and on the live corpus every misclassification left
+                # after the corroboration rule was of exactly that shape.
+                if signals_hit < max(1, math.ceil(len(group) * self.MIN_CATEGORY_SIGNAL_SHARE)):
                     continue
                 if len(matched) > best_hits:
                     best_code, best_hits = code, len(matched)
