@@ -33,19 +33,24 @@ SRC_NON_ASCII_ALLOWLIST = {
 
 # Vocabulary constants that predate the Data-Driven Vocabulary Protocol.
 KNOWN_VOCABULARY_CONSTANTS = {
-    ("ignis/infrastructure/harness/language_detector.py", "FOREIGN_STOPWORD_PHRASES"),
-    ("ignis/infrastructure/harness/language_detector.py", "PORTUGUESE_MARKERS"),
     ("ignis/infrastructure/connectors/reels/reels_plugin.py", "BROWSER_API_MARKERS"),
     ("ignis/infrastructure/harness/strategic_reasoner.py", "RATE_LIMIT_HINTS"),
     ("ignis/infrastructure/harness/strategic_reasoner.py", "AUTH_SENSITIVE_PLATFORMS"),
     ("ignis/infrastructure/harness/strategic_reasoner.py", "VIDEO_PLATFORMS"),
+    # Vietnamese written without tones, used to read titles that are themselves untoned, and the
+    # loanwords subtracted before that count. Real vocabulary and real debt; listed rather than
+    # invisible, which is what "WORDS" in the hint below now guarantees.
+    ("ignis/infrastructure/harness/language_detector.py", "VI_CORE_WORDS"),
+    ("ignis/infrastructure/harness/language_detector.py", "TECH_LOAN_WORDS"),
 }
 
-# BLACKLIST was missing until 09/09/2026, which is how TikTok's NOTIFICATION_BLACKLIST stayed
-# invisible here while the allowlist carried an entry for a constant that never existed.
+# BLACKLIST and WORDS were both missing until 09/09/2026. That is how NOTIFICATION_BLACKLIST and
+# VI_CORE_WORDS stayed invisible here, while the allowlist carried entries for two constants that
+# never existed under those names: NOTIFICATION_NOISE_PATTERNS and PORTUGUESE_MARKERS. A name in
+# the allowlist that matches nothing in src/ is worse than no entry, because it reads as covered.
 VOCABULARY_NAME_HINT = re.compile(
     r"(SYNONYM|LEXICON|KEYWORD|VOCAB|TERMS|PHRASES|STOPWORD|NOISE|UNIGRAM|MARKERS|PROBES"
-    r"|TAXONOM|BLACKLIST|WHITELIST|ALLOWLIST|TRIGGERS)"
+    r"|TAXONOM|BLACKLIST|WHITELIST|ALLOWLIST|TRIGGERS|WORDS)"
 )
 
 

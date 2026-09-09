@@ -59,6 +59,7 @@ from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin
 from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
+from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
@@ -151,8 +152,10 @@ def _init_components():
 
     clusterer = SemanticClusterer()
     artifact_builder = HtmlArtifactBuilder()
-    quality_evaluator = QualityEvaluator()
-    strategic_reasoner = StrategicMarketReasoner()
+    # One detector, shared, so its vocabulary is loaded once rather than per engine.
+    language_detector = HeuristicLanguageDetector()
+    quality_evaluator = QualityEvaluator(detector=language_detector)
+    strategic_reasoner = StrategicMarketReasoner(detector=language_detector)
 
     harness_orchestrator = AutonomousRefinementOrchestrator(
         repository=repository,
@@ -186,6 +189,7 @@ def _init_components():
         "registry": registry,
         "google_trends_plugin": google_trends_plugin,
         "tiktok_plugin": tiktok_plugin,
+        "language_detector": language_detector,
         "tiktok_auth_manager": tiktok_auth_manager,
         "threads_auth_manager": threads_auth_manager,
         "instagram_auth_manager": instagram_auth_manager,
@@ -327,6 +331,9 @@ async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
         if "google_trends_plugin" in comp:
             comp["google_trends_plugin"].register_probe_templates(vocabulary.probe_templates)
             comp["google_trends_plugin"].register_intent_keywords(vocabulary.search_intent)
+        if "language_detector" in comp:
+            comp["language_detector"].register_foreign_phrases(vocabulary.foreign_phrases)
+            comp["language_detector"].register_portuguese_words(vocabulary.portuguese_words)
         if "tiktok_plugin" in comp:
             comp["tiktok_plugin"].register_ui_noise(vocabulary.tiktok_ui_noise)
             comp["tiktok_plugin"].register_suggest_templates(vocabulary.tiktok_suggest_templates)

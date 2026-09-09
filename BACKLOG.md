@@ -107,6 +107,13 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   `sql/013_tiktok_ui_noise.sql`. Bộ lọc thông báo giờ **fail closed**: không có từ vựng thì loại
   hết card thay vì để trôi, vì nó là thứ bảo đảm plugin không bao giờ lưu inbox của người dùng.
   Mẫu probe thì bỏ qua geo nào chưa có phrasing, thay vì probe thị trường US bằng tiếng Việt.
+- [x] **Đã xong (09/09/2026): `language_detector.py` đã chuyển hai bộ từ vựng.**
+  `FOREIGN_STOPWORD_PHRASES` (22 cụm Pháp, Bồ, Indonesia) và `PORTUGUESE_DISTINCTIVE_WORDS`
+  (38 từ) vào `sql/014_language_detection_vocabulary.sql`. Một detector duy nhất được inject
+  vào `QualityEvaluator` và `StrategicMarketReasoner` thay vì mỗi engine tự dựng một cái.
+  Character class vẫn nằm trong code vì ở đó ký tự chính là thuật toán.
+  Còn `VI_CORE_WORDS` và `TECH_LOAN_WORDS` chưa chuyển, nhưng giờ **được ghi tên** trong
+  `KNOWN_VOCABULARY_CONSTANTS` thay vì vô hình với gate.
 - [ ] **Đợi quyết: `_is_private_or_notification` khớp theo substring thô.** `"live "` khớp trong
   `"olive oil review"`, nên một video thật bị loại như thông báo. Lỗi này có từ trước, không phải
   do lần chuyển từ vựng. Sửa bằng cách khớp theo biên từ là đổi hành vi, nên tao chưa làm.

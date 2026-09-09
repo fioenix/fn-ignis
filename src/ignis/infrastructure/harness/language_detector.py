@@ -1,15 +1,50 @@
+import logging
 import re
 from typing import Optional, Set
 
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.domain.value_objects import GeoCode
 
+logger = logging.getLogger(__name__)
+
 
 class HeuristicLanguageDetector(ILanguageDetector):
     """
     Multi-region linguistic and localization verification engine.
     Uses subtractive filtering and authentic script/vocabulary rules to eliminate rubber-stamps and false negatives.
+
+    The character classes below are the algorithm and stay in code. The phrase and word lists
+    are vocabulary of specific languages, so they arrive from market_lexicons through
+    register_foreign_phrases and register_portuguese_words. Both drive rejection rules, so an
+    empty list makes this detector more permissive rather than less: French or Portuguese text
+    starts passing as English. That is logged once per instance instead of failing closed,
+    because a detector that rejects everything would empty the corpus outright.
     """
+
+    def __init__(self) -> None:
+        self._foreign_phrases: Set[str] = set()
+        self._portuguese_words: Set[str] = set()
+        self._warned_about_missing_vocabulary = False
+
+    def register_foreign_phrases(self, phrases) -> None:
+        """Bind the cross-language phrases that disqualify a title from any single locale."""
+        self._foreign_phrases |= {p.strip().lower() for p in phrases or [] if p and p.strip()}
+
+    def register_portuguese_words(self, words) -> None:
+        """Bind the Portuguese words distinctive enough that two of them outrank English."""
+        self._portuguese_words |= {w.strip().lower() for w in words or [] if w and w.strip()}
+
+    def _warn_once_if_vocabulary_missing(self) -> None:
+        if self._foreign_phrases and self._portuguese_words:
+            return
+        if self._warned_about_missing_vocabulary:
+            return
+        self._warned_about_missing_vocabulary = True
+        logger.warning(
+            "Language detection is running without its foreign vocabulary, so French and "
+            "Portuguese titles will pass as English. Check the foreign_phrases and "
+            "portuguese_words domains in market_lexicons."
+        )
 
     # Characters strictly unique to Vietnamese
     VI_EXCLUSIVE_CHARS_PATTERN = re.compile(
@@ -35,22 +70,6 @@ class HeuristicLanguageDetector(ILanguageDetector):
     NON_ENGLISH_DIACRITICS = re.compile(
         r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđĐãõñçüöäß]"
     )
-
-    # Foreign phrases for cross-language rejection
-    FOREIGN_STOPWORD_PHRASES = {
-        "formation complete", "formation complète", "avec", "cours pour", "dans le", "tuto debutant", "tuto débutant",
-        "como criar", "como funcionam", "agentes autonomos", "agentes autônomos", "para você", "para voce",
-        "inteligencia artificial", "inteligência artificial", "todos os", "fazer curso", "cara membuat", "untuk pemula",
-        "de ia", "com ia", "para empresas"
-    }
-
-    PORTUGUESE_DISTINCTIVE_WORDS = {
-        "como", "para", "com", "por", "sobre", "este", "esta", "todos", "agora", "fazer",
-        "curso", "gratis", "completo", "você", "voce", "seus", "suas", "criar", "criando",
-        "ferramenta", "passo", "inteligencia", "artificial", "inteligência", "automatizar",
-        "não", "nao", "em", "do", "da", "que", "uma", "um", "automação", "automacao",
-        "negócios", "negocios", "agentes"
-    }
 
     VI_CORE_WORDS = {
         "va", "cua", "la", "trong", "cho", "voi", "ve", "tu", "dong", "hoa",
@@ -206,7 +225,8 @@ class HeuristicLanguageDetector(ILanguageDetector):
             return False
 
         # 2. Reject foreign phrases
-        for fp in self.FOREIGN_STOPWORD_PHRASES:
+        self._warn_once_if_vocabulary_missing()
+        for fp in self._foreign_phrases:
             if fp in text_lower:
                 return False
 
@@ -235,7 +255,8 @@ class HeuristicLanguageDetector(ILanguageDetector):
             return False
 
         # 3. Reject foreign phrases
-        for fp in self.FOREIGN_STOPWORD_PHRASES:
+        self._warn_once_if_vocabulary_missing()
+        for fp in self._foreign_phrases:
             if fp in text_lower:
                 return False
 
@@ -254,7 +275,7 @@ class HeuristicLanguageDetector(ILanguageDetector):
             return False
 
         # 5. Reject if contains Portuguese/Spanish stopwords (>= 2 distinctive words)
-        pt_matches = sum(1 for w in pure_alpha_words if w in self.PORTUGUESE_DISTINCTIVE_WORDS)
+        pt_matches = sum(1 for w in pure_alpha_words if w in self._portuguese_words)
         if pt_matches >= 2:
             return False
 
@@ -296,5 +317,5 @@ class HeuristicLanguageDetector(ILanguageDetector):
         if self.VI_EXCLUSIVE_CHARS_PATTERN.search(text):
             return False
         words = set(re.findall(r"\b[a-zA-Záéíóúâêôãõç]+\b", text_lower))
-        active_vocab = self.PORTUGUESE_DISTINCTIVE_WORDS | {t.lower() for t in (extra_terms or set()) if len(t) >= 3}
+        active_vocab = self._portuguese_words | {t.lower() for t in (extra_terms or set()) if len(t) >= 3}
         return any(pw in words for pw in active_vocab)

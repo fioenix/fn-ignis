@@ -213,7 +213,11 @@ class SqliteTrendRepository(ITrendRepository):
         # is no user edit to preserve, and a database created before a list was widened would
         # otherwise keep the narrow one and behave differently from Postgres.
         now_str = datetime.now(timezone.utc).isoformat()
-        for vocab_filename in ("012_vocabulary_from_constants.sql", "013_tiktok_ui_noise.sql"):
+        for vocab_filename in (
+            "012_vocabulary_from_constants.sql",
+            "013_tiktok_ui_noise.sql",
+            "014_language_detection_vocabulary.sql",
+        ):
             vocab_path = sql_seed_file(vocab_filename)
             if not vocab_path:
                 continue

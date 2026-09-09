@@ -22,6 +22,8 @@ MACHINERY_DOMAINS = frozenset({
     "search_intent",
     "customer_inquiry",
     "tiktok_ui_noise",
+    "foreign_phrases",
+    "portuguese_words",
 })
 
 # Probe templates are per geo, so their domain carries the geo code: probe_templates_vn.
@@ -47,6 +49,8 @@ class MarketVocabulary:
     search_intent: List[str] = field(default_factory=list)
     customer_inquiry: List[str] = field(default_factory=list)
     tiktok_ui_noise: List[str] = field(default_factory=list)
+    foreign_phrases: List[str] = field(default_factory=list)
+    portuguese_words: List[str] = field(default_factory=list)
     probe_templates: Dict[str, List[str]] = field(default_factory=dict)
     tiktok_suggest_templates: Dict[str, List[str]] = field(default_factory=dict)
     by_domain_and_category: Dict[tuple, List[str]] = field(default_factory=dict)
@@ -85,6 +89,8 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
         search_intent=grouped.get("search_intent", []),
         customer_inquiry=grouped.get("customer_inquiry", []),
         tiktok_ui_noise=grouped.get("tiktok_ui_noise", []),
+        foreign_phrases=grouped.get("foreign_phrases", []),
+        portuguese_words=grouped.get("portuguese_words", []),
         probe_templates=_templates_for(PROBE_TEMPLATE_PREFIX),
         tiktok_suggest_templates=_templates_for(TIKTOK_SUGGEST_TEMPLATE_PREFIX),
         by_domain_and_category=buckets,

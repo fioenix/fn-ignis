@@ -17,12 +17,18 @@ from ignis.infrastructure.config.vocabulary_loader import (
     load_market_vocabulary,
 )
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
+from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
+from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
 SQL = Path(__file__).resolve().parents[2] / "sql"
 # Both files the SQLite bootstrap re-applies. Keep in step with sqlite_repository.
-SEEDS = ("012_vocabulary_from_constants.sql", "013_tiktok_ui_noise.sql")
+SEEDS = (
+    "012_vocabulary_from_constants.sql",
+    "013_tiktok_ui_noise.sql",
+    "014_language_detection_vocabulary.sql",
+)
 
 
 def _seeded_domains():
@@ -170,3 +176,18 @@ async def test_the_tiktok_grid_guard_is_armed_by_a_fresh_database(tmp_path):
     assert plugin._is_private_or_notification("#congnghe2026 AI Agent sieu hot") is False
     assert plugin._intent_probe_templates("VN")
     assert plugin._intent_probe_templates("US") != plugin._intent_probe_templates("VN")
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_database_arms_language_detection(tmp_path):
+    """Without these two lists a Portuguese title reads as English and lands in a US corpus."""
+    repo = SqliteTrendRepository(db_path=str(tmp_path / "language.db"))
+    vocabulary = await load_market_vocabulary(repo)
+
+    detector = HeuristicLanguageDetector()
+    detector.register_foreign_phrases(vocabulary.foreign_phrases)
+    detector.register_portuguese_words(vocabulary.portuguese_words)
+
+    assert detector.is_localized("Como criar agentes autonomos para empresas", geo=GeoCode.US) is False
+    assert detector.is_localized("Formation complete avec n8n", geo=GeoCode.US) is False
+    assert detector.is_localized("Building autonomous AI agents with LangChain", geo=GeoCode.US) is True

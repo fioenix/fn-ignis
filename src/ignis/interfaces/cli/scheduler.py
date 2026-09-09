@@ -28,6 +28,7 @@ from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin
+from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.application.ports.connector_port import IConnectorPlugin
@@ -234,6 +235,7 @@ class IngressScheduler:
             )
 
         clusterer = SemanticClusterer()
+        language_detector = HeuristicLanguageDetector()
         try:
             clusterer.register_taxonomies(await repository.get_industry_taxonomies())
         except Exception as e:
@@ -244,11 +246,14 @@ class IngressScheduler:
                 vocabulary.foreign_stopwords + vocabulary.noise_blacklist
             )
             clusterer.register_ambiguous_unigrams(vocabulary.ambiguous_unigrams)
+            language_detector.register_foreign_phrases(vocabulary.foreign_phrases)
+            language_detector.register_portuguese_words(vocabulary.portuguese_words)
             logger.info(
                 f"Clustering vocabulary loaded: {len(vocabulary.positive_terms)} domain terms, "
                 f"{len(vocabulary.foreign_stopwords)} foreign stopwords, "
-                f"{len(vocabulary.noise_blacklist)} noise terms and "
-                f"{len(vocabulary.ambiguous_unigrams)} ambiguous unigrams. Relevance is judged "
+                f"{len(vocabulary.noise_blacklist)} noise terms, "
+                f"{len(vocabulary.ambiguous_unigrams)} ambiguous unigrams and "
+                f"{len(vocabulary.foreign_phrases)} foreign phrases. Relevance is judged "
                 f"downstream by the quality gate, not at ingress."
             )
         except Exception as e:
@@ -261,8 +266,8 @@ class IngressScheduler:
             logger.warning(f"Could not load self-account identities: {e}")
         ingest_use_case = IngestTrendsUseCase(registry=registry, repository=repository)
         cluster_use_case = ClusterSignalsUseCase(clusterer=clusterer, repository=repository)
-        quality_evaluator = QualityEvaluator()
-        strategic_reasoner = StrategicMarketReasoner()
+        quality_evaluator = QualityEvaluator(detector=language_detector)
+        strategic_reasoner = StrategicMarketReasoner(detector=language_detector)
         artifact_builder = HtmlArtifactBuilder()
 
         discovery_use_case = AutonomousDiscoveryUseCase(
