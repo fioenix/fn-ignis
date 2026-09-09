@@ -43,7 +43,8 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON system_audit_logs (created_
 -- 3. Table topic_clusters (Entity / Topic Level)
 CREATE TABLE IF NOT EXISTS topic_clusters (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    canonical_name TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,    -- Identity key: cluster id is a uuid5 of this
+    topic_label TEXT,                -- Summarised display name; NULL falls back to canonical_name
     summary_text TEXT,
     category VARCHAR(50) DEFAULT 'general',
     cross_platform_score DOUBLE PRECISION DEFAULT 0,

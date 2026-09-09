@@ -217,6 +217,7 @@ class PostgresTimescaleRepository(ITrendRepository):
         update_query = """
             UPDATE topic_clusters SET
                 canonical_name = %s,
+                topic_label = %s,
                 summary_text = %s,
                 category = %s,
                 cross_platform_score = %s,
@@ -227,12 +228,13 @@ class PostgresTimescaleRepository(ITrendRepository):
             INSERT INTO topic_clusters (
                 id,
                 canonical_name,
+                topic_label,
                 summary_text,
                 category,
                 cross_platform_score,
                 first_seen_at,
                 last_updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s);
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
         """
 
         deduped = self._deduplicate_clusters(clusters)
@@ -257,6 +259,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                                         update_query,
                                         (
                                             clean_name,
+                                            c.topic_label,
                                             c.summary_text,
                                             c.category,
                                             c.cross_platform_score,
@@ -271,6 +274,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                                         (
                                             c_id_str,
                                             clean_name,
+                                            c.topic_label,
                                             c.summary_text,
                                             c.category,
                                             c.cross_platform_score,
@@ -311,6 +315,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 SELECT 
                     tc.id,
                     tc.canonical_name,
+                    tc.topic_label,
                     tc.summary_text,
                     tc.category,
                     tc.first_seen_at,
@@ -327,13 +332,14 @@ class PostgresTimescaleRepository(ITrendRepository):
                 FROM topic_clusters tc
                 INNER JOIN trend_signals ts ON ts.cluster_id = tc.id
                 WHERE ts.captured_at >= NOW() - INTERVAL '{interval}'
-                GROUP BY tc.id, tc.canonical_name, tc.summary_text, tc.category, tc.first_seen_at, tc.last_updated_at
+                GROUP BY tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category, tc.first_seen_at, tc.last_updated_at
                 ORDER BY dynamic_score DESC, sig_count DESC
                 LIMIT %s
             )
             SELECT 
                 rc.id,
                 rc.canonical_name,
+                rc.topic_label,
                 rc.summary_text,
                 rc.category,
                 rc.dynamic_score,
@@ -353,7 +359,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             FROM ranked_clusters rc
             INNER JOIN trend_signals ts ON ts.cluster_id = rc.id
             WHERE ts.captured_at >= NOW() - INTERVAL '{interval}'
-            GROUP BY rc.id, rc.canonical_name, rc.summary_text, rc.category, rc.dynamic_score, rc.first_seen_at, rc.last_updated_at, rc.sig_count
+            GROUP BY rc.id, rc.canonical_name, rc.topic_label, rc.summary_text, rc.category, rc.dynamic_score, rc.first_seen_at, rc.last_updated_at, rc.sig_count
             ORDER BY rc.dynamic_score DESC, rc.sig_count DESC;
         """
 
@@ -365,9 +371,9 @@ class PostgresTimescaleRepository(ITrendRepository):
 
             clusters = []
             for row in rows:
-                c_id, name, summary, cat, score, first_seen, last_updated = row[:7]
-                _sig_count = row[7] if len(row) > 7 else 0
-                sigs_raw = row[8] if len(row) > 8 else "[]"
+                c_id, name, label, summary, cat, score, first_seen, last_updated = row[:8]
+                _sig_count = row[8] if len(row) > 8 else 0
+                sigs_raw = row[9] if len(row) > 9 else "[]"
                 
                 signals_list: List[TrendSignal] = []
                 sigs_data = sigs_raw if isinstance(sigs_raw, list) else json.loads(sigs_raw or "[]")
@@ -400,6 +406,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 cluster = TopicCluster(
                     id=UUID(str(c_id)),
                     canonical_name=name,
+                    _topic_label=label,
                     summary_text=dynamic_summary,
                     category=cat or "unclassified",
                     cross_platform_score=float(score or 0.0),

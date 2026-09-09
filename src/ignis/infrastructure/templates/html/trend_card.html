@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ cluster.canonical_name }} — Topic Card</title>
+  <title>{{ cluster.topic_label }} — Topic Card</title>
   {% include "_fino_theme.html" %}
   <style>
     * { box-sizing: border-box; }
@@ -58,7 +58,7 @@
     <header>
       <div>
         <div class="fn-eyebrow">FN-IGNIS · Topic intel</div>
-        <h1>{{ cluster.canonical_name|sanitize_pii }}</h1>
+        <h1>{{ cluster.topic_label|sanitize_pii }}</h1>
       </div>
       <div class="score">
         <span class="value">{{ cluster.cross_platform_score|round(1) }}</span>

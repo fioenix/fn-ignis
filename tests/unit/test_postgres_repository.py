@@ -74,7 +74,7 @@ async def test_get_top_clusters():
     cluster_id = uuid4()
     now = datetime.now(timezone.utc)
     mock_rows = [
-        (str(cluster_id), "AI Agent Trends", "Summary of AI agents", "technology", 92.0, now, now)
+        (str(cluster_id), "AI Agent Trends", "AI agents", "Summary of AI agents", "technology", 92.0, now, now)
     ]
     
     mock_cursor = AsyncMock()
@@ -86,6 +86,7 @@ async def test_get_top_clusters():
     assert len(clusters) == 1
     assert clusters[0].id == cluster_id
     assert clusters[0].canonical_name == "AI Agent Trends"
+    assert clusters[0].topic_label == "AI agents", "Display uses the stored label, not the identity key"
     assert clusters[0].cross_platform_score == 92.0
 
 

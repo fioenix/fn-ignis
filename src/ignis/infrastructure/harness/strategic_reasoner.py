@@ -396,7 +396,7 @@ class StrategicMarketReasoner:
 
             default_summary = f"Topic cluster synthesized from {len(c.signals)} signals."
             verified.append({
-                "canonical_name": c.canonical_name,
+                "canonical_name": c.topic_label,
                 "momentum": c.momentum_category.value if hasattr(c.momentum_category, "value") else str(c.momentum_category),
                 "cross_platform_score": c.cross_platform_score,
                 "platform_diversity": len(p_counts),

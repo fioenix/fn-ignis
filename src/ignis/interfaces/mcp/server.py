@@ -1095,7 +1095,7 @@ async def handle_get_trending_topics(
         dynamic_summary = c.summary_text or f"Aggregated topic from {signal_count} signals across {plat_count} platforms."
         topics.append({
             "id": str(c.id),
-            "topic_name": c.canonical_name,
+            "topic_name": c.topic_label,
             "summary": dynamic_summary,
             "category": c.category,
             "cross_platform_score": c.cross_platform_score,
@@ -1221,7 +1221,7 @@ async def handle_generate_trend_artifact(
                 {
                     "status": "SUCCESS",
                     "type": "TOPIC_CARD",
-                    "topic_name": target_cluster.canonical_name,
+                    "topic_name": target_cluster.topic_label,
                     "artifact_file": abs_path,
                     "file_url": f"file://{abs_path}",
                     "message": f"Topic card exported to: file://{abs_path}",

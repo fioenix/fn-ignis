@@ -3,7 +3,7 @@ import re
 import unicodedata
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.domain.entities import TopicCluster, TrendSignal
@@ -182,6 +182,88 @@ class SemanticClusterer(IClusteringEngine):
     METRIC_LOG_CEILING = 8.0
     VELOCITY_LOG_CEILING = 4.0
 
+    # Words kept in a topic label.
+    TOPIC_LABEL_MAX_WORDS = 6
+    # A token appearing in more than this share of clusters describes the corpus, not one topic.
+    MAX_TOKEN_DOCUMENT_SHARE = 0.15
+    # Minimum in-cluster count per cluster it appears in, before a token may headline a label.
+    MIN_TOKEN_DISTINCTIVENESS = 0.9
+
+    def _token_document_frequency(self, groups: List[List[TrendSignal]]) -> Dict[str, int]:
+        """Count how many clusters each token appears in, so ubiquitous words can be discounted."""
+        doc_freq: Dict[str, int] = {}
+        for group in groups:
+            tokens: Set[str] = set()
+            for signal in group:
+                tokens |= self._tokenize(signal.raw_title or "")
+            for token in tokens:
+                doc_freq[token] = doc_freq.get(token, 0) + 1
+        return doc_freq
+
+    def _build_topic_label(
+        self,
+        canonical_name: str,
+        group: List[TrendSignal],
+        doc_freq: Dict[str, int],
+        total_clusters: int,
+    ) -> str:
+        """Summarise a cluster into a short topic label instead of one signal's verbatim title.
+
+        Score every window of words in the canonical name by how many of its tokens recur across
+        the cluster's other signals, and keep the densest window: what survives is the vocabulary
+        the cluster actually shares rather than whatever preceded it in one post.
+        """
+        canonical = self._clean_title(canonical_name or "")
+        words = [w for w in canonical.split() if w]
+        if not words:
+            return canonical_name or ""
+
+        shared: Set[str] = set()
+        counts: Dict[str, int] = {}
+        if len(group) > 1:
+            for signal in group:
+                for token in self._tokenize(signal.raw_title or ""):
+                    counts[token] = counts.get(token, 0) + 1
+            quorum = max(2, (len(group) + 1) // 2)
+            ceiling = max(2, int(total_clusters * self.MAX_TOKEN_DOCUMENT_SHARE))
+            shared = {
+                token for token, count in counts.items()
+                if count >= quorum and doc_freq.get(token, 1) <= ceiling
+            }
+
+        window = min(self.TOPIC_LABEL_MAX_WORDS, len(words))
+        normalized = [re.sub(r"[^\w]", "", w.lower()) for w in words]
+        best_start, best_score = 0, -1
+        for start in range(0, len(words) - window + 1):
+            score = sum(1 for token in normalized[start:start + window] if token in shared)
+            if score > best_score:
+                best_start, best_score = start, score
+
+        if best_score <= 0 and counts:
+            # No phrase recurs across the cluster, so quoting any window would just quote one post.
+            # Fall back to the tokens this cluster leans on that the rest of the corpus does not.
+            ranked = sorted(
+                ((token, count / max(1, doc_freq.get(token, 1))) for token, count in counts.items() if count > 1),
+                key=lambda kv: (-kv[1], kv[0]),
+            )
+            top = [token for token, weight in ranked[:3] if weight > self.MIN_TOKEN_DISTINCTIVENESS]
+            if top:
+                return " \u00b7 ".join(top)
+
+        start, end = best_start, best_start + window
+        if best_score > 0:
+            while end - start > 2 and normalized[start] not in shared:
+                start += 1
+            while end - start > 2 and normalized[end - 1] not in shared:
+                end -= 1
+
+        label = " ".join(words[start:end]).strip(" -:;,.\"'")
+        if start > 0:
+            label = "\u2026 " + label
+        if end < len(words):
+            label = label + " \u2026"
+        return label or canonical
+
     def _calculate_cross_platform_score(self, signals: List[TrendSignal]) -> float:
         if not signals:
             return 0.0
@@ -201,9 +283,9 @@ class SemanticClusterer(IClusteringEngine):
         if not signals:
             return []
 
-        clusters: List[TopicCluster] = []
         tokenized_signals = [(s, self._tokenize(s.raw_title)) for s in signals]
         visited = set()
+        groups: List[List[TrendSignal]] = []
 
         for i, (sig_a, tokens_a) in enumerate(tokenized_signals):
             if i in visited:
@@ -221,8 +303,16 @@ class SemanticClusterer(IClusteringEngine):
                     group.append(sig_b)
                     visited.add(j)
 
-            from ignis.domain.normalization import normalize_cluster_name
+            groups.append(group)
 
+        from ignis.domain.normalization import normalize_cluster_name
+
+        # Labelling needs the whole pass: a token only earns a headline by being rarer across the
+        # other clusters than inside this one, which cannot be judged one group at a time.
+        doc_freq = self._token_document_frequency(groups)
+        clusters: List[TopicCluster] = []
+
+        for group in groups:
             canonical_name = normalize_cluster_name(self._select_canonical_name(group))
 
             # Deterministic cluster UUID based on normalized canonical_name to prevent duplicate cluster records across runs
@@ -242,8 +332,10 @@ class SemanticClusterer(IClusteringEngine):
                 first_seen_at=min(s.captured_at for s in group),
                 last_updated_at=datetime.now(timezone.utc),
             )
+            cluster.topic_label = self._build_topic_label(
+                canonical_name, group, doc_freq, len(groups)
+            )
             clusters.append(cluster)
 
         clusters.sort(key=lambda c: c.cross_platform_score, reverse=True)
         return clusters
-

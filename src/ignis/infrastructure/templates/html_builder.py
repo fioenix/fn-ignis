@@ -120,7 +120,9 @@ class HtmlArtifactBuilder(IArtifactBuilder):
         # Reuse the caller's clusterer when there is one: it carries the stopwords synced from the
         # database, which is what keeps generic words out of the topic labels.
         clusterer = clusterer or SemanticClusterer()
-        doc_freq = self._token_document_frequency(clusterer, clusters)
+        # Clusters persisted before topic_label existed report their canonical name as the label,
+        # so relabel those here rather than rendering a stray post as a topic.
+        doc_freq = clusterer._token_document_frequency([c.signals or [] for c in clusters])
         nodes: List[Dict[str, Any]] = []
         token_sets: List[Any] = []
 
@@ -140,7 +142,7 @@ class HtmlArtifactBuilder(IArtifactBuilder):
                 "score": round(float(cluster.cross_platform_score or 0.0), 1),
                 "signal_count": signal_count,
                 "platforms": platform_counts,
-                "label": self._build_topic_label(clusterer, cluster, doc_freq, len(clusters)),
+                "label": self._resolve_topic_label(clusterer, cluster, doc_freq, len(clusters)),
                 "full_title": sanitize_pii_text(cluster.canonical_name or ""),
                 "dots": self._build_signal_dots(cluster.signals or []),
                 "last_updated_at": cluster.last_updated_at.isoformat() if cluster.last_updated_at else None,
@@ -163,12 +165,6 @@ class HtmlArtifactBuilder(IArtifactBuilder):
 
     # A dot label longer than this is truncated: the tooltip is a peek at the signal, not a reader.
     MAX_DOT_TITLE_CHARS = 140
-    # Words kept in a node's topic label.
-    TOPIC_LABEL_MAX_WORDS = 6
-    # A token appearing in more than this share of clusters describes the corpus, not one topic.
-    MAX_TOKEN_DOCUMENT_SHARE = 0.15
-    # Minimum in-cluster count per cluster it appears in, before a token may headline a label.
-    MIN_TOKEN_DISTINCTIVENESS = 0.9
 
     @classmethod
     def _build_signal_dots(cls, signals: List[TrendSignal]) -> List[Dict[str, str]]:
@@ -192,87 +188,20 @@ class HtmlArtifactBuilder(IArtifactBuilder):
         return dots
 
     @staticmethod
-    def _token_document_frequency(clusterer: Any, clusters: List[TopicCluster]) -> Dict[str, int]:
-        """Count how many clusters each token appears in, so ubiquitous words can be discounted."""
-        doc_freq: Dict[str, int] = {}
-        for cluster in clusters:
-            tokens: Set[str] = set()
-            for signal in cluster.signals or []:
-                tokens |= clusterer._tokenize(signal.raw_title or "")
-            for token in tokens:
-                doc_freq[token] = doc_freq.get(token, 0) + 1
-        return doc_freq
-
-    @classmethod
-    def _build_topic_label(
-        cls,
+    def _resolve_topic_label(
         clusterer: Any,
         cluster: TopicCluster,
-        doc_freq: Optional[Dict[str, int]] = None,
-        total_clusters: int = 1,
+        doc_freq: Dict[str, int],
+        total_clusters: int,
     ) -> str:
-        """Summarise a cluster into a short topic label instead of one signal's verbatim title.
-
-        canonical_name is the most informative raw title in the group, which reads as a stray post
-        rather than a topic. Score every window of words in it by how many of its tokens recur
-        across the cluster's other signals, and keep the densest window: what survives is the
-        vocabulary the cluster actually shares.
-        """
-        canonical = clusterer._clean_title(cluster.canonical_name or "")
-        words = [w for w in canonical.split() if w]
-        if not words:
-            return cluster.canonical_name or ""
-
-        shared: Set[str] = set()
-        counts: Dict[str, int] = {}
-        signals = cluster.signals or []
-        if len(signals) > 1:
-            for signal in signals:
-                for token in clusterer._tokenize(signal.raw_title or ""):
-                    counts[token] = counts.get(token, 0) + 1
-            quorum = max(2, (len(signals) + 1) // 2)
-            # A token that shows up in most clusters describes the corpus, not this topic.
-            ceiling = max(2, int(total_clusters * cls.MAX_TOKEN_DOCUMENT_SHARE))
-            shared = {
-                token for token, count in counts.items()
-                if count >= quorum and (doc_freq or {}).get(token, 1) <= ceiling
-            }
-
-        window = min(cls.TOPIC_LABEL_MAX_WORDS, len(words))
-        normalized = [re.sub(r"[^\w]", "", w.lower()) for w in words]
-        best_start, best_score = 0, -1
-        for start in range(0, len(words) - window + 1):
-            score = sum(1 for token in normalized[start:start + window] if token in shared)
-            if score > best_score:
-                best_start, best_score = start, score
-
-        if best_score <= 0 and counts:
-            # No phrase recurs across the cluster, so quoting any window would just quote one post.
-            # Fall back to the tokens this cluster leans on that the rest of the corpus does not.
-            freq = doc_freq or {}
-            ranked = sorted(
-                ((token, count / max(1, freq.get(token, 1))) for token, count in counts.items() if count > 1),
-                key=lambda kv: (-kv[1], kv[0]),
+        """Prefer the label the clusterer stored, and derive one when the row predates it."""
+        if cluster._topic_label:
+            return sanitize_pii_text(cluster._topic_label)
+        return sanitize_pii_text(
+            clusterer._build_topic_label(
+                cluster.canonical_name or "", cluster.signals or [], doc_freq, total_clusters
             )
-            top = [token for token, weight in ranked[:3] if weight > cls.MIN_TOKEN_DISTINCTIVENESS]
-            if top:
-                return " · ".join(top)
-
-        start, end = best_start, best_start + window
-        if best_score > 0:
-            # Trim edges that carry none of the shared vocabulary, so the label lands on the phrase
-            # the cluster is actually about rather than on whatever preceded it in one post.
-            while end - start > 2 and normalized[start] not in shared:
-                start += 1
-            while end - start > 2 and normalized[end - 1] not in shared:
-                end -= 1
-
-        label = " ".join(words[start:end]).strip(" -–—:;,.\"'")
-        if start > 0:
-            label = "… " + label
-        if end < len(words):
-            label = label + " …"
-        return label or canonical
+        )
 
     @classmethod
     def _build_similarity_edges(

@@ -90,7 +90,7 @@
           <span class="momentum" data-level="{{ momentum|lower }}">{{ momentum }}</span>
           <span class="score">{{ cluster.cross_platform_score|round(1) }}</span>
         </div>
-        <h2>{{ cluster.canonical_name|sanitize_pii }}</h2>
+        <h2>{{ cluster.topic_label|sanitize_pii }}</h2>
         <p>{{ cluster.summary_text|sanitize_pii }}</p>
         <footer>
           <span class="category">{{ cluster.category }}</span>

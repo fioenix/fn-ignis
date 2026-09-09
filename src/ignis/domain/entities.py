@@ -38,12 +38,25 @@ class TopicCluster:
     """A synthesized topic entity aggregating correlated cross-platform signals."""
     canonical_name: str
     id: UUID = field(default_factory=uuid4)
+    # Short summary of what the cluster is about, for display. canonical_name stays the identity
+    # key (cluster_id is a uuid5 of it) and is the most informative raw title in the group, which
+    # reads as one member's post rather than a topic. Defaults to canonical_name so a row written
+    # before this field existed still renders.
+    _topic_label: Optional[str] = field(default=None, repr=False)
     summary_text: Optional[str] = None
     category: str = "unclassified"
     cross_platform_score: float = 0.0
     signals: List[TrendSignal] = field(default_factory=list)
     first_seen_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def topic_label(self) -> str:
+        return self._topic_label or self.canonical_name
+
+    @topic_label.setter
+    def topic_label(self, value: Optional[str]) -> None:
+        self._topic_label = value
 
     @property
     def momentum_category(self) -> MomentumCategory:

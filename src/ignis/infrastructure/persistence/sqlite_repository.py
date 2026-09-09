@@ -93,6 +93,7 @@ class SqliteTrendRepository(ITrendRepository):
             CREATE TABLE IF NOT EXISTS topic_clusters (
                 id TEXT PRIMARY KEY,
                 canonical_name TEXT NOT NULL UNIQUE,
+                topic_label TEXT,
                 cross_platform_score REAL DEFAULT 0.0,
                 summary_text TEXT,
                 category TEXT DEFAULT 'general',
@@ -165,6 +166,12 @@ class SqliteTrendRepository(ITrendRepository):
                 updated_at TEXT NOT NULL
             );
         """)
+
+        # CREATE TABLE IF NOT EXISTS leaves an existing database untouched, so columns added
+        # after a user's file was created have to be applied here.
+        existing_cluster_columns = {row[1] for row in cur.execute("PRAGMA table_info(topic_clusters)")}
+        if "topic_label" not in existing_cluster_columns:
+            cur.execute("ALTER TABLE topic_clusters ADD COLUMN topic_label TEXT")
 
         # Seed Initial Lexicons & Configs from SQL files if table is empty
         cur.execute("SELECT COUNT(*) FROM market_lexicons")
@@ -327,10 +334,10 @@ class SqliteTrendRepository(ITrendRepository):
                     cur.execute(
                         """
                         INSERT OR REPLACE INTO topic_clusters
-                        (id, canonical_name, cross_platform_score, summary_text, category, first_seen_at, last_updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (id, canonical_name, topic_label, cross_platform_score, summary_text, category, first_seen_at, last_updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (c_id, c.canonical_name, c.cross_platform_score, c.summary_text, c.category, first_seen, last_updated)
+                        (c_id, c.canonical_name, c.topic_label, c.cross_platform_score, c.summary_text, c.category, first_seen, last_updated)
                     )
 
                     for s in c.signals:
@@ -380,6 +387,7 @@ class SqliteTrendRepository(ITrendRepository):
                         SELECT 
                             tc.id,
                             tc.canonical_name,
+                            tc.topic_label,
                             tc.summary_text,
                             tc.category,
                             tc.cross_platform_score,
@@ -392,13 +400,14 @@ class SqliteTrendRepository(ITrendRepository):
                         FROM topic_clusters tc
                         INNER JOIN trend_signals ts ON ts.cluster_id = tc.id
                         WHERE datetime(ts.captured_at) >= datetime('now', '{interval_modifier}')
-                        GROUP BY tc.id, tc.canonical_name, tc.summary_text, tc.category, tc.cross_platform_score, tc.first_seen_at, tc.last_updated_at
+                        GROUP BY tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category, tc.cross_platform_score, tc.first_seen_at, tc.last_updated_at
                         ORDER BY sig_count DESC
                         LIMIT ?
                     )
                     SELECT 
                         rc.id,
                         rc.canonical_name,
+                        rc.topic_label,
                         rc.summary_text,
                         rc.category,
                         rc.cross_platform_score,
@@ -466,6 +475,7 @@ class SqliteTrendRepository(ITrendRepository):
                         TopicCluster(
                             id=UUID(c_id),
                             canonical_name=row["canonical_name"],
+                            _topic_label=row["topic_label"],
                             cross_platform_score=final_score,
                             summary_text=dynamic_summary,
                             category=row["category"] or "unclassified",
