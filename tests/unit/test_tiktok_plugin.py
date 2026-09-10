@@ -137,17 +137,27 @@ def test_an_intent_probe_never_borrows_another_market_phrasing():
     assert plugin._intent_probe_templates("US") == ["how to make {}"]
 
 
-def test_a_trailing_space_in_a_ui_noise_term_survives_registration():
-    """The space in "live " is load-bearing, so registration must not strip it.
+def test_a_ui_noise_term_matches_on_word_boundaries():
+    """A term must match the word, not the middle of a longer one.
 
-    It stops the term matching inside a longer word like "livestream". It does NOT stop it
-    matching mid-string: "olive oil" contains "live ", so a video with that title is dropped.
-    That false positive predates moving this list into the database and is asserted here so it
-    stays visible; matching on word boundaries would be a change of behaviour, not a refactor.
+    Raw substring matching dropped "olive oil review" as a notification, because the stored
+    term is "live " and "olive " contains it. The trailing space in that term was there to stop
+    the same thing happening inside "livestream", and a boundary does both jobs, so the space
+    is no longer load-bearing and registration strips it.
     """
     plugin = TikTokPlugin()
     plugin.register_ui_noise(["live "])
 
-    assert plugin._is_private_or_notification("live  ngay bay gio") is True
+    assert plugin._is_private_or_notification("live ngay bay gio") is True
     assert plugin._is_private_or_notification("livestream review") is False
-    assert plugin._is_private_or_notification("olive oil review") is True
+    assert plugin._is_private_or_notification("olive oil review") is False
+
+
+def test_a_multi_word_term_tolerates_odd_whitespace():
+    """A scraped caption may carry a line break where the badge text has a single space."""
+    plugin = TikTokPlugin()
+    plugin.register_ui_noise(["bắt đầu follow"])
+
+    assert plugin._is_private_or_notification("UserA đã bắt đầu follow bạn") is True
+    assert plugin._is_private_or_notification("UserA đã bắt  đầu\nfollow bạn") is True
+    assert plugin._is_private_or_notification("bắt đầu theo dõi") is False

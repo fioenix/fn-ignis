@@ -248,11 +248,38 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   tiêu đề của một signal khác trong cùng cluster thì nó không thấy, và nhãn rơi về danh sách
   token. Đây là lý do `lê · thị · riêng` vẫn còn dạng cũ.
 
-- [ ] **Đợi quyết: `_is_private_or_notification` khớp theo substring thô.** `"live "` khớp trong
-  `"olive oil review"`, nên một video thật bị loại như thông báo. Lỗi này có từ trước, không phải
-  do lần chuyển từ vựng. Sửa bằng cách khớp theo biên từ là đổi hành vi, nên tao chưa làm.
+- [x] **Đã xong (10/09/2026): `_is_private_or_notification` khớp theo biên từ.**
+  Mỗi term giờ compile thành pattern có `\b` hai đầu, khoảng trắng trong cụm khớp lỏng để chịu
+  được caption có dấu ngắt dòng. Kiểm `\b` với chữ có dấu trước khi làm: 10/10 ca đúng, gồm
+  `đã thích` khớp trong "bạn đã thích video này" mà không khớp trong "đã thíchx".
 
+  Dấu cách cuối của term `"live "` từ đó thành **không còn cần thiết**, nên registration strip
+  term. Ghi chú cũ nói dấu cách đó load-bearing giờ đã sai, đã sửa lại.
 
+  Đo trên 15.771 tiêu đề thật: substring loại 47, biên từ loại 46. Bỏ được `olive oil review`
+  và `livestream review`; sinh thêm `Studio 2.0 is live.` vì substring cần `"live "` có dấu cách
+  nên bỏ lỡ `live.`
+- [ ] **NHƯNG: từ vựng của guard này đang gây hại hơn là bảo vệ.** Đo cùng lúc, qua chính plugin:
+  trong 46 tiêu đề bị loại, **gần như toàn bộ là post công khai thật**, không phải thông báo:
+  - `The new Gmail app icon is live on Google Play`
+  - `KHÁT VỌNG VINH QUANG | Tùng Dương - Live at ASEAN Huyndai Cup 2026`
+  - `Studio 2.0 is live.`
+  - `EM CHỈ MUỐN THÔNG BÁO LÀ EM TÌM CON VỀ ĐƯỢC RUIIIIII`
+
+  Ba term chịu trách nhiệm gần hết: `live` (40 lần), `thông báo` (3), `tin nhắn` (2). Cả ba là
+  từ thông thường, không phải chuỗi UI. Chỉ `đang phát trực tiếp` bắn 1 lần và đúng.
+
+  **9 trong 13 term chưa bao giờ bắn**: `follow bạn`, `bắt đầu follow`, `thích bình luận`,
+  `thích video`, `đã thích`, `bình luận của bạn`, `đăng lại`, `follow lại`, `hộp thư`. Chúng là
+  chuỗi UI thật và không tốn gì.
+
+  Nguyên nhân: từ vựng này lấy từ **trang thông báo** của TikTok, mà connector không cào trang
+  đó — nó cào explore và search grid. Lời hứa về quyền riêng tư được bảo đảm bằng **cấu trúc**
+  (không bao giờ vào surface đó), còn bộ lọc text này là lớp phụ và đang đắt.
+
+  **Đề nghị:** bỏ ba term `live`, `thông báo`, `tin nhắn` khỏi domain `tiktok_ui_noise`, giữ
+  `đang phát trực tiếp` cho badge live tiếng Việt. Tao không tự làm vì đây là từ vựng của một
+  privacy guard, và guard đang fail-closed — bỏ term là quyết định của mày.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)

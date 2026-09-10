@@ -40,9 +40,10 @@ class TikTokPlugin(IConnectorPlugin):
     def __init__(self, auth_manager: Optional[TikTokAuthManager] = None):
         self._auth_manager = auth_manager
         # TikTok's own notification, inbox and live wording, loaded from the tiktok_ui_noise
-        # lexicon domain. Held per locale in the database because a hardcoded list only ever
-        # covered Vietnamese, and a Korean session then got no filtering at all.
-        self._ui_noise: List[str] = []
+        # lexicon domain and compiled to word-boundary patterns. Held per locale in the database
+        # because a hardcoded list only ever covered Vietnamese, and a Korean session then got
+        # no filtering at all.
+        self._ui_noise: List["re.Pattern[str]"] = []
         self._warned_about_missing_ui_noise = False
         # Commercial-intent probe phrasings, keyed by geo, from tiktok_suggest_templates_*.
         self._suggest_templates: Dict[str, List[str]] = {}
@@ -69,10 +70,22 @@ class TikTokPlugin(IConnectorPlugin):
     def register_ui_noise(self, terms: List[str]) -> None:
         """Bind the notification and inbox wording this plugin must never ingest.
 
-        Terms are lowercased but not stripped: "live " carries its trailing space on purpose,
-        so that it matches the live badge and not the middle of "olive".
+        Each term is compiled to match on word boundaries. Raw substring matching was the
+        earlier behaviour and it fired inside longer words: "live " matched in "olive oil
+        review", so a genuine video was dropped as a notification. A boundary does that job
+        properly, which also makes the trailing space in the stored "live " term redundant
+        rather than load-bearing, so terms are stripped here.
+
+        Whitespace inside a phrase is matched loosely, because a scraped caption may carry a
+        line break or a double space where the badge text has one.
         """
-        self._ui_noise = [t.lower() for t in terms or [] if t and t.strip()]
+        self._ui_noise = []
+        for term in terms or []:
+            words = (term or "").strip().lower().split()
+            if not words:
+                continue
+            pattern = r"\b" + r"\s+".join(re.escape(word) for word in words) + r"\b"
+            self._ui_noise.append(re.compile(pattern, re.IGNORECASE))
 
     @property
     def platform(self) -> PlatformType:
@@ -135,8 +148,7 @@ class TikTokPlugin(IConnectorPlugin):
                     "market_lexicons."
                 )
             return True
-        t_low = text.lower()
-        if any(noise in t_low for noise in self._ui_noise):
+        if any(pattern.search(text) for pattern in self._ui_noise):
             return True
         if re.match(r"^\s*\d+[\s\.\,kKmMbB]*\s*$", text):
             return True
