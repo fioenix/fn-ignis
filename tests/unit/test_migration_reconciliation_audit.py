@@ -376,7 +376,7 @@ def test_the_json_report_is_deterministic(hostile_db, tmp_path):
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(first), "--quiet"])
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(second), "--quiet"])
     assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
-    assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 3
+    assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 4
 
 
 # --- the tracked baseline must carry evidence, not content ------------------------------------
@@ -645,7 +645,7 @@ def test_provenance_alone_changes_the_serialized_member(tmp_path):
         published_at="2026-08-01T00:00:00+00:00", metric_value=1.0, growth_velocity=0.0,
         geo_code="VN", mission_id=None, cluster_id=None,
     )
-    args = dict(identity="youtube:video_id:v", row=row, metric_value=1.0, growth_velocity=0.0)
+    args = dict(identity="youtube:video:v", row=row, metric_value=1.0, growth_velocity=0.0)
     as_legacy = observation_member(observed_at=None, time_provenance="legacy_publish_only", **args)
     as_unknown = observation_member(observed_at=None, time_provenance="unknown", **args)
     assert as_legacy != as_unknown, "provenance must reach the serialized member"

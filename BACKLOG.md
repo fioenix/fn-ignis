@@ -148,7 +148,7 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   `published_at = captured_at` cũ, `time_provenance = legacy_publish_only`. Time-window score mặc
   định chỉ dùng `exact_ingestion`; dữ liệu legacy vẫn được xuất hiện trong all-history hoặc
   published-time analysis nhưng output phải gắn cảnh báo approximate.
-- [ ] **Chưa chốt: identity giữ nhãn field hay giữ namespace của object (mở 10/09/2026).**
+- [x] **Identity khoá theo namespace của object, không theo nhãn field (chốt 10/09/2026).**
   Audit đang khoá identity theo `platform:<tên field>:<giá trị>`, mà tên field là cách audit
   *tìm ra* identifier chứ không phải bản chất object. Hệ quả đo được trên corpus thật: cùng một
   video YouTube đi vào hai lần, một lần có `video_id` trong metadata và một lần chỉ parse được từ
@@ -159,12 +159,12 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   (1.479 / 17.118 / 0); mission evidence vẫn **1.301** với 2 mission lặp identity; cluster
   membership vẫn **15.754** nhưng identity nằm nhiều cluster tăng **172 → 175**; reason code
   `repeat_observation_of_one_source` 14.089 → 14.095. Cả bốn digest đổi, audit vẫn `BALANCED`.
-  Schema đã chọn hướng namespace: `sources.external_id` mang sẵn `"<kind>:<value>"`, vì
-  `UNIQUE (platform, external_id)` trong contract chỉ là identity đầy đủ khi namespace nằm trong
-  key. Phần chưa chốt là baseline: nếu giữ số 1.927 thì backfill phải cố ý tái tạo 3 lần chia
-  sai; nếu chốt 1.924 thì `docs/migrations/2026-09-10-source-observation-baseline.{json,md}` phải
-  regenerate thành `schema_version: 4` trước khi viết backfill, và gate đối soát đổi mục tiêu
-  source sang 1.924. Ba con số còn lại giữ nguyên.
+  Đã chốt 1.924: giữ 1.927 đồng nghĩa backfill cố tình tái tạo ba source đã biết là bị chia sai.
+  Đường phân giải có chỗ riêng là `sources.identity_source`, không tham gia key. Baseline
+  regenerate thành `schema_version: 4`, member counts `1.924 / 18.597 / 1.301 / 15.754`, cả bốn
+  digest đổi. Kéo theo một quyết định kiến trúc: policy không được nằm trong script audit, vì
+  commit persistence viết lại mapping sẽ thành định nghĩa identity thứ hai. Resolver canonical ở
+  `src/ignis/domain/source_identity.py`; audit, backfill và live write path gọi cùng một hàm.
 - [x] **Không dùng `xfail` cho defect này (chốt 10/09/2026).** `xfail` trên `main` biến một
   data-integrity defect đang hoạt động thành "known acceptable failure". Giá trị của contract test
   là làm merge gate; BACKLOG đã đủ để defect hiện diện trên `main`. Contract sống RED trên branch

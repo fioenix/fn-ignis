@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sqlite3
 import sys
 from collections import Counter, defaultdict
@@ -41,45 +40,28 @@ from hashlib import sha256
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
-from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 # --- Identity policy -------------------------------------------------------------------------
 #
-# A canonical source is the external object, keyed on platform plus the identifier that platform
-# assigns it. The connector already records that identifier in metadata, so it is preferred over
-# anything parsed out of a URL. raw_title is deliberately excluded: ten URLs in the corpus carry
-# two different titles, which proves a title is something observed about a source rather than
-# part of its identity.
-#
-# These are third-party field names, matched verbatim against what each connector writes.
-EXTERNAL_ID_METADATA_KEYS: Dict[str, Tuple[str, ...]] = {
-    "youtube": ("video_id",),
-    "tiktok": ("item_id", "hashtag"),
-    "threads": ("post_id",),
-    "reels": ("reel_id",),
-    # Google Trends has no object id: the trend keyword is the object. The explore URL carries it
-    # in q=, so URL and metadata agree here rather than one being a fallback for the other.
-    "google": ("keyword", "probe_keyword"),
-}
+# Imported, not restated. The audit, the backfill it gates and the live write path have to agree
+# on what makes two sightings one object; a copy of the mapping here would make this file a
+# second definition of identity, and the digests it publishes would describe a corpus the writer
+# no longer produces.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-# URL shapes to recover an identifier from when metadata is absent, tried in order.
-URL_ID_PATTERNS: Dict[str, Tuple[Tuple[str, str], ...]] = {
-    "youtube": ((r"[?&]v=([A-Za-z0-9_-]{6,})", "video"), (r"youtu\.be/([A-Za-z0-9_-]{6,})", "video")),
-    "tiktok": ((r"/video/(\d+)", "video"), (r"/tag/([^/?#]+)", "tag")),
-    "threads": ((r"/post/([A-Za-z0-9_-]+)", "post"), (r"/t/([A-Za-z0-9_-]+)", "post")),
-    "reels": ((r"/reel/([A-Za-z0-9_-]+)", "reel"), (r"/p/([A-Za-z0-9_-]+)", "post")),
-    "google": ((r"[?&]q=([^&]+)", "keyword"),),
-}
-
-# Query parameters that never change which object a URL points at.
-TRACKING_PARAMS = frozenset(
-    {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"}
+from ignis.domain.source_identity import (  # noqa: E402
+    IDENTITY_FROM_METADATA,
+    IDENTITY_FROM_NORMALIZED_URL,
+    IDENTITY_FROM_URL,
+    IDENTITY_UNRESOLVED,
+    normalize_url,
+    resolve_source_identity,
 )
 
-RESOLUTION_METADATA = "metadata_external_id"
-RESOLUTION_URL = "url_external_id"
-RESOLUTION_NORMALIZED_URL = "normalized_url_fallback"
-RESOLUTION_UNRESOLVED = "unresolved"
+RESOLUTION_METADATA = IDENTITY_FROM_METADATA
+RESOLUTION_URL = IDENTITY_FROM_URL
+RESOLUTION_NORMALIZED_URL = IDENTITY_FROM_NORMALIZED_URL
+RESOLUTION_UNRESOLVED = IDENTITY_UNRESOLVED
 
 MERGE_REPEAT = "repeat_observation_of_one_source"
 MERGE_TITLE_CHANGED = "observed_title_changed"
@@ -87,39 +69,12 @@ MERGE_URL_VARIANT = "url_variant_of_one_source"
 MERGE_UNCLASSIFIED = "unclassified_identity_collision"
 
 
-def normalize_url(raw: Optional[str]) -> str:
-    """Drop the parts of a URL that never distinguish two objects."""
-    if not raw:
-        return ""
-    parts = urlsplit(raw.strip())
-    host = parts.netloc.lower()
-    if host.startswith("www."):
-        host = host[4:]
-    query = "&".join(
-        f"{k}={v}" for k, v in sorted(parse_qsl(parts.query)) if k not in TRACKING_PARAMS
-    )
-    path = parts.path.rstrip("/")
-    return urlunsplit((parts.scheme.lower(), host, path, query, ""))
-
-
 def resolve_identity(platform: str, source_url: Optional[str], metadata: Any) -> Tuple[str, str]:
-    """Return (identity, resolution_reason) for one legacy row."""
-    meta = metadata if isinstance(metadata, dict) else {}
-    for key in EXTERNAL_ID_METADATA_KEYS.get(platform, ()):
-        value = meta.get(key)
-        if isinstance(value, (str, int)) and str(value).strip():
-            return f"{platform}:{key}:{str(value).strip()}", RESOLUTION_METADATA
-
-    for pattern, kind in URL_ID_PATTERNS.get(platform, ()):
-        match = re.search(pattern, source_url or "")
-        if match:
-            return f"{platform}:{kind}:{match.group(1)}", RESOLUTION_URL
-
-    normalized = normalize_url(source_url)
-    if normalized:
-        return f"{platform}:url:{normalized}", RESOLUTION_NORMALIZED_URL
-
-    return "", RESOLUTION_UNRESOLVED
+    """(identity, resolution_reason) for one legacy row, from the shared resolver."""
+    identity = resolve_source_identity(platform, source_url, metadata)
+    if identity is None:
+        return "", RESOLUTION_UNRESOLVED
+    return identity.canonical_identity, identity.identity_source
 
 
 # --- Row model -------------------------------------------------------------------------------
@@ -592,7 +547,9 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     }
 
     return {
-        "schema_version": 3,
+        # 4: identity keys on the object namespace, not on the metadata field name that
+        # happened to carry the identifier. Three YouTube videos stop being six sources.
+        "schema_version": 4,
         "digests": digests,
         "sources": {
             "canonical_sources": len(rows_per_identity),

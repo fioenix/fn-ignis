@@ -1,7 +1,7 @@
 # Baseline đối soát: source / observation / mission evidence
 
 **Ngày chạy:** 10/09/2026 · **Backend:** PostgreSQL/TimescaleDB (Supabase)
-**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `3`
+**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `4`
 **Lưu ý:** bản baseline đầu tiên của cùng ngày đã bị thay thế — xem mục "Bản sửa" bên dưới.
 **Dữ liệu máy đọc:** [`2026-09-10-source-observation-baseline.json`](2026-09-10-source-observation-baseline.json)
 
@@ -46,6 +46,39 @@ Gate hiện tại dựng observation theo **legacy lineage**: một observation 
 `trend_signals`, cộng một cho mỗi điểm `signal_metrics` **không** lặp lại toàn bộ metric payload
 của dòng cha. Chỉ bản copy mà `sql/008` tạo ra là được gộp. Member là **multiset**.
 
+## Bản sửa v4: đường phân giải không được tham gia identity
+
+Bản v3 khoá identity theo **tên field metadata** chứa identifier, tức khoá theo cách audit tìm ra
+identifier thay vì theo bản chất object. Hệ quả đo được: `youtube:video_id:x` và `youtube:video:x`
+là cùng một video, nhưng bị tính thành hai canonical source. Corpus có **3 cặp** như vậy.
+
+Sửa: identity dùng namespace của object; đường phân giải chuyển sang cột riêng
+`sources.identity_source` với ba giá trị `metadata_external_id` / `url_external_id` /
+`normalized_url_fallback`. Có test trực tiếp cho cả hai chiều — hai đường phân giải cùng object
+phải cho một identity, còn `tiktok:tag:12345` và `tiktok:video:12345` phải khác nhau.
+
+Kèm theo là một sửa về kiến trúc, không phải về số: policy trước đây nằm trong chính script audit.
+Nếu commit persistence viết lại mapping thì đó là **định nghĩa identity thứ hai**, và audit sẽ đo
+một corpus mà writer không còn tạo ra. Policy giờ nằm ở `src/ignis/domain/source_identity.py`;
+audit, backfill và live write path gọi cùng một resolver. Baseline v4 này được sinh bằng chính
+resolver đó.
+
+Đổi gì:
+
+| | v3 | v4 |
+|---|---|---|
+| sources | 1.927 | **1.924** |
+| observations | 18.597 | 18.597 |
+| provenance `exact` / `legacy` / `unknown` | 1.479 / 17.118 / 0 | không đổi |
+| mission_associations | 1.301 | 1.301 |
+| cluster_memberships | 15.754 | 15.754 |
+| identity nằm nhiều cluster | 172 | **175** |
+| `repeat_observation_of_one_source` | 14.089 | **14.095** |
+| digest | cả bốn | **cả bốn đổi** |
+
+Cả bốn digest đổi vì identity là thành phần đầu tiên của mọi member trong cả bốn tập. Số member
+thì chỉ `sources` đổi, và đúng bằng 3 — không có bucket nào khác dịch chuyển theo.
+
 ## Projection: 10 field được bảo toàn, 4 mất mát có chủ ý
 
 Một observation member được render trên đúng những field này:
@@ -71,18 +104,41 @@ là **multiset** chứ không phải set. Nhãn `algorithm` trong JSON ghi đún
 
 | Tập | SHA-256 (16 ký tự đầu) | Member |
 |---|---|---|
-| sources | `cf7bf6501d87b14b` | 1.927 |
-| observations | `df14bd481520ad69` | 18.597 |
-| mission_associations | `d87299a59340eb9d` | 1.301 |
-| cluster_memberships | `532e7834fd44a2f9` | 15.754 |
+| sources | `69d72aee192bf526` | 1.924 |
+| observations | `2caee5f47ee4754b` | 18.597 |
+| mission_associations | `0b9cc2a7a156487d` | 1.301 |
+| cluster_memberships | `4a2fecf505b063a0` | 15.754 |
+
+Cả bốn digest ở bản v3 đều không còn dùng được để đối soát: identity là thành phần đầu tiên của
+mọi member trong cả bốn tập, nên đổi chính sách identity thì đổi cả bốn chuỗi băm. Số member thì
+chỉ có `sources` đổi.
 
 ## Công thức và aggregate
 
-### Source: 1.927 canonical
+### Source: 1.924 canonical
 
-Phần này không đổi so với bản trước. Identity là `platform` cộng identifier do platform cấp, đọc
-từ metadata connector, URL chỉ là fallback. `raw_title` bị loại: 10 URL trong corpus mang hai
-title khác nhau.
+Identity là `platform`, cộng namespace của object, cộng identifier do platform cấp:
+`external_id` mang sẵn dạng `"<kind>:<value>"`. `raw_title` bị loại — 10 URL trong corpus mang
+hai title khác nhau, nên title là thứ được quan sát về một source chứ không định danh nó.
+
+Bản v3 đếm 1.927 vì nó khoá identity theo **tên field metadata** đã chứa identifier. Tên field là
+cách audit tìm ra identifier, không phải bản chất object: cùng một video YouTube vào corpus hai
+lần — một lần có `video_id` trong metadata, một lần chỉ parse được từ URL — bị tính thành hai
+canonical source. Có 3 cặp như vậy, và 1.927 − 3 = **1.924**. Đường phân giải vẫn được ghi, ở
+`sources.identity_source`, nhưng không tham gia key.
+
+| Nhãn connector | Namespace |
+|---|---|
+| YouTube `video_id`, `?v=`, `youtu.be/` | `video` |
+| TikTok `item_id`, `/video/` | `video` |
+| TikTok `hashtag`, `/tag/` | `tag` |
+| Threads `post_id`, `/post/`, `/t/` | `post` |
+| Reels `reel_id`, `/reel/`, `/p/` | `reel` |
+| Google `keyword`, `probe_keyword`, `?q=` | `keyword` |
+
+Namespace nằm **trong** key chứ không nằm cạnh: trên TikTok, một hashtag tên `12345` và item
+`12345` là hai object khác nhau, nên gộp chúng vào một cột là điều kiện để
+`UNIQUE (platform, external_id)` trở thành identity đầy đủ thay vì gần đầy đủ.
 
 | Nguồn identity | Số dòng |
 |---|---|
@@ -96,12 +152,15 @@ Reason code cho mỗi lần một identity giữ nhiều dòng legacy:
 
 | Reason | Số dòng |
 |---|---|
-| `repeat_observation_of_one_source` | 14.089 |
+| `repeat_observation_of_one_source` | 14.095 |
 | `observed_title_changed` | 287 |
 | `url_variant_of_one_source` | 12 |
 | `unclassified_identity_collision` | **0** |
-| identity chỉ giữ một dòng | 1.550 |
+| identity chỉ giữ một dòng | 1.544 |
 | **Tổng** | **15.938** |
+
+So với v3, `repeat_observation_of_one_source` tăng 14.089 → 14.095 và số identity một dòng giảm
+1.550 → 1.544: đúng 6 dòng của 3 cặp vừa nhập về chung identity.
 
 ### Observation: 18.597, không dòng nào bị giảm
 
@@ -210,7 +269,7 @@ một source nhiều hơn một lần — đúng trường hợp mà constraint 
 1.301 chỉ là những gì **đã được persist**. Evidence mà mission thu trong bộ nhớ nhưng chưa bao giờ
 gắn vào DB thì không phục dựng được, và audit không đoán.
 
-### Cluster membership: 172 identity nằm nhiều cluster
+### Cluster membership: 175 identity nằm nhiều cluster
 
 | | |
 |---|---|
@@ -221,14 +280,14 @@ gắn vào DB thì không phục dựng được, và audit không đoán.
 | **membership (multiset)** | **15.754** |
 | payload phân biệt được | 15.653 |
 | `indistinguishable_membership_multiplicity` | 101 |
-| **identity nằm ở nhiều hơn một cluster** | **172** |
+| **identity nằm ở nhiều hơn một cluster** | **175** |
 
 Membership giờ bằng đúng số dòng ánh xạ chắc chắn: **không membership nào bị xoá chỉ vì hai
 observation có cùng business payload**. Con số 586 trong bản trước là hệ quả của cùng lỗi `set`
 đã nêu ở mục "Bản sửa".
 
-172 trường hợp này là bằng chứng đo được cho quyết định đã chốt: cluster membership thuộc
-observation, không thuộc source. Đặt `cluster_id` trên bảng source thì 172 identity này buộc phải
+175 trường hợp này là bằng chứng đo được cho quyết định đã chốt: cluster membership thuộc
+observation, không thuộc source. Đặt `cluster_id` trên bảng source thì 175 identity này buộc phải
 chọn một cluster và bỏ phần còn lại.
 
 ## 14 invariant
@@ -273,7 +332,7 @@ So bản chạy sau với JSON này. Ba điều kiện để coi là thành côn
 2. Mọi observation trỏ đúng một source.
 3. Mọi phép gộp source vẫn có reason code, và `unclassified_identity_collision` vẫn bằng 0.
 
-Cả bốn digest phải **khớp tuyệt đối**, và số member phải khớp đúng: 1.927 source, 18.597
+Cả bốn digest phải **khớp tuyệt đối**, và số member phải khớp đúng: 1.924 source, 18.597
 observation, 1.301 mission association, 15.754 cluster membership. Ba bucket provenance phải khớp
 đúng 1.479 / 17.118 / 0. Migration không được đổi tập
 nào trong bốn tập đó. Nếu một digest lệch, phải chỉ ra được field nào đổi và vì sao — và nếu lý do

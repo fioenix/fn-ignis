@@ -2,7 +2,7 @@
   "balanced": true,
   "cluster_membership": {
     "distinct_membership_payloads": 15653,
-    "identities_spanning_more_than_one_cluster": 172,
+    "identities_spanning_more_than_one_cluster": 175,
     "indistinguishable_membership_multiplicity": 101,
     "memberships": 15754,
     "rows_mapping_certainly": 15754,
@@ -11,16 +11,16 @@
   },
   "digests": {
     "algorithm": "sha256 over NUL-separated members of each sorted multiset",
-    "cluster_memberships": "532e7834fd44a2f9c78fd790c97cbd717708adb767849fba3f18aa0931e658f9",
+    "cluster_memberships": "4a2fecf505b063a0a67d3861b2bf71ee7b4ca48829ecac7875fe009f6741c5ba",
     "member_counts": {
       "cluster_memberships": 15754,
       "mission_associations": 1301,
       "observations": 18597,
-      "sources": 1927
+      "sources": 1924
     },
-    "mission_associations": "d87299a59340eb9d02faa63643129fb7effb8a06a3506f0d1c31bbe08c3d093f",
-    "observations": "df14bd481520ad693495fbedc183934c89533c31d712a2f4b40d187f731bd80e",
-    "sources": "cf7bf6501d87b14b2ed268e9cc439cc7a979b6a272e6c135d2548e0c88733d47"
+    "mission_associations": "0b9cc2a7a156487d7e36a39be6bcf56e0f30a3335fa660e1e5bff5b1879ca515",
+    "observations": "2caee5f47ee4754b2656e6fc6df10aedce6b4bdd07a988e60ed1742345ff4418",
+    "sources": "69d72aee192bf52684187e2c79a80bd944b671ea680cb506841dc32845364a82"
   },
   "invariants": {
     "checked": 14,
@@ -71,20 +71,20 @@
     "trend_signals_rows": 15938
   },
   "sanitized": true,
-  "schema_version": 3,
+  "schema_version": 4,
   "sources": {
-    "canonical_sources": 1927,
-    "identities_holding_one_row": 1550,
+    "canonical_sources": 1924,
+    "identities_holding_one_row": 1544,
     "merge_reasons": {
       "observed_title_changed": 287,
-      "repeat_observation_of_one_source": 14089,
+      "repeat_observation_of_one_source": 14095,
       "url_variant_of_one_source": 12
     },
     "resolution_reasons": {
       "metadata_external_id": 15790,
       "url_external_id": 148
     },
-    "rows_inside_merged_identities": 14388,
+    "rows_inside_merged_identities": 14394,
     "unclassified_collision_count": 0,
     "unresolved_rows": 0
   }
