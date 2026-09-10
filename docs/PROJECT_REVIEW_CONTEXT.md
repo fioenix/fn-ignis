@@ -13,8 +13,16 @@ brought up to date.
 
 The day this snapshot covers was spent on repair, not features, and that shows in §8: four
 defects in the setup and config path were found by writing tests for them rather than by using
-the product. §4 now carries the first end-to-end product measurement the project has, and §7
-records what the owner has decided since the previous snapshot.
+the product. §4 carries the project's first end-to-end product measurement, and §7 records what
+the owner has decided since the previous snapshot.
+
+**Amended the same day, after an external review.** That review found two defects that outrank
+everything else here and that this document had asserted around rather than noticed: mission
+evidence is not reproducible from the database, and the two mission execution paths disagree on
+timeframe and on replacement semantics. Both were independently verified before this amendment —
+see the note in §4 and item 0 in §6. The §4 signal counts are annotated rather than deleted,
+because the gap between what a run summarised and what it persisted is the evidence for the
+defect. The review itself is at `.handoff/2026-09-10-repository-review.handoff.md`.
 
 ---
 
@@ -134,13 +142,38 @@ TikTok metric race was fixed.
 
 | | 1 — no TikTok | 2 — logged in | 3 — race fixed |
 |---|---|---|---|
-| Signals | 55 | 115 | 156 |
+| Signals **as summarised** | 55 | 115 | 156 |
+| Signals **still attached in the DB** | 55 | **57** | **55** |
 | tiktok | 0 `AUTH_REQUIRED` | 48 | 60 |
 | threads | 0 `EMPTY_NO_DATA` | 10 | 39 |
 | coverage | 40.0 | 100.0 | 100.0 |
 | freshness | 100.0 | 90.4 | 77.6 |
 | language precision | 34.5 | 40.9 | 38.5 |
 | overall confidence | 67.0 `MEDIUM` | 80.7 `HIGH` | 75.5 `MEDIUM` |
+
+> **This table is not reproducible from the database, and the reason is a defect.** An external
+> review on 10/09 tried to recompute it and could not. Verified here: querying
+> `trend_signals` by `mission_id` returns 55 / 57 / 55, not 55 / 115 / 156 — and mission 2 has
+> **zero** Google rows and 3 YouTube rows, because those sources stayed attached to mission 1.
+>
+> Root cause, confirmed in `postgres_repository.py` (`save_signals`, mirrored in SQLite): rows are
+> deduplicated globally on `(platform, source_url, raw_title)`, and the UPDATE branch refreshes
+> `metric_value`, `captured_at`, `published_at`, `metadata` and `cluster_id` but **not
+> `mission_id`**. A source therefore belongs permanently to whichever mission saw it first. The
+> figures in the "as summarised" row are the in-memory counts each run collected; they were never
+> persisted as that mission's evidence.
+>
+> A second confirmed defect compounds it. The two mission execution paths disagree:
+> `ExecuteMissionUseCase` passes `custom_timeframe=mission.timeframe` and calls
+> `delete_mission_signals` before saving; `AutonomousRefinementOrchestrator` — the path behind
+> `run_autonomous_research_mission`, which produced these three runs — passes no timeframe and
+> deletes nothing. It computes `tf_days` and hands it only to the quality evaluator. **So these
+> runs collected on connector defaults while freshness was scored against 7 days.**
+>
+> Treat the rows below as directional evidence about connectors and about the metric fix, not as a
+> measurement. The `55 → 115 → 156` growth and the coverage jump are corroborated by the channel
+> summaries and by TikTok going from `AUTH_REQUIRED` to returning rows. The freshness decline, and
+> therefore conclusion 3, rest on a comparison the collector never honoured.
 
 Three things a reviewer should take from that table, because none of them is obvious:
 
@@ -156,7 +189,9 @@ Three things a reviewer should take from that table, because none of them is obv
 3. **Confidence fell while the corpus grew.** 80.7 `HIGH` → 75.5 `MEDIUM`, driven entirely by
    freshness 90.4 → 77.6 as Threads went 10 → 39 signals and the new ones were older. The
    scorecard treats a wider corpus as lower quality. Whether that is the right weighting is an
-   open product question, not a defect — see §9.
+   open product question — see §9 — **but this particular reading is not evidence for it**,
+   because the collector ignored the 7-day timeframe the freshness score was computed against.
+   The weighting question stands on the formula, not on this number.
 
 **Not verified.** Two of the five keywords (`salon toc`, `cong thuc nhuom`) returned n=0 videos
 in all three runs, so their index reflects demand only and stays `UNVERIFIED_DEMAND_GAP`. And
@@ -192,6 +227,16 @@ reached, tested, and then reversed, and the reversal is the useful part. In part
 ## 6. Known debt, with locations
 
 Ordered by how much a reviewer's conclusions would change if they did not know about it.
+
+0. **Mission evidence is not reproducible, and the two mission paths disagree.** This outranks
+   everything below it. `save_signals` deduplicates globally on
+   `(platform, source_url, raw_title)` and never reassigns `mission_id`, so a source belongs
+   permanently to the first mission that saw it and every later mission's dossier is missing the
+   rows it was built from — see the note in §4. Separately, `AutonomousRefinementOrchestrator`
+   omits the timeframe that `ExecuteMissionUseCase` passes, and skips the
+   `delete_mission_signals` replacement that path performs. One workflow, two implementations,
+   already drifting on two observable contracts. No test covers one source participating in two
+   missions.
 
 1. **Probe seeds were machinery vocabulary until 10/09/2026.** Adding eight machinery domains to
    `market_lexicons` on 09/09 left an exclusion list in `ingest_trends.py` naming only the two
@@ -264,14 +309,27 @@ previous snapshot in hand will otherwise re-raise them.
    from git history, verified across `git rev-list --all`. It would need revisiting if anyone
    outside the current users gains access, or if transcripts are shared. Recorded in
    `BACKLOG.md` as an open item so it stays visible rather than being treated as settled.
-6. **The local config chores are done.** `./scripts/bootstrap.sh` was run on 10/09 and all four
-   MCP configs now carry only `IGNIS_ENV_FILE`; `grep` for `AIzaSy`, `IGNIS_ENCRYPTION_KEY` and
-   `DATABASE_URL` across `claude_desktop_config.json`, `~/.codex/config.toml`,
-   `~/.gemini/config/mcp_config.json` and `.mcp.json` returns nothing. The previous snapshot
-   listed a duplicate `fn-ignis` registration as the likely cause of `Connection closed`; there
-   is one registration per client file, so that hypothesis was wrong and the cause is unknown.
-   Claude Desktop and Cowork share `claude_desktop_config.json` — it carries
-   `coworkUserFilesPath` alongside `mcpServers` — so registering once covers both.
+6. **The local config chores are done for three of four clients, and cannot be done for the
+   fourth while Claude Desktop is running.** `./scripts/bootstrap.sh` was run on 10/09;
+   `.mcp.json`, Antigravity's config and `~/.codex/config.toml` now carry only `IGNIS_ENV_FILE`.
+   `claude_desktop_config.json` was rewritten too, and verified — then **reverted**.
+
+   An external review flagged the old four-key `env` block still present. Re-checked: the entry
+   is byte-identical to the pre-bootstrap backup, the file's only other difference from that
+   backup is a list of app-managed `local_*` preference UUIDs, and its mtime is roughly an hour
+   after the last bootstrap write. **Claude Desktop holds its own copy of that file and writes it
+   back from memory, discarding external edits made while it runs.** The restored block carries
+   the *revoked* YouTube key, not the current one, which is why MCP YouTube calls failed while the
+   same code succeeded from a shell.
+
+   The order therefore matters and is not what a reviewer would guess: quit Claude Desktop
+   **first**, then run `./scripts/bootstrap.sh`, then start it. Running bootstrap while the app is
+   open changes nothing durable. Claude Desktop and Cowork share this file — it carries
+   `coworkUserFilesPath` alongside `mcpServers` — so it is the one that matters for both.
+
+   The previous snapshot listed a duplicate `fn-ignis` registration as the likely cause of
+   `Connection closed`; there is one registration per client file, so that hypothesis was wrong
+   and the cause is still unknown.
 
 ## 8. Failure modes this project has actually exhibited
 
