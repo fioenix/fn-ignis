@@ -244,6 +244,26 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [ ] **Còn lại: `BASE_URL` của Creative Center là đường dẫn trước redirect.**
   `/business/creativecenter/inspiration/popular/hashtag/pc/en` giờ 301 sang
   `/creative/creativeCenter/trends`. Browser tự follow nên plugin vẫn chạy. Đo ngày 10/09/2026.
+- [x] **Đã xong (10/09/2026): health report nói rõ TikTok chặn ở surface nào.**
+  Lượt mission trên seed sạch cho TikTok `AUTH_REQUIRED` với 0 signal, trong khi `is_healthy`
+  báo HEALTHY. Tao ban đầu nói nguyên nhân là `search_across_all` đòi session — **sai**.
+  `AUTH_REQUIRED` do `strategic_reasoner` suy từ map `auth_status`, còn `search_signals` truyền
+  `storage_state=None` xuống Playwright rồi cào bình thường, không đòi gì.
+
+  Nguyên nhân thật, đo được: **không có session TikTok nào được lưu**, và `search_signals` không
+  session **chạy không lỗi và trả về 0 card**. Còn `fetch_signals` (explore) thì lượt trước lấy
+  17 signal cũng không session. Nên connector này có **hai surface, hai yêu cầu khác nhau**, và
+  một boolean không diễn tả được.
+
+  `is_healthy` giữ nghĩa năng lực (browser chạy được + trang trả lời) vì explore vẫn hoạt động
+  thật. Thêm `keyword_search_blocked_reason()`, và health report đưa nó ra dạng `remediation`
+  cộng một alert `KEYWORD_SEARCH_BLOCKED`, giữ status HEALTHY. Người vận hành giờ đọc được đúng
+  lý do một mission không nhận gì từ TikTok.
+
+  Một điểm yếu lộ ra khi làm: `hasattr(plugin, ...)` **luôn True với mock**, nên branch mới gọi
+  nó trên mock plugin của hai test khác và nhét `AsyncMock` vào payload JSON — một connector trả
+  lời lạ làm sập cả bản báo cáo. Giờ chỉ nhận chuỗi không rỗng. Check `synthetic_probe` sẵn có
+  cùng kiểu duck-typing và cùng điểm yếu, nhưng nó nằm ngoài phạm vi lần này.
 - [ ] **Còn lại: `_contiguous_phrase` chỉ đọc `canonical_name`.** Nếu cụm đáng làm nhãn nằm ở
   tiêu đề của một signal khác trong cùng cluster thì nó không thấy, và nhãn rơi về danh sách
   token. Đây là lý do `lê · thị · riêng` vẫn còn dạng cũ.

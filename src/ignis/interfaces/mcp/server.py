@@ -2203,6 +2203,29 @@ async def handle_verify_connectors_health() -> str:
                 probe_status = "HEALTHY"
                 remediation = None
 
+                # A connector can be healthy for one surface and blocked on another. TikTok's
+                # explore grid needs no login while its keyword search does, and reporting only
+                # HEALTHY hid the reason a research mission got nothing back from it.
+                if hasattr(plugin, "keyword_search_blocked_reason"):
+                    try:
+                        blocked = await plugin.keyword_search_blocked_reason()
+                    except Exception as be:
+                        blocked = f"Could not determine keyword-search readiness: {be}"
+                    # Only a real message counts. hasattr is true of any mock, and this report
+                    # is serialised to JSON, so anything that is not a string would land in the
+                    # payload and break the whole diagnostic rather than one connector's entry.
+                    if not isinstance(blocked, str) or not blocked.strip():
+                        blocked = None
+                    if blocked:
+                        remediation = blocked
+                        alerts.append({
+                            "level": "WARNING",
+                            "type": "KEYWORD_SEARCH_BLOCKED",
+                            "component": plugin.name,
+                            "message": blocked,
+                            "timestamp": now.isoformat(),
+                        })
+
                 if hasattr(plugin, "synthetic_probe"):
                     try:
                         probe_res = await plugin.synthetic_probe()

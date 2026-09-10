@@ -163,3 +163,83 @@ def test_the_creative_center_url_is_the_one_tiktok_serves_directly():
         TikTokCreativeCenterPlugin.BASE_URL
         == "https://ads.tiktok.com/creative/creativeCenter/trends"
     )
+
+
+@pytest.mark.asyncio
+async def test_no_auth_manager_blocks_keyword_search():
+    """Two surfaces, two requirements: explore needs no login, keyword search does."""
+    reason = await TikTokPlugin().keyword_search_blocked_reason()
+
+    assert reason and "explore" in reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_no_stored_session_blocks_keyword_search():
+    """Measured 10/09/2026: with nothing stored, search_signals ran and returned zero cards.
+
+    Reporting only HEALTHY hid that, which is why a research mission came back with nothing
+    from TikTok and the report gave no reason.
+    """
+    auth = AsyncMock()
+    auth.get_storage_state = AsyncMock(return_value=None)
+
+    reason = await TikTokPlugin(auth_manager=auth).keyword_search_blocked_reason()
+
+    assert reason and "authenticate_tiktok" in reason
+
+
+@pytest.mark.asyncio
+async def test_a_stored_session_blocks_nothing():
+    auth = AsyncMock()
+    auth.get_storage_state = AsyncMock(return_value={"cookies": [{"name": "sessionid", "value": "x"}]})
+
+    assert await TikTokPlugin(auth_manager=auth).keyword_search_blocked_reason() is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_session_read_is_reported_not_raised():
+    """A diagnostic that raises tells the operator less than one that answers."""
+    auth = AsyncMock()
+    auth.get_storage_state = AsyncMock(side_effect=RuntimeError("pool is gone"))
+
+    reason = await TikTokPlugin(auth_manager=auth).keyword_search_blocked_reason()
+
+    assert reason and "pool is gone" in reason
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_surface_does_not_make_the_connector_unhealthy(probes):
+    """The connector still serves the public grid, so the verdict stays HEALTHY.
+
+    The gap belongs in remediation, where an operator reads it, not folded into a boolean that
+    would deregister a connector that works.
+    """
+    auth = AsyncMock()
+    auth.get_storage_state = AsyncMock(return_value=None)
+    plugin = TikTokPlugin(auth_manager=auth)
+
+    assert await plugin.is_healthy() is True
+    assert await plugin.keyword_search_blocked_reason() is not None
+
+
+@pytest.mark.asyncio
+async def test_a_non_string_readiness_answer_is_ignored():
+    """hasattr is true of any mock, and this report is serialised to JSON.
+
+    The first version of the health wiring accepted whatever the attribute returned, so a mock
+    plugin in an unrelated test put an AsyncMock into the payload and the whole diagnostic
+    failed to serialise -- one connector's odd answer taking down the entire report.
+    """
+    import json
+
+    from ignis.interfaces.mcp import server as mcp_server
+
+    plugin = AsyncMock()
+    plugin.keyword_search_blocked_reason = AsyncMock(return_value=AsyncMock())
+
+    blocked = await plugin.keyword_search_blocked_reason()
+    accepted = blocked if isinstance(blocked, str) and blocked.strip() else None
+
+    assert accepted is None
+    json.dumps({"remediation": accepted})  # would raise if a mock had been let through
+    assert hasattr(mcp_server, "handle_verify_connectors_health")

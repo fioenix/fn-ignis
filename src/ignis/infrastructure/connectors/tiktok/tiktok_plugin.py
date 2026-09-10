@@ -111,8 +111,11 @@ class TikTokPlugin(IConnectorPlugin):
         A stored session is deliberately not part of the verdict. The explore grid is public,
         an unauthenticated pass still returns cards, and a bound auth manager with nothing
         stored yet is the normal state before authenticate_tiktok has been run: failing on it
-        would report a working connector as broken. Session validity belongs to
-        get_platform_auth_status, which reports expiry on its own.
+        would report a working connector as broken.
+
+        That leaves a gap this method cannot close on its own, because keyword search does need
+        a session. `keyword_search_blocked_reason` reports that, and the health check passes it
+        on as remediation; expiry of a session that exists belongs to get_platform_auth_status.
         """
         if not await browser_launch_available():
             return False
@@ -153,6 +156,35 @@ class TikTokPlugin(IConnectorPlugin):
         if re.match(r"^\s*\d+[\s\.\,kKmMbB]*\s*$", text):
             return True
         return False
+
+    async def keyword_search_blocked_reason(self) -> Optional[str]:
+        """Why `search_signals` would come back empty, when that is knowable in advance.
+
+        This connector has two surfaces and they do not need the same thing. The explore grid
+        is public: a pass with no stored session still returns cards, which is why is_healthy
+        does not fail on a missing session. Keyword search is different -- measured 10/09/2026
+        with no session stored, `search_signals` for two seeded keywords ran without error and
+        returned zero cards.
+
+        So a single boolean cannot describe this connector, and reporting HEALTHY on its own
+        hid the reason a research mission got nothing from TikTok. The health report reads this
+        and passes it on as remediation rather than folding it into the verdict, because the
+        connector genuinely still works for the surface that does not need a login.
+        """
+        if not self._auth_manager:
+            return (
+                "No TikTok auth manager is bound, so keyword search cannot use a session. "
+                "The public explore grid still works."
+            )
+        try:
+            if await self._auth_manager.get_storage_state():
+                return None
+        except Exception as e:
+            return f"Could not read the stored TikTok session: {e}"
+        return (
+            "No TikTok session is stored, so keyword search returns nothing. Run "
+            "authenticate_tiktok. The public explore grid still works without one."
+        )
 
     async def resolve_ingest_runtime(self) -> IngestRuntime:
         """TikTok exposes no official read API for this surface, so a browser is the only way in."""
