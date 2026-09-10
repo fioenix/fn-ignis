@@ -183,23 +183,42 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [ ] **Còn lại của mày: `fn-ignis` đang đăng ký hai lần.** Có trong cả `.mcp.json` (workspace) và
   `claude_desktop_config.json` (global), `command` với `args` giống hệt. Đây là nghi phạm cho
   `Connection closed`; server tự nó bắt tay MCP xong trong 1,2 giây, exit 0. Bỏ một trong hai.
-- [ ] **`self_healing_sniffer` ghi `runtime_configs` 97 lần trong một lượt.** Đo trên lượt
-  09/09/2026: 85 lần cho `threads_doc_id_trending_topics`, 7 cho `search_posts`, 5 cho
-  `search_suggestions`, dồn trong khoảng 40 giây. Ghi cùng một giá trị lặp lại vào Postgres.
-  Cần dedupe: chỉ ghi khi giá trị thay đổi thật.
-- [ ] **CHẶN VẬN HÀNH: key YouTube trong `.env` là key cũ đã bị revoke.** Google trả về
-  `400 badRequest · "API key expired. Please renew the API key."` Key mới đã tạo nhưng chưa vào
-  `.env`. Hệ quả: YouTube ingress chết hoàn toàn, và YouTube là 1 trong 2 connector duy nhất
-  worker chạy được, đồng thời chiếm 94% corpus 30 ngày. Đo ngày 09/09/2026.
-- [ ] **`is_healthy()` của hai connector TikTok là `return True` cứng.** `TikTokPlugin` và
-  `TikTokCreativeCenterPlugin` không kiểm gì cả, nên `verify_connectors_health` báo `HEALTHY`
-  cho chúng trong mọi hoàn cảnh, kể cả khi Playwright không chạy được hay session đã hết.
-  Google Trends, Threads, Reels, YouTube đều có probe thật. Bốn trên sáu là thật, hai là hằng số.
-- [ ] **Taxonomy không phủ được câu hỏi lắng nghe mở.** Một lượt Google Trends VN thật ngày
-  09/09 trả 10 signal, cluster ra 10 chủ đề, nhưng 9/10 là `unclassified`: "áp thấp nhiệt đới",
-  "hồ ngọc hà", "match day 2026", "đỗ xe". Taxonomy hình dung theo vertical thị trường, còn
-  Google Trends hằng ngày là tin tức và giải trí. Cần quyết: mở rộng taxonomy sang các nhóm
-  phi thị trường, hay chấp nhận `unclassified` là câu trả lời hợp lệ và hiển thị nó tử tế.
+- [x] **Đã xong (10/09/2026): sniffer chỉ ghi khi doc_id thật sự đổi.** `GraphQLDocIdCache.set`
+  chạy trong request interceptor của Playwright, nên Threads gọi GraphQL bao nhiêu lần thì nó
+  chạy bấy nhiêu lần, và lần nào cũng queue một lệnh ghi database. Một lượt đo được 97 lần ghi,
+  85 lần cùng một giá trị cho `trending_topics`.
+
+  doc_id chỉ đổi khi Meta ship build frontend mới, mà đó cũng là lý do duy nhất để persist nó,
+  nên giá trị không đổi giờ ghi một lần rồi thôi. Token LSD xoay liên tục và không được persist,
+  nên nó chỉ cập nhật trong memory và không còn bị tính là thay đổi.
+
+  Sửa thêm hai chỗ trong cùng hàm: task `create_task` trước đây không ai giữ tham chiếu nên có
+  thể bị garbage-collect giữa lúc ghi, và exception trong đó bị nuốt hoàn toàn. Giờ task được
+  giữ trong một set và lỗi được log, vì một lệnh ghi mất nghĩa là tiến trình sau phải sniff lại.
+- [x] **Đã xong (10/09/2026): nhãn chủ đề.** Đo trên 40 cluster đã lưu, dựng lại nhãn bằng chính
+  code: **24/40 nhãn bị bọc trong dấu `…`**, nhiều nhãn bị cắt còn hai từ vô nghĩa
+  (`bão số`, `ba về`, `tên các`), ba nhãn là danh sách token nối bằng `·`, và một nhãn giữ nửa
+  cụm trong ngoặc kép.
+
+  Bốn thứ đã sửa:
+  1. Bỏ hẳn dấu `…`. Nhãn vốn đã là bản tóm tắt, đánh dấu nó là đoạn trích không cho người đọc
+     thêm thông tin nào mà làm mọi nhãn trông như bị cắt. Toàn văn vẫn ở `canonical_name`.
+  2. `TOPIC_LABEL_MIN_WORDS = 3`. Vòng thu gọn trước đây tụt được xuống đúng hai từ.
+  3. Fallback loại `ambiguous_unigrams` — clusterer đã nạp sẵn vốn từ đó cho similarity guard,
+     nhưng chỗ này chưa hỏi tới nó, nên một nhãn ra `cho · cách · sốp`.
+  4. Khi các token đứng liền nhau trong tiêu đề thì trả về đúng cụm đó thay vì danh sách:
+     một công viên tên `lê thị riêng` là một cái tên, không phải ba từ khoá.
+
+  Sau khi sửa, trên đúng 40 cluster đó: ellipsis 24 → **0**, ngoặc kép và ngoặc đơn cân hết.
+  Token-soup còn 3, vì `_contiguous_phrase` chỉ soi `canonical_name`, và có trường hợp token
+  đắt giá nằm ở tiêu đề của signal khác. Chỗ đó tao chưa sửa.
+
+  Ba guard tao thử ngược: đặt lại ellipsis thì 2 test fail, hạ floor về 2 thì test fragment fail,
+  trả lại phép so sánh ngoặc kép sai thì test parity fail. Khôi phục thì 10 test pass.
+- [ ] **Còn lại: `_contiguous_phrase` chỉ đọc `canonical_name`.** Nếu cụm đáng làm nhãn nằm ở
+  tiêu đề của một signal khác trong cùng cluster thì nó không thấy, và nhãn rơi về danh sách
+  token. Đây là lý do `lê · thị · riêng` vẫn còn dạng cũ.
+
 - [ ] **Đợi quyết: `_is_private_or_notification` khớp theo substring thô.** `"live "` khớp trong
   `"olive oil review"`, nên một video thật bị loại như thông báo. Lỗi này có từ trước, không phải
   do lần chuyển từ vựng. Sửa bằng cách khớp theo biên từ là đổi hành vi, nên tao chưa làm.

@@ -301,6 +301,9 @@ class SemanticClusterer(IClusteringEngine):
 
     # Words kept in a topic label.
     TOPIC_LABEL_MAX_WORDS = 6
+    # Trimming a window down to only its shared tokens used to leave two words stranded, which
+    # reads as nothing: "bao so" out of a weather bulletin, "ba ve" out of a family story.
+    TOPIC_LABEL_MIN_WORDS = 3
     # A token appearing in more than this share of clusters describes the corpus, not one topic.
     MAX_TOKEN_DOCUMENT_SHARE = 0.15
     # Minimum in-cluster count per cluster it appears in, before a token may headline a label.
@@ -366,27 +369,77 @@ class SemanticClusterer(IClusteringEngine):
                 (
                     (token, count / max(1, doc_freq.get(token, 1)))
                     for token, count in counts.items()
-                    if count > 1 and not token.isdigit()
+                    # A generic single word cannot carry a label any more than it can identify a
+                    # topic, and the clusterer already holds that vocabulary for exactly this
+                    # judgement. Without it a label came out as "cho, cach, sop".
+                    if count > 1
+                    and not token.isdigit()
+                    and token not in self._ambiguous_unigrams
                 ),
                 key=lambda kv: (-kv[1], kv[0]),
             )
             top = [token for token, weight in ranked[:3] if weight > self.MIN_TOKEN_DISTINCTIVENESS]
             if top:
-                return " \u00b7 ".join(top)
+                # When those tokens sit next to each other in the title they are a phrase, and
+                # reading them as one is the point: a park called "le thi rieng" is a name, not
+                # three separate keywords.
+                phrase = self._contiguous_phrase(words, normalized, top)
+                return phrase or " \u00b7 ".join(top)
 
         start, end = best_start, best_start + window
         if best_score > 0:
-            while end - start > 2 and normalized[start] not in shared:
+            floor = min(self.TOPIC_LABEL_MIN_WORDS, len(words))
+            while end - start > floor and normalized[start] not in shared:
                 start += 1
-            while end - start > 2 and normalized[end - 1] not in shared:
+            while end - start > floor and normalized[end - 1] not in shared:
                 end -= 1
 
-        label = " ".join(words[start:end]).strip(" -:;,.\"'")
-        if start > 0:
-            label = "\u2026 " + label
-        if end < len(words):
-            label = label + " \u2026"
-        return label or canonical
+        # No ellipsis. A label is a summary by definition, so marking it as an excerpt says
+        # nothing a reader can act on while making every label look truncated -- it was on 24 of
+        # 40 stored clusters. The full title stays in canonical_name for anyone who wants it.
+        label = " ".join(words[start:end]).strip(" -:;,.\"'|\u2013\u2014")
+        return self._balance_quotes(label) or canonical
+
+    @staticmethod
+    def _contiguous_phrase(
+        words: List[str], normalized: List[str], tokens: List[str]
+    ) -> Optional[str]:
+        """Return the tokens as they appear in the title when they form one unbroken run."""
+        wanted = set(tokens)
+        best: Optional[str] = None
+        run_start = None
+        for index, token in enumerate(normalized):
+            if token in wanted:
+                if run_start is None:
+                    run_start = index
+            else:
+                if run_start is not None and index - run_start >= 2:
+                    candidate = " ".join(words[run_start:index])
+                    if best is None or len(candidate) > len(best):
+                        best = candidate
+                run_start = None
+        if run_start is not None and len(normalized) - run_start >= 2:
+            candidate = " ".join(words[run_start:])
+            if best is None or len(candidate) > len(best):
+                best = candidate
+        return best.strip(" -:;,.\"'|") if best else None
+
+    # A quote character that opens and closes with the same glyph needs a parity test; a
+    # bracket pair needs its two counts compared. Treating the first kind like the second is
+    # how 'album "ac mong dep' kept its dangling quote.
+    _SYMMETRIC_QUOTES = ('"', "'")
+    _BRACKET_PAIRS = (("(", ")"), ("[", "]"), ("\u201c", "\u201d"), ("\u2018", "\u2019"))
+
+    @classmethod
+    def _balance_quotes(cls, label: str) -> str:
+        """Drop a quote or bracket the window cut in half, which reads as a broken string."""
+        for glyph in cls._SYMMETRIC_QUOTES:
+            if label.count(glyph) % 2:
+                label = label.replace(glyph, "")
+        for opener, closer in cls._BRACKET_PAIRS:
+            if label.count(opener) != label.count(closer):
+                label = label.replace(opener, "").replace(closer, "")
+        return label.strip(" -:;,.\"'|")
 
     def _calculate_cross_platform_score(self, signals: List[TrendSignal]) -> float:
         if not signals:

@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import urllib.parse
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 import httpx
 
@@ -58,29 +58,70 @@ class GraphQLDocIdCache:
                 doc_id = db_doc
         return doc_id, lsd
 
+    # Fire-and-forget persistence tasks, held so the event loop cannot collect one mid-write.
+    _pending_writes: Set["asyncio.Task[None]"] = set()
+
     @classmethod
     def set(cls, query_type: str, doc_id: str, lsd: Optional[str] = None) -> None:
+        """Record a captured doc_id, persisting it only when it is genuinely new.
+
+        The sniffer runs inside a request interceptor, so this is called once per GraphQL
+        request Threads makes -- dozens of times in a single pass. It used to queue a database
+        write every time: one measured pass wrote the same three keys 97 times, 85 of them the
+        same value for trending_topics. The doc_id only changes when Meta ships a new frontend
+        build, which is the whole reason it is persisted, so an unchanged value is written once
+        and then never again.
+        """
         if query_type not in cls._cache:
             cls._cache[query_type] = {}
-        cls._cache[query_type]["doc_id"] = doc_id
+
+        # The LSD token rotates constantly and is never persisted; it belongs in memory only.
         if lsd:
             cls._cache[query_type]["lsd"] = lsd
-        logger.debug(f"Updated GraphQLDocIdCache for '{query_type}': doc_id={doc_id}")
+
+        persisted_key = f"threads_doc_id_{query_type}"
+        known = cls._cache[query_type].get("doc_id")
+        if not known:
+            # First sighting this process: what the database already holds counts as known, or
+            # every restart would rewrite a value that never changed.
+            known = RuntimeConfigManager.get_instance().get_sync(persisted_key) or None
+
+        if known == doc_id:
+            cls._cache[query_type]["doc_id"] = doc_id
+            return
+
+        cls._cache[query_type]["doc_id"] = doc_id
+        logger.info(
+            f"Meta rotated the '{query_type}' doc_id; persisting the newly captured one."
+        )
 
         try:
             loop = asyncio.get_running_loop()
-            persisted_key = f"threads_doc_id_{query_type}"
-            loop.create_task(
-                RuntimeConfigManager.get_instance().set(
-                    key=persisted_key,
-                    value=doc_id,
-                    category="threads",
-                    description=f"Auto-captured doc_id for {query_type}",
-                    updated_by="self_healing_sniffer",
-                )
-            )
         except RuntimeError:
-            pass
+            # No loop: a synchronous caller. The in-memory cache still carries the new value.
+            return
+
+        task = loop.create_task(
+            RuntimeConfigManager.get_instance().set(
+                key=persisted_key,
+                value=doc_id,
+                category="threads",
+                description=f"Auto-captured doc_id for {query_type}",
+                updated_by="self_healing_sniffer",
+            )
+        )
+        cls._pending_writes.add(task)
+        task.add_done_callback(cls._pending_writes.discard)
+        task.add_done_callback(cls._log_write_failure)
+
+    @staticmethod
+    def _log_write_failure(task: "asyncio.Task[None]") -> None:
+        """A dropped write leaves the next process re-sniffing, so it must not pass unnoticed."""
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.warning(f"Could not persist a captured Threads doc_id: {error}")
 
     @classmethod
     def record_signature_from_payload(cls, doc_id: str, lsd: Optional[str], vars_raw: str) -> None:
