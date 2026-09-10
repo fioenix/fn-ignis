@@ -294,3 +294,71 @@ async def test_an_exact_ingestion_observation_must_carry_observed_at(postgres_sc
                 " VALUES (%s, NULL, 1.0, 'exact_ingestion')",
                 (source_id,),
             )
+
+
+# --- decision: multiplicity is data, so the schema must not forbid it -------------------------
+
+
+async def test_two_observations_may_share_source_time_and_metric(postgres_schema):
+    """The surrogate observation id is what keeps two collection events apart.
+
+    A UNIQUE over (source_id, observed_at, metric_value) would look tidy and would delete real
+    data: in the corpus, rows matching on those three carry three distinct growth_velocity
+    values. The audit was corrected for asserting the opposite, and the schema must not encode
+    the same mistake.
+    """
+    with psycopg.connect(postgres_schema, autocommit=True) as conn:
+        source_id = conn.execute(
+            "INSERT INTO sources (platform, external_id) VALUES ('youtube', 'vid-twin')"
+            " RETURNING id"
+        ).fetchone()[0]
+        for velocity in (1.0, 2.0):
+            conn.execute(
+                "INSERT INTO observations (source_id, observed_at, metric_value,"
+                " growth_velocity, time_provenance)"
+                " VALUES (%s, %s, 100.0, %s, 'exact_ingestion')",
+                (source_id, NOW, velocity),
+            )
+        # And again with the velocity identical too: still two sightings.
+        for _ in range(2):
+            conn.execute(
+                "INSERT INTO observations (source_id, observed_at, metric_value,"
+                " growth_velocity, time_provenance)"
+                " VALUES (%s, %s, 100.0, 5.0, 'exact_ingestion')",
+                (source_id, NOW),
+            )
+        kept = conn.execute(
+            "SELECT count(*) FROM observations WHERE source_id = %s", (source_id,)
+        ).fetchone()[0]
+        assert kept == 4
+
+
+async def test_no_unique_constraint_forbids_a_repeated_observation_payload(postgres_schema):
+    with psycopg.connect(postgres_schema) as conn:
+        forbidden = (
+            frozenset({"source_id", "observed_at", "metric_value"}),
+            frozenset({"source_id", "observed_at"}),
+            frozenset({"source_id", "metric_value"}),
+        )
+        constraints = unique_columns(conn, "observations")
+        overlap = sorted(set(map(tuple, map(sorted, constraints & set(forbidden)))))
+        assert not overlap, f"these constraints would delete real collection events: {overlap}"
+
+
+async def test_an_observation_preserves_every_field_the_audit_conserves(postgres_schema):
+    """The schema has to hold what the reconciliation digest promises to carry across."""
+    with psycopg.connect(postgres_schema) as conn:
+        columns = columns_of(conn, "observations")
+        for column in (
+            "source_id",
+            "observed_at",
+            "published_at",
+            "observed_title",
+            "metric_value",
+            "growth_velocity",
+            "geo_code",
+            "source_url",
+            "metadata",
+            "time_provenance",
+        ):
+            assert column in columns, f"observations.{column} is missing"

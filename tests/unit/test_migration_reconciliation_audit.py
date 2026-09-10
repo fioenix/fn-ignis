@@ -30,8 +30,8 @@ CREATE TABLE research_missions (id TEXT PRIMARY KEY, title TEXT);
 CREATE TABLE topic_clusters (id TEXT PRIMARY KEY, canonical_name TEXT);
 CREATE TABLE trend_signals (
     id TEXT PRIMARY KEY, platform TEXT, raw_title TEXT, metric_value REAL,
-    source_url TEXT, geo_code TEXT, cluster_id TEXT, mission_id TEXT,
-    metadata TEXT, captured_at TEXT, published_at TEXT
+    growth_velocity REAL, source_url TEXT, geo_code TEXT, cluster_id TEXT,
+    mission_id TEXT, metadata TEXT, captured_at TEXT, published_at TEXT
 );
 CREATE TABLE signal_metrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT, signal_id TEXT, captured_at TEXT,
@@ -52,16 +52,17 @@ def build_db(path, signals, metrics=(), missions=("m-a", "m-b"), clusters=("c-1"
         [(c, f"cluster {c}") for c in clusters],
     )
     conn.executemany(
-        "INSERT INTO trend_signals (id, platform, raw_title, metric_value, source_url,"
-        " cluster_id, mission_id, metadata, captured_at)"
-        " VALUES (:id, :platform, :raw_title, :metric_value, :source_url, :cluster_id,"
-        " :mission_id, :metadata, :captured_at)",
+        "INSERT INTO trend_signals (id, platform, raw_title, metric_value, growth_velocity,"
+        " source_url, geo_code, cluster_id, mission_id, metadata, captured_at, published_at)"
+        " VALUES (:id, :platform, :raw_title, :metric_value, :growth_velocity, :source_url,"
+        " :geo_code, :cluster_id, :mission_id, :metadata, :captured_at, :published_at)",
         [{**s, "metadata": json.dumps(s.get("metadata") or {})} for s in signals],
     )
+    # metrics entries are (signal_id, captured_at, metric_value[, growth_velocity]).
     conn.executemany(
         "INSERT INTO signal_metrics (signal_id, captured_at, metric_value, growth_velocity)"
-        " VALUES (?, ?, ?, 0)",
-        list(metrics),
+        " VALUES (?, ?, ?, ?)",
+        [tuple(m) if len(m) == 4 else (*m, 1.0) for m in metrics],
     )
     conn.commit()
     conn.close()
@@ -74,11 +75,14 @@ def signal(sid, **overrides):
         "platform": "youtube",
         "raw_title": "A Video",
         "metric_value": 100.0,
+        "growth_velocity": 1.0,
         "source_url": "https://www.youtube.com/watch?v=vid-1",
+        "geo_code": "VN",
         "cluster_id": "c-1",
         "mission_id": None,
         "metadata": {"video_id": "vid-1"},
         "captured_at": "2026-09-01T00:00:00+00:00",
+        "published_at": None,
     }
     base.update(overrides)
     return base
@@ -159,7 +163,7 @@ def hostile_db(tmp_path):
         ),
     ]
     metrics = [
-        ("s1", "2026-09-01T00:00:00+00:00", 100.0),  # duplicates the row itself
+        ("s1", "2026-09-01T00:00:00+00:00", 100.0, 1.0),  # the sql/008 copy of the row itself
         ("s1", "2026-09-05T00:00:00+00:00", 150.0),  # an observation the row does not carry
         ("s6", "2026-09-06T00:00:00+00:00", 900.0),
     ]
@@ -241,10 +245,33 @@ def test_observation_total_is_the_stated_formula_not_a_naive_sum(hostile_db):
     obs = run_audit(hostile_db)["observations"]
     assert obs["trend_signals_rows"] == 11
     assert obs["signal_metrics_rows"] == 3
-    assert obs["triples_shared_by_both_tables"] == 1  # only s1's first point duplicates its row
+    # Only s1's first point repeats its parent row's whole payload, so only it merges.
+    assert obs["lineage_merges_of_the_sql008_copy"] == 1
     assert obs["observations"] == 11 + 3 - 1
     assert obs["naive_sum_for_contrast"] == 14
     assert obs["observations"] < obs["naive_sum_for_contrast"]
+
+
+def test_the_projection_declares_every_field_it_preserves(hostile_db):
+    obs = run_audit(hostile_db)["observations"]
+    assert set(obs["preserved_fields"]) == {
+        "canonical_source_identity",
+        "observed_at",
+        "published_at",
+        "observed_title",
+        "metric_value",
+        "growth_velocity",
+        "geo_code",
+        "normalized_source_url",
+        "canonical_metadata",
+    }
+    # Anything left out is a named, reasoned loss rather than an omission nobody noticed.
+    assert set(obs["intentional_losses"]) == {
+        "trend_signals.id",
+        "signal_metrics.id",
+        "trend_signals.mission_id",
+        "trend_signals.cluster_id",
+    }
 
 
 def test_mission_evidence_reports_exact_and_ambiguous_separately(hostile_db):
@@ -386,7 +413,7 @@ def test_the_sanitized_report_keeps_the_evidence(hostile_db):
     assert report["sources"]["merge_reasons"]
     assert report["sources"]["unclassified_collision_count"] == 0
     assert "unclassified_collisions" not in report["sources"]
-    assert report["invariants"]["checked"] == 11
+    assert report["invariants"]["checked"] == 13
     assert set(report["digests"]) >= {
         "sources",
         "observations",
@@ -463,11 +490,14 @@ def test_a_mission_observing_one_source_twice_is_reported_not_collapsed(hostile_
     assert repeats[0]["row_count"] == 2
 
 
-def test_indistinguishable_observations_are_counted_not_hidden(tmp_path):
-    """Two rows sharing source, captured_at and metric collapse once surrogate ids are gone.
+def test_two_rows_with_an_identical_payload_stay_two_observations(tmp_path):
+    """This is the correction. They are two collection events, not one.
 
-    The audit must say how many, because that is a real reduction the migration performs. It
-    surfaced here as a digest whose member count did not match the observation total beside it.
+    An earlier version built the member set with `set()`, counted these once, and reported the
+    difference as a reduction the migration would perform. Nothing in the schema says two
+    sightings must differ on source, time and metric -- in the real corpus rows that match on
+    those three carry three distinct growth_velocity values. The surrogate observation id is
+    what keeps them apart, so the multiplicity is data and has to be conserved.
     """
     same = dict(captured_at="2026-09-01T00:00:00+00:00", metric_value=100.0)
     path = build_db(
@@ -475,22 +505,60 @@ def test_indistinguishable_observations_are_counted_not_hidden(tmp_path):
         [signal("s1", **same), signal("s2", **same), signal("s3", metric_value=200.0)],
     )
     obs = run_audit(path)["observations"]
-    assert obs["observations"] == 3
-    assert obs["distinct_by_business_identity"] == 2
-    assert obs["collapsing_on_business_identity"] == 1
+    assert obs["observations"] == 3, "no observation may be dropped"
+    assert obs["distinct_observation_payloads"] == 2
+    assert obs["indistinguishable_observation_multiplicity"] == 1
 
 
-def test_the_observation_digest_covers_the_business_identity_set(hostile_db):
+def test_multiplicity_reaches_the_digest(tmp_path):
+    """A set-based digest hashed these two identically; a multiset does not."""
+    same = dict(captured_at="2026-09-01T00:00:00+00:00", metric_value=100.0)
+    one = build_db(str(tmp_path / "one.sqlite"), [signal("s1", **same)])
+    two = build_db(str(tmp_path / "two.sqlite"), [signal("s1", **same), signal("s2", **same)])
+    assert run_audit(one)["digests"]["observations"] != run_audit(two)["digests"]["observations"]
+
+
+def test_two_signal_ids_with_an_identical_payload_are_two_observations(tmp_path):
+    same = dict(captured_at="2026-09-02T00:00:00+00:00", metric_value=7.0, growth_velocity=2.0)
+    path = build_db(str(tmp_path / "a.sqlite"), [signal("s1", **same), signal("s2", **same)])
+    assert run_audit(path)["observations"]["observations"] == 2
+
+
+def test_one_signal_id_copied_into_both_tables_is_one_observation(tmp_path):
+    path = build_db(
+        str(tmp_path / "b.sqlite"),
+        [signal("s1", captured_at="2026-09-02T00:00:00+00:00", metric_value=7.0,
+                growth_velocity=2.0)],
+        metrics=[("s1", "2026-09-02T00:00:00+00:00", 7.0, 2.0)],
+    )
+    obs = run_audit(path)["observations"]
+    assert obs["observations"] == 1
+    assert obs["lineage_merges_of_the_sql008_copy"] == 1
+
+
+def test_the_same_time_and_metric_with_a_different_velocity_is_two_observations(tmp_path):
+    path = build_db(
+        str(tmp_path / "c.sqlite"),
+        [signal("s1", captured_at="2026-09-02T00:00:00+00:00", metric_value=7.0,
+                growth_velocity=2.0)],
+        metrics=[("s1", "2026-09-02T00:00:00+00:00", 7.0, 9.0)],
+    )
+    obs = run_audit(path)["observations"]
+    assert obs["observations"] == 2, "velocity is part of the payload, so this is a new sighting"
+    assert obs["lineage_merges_of_the_sql008_copy"] == 0
+
+
+def test_the_observation_digest_covers_every_observation(hostile_db):
     report = run_audit(hostile_db)
     assert (
         report["digests"]["member_counts"]["observations"]
-        == report["observations"]["distinct_by_business_identity"]
+        == report["observations"]["observations"]
     )
 
 
-def test_the_cluster_digest_covers_the_business_identity_set(hostile_db):
+def test_the_cluster_digest_covers_every_membership(hostile_db):
     report = run_audit(hostile_db)
     assert (
         report["digests"]["member_counts"]["cluster_memberships"]
-        == report["cluster_membership"]["distinct_by_business_identity"]
+        == report["cluster_membership"]["memberships"]
     )

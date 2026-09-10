@@ -1,7 +1,8 @@
 # Baseline đối soát: source / observation / mission evidence
 
-**Ngày chạy:** 10/09/2026 · **Commit:** `8f9ee89` · **Backend:** PostgreSQL/TimescaleDB (Supabase)
-**Kết quả:** `BALANCED`, 11/11 invariant giữ, exit code `0`
+**Ngày chạy:** 10/09/2026 · **Backend:** PostgreSQL/TimescaleDB (Supabase)
+**Kết quả:** `BALANCED`, 13/13 invariant giữ, exit code `0`
+**Lưu ý:** bản baseline đầu tiên của cùng ngày đã bị thay thế — xem mục "Bản sửa" bên dưới.
 **Dữ liệu máy đọc:** [`2026-09-10-source-observation-baseline.json`](2026-09-10-source-observation-baseline.json)
 
 Đây là bằng chứng migration lâu dài, không phải ghi chú tạm. Nó tồn tại vì
@@ -21,27 +22,66 @@ python scripts/migration_reconciliation_audit.py \
   --rows-out .handoff/<ngày>-migration-baseline-rows.json
 ```
 
+## Bản sửa: gate cũ cân bằng trên một projection bị mất dữ liệu
+
+Bản baseline đầu tiên của ngày 10/09 tuyên bố `BALANCED` với 11 invariant, và tuyên bố đó **sai
+tầng**. Nó chứng minh một projection tự nhất quán, không chứng minh toàn corpus được bảo toàn.
+
+Ba lỗi, đã xác nhận:
+
+1. Member của observation, mission và cluster được dựng bằng `set`, nên **multiplicity bị xoá
+   trước khi hash**. `digest_of()` giữ được duplicate nếu nhận list — kiểm trực tiếp: `["a"]` và
+   `["a","a"]` cho hai digest khác nhau, còn `{"a","a"}` cho đúng digest của `["a"]`. Chính caller
+   làm mất dữ liệu.
+2. Audit đọc `signal_metrics` chỉ với `(signal_id, captured_at, metric_value)`, **bỏ
+   `growth_velocity`**. Projection cũng không khoá `published_at`, `observed_title`, `geo_code` và
+   metadata.
+3. Kết luận "683 observation sẽ thực sự bị giảm" **sai**. Không constraint nào buộc hai
+   observation phải khác nhau theo bộ ba đó. Đo trên corpus thật: các dòng trùng cả
+   `(source_url, raw_title, captured_at, metric_value)` mang **3 giá trị `growth_velocity` khác
+   nhau** và 2 biến thể metadata — chúng là những lần thu thập thật sự khác nhau. Surrogate
+   observation ID mới là thứ giữ chúng riêng biệt.
+
+Gate hiện tại dựng observation theo **legacy lineage**: một observation cho mỗi dòng
+`trend_signals`, cộng một cho mỗi điểm `signal_metrics` **không** lặp lại toàn bộ metric payload
+của dòng cha. Chỉ bản copy mà `sql/008` tạo ra là được gộp. Member là **multiset**.
+
+## Projection: 9 field được bảo toàn, 4 mất mát có chủ ý
+
+Một observation member được render trên đúng những field này:
+
+`canonical_source_identity` · `observed_at` · `published_at` · `observed_title` · `metric_value` ·
+`growth_velocity` · `geo_code` · `normalized_source_url` · `canonical_metadata`
+
+Field bị bỏ phải được khai báo là mất mát có chủ ý kèm lý do, để câu "digest khớp" không bao giờ
+có nghĩa là "digest bỏ qua đúng cột đã đổi":
+
+| Field | Lý do |
+|---|---|
+| `trend_signals.id` | surrogate key, migration cấp lại theo thiết kế |
+| `signal_metrics.id` | surrogate key, migration cấp lại theo thiết kế |
+| `trend_signals.mission_id` | đã nằm trong digest `mission_associations` |
+| `trend_signals.cluster_id` | đã nằm trong digest `cluster_memberships` |
+
 ## Digest — bốn tập canonical
 
-SHA-256 trên từng tập đã sort, các member là **business identity** chứ không phải surrogate key.
-Digest khoá trên `trend_signals.id` sẽ đổi ngay khi migration ghi lại dòng, tức là mất giá trị
-đúng lúc cần nó nhất. Khoá trên platform identity cộng giá trị quan sát thì bản chạy sau migration
-tính lại được cùng một digest từ bảng mới.
+SHA-256 trên từng tập đã sort, member là **business identity** chứ không phải surrogate key, và
+là **multiset** chứ không phải set.
 
-| Tập | SHA-256 | Số member |
+| Tập | SHA-256 | Member |
 |---|---|---|
 | sources | `cf7bf6501d87b14b2ed268e9cc439cc7a979b6a272e6c135d2548e0c88733d47` | 1.927 |
-| observations | `676e7c5a5e144f07339013408140fcc52bd2136a3e155780d1d7ea9194166507` | 17.529 |
-| mission_associations | `7124ebccf448647e1bbf5d73ace556649782cebdbfe0ddf1fe19d3ca1acc7c2d` | 1.301 |
-| cluster_memberships | `c8da41dd79af9d17b18231b747bf0ce53dbd9dd8e379e41ff67496d6a9e942d0` | 15.168 |
+| observations | `44d9bf490c8cb6a8…` (xem JSON) | 18.597 |
+| mission_associations | `39da6905ea3edb5b…` (xem JSON) | 1.301 |
+| cluster_memberships | `44ec7c865db748d2…` (xem JSON) | 15.754 |
 
 ## Công thức và aggregate
 
 ### Source: 1.927 canonical
 
-Identity là `platform` cộng identifier do platform cấp, đọc từ metadata connector, URL chỉ là
-fallback. `raw_title` bị loại: 10 URL trong corpus mang hai title khác nhau, nên title là thứ được
-quan sát về một source, không phải thành phần định danh nó.
+Phần này không đổi so với bản trước. Identity là `platform` cộng identifier do platform cấp, đọc
+từ metadata connector, URL chỉ là fallback. `raw_title` bị loại: 10 URL trong corpus mang hai
+title khác nhau.
 
 | Nguồn identity | Số dòng |
 |---|---|
@@ -50,11 +90,6 @@ quan sát về một source, không phải thành phần định danh nó.
 | `normalized_url_fallback` | 0 |
 | `unresolved` | 0 |
 | **Tổng** | **15.938** |
-
-Ba con số từng được nêu trước đây đều không phải kết quả của chính sách này: **1.939** đếm theo
-`(platform, source_url, raw_title)`, vẫn dùng title làm key; **1.929** đếm theo
-`(platform, source_url)`, chưa gộp URL variant và chưa tách hai loại object TikTok
-(`/video/<id>` là một video, `/tag/<hashtag>` là một surface).
 
 Reason code cho mỗi lần một identity giữ nhiều dòng legacy:
 
@@ -67,13 +102,13 @@ Reason code cho mỗi lần một identity giữ nhiều dòng legacy:
 | identity chỉ giữ một dòng | 1.550 |
 | **Tổng** | **15.938** |
 
-### Observation: 18.212, và 683 dòng sẽ gộp lại
+### Observation: 18.597, không dòng nào bị giảm
 
 ```
-observations = distinct(signal_id, captured_at, metric_value)
-               over signal_metrics UNION trend_signals
-             = 15.938 + 3.292 − 1.018 trùng
-             = 18.212
+observations = một cho mỗi dòng trend_signals
+             + một cho mỗi điểm signal_metrics không lặp lại toàn bộ payload của dòng cha
+             = 15.938 + 3.677 − 1.018
+             = 18.597
 ```
 
 | | |
@@ -81,18 +116,23 @@ observations = distinct(signal_id, captured_at, metric_value)
 | `trend_signals` rows | 15.938 |
 | `signal_metrics` rows | 3.677 |
 | signal không có metric point nào | 14.920 |
-| triple xuất hiện ở cả hai bảng | 1.018 |
+| bản copy do `sql/008` tạo, được gộp | 1.018 |
 | tổng thô, để đối chiếu | 19.615 |
-| **distinct theo business identity** | **17.529** |
-| **sẽ gộp khi bỏ surrogate id** | **683** |
+| **observation (multiset)** | **18.597** |
+| payload phân biệt được | 18.199 |
+| `indistinguishable_observation_multiplicity` | **398** |
 
-683 dòng này chia sẻ cùng source, cùng `captured_at` và cùng `metric_value`, nên khi
-`trend_signals.id` không còn thì chúng không phân biệt được nữa. Đây là phần giảm **thật** mà
-migration sẽ thực hiện, nên nó có số riêng. Nó lộ ra vì digest có 17.529 member trong khi
-observation là 18.212 — một chênh lệch mà nếu bỏ qua thì 683 dòng sẽ biến mất không ai biết.
+398 member đó giống nhau trên cả 9 field được bảo toàn. **Đây không phải phần giảm mà migration
+thực hiện** — hai lần thu thập có thể hợp lệ giống nhau trên mọi field, và chỉ surrogate
+observation ID phân biệt chúng. Con số được báo để bản chạy sau migration xác nhận multiplicity
+đó vẫn còn, không phải để gộp bất cứ thứ gì.
 
-Con số **18.195** từng được nêu không tái hiện được. Năm định nghĩa đã thử: 19.615 (tổng thô),
-16.276 (union theo `signal_id, captured_at`), 18.597, 18.365, và 18.212 (định nghĩa đang dùng).
+Kỳ vọng định hướng trước khi chạy là observation về lại **18.212**. Kết quả thật là **18.597**, và
+chênh lệch có lý do: 18.212 là số **payload triple phân biệt được** theo projection cũ, còn 18.597
+là số **collection event được bảo toàn**. Overlap `sql/008` vẫn đúng 1.018 sau khi thêm
+`growth_velocity` — mọi bản copy do migration đó tạo cũng khớp cả velocity. Con số gần 18.212 nhất
+trong bản mới là 18.199, tức số payload phân biệt được sau khi projection đã gồm velocity, geo,
+title và metadata.
 
 ### Mission evidence: 1.301, phục dựng chính xác toàn bộ
 
@@ -119,15 +159,20 @@ gắn vào DB thì không phục dựng được, và audit không đoán.
 | cluster reference dangling | 0 |
 | không có cluster | 184 |
 | **Tổng** | **15.938** |
-| distinct theo business identity | 15.168 |
-| sẽ gộp khi bỏ surrogate id | 586 |
+| **membership (multiset)** | **15.754** |
+| payload phân biệt được | 15.653 |
+| `indistinguishable_membership_multiplicity` | 101 |
 | **identity nằm ở nhiều hơn một cluster** | **172** |
+
+Membership giờ bằng đúng số dòng ánh xạ chắc chắn: **không membership nào bị xoá chỉ vì hai
+observation có cùng business payload**. Con số 586 trong bản trước là hệ quả của cùng lỗi `set`
+đã nêu ở mục "Bản sửa".
 
 172 trường hợp này là bằng chứng đo được cho quyết định đã chốt: cluster membership thuộc
 observation, không thuộc source. Đặt `cluster_id` trên bảng source thì 172 identity này buộc phải
 chọn một cluster và bỏ phần còn lại.
 
-## 11 invariant
+## 13 invariant
 
 Tất cả đều giữ. Audit exit non-zero nếu bất kỳ điều nào sau đây bị vi phạm:
 
@@ -135,13 +180,15 @@ Tất cả đều giữ. Audit exit non-zero nếu bất kỳ điều nào sau �
 2. Không dòng nào không resolve được identity.
 3. Mọi phép gộp source có reason code (0 `unclassified_identity_collision`).
 4. Dòng đã resolve = identity một dòng + dòng trong identity đã gộp.
-5. Union observation = a + b − overlap.
-6. Tập observation theo business identity không lớn hơn tập theo surrogate key.
-7. Không metric point nào trỏ tới `trend_signals` row không tồn tại.
-8. Dòng mission-attached = exact + unresolved + dangling.
-9. Không dòng nào trỏ tới mission không tồn tại.
-10. Mọi dòng = cluster chắc chắn + dangling + không cluster.
-11. Không dòng nào trỏ tới cluster không tồn tại.
+5. Số observation = số dòng + số metric point − số bản copy `sql/008` được gộp.
+6. Số payload phân biệt được không vượt quá multiset observation.
+7. Số cluster membership không vượt quá số dòng ánh xạ tới một cluster.
+8. Không metric point nào trỏ tới `trend_signals` row không tồn tại.
+9. Dòng mission-attached = exact + unresolved + dangling.
+10. Không dòng nào trỏ tới mission không tồn tại.
+11. Mọi dòng = cluster chắc chắn + dangling + không cluster.
+12. Không dòng nào trỏ tới cluster không tồn tại.
+13. Dòng đã resolve = identity một dòng + dòng trong identity đã gộp.
 
 ## Guard: read-only do engine cưỡng chế
 
@@ -160,11 +207,13 @@ SQLite raise `readonly`, và một test so file byte-by-byte trước/sau khi au
 
 So bản chạy sau với JSON này. Ba điều kiện để coi là thành công:
 
-1. Không dòng legacy hay metric point nào biến mất ngoài 683 observation và 586 cluster
-   membership đã được khai báo trước là sẽ gộp.
+1. Không dòng legacy hay metric point nào biến mất. Không có phần gộp nào được cho phép: 398
+   observation và 101 cluster membership có payload giống nhau là **multiplicity phải bảo toàn**,
+   không phải phần được gộp.
 2. Mọi observation trỏ đúng một source.
 3. Mọi phép gộp source vẫn có reason code, và `unclassified_identity_collision` vẫn bằng 0.
 
-Digest `sources` và `mission_associations` phải **khớp tuyệt đối**: migration không được đổi tập
-source canonical hay tập mission association. Digest `observations` và `cluster_memberships` được
-phép đổi chỉ khi số member khớp đúng con số distinct-theo-business-identity ghi ở trên.
+Cả bốn digest phải **khớp tuyệt đối**, và số member phải khớp đúng: 1.927 source, 18.597
+observation, 1.301 mission association, 15.754 cluster membership. Migration không được đổi tập
+nào trong bốn tập đó. Nếu một digest lệch, phải chỉ ra được field nào đổi và vì sao — và nếu lý do
+là một field bị bỏ khỏi projection thì nó phải vào bảng mất mát có chủ ý trước, không phải sau.

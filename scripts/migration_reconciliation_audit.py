@@ -133,9 +133,26 @@ class SignalRow:
     raw_title: Optional[str]
     metadata: Any
     captured_at: Optional[str]
+    published_at: Optional[str]
     metric_value: Optional[float]
+    growth_velocity: Optional[float]
+    geo_code: Optional[str]
     mission_id: Optional[str]
     cluster_id: Optional[str]
+
+
+@dataclass(frozen=True)
+class MetricPoint:
+    """One row of signal_metrics: the same source observed again, with its own metric payload."""
+
+    signal_id: str
+    captured_at: Optional[str]
+    metric_value: Optional[float]
+    growth_velocity: Optional[float]
+
+    @property
+    def payload(self) -> Tuple[Optional[str], Optional[float], Optional[float]]:
+        return (self.captured_at, self.metric_value, self.growth_velocity)
 
 
 @dataclass
@@ -156,7 +173,7 @@ class ReadOnlyReader:
     def signals(self) -> Iterable[SignalRow]:
         raise NotImplementedError
 
-    def metric_points(self) -> Iterable[Tuple[str, Optional[str], Optional[float]]]:
+    def metric_points(self) -> Iterable["MetricPoint"]:
         raise NotImplementedError
 
     def mission_ids(self) -> Sequence[str]:
@@ -180,7 +197,8 @@ class PostgresReader(ReadOnlyReader):
     def signals(self) -> Iterable[SignalRow]:
         for row in self._conn.execute(
             "SELECT id, platform, source_url, raw_title, metadata, captured_at, metric_value,"
-            " mission_id, cluster_id FROM trend_signals ORDER BY id"
+            " mission_id, cluster_id, growth_velocity, geo_code, published_at"
+            " FROM trend_signals ORDER BY id"
         ):
             yield SignalRow(
                 signal_id=str(row[0]),
@@ -192,17 +210,21 @@ class PostgresReader(ReadOnlyReader):
                 metric_value=float(row[6]) if row[6] is not None else None,
                 mission_id=str(row[7]) if row[7] else None,
                 cluster_id=str(row[8]) if row[8] else None,
+                growth_velocity=float(row[9]) if row[9] is not None else None,
+                geo_code=row[10],
+                published_at=row[11].isoformat() if row[11] else None,
             )
 
-    def metric_points(self) -> Iterable[Tuple[str, Optional[str], Optional[float]]]:
+    def metric_points(self) -> Iterable[MetricPoint]:
         for row in self._conn.execute(
-            "SELECT signal_id, captured_at, metric_value FROM signal_metrics"
-            " ORDER BY signal_id, captured_at, metric_value"
+            "SELECT signal_id, captured_at, metric_value, growth_velocity FROM signal_metrics"
+            " ORDER BY signal_id, captured_at, metric_value, growth_velocity"
         ):
-            yield (
-                str(row[0]),
-                row[1].isoformat() if row[1] else None,
-                float(row[2]) if row[2] is not None else None,
+            yield MetricPoint(
+                signal_id=str(row[0]),
+                captured_at=row[1].isoformat() if row[1] else None,
+                metric_value=float(row[2]) if row[2] is not None else None,
+                growth_velocity=float(row[3]) if row[3] is not None else None,
             )
 
     def mission_ids(self) -> Sequence[str]:
@@ -223,7 +245,8 @@ class SqliteReader(ReadOnlyReader):
     def signals(self) -> Iterable[SignalRow]:
         for row in self._conn.execute(
             "SELECT id, platform, source_url, raw_title, metadata, captured_at, metric_value,"
-            " mission_id, cluster_id FROM trend_signals ORDER BY id"
+            " mission_id, cluster_id, growth_velocity, geo_code, published_at"
+            " FROM trend_signals ORDER BY id"
         ):
             try:
                 metadata = json.loads(row[4]) if row[4] else {}
@@ -239,18 +262,27 @@ class SqliteReader(ReadOnlyReader):
                 metric_value=float(row[6]) if row[6] is not None else None,
                 mission_id=str(row[7]) if row[7] else None,
                 cluster_id=str(row[8]) if row[8] else None,
+                growth_velocity=float(row[9]) if row[9] is not None else None,
+                geo_code=row[10],
+                published_at=row[11],
             )
 
-    def metric_points(self) -> Iterable[Tuple[str, Optional[str], Optional[float]]]:
+    def metric_points(self) -> Iterable[MetricPoint]:
         try:
             rows = self._conn.execute(
-                "SELECT signal_id, captured_at, metric_value FROM signal_metrics"
-                " ORDER BY signal_id, captured_at, metric_value"
+                "SELECT signal_id, captured_at, metric_value, growth_velocity FROM signal_metrics"
+                " ORDER BY signal_id, captured_at, metric_value, growth_velocity"
             ).fetchall()
         except sqlite3.OperationalError:
             return []  # a database predating the metric history table
         return [
-            (str(r[0]), r[1], float(r[2]) if r[2] is not None else None) for r in rows
+            MetricPoint(
+                signal_id=str(r[0]),
+                captured_at=r[1],
+                metric_value=float(r[2]) if r[2] is not None else None,
+                growth_velocity=float(r[3]) if r[3] is not None else None,
+            )
+            for r in rows
         ]
 
     def mission_ids(self) -> Sequence[str]:
@@ -311,51 +343,80 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     # Observations. trend_signals and signal_metrics overlap partially, so no single count is
     # self-evidently right; the audit states the arithmetic instead of asserting a total.
     signal_ids = {row.signal_id for row in signals}
-    dangling_metric_points = sorted({p[0] for p in metric_points} - signal_ids)
-    signals_with_metrics = {p[0] for p in metric_points}
-    metric_triples = {(p[0], p[1], p[2]) for p in metric_points}
-    signal_triples = {(row.signal_id, row.captured_at, row.metric_value) for row in signals}
+    dangling_metric_points = sorted({p.signal_id for p in metric_points} - signal_ids)
 
-    observation_members = {
-        f"{identity_of.get(sid, '')}|{captured or ''}|{metric if metric is not None else ''}"
-        for sid, captured, metric in (
-            [(row.signal_id, row.captured_at, row.metric_value) for row in signals]
-            + list(metric_points)
+    # One observation per collection event, resolved along legacy lineage. A signal_metrics point
+    # is merged with its parent row only when it repeats that row's whole metric payload, which is
+    # the copy sql/008 made. Anything else is a second sighting and stays a second observation.
+    #
+    # The members are a multiset. The previous version built a set here, which erased the very
+    # multiplicity the audit exists to conserve: rows sharing source, captured_at and metric_value
+    # were counted once, and the difference was then reported as though the migration would
+    # genuinely reduce them. In this corpus those rows carry three distinct growth_velocity values,
+    # so they are distinct collection events and no unique constraint says otherwise. It is the
+    # surrogate observation id that keeps them apart.
+    points_by_signal: Dict[str, List[MetricPoint]] = defaultdict(list)
+    for point in metric_points:
+        points_by_signal[point.signal_id].append(point)
+
+    observation_members: List[str] = []
+    lineage_merges = 0
+    for row in signals:
+        if row.signal_id not in identity_of:
+            continue
+        identity = identity_of[row.signal_id]
+        row_payload = (row.captured_at, row.metric_value, row.growth_velocity)
+        observation_members.append(
+            observation_member(identity, row, *row_payload)
         )
-        if sid in identity_of
-    }
+        merged_once = False
+        for point in points_by_signal.get(row.signal_id, []):
+            if point.payload == row_payload and not merged_once:
+                merged_once = True  # the sql/008 copy of the row itself
+                lineage_merges += 1
+                continue
+            observation_members.append(
+                observation_member(
+                    identity, row, point.captured_at, point.metric_value, point.growth_velocity
+                )
+            )
+
     observation_arithmetic = {
         "formula": (
-            "observations = distinct(signal_id, captured_at, metric_value) over"
-            " signal_metrics UNION trend_signals"
+            "observations = one per trend_signals row, plus one per signal_metrics point whose"
+            " (captured_at, metric_value, growth_velocity) does not repeat its parent row's"
         ),
         "trend_signals_rows": len(signals),
         "signal_metrics_rows": len(metric_points),
-        "signals_carrying_at_least_one_metric_point": len(signals_with_metrics),
-        "signals_with_no_metric_point": len(signals) - len(signals_with_metrics),
-        "metric_triples_distinct": len(metric_triples),
-        "signal_triples_distinct": len(signal_triples),
-        "triples_shared_by_both_tables": len(metric_triples & signal_triples),
-        "observations": len(metric_triples | signal_triples),
+        "signals_carrying_at_least_one_metric_point": len({p.signal_id for p in metric_points}),
+        "signals_with_no_metric_point": len(signals)
+        - len({p.signal_id for p in metric_points} & {row.signal_id for row in signals}),
+        "lineage_merges_of_the_sql008_copy": lineage_merges,
+        "observations": len(observation_members),
         "naive_sum_for_contrast": len(signals) + len(metric_points),
+        "preserved_fields": list(OBSERVATION_FIELDS),
+        "intentional_losses": dict(sorted(INTENTIONAL_LOSSES.items())),
     }
-    # Observations counted by surrogate signal_id are not the same set as observations counted by
-    # business identity. Rows that share source, captured_at and metric_value are indistinguishable
-    # once the surrogate id is gone, so the migration would collapse them. That is a real
-    # reduction and it gets its own number rather than surfacing as a digest that does not match
-    # the count beside it.
-    observation_arithmetic["distinct_by_business_identity"] = len(observation_members)
-    observation_arithmetic["collapsing_on_business_identity"] = (
-        observation_arithmetic["observations"] - len(observation_members)
+    # Members that are byte-identical across every preserved field. These are NOT a reduction the
+    # migration performs: two collection events may legitimately look the same on all of them, and
+    # only the surrogate observation id separates them. The number is reported so the post-migration
+    # run can confirm the same multiplicity survived, not so anything gets collapsed.
+    distinct_members = len(set(observation_members))
+    observation_arithmetic["distinct_observation_payloads"] = distinct_members
+    observation_arithmetic["indistinguishable_observation_multiplicity"] = (
+        len(observation_members) - distinct_members
     )
     findings.require(
-        observation_arithmetic["observations"]
-        == len(metric_triples) + len(signal_triples) - len(metric_triples & signal_triples),
-        "observation arithmetic does not balance: union != a + b - overlap",
+        len(observation_members)
+        == len(signals) - len([row for row in signals if row.signal_id not in identity_of])
+        + len(metric_points)
+        - lineage_merges
+        - len([p for p in metric_points if p.signal_id not in identity_of]),
+        "observation count does not balance against rows, points and lineage merges",
     )
     findings.require(
-        observation_arithmetic["collapsing_on_business_identity"] >= 0,
-        "business-identity observation set is larger than the surrogate-keyed set",
+        observation_arithmetic["indistinguishable_observation_multiplicity"] >= 0,
+        "distinct observation payloads exceed the observation multiset",
     )
     findings.require(
         not dangling_metric_points,
@@ -410,16 +471,26 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
         cluster_certain += 1
         if row.signal_id in identity_of:
             identities_per_cluster[row.cluster_id].add(identity_of[row.signal_id])
-    cluster_members_preview = {
-        f"{row.cluster_id}|{identity_of[row.signal_id]}|{row.captured_at or ''}"
-        f"|{row.metric_value if row.metric_value is not None else ''}"
+    # A multiset, for the same reason as the observations: two rows in one cluster that look
+    # identical on every preserved field are still two memberships. Nothing is deleted just
+    # because two observations share a payload.
+    cluster_members_preview = [
+        f"{row.cluster_id}\x1f"
+        + observation_member(
+            identity_of[row.signal_id], row, row.captured_at, row.metric_value,
+            row.growth_velocity,
+        )
         for row in signals
         if row.cluster_id and row.signal_id in identity_of
-    }
+    ]
     cluster_ambiguous_identities = sorted(
         identity
         for identity, clusters in _invert(identities_per_cluster).items()
         if len(clusters) > 1
+    )
+    findings.require(
+        len(cluster_members_preview) <= cluster_certain,
+        "cluster memberships exceed the rows that map to a cluster",
     )
     findings.require(
         len(signals) == cluster_certain + len(cluster_dangling) + cluster_absent,
@@ -480,18 +551,16 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
 
     # One digest per canonical set, over business identity rather than surrogate keys, so the
     # post-migration run can recompute the same value from the new tables.
-    mission_members = {
-        f"{row.mission_id}|{identity_of[row.signal_id]}|{row.captured_at or ''}"
-        f"|{row.metric_value if row.metric_value is not None else ''}"
+    mission_members = [
+        f"{row.mission_id}\x1f"
+        + observation_member(
+            identity_of[row.signal_id], row, row.captured_at, row.metric_value,
+            row.growth_velocity,
+        )
         for row in signals
         if row.mission_id and row.signal_id in identity_of
-    }
-    cluster_members = {
-        f"{row.cluster_id}|{identity_of[row.signal_id]}|{row.captured_at or ''}"
-        f"|{row.metric_value if row.metric_value is not None else ''}"
-        for row in signals
-        if row.cluster_id and row.signal_id in identity_of
-    }
+    ]
+    cluster_members = cluster_members_preview
     digests = {
         "algorithm": "sha256 over NUL-separated members of each sorted set",
         "sources": digest_of(rows_per_identity),
@@ -532,17 +601,77 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
             "rows_with_dangling_cluster": len(cluster_dangling),
             "rows_without_cluster": cluster_absent,
             "identities_spanning_more_than_one_cluster": len(cluster_ambiguous_identities),
-            "distinct_by_business_identity": len(cluster_members_preview),
-            "collapsing_on_business_identity": cluster_certain - len(cluster_members_preview),
+            "memberships": len(cluster_members_preview),
+            "distinct_membership_payloads": len(set(cluster_members_preview)),
+            "indistinguishable_membership_multiplicity": len(cluster_members_preview)
+            - len(set(cluster_members_preview)),
         },
         "detail": detail,
         "invariants": {
-            "checked": 11,
+            "checked": 13,
             "failed": len(findings.failures),
             "failures": sorted(findings.failures),
         },
         "balanced": not findings.failures,
     }
+
+
+# What one observation member commits to preserving. A field absent from this tuple is an
+# intentional loss and has to appear in INTENTIONAL_LOSSES with a reason, so that "the digest
+# matched" can never mean "the digest ignored the column that changed".
+OBSERVATION_FIELDS = (
+    "canonical_source_identity",
+    "observed_at",
+    "published_at",
+    "observed_title",
+    "metric_value",
+    "growth_velocity",
+    "geo_code",
+    "normalized_source_url",
+    "canonical_metadata",
+)
+
+INTENTIONAL_LOSSES = {
+    "trend_signals.id": "surrogate key; the migration reassigns it by design",
+    "signal_metrics.id": "surrogate key; the migration reassigns it by design",
+    "trend_signals.mission_id": "carried by the mission_associations digest instead",
+    "trend_signals.cluster_id": "carried by the cluster_memberships digest instead",
+}
+
+
+def canonical_metadata(metadata: Any) -> str:
+    """Metadata as a stable string, so a key-order change is not read as a data change."""
+    if not isinstance(metadata, dict):
+        return ""
+    return json.dumps(metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def observation_member(
+    identity: str,
+    row: "SignalRow",
+    captured_at: Optional[str],
+    metric_value: Optional[float],
+    growth_velocity: Optional[float],
+) -> str:
+    """One observation, rendered over every field OBSERVATION_FIELDS names.
+
+    A metric point inherits title, geo, URL and metadata from the trend_signals row it hangs off,
+    because signal_metrics stores none of those: it records that the same source was seen again
+    with a new metric payload.
+    """
+    parts = (
+        identity,
+        captured_at or "",
+        row.published_at or "",
+        (row.raw_title or "").strip(),
+        "" if metric_value is None else repr(metric_value),
+        "" if growth_velocity is None else repr(growth_velocity),
+        row.geo_code or "",
+        normalize_url(row.source_url),
+        canonical_metadata(row.metadata),
+    )
+    assert len(parts) == len(OBSERVATION_FIELDS)
+    return "\x1f".join(parts)
 
 
 def _merge_reason_for(rows: Sequence["SignalRow"]) -> str:
@@ -630,10 +759,12 @@ def render_summary(report: Dict[str, Any]) -> str:
         f"    trend_signals rows              {obs['trend_signals_rows']}",
         f"    signal_metrics rows             {obs['signal_metrics_rows']}",
         f"    signals with no metric point    {obs['signals_with_no_metric_point']}",
-        f"    triples in both tables          {obs['triples_shared_by_both_tables']}",
+        f"    sql/008 copies merged           {obs['lineage_merges_of_the_sql008_copy']}",
         f"    naive sum, for contrast         {obs['naive_sum_for_contrast']}",
-        f"    distinct by business identity   {obs['distinct_by_business_identity']}",
-        f"    collapsing once surrogate ids go{obs['collapsing_on_business_identity']:>6d}",
+        f"    distinct payloads               {obs['distinct_observation_payloads']}",
+        f"    indistinguishable multiplicity  {obs['indistinguishable_observation_multiplicity']}",
+        f"    fields preserved                {len(obs['preserved_fields'])}"
+        f"  intentional losses {len(obs['intentional_losses'])}",
         "",
         "  mission evidence",
         f"    mission-attached rows           {mis['mission_attached_rows']}",
@@ -647,6 +778,8 @@ def render_summary(report: Dict[str, Any]) -> str:
         f"    dangling cluster reference      {clu['rows_with_dangling_cluster']}",
         f"    no cluster                      {clu['rows_without_cluster']}",
         f"    identities across >1 cluster    {clu['identities_spanning_more_than_one_cluster']}",
+        f"    memberships (multiset)          {clu['memberships']}",
+        f"    indistinguishable multiplicity  {clu['indistinguishable_membership_multiplicity']}",
         "",
         "  digests (sha256, first 16)",
         *(

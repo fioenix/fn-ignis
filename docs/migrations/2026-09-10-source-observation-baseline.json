@@ -1,28 +1,29 @@
 {
   "balanced": true,
   "cluster_membership": {
-    "collapsing_on_business_identity": 586,
-    "distinct_by_business_identity": 15168,
+    "distinct_membership_payloads": 15653,
     "identities_spanning_more_than_one_cluster": 172,
+    "indistinguishable_membership_multiplicity": 101,
+    "memberships": 15754,
     "rows_mapping_certainly": 15754,
     "rows_with_dangling_cluster": 0,
     "rows_without_cluster": 184
   },
   "digests": {
     "algorithm": "sha256 over NUL-separated members of each sorted set",
-    "cluster_memberships": "c8da41dd79af9d17b18231b747bf0ce53dbd9dd8e379e41ff67496d6a9e942d0",
+    "cluster_memberships": "44ec7c865db748d21dc6bbe40037717f7e74c1f40e32034c8698c16b91d0051b",
     "member_counts": {
-      "cluster_memberships": 15168,
+      "cluster_memberships": 15754,
       "mission_associations": 1301,
-      "observations": 17529,
+      "observations": 18597,
       "sources": 1927
     },
-    "mission_associations": "7124ebccf448647e1bbf5d73ace556649782cebdbfe0ddf1fe19d3ca1acc7c2d",
-    "observations": "676e7c5a5e144f07339013408140fcc52bd2136a3e155780d1d7ea9194166507",
+    "mission_associations": "39da6905ea3edb5b61cd7ec3cde57d2ce42d15256ae7a0e5d5cb5d47162dfa02",
+    "observations": "44d9bf490c8cb6a8b0e1a908a7682b411f9ba8d5c69c32202e9e2cf50be1c1ad",
     "sources": "cf7bf6501d87b14b2ed268e9cc439cc7a979b6a272e6c135d2548e0c88733d47"
   },
   "invariants": {
-    "checked": 11,
+    "checked": 13,
     "failed": 0,
     "failures": []
   },
@@ -35,18 +36,33 @@
     "unresolved_identity": 0
   },
   "observations": {
-    "collapsing_on_business_identity": 683,
-    "distinct_by_business_identity": 17529,
-    "formula": "observations = distinct(signal_id, captured_at, metric_value) over signal_metrics UNION trend_signals",
-    "metric_triples_distinct": 3292,
+    "distinct_observation_payloads": 18199,
+    "formula": "observations = one per trend_signals row, plus one per signal_metrics point whose (captured_at, metric_value, growth_velocity) does not repeat its parent row's",
+    "indistinguishable_observation_multiplicity": 398,
+    "intentional_losses": {
+      "signal_metrics.id": "surrogate key; the migration reassigns it by design",
+      "trend_signals.cluster_id": "carried by the cluster_memberships digest instead",
+      "trend_signals.id": "surrogate key; the migration reassigns it by design",
+      "trend_signals.mission_id": "carried by the mission_associations digest instead"
+    },
+    "lineage_merges_of_the_sql008_copy": 1018,
     "naive_sum_for_contrast": 19615,
-    "observations": 18212,
+    "observations": 18597,
+    "preserved_fields": [
+      "canonical_source_identity",
+      "observed_at",
+      "published_at",
+      "observed_title",
+      "metric_value",
+      "growth_velocity",
+      "geo_code",
+      "normalized_source_url",
+      "canonical_metadata"
+    ],
     "signal_metrics_rows": 3677,
-    "signal_triples_distinct": 15938,
     "signals_carrying_at_least_one_metric_point": 1018,
     "signals_with_no_metric_point": 14920,
-    "trend_signals_rows": 15938,
-    "triples_shared_by_both_tables": 1018
+    "trend_signals_rows": 15938
   },
   "sanitized": true,
   "schema_version": 1,
