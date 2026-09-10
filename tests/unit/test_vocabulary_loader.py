@@ -191,3 +191,83 @@ async def test_a_fresh_database_arms_language_detection(tmp_path):
     assert detector.is_localized("Como criar agentes autonomos para empresas", geo=GeoCode.US) is False
     assert detector.is_localized("Formation complete avec n8n", geo=GeoCode.US) is False
     assert detector.is_localized("Building autonomous AI agents with LangChain", geo=GeoCode.US) is True
+
+
+@pytest.mark.asyncio
+async def test_probe_seeds_never_contain_machinery_terms(tmp_path):
+    """A public pass must not go searching platforms for its own stopwords.
+
+    Adding eight machinery domains on 2026-09-09 without updating the exclusion list in
+    ingest_trends left every probe seed a Vietnamese function word -- ambiguous_unigrams sorts
+    first alphabetically and filled the whole budget. Both places now read one list, and this
+    fails if a second copy appears.
+    """
+    from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
+
+    repo = SqliteTrendRepository(db_path=str(tmp_path / "seeds.db"))
+    seeds = await IngestTrendsUseCase(registry=None, repository=repo).load_seed_keywords()
+
+    assert seeds, "a seeded database must yield probe seeds"
+
+    rows = await repo.get_domain_lexicons()
+    domains_of = {}
+    for row in rows or []:
+        domains_of.setdefault(str(row.get("term") or ""), set()).add(str(row.get("domain") or ""))
+
+    leaked = [
+        seed for seed in seeds
+        if domains_of.get(seed)
+        and all(
+            domain in MACHINERY_DOMAINS or domain.startswith(TEMPLATE_PREFIXES)
+            for domain in domains_of[seed]
+        )
+    ]
+    assert not leaked, f"machinery terms sent to platforms as search queries: {leaked}"
+
+
+def test_the_machinery_list_is_not_duplicated_in_the_use_cases():
+    """Two copies of this list is what caused the leak; the second copy must stay gone."""
+    src = Path(__file__).resolve().parents[2] / "src" / "ignis"
+    offenders = [
+        path.relative_to(src).as_posix()
+        for path in src.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and "NON_TOPIC_LEXICON_DOMAINS" in path.read_text(encoding="utf-8")
+    ]
+
+    assert not offenders, (
+        "MACHINERY_DOMAINS in vocabulary_loader is the only list of non-topic domains. "
+        f"Found a second one in: {offenders}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_discovery_reports_an_empty_scope_instead_of_inventing_keywords(tmp_path):
+    """An empty macro scan with no seeds must say so, not fall back to five compiled-in terms."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
+    from ignis.domain.value_objects import GeoCode
+
+    repository = AsyncMock()
+    repository.list_missions.return_value = []
+    repository.save_mission.return_value = None
+    # No Creative Center plugin registered, and an empty lexicon: nothing to probe with.
+    repository.get_domain_lexicons.return_value = []
+    registry = MagicMock()
+    registry._plugins = {}
+
+    use_case = AutonomousDiscoveryUseCase(
+        repository=repository,
+        registry=registry,
+        clusterer=MagicMock(),
+        quality_evaluator=MagicMock(),
+        strategic_reasoner=MagicMock(),
+        artifact_builder=MagicMock(),
+    )
+
+    result = await use_case.execute(geo=GeoCode.VN)
+
+    assert result["status"] == "NO_SCOPE"
+    assert result["keyword_source"] == "none"
+    assert "register_domain_lexicon" in result["message"]

@@ -137,16 +137,29 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   một mốc thời gian bịa. Cửa sổ thời gian trên các dòng đó còn xấp xỉ cho tới khi chúng rơi ra
   khỏi cửa sổ.
 
-- [ ] **`autonomous_discovery.py:116` hardcode 5 từ khoá làm fallback.** Khi macro scan qua
-  Creative Center trả rỗng, `macro_keywords` bị gán
-  `["ai agent", "chatbot", "automation", "ecommerce", "tiktok shop"]` mà không log gì. Nghĩa là
-  một câu hỏi lắng nghe mở âm thầm biến thành một câu hỏi về AI agent và ecommerce. Chỗ này lọt
-  **cả hai** gate: tiếng Anh nên gate non-ASCII không thấy, là biến local nên gate constant
-  không thấy. Macro scan rỗng thì phải báo rỗng.
-- [ ] **`trigger_ingress_refresh` không truyền `timeframe` cho `fetch_from_all`.**
-  `fetch_from_all` có tham số đó, mặc định `LAST_24H`, và MCP tool chưa bao giờ truyền. Nên một
-  câu hỏi 30 ngày chỉ được lọc ở bước đọc, còn lượt ingress luôn chạy ở 24 giờ. Bản thân MCP
-  tool cũng không nhận tham số timeframe từ agent.
+- [x] **Đã xong (10/09/2026): bỏ 5 từ khoá hardcode trong đường discovery.** Macro scan rỗng
+  giờ rơi về seed trong `market_lexicons`, tức từ vựng của người vận hành, và log warning nói rõ
+  chu kỳ này phản ánh vốn từ đã seed chứ không phải thứ nền tảng tự nổi lên. Nếu lexicon cũng
+  rỗng thì trả `status: NO_SCOPE` kèm hướng dẫn, **không bịa từ khoá**. Kết quả luôn mang
+  `keyword_source` là `creative_center` / `market_lexicon` / `none` nên không còn im lặng.
+- [x] **Đã xong (10/09/2026): nối `timeframe` vào `trigger_ingress_refresh`.** Tool nhận
+  `timeframe` và truyền xuống `fetch_from_all`, từ đó tới `plugin.fetch_signals` và
+  `search_signals`. Kiểm bằng spy: `30d`, `7d`, `12m` đều tới đúng connector.
+
+  Việc nối này mở ra một lỗ phải bịt luôn: `Timeframe._missing_` dựng member từ **bất kỳ** chuỗi,
+  nên `'bogus'` thành `Timeframe.BOGUS` rồi bị map ngầm về mặc định ở hạ nguồn. Giờ trả
+  `INVALID_TIMEFRAME` kèm danh sách giá trị hợp lệ. Rỗng vẫn là mặc định 24h, giống `resolve_geo`.
+- [x] **Đã sửa (10/09/2026): seed keyword bị nhiễm từ vựng máy móc.** Đây là regression tao gây
+  ra ngày 09/09: `NON_TOPIC_LEXICON_DOMAINS` trong `ingest_trends.py` chỉ loại 2 domain cũ, nên 8
+  domain máy móc thêm hôm đó chảy thẳng vào seed. Đo trên Postgres thật: **cả 10 seed** đều là hư
+  từ tiếng Việt, vì `ambiguous_unigrams` sắp trước theo bảng chữ cái và chiếm trọn budget.
+
+  Nghĩa là lượt 6 connector tao báo hôm qua đã probe các nền tảng bằng hư từ. Phần signal từ
+  stage 1 vẫn thật, nhưng phần keyword fan-out thì gần như vô nghĩa.
+
+  Danh sách domain máy móc giờ chỉ còn một bản trong `vocabulary_loader`, và có test chặn bản
+  thứ hai xuất hiện lại. Sau khi sửa, 10 seed là chủ đề thật.
+
 - [ ] **`self_healing_sniffer` ghi `runtime_configs` 97 lần trong một lượt.** Đo trên lượt
   09/09/2026: 85 lần cho `threads_doc_id_trending_topics`, 7 cho `search_posts`, 5 cho
   `search_suggestions`, dồn trong khoảng 40 giây. Ghi cùng một giá trị lặp lại vào Postgres.

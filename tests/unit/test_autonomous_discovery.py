@@ -13,6 +13,14 @@ async def test_autonomous_discovery_use_case_execution(tmp_path):
     mock_repo = AsyncMock()
     mock_repo.list_missions.return_value = []
     mock_repo.get_mission_signals.return_value = []
+    # With no Creative Center plugin registered the macro scan is empty, and the cycle takes its
+    # scope from the persisted lexicon. It used to take it from five keywords written into
+    # autonomous_discovery.py, which is why this test passed without a lexicon at all.
+    mock_repo.get_domain_lexicons.return_value = [
+        {"domain": "tech", "term": "ai agent", "category": "topic"},
+        {"domain": "tech", "term": "chatbot", "category": "topic"},
+        {"domain": "ecommerce", "term": "tiktok shop", "category": "topic"},
+    ]
     
     mock_registry = AsyncMock()
     mock_registry._plugins = {}

@@ -39,6 +39,7 @@ from ignis.domain.value_objects import (
     GeoCode,
     IngressScope,
     PlatformType,
+    Timeframe,
     resolve_geo,
     resolve_platform,
     resolve_timeframe,
@@ -1253,10 +1254,33 @@ async def handle_generate_trend_artifact(
         return json.dumps({"error": "Requested topic not found."}, ensure_ascii=False)
 
 
-async def handle_trigger_ingress_refresh(geo: str = "VN", scope: str = "public_market") -> str:
+async def handle_trigger_ingress_refresh(
+    geo: str = "VN",
+    scope: str = "public_market",
+    timeframe: str = "24h",
+) -> str:
     comp = get_components()
     await _sync_lexicons_from_db(comp)
     geo_val = resolve_geo(geo)
+    # The window the connectors themselves search. Without this the pass always ran at 24h no
+    # matter what the caller asked for, and the timeframe only narrowed the later read.
+    #
+    # Timeframe._missing_ builds a member out of any string it is handed, so an unknown value
+    # would reach the connectors as a live enum and then be silently mapped to a default. Check
+    # it here instead, the same way an unknown scope is refused below.
+    timeframe_val = resolve_timeframe(timeframe)
+    if timeframe_val not in tuple(Timeframe):
+        return json.dumps(
+            {
+                "status": "INVALID_TIMEFRAME",
+                "message": (
+                    f"Unknown timeframe '{timeframe}'. Use one of: "
+                    + ", ".join(t.value for t in Timeframe)
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     scope_val = IngressScope(scope)
     if scope_val is None:
@@ -1279,6 +1303,7 @@ async def handle_trigger_ingress_refresh(geo: str = "VN", scope: str = "public_m
     # The keyword cap still applies: this path spends the same YouTube search quota as the worker.
     signals = await comp["registry"].fetch_from_all(
         geo=geo_val,
+        timeframe=timeframe_val,
         scope=scope_val,
         seed_keywords=seeds,
         max_probe_keywords=MAX_TOPIC_KEYWORDS,
@@ -1292,6 +1317,7 @@ async def handle_trigger_ingress_refresh(geo: str = "VN", scope: str = "public_m
             "status": "success",
             "geo": geo_val.value,
             "scope": scope_val.value,
+            "timeframe": timeframe_val.value,
             "total_signals_fetched": len(signals),
             "total_clusters_formed": len(clusters),
             "seed_keywords_used": len(seeds),
@@ -1404,9 +1430,13 @@ async def generate_trend_artifact(topic_id: str = "", geo: str = "VN", format: s
     return await handle_generate_trend_artifact(topic_id=topic_id, geo=geo, format=format)
 
 
-@mcp.tool(name="trigger_ingress_refresh", description="Trigger immediate multi-platform ETL trend ingestion and clustering. Reads public market surfaces only by default; pass scope='own_profile' to read the connected account's own posts instead, or scope='both' for the union.")
-async def trigger_ingress_refresh(geo: str = "VN", scope: str = "public_market") -> str:
-    return await handle_trigger_ingress_refresh(geo=geo, scope=scope)
+@mcp.tool(name="trigger_ingress_refresh", description="Trigger immediate multi-platform ETL trend ingestion and clustering. `timeframe` is the window the connectors search (24h, 7d, 30d, 90d, 12m), not a filter applied afterwards. Reads public market surfaces only by default; pass scope='own_profile' to read the connected account's own posts instead, or scope='both' for the union.")
+async def trigger_ingress_refresh(
+    geo: str = "VN",
+    scope: str = "public_market",
+    timeframe: str = "24h",
+) -> str:
+    return await handle_trigger_ingress_refresh(geo=geo, scope=scope, timeframe=timeframe)
 
 
 @mcp.tool(name="get_current_session_mission", description="Automatically retrieve the research mission associated with the current session ID or chat thread.")

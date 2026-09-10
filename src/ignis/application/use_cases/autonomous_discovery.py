@@ -9,6 +9,11 @@ from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.harness_models import HarnessResearchReport
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.application.use_cases.ingest_trends import MAX_SEED_KEYWORDS
+from ignis.infrastructure.config.vocabulary_loader import (
+    MACHINERY_DOMAINS,
+    TEMPLATE_PREFIXES,
+)
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
@@ -44,6 +49,28 @@ class AutonomousDiscoveryUseCase:
         self._artifact_builder = artifact_builder
         self._reports_dir = reports_dir or (Path(__file__).resolve().parents[3] / "reports")
         self._reports_dir.mkdir(parents=True, exist_ok=True)
+
+    async def _load_seed_keywords(self) -> List[str]:
+        """Read probe seeds from the persisted market lexicon, never from a constant in code.
+
+        Mirrors IngestTrendsUseCase.load_seed_keywords: the machinery domains hold stopwords and
+        matcher vocabulary, not topics, so they are not something to go and search for.
+        """
+        try:
+            lexicons = await self._repository.get_domain_lexicons()
+        except Exception as e:
+            logger.warning(f"Could not load seed keywords from the market lexicon: {e}")
+            return []
+
+        seeds: List[str] = []
+        for item in lexicons or []:
+            domain = str(item.get("domain") or "").strip().lower()
+            if domain in MACHINERY_DOMAINS or domain.startswith(TEMPLATE_PREFIXES):
+                continue
+            term = str(item.get("term") or "").strip()
+            if term and term not in seeds:
+                seeds.append(term)
+        return seeds[:MAX_SEED_KEYWORDS]
 
     async def execute(
         self,
@@ -111,9 +138,37 @@ class AutonomousDiscoveryUseCase:
 
 
 
-        # Fallback keywords if Creative Center scan yielded empty
+        # Where the scope of this cycle came from. An empty macro scan used to be papered over
+        # with five keywords compiled into this file, which quietly turned "what is the market
+        # discussing" into "what is happening in AI agents and ecommerce" without saying so.
+        keyword_source = "creative_center"
         if not macro_keywords:
-            macro_keywords = ["ai agent", "chatbot", "automation", "ecommerce", "tiktok shop"]
+            # The persisted lexicon is the operator's own vocabulary, not this file's opinion.
+            keyword_source = "market_lexicon"
+            macro_keywords = await self._load_seed_keywords()
+            logger.warning(
+                f"Macro scan returned no hashtags; falling back to {len(macro_keywords)} seed "
+                f"terms from market_lexicons. This cycle reflects the seeded vocabulary, not "
+                f"what the platform surfaced on its own."
+            )
+        if not macro_keywords:
+            keyword_source = "none"
+            logger.error(
+                "Macro scan returned nothing and market_lexicons holds no seed terms, so this "
+                "cycle has no scope to probe. Reporting empty rather than inventing keywords."
+            )
+            return {
+                "status": "NO_SCOPE",
+                "mission_id": str(mission.id),
+                "shortcode": mission_shortcode,
+                "geo_code": geo.value,
+                "keyword_source": keyword_source,
+                "message": (
+                    "Discovery found no candidate topics. The Creative Center scan came back "
+                    "empty and no seed terms are registered. Register domain vocabulary with "
+                    "register_domain_lexicon, or check the TikTok session."
+                ),
+            }
 
 
         # Step 3: Real-World Search Suggestions & Sub-Niche Expansion
@@ -274,6 +329,7 @@ class AutonomousDiscoveryUseCase:
             "shortcode": mission_shortcode,
             "title": mission.title,
             "geo_code": geo.value,
+            "keyword_source": keyword_source,
             "total_signals": len(all_signals),
             "total_clusters": len(clusters),
             "top_opportunities": [

@@ -3,20 +3,27 @@ from typing import Any, Dict, List
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.value_objects import GeoCode, IngressScope, Timeframe
+from ignis.infrastructure.config.vocabulary_loader import (
+    MACHINERY_DOMAINS,
+    TEMPLATE_PREFIXES,
+)
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 
 logger = logging.getLogger(__name__)
 
 # Lexicon domains that hold negative vocabulary rather than topics to probe for.
-NON_TOPIC_LEXICON_DOMAINS = ("foreign_stopwords", "noise_blacklist")
+# Which lexicon domains are not topics is decided in one place, by the vocabulary loader.
+# Keeping a second copy here is what let eight machinery domains added on 2026-09-09 fall
+# straight through into the probe seeds: every seed a public pass probed with was a Vietnamese
+# function word, because ambiguous_unigrams sorts first alphabetically and filled the budget.
 # How many seed keywords a public pass hands to a connector that has no public feed of its own.
 MAX_SEED_KEYWORDS = 10
 # Total keywords one pass may probe with, lexicon seeds and freshly discovered topics combined.
 #
 # This is an API budget, not a tuning knob. A YouTube `search.list` call costs 100 quota units
 # against a default 10,000 units/day, so 10 keywords is 1,000 units per pass and the daily quota
-# covers 10 passes. The worker's default 15-minute cadence would want 96, which is why an
-# operator running the topic-coupled radar has to widen `IGNIS_SYNC_INTERVAL_MINUTES` instead.
+# covers 10 passes, which is where the worker's default 8640-second tick comes from. A
+# 15-minute cadence would want 96 passes a day and blow the quota by mid-morning.
 # An untargeted chart pull costs 1 unit, which is exactly why it was affordable and useless.
 MAX_TOPIC_KEYWORDS = 10
 
@@ -100,7 +107,8 @@ class IngestTrendsUseCase:
 
         seeds: List[str] = []
         for item in lexicons or []:
-            if str(item.get("domain") or "").strip().lower() in NON_TOPIC_LEXICON_DOMAINS:
+            domain = str(item.get("domain") or "").strip().lower()
+            if domain in MACHINERY_DOMAINS or domain.startswith(TEMPLATE_PREFIXES):
                 continue
             term = str(item.get("term") or "").strip()
             if term and term not in seeds:
