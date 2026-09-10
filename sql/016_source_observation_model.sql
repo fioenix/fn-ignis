@@ -32,10 +32,15 @@ CREATE TABLE IF NOT EXISTS sources (
     -- keying on the route would file it as two objects.
     identity_source VARCHAR(30),
     canonical_url TEXT,
-    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT sources_platform_external_id_key UNIQUE (platform, external_id)
 );
+
+-- No first_seen_at or last_seen_at here. When a source was seen is already in observations, one
+-- row per sighting, and a pair of columns summarising them is a second copy of that truth that
+-- every write would have to keep in step. The backfill could not fill them honestly either:
+-- 17,118 of the 18,597 observations have no known ingestion time, so NOW() would invent a
+-- lifecycle rather than record one. If a query needs the range, derive it from the
+-- exact_ingestion observations, or build a projection with its own rebuild contract.
 
 -- No title and no cluster_id on this table, by measurement rather than by taste: 10 URLs in the
 -- corpus reported two different titles, and 172 identities appear under more than one cluster.

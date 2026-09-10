@@ -48,6 +48,10 @@ class SqliteTrendRepository(ITrendRepository):
             return self._mem_conn
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        # SQLite defaults foreign keys off per connection, which would make every REFERENCES
+        # clause in the schema decoration: ON DELETE SET NULL would never fire and a dangling
+        # source_id would insert cleanly. Only the three tables from sql/016 declare any.
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     async def _ensure_schema(self) -> None:
@@ -102,15 +106,15 @@ class SqliteTrendRepository(ITrendRepository):
                 external_id TEXT NOT NULL,
                 identity_source TEXT,
                 canonical_url TEXT,
-                first_seen_at TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL,
+                -- No first_seen_at / last_seen_at: observations already hold when a source was
+                -- seen, and 17,118 of them have no known ingestion time to summarise.
                 UNIQUE (platform, external_id)
             );
 
             CREATE TABLE IF NOT EXISTS observations (
                 id TEXT PRIMARY KEY,
                 source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
-                cluster_id TEXT,
+                cluster_id TEXT REFERENCES topic_clusters(id) ON DELETE SET NULL,
                 observed_at TEXT,
                 published_at TEXT,
                 time_provenance TEXT NOT NULL

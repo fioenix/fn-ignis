@@ -423,13 +423,13 @@ async def test_sqlite_holds_the_three_entities_with_the_same_shape(sqlite_schema
         _sqlite_columns(conn, "mission_evidence")
 
         conn.execute(
-            "INSERT INTO sources (id, platform, external_id, first_seen_at, last_seen_at)"
-            " VALUES ('s1', 'youtube', 'video:vid-1', '2026-09-10', '2026-09-10')"
+            "INSERT INTO sources (id, platform, external_id)"
+            " VALUES ('s1', 'youtube', 'video:vid-1')"
         )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
-                "INSERT INTO sources (id, platform, external_id, first_seen_at, last_seen_at)"
-                " VALUES ('s2', 'youtube', 'video:vid-1', '2026-09-10', '2026-09-10')"
+                "INSERT INTO sources (id, platform, external_id)"
+                " VALUES ('s2', 'youtube', 'video:vid-1')"
             )
 
 
@@ -438,8 +438,8 @@ async def test_sqlite_labels_the_clock_and_refuses_an_invented_one(sqlite_schema
 
     with _sqlite(sqlite_schema) as conn:
         conn.execute(
-            "INSERT INTO sources (id, platform, external_id, first_seen_at, last_seen_at)"
-            " VALUES ('s1', 'youtube', 'video:vid-tp', '2026-09-10', '2026-09-10')"
+            "INSERT INTO sources (id, platform, external_id)"
+            " VALUES ('s1', 'youtube', 'video:vid-tp')"
         )
         for index, provenance in enumerate(
             ("exact_ingestion", "legacy_publish_only", "unknown")
@@ -473,8 +473,8 @@ async def test_sqlite_keeps_two_observations_of_one_source_in_one_mission(sqlite
 
     with _sqlite(sqlite_schema) as conn:
         conn.execute(
-            "INSERT INTO sources (id, platform, external_id, first_seen_at, last_seen_at)"
-            " VALUES ('s1', 'tiktok', 'video:777', '2026-09-10', '2026-09-10')"
+            "INSERT INTO sources (id, platform, external_id)"
+            " VALUES ('s1', 'tiktok', 'video:777')"
         )
         conn.execute(
             "INSERT INTO research_missions (id, title, keywords, created_at)"
@@ -514,3 +514,85 @@ async def test_sqlite_keeps_two_observations_of_one_source_in_one_mission(sqlite
             conn.execute("SELECT count(*) FROM observations WHERE source_id = 's1'").fetchone()[0]
             == 4
         )
+
+
+async def test_a_source_carries_no_lifecycle_summary_of_its_observations(postgres_schema):
+    """When a source was seen lives in observations; a pair of columns here is a second copy.
+
+    The backfill could not fill them honestly either: 17,118 of the 18,597 observations have no
+    known ingestion time, so a DEFAULT NOW() would have invented a lifecycle rather than recorded
+    one.
+    """
+    with psycopg.connect(postgres_schema) as conn:
+        columns = columns_of(conn, "sources")
+        assert not columns & {"first_seen_at", "last_seen_at", "observation_count"}
+
+
+async def test_an_observation_loses_its_cluster_rather_than_dangling(postgres_schema):
+    with psycopg.connect(postgres_schema, autocommit=True) as conn:
+        source_id = conn.execute(
+            "INSERT INTO sources (platform, external_id) VALUES ('youtube', 'video:c1')"
+            " RETURNING id"
+        ).fetchone()[0]
+        cluster_id = conn.execute(
+            "INSERT INTO topic_clusters (canonical_name) VALUES ('c') RETURNING id"
+        ).fetchone()[0]
+        observation_id = conn.execute(
+            "INSERT INTO observations (source_id, cluster_id, observed_at, metric_value,"
+            " time_provenance) VALUES (%s, %s, %s, 1.0, 'exact_ingestion') RETURNING id",
+            (source_id, cluster_id, NOW),
+        ).fetchone()[0]
+        conn.execute("DELETE FROM topic_clusters WHERE id = %s", (cluster_id,))
+        row = conn.execute(
+            "SELECT cluster_id FROM observations WHERE id = %s", (observation_id,)
+        ).fetchone()
+        assert row[0] is None, "the observation must survive its cluster, without a dangling id"
+
+
+async def test_sqlite_enforces_the_same_cluster_reference(sqlite_schema):
+    """A REFERENCES clause SQLite never enforces is decoration, so the behaviour is asserted.
+
+    Both halves: the declaration is there, and the connection the repository hands out actually
+    has foreign keys on -- SQLite defaults them off per connection.
+    """
+    import sqlite3
+
+    with _sqlite(sqlite_schema) as conn:
+        referenced = {row[2] for row in conn.execute("PRAGMA foreign_key_list(observations)")}
+        assert {"sources", "topic_clusters"} <= referenced
+
+        conn.execute(
+            "INSERT INTO sources (id, platform, external_id) VALUES ('s1', 'youtube', 'video:c1')"
+        )
+        conn.execute(
+            "INSERT INTO topic_clusters (id, canonical_name, first_seen_at, last_updated_at)"
+            " VALUES ('c1', 'c', '2026-09-10', '2026-09-10')"
+        )
+        conn.execute(
+            "INSERT INTO observations (id, source_id, cluster_id, observed_at, metric_value,"
+            " time_provenance) VALUES ('o1', 's1', 'c1', '2026-09-10T12:00:00+00:00', 1.0,"
+            " 'exact_ingestion')"
+        )
+        conn.execute("DELETE FROM topic_clusters WHERE id = 'c1'")
+        assert (
+            conn.execute("SELECT cluster_id FROM observations WHERE id = 'o1'").fetchone()[0]
+            is None
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO observations (id, source_id, observed_at, metric_value,"
+                " time_provenance) VALUES ('o-dangling', 'nope',"
+                " '2026-09-10T12:00:00+00:00', 1.0, 'exact_ingestion')"
+            )
+
+
+async def test_the_repository_connection_has_foreign_keys_on(sqlite_schema):
+    """The pragma is per connection, so it is asserted on the one the repository returns."""
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+
+    repository = SqliteTrendRepository(sqlite_schema)
+    try:
+        conn = repository._get_connection()
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    finally:
+        await repository.close()
