@@ -220,7 +220,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
                 source_url=source_url,
                 geo_code=geo,
                 metadata=metadata,
-                captured_at=published_at,
+                captured_at=datetime.now(timezone.utc),
+                published_at=published_at,
             )
             signals.append(signal)
 
@@ -370,7 +371,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                     source_url=f"https://www.youtube.com/watch?v={v_id}",
                                     geo_code=geo,
                                     metadata=meta,
-                                    captured_at=pub_at,
+                                    captured_at=datetime.now(timezone.utc),
+                                    published_at=pub_at,
                                 )
                                 kw_signals.append(sig)
 

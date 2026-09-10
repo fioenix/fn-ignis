@@ -30,7 +30,13 @@ class TrendSignal:
     cluster_id: Optional[UUID] = None
     mission_id: Optional[UUID] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # When this harness pulled the signal. This is the clock every timeframe query runs on.
     captured_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # When the platform says the content itself was posted, where the platform reports it.
+    # Kept apart from captured_at because they answer different questions: "what did we see
+    # this week" is not "what was posted this week", and holding both in one column made a
+    # 30-day window mean video publish dates for YouTube and scrape dates for Threads.
+    published_at: Optional[datetime] = None
 
 
 @dataclass

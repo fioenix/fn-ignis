@@ -1155,6 +1155,9 @@ async def handle_get_topic_detail(topic_id: str, limit: int = 20) -> str:
                 "growth_velocity": s.growth_velocity,
                 "source_url": s.source_url,
                 "captured_at": s.captured_at.isoformat() if s.captured_at else None,
+                # When the platform says the content was posted, where it says so at all.
+                # Distinct from captured_at, which is when this harness pulled it.
+                "published_at": s.published_at.isoformat() if s.published_at else None,
                 "metadata": {
                     k: v for k, v in s.metadata.items() if k in ["channel_title", "channel", "views", "likes", "published_at"]
                 },

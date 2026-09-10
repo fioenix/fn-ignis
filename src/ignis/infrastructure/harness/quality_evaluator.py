@@ -167,18 +167,21 @@ class QualityEvaluator:
         else:
             creator_diversity = 70.0
 
-        # 5. Data Freshness Score (Evaluate published_at or captured_at against window)
+        # 5. Data Freshness Score. Freshness is a property of the content, so this prefers the
+        # publish time and only falls back to the ingestion time when the platform reports none.
+        # The published_at field is authoritative; the metadata copy is read for rows written
+        # before the field existed.
         now_utc = datetime.now(timezone.utc)
         in_timeframe_count = 0
         for s in signals:
-            signal_dt = None
-            if s.metadata and s.metadata.get("published_at"):
+            signal_dt = s.published_at
+            if signal_dt is None and s.metadata and s.metadata.get("published_at"):
                 pub_str = s.metadata["published_at"]
                 try:
                     signal_dt = datetime.fromisoformat(str(pub_str).replace("Z", "+00:00"))
                 except Exception:
-                    signal_dt = s.captured_at
-            else:
+                    signal_dt = None
+            if signal_dt is None:
                 signal_dt = s.captured_at
 
             if signal_dt:

@@ -114,23 +114,29 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   Character class vẫn nằm trong code vì ở đó ký tự chính là thuật toán.
   Còn `VI_CORE_WORDS` và `TECH_LOAN_WORDS` chưa chuyển, nhưng giờ **được ghi tên** trong
   `KNOWN_VOCABULARY_CONSTANTS` thay vì vô hình với gate.
-- [ ] **`captured_at` mang hai nghĩa khác nhau tuỳ connector.** Đây là phát hiện nặng nhất
-  ngày 09/09/2026. 13 trong 15 chỗ gán `captured_at=datetime.now(timezone.utc)`, tức thời điểm
-  thu thập. Ba chỗ còn lại gán thời điểm **nội dung được đăng**:
-  `youtube_plugin.py:223` (`published_at`), `youtube_plugin.py:373` (`pub_at`) và
-  `google_trends/rss_plugin.py:268` (`pub_date` của RSS). Ngay trong `rss_plugin` cũng có hai
-  nghĩa: dòng 268 dùng pubDate, dòng 317 dùng `now()`.
+- [x] **Đã xong (10/09/2026): tách `captured_at` và `published_at` thành hai cột.**
+  Trước đó ba trong mười lăm chỗ gán `captured_at` bằng thời điểm nội dung được đăng, và ba chỗ
+  đó thuộc hai connector chiếm phần lớn corpus, nên mọi truy vấn theo timeframe đang trộn hai
+  đồng hồ.
 
-  Hệ quả: **mọi truy vấn theo timeframe đang trộn hai đồng hồ.** `get_trending_topics(30d)` lọc
-  trên `captured_at`, nên với YouTube nó nghĩa là "video đăng trong 30 ngày", còn với Threads là
-  "bài mình cào trong 30 ngày". Hai câu hỏi khác nhau.
+  `captured_at` giờ luôn là thời điểm thu thập và là đồng hồ duy nhất mà timeframe query dùng.
+  `published_at` là thời điểm nền tảng báo nội dung được đăng, `NULL` ở nơi nền tảng không báo.
 
-  Nó cũng giải thích vì sao YouTube chiếm 94% corpus 30 ngày: 14.813 dòng rải từ 08/06 đến
-  09/09 nhưng chỉ 1.039 mốc thời gian khác nhau, tức nó lấp kín cả cửa sổ ngay lập tức, còn
-  connector browser chỉ lấp những ngày thật sự chạy pass.
+  Backfill trong `sql/015` chính xác, không suy đoán: 14.813 dòng youtube lấy từ
+  `metadata->>'published_at'` và khớp 100% với giá trị của nền tảng, cộng 486 threads và 29
+  reels cùng nguồn đó, cộng 72 dòng Google Trends RSS lấy từ chính `captured_at` vì ở đó nó là
+  pubDate. 371 dòng còn lại để `NULL`: 259 tiktok và 112 dòng probe của Google đều không có
+  khái niệm ngày đăng. Tổng 15.400/15.771 dòng có `published_at`.
 
-  Cần quyết: tách thành hai cột (`captured_at` cho lúc thu thập, `published_at` cho lúc đăng),
-  hay chuẩn hoá `captured_at` về thời điểm thu thập và bỏ hẳn thời điểm đăng.
+  `QualityEvaluator` giờ đọc thẳng field cho điểm freshness, vì độ tươi là thuộc tính của nội
+  dung. Guard chống tái phát là một test đọc AST của mọi connector: đặt lại lỗi cũ thì nó fail
+  đúng dòng, tao đã thử.
+
+  **Chỗ không lấy lại được:** với các dòng ghi trước migration bởi ba code path đó, `captured_at`
+  vẫn là ngày đăng, và thời điểm thu thập thật chưa từng được lưu. Tao để nguyên chứ không đóng
+  một mốc thời gian bịa. Cửa sổ thời gian trên các dòng đó còn xấp xỉ cho tới khi chúng rơi ra
+  khỏi cửa sổ.
+
 - [ ] **`autonomous_discovery.py:116` hardcode 5 từ khoá làm fallback.** Khi macro scan qua
   Creative Center trả rỗng, `macro_keywords` bị gán
   `["ai agent", "chatbot", "automation", "ecommerce", "tiktok shop"]` mà không log gì. Nghĩa là

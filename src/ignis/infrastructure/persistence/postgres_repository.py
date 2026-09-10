@@ -101,13 +101,14 @@ class PostgresTimescaleRepository(ITrendRepository):
                             meta_json = json.dumps(s.metadata or {})
                             cap_at = s.captured_at or datetime.now(timezone.utc)
                             c_id = str(s.cluster_id) if s.cluster_id else None
-                            updates.append((s.metric_value, s.growth_velocity, s.raw_title, meta_json, cap_at, c_id, sig_id))
+                            updates.append((s.metric_value, s.growth_velocity, s.raw_title, meta_json, cap_at, s.published_at, c_id, sig_id))
                             all_metric_points.append((sig_id, cap_at, s.metric_value, s.growth_velocity))
 
                     if updates:
                         update_query = """
                             UPDATE trend_signals 
-                            SET metric_value = %s, growth_velocity = %s, raw_title = %s, metadata = %s, captured_at = %s, cluster_id = COALESCE(%s, cluster_id)
+                            SET metric_value = %s, growth_velocity = %s, raw_title = %s, metadata = %s, captured_at = %s,
+                                published_at = COALESCE(%s, published_at), cluster_id = COALESCE(%s, cluster_id)
                             WHERE id = %s;
                         """
                         await cur.executemany(update_query, updates)
@@ -127,8 +128,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 source_url,
                                 geo_code,
                                 metadata,
-                                captured_at
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                                captured_at,
+                                published_at
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                         """
                         insert_params = [
                             (
@@ -142,6 +144,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 s.geo_code.value if hasattr(s.geo_code, "value") else str(s.geo_code),
                                 json.dumps(s.metadata or {}),
                                 s.captured_at or datetime.now(timezone.utc),
+                                s.published_at,
                             )
                             for s in to_insert
                         ]
@@ -354,7 +357,8 @@ class PostgresTimescaleRepository(ITrendRepository):
                     'source_url', ts.source_url,
                     'geo_code', ts.geo_code,
                     'metadata', ts.metadata,
-                    'captured_at', ts.captured_at
+                    'captured_at', ts.captured_at,
+                    'published_at', ts.published_at
                 )) AS signals
             FROM ranked_clusters rc
             INNER JOIN trend_signals ts ON ts.cluster_id = rc.id
@@ -381,6 +385,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                     c_at = s_dict.get("captured_at")
                     if isinstance(c_at, str):
                         c_at = datetime.fromisoformat(c_at)
+                    p_at = s_dict.get("published_at")
+                    if isinstance(p_at, str):
+                        p_at = datetime.fromisoformat(p_at)
                     sig_meta = s_dict.get("metadata") or {}
                     if isinstance(sig_meta, str):
                         try:
@@ -398,6 +405,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                             cluster_id=UUID(str(c_id)),
                             metadata=sig_meta,
                             captured_at=c_at or datetime.now(timezone.utc),
+                            published_at=p_at,
                         )
                     )
 
@@ -443,6 +451,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 geo_code,
                 metadata,
                 captured_at,
+                published_at,
                 cluster_id,
                 mission_id
             FROM trend_signals
@@ -460,7 +469,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             seen_urls = set()
             # Walk newest first so the latest metric of a duplicated source_url wins, then restore ASC order.
             for row in reversed(rows):
-                platform_str, title, metric, velocity, url, geo_str, meta_json, captured, c_id, m_id = row
+                platform_str, title, metric, velocity, url, geo_str, meta_json, captured, published, c_id, m_id = row
                 if url:
                     key = (platform_str, url)
                     if key in seen_urls:
@@ -478,6 +487,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     mission_id=UUID(str(m_id)) if m_id else None,
                     metadata=meta,
                     captured_at=captured,
+                    published_at=published,
                 )
                 signals.append(sig)
             signals.reverse()
@@ -695,6 +705,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 geo_code,
                 metadata,
                 captured_at,
+                published_at,
                 cluster_id,
                 mission_id
             FROM trend_signals
@@ -709,7 +720,7 @@ class PostgresTimescaleRepository(ITrendRepository):
 
             signals = []
             for row in rows:
-                platform_str, title, metric, velocity, url, geo_str, meta_json, captured, c_id, m_id = row
+                platform_str, title, metric, velocity, url, geo_str, meta_json, captured, published, c_id, m_id = row
                 meta = meta_json if isinstance(meta_json, dict) else json.loads(meta_json or "{}")
                 sig = TrendSignal(
                     platform=PlatformType(platform_str),
@@ -722,6 +733,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     mission_id=UUID(str(m_id)) if m_id else None,
                     metadata=meta,
                     captured_at=captured,
+                    published_at=published,
                 )
                 signals.append(sig)
             return signals

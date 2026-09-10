@@ -65,7 +65,11 @@ CREATE TABLE IF NOT EXISTS trend_signals (
     source_url TEXT,
     geo_code VARCHAR(10) DEFAULT 'VN',
     metadata JSONB DEFAULT '{}'::jsonb,
-    captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    -- When this harness pulled the signal. Every timeframe query runs on this column, so it
+    -- means the same thing for every platform. See 015_split_published_at.sql.
+    captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- When the platform says the content was posted, NULL where the platform reports nothing.
+    published_at TIMESTAMPTZ
 );
 
 -- 5. Hypertable (Optional on TimescaleDB, safe fallback on Supabase/Vanilla Postgres)

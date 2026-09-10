@@ -104,7 +104,8 @@ async def test_get_cluster_signals(sample_trend_signal):
             sample_trend_signal.source_url,
             sample_trend_signal.geo_code.value,
             '{"traffic": "50K+"}',
-            now,
+            now,          # captured_at: when this harness pulled it
+            None,         # published_at: this platform reports none
             str(cluster_id),
             None  # mission_id
         )
@@ -191,3 +192,35 @@ def test_cluster_batch_dedup_repoints_signals_to_the_surviving_cluster():
     assert len(merged.signals) == 3
     assert {s.cluster_id for s in merged.signals} == {survivor_id}
     assert merged.cross_platform_score == 55.0
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_signals_keeps_the_two_clocks_apart(sample_trend_signal):
+    """A row carrying both times must not collapse them: they answer different questions."""
+    repo = PostgresTimescaleRepository(dsn="postgresql://mock")
+    cluster_id = uuid4()
+    pulled_at = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
+    posted_at = datetime(2026, 7, 1, 8, 30, tzinfo=timezone.utc)
+    mock_rows = [
+        (
+            sample_trend_signal.platform.value,
+            sample_trend_signal.raw_title,
+            sample_trend_signal.metric_value,
+            sample_trend_signal.growth_velocity,
+            sample_trend_signal.source_url,
+            sample_trend_signal.geo_code.value,
+            "{}",
+            pulled_at,
+            posted_at,
+            str(cluster_id),
+            None,
+        )
+    ]
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchall = AsyncMock(return_value=mock_rows)
+    repo._pool = _create_mock_pool(mock_cursor)
+
+    signals = await repo.get_cluster_signals(cluster_id=cluster_id, timeframe=Timeframe.LAST_7D)
+
+    assert signals[0].captured_at == pulled_at
+    assert signals[0].published_at == posted_at

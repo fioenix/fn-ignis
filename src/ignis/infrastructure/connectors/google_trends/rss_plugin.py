@@ -265,7 +265,8 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
                     source_url=source_url,
                     geo_code=geo,
                     metadata=metadata,
-                    captured_at=pub_date,
+                    captured_at=datetime.now(timezone.utc),
+                    published_at=pub_date,
                 )
                 signals.append(signal)
 

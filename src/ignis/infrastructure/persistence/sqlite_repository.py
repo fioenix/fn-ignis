@@ -78,7 +78,8 @@ class SqliteTrendRepository(ITrendRepository):
                 cluster_id TEXT,
                 mission_id TEXT,
                 metadata TEXT,
-                captured_at TEXT NOT NULL
+                captured_at TEXT NOT NULL,
+                published_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS signal_metrics (
@@ -173,6 +174,13 @@ class SqliteTrendRepository(ITrendRepository):
         if "topic_label" not in existing_cluster_columns:
             cur.execute("ALTER TABLE topic_clusters ADD COLUMN topic_label TEXT")
 
+        existing_signal_columns = {row[1] for row in cur.execute("PRAGMA table_info(trend_signals)")}
+        if "published_at" not in existing_signal_columns:
+            # captured_at used to hold the publish time for YouTube and the Google Trends feed.
+            # New rows keep the two apart; rows already written cannot have their ingestion time
+            # recovered, so they are left alone rather than stamped with an invented one.
+            cur.execute("ALTER TABLE trend_signals ADD COLUMN published_at TEXT")
+
         # Seed Initial Lexicons & Configs from SQL files if table is empty
         cur.execute("SELECT COUNT(*) FROM market_lexicons")
         count = cur.fetchone()[0]
@@ -264,6 +272,7 @@ class SqliteTrendRepository(ITrendRepository):
                     m_id = str(s.mission_id) if s.mission_id else None
                     meta_json = json.dumps(s.metadata or {}, ensure_ascii=False)
                     cap_at = s.captured_at.isoformat() if s.captured_at else datetime.now(timezone.utc).isoformat()
+                    pub_at = s.published_at.isoformat() if s.published_at else None
                     url = s.source_url.strip() if s.source_url else ""
 
                     existing_id = None
@@ -284,20 +293,21 @@ class SqliteTrendRepository(ITrendRepository):
                         cur.execute(
                             """
                             UPDATE trend_signals 
-                            SET metric_value = ?, growth_velocity = ?, raw_title = ?, metadata = ?, captured_at = ?, cluster_id = COALESCE(?, cluster_id)
+                            SET metric_value = ?, growth_velocity = ?, raw_title = ?, metadata = ?, captured_at = ?,
+                                published_at = COALESCE(?, published_at), cluster_id = COALESCE(?, cluster_id)
                             WHERE id = ?;
                             """,
-                            (s.metric_value, s.growth_velocity, s.raw_title, meta_json, cap_at, c_id, s_id),
+                            (s.metric_value, s.growth_velocity, s.raw_title, meta_json, cap_at, pub_at, c_id, s_id),
                         )
                     else:
                         s_id = str(uuid4())
                         cur.execute(
                             """
                             INSERT INTO trend_signals 
-                            (id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            (id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at, published_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                             """,
-                            (s_id, plat, s.raw_title, s.metric_value, s.growth_velocity, url or None, geo, c_id, m_id, meta_json, cap_at),
+                            (s_id, plat, s.raw_title, s.metric_value, s.growth_velocity, url or None, geo, c_id, m_id, meta_json, cap_at, pub_at),
                         )
                         inserted += 1
 
@@ -372,14 +382,15 @@ class SqliteTrendRepository(ITrendRepository):
                         m_id = str(s.mission_id) if s.mission_id else None
                         meta_json = json.dumps(s.metadata or {}, ensure_ascii=False)
                         cap_at = s.captured_at.isoformat() if s.captured_at else now_str
+                        pub_at = s.published_at.isoformat() if s.published_at else None
 
                         cur.execute(
                             """
                             INSERT OR REPLACE INTO trend_signals
-                            (id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at, published_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
-                            (s_id, plat, s.raw_title, s.metric_value, s.growth_velocity, s.source_url, geo, c_id, m_id, meta_json, cap_at)
+                            (s_id, plat, s.raw_title, s.metric_value, s.growth_velocity, s.source_url, geo, c_id, m_id, meta_json, cap_at, pub_at)
                         )
                 conn.commit()
             finally:
@@ -455,7 +466,7 @@ class SqliteTrendRepository(ITrendRepository):
 
                     # Fetch signals captured within the timeframe window for this cluster
                     sig_query = f"""
-                        SELECT platform, raw_title, metric_value, growth_velocity, source_url, geo_code, metadata, captured_at
+                        SELECT platform, raw_title, metric_value, growth_velocity, source_url, geo_code, metadata, captured_at, published_at
                         FROM trend_signals
                         WHERE cluster_id = ? AND datetime(captured_at) >= datetime('now', '{interval_modifier}')
                         ORDER BY captured_at DESC;
@@ -467,6 +478,7 @@ class SqliteTrendRepository(ITrendRepository):
                     for sr in sig_rows:
                         meta = json.loads(sr["metadata"]) if sr["metadata"] else {}
                         cap_at = datetime.fromisoformat(sr["captured_at"]) if sr["captured_at"] else datetime.now(timezone.utc)
+                        pub_at = datetime.fromisoformat(sr["published_at"]) if sr["published_at"] else None
                         signals_list.append(
                             TrendSignal(
                                 platform=PlatformType(sr["platform"]),
@@ -478,6 +490,7 @@ class SqliteTrendRepository(ITrendRepository):
                                 cluster_id=UUID(c_id),
                                 metadata=meta,
                                 captured_at=cap_at,
+                                published_at=pub_at,
                             )
                         )
 
@@ -539,7 +552,7 @@ class SqliteTrendRepository(ITrendRepository):
                 cur = conn.cursor()
                 cur.execute(
                     f"""
-                    SELECT platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at
+                    SELECT platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at, published_at
                     FROM trend_signals
                     WHERE cluster_id = ? AND datetime(captured_at) >= datetime('now', '{interval_modifier}')
                     ORDER BY captured_at DESC
@@ -559,6 +572,7 @@ class SqliteTrendRepository(ITrendRepository):
                         seen_urls.add(key)
                     meta = json.loads(r["metadata"]) if r["metadata"] else {}
                     cap_at = datetime.fromisoformat(r["captured_at"]) if r["captured_at"] else datetime.now(timezone.utc)
+                    pub_at = datetime.fromisoformat(r["published_at"]) if r["published_at"] else None
                     signals.append(
                         TrendSignal(
                             platform=PlatformType(r["platform"]),
@@ -571,6 +585,7 @@ class SqliteTrendRepository(ITrendRepository):
                             mission_id=UUID(r["mission_id"]) if r["mission_id"] else None,
                             metadata=meta,
                             captured_at=cap_at,
+                            published_at=pub_at,
                         )
                     )
                 return signals
@@ -702,7 +717,7 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, mission_id, metadata, captured_at FROM trend_signals WHERE mission_id = ? ORDER BY captured_at DESC",
+                    "SELECT id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, mission_id, metadata, captured_at, published_at FROM trend_signals WHERE mission_id = ? ORDER BY captured_at DESC",
                     (str(mission_id),)
                 )
                 rows = cur.fetchall()
@@ -710,6 +725,7 @@ class SqliteTrendRepository(ITrendRepository):
                 for r in rows:
                     meta = json.loads(r["metadata"]) if r["metadata"] else {}
                     cap_at = datetime.fromisoformat(r["captured_at"]) if r["captured_at"] else datetime.now(timezone.utc)
+                    pub_at = datetime.fromisoformat(r["published_at"]) if r["published_at"] else None
                     signals.append(
                         TrendSignal(
                             platform=PlatformType(r["platform"]),
@@ -721,6 +737,7 @@ class SqliteTrendRepository(ITrendRepository):
                             mission_id=UUID(r["mission_id"]) if r["mission_id"] else None,
                             metadata=meta,
                             captured_at=cap_at,
+                            published_at=pub_at,
                         )
                     )
 
