@@ -150,3 +150,16 @@ async def test_the_creative_center_probe_follows_redirects():
     source = inspect.getsource(browser_support.surface_reachable)
 
     assert "follow_redirects=True" in source
+
+
+def test_the_creative_center_url_is_the_one_tiktok_serves_directly():
+    """Pinned rather than probed: a network call here would make the suite depend on TikTok.
+
+    The old inspiration/popular/hashtag path answers 301 and lands on this one. Both were run
+    through fetch_macro_trends on 10/09/2026 and returned identical rows, so the redirect was
+    only costing a round trip. If TikTok moves it again this test is the reminder to re-verify.
+    """
+    assert (
+        TikTokCreativeCenterPlugin.BASE_URL
+        == "https://ads.tiktok.com/creative/creativeCenter/trends"
+    )

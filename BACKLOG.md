@@ -67,8 +67,9 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [ ] **Taxonomy chưa phủ các vertical ngoài thị trường:** tin tức, thể thao, người nổi tiếng,
   sức khoẻ/wellness vẫn rơi vào `unclassified`. Đây là **câu hỏi phạm vi sản phẩm**, không phải
   bug: một harness về cơ hội thị trường có nên theo dõi bóng đá không? Chờ Fio quyết.
-- [ ] **Chưa cluster nào đạt BREAKOUT (>= 80):** cần 4-5 platform cùng nói về một chủ đề, hiện
-  tối đa là 3.
+- [x] **BREAKOUT đã với tới được (cập nhật 10/09/2026):** 5 cluster đạt `cross_platform_score
+  >= 80`, và lượt pass đủ 6 connector ngày 09/09 tạo ra 2 cluster trải 4 nền tảng. Trước đó
+  tối đa là 3. Ghi chú cũ nói chưa cluster nào đạt đã sai từ khi ingress hai tầng chạy thật.
 - [ ] **Discovery source chưa đúng mục đích sản phẩm:** feed trending VN của Google Trends là tin
   tức tổng hợp (bóng đá, thời sự), nên ghép chủ đề theo nó cho ra corpus tin tức chứ không phải
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.

@@ -25,7 +25,11 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
     Provides a macro surveillance layer for target markets.
     """
 
-    BASE_URL = "https://ads.tiktok.com/business/creativecenter/inspiration/popular/hashtag/pc/en"
+    # TikTok moved this surface: the old inspiration/popular/hashtag path answers 301 and lands
+    # here. The browser followed the hop silently, so the connector kept working while the URL
+    # in code drifted a release behind. Verified 10/09/2026 by running fetch_macro_trends against
+    # both: identical rows, identical ranks, one fewer round trip.
+    BASE_URL = "https://ads.tiktok.com/creative/creativeCenter/trends"
 
     def __init__(self, auth_manager: Optional[TikTokAuthManager] = None):
         self._auth_manager = auth_manager
