@@ -1,7 +1,7 @@
 # Baseline đối soát: source / observation / mission evidence
 
 **Ngày chạy:** 10/09/2026 · **Backend:** PostgreSQL/TimescaleDB (Supabase)
-**Kết quả:** `BALANCED`, 13/13 invariant giữ, exit code `0`
+**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `2`
 **Lưu ý:** bản baseline đầu tiên của cùng ngày đã bị thay thế — xem mục "Bản sửa" bên dưới.
 **Dữ liệu máy đọc:** [`2026-09-10-source-observation-baseline.json`](2026-09-10-source-observation-baseline.json)
 
@@ -46,12 +46,13 @@ Gate hiện tại dựng observation theo **legacy lineage**: một observation 
 `trend_signals`, cộng một cho mỗi điểm `signal_metrics` **không** lặp lại toàn bộ metric payload
 của dòng cha. Chỉ bản copy mà `sql/008` tạo ra là được gộp. Member là **multiset**.
 
-## Projection: 9 field được bảo toàn, 4 mất mát có chủ ý
+## Projection: 10 field được bảo toàn, 4 mất mát có chủ ý
 
 Một observation member được render trên đúng những field này:
 
-`canonical_source_identity` · `observed_at` · `published_at` · `observed_title` · `metric_value` ·
-`growth_velocity` · `geo_code` · `normalized_source_url` · `canonical_metadata`
+`canonical_source_identity` · `observed_at` · `published_at` · **`time_provenance`** ·
+`observed_title` · `metric_value` · `growth_velocity` · `geo_code` · `normalized_source_url` ·
+`canonical_metadata`
 
 Field bị bỏ phải được khai báo là mất mát có chủ ý kèm lý do, để câu "digest khớp" không bao giờ
 có nghĩa là "digest bỏ qua đúng cột đã đổi":
@@ -66,14 +67,14 @@ có nghĩa là "digest bỏ qua đúng cột đã đổi":
 ## Digest — bốn tập canonical
 
 SHA-256 trên từng tập đã sort, member là **business identity** chứ không phải surrogate key, và
-là **multiset** chứ không phải set.
+là **multiset** chứ không phải set. Nhãn `algorithm` trong JSON ghi đúng `sorted multiset`.
 
-| Tập | SHA-256 | Member |
+| Tập | SHA-256 (16 ký tự đầu) | Member |
 |---|---|---|
-| sources | `cf7bf6501d87b14b2ed268e9cc439cc7a979b6a272e6c135d2548e0c88733d47` | 1.927 |
-| observations | `44d9bf490c8cb6a8…` (xem JSON) | 18.597 |
-| mission_associations | `39da6905ea3edb5b…` (xem JSON) | 1.301 |
-| cluster_memberships | `44ec7c865db748d2…` (xem JSON) | 15.754 |
+| sources | `cf7bf6501d87b14b` | 1.927 |
+| observations | `77469642b28e8561` | 18.597 |
+| mission_associations | `d87299a59340eb9d` | 1.301 |
+| cluster_memberships | `532e7834fd44a2f9` | 15.754 |
 
 ## Công thức và aggregate
 
@@ -134,6 +135,53 @@ là số **collection event được bảo toàn**. Overlap `sql/008` vẫn đú
 trong bản mới là 18.199, tức số payload phân biệt được sau khi projection đã gồm velocity, geo,
 title và metadata.
 
+### Time provenance: 3 bucket, cộng lại đúng 18.597
+
+| Bucket | Observation |
+|---|---|
+| `exact_ingestion` | 1.466 |
+| `legacy_publish_only` | 17.131 |
+| `unknown` | 0 |
+| **Tổng** | **18.597** |
+
+Đây là khoảng trống mà bản trước để hở, và nó nghiêm trọng hơn nhãn JSON: projection cũ đưa
+`captured_at` thẳng vào một field **mang tên `observed_at`**, không có `time_provenance`. Với
+YouTube và Google feed lịch sử, `captured_at` chính là publish time — đúng thứ đã quyết là không
+được giả làm ingestion time. Schema test chỉ chứng minh cột và constraint tồn tại, nên migration
+vẫn có thể gắn sai provenance cho cả 18.597 observation mà bốn digest đều khớp.
+
+Provenance là field thứ 10 của digest, nên việc gắn lại nhãn làm digest lệch ngay. Có test chứng
+minh: cùng nội dung, một bên rơi vào `legacy_publish_only`, một bên `exact_ingestion` → hai
+observation digest khác nhau.
+
+**Rule suy ra từ bằng chứng, không từ mốc ngày tự chọn.** `sql/015` ghi lại chính xác code path
+nào từng viết publish time vào `captured_at` — hai đường YouTube và feed Google Trends — rồi
+backfill `published_at` từ giá trị của platform trong metadata cho YouTube, và chuyển `captured_at`
+sang cho các dòng feed Google. Vì vậy dòng viết **trước** bản sửa để lại `published_at` bằng
+`captured_at`, còn dòng viết **sau** có `captured_at` là ingestion và `published_at` khác. Đẳng
+thức đó là signature, và nó đo được:
+
+| platform | n | `published_at == captured_at` | khác | NULL |
+|---|---|---|---|---|
+| youtube | 14.869 | **14.737** | 132 | 0 |
+| google feed | 72 | **72** | 0 | 0 |
+| google probe | 117 | 0 | 0 | 117 |
+| threads | 517 | 0 | 486 | 31 |
+| tiktok | 333 | 0 | 0 | 333 |
+| reels | 30 | 0 | 29 | 1 |
+
+Dòng probe của Google được `sql/015` loại khỏi backfill vì chúng luôn được đóng dấu ingestion time
+và không có khái niệm publish, nên chúng là `exact_ingestion`.
+
+Cách bucket cộng lại: **14.809 dòng legacy** (14.737 youtube + 72 google feed) và **1.129 dòng
+exact** (15.938 − 14.809). Metric point thừa hưởng đồng hồ của dòng cha, vì `save_signals` đóng
+dấu mỗi point bằng `captured_at` của dòng đó — 2.322 point rơi vào dòng legacy và 337 vào dòng
+exact, cộng 2.659 = 3.677 − 1.018. Ra 17.131 legacy và 1.466 exact.
+
+Ở đâu `captured_at` là publish time thì `observed_at` là **NULL**. Thời điểm thu thập thật chưa
+từng được ghi, và đóng dấu publish time vào một cột tên `observed_at` chính là phép thay thế mà
+toàn bộ việc này tồn tại để chặn.
+
 ### Mission evidence: 1.301, phục dựng chính xác toàn bộ
 
 | | |
@@ -172,7 +220,7 @@ observation có cùng business payload**. Con số 586 trong bản trước là 
 observation, không thuộc source. Đặt `cluster_id` trên bảng source thì 172 identity này buộc phải
 chọn một cluster và bỏ phần còn lại.
 
-## 13 invariant
+## 14 invariant
 
 Tất cả đều giữ. Audit exit non-zero nếu bất kỳ điều nào sau đây bị vi phạm:
 
@@ -182,13 +230,14 @@ Tất cả đều giữ. Audit exit non-zero nếu bất kỳ điều nào sau �
 4. Dòng đã resolve = identity một dòng + dòng trong identity đã gộp.
 5. Số observation = số dòng + số metric point − số bản copy `sql/008` được gộp.
 6. Số payload phân biệt được không vượt quá multiset observation.
-7. Số cluster membership không vượt quá số dòng ánh xạ tới một cluster.
-8. Không metric point nào trỏ tới `trend_signals` row không tồn tại.
-9. Dòng mission-attached = exact + unresolved + dangling.
-10. Không dòng nào trỏ tới mission không tồn tại.
-11. Mọi dòng = cluster chắc chắn + dangling + không cluster.
-12. Không dòng nào trỏ tới cluster không tồn tại.
-13. Dòng đã resolve = identity một dòng + dòng trong identity đã gộp.
+7. Ba bucket `time_provenance` cộng lại bằng đúng số observation.
+8. Số cluster membership không vượt quá số dòng ánh xạ tới một cluster.
+9. Không metric point nào trỏ tới `trend_signals` row không tồn tại.
+10. Dòng mission-attached = exact + unresolved + dangling.
+11. Không dòng nào trỏ tới mission không tồn tại.
+12. Mọi dòng = cluster chắc chắn + dangling + không cluster.
+13. Không dòng nào trỏ tới cluster không tồn tại.
+14. Dòng đã resolve = identity một dòng + dòng trong identity đã gộp.
 
 ## Guard: read-only do engine cưỡng chế
 
@@ -214,6 +263,7 @@ So bản chạy sau với JSON này. Ba điều kiện để coi là thành côn
 3. Mọi phép gộp source vẫn có reason code, và `unclassified_identity_collision` vẫn bằng 0.
 
 Cả bốn digest phải **khớp tuyệt đối**, và số member phải khớp đúng: 1.927 source, 18.597
-observation, 1.301 mission association, 15.754 cluster membership. Migration không được đổi tập
+observation, 1.301 mission association, 15.754 cluster membership. Ba bucket provenance phải khớp
+đúng 1.466 / 17.131 / 0. Migration không được đổi tập
 nào trong bốn tập đó. Nếu một digest lệch, phải chỉ ra được field nào đổi và vì sao — và nếu lý do
 là một field bị bỏ khỏi projection thì nó phải vào bảng mất mát có chủ ý trước, không phải sau.

@@ -10,20 +10,20 @@
     "rows_without_cluster": 184
   },
   "digests": {
-    "algorithm": "sha256 over NUL-separated members of each sorted set",
-    "cluster_memberships": "44ec7c865db748d21dc6bbe40037717f7e74c1f40e32034c8698c16b91d0051b",
+    "algorithm": "sha256 over NUL-separated members of each sorted multiset",
+    "cluster_memberships": "532e7834fd44a2f9c78fd790c97cbd717708adb767849fba3f18aa0931e658f9",
     "member_counts": {
       "cluster_memberships": 15754,
       "mission_associations": 1301,
       "observations": 18597,
       "sources": 1927
     },
-    "mission_associations": "39da6905ea3edb5b61cd7ec3cde57d2ce42d15256ae7a0e5d5cb5d47162dfa02",
-    "observations": "44d9bf490c8cb6a8b0e1a908a7682b411f9ba8d5c69c32202e9e2cf50be1c1ad",
+    "mission_associations": "d87299a59340eb9d02faa63643129fb7effb8a06a3506f0d1c31bbe08c3d093f",
+    "observations": "77469642b28e856144912efe6dcc4f2e1e60f04e54ef1e1bcdce44ef071ded98",
     "sources": "cf7bf6501d87b14b2ed268e9cc439cc7a979b6a272e6c135d2548e0c88733d47"
   },
   "invariants": {
-    "checked": 13,
+    "checked": 14,
     "failed": 0,
     "failures": []
   },
@@ -52,6 +52,7 @@
       "canonical_source_identity",
       "observed_at",
       "published_at",
+      "time_provenance",
       "observed_title",
       "metric_value",
       "growth_velocity",
@@ -62,10 +63,15 @@
     "signal_metrics_rows": 3677,
     "signals_carrying_at_least_one_metric_point": 1018,
     "signals_with_no_metric_point": 14920,
+    "time_provenance_buckets": {
+      "exact_ingestion": 1466,
+      "legacy_publish_only": 17131,
+      "unknown": 0
+    },
     "trend_signals_rows": 15938
   },
   "sanitized": true,
-  "schema_version": 1,
+  "schema_version": 2,
   "sources": {
     "canonical_sources": 1927,
     "identities_holding_one_row": 1550,

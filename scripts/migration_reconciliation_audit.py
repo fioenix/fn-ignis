@@ -360,15 +360,18 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
         points_by_signal[point.signal_id].append(point)
 
     observation_members: List[str] = []
+    provenance_buckets: Counter = Counter()
     lineage_merges = 0
     for row in signals:
         if row.signal_id not in identity_of:
             continue
         identity = identity_of[row.signal_id]
+        provenance, _ = derive_time_provenance(row)
         row_payload = (row.captured_at, row.metric_value, row.growth_velocity)
         observation_members.append(
             observation_member(identity, row, *row_payload)
         )
+        provenance_buckets[provenance] += 1
         merged_once = False
         for point in points_by_signal.get(row.signal_id, []):
             if point.payload == row_payload and not merged_once:
@@ -380,6 +383,7 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
                     identity, row, point.captured_at, point.metric_value, point.growth_velocity
                 )
             )
+            provenance_buckets[provenance] += 1
 
     observation_arithmetic = {
         "formula": (
@@ -396,6 +400,14 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
         "naive_sum_for_contrast": len(signals) + len(metric_points),
         "preserved_fields": list(OBSERVATION_FIELDS),
         "intentional_losses": dict(sorted(INTENTIONAL_LOSSES.items())),
+        # Every observation lands in exactly one bucket. A migration that mislabels a legacy
+        # publish time as a proven ingestion time would leave every count and every digest of the
+        # previous version matching, which is why provenance is inside the digest and counted here.
+        "time_provenance_buckets": {
+            PROVENANCE_EXACT: provenance_buckets[PROVENANCE_EXACT],
+            PROVENANCE_LEGACY: provenance_buckets[PROVENANCE_LEGACY],
+            PROVENANCE_UNKNOWN: provenance_buckets[PROVENANCE_UNKNOWN],
+        },
     }
     # Members that are byte-identical across every preserved field. These are NOT a reduction the
     # migration performs: two collection events may legitimately look the same on all of them, and
@@ -413,6 +425,11 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
         - lineage_merges
         - len([p for p in metric_points if p.signal_id not in identity_of]),
         "observation count does not balance against rows, points and lineage merges",
+    )
+    findings.require(
+        sum(observation_arithmetic["time_provenance_buckets"].values())
+        == len(observation_members),
+        "time_provenance buckets do not account for every observation",
     )
     findings.require(
         observation_arithmetic["indistinguishable_observation_multiplicity"] >= 0,
@@ -562,7 +579,7 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     ]
     cluster_members = cluster_members_preview
     digests = {
-        "algorithm": "sha256 over NUL-separated members of each sorted set",
+        "algorithm": "sha256 over NUL-separated members of each sorted multiset",
         "sources": digest_of(rows_per_identity),
         "observations": digest_of(observation_members),
         "mission_associations": digest_of(mission_members),
@@ -576,7 +593,7 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     }
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "digests": digests,
         "sources": {
             "canonical_sources": len(rows_per_identity),
@@ -608,7 +625,7 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
         },
         "detail": detail,
         "invariants": {
-            "checked": 13,
+            "checked": 14,
             "failed": len(findings.failures),
             "failures": sorted(findings.failures),
         },
@@ -623,6 +640,7 @@ OBSERVATION_FIELDS = (
     "canonical_source_identity",
     "observed_at",
     "published_at",
+    "time_provenance",
     "observed_title",
     "metric_value",
     "growth_velocity",
@@ -637,6 +655,55 @@ INTENTIONAL_LOSSES = {
     "trend_signals.mission_id": "carried by the mission_associations digest instead",
     "trend_signals.cluster_id": "carried by the cluster_memberships digest instead",
 }
+
+
+PROVENANCE_EXACT = "exact_ingestion"
+PROVENANCE_LEGACY = "legacy_publish_only"
+PROVENANCE_UNKNOWN = "unknown"
+
+# Row titles Google Trends gives its keyword-probe rows. Third-party wording, matched verbatim;
+# sql/015 excluded exactly these from its publish-time backfill because they were always stamped
+# with the ingestion time and have no publish concept.
+GOOGLE_PROBE_TITLE_PREFIX = "Google Search Trends:"
+
+
+def derive_time_provenance(row: "SignalRow") -> Tuple[str, Optional[str]]:
+    """Decide what a legacy row's captured_at actually means, and what observed_at may be.
+
+    Returns (time_provenance, observed_at). This is derived from the evidence sql/015 left
+    behind, not from a cutoff date picked by hand.
+
+    That migration recorded which code paths wrote a publish time into captured_at: both YouTube
+    paths and the Google Trends RSS feed. It then backfilled published_at from the platform's own
+    value in metadata for YouTube, and moved captured_at across for the Google feed rows. So a row
+    written before the fix by one of those paths ends up with published_at equal to captured_at,
+    while a row written after it has an ingestion captured_at and a different published_at. The
+    equality is the signature, and it is measurable: 14,737 of 14,869 YouTube rows and all 72
+    Google feed rows carry it, while every TikTok, Threads and Reels row does not.
+
+    Where captured_at is the publish time, observed_at is NULL. The true collection time was never
+    recorded, and stamping the publish time into a column named observed_at is the substitution
+    this whole exercise exists to stop.
+    """
+    if row.platform == "google":
+        if (row.raw_title or "").startswith(GOOGLE_PROBE_TITLE_PREFIX):
+            return PROVENANCE_EXACT, row.captured_at
+        if row.published_at is None:
+            return PROVENANCE_UNKNOWN, None
+        if row.published_at == row.captured_at:
+            return PROVENANCE_LEGACY, None
+        return PROVENANCE_EXACT, row.captured_at
+
+    if row.platform == "youtube":
+        if row.published_at is None:
+            # captured_at cannot be placed: the backfill found no platform value to compare it to.
+            return PROVENANCE_UNKNOWN, None
+        if row.published_at == row.captured_at:
+            return PROVENANCE_LEGACY, None
+        return PROVENANCE_EXACT, row.captured_at
+
+    # Every other connector always wrote the ingestion time; sql/015 names the three that did not.
+    return PROVENANCE_EXACT, row.captured_at
 
 
 def canonical_metadata(metadata: Any) -> str:
@@ -655,14 +722,21 @@ def observation_member(
 ) -> str:
     """One observation, rendered over every field OBSERVATION_FIELDS names.
 
-    A metric point inherits title, geo, URL and metadata from the trend_signals row it hangs off,
-    because signal_metrics stores none of those: it records that the same source was seen again
-    with a new metric payload.
+    A metric point inherits title, geo, URL, metadata and clock semantics from the trend_signals
+    row it hangs off, because signal_metrics stores none of those and save_signals stamped each
+    point with the parent row's captured_at. If that row's clock was a publish time, so is the
+    point's, which is why provenance is decided once per row and applies to every observation
+    derived from it.
     """
+    provenance, _row_observed_at = derive_time_provenance(row)
+    # This observation's own clock, not the parent row's: a metric point carries its own
+    # captured_at. It survives only when that clock is a proven ingestion time.
+    observed_at = captured_at if provenance == PROVENANCE_EXACT else None
     parts = (
         identity,
-        captured_at or "",
+        observed_at or "",
         row.published_at or "",
+        provenance,
         (row.raw_title or "").strip(),
         "" if metric_value is None else repr(metric_value),
         "" if growth_velocity is None else repr(growth_velocity),
@@ -765,6 +839,10 @@ def render_summary(report: Dict[str, Any]) -> str:
         f"    indistinguishable multiplicity  {obs['indistinguishable_observation_multiplicity']}",
         f"    fields preserved                {len(obs['preserved_fields'])}"
         f"  intentional losses {len(obs['intentional_losses'])}",
+        *(
+            f"    provenance {name:21s}{count:>6d}"
+            for name, count in obs["time_provenance_buckets"].items()
+        ),
         "",
         "  mission evidence",
         f"    mission-attached rows           {mis['mission_attached_rows']}",

@@ -258,6 +258,7 @@ def test_the_projection_declares_every_field_it_preserves(hostile_db):
         "canonical_source_identity",
         "observed_at",
         "published_at",
+        "time_provenance",
         "observed_title",
         "metric_value",
         "growth_velocity",
@@ -374,7 +375,7 @@ def test_the_json_report_is_deterministic(hostile_db, tmp_path):
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(first), "--quiet"])
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(second), "--quiet"])
     assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
-    assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 1
+    assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 2
 
 
 # --- the tracked baseline must carry evidence, not content ------------------------------------
@@ -413,7 +414,7 @@ def test_the_sanitized_report_keeps_the_evidence(hostile_db):
     assert report["sources"]["merge_reasons"]
     assert report["sources"]["unclassified_collision_count"] == 0
     assert "unclassified_collisions" not in report["sources"]
-    assert report["invariants"]["checked"] == 13
+    assert report["invariants"]["checked"] == 14
     assert set(report["digests"]) >= {
         "sources",
         "observations",
@@ -562,3 +563,95 @@ def test_the_cluster_digest_covers_every_membership(hostile_db):
         report["digests"]["member_counts"]["cluster_memberships"]
         == report["cluster_membership"]["memberships"]
     )
+
+
+# --- decision: a historical timestamp is labelled, never re-labelled silently -----------------
+
+
+def test_provenance_buckets_account_for_every_observation(hostile_db):
+    obs = run_audit(hostile_db)["observations"]
+    buckets = obs["time_provenance_buckets"]
+    assert set(buckets) == {"exact_ingestion", "legacy_publish_only", "unknown"}
+    assert sum(buckets.values()) == obs["observations"]
+
+
+def test_a_youtube_row_whose_captured_at_is_its_publish_time_is_legacy(tmp_path):
+    """The signature sql/015 left behind: the backfill made published_at equal captured_at."""
+    stamp = "2026-08-01T00:00:00+00:00"
+    path = build_db(
+        str(tmp_path / "legacy.sqlite"),
+        [signal("s1", captured_at=stamp, published_at=stamp)],
+    )
+    obs = run_audit(path)["observations"]
+    assert obs["time_provenance_buckets"]["legacy_publish_only"] == 1
+    assert obs["time_provenance_buckets"]["exact_ingestion"] == 0
+
+
+def test_a_youtube_row_written_after_the_split_is_exact(tmp_path):
+    path = build_db(
+        str(tmp_path / "post.sqlite"),
+        [signal("s1", captured_at="2026-09-10T00:00:00+00:00",
+                published_at="2026-08-01T00:00:00+00:00")],
+    )
+    assert run_audit(path)["observations"]["time_provenance_buckets"]["exact_ingestion"] == 1
+
+
+def test_a_youtube_row_with_no_published_at_cannot_be_placed(tmp_path):
+    path = build_db(str(tmp_path / "unk.sqlite"), [signal("s1", published_at=None)])
+    assert run_audit(path)["observations"]["time_provenance_buckets"]["unknown"] == 1
+
+
+def test_a_google_probe_row_is_exact_while_a_google_feed_row_is_legacy(tmp_path):
+    stamp = "2026-08-01T00:00:00+00:00"
+    google = dict(platform="google", metadata={"keyword": "k"},
+                  source_url="https://trends.google.com/trends/explore?q=k")
+    path = build_db(
+        str(tmp_path / "google.sqlite"),
+        [
+            signal("s1", raw_title="Google Search Trends: k", captured_at=stamp,
+                   published_at=None, **google),
+            signal("s2", raw_title="k", captured_at=stamp, published_at=stamp, **google),
+        ],
+    )
+    buckets = run_audit(path)["observations"]["time_provenance_buckets"]
+    assert buckets["exact_ingestion"] == 1
+    assert buckets["legacy_publish_only"] == 1
+    assert buckets["unknown"] == 0
+
+
+def test_a_browser_connector_row_is_always_exact(tmp_path):
+    path = build_db(
+        str(tmp_path / "tiktok.sqlite"),
+        [signal("s1", platform="tiktok", metadata={"item_id": "1"},
+                source_url="https://www.tiktok.com/@a/video/1", published_at=None)],
+    )
+    assert run_audit(path)["observations"]["time_provenance_buckets"]["exact_ingestion"] == 1
+
+
+def test_relabelling_a_legacy_row_as_exact_changes_the_observation_digest(tmp_path):
+    """The gap this closes: without provenance in the digest, a migration could stamp an invented
+    ingestion time onto 14,809 legacy rows and every count and digest would still match."""
+    stamp = "2026-08-01T00:00:00+00:00"
+    legacy = build_db(
+        str(tmp_path / "as_legacy.sqlite"),
+        [signal("s1", captured_at=stamp, published_at=stamp)],
+    )
+    # The same content, but on a platform whose clock was always the ingestion time -- which is
+    # exactly what a migration would be asserting if it relabelled the row above.
+    as_exact = build_db(
+        str(tmp_path / "as_exact.sqlite"),
+        [signal("s1", captured_at=stamp, published_at=stamp, platform="threads",
+                metadata={"post_id": "s1"},
+                source_url="https://www.threads.net/@a/post/s1")],
+    )
+    legacy_report, exact_report = run_audit(legacy), run_audit(as_exact)
+    assert legacy_report["observations"]["time_provenance_buckets"]["legacy_publish_only"] == 1
+    assert exact_report["observations"]["time_provenance_buckets"]["exact_ingestion"] == 1
+    assert (
+        legacy_report["digests"]["observations"] != exact_report["digests"]["observations"]
+    ), "provenance must be inside the digest, or a relabelling passes unnoticed"
+
+
+def test_the_digest_algorithm_label_says_multiset(hostile_db):
+    assert "multiset" in run_audit(hostile_db)["digests"]["algorithm"]
+    assert "sorted set" not in run_audit(hostile_db)["digests"]["algorithm"]
