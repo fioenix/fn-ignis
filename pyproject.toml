@@ -104,6 +104,9 @@ exclude = [
 asyncio_mode = "strict"
 testpaths = ["tests"]
 addopts = "-v"
+# The repository root, so tests can import the maintenance tools under scripts/. The package
+# itself is installed from src/ and is unaffected.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 120
