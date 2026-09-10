@@ -63,3 +63,39 @@ def test_ingress_interval_resolution(sync_min, sched_sec, expected):
     result = resolve_ingress_interval(sync_minutes=sync_min, scheduler_seconds=sched_sec)
     assert result == expected
 
+
+
+def test_resolve_ingress_interval_requires_both_intervals():
+    """Neither argument may default; a default here is a second copy of a Settings value.
+
+    The scheduler_seconds default used to be 900 -- a 15-minute tick that spends the whole
+    daily YouTube search quota in about an hour -- so a caller that omitted it silently got
+    the unsafe cadence instead of the configured one.
+    """
+    import inspect
+
+    from ignis.interfaces.cli.scheduler import resolve_ingress_interval
+
+    parameters = inspect.signature(resolve_ingress_interval).parameters
+    for name in ("sync_minutes", "scheduler_seconds"):
+        assert parameters[name].default is inspect.Parameter.empty, (
+            f"{name} must stay required so it cannot drift from Settings"
+        )
+
+
+def test_ingress_scheduler_requires_an_explicit_interval():
+    import inspect
+
+    from ignis.interfaces.cli.scheduler import IngressScheduler
+
+    parameter = inspect.signature(IngressScheduler.__init__).parameters["interval_seconds"]
+    assert parameter.default is inspect.Parameter.empty
+
+
+def test_zero_sync_minutes_leaves_the_configured_cadence_in_charge():
+    """0 is the shipped SYNC_INTERVAL_MINUTES, so the seconds field must win at that value."""
+    from ignis.config import Settings
+    from ignis.interfaces.cli.scheduler import resolve_ingress_interval
+
+    configured = Settings.model_fields["SCHEDULER_INTERVAL_SECONDS"].default
+    assert resolve_ingress_interval(sync_minutes=0, scheduler_seconds=configured) == configured

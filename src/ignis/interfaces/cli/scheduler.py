@@ -143,7 +143,7 @@ class IngressScheduler:
 
     def __init__(
         self,
-        interval_seconds: int = 900,
+        interval_seconds: int,
         discovery_interval_seconds: int = 43200,
         health_check_interval_seconds: int = 21600,
         geo: GeoCode = GeoCode.VN,
@@ -324,8 +324,14 @@ class IngressScheduler:
         self._shutdown_event.set()
 
 
-def resolve_ingress_interval(sync_minutes: int = 0, scheduler_seconds: int = 900) -> int:
-    """Resolve active ingress interval in seconds, prioritizing non-zero SYNC_INTERVAL_MINUTES override."""
+def resolve_ingress_interval(sync_minutes: int, scheduler_seconds: int) -> int:
+    """Resolve active ingress interval in seconds, prioritizing non-zero SYNC_INTERVAL_MINUTES override.
+
+    Both arguments are required. They used to default to 0 and 900, and 900 is the 15-minute
+    tick that spends the whole daily YouTube search quota in about an hour -- the same number
+    that had drifted into the .env template and env.example. Every caller reads the values off
+    Settings, so a default here can only ever be a stale second copy of one.
+    """
     if sync_minutes > 0:
         return int(sync_minutes * 60)
     return int(scheduler_seconds)
@@ -333,8 +339,8 @@ def resolve_ingress_interval(sync_minutes: int = 0, scheduler_seconds: int = 900
 
 async def main_async():
     ingress_interval = resolve_ingress_interval(
-        sync_minutes=getattr(settings, "SYNC_INTERVAL_MINUTES", 0),
-        scheduler_seconds=getattr(settings, "SCHEDULER_INTERVAL_SECONDS", 900),
+        sync_minutes=settings.SYNC_INTERVAL_MINUTES,
+        scheduler_seconds=settings.SCHEDULER_INTERVAL_SECONDS,
     )
     discovery_interval = int(settings.DISCOVERY_INTERVAL_HOURS * 3600)
     scheduler = IngressScheduler(
