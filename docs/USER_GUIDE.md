@@ -120,9 +120,8 @@ If you want to manually connect `fn-ignis` to your MCP client without using `boo
     "fn-ignis": {
       "command": "/ABSOLUTE/PATH/TO/fn-ignis/.venv/bin/python",
       "args": ["-m", "ignis.interfaces.mcp.server"],
-      "cwd": "/ABSOLUTE/PATH/TO/fn-ignis",
       "env": {
-        "PYTHONPATH": "/ABSOLUTE/PATH/TO/fn-ignis/src"
+        "IGNIS_ENV_FILE": "/ABSOLUTE/PATH/TO/fn-ignis/.env"
       }
     }
   }
@@ -134,14 +133,21 @@ If you want to manually connect `fn-ignis` to your MCP client without using `boo
 {
   "mcpServers": {
     "fn-ignis": {
-      "command": ".venv/bin/python",
+      "command": "/ABSOLUTE/PATH/TO/fn-ignis/.venv/bin/python",
       "args": ["-m", "ignis.interfaces.mcp.server"],
       "env": {
-        "PYTHONPATH": "src"
+        "IGNIS_ENV_FILE": "/ABSOLUTE/PATH/TO/fn-ignis/.env"
       }
     }
   }
 }
+
+`IGNIS_ENV_FILE` is the only variable an MCP config needs, and it is a path rather than a
+credential. The server reads `.env` itself, so the database URL, the Fernet key and the API keys
+live in exactly one file. Copying them into a client config puts secrets in plaintext in several
+places and, because a host's `env` overrides the env file, a stale copy silently wins: rotating
+the YouTube key in `.env` while Claude Desktop still held the old one made every YouTube call
+through MCP fail with "API key expired" while the same code run from a shell succeeded.
 ```
 
 ---

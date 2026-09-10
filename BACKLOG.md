@@ -160,6 +160,29 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   Danh sách domain máy móc giờ chỉ còn một bản trong `vocabulary_loader`, và có test chặn bản
   thứ hai xuất hiện lại. Sau khi sửa, 10 seed là chủ đề thật.
 
+- [x] **Đã xong (10/09/2026): MCP config giữ đường dẫn tới `.env`, không giữ secret.**
+  `build_mcp_entry` từng sao `DATABASE_URL`, `IGNIS_ENCRYPTION_KEY` và `YOUTUBE_API_KEY` vào
+  **bốn** file: `.mcp.json`, config Claude Desktop, config Antigravity và TOML của Codex. Vừa để
+  password database cùng khoá Fernet ở dạng plaintext bốn nơi, vừa tạo bốn nguồn sự thật.
+
+  Hậu quả thật đã xảy ra: sau khi rotate key YouTube, `.env` và `.mcp.json` được cập nhật nhưng
+  config Claude Desktop còn giữ key cũ. Vì `env` của host ghi đè file env, mọi lệnh gọi YouTube
+  qua MCP thất bại với "API key expired", trong khi cùng đoạn code chạy từ shell lại thành công.
+  Đó chính là chỗ tao báo "key expired" rồi ngay sau đó một lượt pass lấy được 95 signal.
+
+  Giờ entry chỉ mang `IGNIS_ENV_FILE`, một đường dẫn tuyệt đối. Kiểm với `env -i`: chỉ một biến
+  đó là server load đủ DSN, key YouTube và khoá Fernet.
+- [x] **Đã sửa (10/09/2026): thứ tự đọc env file bị ngược.** `env_file=(_PROJECT_ENV, ".env")` —
+  pydantic-settings cho file **cuối** quyền cao nhất, nên một `.env` lạ nằm ở thư mục mà host
+  tình cờ khởi động server sẽ ghi đè `.env` của project. Tao dựng decoy để chứng minh: thứ tự cũ
+  cho decoy thắng, thứ tự mới cho project thắng. Có test giữ đúng thứ tự vì lỗi này im lặng, chỉ
+  sai giá trị chứ không báo gì.
+- [ ] **Còn lại của mày: `claude_desktop_config.json` vẫn giữ key cũ và ba secret.** Tao không
+  sửa file ngoài repo. Chạy `./scripts/bootstrap.sh` (hoặc `python -m ignis.interfaces.cli.setup_bundle`)
+  là nó ghi lại entry `fn-ignis` ở cả bốn nơi theo dạng mới, rồi restart Claude Desktop.
+- [ ] **Còn lại của mày: `fn-ignis` đang đăng ký hai lần.** Có trong cả `.mcp.json` (workspace) và
+  `claude_desktop_config.json` (global), `command` với `args` giống hệt. Đây là nghi phạm cho
+  `Connection closed`; server tự nó bắt tay MCP xong trong 1,2 giây, exit 0. Bỏ một trong hai.
 - [ ] **`self_healing_sniffer` ghi `runtime_configs` 97 lần trong một lượt.** Đo trên lượt
   09/09/2026: 85 lần cho `threads_doc_id_trending_topics`, 7 cho `search_posts`, 5 cho
   `search_suggestions`, dồn trong khoảng 40 giây. Ghi cùng một giá trị lặp lại vào Postgres.

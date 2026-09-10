@@ -134,9 +134,7 @@ Thêm khối cấu hình:
       "command": "/ĐƯỜNG_DẪN_TUYỆT_ĐỐI/fn-ignis/.venv/bin/python",
       "args": ["-m", "ignis.interfaces.mcp.server"],
       "env": {
-        "DATABASE_URL": "sqlite:////ĐƯỜNG_DẪN_TUYỆT_ĐỐI/fn-ignis/ignis.db",
-        "DEFAULT_GEO": "VN",
-        "YOUTUBE_API_KEY": ""
+        "IGNIS_ENV_FILE": "/ĐƯỜNG_DẪN_TUYỆT_ĐỐI/fn-ignis/.env"
       }
     }
   }
@@ -151,9 +149,15 @@ command = "/ĐƯỜNG_DẪN_TUYỆT_ĐỐI/fn-ignis/.venv/bin/python"
 args = ["-m", "ignis.interfaces.mcp.server"]
 
 [mcp_servers.fn-ignis.env]
-DATABASE_URL = "sqlite:////ĐƯỜNG_DẪN_TUYỆT_ĐỐI/fn-ignis/ignis.db"
-DEFAULT_GEO = "VN"
+IGNIS_ENV_FILE = "/ĐƯỜNG_DẪN_TUYỆT_ĐỐI/fn-ignis/.env"
 ```
+
+`IGNIS_ENV_FILE` là biến duy nhất mà một MCP config cần, và nó là đường dẫn chứ không phải khoá.
+Server tự đọc `.env`, nên chuỗi kết nối database, khoá Fernet và các API key nằm ở đúng một file.
+Sao chép chúng vào config của client vừa đặt secret ở dạng plaintext tại nhiều nơi, vừa tạo thêm
+một chỗ giữ cùng giá trị đó: `env` của host ghi đè file env, nên bản cũ sẽ âm thầm được ưu tiên.
+Nếu rotate key YouTube trong `.env` mà Claude Desktop còn giữ key cũ thì mọi lệnh gọi YouTube qua
+MCP đều thất bại với "API key expired", trong khi cùng đoạn code chạy từ shell lại thành công.
 
 *(Mẹo: Bạn chỉ cần chạy lệnh `ignis-setup` hoặc `./scripts/bootstrap.sh`, hệ thống sẽ tự động cấu hình cho Claude Desktop, Antigravity, Codex và workspace `.mcp.json`).*
 

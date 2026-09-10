@@ -1,14 +1,29 @@
+import os
 from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The project's own .env, resolved absolutely so it is found no matter what directory the
+# process was started from. An MCP host launches the server with a cwd of its own choosing.
 _PROJECT_ENV = Path(__file__).resolve().parents[2] / ".env"
+
+# An explicit path to the env file, for an installation where the package does not sit inside
+# the project tree -- a wheel in site-packages, for instance. It is a path, not a secret, so it
+# is the one thing an MCP config needs to carry.
+_ENV_FILE_OVERRIDE = os.environ.get("IGNIS_ENV_FILE", "").strip()
+
+# pydantic-settings gives the LAST file the highest priority, so the order is
+# least to most specific. The bare ".env" comes first: a stray file in whatever directory the
+# host happened to start in must not outrank the project's own.
+_ENV_FILES = tuple(
+    source for source in (".env", _PROJECT_ENV, _ENV_FILE_OVERRIDE or None) if source
+)
 
 
 class Settings(BaseSettings):
     """Configuration settings for fn-ignis loaded from environment variables."""
     model_config = SettingsConfigDict(
-        env_file=(_PROJECT_ENV, ".env"),
+        env_file=_ENV_FILES,
         env_file_encoding="utf-8",
         extra="ignore"
     )

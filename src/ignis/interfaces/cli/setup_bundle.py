@@ -112,20 +112,26 @@ def register_mcp_to_codex_toml(config_path: Path, entry: Dict[str, Any]) -> bool
 
 
 def build_mcp_entry(python_bin: str, project_root: Path) -> Dict[str, Any]:
-    """Generate standardized MCP server entry dictionary."""
-    from ignis.config import settings
-    entry: Dict[str, Any] = {
+    """Generate the MCP server entry, carrying a path to the secrets rather than the secrets.
+
+    This used to copy DATABASE_URL, IGNIS_ENCRYPTION_KEY and YOUTUBE_API_KEY into every MCP
+    config it wrote -- the workspace .mcp.json, Claude Desktop's config, Antigravity's, and
+    Codex's TOML. That put a database password and a Fernet key in plaintext in four files, and
+    it made those files a second source of truth: rotating the YouTube key in .env left the copy
+    in Claude Desktop's config behind, and because a host's `env` overrides the env file, every
+    YouTube call through MCP failed with "API key expired" while the same code run from a shell
+    succeeded.
+
+    One file holds the secrets now. The entry carries only IGNIS_ENV_FILE, an absolute path, so
+    the server finds that file whatever directory the host starts it in.
+    """
+    return {
         "command": python_bin,
         "args": ["-m", "ignis.interfaces.mcp.server"],
         "env": {
-            "DATABASE_URL": settings.DATABASE_URL,
-            "DEFAULT_GEO": getattr(settings, "DEFAULT_GEO", "VN"),
-            "IGNIS_ENCRYPTION_KEY": getattr(settings, "IGNIS_ENCRYPTION_KEY", ""),
-        }
+            "IGNIS_ENV_FILE": str((project_root / ".env").resolve()),
+        },
     }
-    if getattr(settings, "YOUTUBE_API_KEY", ""):
-        entry["env"]["YOUTUBE_API_KEY"] = settings.YOUTUBE_API_KEY
-    return entry
 
 
 def register_mcp_to_json_file(config_path: Path, entry: Dict[str, Any], key_name: str = "mcpServers") -> bool:
