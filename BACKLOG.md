@@ -102,6 +102,22 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   duplicate identity group của radar — mission-scoped dedup không chạm vào phần hỏng lớn nhất.
   Migration phải giữ legacy rows tới khi đối soát xong; evidence của các mission chưa từng được
   persist không thể dựng lại từ count trong summary.
+- [x] **Cluster membership thuộc observation, không thuộc source (chốt 10/09/2026).** Canonical
+  source chỉ trả lời "đây là nội dung nào"; nó không trả lời "lần quan sát này đóng góp cho chủ
+  đề nào". Cùng một video được probe bởi hai keyword khác nhau ở hai thời điểm có thể thuộc hai
+  cluster, và đó là thông tin thật chứ không phải xung đột cần giải. Kéo theo:
+  `cross_platform_score` phải đọc observation trong analysis window rồi đếm distinct platform và
+  distinct source, chứ không đếm row. `cluster_id` vì vậy không được đặt trên bảng source.
+- [x] **Giữ Timescale thật trong CI, không mock và không cho skip (chốt 10/09/2026).** Một
+  dual-backend contract mà nhánh Postgres có thể skip thì chưa phải dual-backend contract: không
+  có service, case đó skip im lặng và suite trông nhẹ hơn thực tế một failure. Chi phí là CI phải
+  boot container mỗi lần chạy và phụ thuộc một image bên thứ ba. Đo lại thời gian sau lần GREEN
+  đầu tiên; nếu ảnh hưởng đáng kể thì **tách Postgres contract thành job song song**, không bỏ và
+  không mock.
+- [x] **Không dùng `xfail` cho defect này (chốt 10/09/2026).** `xfail` trên `main` biến một
+  data-integrity defect đang hoạt động thành "known acceptable failure". Giá trị của contract test
+  là làm merge gate; BACKLOG đã đủ để defect hiện diện trên `main`. Contract sống RED trên branch
+  `codex/source-observation-evidence` và chỉ merge khi cả nó lẫn toàn suite đều xanh.
 - [x] **Chất lượng nhãn trên corpus thật:** đã sửa 10/09/2026, xem mục nhãn chủ đề
   ở phần dưới. Ellipsis 24/40 xuống 0 trên chính 40 cluster đã lưu.
 - [x] **Phân loại category:** matcher **không sai** — với taxonomy đã seed, nó phân loại đúng
