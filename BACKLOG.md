@@ -148,6 +148,23 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   `published_at = captured_at` cũ, `time_provenance = legacy_publish_only`. Time-window score mặc
   định chỉ dùng `exact_ingestion`; dữ liệu legacy vẫn được xuất hiện trong all-history hoặc
   published-time analysis nhưng output phải gắn cảnh báo approximate.
+- [ ] **Chưa chốt: identity giữ nhãn field hay giữ namespace của object (mở 10/09/2026).**
+  Audit đang khoá identity theo `platform:<tên field>:<giá trị>`, mà tên field là cách audit
+  *tìm ra* identifier chứ không phải bản chất object. Hệ quả đo được trên corpus thật: cùng một
+  video YouTube đi vào hai lần, một lần có `video_id` trong metadata và một lần chỉ parse được từ
+  URL (nhãn `video`), nên bị tính thành hai canonical source. Có **3 cặp** như vậy.
+  Nếu chuẩn hoá về namespace của object (`video_id ≡ video`, `item_id ≡ video`,
+  `hashtag ≡ tag`, `post_id ≡ post`, `reel_id ≡ reel`, `keyword ≡ probe_keyword`) thì:
+  source **1.927 → 1.924**; observation vẫn **18.597** và ba bucket provenance không đổi
+  (1.479 / 17.118 / 0); mission evidence vẫn **1.301** với 2 mission lặp identity; cluster
+  membership vẫn **15.754** nhưng identity nằm nhiều cluster tăng **172 → 175**; reason code
+  `repeat_observation_of_one_source` 14.089 → 14.095. Cả bốn digest đổi, audit vẫn `BALANCED`.
+  Schema đã chọn hướng namespace: `sources.external_id` mang sẵn `"<kind>:<value>"`, vì
+  `UNIQUE (platform, external_id)` trong contract chỉ là identity đầy đủ khi namespace nằm trong
+  key. Phần chưa chốt là baseline: nếu giữ số 1.927 thì backfill phải cố ý tái tạo 3 lần chia
+  sai; nếu chốt 1.924 thì `docs/migrations/2026-09-10-source-observation-baseline.{json,md}` phải
+  regenerate thành `schema_version: 4` trước khi viết backfill, và gate đối soát đổi mục tiêu
+  source sang 1.924. Ba con số còn lại giữ nguyên.
 - [x] **Không dùng `xfail` cho defect này (chốt 10/09/2026).** `xfail` trên `main` biến một
   data-integrity defect đang hoạt động thành "known acceptable failure". Giá trị của contract test
   là làm merge gate; BACKLOG đã đủ để defect hiện diện trên `main`. Contract sống RED trên branch
