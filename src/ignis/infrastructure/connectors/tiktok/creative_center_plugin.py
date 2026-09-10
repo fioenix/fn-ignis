@@ -12,7 +12,7 @@ from ignis.infrastructure.connectors.browser_support import (
     browser_launch_available,
     surface_reachable,
 )
-from ignis.config import settings
+from ignis.config import reveal_secret, settings
 
 logger = logging.getLogger(__name__)
 
@@ -248,8 +248,8 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
                     "viewport": {"width": 1280, "height": 850},
                     "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
                 }
-                if settings.PLAYWRIGHT_PROXY_SERVER:
-                    context_kwargs["proxy"] = {"server": settings.PLAYWRIGHT_PROXY_SERVER}
+                if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
+                    context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
                 if storage_state:
                     context_kwargs["storage_state"] = storage_state
 

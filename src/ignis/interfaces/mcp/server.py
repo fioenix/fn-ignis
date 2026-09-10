@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import uuid
+from urllib.parse import urlsplit
 from uuid import UUID
 
 
@@ -25,7 +26,7 @@ from ignis.application.use_cases.autonomous_discovery import AutonomousDiscovery
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster
 
-from ignis.config import settings
+from ignis.config import reveal_secret, settings
 
 from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
 from ignis.domain.token_rotation import (
@@ -148,8 +149,8 @@ def _init_components():
         )
     )
 
-    if settings.YOUTUBE_API_KEY:
-        registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
+    if reveal_secret(settings.YOUTUBE_API_KEY):
+        registry.register(YouTubeDataPlugin(api_key=reveal_secret(settings.YOUTUBE_API_KEY)))
 
     clusterer = SemanticClusterer()
     artifact_builder = HtmlArtifactBuilder()
@@ -265,6 +266,22 @@ async def _collect_channel_context(comp: Dict[str, Any]):
         logger.debug(f"Channel audit could not read connector health: {e}")
 
     return auth_status, connector_health
+
+
+def _describe_proxy(proxy_uri: str) -> str:
+    """Name the configured proxy without repeating the credentials embedded in its URI.
+
+    The documented form of PLAYWRIGHT_PROXY_SERVER is http://user:pass@host:port, and the health
+    report is tool output: it reaches the agent's transcript and any log that captures it.
+    """
+    if not proxy_uri:
+        return "Direct (No Proxy)"
+    parsed = urlsplit(proxy_uri)
+    if not parsed.hostname:
+        return "Configured (unparseable URI)"
+    host = parsed.hostname if parsed.port is None else f"{parsed.hostname}:{parsed.port}"
+    scheme = f"{parsed.scheme}://" if parsed.scheme else ""
+    return f"{scheme}{host}" if not parsed.username else f"{scheme}<redacted>@{host}"
 
 
 def _serialize_citation(cit: Any) -> Dict[str, Any]:
@@ -549,7 +566,7 @@ async def handle_diagnose_system_health() -> str:
             diagnostics["recommendations"].append("TikTok connector throttled or challenged by bot detection. Launch Playwright authentication or refresh cookies.")
         elif plat in ["threads", "reels"] and info["circuit_state"] != "CLOSED":
             diagnostics["recommendations"].append(f"Meta ({plat}) requires authentication or GraphQL token verification. Check credentials.")
-        elif plat == "youtube" and not settings.YOUTUBE_API_KEY:
+        elif plat == "youtube" and not reveal_secret(settings.YOUTUBE_API_KEY):
             diagnostics["recommendations"].append("YOUTUBE_API_KEY is not configured in .env.")
 
     return json.dumps(diagnostics, ensure_ascii=False, indent=2)
@@ -2106,8 +2123,8 @@ async def handle_verify_connectors_health() -> str:
 
     diagnostics: Dict[str, Any] = {
         "timestamp": now.isoformat(),
-        "proxy_configured": bool(settings.PLAYWRIGHT_PROXY_SERVER),
-        "proxy_server": settings.PLAYWRIGHT_PROXY_SERVER if settings.PLAYWRIGHT_PROXY_SERVER else "Direct (No Proxy)",
+        "proxy_configured": bool(reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)),
+        "proxy_server": _describe_proxy(reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)),
         "connectors": {},
         "database": {},
         "alerts": [],

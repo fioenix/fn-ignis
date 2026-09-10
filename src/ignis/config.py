@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
-from pydantic import Field
+from typing import Union
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # The project's own .env, resolved absolutely so it is found no matter what directory the
@@ -20,6 +21,23 @@ _ENV_FILES = tuple(
 )
 
 
+def reveal_secret(value: Union[SecretStr, str, None]) -> str:
+    """Unwrap a secret setting at the point of use.
+
+    Secrets are typed SecretStr so that neither repr(settings) nor a pydantic validation error
+    prints them. A failing test dumps the whole Settings repr into the CI log, which on a public
+    repository is world-readable, and that log used to carry the database password verbatim.
+
+    Plain strings pass through, so a test that monkeypatches a setting and a caller that already
+    holds an unwrapped value both stay valid.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, SecretStr):
+        return value.get_secret_value()
+    return str(value)
+
+
 class Settings(BaseSettings):
     """Configuration settings for fn-ignis loaded from environment variables."""
     model_config = SettingsConfigDict(
@@ -29,32 +47,34 @@ class Settings(BaseSettings):
     )
 
     # Database TimescaleDB / PostgreSQL or SQLite
-    DATABASE_URL: str = Field(
-        default="sqlite:///ignis.db",
+    # Carries a password whenever it points at anything but local SQLite. Unwrap with
+    # reveal_secret() at the point of use.
+    DATABASE_URL: SecretStr = Field(
+        default=SecretStr("sqlite:///ignis.db"),
         description="Database connection URI (SQLite default for zero-config local mode, or PostgreSQL / TimescaleDB)"
     )
     DB_MIN_POOL_SIZE: int = Field(default=1, description="Minimum database connection pool size")
     DB_MAX_POOL_SIZE: int = Field(default=3, description="Maximum database connection pool size")
 
     # Ingress Connectors & API Keys
-    YOUTUBE_API_KEY: str = Field(default="", description="YouTube Data API v3 Key")
+    YOUTUBE_API_KEY: SecretStr = Field(default=SecretStr(""), description="YouTube Data API v3 Key")
 
     # Meta Threads Graph API (Official OAuth 2.0)
     THREADS_APP_ID: str = Field(default="", description="Meta Threads App ID (client_id) for Graph API OAuth 2.0")
-    THREADS_APP_SECRET: str = Field(default="", description="Meta Threads App Secret (client_secret) used for long-lived token exchange")
+    THREADS_APP_SECRET: SecretStr = Field(default=SecretStr(""), description="Meta Threads App Secret (client_secret) used for long-lived token exchange")
     THREADS_REDIRECT_URI: str = Field(default="", description="Registered OAuth redirect URI for the Threads app")
     THREADS_API_VERSION: str = Field(default="v1.0", description="Threads Graph API version prefix")
 
     # Instagram Graph API (Official, for Reels ingress)
     INSTAGRAM_USER_ID: str = Field(default="", description="Instagram Business/Creator account ID used for Reels Graph API ingress")
     INSTAGRAM_APP_ID: str = Field(default="", description="Instagram App ID (client_id) for Graph API OAuth 2.0")
-    INSTAGRAM_APP_SECRET: str = Field(default="", description="Instagram App Secret (client_secret) used for long-lived token exchange")
+    INSTAGRAM_APP_SECRET: SecretStr = Field(default=SecretStr(""), description="Instagram App Secret (client_secret) used for long-lived token exchange")
     INSTAGRAM_REDIRECT_URI: str = Field(default="", description="Registered OAuth redirect URI for the Instagram app")
     INSTAGRAM_API_VERSION: str = Field(default="v23.0", description="Instagram Graph API version prefix")
 
     # Security & Encryption
-    IGNIS_ENCRYPTION_KEY: str = Field(
-        default="",
+    IGNIS_ENCRYPTION_KEY: SecretStr = Field(
+        default=SecretStr(""),
         description="Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) secret key for encrypting stored credentials in DB"
     )
 
@@ -110,8 +130,9 @@ class Settings(BaseSettings):
         default=7200,
         description="TTL in seconds for Threads/Reels post insights cache (default 2h to stay under Meta's 200 calls/user/hour limit)"
     )
-    PLAYWRIGHT_PROXY_SERVER: str = Field(
-        default="",
+    # The documented form embeds credentials in the URI, so this is a secret too.
+    PLAYWRIGHT_PROXY_SERVER: SecretStr = Field(
+        default=SecretStr(""),
         description="Optional HTTP/SOCKS proxy server URI (e.g. http://user:pass@proxy.example.com:8080) for Playwright ingress"
     )
 

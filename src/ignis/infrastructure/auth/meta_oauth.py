@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from ignis.application.ports.repository_port import ITrendRepository
-from ignis.config import settings
+from ignis.config import reveal_secret, settings
 from ignis.domain.exceptions import ConnectorAuthenticationException
 from ignis.infrastructure.auth.crypto import CryptoService
 
@@ -81,7 +81,9 @@ class ThreadsAuthManager:
     ) -> Dict[str, str]:
         resolved = {
             "client_id": client_id or getattr(settings, self.APP_ID_SETTING, ""),
-            "client_secret": client_secret or getattr(settings, self.APP_SECRET_SETTING, ""),
+            "client_secret": client_secret or reveal_secret(
+                getattr(settings, self.APP_SECRET_SETTING, "")
+            ),
             "redirect_uri": redirect_uri or getattr(settings, self.REDIRECT_URI_SETTING, ""),
         }
         missing = [k for k in ("client_id", "client_secret") if not resolved[k]]

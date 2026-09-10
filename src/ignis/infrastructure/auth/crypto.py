@@ -4,7 +4,7 @@ import base64
 import hashlib
 from typing import Any, Dict, Optional
 from cryptography.fernet import Fernet
-from ignis.config import settings
+from ignis.config import reveal_secret, settings
 from ignis.domain.exceptions import EncryptionKeyMissingException
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ _EPHEMERAL_KEY: Optional[str] = None
 def _get_fernet_instance(secret_key: Optional[str] = None) -> Fernet:
     """Initialize Fernet cipher using configured secret key or a process-lifetime random ephemeral key."""
     global _EPHEMERAL_KEY
-    raw_key = secret_key or settings.IGNIS_ENCRYPTION_KEY
+    raw_key = secret_key or reveal_secret(settings.IGNIS_ENCRYPTION_KEY)
     if not raw_key:
         if _EPHEMERAL_KEY is None:
             _EPHEMERAL_KEY = Fernet.generate_key().decode()
@@ -47,7 +47,7 @@ def generate_new_key() -> str:
 
 def has_persistent_key(secret_key: Optional[str] = None) -> bool:
     """Report whether a durable encryption key is configured (i.e. not an ephemeral in-memory key)."""
-    return bool(secret_key or settings.IGNIS_ENCRYPTION_KEY)
+    return bool(secret_key or reveal_secret(settings.IGNIS_ENCRYPTION_KEY))
 
 
 def assert_persistent_key(context: str, secret_key: Optional[str] = None) -> None:

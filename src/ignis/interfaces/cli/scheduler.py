@@ -9,7 +9,7 @@ from ignis.application.use_cases.ingest_trends import (
     IngestTrendsUseCase,
     quota_safe_interval_seconds,
 )
-from ignis.config import settings
+from ignis.config import reveal_secret, settings
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope
 from ignis.infrastructure.auth.meta_browser_auth import (
     InstagramBrowserAuthManager,
@@ -111,8 +111,8 @@ async def build_connector_registry(
             browser_auth_manager=InstagramBrowserAuthManager(repository=repository),
         ),
     ]
-    if settings.YOUTUBE_API_KEY:
-        candidates.append(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
+    if reveal_secret(settings.YOUTUBE_API_KEY):
+        candidates.append(YouTubeDataPlugin(api_key=reveal_secret(settings.YOUTUBE_API_KEY)))
 
     registry = ConnectorPluginRegistry(repository=repository)
     skipped: List[Dict[str, str]] = []

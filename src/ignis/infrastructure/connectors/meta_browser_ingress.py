@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 import httpx
 
-from ignis.config import settings
+from ignis.config import reveal_secret, settings
 from ignis.domain.exceptions import ConnectorExecutionException
 from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
@@ -263,8 +263,8 @@ async def collect_json_payloads(
                 "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
                 "storage_state": storage_state,
             }
-            if settings.PLAYWRIGHT_PROXY_SERVER:
-                context_kwargs["proxy"] = {"server": settings.PLAYWRIGHT_PROXY_SERVER}
+            if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
+                context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
 
             context = await browser.new_context(**context_kwargs)
             page = await context.new_page()
@@ -519,8 +519,8 @@ async def collect_threads_search_suggestions_via_browser(
                 "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
                 "storage_state": storage_state,
             }
-            if settings.PLAYWRIGHT_PROXY_SERVER:
-                context_kwargs["proxy"] = {"server": settings.PLAYWRIGHT_PROXY_SERVER}
+            if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
+                context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
 
             context = await browser.new_context(**context_kwargs)
             page = await context.new_page()

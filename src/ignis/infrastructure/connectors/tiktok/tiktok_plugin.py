@@ -15,7 +15,7 @@ from ignis.infrastructure.connectors.browser_support import (
     surface_reachable,
 )
 from ignis.infrastructure.connectors.meta_browser_ingress import build_cookie_header
-from ignis.config import settings
+from ignis.config import reveal_secret, settings
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 
 
@@ -290,8 +290,8 @@ class TikTokPlugin(IConnectorPlugin):
                     "viewport": {"width": 1280, "height": 800},
                     "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
                 }
-                if settings.PLAYWRIGHT_PROXY_SERVER:
-                    context_kwargs["proxy"] = {"server": settings.PLAYWRIGHT_PROXY_SERVER}
+                if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
+                    context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
                 if storage_state:
                     context_kwargs["storage_state"] = storage_state
 
@@ -503,8 +503,8 @@ class TikTokPlugin(IConnectorPlugin):
                     "viewport": {"width": 1280, "height": 800},
                     "locale": "vi-VN",
                 }
-                if settings.PLAYWRIGHT_PROXY_SERVER:
-                    context_kwargs["proxy"] = {"server": settings.PLAYWRIGHT_PROXY_SERVER}
+                if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
+                    context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
                 if storage_state:
                     context_kwargs["storage_state"] = storage_state
 
@@ -640,8 +640,8 @@ class TikTokPlugin(IConnectorPlugin):
                     "viewport": {"width": 1280, "height": 800},
                     "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
                 }
-                if settings.PLAYWRIGHT_PROXY_SERVER:
-                    context_kwargs["proxy"] = {"server": settings.PLAYWRIGHT_PROXY_SERVER}
+                if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
+                    context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
                 if storage_state:
                     context_kwargs["storage_state"] = storage_state
 

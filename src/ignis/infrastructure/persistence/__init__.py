@@ -1,6 +1,6 @@
 from typing import Optional
 from ignis.application.ports.repository_port import ITrendRepository
-from ignis.config import settings
+from ignis.config import reveal_secret, settings
 from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
@@ -11,7 +11,7 @@ def create_repository(dsn: Optional[str] = None) -> ITrendRepository:
     - sqlite://... -> SqliteTrendRepository (Zero-Docker mode)
     - postgresql://... -> PostgresTimescaleRepository (Production / Cloud mode)
     """
-    target_dsn = dsn or settings.DATABASE_URL
+    target_dsn = dsn or reveal_secret(settings.DATABASE_URL)
     if target_dsn.startswith("sqlite"):
         return SqliteTrendRepository(db_path=target_dsn)
     else:
