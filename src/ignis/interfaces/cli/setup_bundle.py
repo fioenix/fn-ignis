@@ -19,9 +19,15 @@ def ensure_environment_file(project_root: Path) -> Tuple[bool, str]:
     """
     Ensure .env file exists with essential defaults and auto-generated encryption key.
     Returns (created_or_updated: bool, message: str).
+
+    The only edit this makes to an existing file is filling in IGNIS_ENCRYPTION_KEY when it is
+    absent or empty, so the write is gated on exactly that. It used to compare the rejoined
+    lines against the original text, which differs by the trailing newline on almost every
+    file, and then reported "Updated existing .env with generated IGNIS_ENCRYPTION_KEY" on a
+    run that generated nothing. Rotating that key silently strands every credential already
+    encrypted with the old one, so a message claiming it happened is worse than no message.
     """
     env_file = project_root / ".env"
-    fernet_key = Fernet.generate_key().decode()
 
     if not env_file.exists():
         default_env = (
@@ -30,33 +36,32 @@ def ensure_environment_file(project_root: Path) -> Tuple[bool, str]:
             "# ==============================================================================\n"
             "DATABASE_URL=sqlite:///ignis.db\n"
             "DEFAULT_GEO=VN\n"
-            f"IGNIS_ENCRYPTION_KEY={fernet_key}\n"
+            f"IGNIS_ENCRYPTION_KEY={Fernet.generate_key().decode()}\n"
             "YOUTUBE_API_KEY=\n"
-            "SCHEDULER_INTERVAL_SECONDS=900\n"
+            # One pass probes up to MAX_TOPIC_KEYWORDS keywords and a YouTube search.list costs
+            # 100 of the 10,000 units a free project gets per day, so ~2.4h is what fits. This
+            # has to agree with SCHEDULER_INTERVAL_SECONDS in ignis.config and env.example.
+            "SCHEDULER_INTERVAL_SECONDS=8640\n"
             "DISCOVERY_INTERVAL_HOURS=24\n"
         )
         env_file.write_text(default_env, encoding="utf-8")
         return True, "Created .env with SQLite default & generated Fernet key."
 
-    existing_content = env_file.read_text(encoding="utf-8")
-    lines = existing_content.splitlines()
-    has_key = False
-    new_lines = []
-    for line in lines:
-        if line.startswith("IGNIS_ENCRYPTION_KEY="):
-            val = line.split("=", 1)[1].strip()
-            if not val:
-                line = f"IGNIS_ENCRYPTION_KEY={fernet_key}"
-            has_key = True
-        new_lines.append(line)
-    if not has_key:
-        new_lines.append(f"IGNIS_ENCRYPTION_KEY={fernet_key}")
-    
-    if "\n".join(new_lines) != existing_content:
-        env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-        return True, "Updated existing .env with generated IGNIS_ENCRYPTION_KEY."
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    key_lines = [i for i, line in enumerate(lines) if line.startswith("IGNIS_ENCRYPTION_KEY=")]
+    key_is_set = any(lines[i].split("=", 1)[1].strip() for i in key_lines)
 
-    return False, "Existing .env is valid and configured."
+    if key_is_set:
+        return False, "Existing .env is valid and configured."
+
+    fernet_key = f"IGNIS_ENCRYPTION_KEY={Fernet.generate_key().decode()}"
+    if key_lines:
+        lines[key_lines[0]] = fernet_key
+    else:
+        lines.append(fernet_key)
+
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True, "Generated a Fernet key into the existing .env; IGNIS_ENCRYPTION_KEY was empty."
 
 
 async def bootstrap_database() -> Tuple[bool, str]:
