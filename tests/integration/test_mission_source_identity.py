@@ -48,6 +48,20 @@ class RepositoryCase:
                 ).fetchone()
         return int(row[0])
 
+    def observation_routes(self) -> list:
+        """identity_source of every observation, in the order they were written."""
+        query = (
+            "SELECT identity_source FROM observations o"
+            " JOIN sources s ON s.id = o.source_id ORDER BY o.observed_at"
+        )
+        if self.name == "sqlite":
+            with sqlite3.connect(self.repository._db_path) as conn:
+                rows = conn.execute(query).fetchall()
+        else:
+            with psycopg.connect(self.dsn) as conn:
+                rows = conn.execute(query).fetchall()
+        return [row[0] for row in rows]
+
 
 class TwoObservationRegistry:
     """Replace only the external connectors; persistence and mission execution stay real."""
@@ -92,7 +106,12 @@ def _postgres_dsns() -> tuple[str, str, str]:
 def _apply_postgres_schema(dsn: str) -> None:
     repo_root = Path(__file__).resolve().parents[2]
     with psycopg.connect(dsn) as conn:
-        for migration in ("001_initial_schema.sql", "008_deduplicate_signal_metrics.sql"):
+        for migration in (
+            "001_initial_schema.sql",
+            "008_deduplicate_signal_metrics.sql",
+            "015_split_published_at.sql",
+            "016_source_observation_model.sql",
+        ):
             conn.execute((repo_root / "sql" / migration).read_text(encoding="utf-8"))
 
 
@@ -167,3 +186,63 @@ async def test_one_source_keeps_distinct_evidence_for_two_missions(repository_ca
     assert len(evidence_b) == 1, "mission B lost the source it observed"
     assert [signal.metric_value for signal in evidence_a] == [100.0]
     assert [signal.metric_value for signal in evidence_b] == [200.0]
+
+
+class UrlOnlyRegistry:
+    """One sighting whose identifier is only recoverable from its URL."""
+
+    def __init__(self, source_url: str, raw_title: str):
+        self._source_url = source_url
+        self._raw_title = raw_title
+
+    async def search_across_all(self, **_kwargs):
+        return [
+            TrendSignal(
+                platform=PlatformType.YOUTUBE,
+                raw_title=self._raw_title,
+                metric_value=100.0,
+                source_url=self._source_url,
+                geo_code=GeoCode.VN,
+                captured_at=datetime(2026, 9, 11, 1, 0, tzinfo=timezone.utc),
+                metadata={},
+            )
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata_carries_the_id", "expected_route"),
+    ((True, "metadata_external_id"), (False, "url_external_id")),
+)
+async def test_an_observation_records_the_route_that_resolved_it(
+    repository_case, metadata_carries_the_id, expected_route
+):
+    """The live writer has to store the route the resolver returned, not a default.
+
+    A real YouTube id is 11 characters and the URL pattern needs at least 6, so a short stand-in
+    would resolve by the normalized-URL fallback and this test would assert the wrong route.
+    """
+    repository = repository_case.repository
+    source_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    raw_title = "One source, one route"
+    registry = (
+        TwoObservationRegistry(source_url=source_url, raw_title=raw_title)
+        if metadata_carries_the_id
+        else UrlOnlyRegistry(source_url=source_url, raw_title=raw_title)
+    )
+    use_case = ExecuteMissionUseCase(
+        repository=repository,
+        registry=registry,
+        clusterer=SemanticClusterer(),
+    )
+    mission = ResearchMission(
+        title="Route",
+        keywords=["one source"],
+        platforms=[PlatformType.YOUTUBE],
+        geo_code=GeoCode.VN,
+        timeframe=Timeframe.LAST_7D,
+    )
+    await repository.save_mission(mission)
+    await use_case.execute(mission.id)
+
+    assert repository_case.observation_routes() == [expected_route]

@@ -148,6 +148,16 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   `published_at = captured_at` cũ, `time_provenance = legacy_publish_only`. Time-window score mặc
   định chỉ dùng `exact_ingestion`; dữ liệu legacy vẫn được xuất hiện trong all-history hoặc
   published-time analysis nhưng output phải gắn cảnh báo approximate.
+- [x] **`sources` chỉ ba cột; route và URL thuộc observation (chốt 11/09/2026).** `sources` giữ
+  `id`, `platform`, `external_id` và không gì khác. `identity_source` xuống `observations`,
+  `NOT NULL`, `CHECK` ba giá trị, và là field thứ 11 của projection — cùng lý do đo được đã dùng
+  để chốt namespace: ba video YouTube vào corpus bằng hai route, nên một cột ở tầng source chỉ giữ
+  được một route. `canonical_url` bỏ hẳn: URL là thứ một lần quan sát báo về, và corpus đã có
+  source xuất hiện dưới hai biến thể URL, nên cột đó là cache "URL mới nhất" không rebuild contract
+  — citation dùng `observation.source_url`, canonical locator derive từ `(platform, external_id)`.
+  `first_seen_at`/`last_seen_at` cũng bỏ, vì 17.118 observation không có ingestion time nên
+  `NOW()` sẽ bịa lifecycle. Baseline lên `schema_version: 5`; digest `sources` giữ nguyên
+  `69d72aee192bf526`, ba digest còn lại đổi, member counts không đổi.
 - [x] **Identity khoá theo namespace của object, không theo nhãn field (chốt 10/09/2026).**
   Audit đang khoá identity theo `platform:<tên field>:<giá trị>`, mà tên field là cách audit
   *tìm ra* identifier chứ không phải bản chất object. Hệ quả đo được trên corpus thật: cùng một

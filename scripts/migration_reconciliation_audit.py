@@ -270,6 +270,9 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     known_clusters = set(reader.cluster_ids())
 
     identity_of: Dict[str, str] = {}
+    # The route each row was resolved by. Kept beside the identity rather than recomputed, so the
+    # digest and the resolution_reasons breakdown can never disagree about one row.
+    identity_source_of: Dict[str, str] = {}
     resolution_counts: Counter = Counter()
     rows_per_identity: Dict[str, List[SignalRow]] = defaultdict(list)
     unresolved_rows: List[str] = []
@@ -281,6 +284,7 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
             unresolved_rows.append(row.signal_id)
             continue
         identity_of[row.signal_id] = identity
+        identity_source_of[row.signal_id] = reason
         rows_per_identity[identity].append(row)
 
     # Why does an identity hold more than one legacy row? Every collapse needs a stated reason,
@@ -322,7 +326,9 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
             continue
         identity = identity_of[row.signal_id]
         row_payload = (row.captured_at, row.metric_value, row.growth_velocity)
-        member, provenance = observation_event(identity, row, *row_payload)
+        member, provenance = observation_event(
+            identity, identity_source_of[row.signal_id], row, *row_payload
+        )
         observation_members.append(member)
         provenance_buckets[provenance] += 1
         merged_once = False
@@ -334,7 +340,12 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
             # Derived on this point's own captured_at. It may land in a different bucket from its
             # parent row, which is the whole reason the derivation is per event.
             member, point_provenance = observation_event(
-                identity, row, point.captured_at, point.metric_value, point.growth_velocity
+                identity,
+                identity_source_of[row.signal_id],
+                row,
+                point.captured_at,
+                point.metric_value,
+                point.growth_velocity,
             )
             observation_members.append(member)
             provenance_buckets[point_provenance] += 1
@@ -448,7 +459,11 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     cluster_members_preview = [
         f"{row.cluster_id}\x1f"
         + observation_event(
-            identity_of[row.signal_id], row, row.captured_at, row.metric_value,
+            identity_of[row.signal_id],
+            identity_source_of[row.signal_id],
+            row,
+            row.captured_at,
+            row.metric_value,
             row.growth_velocity,
         )[0]
         for row in signals
@@ -525,7 +540,11 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     mission_members = [
         f"{row.mission_id}\x1f"
         + observation_event(
-            identity_of[row.signal_id], row, row.captured_at, row.metric_value,
+            identity_of[row.signal_id],
+            identity_source_of[row.signal_id],
+            row,
+            row.captured_at,
+            row.metric_value,
             row.growth_velocity,
         )[0]
         for row in signals
@@ -548,8 +567,10 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
 
     return {
         # 4: identity keys on the object namespace, not on the metadata field name that
-        # happened to carry the identifier. Three YouTube videos stop being six sources.
-        "schema_version": 4,
+        #    happened to carry the identifier. Three YouTube videos stop being six sources.
+        # 5: identity_source is the 11th field of the observation projection. The route belongs
+        #    to the sighting, so it is inside the digest rather than summarised on the source.
+        "schema_version": 5,
         "digests": digests,
         "sources": {
             "canonical_sources": len(rows_per_identity),
@@ -603,6 +624,11 @@ OBSERVATION_FIELDS = (
     "geo_code",
     "normalized_source_url",
     "canonical_metadata",
+    # 11th, from schema_version 5. The route that resolved this sighting to its source is a fact
+    # about the sighting: 3 YouTube videos reached the corpus by both routes, so a source-level
+    # column would keep one and lose the other. Inside the digest, so a migration that drops the
+    # distinction cannot leave every count and every digest matching.
+    "identity_source",
 )
 
 INTENTIONAL_LOSSES = {
@@ -674,6 +700,7 @@ def canonical_metadata(metadata: Any) -> str:
 
 def observation_member(
     identity: str,
+    identity_source: str,
     row: "SignalRow",
     observed_at: Optional[str],
     time_provenance: str,
@@ -702,6 +729,7 @@ def observation_member(
         row.geo_code or "",
         normalize_url(row.source_url),
         canonical_metadata(row.metadata),
+        identity_source,
     )
     assert len(parts) == len(OBSERVATION_FIELDS)
     return "\x1f".join(parts)
@@ -709,15 +737,22 @@ def observation_member(
 
 def observation_event(
     identity: str,
+    identity_source: str,
     row: "SignalRow",
     event_captured_at: Optional[str],
     metric_value: Optional[float],
     growth_velocity: Optional[float],
 ) -> Tuple[str, str]:
-    """One observation as (member, provenance), deriving the clock for this event alone."""
+    """One observation as (member, provenance), deriving the clock for this event alone.
+
+    A metric point inherits its parent row's identity_source, because the route is a property of
+    the row the point hangs off: signal_metrics stores neither metadata nor a URL, so there is
+    nothing on the point itself to resolve. Two rows of one source may still differ, and that is
+    the case the field exists to preserve.
+    """
     provenance, observed_at = derive_time_provenance(row, event_captured_at)
     member = observation_member(
-        identity, row, observed_at, provenance, metric_value, growth_velocity
+        identity, identity_source, row, observed_at, provenance, metric_value, growth_velocity
     )
     return member, provenance
 

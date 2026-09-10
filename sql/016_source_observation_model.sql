@@ -2,7 +2,7 @@
 --
 -- trend_signals conflated three things: the external object, the act of observing it, and one
 -- mission's claim on that observation. The baseline in docs/migrations/ measured what that
--- conflation costs -- 1,927 canonical objects hidden inside 15,938 rows, 10 URLs reporting two
+-- conflation costs -- 1,924 canonical objects hidden inside 15,938 rows, 10 URLs reporting two
 -- titles, 172 identities sitting under more than one cluster, and 2 missions each holding two
 -- observations of one source that any UNIQUE(mission_id, source_id) would silently delete.
 --
@@ -26,24 +26,28 @@ CREATE TABLE IF NOT EXISTS sources (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     platform VARCHAR(30) NOT NULL,
     external_id TEXT NOT NULL,
-    -- How the identity was resolved, for audit only: 'metadata_external_id' where the connector
-    -- recorded the platform's id, 'url_external_id' where it was parsed back out of the URL.
-    -- Never part of the key -- the same video reached the corpus by both routes 3 times, and
-    -- keying on the route would file it as two objects.
-    identity_source VARCHAR(30),
-    canonical_url TEXT,
     CONSTRAINT sources_platform_external_id_key UNIQUE (platform, external_id)
 );
 
--- No first_seen_at or last_seen_at here. When a source was seen is already in observations, one
--- row per sighting, and a pair of columns summarising them is a second copy of that truth that
--- every write would have to keep in step. The backfill could not fill them honestly either:
--- 17,118 of the 18,597 observations have no known ingestion time, so NOW() would invent a
--- lifecycle rather than record one. If a query needs the range, derive it from the
--- exact_ingestion observations, or build a projection with its own rebuild contract.
+-- Three columns, and everything else about a source is an observation of it.
+--
+-- No first_seen_at or last_seen_at: when a source was seen is already in observations, one row
+-- per sighting, and a pair of columns summarising them is a second copy of that truth that every
+-- write would have to keep in step. The backfill could not fill them honestly either -- 17,118 of
+-- the 18,597 observations have no known ingestion time, so NOW() would invent a lifecycle rather
+-- than record one.
+--
+-- No canonical_url: a URL is what one sighting reported, and the corpus already contains one
+-- source seen under two URL variants. A column here would become a "latest URL" cache with no
+-- rebuild contract. Citations use observations.source_url; a canonical locator, if one is ever
+-- needed, derives from (platform, external_id).
+--
+-- No identity_source: the resolution route is a fact about a sighting, not about the object. The
+-- 3 YouTube videos that arrived by both routes prove it -- a source-level column would keep one
+-- route and lose the other. It lives on observations.
 
 -- No title and no cluster_id on this table, by measurement rather than by taste: 10 URLs in the
--- corpus reported two different titles, and 172 identities appear under more than one cluster.
+-- corpus reported two different titles, and 175 identities appear under more than one cluster.
 -- Both are things observed about a source at a point in time, so both live on the observation.
 
 -- 2. observations -- one row per collection event, immutable once written.
@@ -60,6 +64,11 @@ CREATE TABLE IF NOT EXISTS observations (
     -- captured_at with the publish time. Labelling them is the only honest option, because the
     -- true collection time was never written down and cannot be recovered.
     time_provenance VARCHAR(30) NOT NULL,
+    -- Which route resolved this sighting to its source: the connector's own identifier in
+    -- metadata, an identifier parsed back out of the URL, or the normalized URL as a last
+    -- resort. Recorded per observation because one source is reached by different routes at
+    -- different times, and required because every observation was resolved by exactly one.
+    identity_source VARCHAR(30) NOT NULL,
     observed_title TEXT,
     metric_value DOUBLE PRECISION DEFAULT 0,
     growth_velocity DOUBLE PRECISION DEFAULT 0,
@@ -72,6 +81,9 @@ CREATE TABLE IF NOT EXISTS observations (
     -- exact_ingestion is a claim about a known clock, so it has to have one.
     CONSTRAINT observations_exact_ingestion_has_a_clock CHECK (
         time_provenance <> 'exact_ingestion' OR observed_at IS NOT NULL
+    ),
+    CONSTRAINT observations_identity_source_check CHECK (
+        identity_source IN ('metadata_external_id', 'url_external_id', 'normalized_url_fallback')
     )
 );
 

@@ -104,10 +104,9 @@ class SqliteTrendRepository(ITrendRepository):
                 -- "<kind>:<value>", so that a TikTok hashtag named "12345" and item 12345 stay
                 -- two objects. See the migration header for why the namespace is inside the key.
                 external_id TEXT NOT NULL,
-                identity_source TEXT,
-                canonical_url TEXT,
-                -- No first_seen_at / last_seen_at: observations already hold when a source was
-                -- seen, and 17,118 of them have no known ingestion time to summarise.
+                -- Three columns only. A URL, a resolution route and a first/last seen range
+                -- are all facts about a sighting, so they live on observations; see the header
+                -- of sql/016_source_observation_model.sql.
                 UNIQUE (platform, external_id)
             );
 
@@ -119,6 +118,9 @@ class SqliteTrendRepository(ITrendRepository):
                 published_at TEXT,
                 time_provenance TEXT NOT NULL
                     CHECK (time_provenance IN ('exact_ingestion', 'legacy_publish_only', 'unknown')),
+                identity_source TEXT NOT NULL
+                    CHECK (identity_source IN ('metadata_external_id', 'url_external_id',
+                                               'normalized_url_fallback')),
                 observed_title TEXT,
                 metric_value REAL DEFAULT 0.0,
                 growth_velocity REAL DEFAULT 0.0,

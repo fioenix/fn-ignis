@@ -11,15 +11,15 @@
   },
   "digests": {
     "algorithm": "sha256 over NUL-separated members of each sorted multiset",
-    "cluster_memberships": "4a2fecf505b063a0a67d3861b2bf71ee7b4ca48829ecac7875fe009f6741c5ba",
+    "cluster_memberships": "12e57ff31fc6a736b5c1bfad9dbcce455405dd51491cfab625a907fad4a4c766",
     "member_counts": {
       "cluster_memberships": 15754,
       "mission_associations": 1301,
       "observations": 18597,
       "sources": 1924
     },
-    "mission_associations": "0b9cc2a7a156487d7e36a39be6bcf56e0f30a3335fa660e1e5bff5b1879ca515",
-    "observations": "2caee5f47ee4754b2656e6fc6df10aedce6b4bdd07a988e60ed1742345ff4418",
+    "mission_associations": "27ef7abf5e2bda15aba94ad6cc260b595bd54654b77743bef8571101a516990e",
+    "observations": "b19e7385bf28c51cfca62bb8e65d0eb762f65b9251574eccf5b7ac154f167585",
     "sources": "69d72aee192bf52684187e2c79a80bd944b671ea680cb506841dc32845364a82"
   },
   "invariants": {
@@ -58,7 +58,8 @@
       "growth_velocity",
       "geo_code",
       "normalized_source_url",
-      "canonical_metadata"
+      "canonical_metadata",
+      "identity_source"
     ],
     "signal_metrics_rows": 3677,
     "signals_carrying_at_least_one_metric_point": 1018,
@@ -71,7 +72,7 @@
     "trend_signals_rows": 15938
   },
   "sanitized": true,
-  "schema_version": 4,
+  "schema_version": 5,
   "sources": {
     "canonical_sources": 1924,
     "identities_holding_one_row": 1544,

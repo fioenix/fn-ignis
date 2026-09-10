@@ -174,8 +174,8 @@ async def test_one_mission_keeps_two_observations_of_one_source(postgres_schema)
         ).fetchone()[0]
         observation_ids = [
             conn.execute(
-                "INSERT INTO observations (source_id, observed_at, metric_value, time_provenance)"
-                " VALUES (%s, %s, %s, 'exact_ingestion') RETURNING id",
+                "INSERT INTO observations (source_id, observed_at, metric_value, time_provenance, identity_source)"
+                " VALUES (%s, %s, %s, 'exact_ingestion', 'metadata_external_id') RETURNING id",
                 (source_id, NOW - timedelta(days=offset), metric),
             ).fetchone()[0]
             for offset, metric in ((2, 100.0), (1, 200.0))
@@ -202,8 +202,8 @@ async def test_the_same_evidence_row_cannot_be_recorded_twice(postgres_schema):
             " status) VALUES ('m', '{}', '{}', 'VN', '7d', 'COMPLETED') RETURNING id"
         ).fetchone()[0]
         observation_id = conn.execute(
-            "INSERT INTO observations (source_id, observed_at, metric_value, time_provenance)"
-            " VALUES (%s, %s, 1.0, 'exact_ingestion') RETURNING id",
+            "INSERT INTO observations (source_id, observed_at, metric_value, time_provenance, identity_source)"
+            " VALUES (%s, %s, 1.0, 'exact_ingestion', 'metadata_external_id') RETURNING id",
             (source_id, NOW),
         ).fetchone()[0]
         conn.execute(
@@ -253,14 +253,14 @@ async def test_time_provenance_is_a_required_three_valued_column(postgres_schema
         ).fetchone()[0]
         for provenance in ("exact_ingestion", "legacy_publish_only", "unknown"):
             conn.execute(
-                "INSERT INTO observations (source_id, observed_at, metric_value, time_provenance)"
-                " VALUES (%s, %s, 1.0, %s)",
+                "INSERT INTO observations (source_id, observed_at, metric_value, time_provenance, identity_source)"
+                " VALUES (%s, %s, 1.0, %s, 'metadata_external_id')",
                 (source_id, NOW, provenance),
             )
         with pytest.raises((psycopg.errors.CheckViolation, psycopg.errors.InvalidTextRepresentation)):
             conn.execute(
-                "INSERT INTO observations (source_id, observed_at, metric_value, time_provenance)"
-                " VALUES (%s, %s, 1.0, 'approximately_exact')",
+                "INSERT INTO observations (source_id, observed_at, metric_value, time_provenance, identity_source)"
+                " VALUES (%s, %s, 1.0, 'approximately_exact', 'metadata_external_id')",
                 (source_id, NOW),
             )
 
@@ -274,7 +274,8 @@ async def test_a_legacy_publish_only_observation_has_no_invented_ingestion_time(
         ).fetchone()[0]
         observation_id = conn.execute(
             "INSERT INTO observations (source_id, observed_at, published_at, metric_value,"
-            " time_provenance) VALUES (%s, NULL, %s, 1.0, 'legacy_publish_only') RETURNING id",
+            " time_provenance, identity_source)"
+            " VALUES (%s, NULL, %s, 1.0, 'legacy_publish_only', 'url_external_id') RETURNING id",
             (source_id, NOW - timedelta(days=30)),
         ).fetchone()[0]
         row = conn.execute(
@@ -291,8 +292,8 @@ async def test_an_exact_ingestion_observation_must_carry_observed_at(postgres_sc
         ).fetchone()[0]
         with pytest.raises(psycopg.errors.CheckViolation):
             conn.execute(
-                "INSERT INTO observations (source_id, observed_at, metric_value, time_provenance)"
-                " VALUES (%s, NULL, 1.0, 'exact_ingestion')",
+                "INSERT INTO observations (source_id, observed_at, metric_value, time_provenance, identity_source)"
+                " VALUES (%s, NULL, 1.0, 'exact_ingestion', 'metadata_external_id')",
                 (source_id,),
             )
 
@@ -316,16 +317,16 @@ async def test_two_observations_may_share_source_time_and_metric(postgres_schema
         for velocity in (1.0, 2.0):
             conn.execute(
                 "INSERT INTO observations (source_id, observed_at, metric_value,"
-                " growth_velocity, time_provenance)"
-                " VALUES (%s, %s, 100.0, %s, 'exact_ingestion')",
+                " growth_velocity, time_provenance, identity_source)"
+                " VALUES (%s, %s, 100.0, %s, 'exact_ingestion', 'metadata_external_id')",
                 (source_id, NOW, velocity),
             )
         # And again with the velocity identical too: still two sightings.
         for _ in range(2):
             conn.execute(
                 "INSERT INTO observations (source_id, observed_at, metric_value,"
-                " growth_velocity, time_provenance)"
-                " VALUES (%s, %s, 100.0, 5.0, 'exact_ingestion')",
+                " growth_velocity, time_provenance, identity_source)"
+                " VALUES (%s, %s, 100.0, 5.0, 'exact_ingestion', 'metadata_external_id')",
                 (source_id, NOW),
             )
         kept = conn.execute(
@@ -446,25 +447,27 @@ async def test_sqlite_labels_the_clock_and_refuses_an_invented_one(sqlite_schema
         ):
             conn.execute(
                 "INSERT INTO observations (id, source_id, observed_at, metric_value,"
-                " time_provenance) VALUES (?, 's1', '2026-09-10T12:00:00+00:00', 1.0, ?)",
+                " time_provenance, identity_source)"
+                " VALUES (?, 's1', '2026-09-10T12:00:00+00:00', 1.0, ?, 'metadata_external_id')",
                 (f"o{index}", provenance),
             )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 "INSERT INTO observations (id, source_id, observed_at, metric_value,"
-                " time_provenance) VALUES ('o-bad', 's1', '2026-09-10T12:00:00+00:00', 1.0,"
-                " 'approximately_exact')"
+                " time_provenance, identity_source) VALUES ('o-bad', 's1', '2026-09-10T12:00:00+00:00', 1.0,"
+                " 'approximately_exact', 'metadata_external_id')"
             )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 "INSERT INTO observations (id, source_id, observed_at, metric_value,"
-                " time_provenance) VALUES ('o-noclock', 's1', NULL, 1.0, 'exact_ingestion')"
+                " time_provenance, identity_source)"
+                " VALUES ('o-noclock', 's1', NULL, 1.0, 'exact_ingestion', 'metadata_external_id')"
             )
         # A legacy observation keeps a NULL observed_at rather than an invented one.
         conn.execute(
             "INSERT INTO observations (id, source_id, observed_at, published_at, metric_value,"
-            " time_provenance) VALUES ('o-legacy', 's1', NULL, '2026-08-10T00:00:00+00:00', 1.0,"
-            " 'legacy_publish_only')"
+            " time_provenance, identity_source) VALUES ('o-legacy', 's1', NULL, '2026-08-10T00:00:00+00:00', 1.0,"
+            " 'legacy_publish_only', 'url_external_id')"
         )
 
 
@@ -483,7 +486,7 @@ async def test_sqlite_keeps_two_observations_of_one_source_in_one_mission(sqlite
         for index, metric in enumerate((100.0, 200.0)):
             conn.execute(
                 "INSERT INTO observations (id, source_id, observed_at, metric_value,"
-                " time_provenance) VALUES (?, 's1', ?, ?, 'exact_ingestion')",
+                " time_provenance, identity_source) VALUES (?, 's1', ?, ?, 'exact_ingestion', 'metadata_external_id')",
                 (f"o{index}", f"2026-09-0{index + 1}T00:00:00+00:00", metric),
             )
             conn.execute(
@@ -506,8 +509,8 @@ async def test_sqlite_keeps_two_observations_of_one_source_in_one_mission(sqlite
         for index in range(2):
             conn.execute(
                 "INSERT INTO observations (id, source_id, observed_at, metric_value,"
-                " growth_velocity, time_provenance) VALUES (?, 's1',"
-                " '2026-09-10T12:00:00+00:00', 100.0, 5.0, 'exact_ingestion')",
+                " growth_velocity, time_provenance, identity_source) VALUES (?, 's1',"
+                " '2026-09-10T12:00:00+00:00', 100.0, 5.0, 'exact_ingestion', 'metadata_external_id')",
                 (f"twin{index}",),
             )
         assert (
@@ -539,7 +542,8 @@ async def test_an_observation_loses_its_cluster_rather_than_dangling(postgres_sc
         ).fetchone()[0]
         observation_id = conn.execute(
             "INSERT INTO observations (source_id, cluster_id, observed_at, metric_value,"
-            " time_provenance) VALUES (%s, %s, %s, 1.0, 'exact_ingestion') RETURNING id",
+            " time_provenance, identity_source)"
+            " VALUES (%s, %s, %s, 1.0, 'exact_ingestion', 'metadata_external_id') RETURNING id",
             (source_id, cluster_id, NOW),
         ).fetchone()[0]
         conn.execute("DELETE FROM topic_clusters WHERE id = %s", (cluster_id,))
@@ -570,8 +574,8 @@ async def test_sqlite_enforces_the_same_cluster_reference(sqlite_schema):
         )
         conn.execute(
             "INSERT INTO observations (id, source_id, cluster_id, observed_at, metric_value,"
-            " time_provenance) VALUES ('o1', 's1', 'c1', '2026-09-10T12:00:00+00:00', 1.0,"
-            " 'exact_ingestion')"
+            " time_provenance, identity_source) VALUES ('o1', 's1', 'c1', '2026-09-10T12:00:00+00:00', 1.0,"
+            " 'exact_ingestion', 'metadata_external_id')"
         )
         conn.execute("DELETE FROM topic_clusters WHERE id = 'c1'")
         assert (
@@ -581,8 +585,8 @@ async def test_sqlite_enforces_the_same_cluster_reference(sqlite_schema):
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 "INSERT INTO observations (id, source_id, observed_at, metric_value,"
-                " time_provenance) VALUES ('o-dangling', 'nope',"
-                " '2026-09-10T12:00:00+00:00', 1.0, 'exact_ingestion')"
+                " time_provenance, identity_source) VALUES ('o-dangling', 'nope',"
+                " '2026-09-10T12:00:00+00:00', 1.0, 'exact_ingestion', 'metadata_external_id')"
             )
 
 
@@ -596,3 +600,99 @@ async def test_the_repository_connection_has_foreign_keys_on(sqlite_schema):
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     finally:
         await repository.close()
+
+
+# --- decision: the resolution route belongs to the sighting ------------------------------------
+
+
+async def test_a_source_carries_no_url_and_no_resolution_route(postgres_schema):
+    """Three columns, and everything else about a source is an observation of it.
+
+    canonical_url would become a "latest URL" cache with no rebuild contract, and the corpus
+    already holds one source seen under two URL variants. identity_source would keep one route
+    and lose the other, which the 3 videos that arrived by both routes make measurable.
+    """
+    with psycopg.connect(postgres_schema) as conn:
+        assert columns_of(conn, "sources") == {"id", "platform", "external_id"}
+
+
+async def test_two_observations_of_one_source_may_carry_two_routes(postgres_schema):
+    with psycopg.connect(postgres_schema, autocommit=True) as conn:
+        source_id = conn.execute(
+            "INSERT INTO sources (platform, external_id) VALUES ('youtube', 'video:two-routes')"
+            " RETURNING id"
+        ).fetchone()[0]
+        for route in ("metadata_external_id", "url_external_id"):
+            conn.execute(
+                "INSERT INTO observations (source_id, observed_at, metric_value,"
+                " time_provenance, identity_source)"
+                " VALUES (%s, %s, 1.0, 'exact_ingestion', %s)",
+                (source_id, NOW, route),
+            )
+        kept = {
+            row[0]
+            for row in conn.execute(
+                "SELECT identity_source FROM observations WHERE source_id = %s", (source_id,)
+            )
+        }
+        assert kept == {"metadata_external_id", "url_external_id"}
+
+
+async def test_identity_source_is_required_and_three_valued(postgres_schema):
+    with psycopg.connect(postgres_schema) as conn:
+        row = conn.execute(
+            "SELECT is_nullable FROM information_schema.columns"
+            " WHERE table_name = 'observations' AND column_name = 'identity_source'"
+        ).fetchone()
+        assert row and row[0] == "NO"
+
+    with psycopg.connect(postgres_schema, autocommit=True) as conn:
+        source_id = conn.execute(
+            "INSERT INTO sources (platform, external_id) VALUES ('google', 'keyword:ao thun')"
+            " RETURNING id"
+        ).fetchone()[0]
+        for route in ("metadata_external_id", "url_external_id", "normalized_url_fallback"):
+            conn.execute(
+                "INSERT INTO observations (source_id, observed_at, metric_value,"
+                " time_provenance, identity_source)"
+                " VALUES (%s, %s, 1.0, 'exact_ingestion', %s)",
+                (source_id, NOW, route),
+            )
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(
+                "INSERT INTO observations (source_id, observed_at, metric_value,"
+                " time_provenance, identity_source)"
+                " VALUES (%s, %s, 1.0, 'exact_ingestion', 'guessed')",
+                (source_id, NOW),
+            )
+
+
+async def test_sqlite_requires_the_same_route_values(sqlite_schema):
+    import sqlite3
+
+    with _sqlite(sqlite_schema) as conn:
+        assert _sqlite_columns(conn, "sources") == {"id", "platform", "external_id"}
+        conn.execute(
+            "INSERT INTO sources (id, platform, external_id)"
+            " VALUES ('s1', 'youtube', 'video:two-routes')"
+        )
+        for index, route in enumerate(("metadata_external_id", "url_external_id")):
+            conn.execute(
+                "INSERT INTO observations (id, source_id, observed_at, metric_value,"
+                " time_provenance, identity_source)"
+                " VALUES (?, 's1', '2026-09-10T12:00:00+00:00', 1.0, 'exact_ingestion', ?)",
+                (f"o{index}", route),
+            )
+        assert (
+            conn.execute(
+                "SELECT count(DISTINCT identity_source) FROM observations WHERE source_id = 's1'"
+            ).fetchone()[0]
+            == 2
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO observations (id, source_id, observed_at, metric_value,"
+                " time_provenance, identity_source)"
+                " VALUES ('o-bad', 's1', '2026-09-10T12:00:00+00:00', 1.0, 'exact_ingestion',"
+                " 'guessed')"
+            )

@@ -70,6 +70,13 @@ def build_db(path, signals, metrics=(), missions=("m-a", "m-b"), clusters=("c-1"
     return path
 
 
+
+# A real YouTube id is 11 characters, and the URL pattern needs at least 6. The fixture's default
+# "vid-1" is 5, so a URL-only row carrying it resolves by the normalized-URL fallback instead of
+# as a video -- these two constants exist so the route tests exercise the route they name.
+YT_ID = "dQw4w9WgXcQ"
+YT_URL = f"https://www.youtube.com/watch?v={YT_ID}"
+
 def signal(sid, **overrides):
     base = {
         "id": sid,
@@ -266,6 +273,7 @@ def test_the_projection_declares_every_field_it_preserves(hostile_db):
         "geo_code",
         "normalized_source_url",
         "canonical_metadata",
+        "identity_source",
     }
     # Anything left out is a named, reasoned loss rather than an omission nobody noticed.
     assert set(obs["intentional_losses"]) == {
@@ -376,7 +384,7 @@ def test_the_json_report_is_deterministic(hostile_db, tmp_path):
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(first), "--quiet"])
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(second), "--quiet"])
     assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
-    assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 4
+    assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 5
 
 
 # --- the tracked baseline must carry evidence, not content ------------------------------------
@@ -645,7 +653,13 @@ def test_provenance_alone_changes_the_serialized_member(tmp_path):
         published_at="2026-08-01T00:00:00+00:00", metric_value=1.0, growth_velocity=0.0,
         geo_code="VN", mission_id=None, cluster_id=None,
     )
-    args = dict(identity="youtube:video:v", row=row, metric_value=1.0, growth_velocity=0.0)
+    args = dict(
+        identity="youtube:video:v",
+        identity_source="metadata_external_id",
+        row=row,
+        metric_value=1.0,
+        growth_velocity=0.0,
+    )
     as_legacy = observation_member(observed_at=None, time_provenance="legacy_publish_only", **args)
     as_unknown = observation_member(observed_at=None, time_provenance="unknown", **args)
     assert as_legacy != as_unknown, "provenance must reach the serialized member"
@@ -710,3 +724,76 @@ def test_a_legacy_parent_can_carry_a_later_exact_point(tmp_path):
 def test_the_digest_algorithm_label_says_multiset(hostile_db):
     assert "multiset" in run_audit(hostile_db)["digests"]["algorithm"]
     assert "sorted set" not in run_audit(hostile_db)["digests"]["algorithm"]
+
+
+# --- identity_source: field 11 ----------------------------------------------------------------
+
+
+def test_identity_source_alone_changes_the_serialized_member():
+    """Vary the route and nothing else, at the serializer, so the field cannot ride on another.
+
+    The same shape as the time_provenance isolation test, and for the same reason: an earlier
+    version of that test moved a row between buckets by changing its platform, which changed five
+    fields at once and would have passed with the field removed entirely.
+    """
+    from scripts.migration_reconciliation_audit import SignalRow, observation_member
+
+    row = SignalRow(
+        signal_id="s1",
+        platform="youtube",
+        source_url="https://www.youtube.com/watch?v=vid-1",
+        raw_title="A Video",
+        metadata={"video_id": "vid-1"},
+        captured_at="2026-09-01T00:00:00+00:00",
+        published_at=None,
+        metric_value=100.0,
+        growth_velocity=1.0,
+        geo_code="VN",
+        mission_id=None,
+        cluster_id=None,
+    )
+    args = dict(
+        identity="youtube:video:vid-1",
+        row=row,
+        observed_at="2026-09-01T00:00:00+00:00",
+        time_provenance="exact_ingestion",
+        metric_value=100.0,
+        growth_velocity=1.0,
+    )
+    from_metadata = observation_member(identity_source="metadata_external_id", **args)
+    from_url = observation_member(identity_source="url_external_id", **args)
+    from_fallback = observation_member(identity_source="normalized_url_fallback", **args)
+    assert len({from_metadata, from_url, from_fallback}) == 3
+
+
+def test_two_observations_of_one_source_keep_two_routes(tmp_path):
+    """The corpus case: one YouTube video arrived with metadata once and URL-only once.
+
+    Both rows resolve to one canonical source, and both routes survive into the digest. A
+    source-level identity_source could only have kept one of them.
+    """
+    path = build_db(
+        tmp_path / "routes.sqlite",
+        [
+            signal("s-meta", source_url=YT_URL, metadata={"video_id": YT_ID}),
+            signal(
+                "s-url", source_url=YT_URL, metadata={},
+                captured_at="2026-09-02T00:00:00+00:00",
+            ),
+        ],
+    )
+    report = run_audit(path)
+    assert report["sources"]["canonical_sources"] == 1, "one video, one canonical source"
+    assert report["sources"]["resolution_reasons"] == {
+        "metadata_external_id": 1,
+        "url_external_id": 1,
+    }
+    assert report["digests"]["member_counts"]["observations"] == 2
+    assert report["balanced"] is True
+
+
+# There is deliberately no row-level test asserting that removing identity_source would fuse two
+# observations. It cannot exist: the route is decided by whether metadata carries the identifier,
+# so two rows with different routes always differ in metadata as well, and such a test would pass
+# with the field deleted. The serializer-level test above is what isolates the field, and
+# deleting the field from the member proves it -- exactly that test fails, plus the declaration.

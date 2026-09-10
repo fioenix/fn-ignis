@@ -1,7 +1,7 @@
 # Baseline đối soát: source / observation / mission evidence
 
 **Ngày chạy:** 10/09/2026 · **Backend:** PostgreSQL/TimescaleDB (Supabase)
-**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `4`
+**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `5`
 **Lưu ý:** bản baseline đầu tiên của cùng ngày đã bị thay thế — xem mục "Bản sửa" bên dưới.
 **Dữ liệu máy đọc:** [`2026-09-10-source-observation-baseline.json`](2026-09-10-source-observation-baseline.json)
 
@@ -79,13 +79,46 @@ resolver đó.
 Cả bốn digest đổi vì identity là thành phần đầu tiên của mọi member trong cả bốn tập. Số member
 thì chỉ `sources` đổi, và đúng bằng 3 — không có bucket nào khác dịch chuyển theo.
 
-## Projection: 10 field được bảo toàn, 4 mất mát có chủ ý
+## Bản sửa v5: route phân giải thuộc lần quan sát, không thuộc source
+
+v4 để `identity_source` trên bảng `sources`. Sai theo đúng số đo đã dùng để chốt v4: ba video
+YouTube cùng một canonical source đã vào corpus bằng **hai route khác nhau**, nên một cột ở tầng
+source chỉ giữ được một route và làm mất route còn lại. Chính docstring của resolver cũng ghi rằng
+mechanism được record theo từng observation.
+
+Sửa: `sources` còn đúng ba cột — `id`, `platform`, `external_id`. `identity_source` chuyển xuống
+`observations`, `NOT NULL`, `CHECK` ba giá trị `metadata_external_id` / `url_external_id` /
+`normalized_url_fallback`, và trở thành **field thứ 11** của projection observation.
+
+Cùng lúc bỏ `canonical_url` khỏi `sources`: URL là thứ một lần quan sát báo về, corpus đã có một
+source xuất hiện dưới hai biến thể URL, nên cột đó sẽ thành cache "URL mới nhất" không có rebuild
+contract. Citation dùng `observation.source_url`; canonical locator, nếu cần, derive từ
+`(platform, external_id)`.
+
+Điểm phân giải mỗi metric point: một điểm `signal_metrics` **thừa hưởng** route của dòng cha, vì
+bảng đó không lưu metadata lẫn URL — không có gì trên chính điểm đó để phân giải. Hai dòng của
+cùng một source vẫn có thể khác route, và đó chính là trường hợp field này tồn tại để giữ.
+
+| | v4 | v5 |
+|---|---|---|
+| field trong projection | 10 | **11** |
+| sources | 1.924 | 1.924 |
+| observations | 18.597 | 18.597 |
+| mission_associations | 1.301 | 1.301 |
+| cluster_memberships | 15.754 | 15.754 |
+| digest `sources` | `69d72aee192bf526` | **giữ nguyên** |
+| ba digest còn lại | | **đổi** |
+
+`sources` giữ nguyên vì source member chỉ gồm identity. Ba digest kia đổi vì member của chúng
+chứa observation member.
+
+## Projection: 11 field được bảo toàn, 4 mất mát có chủ ý
 
 Một observation member được render trên đúng những field này:
 
 `canonical_source_identity` · `observed_at` · `published_at` · **`time_provenance`** ·
 `observed_title` · `metric_value` · `growth_velocity` · `geo_code` · `normalized_source_url` ·
-`canonical_metadata`
+`canonical_metadata` · **`identity_source`**
 
 Field bị bỏ phải được khai báo là mất mát có chủ ý kèm lý do, để câu "digest khớp" không bao giờ
 có nghĩa là "digest bỏ qua đúng cột đã đổi":
@@ -105,13 +138,15 @@ là **multiset** chứ không phải set. Nhãn `algorithm` trong JSON ghi đún
 | Tập | SHA-256 (16 ký tự đầu) | Member |
 |---|---|---|
 | sources | `69d72aee192bf526` | 1.924 |
-| observations | `2caee5f47ee4754b` | 18.597 |
-| mission_associations | `0b9cc2a7a156487d` | 1.301 |
-| cluster_memberships | `4a2fecf505b063a0` | 15.754 |
+| observations | `b19e7385bf28c51c` | 18.597 |
+| mission_associations | `27ef7abf5e2bda15` | 1.301 |
+| cluster_memberships | `12e57ff31fc6a736` | 15.754 |
 
-Cả bốn digest ở bản v3 đều không còn dùng được để đối soát: identity là thành phần đầu tiên của
-mọi member trong cả bốn tập, nên đổi chính sách identity thì đổi cả bốn chuỗi băm. Số member thì
-chỉ có `sources` đổi.
+Digest v3 không còn dùng được: identity là thành phần đầu tiên của mọi member trong cả bốn tập,
+nên đổi chính sách identity thì đổi cả bốn chuỗi băm. Sang v5, `sources` giữ nguyên
+`69d72aee192bf526` — source member chỉ gồm identity, mà identity không đổi — còn ba digest kia
+đổi vì member của chúng chứa observation member, nơi `identity_source` vừa trở thành field thứ 11.
+Số member không đổi ở cả bốn tập.
 
 ## Công thức và aggregate
 
