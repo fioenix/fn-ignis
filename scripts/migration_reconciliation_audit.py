@@ -366,11 +366,9 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
         if row.signal_id not in identity_of:
             continue
         identity = identity_of[row.signal_id]
-        provenance, _ = derive_time_provenance(row)
         row_payload = (row.captured_at, row.metric_value, row.growth_velocity)
-        observation_members.append(
-            observation_member(identity, row, *row_payload)
-        )
+        member, provenance = observation_event(identity, row, *row_payload)
+        observation_members.append(member)
         provenance_buckets[provenance] += 1
         merged_once = False
         for point in points_by_signal.get(row.signal_id, []):
@@ -378,12 +376,13 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
                 merged_once = True  # the sql/008 copy of the row itself
                 lineage_merges += 1
                 continue
-            observation_members.append(
-                observation_member(
-                    identity, row, point.captured_at, point.metric_value, point.growth_velocity
-                )
+            # Derived on this point's own captured_at. It may land in a different bucket from its
+            # parent row, which is the whole reason the derivation is per event.
+            member, point_provenance = observation_event(
+                identity, row, point.captured_at, point.metric_value, point.growth_velocity
             )
-            provenance_buckets[provenance] += 1
+            observation_members.append(member)
+            provenance_buckets[point_provenance] += 1
 
     observation_arithmetic = {
         "formula": (
@@ -493,10 +492,10 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     # because two observations share a payload.
     cluster_members_preview = [
         f"{row.cluster_id}\x1f"
-        + observation_member(
+        + observation_event(
             identity_of[row.signal_id], row, row.captured_at, row.metric_value,
             row.growth_velocity,
-        )
+        )[0]
         for row in signals
         if row.cluster_id and row.signal_id in identity_of
     ]
@@ -570,10 +569,10 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     # post-migration run can recompute the same value from the new tables.
     mission_members = [
         f"{row.mission_id}\x1f"
-        + observation_member(
+        + observation_event(
             identity_of[row.signal_id], row, row.captured_at, row.metric_value,
             row.growth_velocity,
-        )
+        )[0]
         for row in signals
         if row.mission_id and row.signal_id in identity_of
     ]
@@ -593,7 +592,7 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     }
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "digests": digests,
         "sources": {
             "canonical_sources": len(rows_per_identity),
@@ -667,43 +666,46 @@ PROVENANCE_UNKNOWN = "unknown"
 GOOGLE_PROBE_TITLE_PREFIX = "Google Search Trends:"
 
 
-def derive_time_provenance(row: "SignalRow") -> Tuple[str, Optional[str]]:
-    """Decide what a legacy row's captured_at actually means, and what observed_at may be.
+def row_clock_may_be_a_publish_time(row: "SignalRow") -> bool:
+    """Whether this row was written by one of the paths that put a publish time in captured_at.
 
-    Returns (time_provenance, observed_at). This is derived from the evidence sql/015 left
-    behind, not from a cutoff date picked by hand.
-
-    That migration recorded which code paths wrote a publish time into captured_at: both YouTube
-    paths and the Google Trends RSS feed. It then backfilled published_at from the platform's own
-    value in metadata for YouTube, and moved captured_at across for the Google feed rows. So a row
-    written before the fix by one of those paths ends up with published_at equal to captured_at,
-    while a row written after it has an ingestion captured_at and a different published_at. The
-    equality is the signature, and it is measurable: 14,737 of 14,869 YouTube rows and all 72
-    Google feed rows carry it, while every TikTok, Threads and Reels row does not.
-
-    Where captured_at is the publish time, observed_at is NULL. The true collection time was never
-    recorded, and stamping the publish time into a column named observed_at is the substitution
-    this whole exercise exists to stop.
+    sql/015 names them: both YouTube paths and the Google Trends RSS feed. Google's keyword-probe
+    rows are excluded there because they were always stamped with the ingestion time and have no
+    publish concept, and their raw_title is what distinguishes them.
     """
-    if row.platform == "google":
-        if (row.raw_title or "").startswith(GOOGLE_PROBE_TITLE_PREFIX):
-            return PROVENANCE_EXACT, row.captured_at
-        if row.published_at is None:
-            return PROVENANCE_UNKNOWN, None
-        if row.published_at == row.captured_at:
-            return PROVENANCE_LEGACY, None
-        return PROVENANCE_EXACT, row.captured_at
-
     if row.platform == "youtube":
-        if row.published_at is None:
-            # captured_at cannot be placed: the backfill found no platform value to compare it to.
-            return PROVENANCE_UNKNOWN, None
-        if row.published_at == row.captured_at:
-            return PROVENANCE_LEGACY, None
-        return PROVENANCE_EXACT, row.captured_at
+        return True
+    if row.platform == "google":
+        return not (row.raw_title or "").startswith(GOOGLE_PROBE_TITLE_PREFIX)
+    return False
 
-    # Every other connector always wrote the ingestion time; sql/015 names the three that did not.
-    return PROVENANCE_EXACT, row.captured_at
+
+def derive_time_provenance(
+    row: "SignalRow", event_captured_at: Optional[str]
+) -> Tuple[str, Optional[str]]:
+    """Decide what ONE observation's captured_at means. Returns (provenance, observed_at).
+
+    Per event, not per row. trend_signals is a mutable current snapshot: both repositories
+    overwrite captured_at on every re-poll, while each signal_metrics row keeps the captured_at of
+    the poll that wrote it. So a parent row can currently hold a proven ingestion time while its
+    metric history still contains a point stamped with the publish time, and inheriting the
+    parent's present clock would misfile that point. An earlier version of this function took only
+    the row and did exactly that.
+
+    The test is sql/015's own signature: that migration backfilled published_at from the
+    platform's value, so an event whose captured_at equals published_at was written before the fix
+    by a path that stored the publish time.
+    """
+    if not row_clock_may_be_a_publish_time(row):
+        # Every other connector always wrote the ingestion time, for every event.
+        return PROVENANCE_EXACT, event_captured_at
+
+    if row.published_at is None:
+        # Nothing to compare this event against; refuse to guess either way.
+        return PROVENANCE_UNKNOWN, None
+    if event_captured_at == row.published_at:
+        return PROVENANCE_LEGACY, None
+    return PROVENANCE_EXACT, event_captured_at
 
 
 def canonical_metadata(metadata: Any) -> str:
@@ -716,27 +718,27 @@ def canonical_metadata(metadata: Any) -> str:
 def observation_member(
     identity: str,
     row: "SignalRow",
-    captured_at: Optional[str],
+    observed_at: Optional[str],
+    time_provenance: str,
     metric_value: Optional[float],
     growth_velocity: Optional[float],
 ) -> str:
-    """One observation, rendered over every field OBSERVATION_FIELDS names.
+    """Serialize one observation over every field OBSERVATION_FIELDS names.
 
-    A metric point inherits title, geo, URL, metadata and clock semantics from the trend_signals
-    row it hangs off, because signal_metrics stores none of those and save_signals stamped each
-    point with the parent row's captured_at. If that row's clock was a publish time, so is the
-    point's, which is why provenance is decided once per row and applies to every observation
-    derived from it.
+    observed_at and time_provenance are arguments rather than being derived here, so a test can
+    hold every other field constant and vary provenance alone. The previous isolation test moved a
+    row between buckets by changing its platform, which also changed the canonical identity, the
+    URL, the metadata and observed_at -- that digest would have differed with time_provenance
+    removed entirely, so it proved nothing about provenance.
+
+    A metric point inherits title, geo, URL and metadata from the trend_signals row it hangs off,
+    because signal_metrics stores none of those. It does not inherit that row's clock.
     """
-    provenance, _row_observed_at = derive_time_provenance(row)
-    # This observation's own clock, not the parent row's: a metric point carries its own
-    # captured_at. It survives only when that clock is a proven ingestion time.
-    observed_at = captured_at if provenance == PROVENANCE_EXACT else None
     parts = (
         identity,
         observed_at or "",
         row.published_at or "",
-        provenance,
+        time_provenance,
         (row.raw_title or "").strip(),
         "" if metric_value is None else repr(metric_value),
         "" if growth_velocity is None else repr(growth_velocity),
@@ -746,6 +748,21 @@ def observation_member(
     )
     assert len(parts) == len(OBSERVATION_FIELDS)
     return "\x1f".join(parts)
+
+
+def observation_event(
+    identity: str,
+    row: "SignalRow",
+    event_captured_at: Optional[str],
+    metric_value: Optional[float],
+    growth_velocity: Optional[float],
+) -> Tuple[str, str]:
+    """One observation as (member, provenance), deriving the clock for this event alone."""
+    provenance, observed_at = derive_time_provenance(row, event_captured_at)
+    member = observation_member(
+        identity, row, observed_at, provenance, metric_value, growth_velocity
+    )
+    return member, provenance
 
 
 def _merge_reason_for(rows: Sequence["SignalRow"]) -> str:

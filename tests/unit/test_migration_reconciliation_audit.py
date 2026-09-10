@@ -19,6 +19,7 @@ from scripts.migration_reconciliation_audit import (
     RESOLUTION_NORMALIZED_URL,
     RESOLUTION_UNRESOLVED,
     audit,
+    digest_of,
     main,
     normalize_url,
     open_reader,
@@ -375,7 +376,7 @@ def test_the_json_report_is_deterministic(hostile_db, tmp_path):
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(first), "--quiet"])
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(second), "--quiet"])
     assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
-    assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 2
+    assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 3
 
 
 # --- the tracked baseline must carry evidence, not content ------------------------------------
@@ -628,28 +629,82 @@ def test_a_browser_connector_row_is_always_exact(tmp_path):
     assert run_audit(path)["observations"]["time_provenance_buckets"]["exact_ingestion"] == 1
 
 
-def test_relabelling_a_legacy_row_as_exact_changes_the_observation_digest(tmp_path):
-    """The gap this closes: without provenance in the digest, a migration could stamp an invented
-    ingestion time onto 14,809 legacy rows and every count and digest would still match."""
+def test_provenance_alone_changes_the_serialized_member(tmp_path):
+    """Isolation, done properly: every other field held constant, only provenance varies.
+
+    The first version of this test changed the platform to move a row between buckets, which also
+    changed the canonical identity, the URL, the metadata and observed_at. That digest would have
+    differed with time_provenance stripped out entirely, so it proved nothing about provenance.
+    Calling the serializer directly is the only way to vary one field.
+    """
+    from scripts.migration_reconciliation_audit import SignalRow, observation_member
+
+    row = SignalRow(
+        signal_id="s1", platform="youtube", source_url="https://www.youtube.com/watch?v=v",
+        raw_title="T", metadata={"video_id": "v"}, captured_at="2026-08-01T00:00:00+00:00",
+        published_at="2026-08-01T00:00:00+00:00", metric_value=1.0, growth_velocity=0.0,
+        geo_code="VN", mission_id=None, cluster_id=None,
+    )
+    args = dict(identity="youtube:video_id:v", row=row, metric_value=1.0, growth_velocity=0.0)
+    as_legacy = observation_member(observed_at=None, time_provenance="legacy_publish_only", **args)
+    as_unknown = observation_member(observed_at=None, time_provenance="unknown", **args)
+    assert as_legacy != as_unknown, "provenance must reach the serialized member"
+    assert digest_of([as_legacy]) != digest_of([as_unknown])
+
+
+def test_a_relabelled_legacy_observation_changes_the_corpus_digest(tmp_path):
+    """And end to end: the same row, classified differently, gives a different digest.
+
+    Only published_at moves, which is what decides the classification. It is also inside the
+    digest, so this shows the pair changing together rather than isolating provenance -- the test
+    above does the isolation.
+    """
     stamp = "2026-08-01T00:00:00+00:00"
-    legacy = build_db(
-        str(tmp_path / "as_legacy.sqlite"),
-        [signal("s1", captured_at=stamp, published_at=stamp)],
+    legacy = build_db(str(tmp_path / "l.sqlite"),
+                      [signal("s1", captured_at=stamp, published_at=stamp)])
+    exact = build_db(str(tmp_path / "e.sqlite"),
+                     [signal("s1", captured_at=stamp, published_at="2026-07-01T00:00:00+00:00")])
+    left, right = run_audit(legacy), run_audit(exact)
+    assert left["observations"]["time_provenance_buckets"]["legacy_publish_only"] == 1
+    assert right["observations"]["time_provenance_buckets"]["exact_ingestion"] == 1
+    assert left["digests"]["observations"] != right["digests"]["observations"]
+
+
+def test_provenance_is_derived_per_event_not_per_row(tmp_path):
+    """Mixed lineage: a parent whose current clock is proven, over a historical legacy point.
+
+    Both repositories overwrite trend_signals.captured_at on every re-poll, while each
+    signal_metrics row keeps the captured_at of the poll that wrote it. So a row can currently
+    hold a proven ingestion time while its metric history still contains a point stamped with the
+    publish time. Deciding provenance once per row misfiles that point.
+    """
+    publish = "2026-07-01T00:00:00+00:00"
+    path = build_db(
+        str(tmp_path / "mixed.sqlite"),
+        # The parent's captured_at differs from published_at, so the current snapshot is exact.
+        [signal("s1", captured_at="2026-09-01T00:00:00+00:00", published_at=publish,
+                metric_value=200.0, growth_velocity=2.0)],
+        # A point left over from before the split, stamped with the publish time.
+        metrics=[("s1", publish, 100.0, 1.0)],
     )
-    # The same content, but on a platform whose clock was always the ingestion time -- which is
-    # exactly what a migration would be asserting if it relabelled the row above.
-    as_exact = build_db(
-        str(tmp_path / "as_exact.sqlite"),
-        [signal("s1", captured_at=stamp, published_at=stamp, platform="threads",
-                metadata={"post_id": "s1"},
-                source_url="https://www.threads.net/@a/post/s1")],
+    obs = run_audit(path)["observations"]
+    assert obs["observations"] == 2
+    assert obs["time_provenance_buckets"]["exact_ingestion"] == 1
+    assert obs["time_provenance_buckets"]["legacy_publish_only"] == 1
+    assert obs["time_provenance_buckets"]["unknown"] == 0
+
+
+def test_a_legacy_parent_can_carry_a_later_exact_point(tmp_path):
+    """The mirror case: the parent still holds a publish time, a later point does not."""
+    publish = "2026-07-01T00:00:00+00:00"
+    path = build_db(
+        str(tmp_path / "mirror.sqlite"),
+        [signal("s1", captured_at=publish, published_at=publish, growth_velocity=1.0)],
+        metrics=[("s1", "2026-09-01T00:00:00+00:00", 500.0, 3.0)],
     )
-    legacy_report, exact_report = run_audit(legacy), run_audit(as_exact)
-    assert legacy_report["observations"]["time_provenance_buckets"]["legacy_publish_only"] == 1
-    assert exact_report["observations"]["time_provenance_buckets"]["exact_ingestion"] == 1
-    assert (
-        legacy_report["digests"]["observations"] != exact_report["digests"]["observations"]
-    ), "provenance must be inside the digest, or a relabelling passes unnoticed"
+    buckets = run_audit(path)["observations"]["time_provenance_buckets"]
+    assert buckets["legacy_publish_only"] == 1
+    assert buckets["exact_ingestion"] == 1
 
 
 def test_the_digest_algorithm_label_says_multiset(hostile_db):

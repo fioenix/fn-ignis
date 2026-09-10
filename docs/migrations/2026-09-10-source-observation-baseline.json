@@ -19,7 +19,7 @@
       "sources": 1927
     },
     "mission_associations": "d87299a59340eb9d02faa63643129fb7effb8a06a3506f0d1c31bbe08c3d093f",
-    "observations": "77469642b28e856144912efe6dcc4f2e1e60f04e54ef1e1bcdce44ef071ded98",
+    "observations": "df14bd481520ad693495fbedc183934c89533c31d712a2f4b40d187f731bd80e",
     "sources": "cf7bf6501d87b14b2ed268e9cc439cc7a979b6a272e6c135d2548e0c88733d47"
   },
   "invariants": {
@@ -64,14 +64,14 @@
     "signals_carrying_at_least_one_metric_point": 1018,
     "signals_with_no_metric_point": 14920,
     "time_provenance_buckets": {
-      "exact_ingestion": 1466,
-      "legacy_publish_only": 17131,
+      "exact_ingestion": 1479,
+      "legacy_publish_only": 17118,
       "unknown": 0
     },
     "trend_signals_rows": 15938
   },
   "sanitized": true,
-  "schema_version": 2,
+  "schema_version": 3,
   "sources": {
     "canonical_sources": 1927,
     "identities_holding_one_row": 1550,

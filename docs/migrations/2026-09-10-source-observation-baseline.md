@@ -1,7 +1,7 @@
 # Baseline đối soát: source / observation / mission evidence
 
 **Ngày chạy:** 10/09/2026 · **Backend:** PostgreSQL/TimescaleDB (Supabase)
-**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `2`
+**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `3`
 **Lưu ý:** bản baseline đầu tiên của cùng ngày đã bị thay thế — xem mục "Bản sửa" bên dưới.
 **Dữ liệu máy đọc:** [`2026-09-10-source-observation-baseline.json`](2026-09-10-source-observation-baseline.json)
 
@@ -72,7 +72,7 @@ là **multiset** chứ không phải set. Nhãn `algorithm` trong JSON ghi đún
 | Tập | SHA-256 (16 ký tự đầu) | Member |
 |---|---|---|
 | sources | `cf7bf6501d87b14b` | 1.927 |
-| observations | `77469642b28e8561` | 18.597 |
+| observations | `df14bd481520ad69` | 18.597 |
 | mission_associations | `d87299a59340eb9d` | 1.301 |
 | cluster_memberships | `532e7834fd44a2f9` | 15.754 |
 
@@ -139,8 +139,8 @@ title và metadata.
 
 | Bucket | Observation |
 |---|---|
-| `exact_ingestion` | 1.466 |
-| `legacy_publish_only` | 17.131 |
+| `exact_ingestion` | 1.479 |
+| `legacy_publish_only` | 17.118 |
 | `unknown` | 0 |
 | **Tổng** | **18.597** |
 
@@ -150,9 +150,11 @@ YouTube và Google feed lịch sử, `captured_at` chính là publish time — �
 được giả làm ingestion time. Schema test chỉ chứng minh cột và constraint tồn tại, nên migration
 vẫn có thể gắn sai provenance cho cả 18.597 observation mà bốn digest đều khớp.
 
-Provenance là field thứ 10 của digest, nên việc gắn lại nhãn làm digest lệch ngay. Có test chứng
-minh: cùng nội dung, một bên rơi vào `legacy_publish_only`, một bên `exact_ingestion` → hai
-observation digest khác nhau.
+Provenance là field thứ 10 của digest, nên việc gắn lại nhãn làm digest lệch ngay. Test chứng minh
+điều đó gọi **thẳng serializer**, giữ nguyên mọi field khác và chỉ đổi `time_provenance` — bản test
+đầu tiên đổi platform để dịch bucket, kéo theo đổi cả canonical identity, URL, metadata và
+`observed_at`, nên nó sẽ khác digest **ngay cả khi bỏ hẳn** `time_provenance`. Verify ngược: xoá
+`time_provenance` khỏi member thì đúng một test fail, chính test isolation đó.
 
 **Rule suy ra từ bằng chứng, không từ mốc ngày tự chọn.** `sql/015` ghi lại chính xác code path
 nào từng viết publish time vào `captured_at` — hai đường YouTube và feed Google Trends — rồi
@@ -173,10 +175,19 @@ thức đó là signature, và nó đo được:
 Dòng probe của Google được `sql/015` loại khỏi backfill vì chúng luôn được đóng dấu ingestion time
 và không có khái niệm publish, nên chúng là `exact_ingestion`.
 
-Cách bucket cộng lại: **14.809 dòng legacy** (14.737 youtube + 72 google feed) và **1.129 dòng
-exact** (15.938 − 14.809). Metric point thừa hưởng đồng hồ của dòng cha, vì `save_signals` đóng
-dấu mỗi point bằng `captured_at` của dòng đó — 2.322 point rơi vào dòng legacy và 337 vào dòng
-exact, cộng 2.659 = 3.677 − 1.018. Ra 17.131 legacy và 1.466 exact.
+**Provenance quyết theo từng event, không theo dòng.** `trend_signals` là snapshot hiện tại và
+có thể ghi lại: cả hai repository đều cập nhật `captured_at` mỗi lần poll
+(`postgres_repository.py` và `sqlite_repository.py`, nhánh UPDATE), trong khi mỗi dòng
+`signal_metrics` giữ `captured_at` của đúng lần poll đã ghi nó. Nên một dòng cha có thể đang mang
+ingestion time chứng minh được, còn metric history của nó vẫn chứa point đóng dấu publish time.
+Quyết một lần cho cả dòng là xếp sai point đó.
+
+Đo mức ảnh hưởng bằng cách chạy cả hai cách derivation trên corpus thật: **13 observation chuyển
+`legacy_publish_only` → `exact_ingestion`**, không có chiều ngược lại. Tổng vẫn 18.597. Con số nhỏ,
+nhưng audit phải đúng theo thiết kế chứ không đúng nhờ hình dạng dữ liệu hiện tại.
+
+Trong corpus hiện tại có **1 signal** mà metric history trộn hai loại clock, và **0** ca "dòng cha
+exact nhưng point legacy". Cả hai đều được test phủ, vì cấu trúc cho phép chúng xảy ra.
 
 Ở đâu `captured_at` là publish time thì `observed_at` là **NULL**. Thời điểm thu thập thật chưa
 từng được ghi, và đóng dấu publish time vào một cột tên `observed_at` chính là phép thay thế mà
@@ -264,6 +275,6 @@ So bản chạy sau với JSON này. Ba điều kiện để coi là thành côn
 
 Cả bốn digest phải **khớp tuyệt đối**, và số member phải khớp đúng: 1.927 source, 18.597
 observation, 1.301 mission association, 15.754 cluster membership. Ba bucket provenance phải khớp
-đúng 1.466 / 17.131 / 0. Migration không được đổi tập
+đúng 1.479 / 17.118 / 0. Migration không được đổi tập
 nào trong bốn tập đó. Nếu một digest lệch, phải chỉ ra được field nào đổi và vì sao — và nếu lý do
 là một field bị bỏ khỏi projection thì nó phải vào bảng mất mát có chủ ý trước, không phải sau.
