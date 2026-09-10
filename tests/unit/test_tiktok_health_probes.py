@@ -243,3 +243,18 @@ async def test_a_non_string_readiness_answer_is_ignored():
     assert accepted is None
     json.dumps({"remediation": accepted})  # would raise if a mock had been let through
     assert hasattr(mcp_server, "handle_verify_connectors_health")
+
+
+def test_the_json_capture_window_is_wider_than_the_settle_delay():
+    """The payload wait has to be able to outlast the settle delay, or it is a fixed sleep again.
+
+    The timing itself is not unit-testable: it lives inside a Playwright session. It was
+    verified by measurement instead, three consecutive runs of two keywords in one session,
+    before and after: 33 of 48 signals lost their view count, then 1 of 48. One keyword went
+    from losing all 24 to losing none. The constants are pinned here so a later edit that
+    collapses the window back into a single sleep fails.
+    """
+    assert TikTokPlugin.JSON_SETTLE_MS < TikTokPlugin.JSON_CAPTURE_TIMEOUT_MS
+    assert 0 < TikTokPlugin.JSON_POLL_MS <= TikTokPlugin.JSON_SETTLE_MS
+    # The old behaviour was a flat 3500ms with no polling at all.
+    assert TikTokPlugin.JSON_CAPTURE_TIMEOUT_MS >= 3500 * 2

@@ -37,6 +37,13 @@ class TikTokPlugin(IConnectorPlugin):
 
     VIDEO_URL_PATTERN = re.compile(r"(https://www\.tiktok\.com)?/(@[\w\.-]+)/video/(\d+)")
 
+    # How long to give TikTok's own XHR before giving up on it. The JSON payload is the only
+    # source of view counts, so waiting a few seconds longer is cheaper than a signal with no
+    # metric: supply scoring reads the metric and cannot tell "no data" from "nobody watched".
+    JSON_SETTLE_MS = 2000
+    JSON_POLL_MS = 500
+    JSON_CAPTURE_TIMEOUT_MS = 12000
+
     def __init__(self, auth_manager: Optional[TikTokAuthManager] = None):
         self._auth_manager = auth_manager
         # TikTok's own notification, inbox and live wording, loaded from the tiktok_ui_noise
@@ -667,7 +674,27 @@ class TikTokPlugin(IConnectorPlugin):
 
                 logger.info(f"TikTok Ingress navigating to {url}...")
                 await page.goto(url, wait_until="domcontentloaded", timeout=20000)
-                await page.wait_for_timeout(3500)
+
+                # Wait for the thing that is actually needed, not for a fixed guess. The
+                # response handler above is what supplies view counts, likes and shares; the
+                # DOM fallback below cannot, because the search grid renders no counts at all.
+                #
+                # A flat 3.5s sleep raced that XHR. Measured on 10/09/2026 over three
+                # consecutive runs of one keyword in one session: 8 of 8 signals lost their
+                # metric, then 1 of 8, then 0 of 8. Same input, three different answers.
+                #
+                # Polling for captured_items rather than matching a response URL keeps this
+                # working when TikTok moves the endpoint, which it has done before.
+                await page.wait_for_timeout(self.JSON_SETTLE_MS)
+                waited_ms = self.JSON_SETTLE_MS
+                while not captured_items and waited_ms < self.JSON_CAPTURE_TIMEOUT_MS:
+                    await page.wait_for_timeout(self.JSON_POLL_MS)
+                    waited_ms += self.JSON_POLL_MS
+                if not captured_items:
+                    logger.info(
+                        f"No TikTok JSON payload arrived within {waited_ms}ms; falling back to "
+                        f"the DOM, which carries no view counts."
+                    )
 
                 # 1. Transform from captured JSON API items if available
                 for item in captured_items:

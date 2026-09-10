@@ -264,6 +264,40 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   nó trên mock plugin của hai test khác và nhét `AsyncMock` vào payload JSON — một connector trả
   lời lạ làm sập cả bản báo cáo. Giờ chỉ nhận chuỗi không rỗng. Check `synthetic_probe` sẵn có
   cùng kiểu duck-typing và cùng điểm yếu, nhưng nó nằm ngoài phạm vi lần này.
+- [x] **Đã xong (10/09/2026): TikTok mất số view vì một race, không phải vì parser.**
+  Sau khi login TikTok, 27/48 signal của mission có `metric_value = 0`. Supply score đọc chính
+  cột đó, nên nó ăn thẳng vào chỉ số chính của sản phẩm.
+
+  Kiến trúc plugin vốn đã đúng: nó chặn response JSON của TikTok (`page.on("response")`) và ưu
+  tiên `_parse_json_item` — đường đó có `playCount`, `likes`, `comments`, `shares`. Chỉ khi
+  **không bắt được JSON** nó mới rơi về `_parse_dom_card`. Và trong DOM **không có số view**: tao
+  dò `card`, `parent`, `grandparent`, không `data-e2e` count, không `<strong>` số. Nên sửa
+  selector là vô ích.
+
+  Nguyên nhân: `await page.wait_for_timeout(3500)` là khoảng chờ **cứng**. XHR về trước 3,5 giây
+  thì có full stats, về sau thì `browser.close()` đã chạy. Chứng minh bằng variance: cùng
+  `tay toc`, ba lần liên tiếp một session, mất 8/8 → 1/8 → 0/8.
+
+  Sửa: chờ đúng cái cần chờ. Settle 2000ms rồi poll `captured_items` mỗi 500ms tới 12000ms.
+  Poll theo `captured_items` thay vì khớp URL response để nó còn chạy khi TikTok đổi endpoint —
+  việc họ đã làm rồi. Trường hợp thường gặp còn **nhanh hơn** cũ: ~2s thay vì 3,5s cố định.
+
+  Đo 3 lần × 2 từ khoá, trước và sau:
+
+  | | trước | sau |
+  |---|---|---|
+  | tổng mất metric | 33/48 (68,8%) | **1/48 (2,1%)** |
+  | `salon toc` | 24/24 | **0/24** |
+  | `tay toc` | 9/24 | 1/24 |
+
+  Ba lần tao chẩn sai trước khi tới đây, ghi lại vì cùng một hình dạng: đoán "parse theo vị trí"
+  (đúng mô tả, sai nguyên nhân); kết luận "card chưa render" trong khi probe đọc `card` còn
+  parser đọc `parent`, tức **đo sai element**; và tưởng `views=0` là đặc tính đường search trong
+  khi 197/201 row lịch sử có metric.
+- [ ] **Còn lại: supply score không phân biệt "không có dữ liệu" với "không ai xem".**
+  `view_factor = 0.0 if loc_views == 0`, nên một signal thiếu metric bị tính như một video 0 view.
+  Sau khi sửa race thì chỉ còn 2,1% signal rơi vào diện này, nên không gấp. Sửa đúng cách là ghi
+  một cờ trong metadata khi rơi về DOM và cho supply bỏ qua signal đó thay vì coi là 0.
 - [ ] **Còn lại: `_contiguous_phrase` chỉ đọc `canonical_name`.** Nếu cụm đáng làm nhãn nằm ở
   tiêu đề của một signal khác trong cùng cluster thì nó không thấy, và nhãn rơi về danh sách
   token. Đây là lý do `lê · thị · riêng` vẫn còn dạng cũ.
