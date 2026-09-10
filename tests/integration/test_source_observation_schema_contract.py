@@ -43,6 +43,7 @@ SCHEMA_MIGRATIONS = (
     "001_initial_schema.sql",
     "008_deduplicate_signal_metrics.sql",
     "015_split_published_at.sql",
+    "016_source_observation_model.sql",
 )
 
 
@@ -362,3 +363,154 @@ async def test_an_observation_preserves_every_field_the_audit_conserves(postgres
             "time_provenance",
         ):
             assert column in columns, f"observations.{column} is missing"
+
+
+# --- the same contract on SQLite ---------------------------------------------------------------
+#
+# SQLite does not read sql/, so its schema is restated in _ensure_schema and could drift from the
+# migration without anything failing. These are the same behavioural assertions, not a column
+# inventory: a backend that agrees on names and disagrees on constraints is the drift worth
+# catching.
+
+
+@pytest_asyncio.fixture
+async def sqlite_schema(tmp_path):
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+
+    repository = SqliteTrendRepository(str(tmp_path / "schema_contract.sqlite"))
+    await repository._ensure_schema()
+    try:
+        yield repository._db_path
+    finally:
+        await repository.close()
+
+
+def _sqlite(path):
+    import sqlite3
+
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def _sqlite_columns(conn, table: str) -> set:
+    rows = list(conn.execute(f"PRAGMA table_info({table})"))
+    assert rows, f"{table} is missing"
+    return {row[1] for row in rows}
+
+
+async def test_sqlite_holds_the_three_entities_with_the_same_shape(sqlite_schema):
+    import sqlite3
+
+    with _sqlite(sqlite_schema) as conn:
+        source_columns = _sqlite_columns(conn, "sources")
+        assert "raw_title" not in source_columns and "title" not in source_columns
+        assert "cluster_id" not in source_columns
+        observation_columns = _sqlite_columns(conn, "observations")
+        for column in (
+            "source_id",
+            "observed_at",
+            "published_at",
+            "observed_title",
+            "metric_value",
+            "growth_velocity",
+            "geo_code",
+            "source_url",
+            "metadata",
+            "time_provenance",
+        ):
+            assert column in observation_columns, f"observations.{column} is missing"
+        _sqlite_columns(conn, "mission_evidence")
+
+        conn.execute(
+            "INSERT INTO sources (id, platform, external_id, first_seen_at, last_seen_at)"
+            " VALUES ('s1', 'youtube', 'video:vid-1', '2026-09-10', '2026-09-10')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO sources (id, platform, external_id, first_seen_at, last_seen_at)"
+                " VALUES ('s2', 'youtube', 'video:vid-1', '2026-09-10', '2026-09-10')"
+            )
+
+
+async def test_sqlite_labels_the_clock_and_refuses_an_invented_one(sqlite_schema):
+    import sqlite3
+
+    with _sqlite(sqlite_schema) as conn:
+        conn.execute(
+            "INSERT INTO sources (id, platform, external_id, first_seen_at, last_seen_at)"
+            " VALUES ('s1', 'youtube', 'video:vid-tp', '2026-09-10', '2026-09-10')"
+        )
+        for index, provenance in enumerate(
+            ("exact_ingestion", "legacy_publish_only", "unknown")
+        ):
+            conn.execute(
+                "INSERT INTO observations (id, source_id, observed_at, metric_value,"
+                " time_provenance) VALUES (?, 's1', '2026-09-10T12:00:00+00:00', 1.0, ?)",
+                (f"o{index}", provenance),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO observations (id, source_id, observed_at, metric_value,"
+                " time_provenance) VALUES ('o-bad', 's1', '2026-09-10T12:00:00+00:00', 1.0,"
+                " 'approximately_exact')"
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO observations (id, source_id, observed_at, metric_value,"
+                " time_provenance) VALUES ('o-noclock', 's1', NULL, 1.0, 'exact_ingestion')"
+            )
+        # A legacy observation keeps a NULL observed_at rather than an invented one.
+        conn.execute(
+            "INSERT INTO observations (id, source_id, observed_at, published_at, metric_value,"
+            " time_provenance) VALUES ('o-legacy', 's1', NULL, '2026-08-10T00:00:00+00:00', 1.0,"
+            " 'legacy_publish_only')"
+        )
+
+
+async def test_sqlite_keeps_two_observations_of_one_source_in_one_mission(sqlite_schema):
+    import sqlite3
+
+    with _sqlite(sqlite_schema) as conn:
+        conn.execute(
+            "INSERT INTO sources (id, platform, external_id, first_seen_at, last_seen_at)"
+            " VALUES ('s1', 'tiktok', 'video:777', '2026-09-10', '2026-09-10')"
+        )
+        conn.execute(
+            "INSERT INTO research_missions (id, title, keywords, created_at)"
+            " VALUES ('m1', 'm', '[]', '2026-09-10')"
+        )
+        for index, metric in enumerate((100.0, 200.0)):
+            conn.execute(
+                "INSERT INTO observations (id, source_id, observed_at, metric_value,"
+                " time_provenance) VALUES (?, 's1', ?, ?, 'exact_ingestion')",
+                (f"o{index}", f"2026-09-0{index + 1}T00:00:00+00:00", metric),
+            )
+            conn.execute(
+                "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at)"
+                " VALUES (?, 'm1', ?, '2026-09-10')",
+                (f"e{index}", f"o{index}"),
+            )
+        kept = conn.execute(
+            "SELECT count(*) FROM mission_evidence WHERE mission_id = 'm1'"
+        ).fetchone()[0]
+        assert kept == 2, "the mission ledger must be lossless on SQLite too"
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at)"
+                " VALUES ('e-dup', 'm1', 'o0', '2026-09-10')"
+            )
+
+        # Two collection events identical on every field are still two events.
+        for index in range(2):
+            conn.execute(
+                "INSERT INTO observations (id, source_id, observed_at, metric_value,"
+                " growth_velocity, time_provenance) VALUES (?, 's1',"
+                " '2026-09-10T12:00:00+00:00', 100.0, 5.0, 'exact_ingestion')",
+                (f"twin{index}",),
+            )
+        assert (
+            conn.execute("SELECT count(*) FROM observations WHERE source_id = 's1'").fetchone()[0]
+            == 4
+        )

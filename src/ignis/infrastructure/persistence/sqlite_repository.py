@@ -91,6 +91,50 @@ class SqliteTrendRepository(ITrendRepository):
             );
             CREATE INDEX IF NOT EXISTS idx_signal_metrics_sig ON signal_metrics (signal_id, captured_at DESC);
 
+            -- The three entities sql/016_source_observation_model.sql creates on Postgres.
+            -- SQLite does not read the sql/ files, so the same constraints are restated here;
+            -- a backend that only agrees on column names is not the same contract.
+            CREATE TABLE IF NOT EXISTS sources (
+                id TEXT PRIMARY KEY,
+                platform TEXT NOT NULL,
+                -- "<kind>:<value>", so that a TikTok hashtag named "12345" and item 12345 stay
+                -- two objects. See the migration header for why the namespace is inside the key.
+                external_id TEXT NOT NULL,
+                identity_source TEXT,
+                canonical_url TEXT,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                UNIQUE (platform, external_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS observations (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+                cluster_id TEXT,
+                observed_at TEXT,
+                published_at TEXT,
+                time_provenance TEXT NOT NULL
+                    CHECK (time_provenance IN ('exact_ingestion', 'legacy_publish_only', 'unknown')),
+                observed_title TEXT,
+                metric_value REAL DEFAULT 0.0,
+                growth_velocity REAL DEFAULT 0.0,
+                geo_code TEXT DEFAULT 'VN',
+                source_url TEXT,
+                metadata TEXT,
+                CHECK (time_provenance <> 'exact_ingestion' OR observed_at IS NOT NULL)
+            );
+            CREATE INDEX IF NOT EXISTS idx_observations_source ON observations (source_id, observed_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_observations_cluster ON observations (cluster_id, observed_at DESC);
+
+            CREATE TABLE IF NOT EXISTS mission_evidence (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+                recorded_at TEXT NOT NULL,
+                UNIQUE (mission_id, observation_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_mission_evidence_observation ON mission_evidence (observation_id);
+
             CREATE TABLE IF NOT EXISTS topic_clusters (
                 id TEXT PRIMARY KEY,
                 canonical_name TEXT NOT NULL UNIQUE,
