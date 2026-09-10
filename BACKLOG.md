@@ -72,8 +72,8 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [ ] **Discovery source chưa đúng mục đích sản phẩm:** feed trending VN của Google Trends là tin
   tức tổng hợp (bóng đá, thời sự), nên ghép chủ đề theo nó cho ra corpus tin tức chứ không phải
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
-- [ ] **Chất lượng nhãn trên corpus thật:** nhiều nhãn rút về dạng mảnh có dấu ba chấm
-  ("… em theo …"). Thuật toán đúng nhưng đầu vào là câu nói thường ngày, không phải cụm chủ đề.
+- [x] **Chất lượng nhãn trên corpus thật:** đã sửa 10/09/2026, xem mục nhãn chủ đề
+  ở phần dưới. Ellipsis 24/40 xuống 0 trên chính 40 cluster đã lưu.
 - [x] **Phân loại category:** matcher **không sai** — với taxonomy đã seed, nó phân loại đúng
   6/6 vertical thị trường và đúng khi trả `unclassified` cho bóng đá hay giá vàng. Vấn đề là
   vocabulary: 6 vertical chỉ có 44 keyword cho cả nền kinh tế, nên "chatgpt va gpt-6" và
@@ -215,6 +215,34 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 
   Ba guard tao thử ngược: đặt lại ellipsis thì 2 test fail, hạ floor về 2 thì test fragment fail,
   trả lại phép so sánh ngoặc kép sai thì test parity fail. Khôi phục thì 10 test pass.
+- [x] **Đã xong (10/09/2026): `is_healthy()` của hai connector TikTok là phép đo thật.**
+  Cả hai từng `return True` vô điều kiện, nên `verify_connectors_health` báo HEALTHY trong mọi
+  hoàn cảnh: host không có browser, chưa có session, TikTok không truy cập được. Bốn trên sáu
+  connector có probe thật, hai cái này là hằng số, và điều đó làm cả bản báo cáo mất giá trị.
+
+  Một lượt browser cần đúng hai thứ, giờ probe hỏi đúng hai thứ đó: một Chromium **chạy được**
+  và trang cần cào có trả lời. Hai chi tiết phải đo chứ không đoán:
+  - `browser_runtime_available()` cũ chỉ kiểm module `playwright` import được, **không** kiểm
+    Chromium có trên đĩa. `pip install playwright` mà thiếu `playwright install` thì check đó vẫn
+    xanh trong khi mọi lượt browser đều fail. Giờ hỏi thẳng Playwright đường dẫn nó sẽ launch rồi
+    kiểm file tồn tại — cách này còn đúng khi có `PLAYWRIGHT_BROWSERS_PATH` hoặc đổi nền tảng,
+    trong khi đoán đường cache thì không. Tốn ~0,58s, không launch browser, cache một lần mỗi
+    tiến trình. Cổng đăng ký của worker cũng dùng câu hỏi mạnh này.
+  - Probe của Threads dùng `follow_redirects=False` và đòi đúng 200. Copy nguyên sang Creative
+    Center là **báo sai**: URL của nó trả `301` rồi đáp `200` ở path khác
+    (`ads.tiktok.com/creative/creativeCenter/trends`). Hai probe này follow redirect, nhận mọi
+    status dưới 400.
+
+  Session **không** tính vào verdict của video grid: explore là trang công khai, và một auth
+  manager chưa có gì lưu là trạng thái bình thường trước khi chạy `authenticate_tiktok`. Coi đó
+  là hỏng thì báo sai một connector đang chạy tốt. Hạn session là việc của
+  `get_platform_auth_status`.
+
+  Kiểm ngược trên host thật: bỏ module playwright → cả hai False; trỏ sang host không tồn tại →
+  cả hai False; host thật → cả hai True. Đặt lại `return True` thì 3 test fail.
+- [ ] **Còn lại: `BASE_URL` của Creative Center là đường dẫn trước redirect.**
+  `/business/creativecenter/inspiration/popular/hashtag/pc/en` giờ 301 sang
+  `/creative/creativeCenter/trends`. Browser tự follow nên plugin vẫn chạy. Đo ngày 10/09/2026.
 - [ ] **Còn lại: `_contiguous_phrase` chỉ đọc `canonical_name`.** Nếu cụm đáng làm nhãn nằm ở
   tiêu đề của một signal khác trong cùng cluster thì nó không thấy, và nhãn rơi về danh sách
   token. Đây là lý do `lê · thị · riêng` vẫn còn dạng cũ.
