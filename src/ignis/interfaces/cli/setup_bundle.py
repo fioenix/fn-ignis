@@ -83,28 +83,49 @@ def get_claude_desktop_config_path() -> Path:
         return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
 
 
+def _toml_basic_string(value: Any) -> str:
+    """Quote a value as a TOML basic string, escaping what that grammar reserves."""
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{text}"'
+
+
+def _strip_fn_ignis_sections(content: str) -> str:
+    """Drop every existing fn-ignis table, sub-tables included.
+
+    The previous implementation substituted on a non-greedy match that stopped at the first
+    following "\n[", which is fn-ignis's own [mcp_servers.fn-ignis.env] sub-table. The header was
+    replaced and the old env table survived, so each run appended a second env table carrying the
+    secrets the previous run had written -- duplicate keys, which strict TOML rejects, and a stale
+    copy of a rotated API key. Splitting on table headers and dropping the whole section instead
+    is idempotent no matter how many stale copies a file has accumulated.
+    """
+    sections = re.split(r"(?m)^(?=\[)", content)
+    kept = [
+        section
+        for section in sections
+        if not re.match(r"^\[mcp_servers\.fn-ignis[\].]", section.strip())
+    ]
+    return "".join(kept)
+
+
 def register_mcp_to_codex_toml(config_path: Path, entry: Dict[str, Any]) -> bool:
     """Safely register or update fn-ignis entry in Codex TOML configuration file."""
     try:
         if not config_path.exists():
             return False
 
-        content = config_path.read_text(encoding="utf-8")
-        command_str = entry.get("command", "")
-        args_str = json.dumps(entry.get("args", []))
-        env_dict = entry.get("env", {})
+        content = _strip_fn_ignis_sections(config_path.read_text(encoding="utf-8"))
 
-        toml_block = f"""\n[mcp_servers.fn-ignis]\ncommand = "{command_str}"\nargs = {args_str}\n\n[mcp_servers.fn-ignis.env]\n"""
-        for k, v in env_dict.items():
-            toml_block += f'{k} = "{v}"\n'
+        toml_block = (
+            "\n[mcp_servers.fn-ignis]\n"
+            f"command = {_toml_basic_string(entry.get('command', ''))}\n"
+            f"args = {json.dumps(entry.get('args', []))}\n"
+            "\n[mcp_servers.fn-ignis.env]\n"
+        )
+        for k, v in entry.get("env", {}).items():
+            toml_block += f"{k} = {_toml_basic_string(v)}\n"
 
-        if "[mcp_servers.fn-ignis]" in content:
-            pattern = re.compile(r"\[mcp_servers\.fn-ignis\][\s\S]*?(?=(\n\[|\Z))")
-            content = pattern.sub(toml_block.strip(), content)
-        else:
-            content = content.rstrip() + "\n" + toml_block
-
-        config_path.write_text(content, encoding="utf-8")
+        config_path.write_text(content.rstrip() + "\n" + toml_block, encoding="utf-8")
         return True
     except Exception as e:
         print(f"  ⚠️ Failed to write to Codex config {config_path}: {e}")
