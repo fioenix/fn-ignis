@@ -1,5 +1,4 @@
 import asyncio
-import importlib.util
 import logging
 import signal
 from typing import Dict, List, Optional, Tuple
@@ -21,6 +20,10 @@ from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
+from ignis.infrastructure.connectors.browser_support import (
+    browser_launch_available,
+    browser_module_available,
+)
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
@@ -49,8 +52,13 @@ logger = logging.getLogger("ignis.scheduler")
 
 
 def browser_runtime_available() -> bool:
-    """Whether this host can drive a headless browser at all."""
-    return importlib.util.find_spec("playwright") is not None
+    """Whether this host can drive a headless browser at all.
+
+    Kept as the worker's registration gate, which is synchronous and only needs to know whether
+    the module is there. Whether a Chromium is actually installed is a stronger question and is
+    asked by each browser-bound connector's own health probe.
+    """
+    return browser_module_available()
 
 
 async def build_connector_registry(
@@ -68,7 +76,10 @@ async def build_connector_registry(
     the operator's own machine with their own session.
     """
     if browser_available is None:
-        browser_available = browser_runtime_available()
+        # The stronger question, not just whether the module imports: a host with playwright
+        # installed but no Chromium would otherwise register the browser connectors and then
+        # fail every pass, with the reason buried in a Playwright traceback.
+        browser_available = await browser_launch_available()
 
     tiktok_auth_manager = TikTokAuthManager(repository=repository)
 

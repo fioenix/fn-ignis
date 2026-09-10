@@ -8,6 +8,10 @@ from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
+from ignis.infrastructure.connectors.browser_support import (
+    browser_launch_available,
+    surface_reachable,
+)
 from ignis.config import settings
 
 logger = logging.getLogger(__name__)
@@ -43,7 +47,15 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
         return "TikTok Creative Center Macro Radar"
 
     async def is_healthy(self) -> bool:
-        return True
+        """Whether the macro radar could actually pull right now.
+
+        Like the video-grid connector this answered `return True` unconditionally. The entry URL
+        answers 301 and lands on a different path, so the probe follows redirects: refusing them
+        the way the Threads probe does would report this connector as broken while it works.
+        """
+        if not await browser_launch_available():
+            return False
+        return await surface_reachable(self.BASE_URL)
 
     def _parse_metric_number(self, text: str) -> float:
         """Parse metric strings such as '346.2K', '1.9B', '28M' into floating-point numbers."""

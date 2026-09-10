@@ -10,6 +10,11 @@ from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
+from ignis.infrastructure.connectors.browser_support import (
+    browser_launch_available,
+    surface_reachable,
+)
+from ignis.infrastructure.connectors.meta_browser_ingress import build_cookie_header
 from ignis.config import settings
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 
@@ -83,7 +88,32 @@ class TikTokPlugin(IConnectorPlugin):
         return "TikTok Trending & Search Ingress"
 
     async def is_healthy(self) -> bool:
-        return True
+        """Whether an ingress pass could actually succeed right now.
+
+        This answered `return True` unconditionally, so verify_connectors_health reported the
+        connector HEALTHY on a host with no browser installed and with TikTok unreachable. The
+        two things a pass genuinely needs are a launchable Chromium and an explore page that
+        answers.
+
+        A stored session is deliberately not part of the verdict. The explore grid is public,
+        an unauthenticated pass still returns cards, and a bound auth manager with nothing
+        stored yet is the normal state before authenticate_tiktok has been run: failing on it
+        would report a working connector as broken. Session validity belongs to
+        get_platform_auth_status, which reports expiry on its own.
+        """
+        if not await browser_launch_available():
+            return False
+
+        cookie_header = None
+        if self._auth_manager:
+            try:
+                storage_state = await self._auth_manager.get_storage_state()
+                if storage_state:
+                    cookie_header = build_cookie_header(storage_state) or None
+            except Exception as e:
+                logger.warning(f"Could not read the stored TikTok session for the probe: {e}")
+
+        return await surface_reachable(self.EXPLORE_URL, cookie_header=cookie_header)
 
     def _is_private_or_notification(self, text: str) -> bool:
         """Reject private notification, inbox or interaction UI text.
