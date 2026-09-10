@@ -137,6 +137,18 @@ def hostile_db(tmp_path):
             mission_id="m-b",
             cluster_id="c-2",  # cluster ambiguity: one identity, two clusters
         ),
+        # The same mission observing one source twice. This is the case the live corpus has and
+        # the fixture originally lacked, which let a sort-key bug reach the real run.
+        signal(
+            "s11",
+            source_url="https://www.tiktok.com/@a/video/777",
+            platform="tiktok",
+            metadata={"item_id": "777"},
+            mission_id="m-a",
+            cluster_id="c-1",
+            metric_value=999.0,
+            captured_at="2026-09-04T00:00:00+00:00",
+        ),
         # A row with no cluster at all.
         signal(
             "s8",
@@ -220,33 +232,35 @@ def test_every_merge_carries_a_reason_code(hostile_db):
 def test_no_legacy_row_falls_outside_the_identity_breakdown(hostile_db):
     report = run_audit(hostile_db)
     src = report["sources"]
-    assert src["identities_holding_one_row"] + src["rows_inside_merged_identities"] == 10
-    assert sum(src["resolution_reasons"].values()) == 10
+    assert src["identities_holding_one_row"] + src["rows_inside_merged_identities"] == 11
+    assert sum(src["resolution_reasons"].values()) == 11
     assert src["identities_holding_one_row"] == 1  # only the google keyword stands alone
 
 
 def test_observation_total_is_the_stated_formula_not_a_naive_sum(hostile_db):
     obs = run_audit(hostile_db)["observations"]
-    assert obs["trend_signals_rows"] == 10
+    assert obs["trend_signals_rows"] == 11
     assert obs["signal_metrics_rows"] == 3
     assert obs["triples_shared_by_both_tables"] == 1  # only s1's first point duplicates its row
-    assert obs["observations"] == 10 + 3 - 1
-    assert obs["naive_sum_for_contrast"] == 13
+    assert obs["observations"] == 11 + 3 - 1
+    assert obs["naive_sum_for_contrast"] == 14
     assert obs["observations"] < obs["naive_sum_for_contrast"]
 
 
 def test_mission_evidence_reports_exact_and_ambiguous_separately(hostile_db):
     mis = run_audit(hostile_db)["mission_evidence"]
-    assert mis["mission_attached_rows"] == 2
-    assert mis["exactly_reconstructable"] == 2
+    assert mis["mission_attached_rows"] == 3
+    assert mis["exactly_reconstructable"] == 3
     assert mis["unresolved_identity"] == 0
     assert mis["dangling_mission_reference"] == 0
     assert mis["distinct_mission_identity_pairs"] == 2
+    # m-a saw the tiktok post twice; the audit reports that instead of dropping one.
+    assert mis["missions_with_repeated_identity"] == 1
 
 
 def test_cluster_ambiguity_is_reported_rather_than_resolved(hostile_db):
     clu = run_audit(hostile_db)["cluster_membership"]
-    assert clu["rows_mapping_certainly"] == 9
+    assert clu["rows_mapping_certainly"] == 10
     assert clu["rows_without_cluster"] == 1
     # The tiktok post sits in c-1 under one mission and c-2 under the other. The audit says so
     # instead of picking one, because cluster membership belongs to the observation.
@@ -334,3 +348,149 @@ def test_the_json_report_is_deterministic(hostile_db, tmp_path):
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(second), "--quiet"])
     assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
     assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 1
+
+
+# --- the tracked baseline must carry evidence, not content ------------------------------------
+
+# Values planted in the fixture that must never reach the tracked copy.
+CONTENT_MARKERS = (
+    "A Video",
+    "A Video (Remastered)",
+    "Third Video",
+    "vid-1",
+    "vid-2",
+    "vid-3",
+    "777",
+    "nhuom toc",
+    "youtube.com",
+    "tiktok.com",
+    "trends.google.com",
+    "mission m-a",
+)
+
+
+def test_the_sanitized_report_names_no_external_content(hostile_db):
+    from scripts.migration_reconciliation_audit import build_sanitized_report
+
+    text = json.dumps(build_sanitized_report(run_audit(hostile_db)), ensure_ascii=False)
+    leaked = sorted(marker for marker in CONTENT_MARKERS if marker in text)
+    assert not leaked, f"the tracked baseline would publish: {leaked}"
+
+
+def test_the_sanitized_report_keeps_the_evidence(hostile_db):
+    from scripts.migration_reconciliation_audit import build_sanitized_report
+
+    report = build_sanitized_report(run_audit(hostile_db))
+    assert report["sanitized"] is True
+    assert report["observations"]["formula"]
+    assert report["sources"]["merge_reasons"]
+    assert report["sources"]["unclassified_collision_count"] == 0
+    assert "unclassified_collisions" not in report["sources"]
+    assert report["invariants"]["checked"] == 11
+    assert set(report["digests"]) >= {
+        "sources",
+        "observations",
+        "mission_associations",
+        "cluster_memberships",
+    }
+
+
+def test_the_unsanitized_report_does_name_identities(hostile_db):
+    # The row-level copy is the one that stays out of git; it has to be useful enough to justify
+    # keeping it beside a backup, which means it names what the sanitized copy hides. The first
+    # version of this split failed here: both halves were identical, because nothing in the
+    # report listed an identity until a detail block was added.
+    detail = run_audit(hostile_db)["detail"]
+    merged = {entry["identity"] for entry in detail["merged_identities"]}
+    assert any("vid-1" in identity for identity in merged)
+    assert any("vid-3" in identity for identity in merged)
+    assert detail["identities_in_more_than_one_cluster"]
+    assert any(
+        "A Video (Remastered)" in entry["distinct_titles"]
+        for entry in detail["merged_identities"]
+    )
+
+
+def test_the_detail_block_is_absent_from_the_sanitized_report(hostile_db):
+    from scripts.migration_reconciliation_audit import build_sanitized_report
+
+    assert "detail" not in build_sanitized_report(run_audit(hostile_db))
+
+
+def test_digests_are_stable_across_runs(hostile_db):
+    assert run_audit(hostile_db)["digests"] == run_audit(hostile_db)["digests"]
+
+
+def test_digests_ignore_surrogate_row_ids(tmp_path):
+    """A digest keyed on trend_signals.id would change the moment the migration rewrites rows."""
+    common = dict(
+        platform="youtube",
+        source_url="https://www.youtube.com/watch?v=vid-9",
+        metadata={"video_id": "vid-9"},
+        cluster_id="c-1",
+        mission_id="m-a",
+    )
+    left = build_db(str(tmp_path / "left.sqlite"), [signal("row-aaa", **common)])
+    right = build_db(str(tmp_path / "right.sqlite"), [signal("row-zzz", **common)])
+    assert run_audit(left)["digests"] == run_audit(right)["digests"]
+
+
+def test_a_changed_metric_changes_the_observation_digest(tmp_path):
+    base = build_db(str(tmp_path / "base.sqlite"), [signal("s1", metric_value=100.0)])
+    moved = build_db(str(tmp_path / "moved.sqlite"), [signal("s1", metric_value=101.0)])
+    left, right = run_audit(base)["digests"], run_audit(moved)["digests"]
+    assert left["sources"] == right["sources"]  # same external object
+    assert left["observations"] != right["observations"]  # different observed value
+
+
+def test_the_cli_writes_a_sanitized_file_and_a_row_level_file(hostile_db, tmp_path):
+    tracked, private = tmp_path / "tracked.json", tmp_path / "private.json"
+    assert main(
+        ["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(tracked),
+         "--rows-out", str(private), "--quiet"]
+    ) == 0
+    assert json.loads(tracked.read_text(encoding="utf-8"))["sanitized"] is True
+    assert not any(m in tracked.read_text(encoding="utf-8") for m in CONTENT_MARKERS)
+    assert "vid-1" in private.read_text(encoding="utf-8")
+
+
+def test_a_mission_observing_one_source_twice_is_reported_not_collapsed(hostile_db):
+    """UNIQUE(mission_id, observation_id), not UNIQUE(mission_id, source_id): keep both."""
+    detail = run_audit(hostile_db)["detail"]
+    repeats = detail["mission_identity_repeats"]
+    assert len(repeats) == 1
+    assert repeats[0]["mission_id"] == "m-a"
+    assert repeats[0]["row_count"] == 2
+
+
+def test_indistinguishable_observations_are_counted_not_hidden(tmp_path):
+    """Two rows sharing source, captured_at and metric collapse once surrogate ids are gone.
+
+    The audit must say how many, because that is a real reduction the migration performs. It
+    surfaced here as a digest whose member count did not match the observation total beside it.
+    """
+    same = dict(captured_at="2026-09-01T00:00:00+00:00", metric_value=100.0)
+    path = build_db(
+        str(tmp_path / "twins.sqlite"),
+        [signal("s1", **same), signal("s2", **same), signal("s3", metric_value=200.0)],
+    )
+    obs = run_audit(path)["observations"]
+    assert obs["observations"] == 3
+    assert obs["distinct_by_business_identity"] == 2
+    assert obs["collapsing_on_business_identity"] == 1
+
+
+def test_the_observation_digest_covers_the_business_identity_set(hostile_db):
+    report = run_audit(hostile_db)
+    assert (
+        report["digests"]["member_counts"]["observations"]
+        == report["observations"]["distinct_by_business_identity"]
+    )
+
+
+def test_the_cluster_digest_covers_the_business_identity_set(hostile_db):
+    report = run_audit(hostile_db)
+    assert (
+        report["digests"]["member_counts"]["cluster_memberships"]
+        == report["cluster_membership"]["distinct_by_business_identity"]
+    )

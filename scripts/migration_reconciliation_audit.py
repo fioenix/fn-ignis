@@ -37,6 +37,7 @@ import re
 import sqlite3
 import sys
 from collections import Counter, defaultdict
+from hashlib import sha256
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -302,19 +303,10 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     for identity, rows in sorted(rows_per_identity.items()):
         if len(rows) == 1:
             continue
-        titles = {(r.raw_title or "").strip() for r in rows}
-        urls = {normalize_url(r.source_url) for r in rows}
-        if len(urls) > 1:
-            merge_reasons[MERGE_URL_VARIANT] += len(rows)
-        elif len(titles) > 1:
-            merge_reasons[MERGE_TITLE_CHANGED] += len(rows)
-        elif len(titles) == 1:
-            merge_reasons[MERGE_REPEAT] += len(rows)
-        else:
-            merge_reasons[MERGE_UNCLASSIFIED] += len(rows)
-            unclassified_collisions.append(
-                {"identity": identity, "row_count": len(rows)}
-            )
+        reason = _merge_reason_for(rows)
+        merge_reasons[reason] += len(rows)
+        if reason == MERGE_UNCLASSIFIED:
+            unclassified_collisions.append({"identity": identity, "row_count": len(rows)})
 
     # Observations. trend_signals and signal_metrics overlap partially, so no single count is
     # self-evidently right; the audit states the arithmetic instead of asserting a total.
@@ -324,6 +316,14 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     metric_triples = {(p[0], p[1], p[2]) for p in metric_points}
     signal_triples = {(row.signal_id, row.captured_at, row.metric_value) for row in signals}
 
+    observation_members = {
+        f"{identity_of.get(sid, '')}|{captured or ''}|{metric if metric is not None else ''}"
+        for sid, captured, metric in (
+            [(row.signal_id, row.captured_at, row.metric_value) for row in signals]
+            + list(metric_points)
+        )
+        if sid in identity_of
+    }
     observation_arithmetic = {
         "formula": (
             "observations = distinct(signal_id, captured_at, metric_value) over"
@@ -339,10 +339,23 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
         "observations": len(metric_triples | signal_triples),
         "naive_sum_for_contrast": len(signals) + len(metric_points),
     }
+    # Observations counted by surrogate signal_id are not the same set as observations counted by
+    # business identity. Rows that share source, captured_at and metric_value are indistinguishable
+    # once the surrogate id is gone, so the migration would collapse them. That is a real
+    # reduction and it gets its own number rather than surfacing as a digest that does not match
+    # the count beside it.
+    observation_arithmetic["distinct_by_business_identity"] = len(observation_members)
+    observation_arithmetic["collapsing_on_business_identity"] = (
+        observation_arithmetic["observations"] - len(observation_members)
+    )
     findings.require(
         observation_arithmetic["observations"]
         == len(metric_triples) + len(signal_triples) - len(metric_triples & signal_triples),
         "observation arithmetic does not balance: union != a + b - overlap",
+    )
+    findings.require(
+        observation_arithmetic["collapsing_on_business_identity"] >= 0,
+        "business-identity observation set is larger than the surrogate-keyed set",
     )
     findings.require(
         not dangling_metric_points,
@@ -397,6 +410,12 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
         cluster_certain += 1
         if row.signal_id in identity_of:
             identities_per_cluster[row.cluster_id].add(identity_of[row.signal_id])
+    cluster_members_preview = {
+        f"{row.cluster_id}|{identity_of[row.signal_id]}|{row.captured_at or ''}"
+        f"|{row.metric_value if row.metric_value is not None else ''}"
+        for row in signals
+        if row.cluster_id and row.signal_id in identity_of
+    }
     cluster_ambiguous_identities = sorted(
         identity
         for identity, clusters in _invert(identities_per_cluster).items()
@@ -427,13 +446,69 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
 
     merged_rows = sum(merge_reasons.values())
     single_row_identities = sum(1 for rows in rows_per_identity.values() if len(rows) == 1)
+
+    # Row-level detail. This is what the migration author needs to hand-check a merge, and it is
+    # exactly what must not be committed: it names external objects. build_sanitized_report drops
+    # the whole block, and a test asserts the tracked copy carries none of it.
+    detail = {
+        "merged_identities": sorted(
+            (
+                {
+                    "identity": identity,
+                    "row_count": len(rows),
+                    "reason": _merge_reason_for(rows),
+                    "distinct_titles": sorted({(r.raw_title or "").strip() for r in rows}),
+                }
+                for identity, rows in rows_per_identity.items()
+                if len(rows) > 1
+            ),
+            key=lambda entry: (-entry["row_count"], entry["identity"]),
+        ),
+        "identities_in_more_than_one_cluster": cluster_ambiguous_identities,
+        "mission_identity_repeats": [
+            {"mission_id": mission, "identity": identity, "row_count": count}
+            for (mission, identity), count in sorted(evidence_per_mission_identity.items())
+            if count > 1
+        ],
+        "unresolved_row_ids": sorted(unresolved_rows),
+        "unclassified_collisions": unclassified_collisions,
+    }
     findings.require(
         len(signals) - len(unresolved_rows) == single_row_identities + merged_rows,
         "resolved rows do not sum to single-row identities + merged rows",
     )
 
+    # One digest per canonical set, over business identity rather than surrogate keys, so the
+    # post-migration run can recompute the same value from the new tables.
+    mission_members = {
+        f"{row.mission_id}|{identity_of[row.signal_id]}|{row.captured_at or ''}"
+        f"|{row.metric_value if row.metric_value is not None else ''}"
+        for row in signals
+        if row.mission_id and row.signal_id in identity_of
+    }
+    cluster_members = {
+        f"{row.cluster_id}|{identity_of[row.signal_id]}|{row.captured_at or ''}"
+        f"|{row.metric_value if row.metric_value is not None else ''}"
+        for row in signals
+        if row.cluster_id and row.signal_id in identity_of
+    }
+    digests = {
+        "algorithm": "sha256 over NUL-separated members of each sorted set",
+        "sources": digest_of(rows_per_identity),
+        "observations": digest_of(observation_members),
+        "mission_associations": digest_of(mission_members),
+        "cluster_memberships": digest_of(cluster_members),
+        "member_counts": {
+            "sources": len(rows_per_identity),
+            "observations": len(observation_members),
+            "mission_associations": len(mission_members),
+            "cluster_memberships": len(cluster_members),
+        },
+    }
+
     return {
         "schema_version": 1,
+        "digests": digests,
         "sources": {
             "canonical_sources": len(rows_per_identity),
             "resolution_reasons": dict(sorted(resolution_counts.items())),
@@ -457,13 +532,68 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
             "rows_with_dangling_cluster": len(cluster_dangling),
             "rows_without_cluster": cluster_absent,
             "identities_spanning_more_than_one_cluster": len(cluster_ambiguous_identities),
+            "distinct_by_business_identity": len(cluster_members_preview),
+            "collapsing_on_business_identity": cluster_certain - len(cluster_members_preview),
         },
+        "detail": detail,
         "invariants": {
-            "checked": 10,
+            "checked": 11,
             "failed": len(findings.failures),
             "failures": sorted(findings.failures),
         },
         "balanced": not findings.failures,
+    }
+
+
+def _merge_reason_for(rows: Sequence["SignalRow"]) -> str:
+    """Why one identity holds several legacy rows. One place decides, so counts and detail agree."""
+    titles = {(r.raw_title or "").strip() for r in rows}
+    urls = {normalize_url(r.source_url) for r in rows}
+    if len(urls) > 1:
+        return MERGE_URL_VARIANT
+    if len(titles) > 1:
+        return MERGE_TITLE_CHANGED
+    if len(titles) == 1:
+        return MERGE_REPEAT
+    return MERGE_UNCLASSIFIED
+
+
+def digest_of(members: Iterable[str]) -> str:
+    """A SHA-256 over one sorted canonical set, comparable across the migration.
+
+    The members are business identities, never surrogate keys. A digest keyed on trend_signals.id
+    would change the moment rows are rewritten, which would make the pre/post comparison
+    meaningless exactly when it matters. Keying on platform identity plus the observed values
+    means the post-migration run can recompute the same digest from the new tables.
+    """
+    hasher = sha256()
+    for member in sorted(members):
+        hasher.update(member.encode("utf-8"))
+        hasher.update(b"\x00")
+    return hasher.hexdigest()
+
+
+def build_sanitized_report(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip everything that identifies external content, keeping the evidence.
+
+    The tracked copy of this baseline lives in docs/ permanently, so it must carry no title, URL,
+    external id or mission title. What survives is the arithmetic, the reason-code totals, the
+    invariant results, and one digest per canonical set -- enough to prove a later run accounted
+    for the same data, and not enough to reconstruct what that data was.
+    """
+    sources = {k: v for k, v in report["sources"].items() if k != "unclassified_collisions"}
+    # "detail" is absent from the returned dict entirely -- see the key list below.
+    sources["unclassified_collision_count"] = len(report["sources"]["unclassified_collisions"])
+    return {
+        "schema_version": report["schema_version"],
+        "sanitized": True,
+        "sources": sources,
+        "observations": report["observations"],
+        "mission_evidence": report["mission_evidence"],
+        "cluster_membership": report["cluster_membership"],
+        "digests": report["digests"],
+        "invariants": report["invariants"],
+        "balanced": report["balanced"],
     }
 
 
@@ -502,6 +632,8 @@ def render_summary(report: Dict[str, Any]) -> str:
         f"    signals with no metric point    {obs['signals_with_no_metric_point']}",
         f"    triples in both tables          {obs['triples_shared_by_both_tables']}",
         f"    naive sum, for contrast         {obs['naive_sum_for_contrast']}",
+        f"    distinct by business identity   {obs['distinct_by_business_identity']}",
+        f"    collapsing once surrogate ids go{obs['collapsing_on_business_identity']:>6d}",
         "",
         "  mission evidence",
         f"    mission-attached rows           {mis['mission_attached_rows']}",
@@ -516,6 +648,13 @@ def render_summary(report: Dict[str, Any]) -> str:
         f"    no cluster                      {clu['rows_without_cluster']}",
         f"    identities across >1 cluster    {clu['identities_spanning_more_than_one_cluster']}",
         "",
+        "  digests (sha256, first 16)",
+        *(
+            f"    {name:28s} {report['digests'][name][:16]}"
+            f"  over {report['digests']['member_counts'][name]} members"
+            for name in ("sources", "observations", "mission_associations", "cluster_memberships")
+        ),
+        "",
         f"  invariants                  {inv['checked'] - inv['failed']}/{inv['checked']} held",
     ]
     lines.extend(f"    FAILED: {failure}" for failure in inv["failures"])
@@ -527,7 +666,17 @@ def render_summary(report: Dict[str, Any]) -> str:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dsn", default=os.environ.get("DATABASE_URL", ""))
-    parser.add_argument("--json-out", type=Path, help="write the deterministic JSON report here")
+    parser.add_argument(
+        "--json-out",
+        type=Path,
+        help="write the sanitized JSON report here -- safe to track in docs/",
+    )
+    parser.add_argument(
+        "--rows-out",
+        type=Path,
+        help="write the unsanitized report, which names external identities, here."
+        " Keep it beside a database backup; never commit it.",
+    )
     parser.add_argument("--quiet", action="store_true", help="suppress the human summary")
     args = parser.parse_args(argv)
 
@@ -546,11 +695,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     finally:
         reader.close()
 
-    payload = json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False)
+    sanitized = json.dumps(
+        build_sanitized_report(report), indent=2, sort_keys=True, ensure_ascii=False
+    )
     if args.json_out:
-        args.json_out.write_text(payload + "\n", encoding="utf-8")
-    elif args.quiet:
-        print(payload)
+        args.json_out.write_text(sanitized + "\n", encoding="utf-8")
+    if args.rows_out:
+        args.rows_out.write_text(
+            json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    if args.quiet and not args.json_out and not args.rows_out:
+        print(sanitized)
 
     if not args.quiet:
         print(render_summary(report))

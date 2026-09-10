@@ -1,0 +1,69 @@
+{
+  "balanced": true,
+  "cluster_membership": {
+    "collapsing_on_business_identity": 586,
+    "distinct_by_business_identity": 15168,
+    "identities_spanning_more_than_one_cluster": 172,
+    "rows_mapping_certainly": 15754,
+    "rows_with_dangling_cluster": 0,
+    "rows_without_cluster": 184
+  },
+  "digests": {
+    "algorithm": "sha256 over NUL-separated members of each sorted set",
+    "cluster_memberships": "c8da41dd79af9d17b18231b747bf0ce53dbd9dd8e379e41ff67496d6a9e942d0",
+    "member_counts": {
+      "cluster_memberships": 15168,
+      "mission_associations": 1301,
+      "observations": 17529,
+      "sources": 1927
+    },
+    "mission_associations": "7124ebccf448647e1bbf5d73ace556649782cebdbfe0ddf1fe19d3ca1acc7c2d",
+    "observations": "676e7c5a5e144f07339013408140fcc52bd2136a3e155780d1d7ea9194166507",
+    "sources": "cf7bf6501d87b14b2ed268e9cc439cc7a979b6a272e6c135d2548e0c88733d47"
+  },
+  "invariants": {
+    "checked": 11,
+    "failed": 0,
+    "failures": []
+  },
+  "mission_evidence": {
+    "dangling_mission_reference": 0,
+    "distinct_mission_identity_pairs": 1294,
+    "exactly_reconstructable": 1301,
+    "mission_attached_rows": 1301,
+    "missions_with_repeated_identity": 2,
+    "unresolved_identity": 0
+  },
+  "observations": {
+    "collapsing_on_business_identity": 683,
+    "distinct_by_business_identity": 17529,
+    "formula": "observations = distinct(signal_id, captured_at, metric_value) over signal_metrics UNION trend_signals",
+    "metric_triples_distinct": 3292,
+    "naive_sum_for_contrast": 19615,
+    "observations": 18212,
+    "signal_metrics_rows": 3677,
+    "signal_triples_distinct": 15938,
+    "signals_carrying_at_least_one_metric_point": 1018,
+    "signals_with_no_metric_point": 14920,
+    "trend_signals_rows": 15938,
+    "triples_shared_by_both_tables": 1018
+  },
+  "sanitized": true,
+  "schema_version": 1,
+  "sources": {
+    "canonical_sources": 1927,
+    "identities_holding_one_row": 1550,
+    "merge_reasons": {
+      "observed_title_changed": 287,
+      "repeat_observation_of_one_source": 14089,
+      "url_variant_of_one_source": 12
+    },
+    "resolution_reasons": {
+      "metadata_external_id": 15790,
+      "url_external_id": 148
+    },
+    "rows_inside_merged_identities": 14388,
+    "unclassified_collision_count": 0,
+    "unresolved_rows": 0
+  }
+}

@@ -114,6 +114,40 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   boot container mỗi lần chạy và phụ thuộc một image bên thứ ba. Đo lại thời gian sau lần GREEN
   đầu tiên; nếu ảnh hưởng đáng kể thì **tách Postgres contract thành job song song**, không bỏ và
   không mock.
+- [x] **Baseline đối soát là bằng chứng migration lâu dài, không phải handoff (chốt
+  10/09/2026).** Bản đã sanitize được track ở `docs/migrations/2026-09-10-source-observation-
+  baseline.{json,md}`: chỉ công thức, aggregate count, reason-code total, 11 invariant result và
+  một SHA-256 trên mỗi tập canonical. Không title, URL, external ID hay mission title. Bản
+  row-level có nêu identity thì ở ngoài git, đi cùng database backup. Digest khoá trên business
+  identity chứ không trên `trend_signals.id`, vì digest khoá trên surrogate key sẽ đổi ngay khi
+  migration ghi lại dòng — mất giá trị đúng lúc cần nhất.
+- [x] **Hai observation cùng source trong một mission: giữ cả hai (chốt 10/09/2026).**
+  Constraint là `UNIQUE (mission_id, observation_id)`, **không** phải
+  `UNIQUE (mission_id, source_id)`. Mission ledger phải lossless; migration không được tự đoán
+  observation nào thừa. Analysis mặc định chọn observation mới nhất của mỗi source để tính score
+  và trình bày headline, còn toàn bộ observation vẫn giữ cho timeline, citation và audit.
+  Baseline đo được 2 mission đang ở tình trạng này.
+- [x] **Contract mới cho `cross_platform_score` (chốt 10/09/2026).** Bản hiện tại ở
+  `semantic_clusterer.py:_calculate_cross_platform_score` cộng `metric_value` của **mọi** row và
+  lấy average velocity trên **mọi** row, nên tần suất poll làm điểm tăng dù không có thêm source
+  độc lập nào — một video bị poll 275 lần đóng góp 275 lần. Nó cũng chia
+  `len(unique_platforms) / 5.0`, tức hard-code 5, và một platform duy nhất vẫn được 8 điểm.
+
+  Contract mới: lọc observation theo analysis window; chọn observation mới nhất cho mỗi canonical
+  source; mỗi source đóng góp đúng một lần vào metric và velocity; platform component tính theo
+  số platform độc lập — `1 platform → 0`, `2 → 20`, `3+ → 40`. Không chia cho tổng connector,
+  không hard-code 5, không để channel lỗi làm topic khác tự nhiên được điểm cao hơn.
+
+  Tổng trọng số tạm giữ `40 platform + 40 metric + 20 velocity`. Việc normalize metric khác đơn vị
+  giữa Google index, view và engagement là một scoring decision riêng, không nhét vào
+  data-model migration.
+- [x] **Timestamp lịch sử: không ghi publish time vào ingestion time (chốt 10/09/2026).**
+  Observation schema cần `observed_at` nullable, `published_at` nullable, và `time_provenance` với
+  ba giá trị `exact_ingestion` / `legacy_publish_only` / `unknown`. Với dòng YouTube và Google
+  Trends lịch sử không chứng minh được thời điểm thu thập: `observed_at = NULL`,
+  `published_at = captured_at` cũ, `time_provenance = legacy_publish_only`. Time-window score mặc
+  định chỉ dùng `exact_ingestion`; dữ liệu legacy vẫn được xuất hiện trong all-history hoặc
+  published-time analysis nhưng output phải gắn cảnh báo approximate.
 - [x] **Không dùng `xfail` cho defect này (chốt 10/09/2026).** `xfail` trên `main` biến một
   data-integrity defect đang hoạt động thành "known acceptable failure". Giá trị của contract test
   là làm merge gate; BACKLOG đã đủ để defect hiện diện trên `main`. Contract sống RED trên branch
