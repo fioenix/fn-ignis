@@ -161,6 +161,66 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   Danh sách domain máy móc giờ chỉ còn một bản trong `vocabulary_loader`, và có test chặn bản
   thứ hai xuất hiện lại. Sau khi sửa, 10 seed là chủ đề thật.
 
+- [x] **Đã xong (10/09/2026): secret không còn rò ra log khi test fail.** pytest in `repr()` của
+  mọi object nằm trong frame của assertion fail. Với field kiểu `str`, bất kỳ test nào chạm vào
+  một hàm đang giữ tham chiếu `Settings` cũng đẩy nguyên password database, khoá Fernet và key
+  YouTube vào log. Trên repo public thì đó là log GitHub Actions ai cũng đọc được.
+
+  Không phải giả thiết: một test scheduler fail trong session 10/09 đã in password Supabase thật.
+
+  Sáu setting mang credential chuyển sang `SecretStr` — `DATABASE_URL`, `YOUTUBE_API_KEY`,
+  `IGNIS_ENCRYPTION_KEY`, `THREADS_APP_SECRET`, `INSTAGRAM_APP_SECRET` và
+  `PLAYWRIGHT_PROXY_SERVER` (dạng tài liệu hoá của nó nhúng `user:pass` vào URI). Hai
+  `*_APP_ID` giữ `str` vì OAuth client_id là public by design.
+
+  11 điểm đọc trong `src/` đi qua `reveal_secret()`, kể cả các phép kiểm truthiness: chúng vẫn
+  đúng trên `Secret.__bool__` hiện tại của pydantic, nhưng người đọc không thể biết điều đó khi
+  thấy `if settings.YOUTUBE_API_KEY:`, và nếu pydantic đổi thì nhánh lật ngược trong im lặng.
+  `verify_connectors_health` từng in nguyên URI proxy vào tool output; `_describe_proxy` giờ chỉ
+  trả scheme + host + port, phần userinfo thay bằng marker.
+
+  Có test walk `src/` bắt mọi lần đọc sáu biến này mà không qua helper, nên call site mới sẽ đỏ
+  ngay thay vì phải nhớ quy tắc.
+
+- [x] **Đã xong (10/09/2026): Codex TOML bị nhân bản section thay vì thay thế.**
+  `register_mcp_to_codex_toml` sub bằng regex non-greedy dừng ở `\n[` đầu tiên — chính là
+  sub-table `[mcp_servers.fn-ignis.env]` của nó. Nên nó chỉ thay header, bảng env cũ sống sót, và
+  mỗi lần chạy lại thêm một bảng nữa. Đợt migration "bỏ secret ra khỏi MCP config" vì vậy **không
+  dọn được** `~/.codex/config.toml`, dù báo `configured`: password Supabase, khoá Fernet và một
+  key YouTube đã revoke vẫn nằm đó, cộng thêm duplicate table mà TOML chuẩn từ chối parse.
+
+  Giờ split file theo table header, xoá cả section rồi mới ghi lại, nên idempotent bất kể đã tích
+  bao nhiêu bản cũ. Giá trị đi qua escaper cho TOML basic string.
+
+- [x] **Đã xong (10/09/2026): provisioner không còn báo rotate key mà nó chưa làm.**
+  `ensure_environment_file` gate việc ghi bằng cách so chuỗi rejoin với text gốc. Hai chuỗi lệch
+  nhau ở newline cuối file mà hầu hết editor để lại, nên một lượt chạy không sinh gì vẫn ghi lại
+  file và báo `Updated existing .env with generated IGNIS_ENCRYPTION_KEY`. Đổi khoá đó là mọi
+  credential đã mã hoá bằng khoá cũ thành rác, nên một thông báo nói nó đã xảy ra còn tệ hơn
+  không thông báo. Đồng thời template cho máy cài mới ghi `SCHEDULER_INTERVAL_SECONDS=900` trong
+  khi `ignis.config` và `env.example` đều nói 8640 — nhịp 15 phút đốt hết quota YouTube trong
+  khoảng một tiếng.
+
+- [x] **Đã xong (10/09/2026): `env.example` ghi đè chính nhịp an toàn quota của nó.**
+  File mẫu đặt `SYNC_INTERVAL_MINUTES=60` ngay trên `SCHEDULER_INTERVAL_SECONDS=8640`. Giá trị
+  lớn hơn 0 thắng field giây, nên ai copy file này thành `.env` — bước đầu tiên sau khi clone —
+  đều chạy tick 60 phút, 24 lượt/ngày trên ngân sách vừa đủ 10 lượt, còn dòng ngay bên dưới thì
+  trông vẫn đúng. Hai dòng riêng lẻ đều hợp lý; đọc cùng nhau mới sai, nên test mới cho cả hai
+  giá trị chạy qua `resolve_ingress_interval()` rồi assert kết quả — kiểm *file copy ra schedule
+  cái gì*, không kiểm file trông có đúng không.
+
+  Cùng lúc xoá bốn default 900 chết trong `scheduler.py`: chúng không bao giờ fire vì mọi caller
+  đều đọc từ `Settings`, nhưng 900 chính là con số đã trôi vào cả hai file cấu hình.
+
+- [ ] **Quyết định 10/09/2026 — Fio chấp nhận rủi ro ba secret đã lọt vào transcript.**
+  Password Supabase, `IGNIS_ENCRYPTION_KEY` và key YouTube xuất hiện dạng plaintext trong
+  transcript phiên 10/09 khi grep `~/.codex/config.toml`. Tao đề nghị rotate cả ba; Fio quyết
+  không rotate, lý do: hiện chỉ nội bộ dùng `ignis` và mức độ mật không đáng.
+
+  Phạm vi quyết định này: chỉ các giá trị đã lọt vào transcript. Ba secret đó **không** nằm trong
+  git history — đã quét toàn bộ `git rev-list --all`. Cần xem lại nếu có thêm người ngoài truy
+  cập được `ignis`, hoặc nếu transcript được chia sẻ ra ngoài.
+
 - [x] **Đã xong (10/09/2026): MCP config giữ đường dẫn tới `.env`, không giữ secret.**
   `build_mcp_entry` từng sao `DATABASE_URL`, `IGNIS_ENCRYPTION_KEY` và `YOUTUBE_API_KEY` vào
   **bốn** file: `.mcp.json`, config Claude Desktop, config Antigravity và TOML của Codex. Vừa để
