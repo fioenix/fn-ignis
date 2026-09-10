@@ -175,7 +175,7 @@ Tất cả các biến môi trường được định nghĩa trong file `.env`:
 | `IGNIS_ENCRYPTION_KEY` | Base64 String | *(Tự sinh)* | Không | Khóa Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) để mã hóa cookie/phiên đăng nhập TikTok lưu trong database. |
 | `SCHEDULER_INTERVAL_SECONDS` | Integer | `8640` (~2,4 giờ) | Không | Nhịp chạy một lượt ingress của worker. Mặc định suy ra từ quota YouTube search: 10 từ khoá x 100 unit, tức một ngày chỉ đủ 10 lượt trong 10.000 unit. |
 | `DISCOVERY_INTERVAL_HOURS` | Integer | `24` | Không | Khoảng cách giữa các đợt tự động quét toàn diện Creative Center và phát hiện white space. |
-| `SYNC_INTERVAL_MINUTES` | Integer | `60` | Không | Chu kỳ cào dữ liệu Google Trends RSS định kỳ. |
+| `SYNC_INTERVAL_MINUTES` | Integer | `0` | Không | Ghi đè nhịp ingress của worker, tính theo phút. Giá trị lớn hơn 0 sẽ thắng `SCHEDULER_INTERVAL_SECONDS`; để 0 thì biến kia quyết định. Chỉ nâng lên khi mày biết quota YouTube của mình chịu được số lượt tăng thêm. |
 | `YOUTUBE_CACHE_TTL_SECONDS` | Integer | `86400` (24h) | Không | Thời gian lưu cache kết quả tìm kiếm YouTube để tiết kiệm quota 10,000 unit/ngày. |
 | `PLAYWRIGHT_PROXY_SERVER` | String | `""` | Không | Proxy server HTTP/SOCKS5 (ví dụ: `http://user:pass@proxy.ip:port`) để cào TikTok không bị chặn. |
 | `CONFIDENCE_HIGH_THRESHOLD` | Float | `80.0` | Không | Ngưỡng điểm để đánh giá chất lượng dữ liệu chiến dịch ở mức HIGH. |
