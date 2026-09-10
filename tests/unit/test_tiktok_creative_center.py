@@ -11,7 +11,11 @@ async def test_tiktok_creative_center_plugin_properties():
     plugin = TikTokCreativeCenterPlugin()
     assert plugin.platform == PlatformType.TIKTOK
     assert "Creative Center" in plugin.name
-    assert await plugin.is_healthy() is True
+    # is_healthy is no longer a constant: it asks whether a Chromium can be launched and
+    # whether the surface answers, so its result depends on the host and the network. A
+    # properties test must not assert it -- CI installs the playwright module but never
+    # runs `playwright install`, so the honest answer there is False.
+    # test_tiktok_health_probes.py covers the probe with the capability stubbed.
 
 
 def test_metric_number_parser():
