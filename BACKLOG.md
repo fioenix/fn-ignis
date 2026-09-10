@@ -73,6 +73,35 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [ ] **Discovery source chưa đúng mục đích sản phẩm:** feed trending VN của Google Trends là tin
   tức tổng hợp (bóng đá, thời sự), nên ghép chủ đề theo nó cho ra corpus tin tức chứ không phải
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
+
+### Source identity và mission evidence — quyết định 10/09/2026
+
+- [x] **Xác nhận duplicate có hai cơ chế, không phải một lỗi duy nhất.** Trên Postgres, nhóm lớn
+  nhất là một video YouTube bị lưu 275 lần bởi `save_signals` trước commit
+  `478a7c9e5209423a38dcee6cc4a47074bd9d4889`, khi hàm này còn insert vô điều kiện. 275 dòng có
+  cùng `captured_at` vì cột đó lúc ấy giữ publish time, nhưng mang 266 giá trị metric khác nhau:
+  đây là 275 lần poll, không phải một batch bị nhân bản. Đường `chart=mostPopular` đó không còn
+  được public ingress ở HEAD đưa vào corpus.
+- [ ] **SQLite default vẫn nhân đôi source ở HEAD.** `save_clusters` tự insert mọi `c.signals`
+  bằng một UUID mới; `ClusterSignalsUseCase` và `ExecuteMissionUseCase` sau đó lại gọi
+  `save_signals`. Chạy thật qua `ExecuteMissionUseCase` với hai mission cùng một source cho hai
+  row, hai ID và một identity; mỗi mission nhìn thấy một row riêng. Postgres `save_clusters`
+  không insert signal nên không có cơ chế này.
+- [ ] **Postgres chưa enforce source identity ở database.** `trend_signals` không có primary key
+  hoặc unique constraint cho source; `save_signals` vẫn là `SELECT` rồi `INSERT`, nên concurrent
+  writers còn có thể đua. Lookup dùng URL/title đã `strip()` nhưng insert lưu giá trị gốc. Chưa có
+  reproduction chứng minh race đã xảy ra ở HEAD.
+- [x] **Migration `sql/008_deduplicate_signal_metrics.sql` không thực hiện điều header tuyên bố.**
+  File ghi "Deduplicate trend_signals", "keeps earliest row as canonical" và tự gọi mình là
+  "Migration 004", nhưng chỉ tạo `signal_metrics` rồi copy metric; không delete duplicate, không
+  re-parent và không tạo unique constraint.
+- [x] **Chọn mô hình ba thực thể thay cho mission-scoped dedup:** một canonical source theo
+  platform-specific external identity; nhiều immutable observation theo lần thu thập; và
+  mission-evidence association trỏ tới đúng observation mà dossier đã dùng. Lý do đo được:
+  mission chỉ chiếm 1.301/15.938 row (8,2%), trong khi 14.377 row (90,2% corpus) nằm trong 378
+  duplicate identity group của radar — mission-scoped dedup không chạm vào phần hỏng lớn nhất.
+  Migration phải giữ legacy rows tới khi đối soát xong; evidence của các mission chưa từng được
+  persist không thể dựng lại từ count trong summary.
 - [x] **Chất lượng nhãn trên corpus thật:** đã sửa 10/09/2026, xem mục nhãn chủ đề
   ở phần dưới. Ellipsis 24/40 xuống 0 trên chính 40 cluster đã lưu.
 - [x] **Phân loại category:** matcher **không sai** — với taxonomy đã seed, nó phân loại đúng
