@@ -202,3 +202,29 @@ async def test_save_signals_counts_the_observations_it_wrote(repository_case):
         metadata={},
     )
     assert await repository.save_signals([unidentifiable]) == 0
+
+
+# --- 5. a cluster with no first sighting survives storage --------------------------------------
+
+
+async def test_a_cluster_with_no_exact_sighting_round_trips_as_null(repository_case):
+    """A cluster built entirely from legacy observations has no first_seen_at to store.
+
+    Both backends have to hold that. SQLite declared the column NOT NULL and substituted now()
+    on the way back out, which would have given every backfilled cluster a first sighting dated
+    to whenever someone ran the query.
+    """
+    from ignis.domain.entities import TopicCluster
+
+    repository = repository_case.repository
+    cluster = TopicCluster(canonical_name="only legacy observations", first_seen_at=None)
+
+    await repository.save_clusters([cluster])
+
+    row = repository_case.query_one(
+        "SELECT first_seen_at FROM topic_clusters WHERE id = ?",
+        "SELECT first_seen_at FROM topic_clusters WHERE id = %s",
+        (str(cluster.id),),
+    )
+    assert row is not None, "the cluster itself must still be stored"
+    assert row[0] is None, "a first sighting that was never recorded must stay absent"

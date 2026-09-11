@@ -155,3 +155,56 @@ async def test_sqlite_dynamic_lexicons(sqlite_repo):
     assert "ao dai cach tan" in terms
     assert "set linen" in terms
 
+
+
+@pytest.mark.asyncio
+async def test_an_existing_database_stops_requiring_a_cluster_first_seen_time(tmp_path):
+    """CREATE TABLE IF NOT EXISTS leaves a user's file alone, so the constraint has to be relaxed.
+
+    A database created before the backfill declares topic_clusters.first_seen_at NOT NULL. The
+    backfill produces clusters built only from observations whose ingestion time was never
+    recorded, and those have no first sighting to store, so an untouched file would reject them
+    while a fresh one accepted them -- the two backends agreeing and the two vintages not.
+    """
+    import sqlite3
+
+    from ignis.domain.entities import TopicCluster
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+
+    db_path = tmp_path / "old_schema.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE topic_clusters (
+                id TEXT PRIMARY KEY,
+                canonical_name TEXT NOT NULL UNIQUE,
+                topic_label TEXT,
+                cross_platform_score REAL DEFAULT 0.0,
+                summary_text TEXT,
+                category TEXT DEFAULT 'general',
+                first_seen_at TEXT NOT NULL,
+                last_updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO topic_clusters (id, canonical_name, first_seen_at, last_updated_at)"
+            " VALUES ('kept', 'an older cluster', '2026-08-01T00:00:00+00:00',"
+            " '2026-08-01T00:00:00+00:00')"
+        )
+
+    repository = SqliteTrendRepository(str(db_path))
+    try:
+        await repository.save_clusters([TopicCluster(canonical_name="only legacy", first_seen_at=None)])
+
+        with sqlite3.connect(db_path) as conn:
+            stored = conn.execute(
+                "SELECT first_seen_at FROM topic_clusters WHERE canonical_name = 'only legacy'"
+            ).fetchone()
+            survived = conn.execute(
+                "SELECT first_seen_at FROM topic_clusters WHERE id = 'kept'"
+            ).fetchone()
+        assert stored[0] is None
+        assert survived[0] == "2026-08-01T00:00:00+00:00", "the rebuild must not lose rows"
+    finally:
+        await repository.close()

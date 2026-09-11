@@ -148,6 +148,28 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   `published_at = captured_at` cũ, `time_provenance = legacy_publish_only`. Time-window score mặc
   định chỉ dùng `exact_ingestion`; dữ liệu legacy vẫn được xuất hiện trong all-history hoặc
   published-time analysis nhưng output phải gắn cảnh báo approximate.
+- [ ] **Chưa sửa: "Atomic Replace" trong `ExecuteMissionUseCase` không atomic (mở 11/09/2026).**
+  `delete_mission_signals()` commit ở transaction riêng, rồi cluster / save / attach chạy ở các
+  transaction sau. Writer lỗi giữa chừng thì mission mất sạch evidence cũ mà không có gì thay thế:
+  tái hiện được trên SQLite, evidence `1 → 0`; Postgres cùng transaction boundary. Không chặn việc
+  viết backfill, nhưng **phải xử lý trước merge** — tên và comment "Atomic Replace" hiện là claim
+  sai, và đây là đường duy nhất rút evidence của mission. Hai hướng: gom cả bốn thao tác vào một
+  transaction do repository mở, hoặc đổi sang ghi evidence mới trước rồi mới rút cái cũ.
+- [ ] **Chưa sửa: SQLite làm mất `platforms` của mission (mở 11/09/2026).** Schema SQLite và
+  `save_mission`/`get_mission` không persist `platforms`. Mission tạo với đúng YouTube, đọc lại
+  thành mặc định năm platform. Quota test không bắt được vì fake registry bỏ qua `target_platforms`.
+  Hệ quả user-facing: summary in ra "1 signal across 1/5 responsive platforms" cho một pass thực
+  tế thu **0** signal và **0** platform phản hồi — con số duy nhất còn lại đến từ một observation
+  cũ được preserve. Đây là defect về bằng chứng hiển thị cho người dùng, xếp **trước merge**,
+  không gộp vào commit nullable-clock.
+- [x] **`first_seen_at` của cluster là earliest exact ingestion, nullable (chốt 11/09/2026).**
+  `min(s.captured_at for s in group)` raise `TypeError` ngay khi group trộn observation legacy với
+  observation exact — đúng hình dạng sẽ xuất hiện sau backfill. Semantics chốt: bỏ qua observation
+  không có clock; cả group đều legacy thì `first_seen_at = NULL`; **không** thay bằng
+  `published_at` hay `now()`, cùng lý do đã bỏ lifecycle cache khỏi `sources`. Kéo theo:
+  `TopicCluster.first_seen_at` nullable, cột SQLite bỏ `NOT NULL`, và cả hai backend ngừng thay
+  `now()` khi ghi lẫn khi đọc. Database SQLite có sẵn phải rebuild bảng, vì
+  `CREATE TABLE IF NOT EXISTS` không nới được ràng buộc.
 - [x] **Discovery gắn cluster bằng `assign_observation_clusters`, không ghi lại signal (chốt
   11/09/2026).** `AutonomousDiscoveryUseCase` gọi `save_signals()` ở bước 4 rồi
   mới `save_clusters()` ở bước 6, và không ghi lại signal sau đó — observation nằm lại với

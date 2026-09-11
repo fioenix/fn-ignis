@@ -149,7 +149,9 @@ class SqliteTrendRepository(ITrendRepository):
                 cross_platform_score REAL DEFAULT 0.0,
                 summary_text TEXT,
                 category TEXT DEFAULT 'general',
-                first_seen_at TEXT NOT NULL,
+                -- Nullable: a cluster built only from observations whose ingestion time was
+                -- never recorded has no first sighting to store.
+                first_seen_at TEXT,
                 last_updated_at TEXT NOT NULL
             );
 
@@ -224,6 +226,39 @@ class SqliteTrendRepository(ITrendRepository):
         existing_cluster_columns = {row[1] for row in cur.execute("PRAGMA table_info(topic_clusters)")}
         if "topic_label" not in existing_cluster_columns:
             cur.execute("ALTER TABLE topic_clusters ADD COLUMN topic_label TEXT")
+
+        # SQLite cannot drop a NOT NULL, so relaxing one means rebuilding the table. Only a
+        # database created before clusters could be clock-less needs it, which is what the
+        # PRAGMA check decides. Foreign keys go off for the swap: dropping the old table would
+        # otherwise fire ON DELETE SET NULL and strip the cluster off every observation.
+        cluster_info = list(cur.execute("PRAGMA table_info(topic_clusters)"))
+        first_seen = next((row for row in cluster_info if row[1] == "first_seen_at"), None)
+        if first_seen is not None and first_seen[3] == 1:
+            cur.execute("PRAGMA foreign_keys = OFF")
+            cur.executescript(
+                """
+                CREATE TABLE topic_clusters_rebuilt (
+                    id TEXT PRIMARY KEY,
+                    canonical_name TEXT NOT NULL UNIQUE,
+                    topic_label TEXT,
+                    cross_platform_score REAL DEFAULT 0.0,
+                    summary_text TEXT,
+                    category TEXT DEFAULT 'general',
+                    first_seen_at TEXT,
+                    last_updated_at TEXT NOT NULL
+                );
+                INSERT INTO topic_clusters_rebuilt
+                    (id, canonical_name, topic_label, cross_platform_score, summary_text,
+                     category, first_seen_at, last_updated_at)
+                SELECT id, canonical_name, topic_label, cross_platform_score, summary_text,
+                       category, first_seen_at, last_updated_at
+                FROM topic_clusters;
+                DROP TABLE topic_clusters;
+                ALTER TABLE topic_clusters_rebuilt RENAME TO topic_clusters;
+                """
+            )
+            conn.commit()
+            cur.execute("PRAGMA foreign_keys = ON")
 
         existing_signal_columns = {row[1] for row in cur.execute("PRAGMA table_info(trend_signals)")}
         if "published_at" not in existing_signal_columns:
@@ -494,7 +529,7 @@ class SqliteTrendRepository(ITrendRepository):
                 for c in clusters:
                     c_id = str(c.id)
                     now_str = datetime.now(timezone.utc).isoformat()
-                    first_seen = c.first_seen_at.isoformat() if c.first_seen_at else now_str
+                    first_seen = c.first_seen_at.isoformat() if c.first_seen_at else None
                     last_updated = c.last_updated_at.isoformat() if c.last_updated_at else now_str
 
                     # An upsert, not INSERT OR REPLACE. REPLACE is a DELETE followed by an
@@ -593,7 +628,11 @@ class SqliteTrendRepository(ITrendRepository):
                 clusters: List[TopicCluster] = []
                 for row in rows:
                     c_id = row["id"]
-                    first_seen = datetime.fromisoformat(row["first_seen_at"]) if row["first_seen_at"] else datetime.now(timezone.utc)
+                    first_seen = (
+                        datetime.fromisoformat(row["first_seen_at"])
+                        if row["first_seen_at"]
+                        else None
+                    )
                     last_updated = datetime.fromisoformat(row["last_updated_at"]) if row["last_updated_at"] else datetime.now(timezone.utc)
 
                     # Fetch signals captured within the timeframe window for this cluster

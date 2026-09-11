@@ -333,7 +333,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                     for c in deduped.values():
                         try:
                             async with conn.transaction():
-                                c_first_seen = c.first_seen_at or datetime.now(timezone.utc)
+                                # Passed through, including None. Substituting now() would
+                                # give a cluster of legacy observations a first sighting dated
+                                # to this run.
+                                c_first_seen = c.first_seen_at
                                 c_last_updated = c.last_updated_at or datetime.now(timezone.utc)
                                 clean_name = c.canonical_name
                                 c_id_str = str(c.id)

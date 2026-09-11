@@ -14,6 +14,19 @@ from ignis.domain.probe_provenance import probe_keyword_of
 logger = logging.getLogger(__name__)
 
 
+def _earliest_exact_ingestion(group) -> Optional[datetime]:
+    """When this harness first collected anything in the group, or None if it never did.
+
+    A group can mix observations collected by this harness, which carry an exact ingestion time,
+    with the 17,118 written before sql/015, whose collection time was never recorded. min() over
+    both raises, and every substitute is a fabrication: published_at answers a different question
+    and now() is simply false. So the clock-less ones are skipped, and a group made only of them
+    has no first sighting to report.
+    """
+    clocks = [s.captured_at for s in group if s.captured_at is not None]
+    return min(clocks) if clocks else None
+
+
 class SemanticClusterer(IClusteringEngine):
     """
     Semantic topic clustering algorithm and Cross-Platform Momentum calculation.
@@ -520,7 +533,7 @@ class SemanticClusterer(IClusteringEngine):
                 category=self._classify_category(group),
                 cross_platform_score=score,
                 signals=group,
-                first_seen_at=min(s.captured_at for s in group),
+                first_seen_at=_earliest_exact_ingestion(group),
                 last_updated_at=datetime.now(timezone.utc),
             )
             cluster.topic_label = self._build_topic_label(

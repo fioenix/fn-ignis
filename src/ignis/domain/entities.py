@@ -66,7 +66,10 @@ class TopicCluster:
     category: str = "unclassified"
     cross_platform_score: float = 0.0
     signals: List[TrendSignal] = field(default_factory=list)
-    first_seen_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # The earliest exact ingestion time among the signals in the cluster. None where none of them
+    # has one: a cluster built only from observations written before sql/015 has no recorded
+    # first sighting, and inventing one would date the topic to whenever the query ran.
+    first_seen_at: Optional[datetime] = field(default_factory=lambda: datetime.now(timezone.utc))
     last_updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
