@@ -19,6 +19,9 @@ otherwise be unrepeatable or lossy:
                       backfill ran, and assuming the deterministic one would collide with
                       UNIQUE(platform, external_id)
 
+One of --dry-run and --apply is required; neither is implied, because the difference between
+planning a migration and performing one should not be a default.
+
 Usage:
     python scripts/backfill_observations.py --dsn "$DATABASE_URL" --dry-run
     python scripts/backfill_observations.py --dsn "$DATABASE_URL" --apply
@@ -252,15 +255,14 @@ class PostgresTarget(BackfillTarget):
         return signals, points
 
     def existing_observation_ids(self):
-        import psycopg
-
-        try:
-            return {str(r[0]) for r in self._conn.execute("SELECT id FROM observations")}
-        except psycopg.errors.UndefinedTable:
-            # sql/016 has not been applied here. A dry run still has something useful to say
-            # about the plan, so this is reported rather than raised.
-            self._conn.rollback()
-            return None
+        # to_regclass rather than a failed SELECT. Letting the query fail aborts the
+        # transaction, and the rollback needed to recover from it discards SET TRANSACTION READ
+        # ONLY with everything else -- the dry run would then be writable again, safe only
+        # because the code happens not to write afterwards.
+        present = self._conn.execute("SELECT to_regclass('public.observations')").fetchone()[0]
+        if present is None:
+            return None  # sql/016 has not been applied here
+        return {str(r[0]) for r in self._conn.execute("SELECT id FROM observations")}
 
     def upsert_source(self, platform: str, external_id: str) -> str:
         row = self._conn.execute(
@@ -366,10 +368,12 @@ class SqliteTarget(BackfillTarget):
         return signals, points
 
     def existing_observation_ids(self):
-        try:
-            return {str(r[0]) for r in self._conn.execute("SELECT id FROM observations")}
-        except sqlite3.OperationalError:
+        present = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'observations'"
+        ).fetchone()
+        if present is None:
             return None  # sql/016 has not been applied here
+        return {str(r[0]) for r in self._conn.execute("SELECT id FROM observations")}
 
     def upsert_source(self, platform: str, external_id: str) -> str:
         row = self._conn.execute(
@@ -438,12 +442,7 @@ def open_target(dsn: str) -> BackfillTarget:
     return PostgresTarget(dsn)
 
 
-def backfill(
-    target: BackfillTarget,
-    apply: bool,
-    allow_foreign_observations: bool = False,
-    after_sources=None,
-) -> Dict[str, Any]:
+def backfill(target: BackfillTarget, apply: bool, after_sources=None) -> Dict[str, Any]:
     """Plan, refuse or write, in one transaction.
 
     after_sources is a hook the rollback test uses to fail partway through with the sources
@@ -467,13 +466,19 @@ def backfill(
             )
         existing = set()
     unexpected = existing - planned_ids
-    if unexpected and not allow_foreign_observations:
+    if unexpected:
         # Almost certainly the live writer, which uses random ids. Backfilling around them is
         # not safe: there is no lineage linking such an observation to the legacy event it may
         # already duplicate, so the run stops rather than doubling a sighting.
+        #
+        # There is deliberately no override. One existed, and no run that used it could ever
+        # reach a verified state: the baseline is the legacy projection, so any observation
+        # kept outside it adds a source and an observation the baseline does not contain. A
+        # flag that waves the first gate through only to guarantee failing the second is not an
+        # escape hatch, it is a way to spend an outage discovering that.
         raise BackfillRefused(
             f"{len(unexpected)} observations already exist that this backfill did not plan;"
-            " quiesce ingress and start from a snapshot, or pass --allow-foreign-observations"
+            " quiesce ingress and run against a snapshot taken after it stopped"
         )
 
     summary = {
@@ -513,8 +518,9 @@ def backfill(
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dsn", default=os.environ.get("DATABASE_URL", ""))
-    parser.add_argument("--apply", action="store_true", help="write; otherwise plan only")
-    parser.add_argument("--allow-foreign-observations", action="store_true")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true", help="plan and report, write nothing")
+    mode.add_argument("--apply", action="store_true", help="write, in one transaction")
     args = parser.parse_args(argv)
 
     if not args.dsn:
@@ -528,9 +534,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     try:
-        summary = backfill(
-            target, apply=args.apply, allow_foreign_observations=args.allow_foreign_observations
-        )
+        summary = backfill(target, apply=args.apply)
     except BackfillRefused as exc:
         print(f"Refused: {exc}", file=sys.stderr)
         return 1
@@ -544,7 +548,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         f" {summary['cluster_memberships']} cluster memberships"
     )
     if not summary["applied"]:
-        print("  dry run; pass --apply to write")
+        if summary["target_tables_present"]:
+            print(
+                f"  target schema present, holding"
+                f" {summary['pre_existing_observations']} of the planned observations"
+            )
+        else:
+            print("  target schema absent: apply sql/016_source_observation_model.sql first")
+        print("  dry run; nothing was written")
     return 0
 
 

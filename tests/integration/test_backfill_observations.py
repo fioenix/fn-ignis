@@ -257,3 +257,96 @@ def _insert_cluster_and_mission(case, cluster_id: str, mission_id: str) -> None:
             " status) VALUES (%s, 'a mission', '{}', '{}', 'VN', '7d', 'COMPLETED')",
             (mission_id,),
         )
+
+
+# --- the dry run has to stay read-only through every branch ------------------------------------
+
+
+async def test_a_dry_run_stays_read_only_even_when_the_target_tables_are_missing(repository_case):
+    """The missing-table branch must not end the read-only transaction.
+
+    Catching UndefinedTable and rolling back does end it: Postgres discards SET TRANSACTION READ
+    ONLY along with everything else, and the next statement can write. The dry run was then safe
+    only because the code happened not to call a write method afterwards, which is a property of
+    control flow rather than of the engine. This is the state Supabase is in right now, with
+    sql/016 not yet applied.
+    """
+    if repository_case.name != "postgres":
+        pytest.skip("about Postgres transaction semantics; SQLite uses PRAGMA query_only")
+
+    with psycopg.connect(repository_case.dsn, autocommit=True) as conn:
+        conn.execute("DROP TABLE mission_evidence")
+        conn.execute("DROP TABLE observations")
+
+    target = open_target(_dsn(repository_case))
+    try:
+        target.enforce_read_only()
+        assert target.existing_observation_ids() is None, "the branch under test has to be taken"
+
+        with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+            target._conn.execute(
+                "INSERT INTO trend_signals (platform, raw_title, metric_value, captured_at)"
+                " VALUES ('youtube', 'should not be written', 1.0, now())"
+            )
+    finally:
+        target.close()
+
+
+async def test_a_dry_run_reports_whether_the_target_schema_is_there(repository_case):
+    """Silence reads as "nothing to do". The plan is real; the tables it needs may not be."""
+    summary = _run(repository_case, apply=False)
+    assert summary["target_tables_present"] is True
+
+    if repository_case.name == "postgres":
+        with psycopg.connect(repository_case.dsn, autocommit=True) as conn:
+            conn.execute("DROP TABLE mission_evidence")
+            conn.execute("DROP TABLE observations")
+    else:
+        with sqlite3.connect(repository_case.repository._db_path) as conn:
+            conn.execute("DROP TABLE mission_evidence")
+            conn.execute("DROP TABLE observations")
+
+    summary = _run(repository_case, apply=False)
+    assert summary["target_tables_present"] is False
+
+
+async def test_applying_against_a_missing_target_schema_is_refused(repository_case):
+    if repository_case.name == "postgres":
+        with psycopg.connect(repository_case.dsn, autocommit=True) as conn:
+            conn.execute("DROP TABLE mission_evidence")
+            conn.execute("DROP TABLE observations")
+    else:
+        with sqlite3.connect(repository_case.repository._db_path) as conn:
+            conn.execute("DROP TABLE mission_evidence")
+            conn.execute("DROP TABLE observations")
+
+    with pytest.raises(BackfillRefused, match="sql/016"):
+        _run(repository_case, apply=True)
+
+
+# --- the command line says what the code does --------------------------------------------------
+
+
+async def test_the_mode_has_to_be_chosen_explicitly(repository_case, capsys):
+    """--dry-run is documented, so it has to exist; and neither mode may be implied."""
+    from scripts.backfill_observations import main
+
+    assert main(["--dsn", _dsn(repository_case), "--dry-run"]) == 0
+
+    with pytest.raises(SystemExit):
+        main(["--dsn", _dsn(repository_case)])
+    with pytest.raises(SystemExit):
+        main(["--dsn", _dsn(repository_case), "--dry-run", "--apply"])
+
+
+async def test_there_is_no_flag_that_skips_the_first_gate_only_to_fail_the_second(repository_case):
+    """--allow-foreign-observations had no run that could end VERIFIED.
+
+    The baseline is the legacy projection. Keeping an observation that is not in it necessarily
+    adds a source and an observation the baseline does not contain, so the reconciliation was
+    guaranteed to fail after the flag had already waved the backfill through.
+    """
+    from scripts.backfill_observations import main
+
+    with pytest.raises(SystemExit):
+        main(["--dsn", _dsn(repository_case), "--apply", "--allow-foreign-observations"])
