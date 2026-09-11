@@ -43,14 +43,13 @@ async def test_save_signals_batch_insert(sample_trend_signal):
 
     count = await repo.save_signals([sample_trend_signal])
 
-    # One collection event. The number used to be the legacy table's insert count.
+    # One collection event, written to the model that now holds it. The assertion used to be
+    # on INSERT INTO trend_signals, which this writer no longer issues at all.
     assert count == 1
-    assert mock_cursor.executemany.called
-    query_arg, params_arg = mock_cursor.executemany.call_args[0]
-    assert "INSERT INTO trend_signals" in query_arg
-    assert len(params_arg) == 1
-    assert params_arg[0][0] == sample_trend_signal.platform.value
-    assert params_arg[0][1] == sample_trend_signal.raw_title
+    statements = [call.args[0] for call in mock_cursor.execute.call_args_list]
+    assert any("INSERT INTO sources" in s for s in statements)
+    assert any("INSERT INTO observations" in s for s in statements)
+    assert not any("trend_signals" in s or "signal_metrics" in s for s in statements)
 
 
 @pytest.mark.asyncio

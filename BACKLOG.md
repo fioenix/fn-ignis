@@ -169,6 +169,14 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   digest `topic_clusters.first_seen_at`, nên hiện chưa biết corpus có bao nhiêu giá trị bắt nguồn từ
   publish time. Không kéo vào backfill. Trình tự: đo trước — đếm cluster có `first_seen_at` trùng
   `published_at` của một signal thành viên — rồi mới quyết giữ, xoá hay gắn provenance.
+- [x] **Runtime ngừng ghi bảng legacy (chốt 11/09/2026).** `save_signals` chỉ còn ghi `sources`,
+  `observations`, `mission_evidence`; không còn `SELECT/INSERT/UPDATE trend_signals` hay
+  `INSERT signal_metrics` ở bất kỳ đâu trong hai repository. Hai bảng legacy **không** bị drop —
+  audit, backfill và toàn bộ lịch sử migration còn đọc chúng — nhưng chúng thành read-only. Tới
+  đây data-model cutover hoàn tất ở runtime: một nguồn sự thật. Test cũ assert dedup legacy đã
+  **chuyển** sang assert contract source/observation chứ không xoá: poll lặp một source cho một
+  source và hai observation; URL cấp feed của Google Trends không gộp hai keyword; identity test
+  đếm dòng trong `sources`.
 - [x] **Reader / scoring / pruner đọc `observations`, không đọc `trend_signals` (chốt 11/09/2026).**
   `get_top_clusters`, `get_cluster_signals` và `prune_empty_clusters` chuyển sang
   `observations → sources` trên cả hai backend. Window mặc định chỉ nhận `exact_ingestion` có

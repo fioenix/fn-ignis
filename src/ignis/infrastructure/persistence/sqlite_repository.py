@@ -342,6 +342,14 @@ class SqliteTrendRepository(ITrendRepository):
             conn.close()
 
     async def save_signals(self, signals: List[TrendSignal]) -> int:
+        """Record each sighting in the source/observation model. Nothing else is written.
+
+        trend_signals and signal_metrics are read-only from here on. They stay in the schema --
+        the audit reads them, the backfill reads them, and they are the only record of what the
+        corpus looked like before the migration -- but a write to them now would restart the
+        divergence the migration closed: the legacy side growing while the new model stands
+        still, with nothing linking a row on one side to an observation on the other.
+        """
         if not signals:
             return 0
         await self._ensure_schema()
@@ -350,65 +358,8 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                inserted = 0
-                for s in signals:
-                    plat = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
-                    geo = s.geo_code.value if hasattr(s.geo_code, "value") else str(s.geo_code)
-                    c_id = str(s.cluster_id) if s.cluster_id else None
-                    m_id = str(s.mission_id) if s.mission_id else None
-                    meta_json = json.dumps(s.metadata or {}, ensure_ascii=False)
-                    cap_at = s.captured_at.isoformat() if s.captured_at else datetime.now(timezone.utc).isoformat()
-                    pub_at = s.published_at.isoformat() if s.published_at else None
-                    url = s.source_url.strip() if s.source_url else ""
-
-                    existing_id = None
-                    if url:
-                        # Title is part of the identity: a feed-level URL is shared by every item
-                        # it lists, so matching on the URL alone overwrote unrelated signals.
-                        cur.execute(
-                            "SELECT id FROM trend_signals WHERE platform = ? AND source_url = ? "
-                            "AND raw_title = ? ORDER BY captured_at DESC LIMIT 1;",
-                            (plat, url, s.raw_title),
-                        )
-                        found = cur.fetchone()
-                        if found:
-                            existing_id = found["id"] if isinstance(found, dict) or hasattr(found, "keys") else found[0]
-
-                    if existing_id:
-                        s_id = existing_id
-                        cur.execute(
-                            """
-                            UPDATE trend_signals 
-                            SET metric_value = ?, growth_velocity = ?, raw_title = ?, metadata = ?, captured_at = ?,
-                                published_at = COALESCE(?, published_at), cluster_id = COALESCE(?, cluster_id)
-                            WHERE id = ?;
-                            """,
-                            (s.metric_value, s.growth_velocity, s.raw_title, meta_json, cap_at, pub_at, c_id, s_id),
-                        )
-                    else:
-                        s_id = str(uuid4())
-                        cur.execute(
-                            """
-                            INSERT INTO trend_signals 
-                            (id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at, published_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                            """,
-                            (s_id, plat, s.raw_title, s.metric_value, s.growth_velocity, url or None, geo, c_id, m_id, meta_json, cap_at, pub_at),
-                        )
-                        inserted += 1
-
-                    cur.execute(
-                        """
-                        INSERT INTO signal_metrics (signal_id, captured_at, metric_value, growth_velocity)
-                        VALUES (?, ?, ?, ?);
-                        """,
-                        (s_id, cap_at, s.metric_value, s.growth_velocity),
-                    )
                 recorded = self._record_observations(cur, signals)
-
                 conn.commit()
-                # Collection events, not first sightings. The old number counted inserts into
-                # the legacy table, so a second pass over a known source reported 0.
                 return recorded
             finally:
                 if self._mem_conn is None:

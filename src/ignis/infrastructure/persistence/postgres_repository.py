@@ -55,6 +55,13 @@ class PostgresTimescaleRepository(ITrendRepository):
             self._pool = None
 
     async def save_signals(self, signals: List[TrendSignal]) -> int:
+        """Record each sighting in the source/observation model. Nothing else is written.
+
+        trend_signals and signal_metrics are read-only from here on. They stay in the schema --
+        the audit reads them, the backfill reads them, and they are the only record of what the
+        corpus looked like before the migration -- but a write to them now would restart the
+        divergence the migration closed.
+        """
         if not signals:
             return 0
 
@@ -62,115 +69,12 @@ class PostgresTimescaleRepository(ITrendRepository):
         try:
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
-                    url_signals = {}
-                    no_url_signals = []
-                    all_metric_points = []
-
-                    # The identity of a signal is its platform, its URL and its title together.
-                    # Several connectors report a feed-level URL that every item shares — Google
-                    # Trends returns one RSS URL for every trending keyword — so keying on the URL
-                    # alone collapsed distinct keywords onto a single row and overwrote it on every
-                    # poll, destroying the demand history it was supposed to accumulate.
-                    for s in signals:
-                        plat = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
-                        url = s.source_url.strip() if s.source_url else ""
-                        if url:
-                            url_signals[(plat, url, (s.raw_title or "").strip())] = s
-                        else:
-                            no_url_signals.append(s)
-
-                    existing_map = {}
-                    if url_signals:
-                        keys_list = list(url_signals.keys())
-                        conds = " OR ".join(
-                            ["(platform = %s AND source_url = %s AND raw_title = %s)"] * len(keys_list)
-                        )
-                        params = []
-                        for p, u, t in keys_list:
-                            params.extend([p, u, t])
-                        await cur.execute(
-                            f"SELECT id, platform, source_url, raw_title FROM trend_signals WHERE {conds};",
-                            params,
-                        )
-                        rows = await cur.fetchall()
-                        for r in rows:
-                            existing_map[(r[1], r[2], (r[3] or "").strip())] = r[0]
-
-                    updates = []
-                    for key, s in url_signals.items():
-                        if key in existing_map:
-                            sig_id = existing_map[key]
-                            meta_json = json.dumps(s.metadata or {})
-                            cap_at = s.captured_at or datetime.now(timezone.utc)
-                            c_id = str(s.cluster_id) if s.cluster_id else None
-                            updates.append((s.metric_value, s.growth_velocity, s.raw_title, meta_json, cap_at, s.published_at, c_id, sig_id))
-                            all_metric_points.append((sig_id, cap_at, s.metric_value, s.growth_velocity))
-
-                    if updates:
-                        update_query = """
-                            UPDATE trend_signals 
-                            SET metric_value = %s, growth_velocity = %s, raw_title = %s, metadata = %s, captured_at = %s,
-                                published_at = COALESCE(%s, published_at), cluster_id = COALESCE(%s, cluster_id)
-                            WHERE id = %s;
-                        """
-                        await cur.executemany(update_query, updates)
-
-                    to_insert = [s for key, s in url_signals.items() if key not in existing_map]
-                    to_insert.extend(no_url_signals)
-
-                    if to_insert:
-                        insert_query = """
-                            INSERT INTO trend_signals (
-                                platform,
-                                raw_title,
-                                cluster_id,
-                                mission_id,
-                                metric_value,
-                                growth_velocity,
-                                source_url,
-                                geo_code,
-                                metadata,
-                                captured_at,
-                                published_at
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-                        """
-                        insert_params = [
-                            (
-                                s.platform.value if hasattr(s.platform, "value") else str(s.platform),
-                                s.raw_title,
-                                s.cluster_id,
-                                s.mission_id,
-                                s.metric_value,
-                                s.growth_velocity,
-                                s.source_url,
-                                s.geo_code.value if hasattr(s.geo_code, "value") else str(s.geo_code),
-                                json.dumps(s.metadata or {}),
-                                s.captured_at or datetime.now(timezone.utc),
-                                s.published_at,
-                            )
-                            for s in to_insert
-                        ]
-                        await cur.executemany(insert_query, insert_params)
-
-                    if all_metric_points:
-                        await cur.executemany(
-                            "INSERT INTO signal_metrics (signal_id, captured_at, metric_value, growth_velocity) VALUES (%s, %s, %s, %s);",
-                            all_metric_points,
-                        )
-
                     recorded = await self._record_observations(cur, signals)
-            logger.info(
-                f"Processed {len(signals)} signals into database "
-                f"({recorded} observations recorded, {len(to_insert)} legacy rows inserted, "
-                f"{len(updates)} refreshed)."
-            )
-            # Collection events, not rows inserted into the legacy table. The old number counted
-            # first sightings only, so a second pass over a known source reported 0 while the
-            # observation count went up.
+            logger.info(f"Recorded {recorded} observations from {len(signals)} signals.")
             return recorded
         except Exception as e:
             logger.error(f"Error saving signals to database: {e}", exc_info=True)
-            raise RepositoryException(f"Failed to batch insert signals: {e}") from e
+            raise RepositoryException(f"Failed to record observations: {e}") from e
 
     async def _record_observations(self, cur, signals: List[TrendSignal]) -> int:
         """Write each signal as one observation of one canonical source.

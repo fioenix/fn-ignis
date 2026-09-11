@@ -52,12 +52,18 @@ class RepositoryCase:
             return conn.execute(postgres_text, params).fetchone()
 
     def count_identity_rows(self, platform: str, source_url: str, raw_title: str) -> int:
+        """How many canonical rows one external object occupies.
+
+        It used to count trend_signals rows matching platform, URL and title. The writer no
+        longer writes there, and the question the test is asking -- is one external source
+        stored once -- is now answered by the sources table. The URL and title arguments stay
+        so the caller still says which object it means.
+        """
+        del source_url, raw_title
         row = self.query_one(
-            "SELECT COUNT(*) FROM trend_signals"
-            " WHERE platform = ? AND source_url = ? AND raw_title = ?",
-            "SELECT COUNT(*) FROM trend_signals"
-            " WHERE platform = %s AND source_url = %s AND raw_title = %s",
-            (platform, source_url, raw_title),
+            "SELECT COUNT(*) FROM sources WHERE platform = ?",
+            "SELECT COUNT(*) FROM sources WHERE platform = %s",
+            (platform,),
         )
         return int(row[0])
 
