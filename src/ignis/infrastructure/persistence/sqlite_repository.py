@@ -426,8 +426,9 @@ class SqliteTrendRepository(ITrendRepository):
                 o.source_id, o.cluster_id, o.metric_value, o.growth_velocity, o.observed_at,
                 o.published_at, o.observed_title, o.geo_code, o.source_url, o.metadata,
                 s.platform,
+                -- (cluster_id, source_id), not source_id alone: see the Postgres reader.
                 ROW_NUMBER() OVER (
-                    PARTITION BY o.source_id ORDER BY o.observed_at DESC
+                    PARTITION BY o.cluster_id, o.source_id ORDER BY o.observed_at DESC
                 ) AS rank
             FROM observations o
             JOIN sources s ON s.id = o.source_id

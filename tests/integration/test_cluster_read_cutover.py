@@ -234,3 +234,75 @@ async def test_the_pruner_ignores_the_legacy_table(repository_case):
         (cluster_id,),
     )
     assert survived[0] == 0
+
+
+async def test_one_source_observed_in_two_clusters_counts_in_both(repository_case):
+    """Partitioning on source_id alone hides a real membership.
+
+    The latest observation of a source wins globally under that partition, so a source observed
+    in cluster A and later in cluster B disappears from A entirely -- A comes back with no
+    signals at all. The corpus has 175 identities under more than one cluster, and carrying
+    cluster_id on the observation instead of the source exists precisely to keep them.
+    """
+    cluster_a = _cluster(repository_case, "cluster a")
+    cluster_b = _cluster(repository_case, "cluster b")
+    source_id = repository_case.insert_source("youtube", f"video:{YT_ID}")
+
+    for cluster_id, hours_ago, metric in ((cluster_a, 3, 100.0), (cluster_b, 1, 200.0)):
+        repository_case.insert_legacy_observation(
+            source_id=source_id,
+            cluster_id=cluster_id,
+            observed_at=(NOW - timedelta(hours=hours_ago)).isoformat()
+            if repository_case.name == "sqlite"
+            else NOW - timedelta(hours=hours_ago),
+            time_provenance="exact_ingestion",
+            identity_source="metadata_external_id",
+            observed_title="One video, two topics",
+            metric_value=metric,
+            growth_velocity=1.0,
+            geo_code="VN",
+            source_url=YT_URL,
+            metadata="{}",
+        )
+
+    clusters = await repository_case.repository.get_top_clusters(timeframe=Timeframe.LAST_24H)
+
+    by_id = {str(c.id): c for c in clusters}
+    assert set(by_id) == {cluster_a, cluster_b}, "neither membership may be swallowed"
+    assert len(by_id[cluster_a].signals) == 1
+    assert len(by_id[cluster_b].signals) == 1
+    assert by_id[cluster_a].signals[0].metric_value == 100.0
+    assert by_id[cluster_b].signals[0].metric_value == 200.0
+
+    for cluster_id in (cluster_a, cluster_b):
+        signals = await repository_case.repository.get_cluster_signals(
+            uuid.UUID(cluster_id), timeframe=Timeframe.LAST_24H
+        )
+        assert len(signals) == 1
+
+
+async def test_repeat_polls_inside_one_cluster_still_collapse_to_the_latest(repository_case):
+    """Widening the partition must not bring polling frequency back in through the same door."""
+    cluster_id = _cluster(repository_case, "polled repeatedly")
+    source_id = repository_case.insert_source("youtube", f"video:{YT_ID}")
+    for hours_ago, metric in ((4, 10.0), (3, 20.0), (2, 30.0)):
+        repository_case.insert_legacy_observation(
+            source_id=source_id,
+            cluster_id=cluster_id,
+            observed_at=(NOW - timedelta(hours=hours_ago)).isoformat()
+            if repository_case.name == "sqlite"
+            else NOW - timedelta(hours=hours_ago),
+            time_provenance="exact_ingestion",
+            identity_source="metadata_external_id",
+            observed_title="Polled three times in one cluster",
+            metric_value=metric,
+            growth_velocity=1.0,
+            geo_code="VN",
+            source_url=YT_URL,
+            metadata="{}",
+        )
+
+    clusters = await repository_case.repository.get_top_clusters(timeframe=Timeframe.LAST_24H)
+
+    assert len(clusters[0].signals) == 1
+    assert clusters[0].signals[0].metric_value == 30.0

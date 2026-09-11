@@ -407,13 +407,18 @@ class PostgresTimescaleRepository(ITrendRepository):
     # One observation per source: the most recent in the window. A source polled hourly must not
     # outweigh one polled daily, because polling frequency is a property of the harness.
     _LATEST_PER_SOURCE = """
-        SELECT DISTINCT ON (o.source_id)
+        -- Partitioned on (cluster_id, source_id), not on source_id alone. A source observed in
+        -- one cluster and later in another would otherwise keep only its latest sighting
+        -- anywhere, and the earlier membership would vanish from the reader entirely -- 175
+        -- identities in the corpus sit under more than one cluster, which is why cluster_id is
+        -- on the observation rather than on the source.
+        SELECT DISTINCT ON (o.cluster_id, o.source_id)
             o.source_id, o.cluster_id, o.metric_value, o.growth_velocity, o.observed_at,
             o.published_at, o.observed_title, o.geo_code, o.source_url, o.metadata, s.platform
         FROM observations o
         JOIN sources s ON s.id = o.source_id
         WHERE o.cluster_id IS NOT NULL AND {window}
-        ORDER BY o.source_id, o.observed_at DESC
+        ORDER BY o.cluster_id, o.source_id, o.observed_at DESC
     """
 
     async def get_top_clusters(
@@ -551,13 +556,13 @@ class PostgresTimescaleRepository(ITrendRepository):
         window = self._WINDOW_PREDICATE.format(interval=interval)
 
         query = f"""
-            SELECT DISTINCT ON (o.source_id)
+            SELECT DISTINCT ON (o.cluster_id, o.source_id)
                 s.platform, o.observed_title, o.metric_value, o.growth_velocity, o.source_url,
                 o.geo_code, o.metadata, o.observed_at, o.published_at
             FROM observations o
             JOIN sources s ON s.id = o.source_id
             WHERE o.cluster_id = %s AND {window}
-            ORDER BY o.source_id, o.observed_at DESC;
+            ORDER BY o.cluster_id, o.source_id, o.observed_at DESC;
         """
 
         try:
