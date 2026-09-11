@@ -55,6 +55,8 @@ async def test_bug05_sqlite_repository_dynamic_score_calculation(tmp_path):
     )
     await repo.save_clusters([cluster])
     
+    # Both carry something that identifies the external object they observed. A signal that
+    # identifies nothing is no longer stored as an observation, so it cannot be read back.
     s1 = TrendSignal(
         platform=PlatformType.GOOGLE_TRENDS,
         raw_title="Chủ đề thử nghiệm B",
@@ -62,6 +64,7 @@ async def test_bug05_sqlite_repository_dynamic_score_calculation(tmp_path):
         growth_velocity=15.0,
         cluster_id=cluster.id,
         geo_code=GeoCode.VN,
+        metadata={"keyword": "chu de thu nghiem b"},
     )
     s2 = TrendSignal(
         platform=PlatformType.YOUTUBE,
@@ -70,6 +73,7 @@ async def test_bug05_sqlite_repository_dynamic_score_calculation(tmp_path):
         growth_velocity=300.0,
         cluster_id=cluster.id,
         geo_code=GeoCode.VN,
+        metadata={"video_id": "dQw4w9WgXcQ"},
     )
     await repo.save_signals([s1, s2])
     

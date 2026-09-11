@@ -169,6 +169,16 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   digest `topic_clusters.first_seen_at`, nên hiện chưa biết corpus có bao nhiêu giá trị bắt nguồn từ
   publish time. Không kéo vào backfill. Trình tự: đo trước — đếm cluster có `first_seen_at` trùng
   `published_at` của một signal thành viên — rồi mới quyết giữ, xoá hay gắn provenance.
+- [x] **Reader / scoring / pruner đọc `observations`, không đọc `trend_signals` (chốt 11/09/2026).**
+  `get_top_clusters`, `get_cluster_signals` và `prune_empty_clusters` chuyển sang
+  `observations → sources` trên cả hai backend. Window mặc định chỉ nhận `exact_ingestion` có
+  `observed_at`; **không** dùng `published_at` thay clock cho 17.118 dòng legacy. Trong window,
+  mỗi source đóng góp đúng một lần — observation mới nhất theo `source_id`, không theo URL, vì
+  corpus có một source xuất hiện dưới hai biến thể URL còn URL cấp feed thì nhiều item dùng chung.
+  Pruner giữ cluster có ít nhất một observation membership, kể cả observation legacy ngoài window.
+  `cross_platform_score` giờ chỉ có **một** implementation ở `src/ignis/domain/cross_platform_score.py`;
+  trước đó có ba, và bản SQL vẫn chia số platform cho 5 trong khi quyết định đã ghi là dải
+  `1 → 0`, `2 → 20`, `3+ → 40`. Metric và velocity giữ nguyên normalization.
 - [x] **`first_seen_at` của cluster là earliest exact ingestion, nullable (chốt 11/09/2026).**
   `min(s.captured_at for s in group)` raise `TypeError` ngay khi group trộn observation legacy với
   observation exact — đúng hình dạng sẽ xuất hiện sau backfill. Semantics chốt: bỏ qua observation

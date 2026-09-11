@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
+from ignis.domain.cross_platform_score import cross_platform_score
 from ignis.domain.source_identity import resolve_source_identity
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_platform
 
@@ -250,11 +251,17 @@ class PostgresTimescaleRepository(ITrendRepository):
         return written
 
     async def prune_empty_clusters(self) -> int:
-        """Remove clusters left holding no signals after re-clustering."""
+        """Remove clusters holding no observation at all.
+
+        Membership, not recency: a cluster whose only observations are legacy ones outside the
+        default analysis window still describes something the corpus contains. Pruning on the
+        window would delete 17,118 observations' worth of topics on the first pass after the
+        backfill.
+        """
         pool = await self._get_pool()
         query = """
             DELETE FROM topic_clusters tc
-            WHERE NOT EXISTS (SELECT 1 FROM trend_signals ts WHERE ts.cluster_id = tc.id);
+            WHERE NOT EXISTS (SELECT 1 FROM observations o WHERE o.cluster_id = tc.id);
         """
         try:
             async with pool.connection() as conn:
@@ -387,12 +394,35 @@ class PostgresTimescaleRepository(ITrendRepository):
             logger.error(f"Error upserting topic clusters: {e}", exc_info=True)
             raise RepositoryException(f"Failed to upsert topic clusters: {e}") from e
 
+    # The default analysis window admits only observations whose collection time is known.
+    # published_at is not a substitute: for the 17,118 legacy observations it answers "when was
+    # this posted", and a window built on it would report a two-year-old video as something seen
+    # this week.
+    _WINDOW_PREDICATE = (
+        "o.time_provenance = 'exact_ingestion'"
+        " AND o.observed_at IS NOT NULL"
+        " AND o.observed_at >= NOW() - INTERVAL '{interval}'"
+    )
+
+    # One observation per source: the most recent in the window. A source polled hourly must not
+    # outweigh one polled daily, because polling frequency is a property of the harness.
+    _LATEST_PER_SOURCE = """
+        SELECT DISTINCT ON (o.source_id)
+            o.source_id, o.cluster_id, o.metric_value, o.growth_velocity, o.observed_at,
+            o.published_at, o.observed_title, o.geo_code, o.source_url, o.metadata, s.platform
+        FROM observations o
+        JOIN sources s ON s.id = o.source_id
+        WHERE o.cluster_id IS NOT NULL AND {window}
+        ORDER BY o.source_id, o.observed_at DESC
+    """
+
     async def get_top_clusters(
         self,
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 10,
     ) -> List[TopicCluster]:
+        """Rank clusters by what was observed in the window, from the new model only."""
         pool = await self._get_pool()
         interval_map = {
             Timeframe.LAST_24H: "24 hours",
@@ -400,127 +430,117 @@ class PostgresTimescaleRepository(ITrendRepository):
             Timeframe.LAST_30D: "30 days",
         }
         interval = interval_map.get(timeframe, "24 hours")
+        latest = self._LATEST_PER_SOURCE.format(
+            window=self._WINDOW_PREDICATE.format(interval=interval)
+        )
 
         query = f"""
-            WITH ranked_clusters AS (
-                SELECT 
-                    tc.id,
-                    tc.canonical_name,
-                    tc.topic_label,
-                    tc.summary_text,
-                    tc.category,
-                    tc.first_seen_at,
-                    tc.last_updated_at,
-                    COUNT(ts.id) AS sig_count,
-                    COUNT(DISTINCT ts.platform) AS plat_count,
-                    COALESCE(SUM(ts.metric_value), 0.0) AS total_metric,
-                    COALESCE(AVG(ts.growth_velocity), 0.0) AS avg_velocity,
-                    ROUND(LEAST(100.0, 
-                        (COUNT(DISTINCT ts.platform) / 5.0 * 40.0) +
-                        LEAST(40.0, (LOG(GREATEST(1.0, COALESCE(SUM(ts.metric_value), 0.0) + 1.0)) / 8.0) * 40.0) +
-                        LEAST(20.0, (LOG(GREATEST(1.0, COALESCE(AVG(ts.growth_velocity), 0.0) + 1.0)) / 4.0) * 20.0)
-                    )::numeric, 1) AS dynamic_score
-                FROM topic_clusters tc
-                INNER JOIN trend_signals ts ON ts.cluster_id = tc.id
-                WHERE ts.captured_at >= NOW() - INTERVAL '{interval}'
-                GROUP BY tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category, tc.first_seen_at, tc.last_updated_at
-                ORDER BY dynamic_score DESC, sig_count DESC
-                LIMIT %s
-            )
-            SELECT 
-                rc.id,
-                rc.canonical_name,
-                rc.topic_label,
-                rc.summary_text,
-                rc.category,
-                rc.dynamic_score,
-                rc.first_seen_at,
-                rc.last_updated_at,
-                rc.sig_count,
+            WITH latest AS ({latest})
+            SELECT
+                tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category,
+                tc.first_seen_at, tc.last_updated_at,
+                COUNT(*) AS source_count,
+                COUNT(DISTINCT l.platform) AS platform_count,
+                COALESCE(SUM(l.metric_value), 0.0) AS total_metric,
+                COALESCE(AVG(l.growth_velocity), 0.0) AS avg_velocity,
                 JSON_AGG(JSON_BUILD_OBJECT(
-                    'platform', ts.platform,
-                    'raw_title', ts.raw_title,
-                    'metric_value', ts.metric_value,
-                    'growth_velocity', ts.growth_velocity,
-                    'source_url', ts.source_url,
-                    'geo_code', ts.geo_code,
-                    'metadata', ts.metadata,
-                    'captured_at', ts.captured_at,
-                    'published_at', ts.published_at
+                    'platform', l.platform,
+                    'raw_title', l.observed_title,
+                    'metric_value', l.metric_value,
+                    'growth_velocity', l.growth_velocity,
+                    'source_url', l.source_url,
+                    'geo_code', l.geo_code,
+                    'metadata', l.metadata,
+                    'observed_at', l.observed_at,
+                    'published_at', l.published_at
                 )) AS signals
-            FROM ranked_clusters rc
-            INNER JOIN trend_signals ts ON ts.cluster_id = rc.id
-            WHERE ts.captured_at >= NOW() - INTERVAL '{interval}'
-            GROUP BY rc.id, rc.canonical_name, rc.topic_label, rc.summary_text, rc.category, rc.dynamic_score, rc.first_seen_at, rc.last_updated_at, rc.sig_count
-            ORDER BY rc.dynamic_score DESC, rc.sig_count DESC;
+            FROM latest l
+            JOIN topic_clusters tc ON tc.id = l.cluster_id
+            GROUP BY tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category,
+                     tc.first_seen_at, tc.last_updated_at
         """
 
         try:
             async with pool.connection() as conn:
                 async with conn.cursor(row_factory=tuple_row) as cur:
-                    await cur.execute(query, (limit,))
+                    await cur.execute(query)
                     rows = await cur.fetchall()
 
             clusters = []
             for row in rows:
-                c_id, name, label, summary, cat, score, first_seen, last_updated = row[:8]
-                _sig_count = row[8] if len(row) > 8 else 0
-                sigs_raw = row[9] if len(row) > 9 else "[]"
-                
-                signals_list: List[TrendSignal] = []
+                (
+                    c_id, name, label, summary, category, first_seen, last_updated,
+                    source_count, platform_count, total_metric, avg_velocity, sigs_raw,
+                ) = row
+                # Scored here, by the same function the clusterer uses. The arithmetic used to
+                # live in this query as well, and the two had already drifted apart.
+                score = cross_platform_score(
+                    distinct_platforms=int(platform_count or 0),
+                    total_metric=float(total_metric or 0.0),
+                    average_velocity=float(avg_velocity or 0.0),
+                )
                 sigs_data = sigs_raw if isinstance(sigs_raw, list) else json.loads(sigs_raw or "[]")
-                for s_dict in sigs_data:
-                    c_at = s_dict.get("captured_at")
-                    if isinstance(c_at, str):
-                        c_at = datetime.fromisoformat(c_at)
-                    p_at = s_dict.get("published_at")
-                    if isinstance(p_at, str):
-                        p_at = datetime.fromisoformat(p_at)
-                    sig_meta = s_dict.get("metadata") or {}
-                    if isinstance(sig_meta, str):
-                        try:
-                            sig_meta = json.loads(sig_meta)
-                        except Exception:
-                            sig_meta = {}
-                    signals_list.append(
-                        TrendSignal(
-                            platform=PlatformType(s_dict["platform"]),
-                            raw_title=s_dict["raw_title"],
-                            metric_value=float(s_dict.get("metric_value", 0.0)),
-                            growth_velocity=float(s_dict.get("growth_velocity", 0.0)),
-                            source_url=s_dict.get("source_url", ""),
-                            geo_code=GeoCode(s_dict.get("geo_code", "VN")),
-                            cluster_id=UUID(str(c_id)),
-                            metadata=sig_meta,
-                            captured_at=c_at or datetime.now(timezone.utc),
-                            published_at=p_at,
-                        )
-                    )
-
-                plat_cnt = len({s.platform for s in signals_list})
-                dynamic_summary = f"Aggregated topic from {len(signals_list)} signals across {plat_cnt} platforms."
+                signals_list = [
+                    self._signal_from_observation(s_dict, UUID(str(c_id))) for s_dict in sigs_data
+                ]
                 cluster = TopicCluster(
                     id=UUID(str(c_id)),
                     canonical_name=name,
-                    _topic_label=label,
-                    summary_text=dynamic_summary,
-                    category=cat or "unclassified",
-                    cross_platform_score=float(score or 0.0),
+                    summary_text=summary
+                    or f"{source_count} sources across {platform_count} platforms.",
+                    category=category or "general",
+                    cross_platform_score=score,
                     signals=signals_list,
                     first_seen_at=first_seen,
                     last_updated_at=last_updated,
                 )
+                cluster.topic_label = label
                 clusters.append(cluster)
-            return clusters
+
+            clusters.sort(key=lambda c: (c.cross_platform_score, len(c.signals)), reverse=True)
+            return clusters[:limit]
         except Exception as e:
-            logger.error(f"Error querying top clusters: {e}", exc_info=True)
-            raise RepositoryException(f"Failed to query top clusters: {e}") from e
+            logger.error(f"Error fetching top clusters: {e}", exc_info=True)
+            raise RepositoryException(f"Failed to fetch top clusters: {e}") from e
+
+    @staticmethod
+    def _signal_from_observation(data: Dict[str, Any], cluster_id: UUID) -> TrendSignal:
+        observed_at = data.get("observed_at")
+        if isinstance(observed_at, str):
+            observed_at = datetime.fromisoformat(observed_at)
+        published_at = data.get("published_at")
+        if isinstance(published_at, str):
+            published_at = datetime.fromisoformat(published_at)
+        metadata = data.get("metadata") or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (TypeError, ValueError):
+                metadata = {}
+        return TrendSignal(
+            platform=PlatformType(data["platform"]),
+            raw_title=data.get("raw_title") or "",
+            metric_value=float(data.get("metric_value") or 0.0),
+            growth_velocity=float(data.get("growth_velocity") or 0.0),
+            source_url=data.get("source_url"),
+            geo_code=GeoCode(data.get("geo_code") or "VN"),
+            cluster_id=cluster_id,
+            metadata=metadata,
+            captured_at=observed_at,
+            published_at=published_at,
+        )
 
     async def get_cluster_signals(
         self,
         cluster_id: UUID,
         timeframe: Timeframe = Timeframe.LAST_7D,
     ) -> List[TrendSignal]:
+        """One signal per source, the most recent observation of it in the window.
+
+        Deduplication is on source_id now, not on the URL. A URL is what one sighting reported,
+        and the corpus holds one source seen under two URL variants -- keying on it counted that
+        source twice, and a feed-level URL shared by many items counted them as one.
+        """
         pool = await self._get_pool()
         interval_map = {
             Timeframe.LAST_24H: "24 hours",
@@ -528,23 +548,16 @@ class PostgresTimescaleRepository(ITrendRepository):
             Timeframe.LAST_30D: "30 days",
         }
         interval = interval_map.get(timeframe, "7 days")
+        window = self._WINDOW_PREDICATE.format(interval=interval)
 
         query = f"""
-            SELECT 
-                platform,
-                raw_title,
-                metric_value,
-                growth_velocity,
-                source_url,
-                geo_code,
-                metadata,
-                captured_at,
-                published_at,
-                cluster_id,
-                mission_id
-            FROM trend_signals
-            WHERE cluster_id = %s AND captured_at >= NOW() - INTERVAL '{interval}'
-            ORDER BY captured_at ASC;
+            SELECT DISTINCT ON (o.source_id)
+                s.platform, o.observed_title, o.metric_value, o.growth_velocity, o.source_url,
+                o.geo_code, o.metadata, o.observed_at, o.published_at
+            FROM observations o
+            JOIN sources s ON s.id = o.source_id
+            WHERE o.cluster_id = %s AND {window}
+            ORDER BY o.source_id, o.observed_at DESC;
         """
 
         try:
@@ -553,37 +566,28 @@ class PostgresTimescaleRepository(ITrendRepository):
                     await cur.execute(query, (str(cluster_id),))
                     rows = await cur.fetchall()
 
-            signals = []
-            seen_urls = set()
-            # Walk newest first so the latest metric of a duplicated source_url wins, then restore ASC order.
-            for row in reversed(rows):
-                platform_str, title, metric, velocity, url, geo_str, meta_json, captured, published, c_id, m_id = row
-                if url:
-                    key = (platform_str, url)
-                    if key in seen_urls:
-                        continue
-                    seen_urls.add(key)
-                meta = meta_json if isinstance(meta_json, dict) else json.loads(meta_json or "{}")
-                sig = TrendSignal(
-                    platform=PlatformType(platform_str),
-                    raw_title=title,
-                    metric_value=float(metric or 0.0),
-                    growth_velocity=float(velocity or 0.0),
-                    source_url=url,
-                    geo_code=GeoCode(geo_str),
-                    cluster_id=UUID(str(c_id)) if c_id else None,
-                    mission_id=UUID(str(m_id)) if m_id else None,
-                    metadata=meta,
-                    captured_at=captured,
-                    published_at=published,
+            signals = [
+                self._signal_from_observation(
+                    {
+                        "platform": row[0],
+                        "raw_title": row[1],
+                        "metric_value": row[2],
+                        "growth_velocity": row[3],
+                        "source_url": row[4],
+                        "geo_code": row[5],
+                        "metadata": row[6],
+                        "observed_at": row[7],
+                        "published_at": row[8],
+                    },
+                    cluster_id,
                 )
-                signals.append(sig)
-            signals.reverse()
+                for row in rows
+            ]
+            signals.sort(key=lambda s: (s.captured_at is None, s.captured_at))
             return signals
         except Exception as e:
             logger.error(f"Error fetching signals for cluster {cluster_id}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to fetch cluster signals: {e}") from e
-
 
     async def create_mission(self, mission: ResearchMission) -> ResearchMission:
         pool = await self._get_pool()

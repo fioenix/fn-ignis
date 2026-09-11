@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import math
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -12,6 +11,7 @@ from uuid import UUID, uuid4
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.resources import sql_seed_file
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
+from ignis.domain.cross_platform_score import cross_platform_score
 from ignis.domain.source_identity import resolve_source_identity
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_timeframe
 
@@ -416,8 +416,34 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_save)
 
+    # One observation per source, the most recent in the window, and only observations whose
+    # collection time is known. published_at is not a substitute clock: for the 17,118 legacy
+    # observations it says when the content was posted, and a window built on it would report a
+    # two-year-old video as something seen this week.
+    _LATEST_PER_SOURCE = """
+        WITH latest AS (
+            SELECT
+                o.source_id, o.cluster_id, o.metric_value, o.growth_velocity, o.observed_at,
+                o.published_at, o.observed_title, o.geo_code, o.source_url, o.metadata,
+                s.platform,
+                ROW_NUMBER() OVER (
+                    PARTITION BY o.source_id ORDER BY o.observed_at DESC
+                ) AS rank
+            FROM observations o
+            JOIN sources s ON s.id = o.source_id
+            WHERE o.cluster_id IS NOT NULL
+              AND o.time_provenance = 'exact_ingestion'
+              AND o.observed_at IS NOT NULL
+              AND o.observed_at >= datetime('now', '{modifier}')
+        )
+    """
+
     async def prune_empty_clusters(self) -> int:
-        """Remove clusters left holding no signals after re-clustering."""
+        """Remove clusters holding no observation at all.
+
+        Membership, not recency: a cluster whose only observations are legacy ones outside the
+        default analysis window still describes something the corpus contains.
+        """
         await self._ensure_schema()
 
         def _sync_prune():
@@ -428,7 +454,7 @@ class SqliteTrendRepository(ITrendRepository):
                     """
                     DELETE FROM topic_clusters
                     WHERE id NOT IN (
-                        SELECT DISTINCT cluster_id FROM trend_signals WHERE cluster_id IS NOT NULL
+                        SELECT DISTINCT cluster_id FROM observations WHERE cluster_id IS NOT NULL
                     );
                     """
                 )
@@ -572,6 +598,7 @@ class SqliteTrendRepository(ITrendRepository):
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 10,
     ) -> List[TopicCluster]:
+        """Rank clusters by what was observed in the window, from the new model only."""
         await self._ensure_schema()
 
         interval_map = {
@@ -585,129 +612,95 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                query = f"""
-                    WITH ranked_clusters AS (
-                        SELECT 
-                            tc.id,
-                            tc.canonical_name,
-                            tc.topic_label,
-                            tc.summary_text,
-                            tc.category,
-                            tc.cross_platform_score,
-                            tc.first_seen_at,
-                            tc.last_updated_at,
-                            COUNT(ts.id) AS sig_count,
-                            COUNT(DISTINCT ts.platform) AS plat_count,
-                            COALESCE(SUM(ts.metric_value), 0.0) AS total_metric,
-                            COALESCE(AVG(ts.growth_velocity), 0.0) AS avg_velocity
-                        FROM topic_clusters tc
-                        INNER JOIN trend_signals ts ON ts.cluster_id = tc.id
-                        WHERE datetime(ts.captured_at) >= datetime('now', '{interval_modifier}')
-                        GROUP BY tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category, tc.cross_platform_score, tc.first_seen_at, tc.last_updated_at
-                        ORDER BY sig_count DESC
-                        LIMIT ?
-                    )
-                    SELECT 
-                        rc.id,
-                        rc.canonical_name,
-                        rc.topic_label,
-                        rc.summary_text,
-                        rc.category,
-                        rc.cross_platform_score,
-                        rc.first_seen_at,
-                        rc.last_updated_at,
-                        rc.sig_count,
-                        rc.plat_count,
-                        rc.total_metric,
-                        rc.avg_velocity
-                    FROM ranked_clusters rc;
-                """
-                cur.execute(query, (limit,))
-                rows = cur.fetchall()
-
-                clusters: List[TopicCluster] = []
-                for row in rows:
-                    c_id = row["id"]
-                    first_seen = (
-                        datetime.fromisoformat(row["first_seen_at"])
-                        if row["first_seen_at"]
-                        else None
-                    )
-                    last_updated = datetime.fromisoformat(row["last_updated_at"]) if row["last_updated_at"] else datetime.now(timezone.utc)
-
-                    # Fetch signals captured within the timeframe window for this cluster
-                    sig_query = f"""
-                        SELECT platform, raw_title, metric_value, growth_velocity, source_url, geo_code, metadata, captured_at, published_at
-                        FROM trend_signals
-                        WHERE cluster_id = ? AND datetime(captured_at) >= datetime('now', '{interval_modifier}')
-                        ORDER BY captured_at DESC;
+                rows = cur.execute(
+                    f"""
+                    {self._LATEST_PER_SOURCE.format(modifier=interval_modifier)}
+                    SELECT
+                        tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category,
+                        tc.first_seen_at, tc.last_updated_at,
+                        l.platform, l.observed_title, l.metric_value, l.growth_velocity,
+                        l.source_url, l.geo_code, l.metadata, l.observed_at, l.published_at
+                    FROM latest l
+                    JOIN topic_clusters tc ON tc.id = l.cluster_id
+                    WHERE l.rank = 1
                     """
-                    cur.execute(sig_query, (c_id,))
-                    sig_rows = cur.fetchall()
-
-                    signals_list: List[TrendSignal] = []
-                    for sr in sig_rows:
-                        meta = json.loads(sr["metadata"]) if sr["metadata"] else {}
-                        cap_at = datetime.fromisoformat(sr["captured_at"]) if sr["captured_at"] else datetime.now(timezone.utc)
-                        pub_at = datetime.fromisoformat(sr["published_at"]) if sr["published_at"] else None
-                        signals_list.append(
-                            TrendSignal(
-                                platform=PlatformType(sr["platform"]),
-                                raw_title=sr["raw_title"],
-                                metric_value=sr["metric_value"],
-                                growth_velocity=sr["growth_velocity"],
-                                source_url=sr["source_url"],
-                                geo_code=GeoCode(sr["geo_code"]),
-                                cluster_id=UUID(c_id),
-                                metadata=meta,
-                                captured_at=cap_at,
-                                published_at=pub_at,
-                            )
-                        )
-
-                    # Calculate dynamic cross-platform score matching SemanticClusterer equation
-                    plat_count = row["plat_count"]
-                    total_metric = row["total_metric"]
-                    avg_velocity = row["avg_velocity"]
-
-                    platform_diversity_score = (plat_count / 5.0) * 40.0
-                    metric_score = min(40.0, (math.log10(max(1.0, total_metric + 1.0)) / 8.0) * 40.0)
-                    velocity_score = min(20.0, (math.log10(max(1.0, avg_velocity + 1.0)) / 4.0) * 20.0)
-                    dynamic_score = round(min(100.0, platform_diversity_score + metric_score + velocity_score), 1)
-
-                    persisted_score = row["cross_platform_score"]
-                    final_score = persisted_score if (persisted_score is not None and persisted_score > 0) else dynamic_score
-
-                    plat_cnt = len({s.platform for s in signals_list})
-                    dynamic_summary = f"Aggregated topic from {len(signals_list)} signals across {plat_cnt} platforms."
-                    clusters.append(
-                        TopicCluster(
-                            id=UUID(c_id),
-                            canonical_name=row["canonical_name"],
-                            _topic_label=row["topic_label"],
-                            cross_platform_score=final_score,
-                            summary_text=dynamic_summary,
-                            category=row["category"] or "unclassified",
-                            first_seen_at=first_seen,
-                            last_updated_at=last_updated,
-                            signals=signals_list,
-                        )
-                    )
-
-                # Sort by dynamic cross platform score descending
-                clusters.sort(key=lambda c: (c.cross_platform_score, len(c.signals)), reverse=True)
-                return clusters
+                ).fetchall()
             finally:
                 if self._mem_conn is None:
                     conn.close()
 
+            grouped: Dict[str, List[Any]] = {}
+            for row in rows:
+                grouped.setdefault(row["id"], []).append(row)
+
+            clusters: List[TopicCluster] = []
+            for cluster_id, cluster_rows in grouped.items():
+                head = cluster_rows[0]
+                signals = [
+                    self._signal_from_observation(row, UUID(cluster_id)) for row in cluster_rows
+                ]
+                # Scored by the same function the clusterer uses, from one observation per
+                # source. The arithmetic used to be restated in this query.
+                score = cross_platform_score(
+                    distinct_platforms=len({s.platform for s in signals}),
+                    total_metric=sum(s.metric_value for s in signals),
+                    average_velocity=sum(s.growth_velocity for s in signals) / len(signals),
+                )
+                cluster = TopicCluster(
+                    id=UUID(cluster_id),
+                    canonical_name=head["canonical_name"],
+                    summary_text=head["summary_text"]
+                    or f"{len(signals)} sources across"
+                    f" {len({s.platform for s in signals})} platforms.",
+                    category=head["category"] or "general",
+                    cross_platform_score=score,
+                    signals=signals,
+                    first_seen_at=datetime.fromisoformat(head["first_seen_at"])
+                    if head["first_seen_at"]
+                    else None,
+                    last_updated_at=datetime.fromisoformat(head["last_updated_at"])
+                    if head["last_updated_at"]
+                    else datetime.now(timezone.utc),
+                )
+                cluster.topic_label = head["topic_label"]
+                clusters.append(cluster)
+
+            clusters.sort(key=lambda c: (c.cross_platform_score, len(c.signals)), reverse=True)
+            return clusters[:limit]
+
         return await asyncio.to_thread(_sync_get)
+
+    @staticmethod
+    def _signal_from_observation(row, cluster_id: UUID) -> TrendSignal:
+        try:
+            metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+        except (TypeError, ValueError):
+            metadata = {}
+        return TrendSignal(
+            platform=PlatformType(row["platform"]),
+            raw_title=row["observed_title"] or "",
+            metric_value=float(row["metric_value"] or 0.0),
+            growth_velocity=float(row["growth_velocity"] or 0.0),
+            source_url=row["source_url"],
+            geo_code=GeoCode(row["geo_code"] or "VN"),
+            cluster_id=cluster_id,
+            metadata=metadata,
+            captured_at=datetime.fromisoformat(row["observed_at"]) if row["observed_at"] else None,
+            published_at=datetime.fromisoformat(row["published_at"])
+            if row["published_at"]
+            else None,
+        )
 
     async def get_cluster_signals(
         self,
         cluster_id: UUID,
         timeframe: Timeframe = Timeframe.LAST_7D,
     ) -> List[TrendSignal]:
+        """One signal per source, the most recent observation of it in the window.
+
+        Deduplication is on source_id, not on the URL: the corpus holds one source seen under
+        two URL variants, and a feed-level URL shared by many items.
+        """
         await self._ensure_schema()
 
         interval_map = {
@@ -721,48 +714,18 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                cur.execute(
+                rows = cur.execute(
                     f"""
-                    SELECT platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at, published_at
-                    FROM trend_signals
-                    WHERE cluster_id = ? AND datetime(captured_at) >= datetime('now', '{interval_modifier}')
-                    ORDER BY captured_at DESC
+                    {self._LATEST_PER_SOURCE.format(modifier=interval_modifier)}
+                    SELECT * FROM latest WHERE rank = 1 AND cluster_id = ?
+                    ORDER BY observed_at ASC
                     """,
-                    (str(cluster_id),)
-                )
-                rows = cur.fetchall()
-                signals: List[TrendSignal] = []
-                seen_urls = set()
-                for r in rows:
-                    url = r["source_url"]
-                    if url:
-                        plat = r["platform"]
-                        key = (plat, url)
-                        if key in seen_urls:
-                            continue
-                        seen_urls.add(key)
-                    meta = json.loads(r["metadata"]) if r["metadata"] else {}
-                    cap_at = datetime.fromisoformat(r["captured_at"]) if r["captured_at"] else datetime.now(timezone.utc)
-                    pub_at = datetime.fromisoformat(r["published_at"]) if r["published_at"] else None
-                    signals.append(
-                        TrendSignal(
-                            platform=PlatformType(r["platform"]),
-                            raw_title=r["raw_title"],
-                            metric_value=r["metric_value"],
-                            growth_velocity=r["growth_velocity"],
-                            source_url=r["source_url"],
-                            geo_code=GeoCode(r["geo_code"]),
-                            cluster_id=UUID(r["cluster_id"]) if r["cluster_id"] else None,
-                            mission_id=UUID(r["mission_id"]) if r["mission_id"] else None,
-                            metadata=meta,
-                            captured_at=cap_at,
-                            published_at=pub_at,
-                        )
-                    )
-                return signals
+                    (str(cluster_id),),
+                ).fetchall()
             finally:
                 if self._mem_conn is None:
                     conn.close()
+            return [self._signal_from_observation(row, cluster_id) for row in rows]
 
         return await asyncio.to_thread(_sync_get)
 

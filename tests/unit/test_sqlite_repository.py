@@ -1,4 +1,5 @@
 import pytest
+from ignis.domain.cross_platform_score import cross_platform_score
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -47,7 +48,11 @@ async def test_sqlite_signals_crud(sqlite_repo):
     top_clusters = await sqlite_repo.get_top_clusters(geo=GeoCode.VN, limit=5)
     assert len(top_clusters) >= 1
     assert top_clusters[0].canonical_name == "AI Agent"
-    assert top_clusters[0].cross_platform_score == 85.0
+    # Computed from the observations in the window, not read back from the cluster row. One
+    # source on one platform scores no platform diversity at all, whatever was stored.
+    assert top_clusters[0].cross_platform_score == cross_platform_score(
+        distinct_platforms=1, total_metric=25000.0, average_velocity=150.0
+    )
 
     # 4. Query cluster signals
     cluster_signals = await sqlite_repo.get_cluster_signals(cluster_id)

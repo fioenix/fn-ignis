@@ -1,4 +1,5 @@
 import pytest
+from ignis.domain.cross_platform_score import cross_platform_score
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 from datetime import datetime, timezone
@@ -77,21 +78,33 @@ async def test_get_top_clusters():
     
     cluster_id = uuid4()
     now = datetime.now(timezone.utc)
+    # The query returns aggregates now, not a score: the arithmetic lives in one place and both
+    # the clusterer and this reader call it.
     mock_rows = [
-        (str(cluster_id), "AI Agent Trends", "AI agents", "Summary of AI agents", "technology", 92.0, now, now)
+        (
+            str(cluster_id), "AI Agent Trends", "AI agents", "Summary of AI agents", "technology",
+            now, now,
+            3,          # sources in the window
+            3,          # distinct platforms
+            1_000_000.0,  # total metric
+            5.0,        # average velocity
+            [],         # the observations themselves
+        )
     ]
-    
+
     mock_cursor = AsyncMock()
     mock_cursor.fetchall = AsyncMock(return_value=mock_rows)
     repo._pool = _create_mock_pool(mock_cursor)
 
     clusters = await repo.get_top_clusters(geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=5)
-    
+
     assert len(clusters) == 1
     assert clusters[0].id == cluster_id
     assert clusters[0].canonical_name == "AI Agent Trends"
     assert clusters[0].topic_label == "AI agents", "Display uses the stored label, not the identity key"
-    assert clusters[0].cross_platform_score == 92.0
+    assert clusters[0].cross_platform_score == cross_platform_score(
+        distinct_platforms=3, total_metric=1_000_000.0, average_velocity=5.0
+    )
 
 
 @pytest.mark.asyncio
@@ -108,10 +121,8 @@ async def test_get_cluster_signals(sample_trend_signal):
             sample_trend_signal.source_url,
             sample_trend_signal.geo_code.value,
             '{"traffic": "50K+"}',
-            now,          # captured_at: when this harness pulled it
+            now,          # observed_at: when this harness pulled it
             None,         # published_at: this platform reports none
-            str(cluster_id),
-            None  # mission_id
         )
     ]
     mock_cursor = AsyncMock()
