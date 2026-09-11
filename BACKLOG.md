@@ -162,6 +162,13 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   tế thu **0** signal và **0** platform phản hồi — con số duy nhất còn lại đến từ một observation
   cũ được preserve. Đây là defect về bằng chứng hiển thị cho người dùng, xếp **trước merge**,
   không gộp vào commit nullable-clock.
+- [ ] **Chưa đo: `first_seen_at` đã lưu của các cluster cũ (mở 11/09/2026).** Bản sửa nullable-clock
+  chỉ áp cho cluster **mới tính**; nó không sửa giá trị đã nằm trong `topic_clusters`, và cả hai
+  upsert đều không cập nhật `first_seen_at` khi cluster đã tồn tại. Nghĩa là một cluster từng được
+  tính bằng `min()` trên publish-time clock sẽ giữ nguyên giá trị đó vô thời hạn. Baseline **không**
+  digest `topic_clusters.first_seen_at`, nên hiện chưa biết corpus có bao nhiêu giá trị bắt nguồn từ
+  publish time. Không kéo vào backfill. Trình tự: đo trước — đếm cluster có `first_seen_at` trùng
+  `published_at` của một signal thành viên — rồi mới quyết giữ, xoá hay gắn provenance.
 - [x] **`first_seen_at` của cluster là earliest exact ingestion, nullable (chốt 11/09/2026).**
   `min(s.captured_at for s in group)` raise `TypeError` ngay khi group trộn observation legacy với
   observation exact — đúng hình dạng sẽ xuất hiện sau backfill. Semantics chốt: bỏ qua observation

@@ -36,7 +36,6 @@ import os
 import sqlite3
 import sys
 from collections import Counter, defaultdict
-from hashlib import sha256
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -58,6 +57,21 @@ from ignis.domain.source_identity import (  # noqa: E402
     resolve_source_identity,
 )
 
+# The projection is shared with the backfill and the verifier. A copy here would let the audit
+# measure a corpus the backfill does not produce.
+from ignis.infrastructure.migration.legacy_projection import (  # noqa: E402
+    OBSERVATION_FIELDS,
+    MetricPoint,
+    observation_event,
+    PROVENANCE_EXACT,
+    PROVENANCE_LEGACY,
+    PROVENANCE_UNKNOWN,
+    SignalRow,
+    digest_of,
+    group_points_by_signal,
+    observation_events_for_row,
+)
+
 RESOLUTION_METADATA = IDENTITY_FROM_METADATA
 RESOLUTION_URL = IDENTITY_FROM_URL
 RESOLUTION_NORMALIZED_URL = IDENTITY_FROM_NORMALIZED_URL
@@ -75,39 +89,6 @@ def resolve_identity(platform: str, source_url: Optional[str], metadata: Any) ->
     if identity is None:
         return "", RESOLUTION_UNRESOLVED
     return identity.canonical_identity, identity.identity_source
-
-
-# --- Row model -------------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class SignalRow:
-    signal_id: str
-    platform: str
-    source_url: Optional[str]
-    raw_title: Optional[str]
-    metadata: Any
-    captured_at: Optional[str]
-    published_at: Optional[str]
-    metric_value: Optional[float]
-    growth_velocity: Optional[float]
-    geo_code: Optional[str]
-    mission_id: Optional[str]
-    cluster_id: Optional[str]
-
-
-@dataclass(frozen=True)
-class MetricPoint:
-    """One row of signal_metrics: the same source observed again, with its own metric payload."""
-
-    signal_id: str
-    captured_at: Optional[str]
-    metric_value: Optional[float]
-    growth_velocity: Optional[float]
-
-    @property
-    def payload(self) -> Tuple[Optional[str], Optional[float], Optional[float]]:
-        return (self.captured_at, self.metric_value, self.growth_velocity)
 
 
 @dataclass
@@ -172,14 +153,18 @@ class PostgresReader(ReadOnlyReader):
 
     def metric_points(self) -> Iterable[MetricPoint]:
         for row in self._conn.execute(
-            "SELECT signal_id, captured_at, metric_value, growth_velocity FROM signal_metrics"
-            " ORDER BY signal_id, captured_at, metric_value, growth_velocity"
+            "SELECT signal_id, captured_at, metric_value, growth_velocity, id"
+            " FROM signal_metrics"
+            " ORDER BY signal_id, captured_at, metric_value, growth_velocity, id"
         ):
             yield MetricPoint(
                 signal_id=str(row[0]),
                 captured_at=row[1].isoformat() if row[1] else None,
                 metric_value=float(row[2]) if row[2] is not None else None,
                 growth_velocity=float(row[3]) if row[3] is not None else None,
+                # Surrogate, and never part of a member. The backfill derives the observation id
+                # from it, and the lineage rule uses it to drop the same duplicate every run.
+                metric_id=str(row[4]),
             )
 
     def mission_ids(self) -> Sequence[str]:
@@ -225,8 +210,9 @@ class SqliteReader(ReadOnlyReader):
     def metric_points(self) -> Iterable[MetricPoint]:
         try:
             rows = self._conn.execute(
-                "SELECT signal_id, captured_at, metric_value, growth_velocity FROM signal_metrics"
-                " ORDER BY signal_id, captured_at, metric_value, growth_velocity"
+                "SELECT signal_id, captured_at, metric_value, growth_velocity, id"
+                " FROM signal_metrics"
+                " ORDER BY signal_id, captured_at, metric_value, growth_velocity, id"
             ).fetchall()
         except sqlite3.OperationalError:
             return []  # a database predating the metric history table
@@ -236,6 +222,7 @@ class SqliteReader(ReadOnlyReader):
                 captured_at=r[1],
                 metric_value=float(r[2]) if r[2] is not None else None,
                 growth_velocity=float(r[3]) if r[3] is not None else None,
+                metric_id=str(r[4]),
             )
             for r in rows
         ]
@@ -314,9 +301,7 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     # genuinely reduce them. In this corpus those rows carry three distinct growth_velocity values,
     # so they are distinct collection events and no unique constraint says otherwise. It is the
     # surrogate observation id that keeps them apart.
-    points_by_signal: Dict[str, List[MetricPoint]] = defaultdict(list)
-    for point in metric_points:
-        points_by_signal[point.signal_id].append(point)
+    points_by_signal = group_points_by_signal(metric_points)
 
     observation_members: List[str] = []
     provenance_buckets: Counter = Counter()
@@ -324,31 +309,17 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
     for row in signals:
         if row.signal_id not in identity_of:
             continue
-        identity = identity_of[row.signal_id]
-        row_payload = (row.captured_at, row.metric_value, row.growth_velocity)
-        member, provenance = observation_event(
-            identity, identity_source_of[row.signal_id], row, *row_payload
-        )
-        observation_members.append(member)
-        provenance_buckets[provenance] += 1
-        merged_once = False
-        for point in points_by_signal.get(row.signal_id, []):
-            if point.payload == row_payload and not merged_once:
-                merged_once = True  # the sql/008 copy of the row itself
-                lineage_merges += 1
-                continue
-            # Derived on this point's own captured_at. It may land in a different bucket from its
-            # parent row, which is the whole reason the derivation is per event.
-            member, point_provenance = observation_event(
-                identity,
-                identity_source_of[row.signal_id],
-                row,
-                point.captured_at,
-                point.metric_value,
-                point.growth_velocity,
+        points = points_by_signal.get(row.signal_id, [])
+        events = list(
+            observation_events_for_row(
+                row, identity_of[row.signal_id], identity_source_of[row.signal_id], points
             )
-            observation_members.append(member)
-            provenance_buckets[point_provenance] += 1
+        )
+        # One event per row plus one per point, less the sql/008 copies the projection dropped.
+        lineage_merges += 1 + len(points) - len(events)
+        for event in events:
+            observation_members.append(event.member)
+            provenance_buckets[event.time_provenance] += 1
 
     observation_arithmetic = {
         "formula": (
@@ -613,148 +584,12 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
 # What one observation member commits to preserving. A field absent from this tuple is an
 # intentional loss and has to appear in INTENTIONAL_LOSSES with a reason, so that "the digest
 # matched" can never mean "the digest ignored the column that changed".
-OBSERVATION_FIELDS = (
-    "canonical_source_identity",
-    "observed_at",
-    "published_at",
-    "time_provenance",
-    "observed_title",
-    "metric_value",
-    "growth_velocity",
-    "geo_code",
-    "normalized_source_url",
-    "canonical_metadata",
-    # 11th, from schema_version 5. The route that resolved this sighting to its source is a fact
-    # about the sighting: 3 YouTube videos reached the corpus by both routes, so a source-level
-    # column would keep one and lose the other. Inside the digest, so a migration that drops the
-    # distinction cannot leave every count and every digest matching.
-    "identity_source",
-)
-
 INTENTIONAL_LOSSES = {
     "trend_signals.id": "surrogate key; the migration reassigns it by design",
     "signal_metrics.id": "surrogate key; the migration reassigns it by design",
     "trend_signals.mission_id": "carried by the mission_associations digest instead",
     "trend_signals.cluster_id": "carried by the cluster_memberships digest instead",
 }
-
-
-PROVENANCE_EXACT = "exact_ingestion"
-PROVENANCE_LEGACY = "legacy_publish_only"
-PROVENANCE_UNKNOWN = "unknown"
-
-# Row titles Google Trends gives its keyword-probe rows. Third-party wording, matched verbatim;
-# sql/015 excluded exactly these from its publish-time backfill because they were always stamped
-# with the ingestion time and have no publish concept.
-GOOGLE_PROBE_TITLE_PREFIX = "Google Search Trends:"
-
-
-def row_clock_may_be_a_publish_time(row: "SignalRow") -> bool:
-    """Whether this row was written by one of the paths that put a publish time in captured_at.
-
-    sql/015 names them: both YouTube paths and the Google Trends RSS feed. Google's keyword-probe
-    rows are excluded there because they were always stamped with the ingestion time and have no
-    publish concept, and their raw_title is what distinguishes them.
-    """
-    if row.platform == "youtube":
-        return True
-    if row.platform == "google":
-        return not (row.raw_title or "").startswith(GOOGLE_PROBE_TITLE_PREFIX)
-    return False
-
-
-def derive_time_provenance(
-    row: "SignalRow", event_captured_at: Optional[str]
-) -> Tuple[str, Optional[str]]:
-    """Decide what ONE observation's captured_at means. Returns (provenance, observed_at).
-
-    Per event, not per row. trend_signals is a mutable current snapshot: both repositories
-    overwrite captured_at on every re-poll, while each signal_metrics row keeps the captured_at of
-    the poll that wrote it. So a parent row can currently hold a proven ingestion time while its
-    metric history still contains a point stamped with the publish time, and inheriting the
-    parent's present clock would misfile that point. An earlier version of this function took only
-    the row and did exactly that.
-
-    The test is sql/015's own signature: that migration backfilled published_at from the
-    platform's value, so an event whose captured_at equals published_at was written before the fix
-    by a path that stored the publish time.
-    """
-    if not row_clock_may_be_a_publish_time(row):
-        # Every other connector always wrote the ingestion time, for every event.
-        return PROVENANCE_EXACT, event_captured_at
-
-    if row.published_at is None:
-        # Nothing to compare this event against; refuse to guess either way.
-        return PROVENANCE_UNKNOWN, None
-    if event_captured_at == row.published_at:
-        return PROVENANCE_LEGACY, None
-    return PROVENANCE_EXACT, event_captured_at
-
-
-def canonical_metadata(metadata: Any) -> str:
-    """Metadata as a stable string, so a key-order change is not read as a data change."""
-    if not isinstance(metadata, dict):
-        return ""
-    return json.dumps(metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-def observation_member(
-    identity: str,
-    identity_source: str,
-    row: "SignalRow",
-    observed_at: Optional[str],
-    time_provenance: str,
-    metric_value: Optional[float],
-    growth_velocity: Optional[float],
-) -> str:
-    """Serialize one observation over every field OBSERVATION_FIELDS names.
-
-    observed_at and time_provenance are arguments rather than being derived here, so a test can
-    hold every other field constant and vary provenance alone. The previous isolation test moved a
-    row between buckets by changing its platform, which also changed the canonical identity, the
-    URL, the metadata and observed_at -- that digest would have differed with time_provenance
-    removed entirely, so it proved nothing about provenance.
-
-    A metric point inherits title, geo, URL and metadata from the trend_signals row it hangs off,
-    because signal_metrics stores none of those. It does not inherit that row's clock.
-    """
-    parts = (
-        identity,
-        observed_at or "",
-        row.published_at or "",
-        time_provenance,
-        (row.raw_title or "").strip(),
-        "" if metric_value is None else repr(metric_value),
-        "" if growth_velocity is None else repr(growth_velocity),
-        row.geo_code or "",
-        normalize_url(row.source_url),
-        canonical_metadata(row.metadata),
-        identity_source,
-    )
-    assert len(parts) == len(OBSERVATION_FIELDS)
-    return "\x1f".join(parts)
-
-
-def observation_event(
-    identity: str,
-    identity_source: str,
-    row: "SignalRow",
-    event_captured_at: Optional[str],
-    metric_value: Optional[float],
-    growth_velocity: Optional[float],
-) -> Tuple[str, str]:
-    """One observation as (member, provenance), deriving the clock for this event alone.
-
-    A metric point inherits its parent row's identity_source, because the route is a property of
-    the row the point hangs off: signal_metrics stores neither metadata nor a URL, so there is
-    nothing on the point itself to resolve. Two rows of one source may still differ, and that is
-    the case the field exists to preserve.
-    """
-    provenance, observed_at = derive_time_provenance(row, event_captured_at)
-    member = observation_member(
-        identity, identity_source, row, observed_at, provenance, metric_value, growth_velocity
-    )
-    return member, provenance
 
 
 def _merge_reason_for(rows: Sequence["SignalRow"]) -> str:
@@ -768,21 +603,6 @@ def _merge_reason_for(rows: Sequence["SignalRow"]) -> str:
     if len(titles) == 1:
         return MERGE_REPEAT
     return MERGE_UNCLASSIFIED
-
-
-def digest_of(members: Iterable[str]) -> str:
-    """A SHA-256 over one sorted canonical set, comparable across the migration.
-
-    The members are business identities, never surrogate keys. A digest keyed on trend_signals.id
-    would change the moment rows are rewritten, which would make the pre/post comparison
-    meaningless exactly when it matters. Keying on platform identity plus the observed values
-    means the post-migration run can recompute the same digest from the new tables.
-    """
-    hasher = sha256()
-    for member in sorted(members):
-        hasher.update(member.encode("utf-8"))
-        hasher.update(b"\x00")
-    return hasher.hexdigest()
 
 
 def build_sanitized_report(report: Dict[str, Any]) -> Dict[str, Any]:

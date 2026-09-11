@@ -645,7 +645,10 @@ def test_provenance_alone_changes_the_serialized_member(tmp_path):
     differed with time_provenance stripped out entirely, so it proved nothing about provenance.
     Calling the serializer directly is the only way to vary one field.
     """
-    from scripts.migration_reconciliation_audit import SignalRow, observation_member
+    from ignis.infrastructure.migration.legacy_projection import (
+        SignalRow,
+        observation_member,
+    )
 
     row = SignalRow(
         signal_id="s1", platform="youtube", source_url="https://www.youtube.com/watch?v=v",
@@ -736,7 +739,10 @@ def test_identity_source_alone_changes_the_serialized_member():
     version of that test moved a row between buckets by changing its platform, which changed five
     fields at once and would have passed with the field removed entirely.
     """
-    from scripts.migration_reconciliation_audit import SignalRow, observation_member
+    from ignis.infrastructure.migration.legacy_projection import (
+        SignalRow,
+        observation_member,
+    )
 
     row = SignalRow(
         signal_id="s1",

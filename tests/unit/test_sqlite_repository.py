@@ -192,6 +192,32 @@ async def test_an_existing_database_stops_requiring_a_cluster_first_seen_time(tm
             " VALUES ('kept', 'an older cluster', '2026-08-01T00:00:00+00:00',"
             " '2026-08-01T00:00:00+00:00')"
         )
+        # An observation already pointing at that cluster, written before the rebuild runs.
+        # Dropping the old table with foreign keys enforced fires ON DELETE SET NULL and strips
+        # the cluster off it, so the reference has to pre-date the rebuild or the test measures
+        # nothing. Both tables are created here by hand for the same reason: opening the
+        # repository first would rebuild before the reference existed.
+        conn.execute(
+            "CREATE TABLE sources (id TEXT PRIMARY KEY, platform TEXT NOT NULL,"
+            " external_id TEXT NOT NULL, UNIQUE (platform, external_id))"
+        )
+        conn.execute(
+            "CREATE TABLE observations ("
+            " id TEXT PRIMARY KEY,"
+            " source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,"
+            " cluster_id TEXT REFERENCES topic_clusters(id) ON DELETE SET NULL,"
+            " observed_at TEXT, published_at TEXT, time_provenance TEXT NOT NULL,"
+            " identity_source TEXT NOT NULL, observed_title TEXT, metric_value REAL,"
+            " growth_velocity REAL, geo_code TEXT, source_url TEXT, metadata TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO sources (id, platform, external_id) VALUES ('s1', 'youtube', 'video:x')"
+        )
+        conn.execute(
+            "INSERT INTO observations (id, source_id, cluster_id, observed_at, metric_value,"
+            " time_provenance, identity_source) VALUES ('o1', 's1', 'kept',"
+            " '2026-09-11T00:00:00+00:00', 1.0, 'exact_ingestion', 'metadata_external_id')"
+        )
 
     repository = SqliteTrendRepository(str(db_path))
     try:
@@ -204,7 +230,31 @@ async def test_an_existing_database_stops_requiring_a_cluster_first_seen_time(tm
             survived = conn.execute(
                 "SELECT first_seen_at FROM topic_clusters WHERE id = 'kept'"
             ).fetchone()
+            still_clustered = conn.execute(
+                "SELECT cluster_id FROM observations WHERE id = 'o1'"
+            ).fetchone()
+            not_null_count = sum(
+                1
+                for row in conn.execute("PRAGMA table_info(topic_clusters)")
+                if row[1] == "first_seen_at" and row[3] == 1
+            )
+            dangling = conn.execute("PRAGMA foreign_key_check").fetchall()
         assert stored[0] is None
         assert survived[0] == "2026-08-01T00:00:00+00:00", "the rebuild must not lose rows"
+        assert still_clustered[0] == "kept", "the rebuild must not strip the cluster off an observation"
+        assert not_null_count == 0
+        assert dangling == [], f"the rebuild left dangling references: {dangling}"
+        # Idempotent: opening the database again must not rebuild or change anything.
+        await repository.close()
+        again = SqliteTrendRepository(str(db_path))
+        try:
+            await again._ensure_schema()
+            with sqlite3.connect(db_path) as conn:
+                assert (
+                    conn.execute("SELECT count(*) FROM topic_clusters").fetchone()[0] == 2
+                )
+                assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        finally:
+            await again.close()
     finally:
         await repository.close()
