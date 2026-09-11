@@ -148,17 +148,24 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   `published_at = captured_at` cũ, `time_provenance = legacy_publish_only`. Time-window score mặc
   định chỉ dùng `exact_ingestion`; dữ liệu legacy vẫn được xuất hiện trong all-history hoặc
   published-time analysis nhưng output phải gắn cảnh báo approximate.
-- [ ] **Chưa sửa: đường discovery ghi signal trước khi cluster, nên cluster membership không
-  được persist (mở 11/09/2026).** `AutonomousDiscoveryUseCase` gọi `save_signals()` ở bước 4 rồi
+- [x] **Discovery gắn cluster bằng `assign_observation_clusters`, không ghi lại signal (chốt
+  11/09/2026).** `AutonomousDiscoveryUseCase` gọi `save_signals()` ở bước 4 rồi
   mới `save_clusters()` ở bước 6, và không ghi lại signal sau đó — observation nằm lại với
   `cluster_id = NULL`. Đây là lỗi **có sẵn**, không phải regression: trên Postgres, `save_clusters`
   chỉ gán `cluster_id` trong bộ nhớ, nên đường này chưa bao giờ persist membership. Trên SQLite
   trước đây nó "có" membership nhờ chính đường ghi trùng vừa bị cắt, tức là bằng cách tạo dòng
   thứ hai cho cùng một source. Hai cách sửa, chưa chọn: (1) đảo thứ tự trong discovery để cluster
-  chạy trước khi persist — đổi hành vi của một use case ngoài phạm vi commit persistence;
-  (2) thêm một thao tác repository gán cluster cho observation đã ghi, vì đây là `UPDATE` chứ
-  không phải observation mới — gọi lại `save_signals()` sẽ đếm đôi observation. Không test nào
-  đang đỏ vì chuyện này.
+  chạy trước khi persist; (2) thêm thao tác repository gán cluster cho observation đã ghi. Chọn
+  (2), vì membership trên một observation đã tồn tại là `UPDATE`, còn gọi lại `save_signals()`
+  đúng nghĩa tạo collection event thứ hai. Test khoá bằng **thứ tự lời gọi**: sau `save_clusters`
+  không được có `save_signals` nào nữa.
+- [x] **Read contract theo kịp model mới (chốt 11/09/2026).** `TrendSignal` mang thêm
+  `observation_id`, `identity_source`, `time_provenance`, và `captured_at` thành nullable —
+  `None` nghĩa là không biết thời điểm thu thập, đúng trạng thái của 17.118 observation legacy.
+  SQLite trước đây thay `NULL` bằng `datetime.now()`, tức biến "không biết" thành "vừa thu thập",
+  và bỏ luôn `cluster_id` dù query đã đọc. Quota fallback không còn đẩy observation cũ qua writer:
+  nó giữ evidence bằng `attach_mission_evidence`. `save_signals()` trả số observation thật sự ghi,
+  không còn trả số dòng insert vào bảng legacy.
 - [x] **`INSERT OR REPLACE` trên SQLite phá dữ liệu con khi bật foreign key (sửa 11/09/2026).**
   `REPLACE` là `DELETE` rồi `INSERT`, nên mỗi lần cập nhật trạng thái mission sẽ cascade xoá sạch
   `mission_evidence` vừa ghi, và mỗi lần lưu lại một cluster sẽ `SET NULL` cluster của mọi
@@ -187,7 +194,8 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   membership vẫn **15.754** nhưng identity nằm nhiều cluster tăng **172 → 175**; reason code
   `repeat_observation_of_one_source` 14.089 → 14.095. Cả bốn digest đổi, audit vẫn `BALANCED`.
   Đã chốt 1.924: giữ 1.927 đồng nghĩa backfill cố tình tái tạo ba source đã biết là bị chia sai.
-  Đường phân giải có chỗ riêng là `sources.identity_source`, không tham gia key. Baseline
+  Đường phân giải có chỗ riêng, không tham gia key — v5 chuyển nó xuống
+  `observations.identity_source`, xem mục dưới. Baseline
   regenerate thành `schema_version: 4`, member counts `1.924 / 18.597 / 1.301 / 15.754`, cả bốn
   digest đổi. Kéo theo một quyết định kiến trúc: policy không được nằm trong script audit, vì
   commit persistence viết lại mapping sẽ thành định nghĩa identity thứ hai. Resolver canonical ở

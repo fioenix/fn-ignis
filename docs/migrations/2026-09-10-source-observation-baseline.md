@@ -159,8 +159,8 @@ hai title khác nhau, nên title là thứ được quan sát về một source 
 Bản v3 đếm 1.927 vì nó khoá identity theo **tên field metadata** đã chứa identifier. Tên field là
 cách audit tìm ra identifier, không phải bản chất object: cùng một video YouTube vào corpus hai
 lần — một lần có `video_id` trong metadata, một lần chỉ parse được từ URL — bị tính thành hai
-canonical source. Có 3 cặp như vậy, và 1.927 − 3 = **1.924**. Đường phân giải vẫn được ghi, ở
-`sources.identity_source`, nhưng không tham gia key.
+canonical source. Có 3 cặp như vậy, và 1.927 − 3 = **1.924**. Đường phân giải vẫn được ghi và
+không tham gia key; v5 đặt nó ở `observations.identity_source`, vì route thuộc lần quan sát.
 
 | Nhãn connector | Namespace |
 |---|---|

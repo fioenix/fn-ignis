@@ -35,10 +35,14 @@ async def test_save_signals_empty_list():
 async def test_save_signals_batch_insert(sample_trend_signal):
     repo = PostgresTimescaleRepository(dsn="postgresql://mock")
     mock_cursor = AsyncMock()
+    # The writer reads back the ids the database assigns, so the mock has to return the kind of
+    # value a database returns. A bare AsyncMock here would only prove the mock is a mock.
+    mock_cursor.fetchone.return_value = (uuid4(),)
     repo._pool = _create_mock_pool(mock_cursor)
 
     count = await repo.save_signals([sample_trend_signal])
-    
+
+    # One collection event. The number used to be the legacy table's insert count.
     assert count == 1
     assert mock_cursor.executemany.called
     query_arg, params_arg = mock_cursor.executemany.call_args[0]

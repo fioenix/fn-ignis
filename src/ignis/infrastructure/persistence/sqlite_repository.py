@@ -369,10 +369,12 @@ class SqliteTrendRepository(ITrendRepository):
                         """,
                         (s_id, cap_at, s.metric_value, s.growth_velocity),
                     )
-                self._record_observations(cur, signals)
+                recorded = self._record_observations(cur, signals)
 
                 conn.commit()
-                return inserted
+                # Collection events, not first sightings. The old number counted inserts into
+                # the legacy table, so a second pass over a known source reported 0.
+                return recorded
             finally:
                 if self._mem_conn is None:
                     conn.close()
@@ -461,6 +463,9 @@ class SqliteTrendRepository(ITrendRepository):
                     json.dumps(signal.metadata or {}, ensure_ascii=False),
                 ),
             )
+            signal.observation_id = UUID(observation_id)
+            signal.identity_source = identity.identity_source
+            signal.time_provenance = "exact_ingestion"
             written += 1
 
             if signal.mission_id:
@@ -862,7 +867,8 @@ class SqliteTrendRepository(ITrendRepository):
                 cur.execute(
                     "SELECT s.platform, o.observed_title, o.metric_value, o.growth_velocity,"
                     " o.source_url, o.geo_code, e.mission_id, o.metadata, o.observed_at,"
-                    " o.published_at, o.cluster_id"
+                    " o.published_at, o.cluster_id, o.id AS observation_id, o.identity_source,"
+                    " o.time_provenance"
                     " FROM mission_evidence e"
                     " JOIN observations o ON o.id = e.observation_id"
                     " JOIN sources s ON s.id = o.source_id"
@@ -873,7 +879,12 @@ class SqliteTrendRepository(ITrendRepository):
                 signals: List[TrendSignal] = []
                 for r in rows:
                     meta = json.loads(r["metadata"]) if r["metadata"] else {}
-                    cap_at = datetime.fromisoformat(r["observed_at"]) if r["observed_at"] else datetime.now(timezone.utc)
+                    # No substitute clock. A NULL observed_at means the collection time was
+                    # never recorded, and datetime.now() here would have turned every one of
+                    # the 17,118 legacy observations into "collected when you ran the query".
+                    cap_at = (
+                        datetime.fromisoformat(r["observed_at"]) if r["observed_at"] else None
+                    )
                     pub_at = datetime.fromisoformat(r["published_at"]) if r["published_at"] else None
                     signals.append(
                         TrendSignal(
@@ -883,7 +894,11 @@ class SqliteTrendRepository(ITrendRepository):
                             growth_velocity=r["growth_velocity"],
                             source_url=r["source_url"],
                             geo_code=GeoCode(r["geo_code"]),
+                            cluster_id=UUID(r["cluster_id"]) if r["cluster_id"] else None,
                             mission_id=UUID(r["mission_id"]) if r["mission_id"] else None,
+                            observation_id=UUID(r["observation_id"]),
+                            identity_source=r["identity_source"],
+                            time_provenance=r["time_provenance"],
                             metadata=meta,
                             captured_at=cap_at,
                             published_at=pub_at,
@@ -896,6 +911,57 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.close()
 
         return await asyncio.to_thread(_sync_get)
+
+    async def assign_observation_clusters(self, signals: List[TrendSignal]) -> int:
+        """Set the cluster on observations already written. See the Postgres docstring."""
+        updates = [
+            (str(s.cluster_id), str(s.observation_id))
+            for s in signals
+            if s.observation_id and s.cluster_id
+        ]
+        if not updates:
+            return 0
+        await self._ensure_schema()
+
+        def _sync_assign():
+            conn = self._get_connection()
+            try:
+                conn.executemany("UPDATE observations SET cluster_id = ? WHERE id = ?", updates)
+                conn.commit()
+                return len(updates)
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_assign)
+
+    async def attach_mission_evidence(self, mission_id: UUID, signals: List[TrendSignal]) -> int:
+        """Record that a mission used observations that already exist. See Postgres."""
+        rows = [
+            (str(uuid4()), str(mission_id), str(s.observation_id),
+             datetime.now(timezone.utc).isoformat())
+            for s in signals
+            if s.observation_id
+        ]
+        if not rows:
+            return 0
+        await self._ensure_schema()
+
+        def _sync_attach():
+            conn = self._get_connection()
+            try:
+                conn.executemany(
+                    "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at)"
+                    " VALUES (?, ?, ?, ?) ON CONFLICT (mission_id, observation_id) DO NOTHING",
+                    rows,
+                )
+                conn.commit()
+                return len(rows)
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_attach)
 
     async def delete_mission_signals(self, mission_id: UUID) -> int:
         await self._ensure_schema()

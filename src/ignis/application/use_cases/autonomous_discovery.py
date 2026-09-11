@@ -259,6 +259,10 @@ class AutonomousDiscoveryUseCase:
         if all_signals:
             clusters = await self._clusterer.cluster_signals(all_signals)
             await self._repository.save_clusters(clusters)
+            # The signals were persisted before they were clustered, so membership lands as an
+            # update on the observations already written. Calling save_signals again would
+            # record every one of them a second time, as sightings that never happened.
+            await self._repository.assign_observation_clusters(all_signals)
 
         # Load dynamic lexicons & foreign stopwords from database
         try:

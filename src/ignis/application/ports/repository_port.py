@@ -81,7 +81,29 @@ class ITrendRepository(ABC):
 
     @abstractmethod
     async def delete_mission_signals(self, mission_id: UUID) -> int:
-        """Delete existing signals for a mission before a new targeted run (Replace mode)."""
+        """Withdraw a mission's claims before a new targeted run.
+
+        The name predates the model. Sources and observations are shared with every other
+        mission that observed them, so only the association rows go.
+        """
+        pass
+
+    @abstractmethod
+    async def assign_observation_clusters(self, signals: List[TrendSignal]) -> int:
+        """Set the cluster on observations that were already written.
+
+        For any path that clusters after persisting. Putting the signals back through
+        save_signals would record each of them as a second collection event.
+        """
+        pass
+
+    @abstractmethod
+    async def attach_mission_evidence(self, mission_id: UUID, signals: List[TrendSignal]) -> int:
+        """Record that a mission used observations that already exist.
+
+        For the quota fallback: a mission keeps the evidence it had when a connector returns
+        nothing, without the harness claiming to have polled a platform it could not reach.
+        """
         pass
 
     @abstractmethod

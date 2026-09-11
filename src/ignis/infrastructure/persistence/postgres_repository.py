@@ -157,12 +157,16 @@ class PostgresTimescaleRepository(ITrendRepository):
                             all_metric_points,
                         )
 
-                    await self._record_observations(cur, signals)
+                    recorded = await self._record_observations(cur, signals)
             logger.info(
                 f"Processed {len(signals)} signals into database "
-                f"({len(to_insert)} inserted, {len(updates)} refreshed)."
+                f"({recorded} observations recorded, {len(to_insert)} legacy rows inserted, "
+                f"{len(updates)} refreshed)."
             )
-            return len(to_insert)
+            # Collection events, not rows inserted into the legacy table. The old number counted
+            # first sightings only, so a second pass over a known source reported 0 while the
+            # observation count went up.
+            return recorded
         except Exception as e:
             logger.error(f"Error saving signals to database: {e}", exc_info=True)
             raise RepositoryException(f"Failed to batch insert signals: {e}") from e
@@ -231,6 +235,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                 ),
             )
             observation_id = (await cur.fetchone())[0]
+            # The caller needs this to attach a cluster later without writing a second sighting.
+            signal.observation_id = UUID(str(observation_id))
+            signal.identity_source = identity.identity_source
+            signal.time_provenance = "exact_ingestion"
             written += 1
 
             if signal.mission_id:
@@ -790,7 +798,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                 o.observed_at,
                 o.published_at,
                 o.cluster_id,
-                e.mission_id
+                e.mission_id,
+                o.id,
+                o.identity_source,
+                o.time_provenance
             FROM mission_evidence e
             JOIN observations o ON o.id = e.observation_id
             JOIN sources s ON s.id = o.source_id
@@ -805,7 +816,10 @@ class PostgresTimescaleRepository(ITrendRepository):
 
             signals = []
             for row in rows:
-                platform_str, title, metric, velocity, url, geo_str, meta_json, captured, published, c_id, m_id = row
+                (
+                    platform_str, title, metric, velocity, url, geo_str, meta_json, observed,
+                    published, c_id, m_id, o_id, route, provenance,
+                ) = row
                 meta = meta_json if isinstance(meta_json, dict) else json.loads(meta_json or "{}")
                 sig = TrendSignal(
                     platform=PlatformType(platform_str),
@@ -816,8 +830,13 @@ class PostgresTimescaleRepository(ITrendRepository):
                     geo_code=GeoCode(geo_str),
                     cluster_id=UUID(str(c_id)) if c_id else None,
                     mission_id=UUID(str(m_id)) if m_id else None,
+                    observation_id=UUID(str(o_id)),
+                    identity_source=route,
+                    time_provenance=provenance,
                     metadata=meta,
-                    captured_at=captured,
+                    # Passed through exactly as stored. NULL means the collection time was never
+                    # recorded, and substituting one here would turn that into "collected now".
+                    captured_at=observed,
                     published_at=published,
                 )
                 signals.append(sig)
@@ -825,6 +844,58 @@ class PostgresTimescaleRepository(ITrendRepository):
         except Exception as e:
             logger.error(f"Error fetching signals for mission {mission_id}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to fetch mission signals: {e}") from e
+
+    async def assign_observation_clusters(self, signals: List[TrendSignal]) -> int:
+        """Set the cluster on observations already written.
+
+        Membership arrived after the sighting was stored -- the discovery pass clusters at the
+        end. Putting the signals back through save_signals would record each of them a second
+        time, so this is an UPDATE keyed on the observation the writer returned.
+        """
+        updates = [
+            (str(s.cluster_id), str(s.observation_id))
+            for s in signals
+            if s.observation_id and s.cluster_id
+        ]
+        if not updates:
+            return 0
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        "UPDATE observations SET cluster_id = %s WHERE id = %s;", updates
+                    )
+            return len(updates)
+        except Exception as e:
+            logger.error(f"Error assigning clusters to observations: {e}", exc_info=True)
+            raise RepositoryException(f"Failed to assign observation clusters: {e}") from e
+
+    async def attach_mission_evidence(self, mission_id: UUID, signals: List[TrendSignal]) -> int:
+        """Record that a mission used observations that already exist.
+
+        The quota fallback needs this: when a connector returns nothing, the mission keeps the
+        evidence it had. Re-submitting those observations through the writer would claim the
+        harness polled a platform it could not reach.
+        """
+        rows = [
+            (str(mission_id), str(s.observation_id)) for s in signals if s.observation_id
+        ]
+        if not rows:
+            return 0
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        "INSERT INTO mission_evidence (mission_id, observation_id)"
+                        " VALUES (%s, %s) ON CONFLICT (mission_id, observation_id) DO NOTHING;",
+                        rows,
+                    )
+            return len(rows)
+        except Exception as e:
+            logger.error(f"Error attaching mission evidence: {e}", exc_info=True)
+            raise RepositoryException(f"Failed to attach mission evidence: {e}") from e
 
     async def delete_mission_signals(self, mission_id: UUID) -> int:
         """Withdraw this mission's claims, and nothing else.
