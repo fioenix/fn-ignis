@@ -26,11 +26,9 @@ async def test_sqlite_signals_crud(sqlite_repo):
         captured_at=datetime.now(timezone.utc),
     )
 
-    # 1. Save signals
-    saved_count = await sqlite_repo.save_signals([signal])
-    assert saved_count == 1
-
-    # 2. Save cluster and link signal
+    # 1. Save the cluster first, then the signals. That is the order the pipeline uses, and it
+    # is the order the schema requires: an observation carries its cluster as a foreign key, so
+    # the cluster has to exist before the observation referencing it is written.
     cluster_id = uuid4()
     cluster = TopicCluster(
         id=cluster_id,
@@ -39,6 +37,10 @@ async def test_sqlite_signals_crud(sqlite_repo):
         signals=[signal],
     )
     await sqlite_repo.save_clusters([cluster])
+
+    # 2. Save signals
+    saved_count = await sqlite_repo.save_signals([signal])
+    assert saved_count == 1
 
 
     # 3. Query top clusters
@@ -86,6 +88,11 @@ async def test_sqlite_mission_lifecycle(sqlite_repo):
         metric_value=100.0,
         mission_id=mission_id,
         geo_code=GeoCode.VN,
+        # A signal now has to say which external object it observed. Every row in the corpus
+        # does; one that identifies nothing is skipped by the writer and counted, rather than
+        # stored under an invented key.
+        source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        metadata={"video_id": "dQw4w9WgXcQ"},
     )
     await sqlite_repo.save_signals([sig1])
 

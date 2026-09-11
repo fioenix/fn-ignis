@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.resources import sql_seed_file
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
+from ignis.domain.source_identity import resolve_source_identity
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_timeframe
 
 from ignis.infrastructure.auth.crypto import decrypt_credentials, encrypt_credentials
@@ -368,6 +369,8 @@ class SqliteTrendRepository(ITrendRepository):
                         """,
                         (s_id, cap_at, s.metric_value, s.growth_velocity),
                     )
+                self._record_observations(cur, signals)
+
                 conn.commit()
                 return inserted
             finally:
@@ -401,6 +404,79 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_prune)
 
+    def _record_observations(self, cur, signals: List[TrendSignal]) -> int:
+        """Write each signal as one observation of one canonical source.
+
+        The same three properties as the Postgres path, restated here rather than shared, because
+        the two backends speak different SQL. What is shared is the part that must never diverge:
+        both resolve identity through ignis.domain.source_identity.
+        """
+        written = 0
+        for signal in signals:
+            platform = (
+                signal.platform.value if hasattr(signal.platform, "value") else str(signal.platform)
+            )
+            identity = resolve_source_identity(platform, signal.source_url, signal.metadata)
+            if identity is None:
+                logger.warning("Signal has no resolvable external identity, skipped: %s", platform)
+                continue
+
+            # One statement, not a SELECT then an INSERT: two passes racing on one video would
+            # both find nothing and both insert.
+            row = cur.execute(
+                "INSERT INTO sources (id, platform, external_id) VALUES (?, ?, ?)"
+                " ON CONFLICT (platform, external_id) DO UPDATE SET platform = excluded.platform"
+                " RETURNING id;",
+                (str(uuid4()), identity.platform, identity.external_id),
+            ).fetchone()
+            source_id = row["id"] if hasattr(row, "keys") else row[0]
+
+            # A live write knows its own collection time, so the clock is exact. Legacy rows
+            # carrying a publish time arrive through the backfill, not through here.
+            observed_at = (
+                signal.captured_at.isoformat()
+                if signal.captured_at
+                else datetime.now(timezone.utc).isoformat()
+            )
+            observation_id = str(uuid4())
+            cur.execute(
+                "INSERT INTO observations (id, source_id, cluster_id, observed_at, published_at,"
+                " time_provenance, identity_source, observed_title, metric_value,"
+                " growth_velocity, geo_code, source_url, metadata)"
+                " VALUES (?, ?, ?, ?, ?, 'exact_ingestion', ?, ?, ?, ?, ?, ?, ?);",
+                (
+                    observation_id,
+                    source_id,
+                    str(signal.cluster_id) if signal.cluster_id else None,
+                    observed_at,
+                    signal.published_at.isoformat() if signal.published_at else None,
+                    identity.identity_source,
+                    signal.raw_title,
+                    signal.metric_value,
+                    signal.growth_velocity,
+                    signal.geo_code.value
+                    if hasattr(signal.geo_code, "value")
+                    else str(signal.geo_code),
+                    signal.source_url,
+                    json.dumps(signal.metadata or {}, ensure_ascii=False),
+                ),
+            )
+            written += 1
+
+            if signal.mission_id:
+                cur.execute(
+                    "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at)"
+                    " VALUES (?, ?, ?, ?)"
+                    " ON CONFLICT (mission_id, observation_id) DO NOTHING;",
+                    (
+                        str(uuid4()),
+                        str(signal.mission_id),
+                        observation_id,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+        return written
+
     async def save_clusters(self, clusters: List[TopicCluster]) -> None:
         if not clusters:
             return
@@ -416,32 +492,33 @@ class SqliteTrendRepository(ITrendRepository):
                     first_seen = c.first_seen_at.isoformat() if c.first_seen_at else now_str
                     last_updated = c.last_updated_at.isoformat() if c.last_updated_at else now_str
 
+                    # An upsert, not INSERT OR REPLACE. REPLACE is a DELETE followed by an
+                    # INSERT, so with foreign keys enforced it fires ON DELETE SET NULL on every
+                    # observation already pointing at this cluster -- re-saving a cluster would
+                    # quietly erase the membership history it exists to accumulate.
                     cur.execute(
                         """
-                        INSERT OR REPLACE INTO topic_clusters
+                        INSERT INTO topic_clusters
                         (id, canonical_name, topic_label, cross_platform_score, summary_text, category, first_seen_at, last_updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET
+                            canonical_name = excluded.canonical_name,
+                            topic_label = excluded.topic_label,
+                            cross_platform_score = excluded.cross_platform_score,
+                            summary_text = excluded.summary_text,
+                            category = excluded.category,
+                            last_updated_at = excluded.last_updated_at
                         """,
                         (c_id, c.canonical_name, c.topic_label, c.cross_platform_score, c.summary_text, c.category, first_seen, last_updated)
                     )
 
+                    # Assign the cluster in memory and stop there. This used to insert every
+                    # signal under a fresh uuid4, which made save_clusters a second write path:
+                    # one external source became two rows, and the contract test measured it.
+                    # save_signals is the only place a signal is written, and the pipeline calls
+                    # this first so the cluster exists before an observation references it.
                     for s in c.signals:
-                        s_id = str(uuid4())
-                        plat = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
-                        geo = s.geo_code.value if hasattr(s.geo_code, "value") else str(s.geo_code)
-                        m_id = str(s.mission_id) if s.mission_id else None
-                        meta_json = json.dumps(s.metadata or {}, ensure_ascii=False)
-                        cap_at = s.captured_at.isoformat() if s.captured_at else now_str
-                        pub_at = s.published_at.isoformat() if s.published_at else None
-
-                        cur.execute(
-                            """
-                            INSERT OR REPLACE INTO trend_signals
-                            (id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at, published_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (s_id, plat, s.raw_title, s.metric_value, s.growth_velocity, s.source_url, geo, c_id, m_id, meta_json, cap_at, pub_at)
-                        )
+                        s.cluster_id = c.id
                 conn.commit()
             finally:
                 if self._mem_conn is None:
@@ -663,11 +740,25 @@ class SqliteTrendRepository(ITrendRepository):
                 now_str = datetime.now(timezone.utc).isoformat()
                 c_at = mission.created_at.isoformat() if mission.created_at else now_str
 
+                # An upsert, not INSERT OR REPLACE. REPLACE deletes the row first, and
+                # mission_evidence cascades on that delete: every status update would have
+                # thrown away the evidence the mission had just recorded.
                 cur.execute(
                     """
-                    INSERT OR REPLACE INTO research_missions
+                    INSERT INTO research_missions
                     (id, title, keywords, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO UPDATE SET
+                        title = excluded.title,
+                        keywords = excluded.keywords,
+                        shortcode = excluded.shortcode,
+                        geo_code = excluded.geo_code,
+                        timeframe = excluded.timeframe,
+                        status = excluded.status,
+                        agent = excluded.agent,
+                        session_id = excluded.session_id,
+                        summary = excluded.summary,
+                        updated_at = excluded.updated_at
                     """,
                     (m_id, mission.title, kw_json, mission.shortcode, geo, tf, mission.status, mission.agent, mission.session_id, mission.summary, c_at, now_str)
                 )
@@ -766,20 +857,28 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
+                # mission_evidence -> observations -> sources. The legacy mission_id column
+                # held one mission per source, so whichever mission wrote last owned the row.
                 cur.execute(
-                    "SELECT id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, mission_id, metadata, captured_at, published_at FROM trend_signals WHERE mission_id = ? ORDER BY captured_at DESC",
+                    "SELECT s.platform, o.observed_title, o.metric_value, o.growth_velocity,"
+                    " o.source_url, o.geo_code, e.mission_id, o.metadata, o.observed_at,"
+                    " o.published_at, o.cluster_id"
+                    " FROM mission_evidence e"
+                    " JOIN observations o ON o.id = e.observation_id"
+                    " JOIN sources s ON s.id = o.source_id"
+                    " WHERE e.mission_id = ? ORDER BY o.observed_at DESC",
                     (str(mission_id),)
                 )
                 rows = cur.fetchall()
                 signals: List[TrendSignal] = []
                 for r in rows:
                     meta = json.loads(r["metadata"]) if r["metadata"] else {}
-                    cap_at = datetime.fromisoformat(r["captured_at"]) if r["captured_at"] else datetime.now(timezone.utc)
+                    cap_at = datetime.fromisoformat(r["observed_at"]) if r["observed_at"] else datetime.now(timezone.utc)
                     pub_at = datetime.fromisoformat(r["published_at"]) if r["published_at"] else None
                     signals.append(
                         TrendSignal(
                             platform=PlatformType(r["platform"]),
-                            raw_title=r["raw_title"],
+                            raw_title=r["observed_title"],
                             metric_value=r["metric_value"],
                             growth_velocity=r["growth_velocity"],
                             source_url=r["source_url"],
@@ -805,7 +904,10 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                cur.execute("DELETE FROM trend_signals WHERE mission_id = ?", (str(mission_id),))
+                # Only the mission's claims. A source and its observations are shared with
+                # every other mission that observed them, and the cluster history is built on
+                # those observations.
+                cur.execute("DELETE FROM mission_evidence WHERE mission_id = ?", (str(mission_id),))
                 deleted = cur.rowcount
                 conn.commit()
                 return deleted

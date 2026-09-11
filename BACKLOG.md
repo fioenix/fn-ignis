@@ -148,6 +148,23 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   `published_at = captured_at` cũ, `time_provenance = legacy_publish_only`. Time-window score mặc
   định chỉ dùng `exact_ingestion`; dữ liệu legacy vẫn được xuất hiện trong all-history hoặc
   published-time analysis nhưng output phải gắn cảnh báo approximate.
+- [ ] **Chưa sửa: đường discovery ghi signal trước khi cluster, nên cluster membership không
+  được persist (mở 11/09/2026).** `AutonomousDiscoveryUseCase` gọi `save_signals()` ở bước 4 rồi
+  mới `save_clusters()` ở bước 6, và không ghi lại signal sau đó — observation nằm lại với
+  `cluster_id = NULL`. Đây là lỗi **có sẵn**, không phải regression: trên Postgres, `save_clusters`
+  chỉ gán `cluster_id` trong bộ nhớ, nên đường này chưa bao giờ persist membership. Trên SQLite
+  trước đây nó "có" membership nhờ chính đường ghi trùng vừa bị cắt, tức là bằng cách tạo dòng
+  thứ hai cho cùng một source. Hai cách sửa, chưa chọn: (1) đảo thứ tự trong discovery để cluster
+  chạy trước khi persist — đổi hành vi của một use case ngoài phạm vi commit persistence;
+  (2) thêm một thao tác repository gán cluster cho observation đã ghi, vì đây là `UPDATE` chứ
+  không phải observation mới — gọi lại `save_signals()` sẽ đếm đôi observation. Không test nào
+  đang đỏ vì chuyện này.
+- [x] **`INSERT OR REPLACE` trên SQLite phá dữ liệu con khi bật foreign key (sửa 11/09/2026).**
+  `REPLACE` là `DELETE` rồi `INSERT`, nên mỗi lần cập nhật trạng thái mission sẽ cascade xoá sạch
+  `mission_evidence` vừa ghi, và mỗi lần lưu lại một cluster sẽ `SET NULL` cluster của mọi
+  observation đang trỏ tới nó. Cả hai chuyển sang `ON CONFLICT (id) DO UPDATE`. Lỗi này chỉ lộ ra
+  sau khi bật `PRAGMA foreign_keys = ON` — trước đó FK không được cưỡng chế nên `REPLACE` trông
+  vô hại.
 - [x] **`sources` chỉ ba cột; route và URL thuộc observation (chốt 11/09/2026).** `sources` giữ
   `id`, `platform`, `external_id` và không gì khác. `identity_source` xuống `observations`,
   `NOT NULL`, `CHECK` ba giá trị, và là field thứ 11 của projection — cùng lý do đo được đã dùng

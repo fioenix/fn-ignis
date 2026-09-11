@@ -14,7 +14,7 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
-from ignis.domain.entities import ResearchMission, TrendSignal
+from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
@@ -188,12 +188,18 @@ async def test_one_source_keeps_distinct_evidence_for_two_missions(repository_ca
     assert [signal.metric_value for signal in evidence_b] == [200.0]
 
 
-class UrlOnlyRegistry:
-    """One sighting whose identifier is only recoverable from its URL."""
+class OneSightingRegistry:
+    """One sighting, with the connector's metadata under the test's control.
 
-    def __init__(self, source_url: str, raw_title: str):
+    TwoObservationRegistry reports channel_title and no video_id, so it exercises the URL route.
+    The route a signal takes is decided by exactly this: whether the connector wrote the
+    platform's own identifier.
+    """
+
+    def __init__(self, source_url: str, raw_title: str, metadata: dict):
         self._source_url = source_url
         self._raw_title = raw_title
+        self._metadata = metadata
 
     async def search_across_all(self, **_kwargs):
         return [
@@ -204,7 +210,7 @@ class UrlOnlyRegistry:
                 source_url=self._source_url,
                 geo_code=GeoCode.VN,
                 captured_at=datetime(2026, 9, 11, 1, 0, tzinfo=timezone.utc),
-                metadata={},
+                metadata=dict(self._metadata),
             )
         ]
 
@@ -225,10 +231,10 @@ async def test_an_observation_records_the_route_that_resolved_it(
     repository = repository_case.repository
     source_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     raw_title = "One source, one route"
-    registry = (
-        TwoObservationRegistry(source_url=source_url, raw_title=raw_title)
-        if metadata_carries_the_id
-        else UrlOnlyRegistry(source_url=source_url, raw_title=raw_title)
+    registry = OneSightingRegistry(
+        source_url=source_url,
+        raw_title=raw_title,
+        metadata={"video_id": "dQw4w9WgXcQ"} if metadata_carries_the_id else {},
     )
     use_case = ExecuteMissionUseCase(
         repository=repository,
@@ -246,3 +252,159 @@ async def test_an_observation_records_the_route_that_resolved_it(
     await use_case.execute(mission.id)
 
     assert repository_case.observation_routes() == [expected_route]
+
+
+def _counts(case) -> dict:
+    query = {
+        "sources": "SELECT count(*) FROM sources",
+        "observations": "SELECT count(*) FROM observations",
+        "mission_evidence": "SELECT count(*) FROM mission_evidence",
+        "clustered_observations": "SELECT count(*) FROM observations WHERE cluster_id IS NOT NULL",
+    }
+    if case.name == "sqlite":
+        with sqlite3.connect(case.repository._db_path) as conn:
+            return {name: conn.execute(sql_text).fetchone()[0] for name, sql_text in query.items()}
+    with psycopg.connect(case.dsn) as conn:
+        return {name: conn.execute(sql_text).fetchone()[0] for name, sql_text in query.items()}
+
+
+@pytest.mark.asyncio
+async def test_repeating_a_pass_adds_an_observation_and_no_second_source(repository_case):
+    """Two ingress passes over one video: one canonical row, two collection events.
+
+    The upsert is a single statement for the same reason -- a SELECT then an INSERT lets two
+    passes both find nothing and both insert, which is how the legacy table came to hold more
+    rows than there are objects.
+    """
+    repository = repository_case.repository
+    signals = [
+        TrendSignal(
+            platform=PlatformType.YOUTUBE,
+            raw_title="Repeat",
+            metric_value=metric,
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            geo_code=GeoCode.VN,
+            captured_at=datetime(2026, 9, 11, hour, 0, tzinfo=timezone.utc),
+            metadata={"video_id": "dQw4w9WgXcQ"},
+        )
+        for hour, metric in ((1, 100.0), (2, 200.0))
+    ]
+    for signal in signals:
+        await repository.save_signals([signal])
+
+    counts = _counts(repository_case)
+    assert counts["sources"] == 1
+    assert counts["observations"] == 2
+
+
+@pytest.mark.asyncio
+async def test_an_identical_payload_twice_is_still_two_observations(repository_case):
+    """Nothing is deduplicated on the payload: only the surrogate id separates two sightings."""
+    repository = repository_case.repository
+
+    def one_signal():
+        return TrendSignal(
+            platform=PlatformType.YOUTUBE,
+            raw_title="Identical",
+            metric_value=100.0,
+            growth_velocity=5.0,
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            geo_code=GeoCode.VN,
+            captured_at=datetime(2026, 9, 11, 1, 0, tzinfo=timezone.utc),
+            metadata={"video_id": "dQw4w9WgXcQ"},
+        )
+
+    await repository.save_signals([one_signal()])
+    await repository.save_signals([one_signal()])
+
+    assert _counts(repository_case)["observations"] == 2
+
+
+@pytest.mark.asyncio
+async def test_withdrawing_a_mission_keeps_the_source_the_observation_and_the_cluster(
+    repository_case,
+):
+    """delete_mission_signals withdraws claims. It is not a delete of shared history.
+
+    The name is older than the model. A source and its observations belong to every mission that
+    observed them, and the cluster membership is a column on those observations, so deleting any
+    of it here would take another mission's evidence with it.
+    """
+    repository = repository_case.repository
+    registry = TwoObservationRegistry(
+        source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ", raw_title="Withdrawn"
+    )
+    use_case = ExecuteMissionUseCase(
+        repository=repository, registry=registry, clusterer=SemanticClusterer()
+    )
+    mission = ResearchMission(
+        title="Withdrawn",
+        keywords=["withdrawn"],
+        platforms=[PlatformType.YOUTUBE],
+        geo_code=GeoCode.VN,
+        timeframe=Timeframe.LAST_7D,
+    )
+    await repository.save_mission(mission)
+    await use_case.execute(mission.id)
+
+    before = _counts(repository_case)
+    assert before["mission_evidence"] == 1
+    assert before["clustered_observations"] == 1
+
+    withdrawn = await repository.delete_mission_signals(mission.id)
+
+    after = _counts(repository_case)
+    assert withdrawn == 1
+    assert after["mission_evidence"] == 0
+    assert after["sources"] == before["sources"]
+    assert after["observations"] == before["observations"]
+    assert after["clustered_observations"] == before["clustered_observations"]
+
+
+@pytest.mark.asyncio
+async def test_saving_a_cluster_writes_no_observation(repository_case):
+    """save_clusters persists the cluster and labels signals in memory. Nothing else.
+
+    On SQLite it used to insert every signal under a fresh uuid4, which stored one external
+    source as two rows -- the defect the first contract measured.
+    """
+    repository = repository_case.repository
+    signal = TrendSignal(
+        platform=PlatformType.YOUTUBE,
+        raw_title="Cluster only",
+        metric_value=100.0,
+        source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        geo_code=GeoCode.VN,
+        metadata={"video_id": "dQw4w9WgXcQ"},
+    )
+    cluster = TopicCluster(canonical_name="cluster only", signals=[signal])
+
+    await repository.save_clusters([cluster])
+
+    counts = _counts(repository_case)
+    assert counts["observations"] == 0
+    assert counts["sources"] == 0
+    # It still did its own job: the signal now carries the cluster it belongs to.
+    assert signal.cluster_id == cluster.id
+
+
+@pytest.mark.asyncio
+async def test_a_signal_identifying_nothing_is_skipped_not_given_a_key(repository_case):
+    """Every row in the corpus resolves, and one that does not is not worth an invented key."""
+    repository = repository_case.repository
+    await repository.save_signals(
+        [
+            TrendSignal(
+                platform=PlatformType.YOUTUBE,
+                raw_title="Nothing identifies this",
+                metric_value=100.0,
+                source_url=None,
+                geo_code=GeoCode.VN,
+                metadata={},
+            )
+        ]
+    )
+
+    counts = _counts(repository_case)
+    assert counts["sources"] == 0
+    assert counts["observations"] == 0

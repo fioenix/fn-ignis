@@ -42,7 +42,11 @@ async def test_sqlite_round_trip_keeps_both_times(tmp_path):
     """Both columns must survive a write and a read, independently."""
     repo = SqliteTrendRepository(db_path=str(tmp_path / "clocks.db"))
     cluster = TopicCluster(canonical_name="khoa hoc ai", signals=[_signal()])
+    # The order the pipeline uses: the cluster is persisted first so the signals it labels can
+    # reference it, then the signals are written. save_clusters used to write them itself, which
+    # made it a second write path and stored one source twice.
     await repo.save_clusters([cluster])
+    await repo.save_signals(cluster.signals)
 
     stored = await repo.get_cluster_signals(cluster.id)
 
@@ -60,6 +64,7 @@ async def test_a_platform_that_reports_no_publish_time_stores_null(tmp_path):
         signals=[_signal(platform=PlatformType.GOOGLE_TRENDS, published_at=None)],
     )
     await repo.save_clusters([cluster])
+    await repo.save_signals(cluster.signals)
 
     stored = await repo.get_cluster_signals(cluster.id)
 

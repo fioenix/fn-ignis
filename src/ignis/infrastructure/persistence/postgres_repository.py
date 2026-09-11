@@ -10,6 +10,7 @@ from psycopg_pool import AsyncConnectionPool
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
+from ignis.domain.source_identity import resolve_source_identity
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_platform
 
 from ignis.infrastructure.auth.crypto import encrypt_credentials, decrypt_credentials
@@ -155,6 +156,8 @@ class PostgresTimescaleRepository(ITrendRepository):
                             "INSERT INTO signal_metrics (signal_id, captured_at, metric_value, growth_velocity) VALUES (%s, %s, %s, %s);",
                             all_metric_points,
                         )
+
+                    await self._record_observations(cur, signals)
             logger.info(
                 f"Processed {len(signals)} signals into database "
                 f"({len(to_insert)} inserted, {len(updates)} refreshed)."
@@ -163,6 +166,80 @@ class PostgresTimescaleRepository(ITrendRepository):
         except Exception as e:
             logger.error(f"Error saving signals to database: {e}", exc_info=True)
             raise RepositoryException(f"Failed to batch insert signals: {e}") from e
+
+    async def _record_observations(self, cur, signals: List[TrendSignal]) -> int:
+        """Write each signal as one observation of one canonical source.
+
+        Three properties this has to hold, each of them measured on the corpus rather than
+        assumed:
+
+        - A source is upserted on (platform, external_id) in a single statement. A SELECT
+          followed by an INSERT is not the same thing: two ingress passes racing on one video
+          would both see nothing and both insert, which is how the legacy table came to hold
+          1,927 rows for 1,924 objects.
+        - Every signal becomes an observation. Nothing is deduplicated on the payload, because
+          two collection events are allowed to be identical on every field and only the
+          surrogate id separates them.
+        - A mission's claim goes to mission_evidence, never onto the source or the observation.
+          One source is observed by many missions, and the legacy mission_id column could only
+          record the last one, which is why the second mission lost its evidence.
+        """
+        written = 0
+        for signal in signals:
+            platform = (
+                signal.platform.value if hasattr(signal.platform, "value") else str(signal.platform)
+            )
+            identity = resolve_source_identity(platform, signal.source_url, signal.metadata)
+            if identity is None:
+                # Nothing identifies this sighting. Counted by the audit rather than given an
+                # invented key, and skipped here for the same reason.
+                logger.warning("Signal has no resolvable external identity, skipped: %s", platform)
+                continue
+
+            await cur.execute(
+                "INSERT INTO sources (platform, external_id) VALUES (%s, %s)"
+                " ON CONFLICT (platform, external_id) DO UPDATE SET platform = EXCLUDED.platform"
+                " RETURNING id;",
+                (identity.platform, identity.external_id),
+            )
+            source_id = (await cur.fetchone())[0]
+
+            # A live write knows when it collected: the clock is this process's own. Only rows
+            # written before sql/015 by a connector that stamped a publish time are legacy, and
+            # those arrive through the backfill, not here.
+            observed_at = signal.captured_at or datetime.now(timezone.utc)
+            await cur.execute(
+                "INSERT INTO observations (source_id, cluster_id, observed_at, published_at,"
+                " time_provenance, identity_source, observed_title, metric_value,"
+                " growth_velocity, geo_code, source_url, metadata)"
+                " VALUES (%s, %s, %s, %s, 'exact_ingestion', %s, %s, %s, %s, %s, %s, %s)"
+                " RETURNING id;",
+                (
+                    source_id,
+                    str(signal.cluster_id) if signal.cluster_id else None,
+                    observed_at,
+                    signal.published_at,
+                    identity.identity_source,
+                    signal.raw_title,
+                    signal.metric_value,
+                    signal.growth_velocity,
+                    signal.geo_code.value
+                    if hasattr(signal.geo_code, "value")
+                    else str(signal.geo_code),
+                    signal.source_url,
+                    json.dumps(signal.metadata or {}),
+                ),
+            )
+            observation_id = (await cur.fetchone())[0]
+            written += 1
+
+            if signal.mission_id:
+                await cur.execute(
+                    "INSERT INTO mission_evidence (mission_id, observation_id) VALUES (%s, %s)"
+                    " ON CONFLICT (mission_id, observation_id) DO NOTHING;",
+                    (str(signal.mission_id), str(observation_id)),
+                )
+        return written
 
     async def prune_empty_clusters(self) -> int:
         """Remove clusters left holding no signals after re-clustering."""
@@ -694,23 +771,31 @@ class PostgresTimescaleRepository(ITrendRepository):
             raise RepositoryException(f"Failed to list research missions: {e}") from e
 
     async def get_mission_signals(self, mission_id: UUID) -> List[TrendSignal]:
+        """Read the mission's evidence through the ledger, not through a column on the source.
+
+        mission_evidence -> observations -> sources. The legacy trend_signals.mission_id could
+        hold one mission per source, so a source two missions had both observed belonged to
+        whichever wrote last; this join returns exactly the observations this mission recorded.
+        """
         pool = await self._get_pool()
         query = """
-            SELECT 
-                platform,
-                raw_title,
-                metric_value,
-                growth_velocity,
-                source_url,
-                geo_code,
-                metadata,
-                captured_at,
-                published_at,
-                cluster_id,
-                mission_id
-            FROM trend_signals
-            WHERE mission_id = %s
-            ORDER BY metric_value DESC, captured_at DESC;
+            SELECT
+                s.platform,
+                o.observed_title,
+                o.metric_value,
+                o.growth_velocity,
+                o.source_url,
+                o.geo_code,
+                o.metadata,
+                o.observed_at,
+                o.published_at,
+                o.cluster_id,
+                e.mission_id
+            FROM mission_evidence e
+            JOIN observations o ON o.id = e.observation_id
+            JOIN sources s ON s.id = o.source_id
+            WHERE e.mission_id = %s
+            ORDER BY o.metric_value DESC, o.observed_at DESC;
         """
         try:
             async with pool.connection() as conn:
@@ -742,15 +827,22 @@ class PostgresTimescaleRepository(ITrendRepository):
             raise RepositoryException(f"Failed to fetch mission signals: {e}") from e
 
     async def delete_mission_signals(self, mission_id: UUID) -> int:
+        """Withdraw this mission's claims, and nothing else.
+
+        The name is from when a mission owned its signals. It does not: a source and its
+        observations are shared, and 1,301 legacy associations sit across sources that other
+        missions also observed. Deleting them here would delete another mission's evidence and
+        the cluster history built on it, so only the association rows go.
+        """
         pool = await self._get_pool()
-        query = "DELETE FROM trend_signals WHERE mission_id = %s;"
+        query = "DELETE FROM mission_evidence WHERE mission_id = %s;"
         try:
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(query, (str(mission_id),))
                     deleted_count = cur.rowcount
                     await conn.commit()
-            logger.info(f"Deleted {deleted_count} prior signals for mission {mission_id} for fresh atomic replace.")
+            logger.info(f"Withdrew {deleted_count} evidence rows for mission {mission_id}.")
             return deleted_count
         except Exception as e:
             logger.error(f"Error deleting signals for mission {mission_id}: {e}", exc_info=True)
