@@ -213,6 +213,12 @@ class PostgresTarget(BackfillTarget):
         import psycopg
 
         self._conn = psycopg.connect(dsn, autocommit=False)
+        # Exact float text, whatever the server defaults to. Supabase's pooler answers with
+        # extra_float_digits = 0, which rounds a double to 15 significant digits: 262,600,000.00000003
+        # arrives as 262,600,000.0. The value enters the observation digest, so the same corpus
+        # read through two connections hashed to two different digests -- a reconciliation that
+        # depends on a session setting is not a reconciliation.
+        self._conn.execute("SET extra_float_digits = 3")
 
     def enforce_read_only(self) -> None:
         self._conn.execute("SET TRANSACTION READ ONLY")

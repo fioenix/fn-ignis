@@ -1,7 +1,7 @@
 # Baseline đối soát: source / observation / mission evidence
 
 **Ngày chạy:** 10/09/2026 · **Backend:** PostgreSQL/TimescaleDB (Supabase)
-**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `5`
+**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `6`
 **Lưu ý:** bản baseline đầu tiên của cùng ngày đã bị thay thế — xem mục "Bản sửa" bên dưới.
 **Dữ liệu máy đọc:** [`2026-09-10-source-observation-baseline.json`](2026-09-10-source-observation-baseline.json)
 
@@ -112,6 +112,30 @@ cùng một source vẫn có thể khác route, và đó chính là trường h�
 `sources` giữ nguyên vì source member chỉ gồm identity. Ba digest kia đổi vì member của chúng
 chứa observation member.
 
+## Bản sửa v6: digest không được phụ thuộc vào session setting
+
+Phát hiện trong lần diễn tập trên bản sao disposable: cùng một corpus, đọc qua hai kết nối, cho
+hai digest observation khác nhau. Ba digest kia khớp.
+
+Nguyên nhân: pooler của Supabase trả `extra_float_digits = 0`, tức làm tròn `double` về 15 chữ số
+có nghĩa. Giá trị `262600000.00000003` trong `signal_metrics` về tới client thành `262600000.0`.
+Bản sao chạy Postgres mặc định (`extra_float_digits = 1`, shortest round-trip) nên giữ đúng giá
+trị. Đúng **15 member** lệch, tất cả đều là metric point — vì vậy mission và cluster digest, vốn
+chỉ dựng từ dòng cha, không đổi.
+
+Một chi tiết đáng nhớ khi kiểm: câu
+`SELECT count(*) FROM signal_metrics WHERE metric_value <> metric_value::text::float8` trả **0**
+trên chính kết nối đang mất chính xác. Text *tự* round-trip trong phạm vi một session không có
+nghĩa là text đó đúng — phép kiểm đó không phát hiện được gì.
+
+Sửa: cả ba công cụ — audit, backfill, verifier — đều `SET extra_float_digits = 3` ngay khi mở
+kết nối Postgres, nên độ chính xác không còn phụ thuộc mặc định của server. Digest observation
+đổi từ `b19e7385bf28c51c` sang `301dd36c688c68de`; ba digest còn lại và toàn bộ member count giữ
+nguyên `1.924 / 18.597 / 1.301 / 15.754`.
+
+Bài học rộng hơn con số: baseline v5 **không sai ở chỗ dữ liệu**, nó sai ở chỗ *không thể tái lập
+ở nơi khác*. Một digest đối soát mà đổi theo session setting thì không đối soát được gì.
+
 ## Projection: 11 field được bảo toàn, 4 mất mát có chủ ý
 
 Một observation member được render trên đúng những field này:
@@ -138,7 +162,7 @@ là **multiset** chứ không phải set. Nhãn `algorithm` trong JSON ghi đún
 | Tập | SHA-256 (16 ký tự đầu) | Member |
 |---|---|---|
 | sources | `69d72aee192bf526` | 1.924 |
-| observations | `b19e7385bf28c51c` | 18.597 |
+| observations | `301dd36c688c68de` | 18.597 |
 | mission_associations | `27ef7abf5e2bda15` | 1.301 |
 | cluster_memberships | `12e57ff31fc6a736` | 15.754 |
 

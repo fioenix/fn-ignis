@@ -350,3 +350,35 @@ async def test_there_is_no_flag_that_skips_the_first_gate_only_to_fail_the_secon
 
     with pytest.raises(SystemExit):
         main(["--dsn", _dsn(repository_case), "--apply", "--allow-foreign-observations"])
+
+
+async def test_every_postgres_connection_reads_floats_at_full_precision(repository_case):
+    """A digest that changes with a session setting is not a reconciliation.
+
+    Supabase's pooler answers with extra_float_digits = 0, which rounds a double to 15
+    significant digits: a metric point stored as 262600000.00000003 arrived as 262600000.0. The
+    value is inside the observation member, so the same corpus read through two connections
+    hashed to two different digests -- found by running the migration rehearsal against a copy
+    and watching three of the four digests match.
+
+    Checking that the text round-trips does not catch it. Within the connection that is losing
+    precision, metric_value <> metric_value::text::float8 matches zero rows.
+    """
+    if repository_case.name != "postgres":
+        pytest.skip("about the Postgres wire format")
+
+    from scripts.migration_reconciliation_audit import open_reader
+    from scripts.post_migration_verification import open_stored_reader
+
+    readers = [
+        open_target(repository_case.dsn),
+        open_reader(repository_case.dsn),
+        open_stored_reader(repository_case.dsn),
+    ]
+    try:
+        for reader in readers:
+            setting = reader._conn.execute("SHOW extra_float_digits").fetchone()[0]
+            assert setting == "3", f"{type(reader).__name__} reads floats at {setting}"
+    finally:
+        for reader in readers:
+            reader.close()

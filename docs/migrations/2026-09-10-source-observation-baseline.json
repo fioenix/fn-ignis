@@ -19,7 +19,7 @@
       "sources": 1924
     },
     "mission_associations": "27ef7abf5e2bda15aba94ad6cc260b595bd54654b77743bef8571101a516990e",
-    "observations": "b19e7385bf28c51cfca62bb8e65d0eb762f65b9251574eccf5b7ac154f167585",
+    "observations": "301dd36c688c68deba7ffda1f34a6adc59ed1b0109d8a1c598a41707fe71380c",
     "sources": "69d72aee192bf52684187e2c79a80bd944b671ea680cb506841dc32845364a82"
   },
   "invariants": {
@@ -72,7 +72,7 @@
     "trend_signals_rows": 15938
   },
   "sanitized": true,
-  "schema_version": 5,
+  "schema_version": 6,
   "sources": {
     "canonical_sources": 1924,
     "identities_holding_one_row": 1544,

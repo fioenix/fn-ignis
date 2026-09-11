@@ -129,6 +129,12 @@ class PostgresReader(ReadOnlyReader):
         self._conn = psycopg.connect(dsn)
         # Enforced by the server, not by convention: any write in this session is refused.
         self._conn.execute("SET TRANSACTION READ ONLY")
+        # Exact float text, whatever the server defaults to. Supabase's pooler answers with
+        # extra_float_digits = 0, which rounds a double to 15 significant digits: 262,600,000.00000003
+        # arrives as 262,600,000.0. The value enters the observation digest, so the same corpus
+        # read through two connections hashed to two different digests -- a reconciliation that
+        # depends on a session setting is not a reconciliation.
+        self._conn.execute("SET extra_float_digits = 3")
 
     def signals(self) -> Iterable[SignalRow]:
         for row in self._conn.execute(
@@ -541,7 +547,10 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
         #    happened to carry the identifier. Three YouTube videos stop being six sources.
         # 5: identity_source is the 11th field of the observation projection. The route belongs
         #    to the sighting, so it is inside the digest rather than summarised on the source.
-        "schema_version": 5,
+        # 6: float text is read at full precision. The v5 observation digest was computed
+        #    through a pooler that rounds doubles to 15 significant digits, so it described
+        #    truncated values and differed from the same corpus read anywhere else.
+        "schema_version": 6,
         "digests": digests,
         "sources": {
             "canonical_sources": len(rows_per_identity),
