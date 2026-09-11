@@ -98,6 +98,16 @@ class ITrendRepository(ABC):
         pass
 
     @abstractmethod
+    async def prune_mission_evidence(self, mission_id: UUID, retained_observation_ids) -> int:
+        """Drop this mission's claims on anything outside the set it now stands on.
+
+        Called after the new evidence is written, so a pass that fails earlier leaves the
+        mission holding what it already had. Passing an empty set withdraws everything, which is
+        what a pass that collected nothing means.
+        """
+        pass
+
+    @abstractmethod
     async def attach_mission_evidence(self, mission_id: UUID, signals: List[TrendSignal]) -> int:
         """Record that a mission used observations that already exist.
 

@@ -813,6 +813,36 @@ class PostgresTimescaleRepository(ITrendRepository):
             logger.error(f"Error attaching mission evidence: {e}", exc_info=True)
             raise RepositoryException(f"Failed to attach mission evidence: {e}") from e
 
+    async def prune_mission_evidence(self, mission_id: UUID, retained_observation_ids) -> int:
+        """Drop this mission's claims on anything outside the retained set.
+
+        The replacement writes first and prunes last, so the window where a failure can hurt is
+        a window where the mission holds too much rather than nothing. Stale evidence is
+        recoverable on the next pass; deleted evidence is not.
+        """
+        retained = [str(observation_id) for observation_id in retained_observation_ids]
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    if retained:
+                        await cur.execute(
+                            "DELETE FROM mission_evidence"
+                            " WHERE mission_id = %s AND NOT (observation_id = ANY(%s::uuid[]))",
+                            (str(mission_id), retained),
+                        )
+                    else:
+                        await cur.execute(
+                            "DELETE FROM mission_evidence WHERE mission_id = %s",
+                            (str(mission_id),),
+                        )
+                    removed = cur.rowcount or 0
+                    await conn.commit()
+            return removed
+        except Exception as e:
+            logger.error(f"Error pruning evidence for mission {mission_id}: {e}", exc_info=True)
+            raise RepositoryException(f"Failed to prune mission evidence: {e}") from e
+
     async def delete_mission_signals(self, mission_id: UUID) -> int:
         """Withdraw this mission's claims, and nothing else.
 

@@ -148,13 +148,19 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   `published_at = captured_at` cũ, `time_provenance = legacy_publish_only`. Time-window score mặc
   định chỉ dùng `exact_ingestion`; dữ liệu legacy vẫn được xuất hiện trong all-history hoặc
   published-time analysis nhưng output phải gắn cảnh báo approximate.
-- [ ] **Chưa sửa: "Atomic Replace" trong `ExecuteMissionUseCase` không atomic (mở 11/09/2026).**
+- [x] **Thay evidence theo kiểu failure-safe, không còn nhãn "Atomic Replace" (chốt 11/09/2026).**
   `delete_mission_signals()` commit ở transaction riêng, rồi cluster / save / attach chạy ở các
   transaction sau. Writer lỗi giữa chừng thì mission mất sạch evidence cũ mà không có gì thay thế:
   tái hiện được trên SQLite, evidence `1 → 0`; Postgres cùng transaction boundary. Không chặn việc
-  viết backfill, nhưng **phải xử lý trước merge** — tên và comment "Atomic Replace" hiện là claim
-  sai, và đây là đường duy nhất rút evidence của mission. Hai hướng: gom cả bốn thao tác vào một
-  transaction do repository mở, hoặc đổi sang ghi evidence mới trước rồi mới rút cái cũ.
+  viết backfill, nhưng phải xử lý trước merge.
+
+  Chốt hướng thứ hai: **ghi mới trước, prune cũ sau**, không mở transaction abstraction xuyên use
+  case. Thêm `prune_mission_evidence(mission_id, retained_ids)`; `delete_mission_signals()` rời
+  khỏi đường execute và ở lại đúng vai trò withdrawal tường minh. Bảo đảm mới **yếu hơn atomic và
+  đủ dùng**: ở mọi điểm pass có thể lỗi, mission giữ **ít nhất** số evidence nó đang có. Claim
+  thừa sót lại sau lỗi thì pass sau dọn; evidence bị xoá bởi một pass lỗi thì mất luôn. Retained
+  set đọc từ `observation_id` thực sự ghi được, không phải từ danh sách signal — sighting bị
+  writer bỏ qua không mang observation id nên không được tính là evidence.
 - [ ] **Chưa sửa: SQLite làm mất `platforms` của mission (mở 11/09/2026).** Schema SQLite và
   `save_mission`/`get_mission` không persist `platforms`. Mission tạo với đúng YouTube, đọc lại
   thành mặc định năm platform. Quota test không bắt được vì fake registry bỏ qua `target_platforms`.

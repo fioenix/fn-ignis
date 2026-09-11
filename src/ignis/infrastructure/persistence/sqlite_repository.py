@@ -917,6 +917,35 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_attach)
 
+    async def prune_mission_evidence(self, mission_id: UUID, retained_observation_ids) -> int:
+        """Drop this mission's claims on anything outside the retained set. See Postgres."""
+        retained = [str(observation_id) for observation_id in retained_observation_ids]
+        await self._ensure_schema()
+
+        def _sync_prune():
+            conn = self._get_connection()
+            try:
+                cur = conn.cursor()
+                if retained:
+                    placeholders = ", ".join("?" for _ in retained)
+                    cur.execute(
+                        "DELETE FROM mission_evidence"
+                        f" WHERE mission_id = ? AND observation_id NOT IN ({placeholders})",
+                        (str(mission_id), *retained),
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM mission_evidence WHERE mission_id = ?", (str(mission_id),)
+                    )
+                removed = cur.rowcount or 0
+                conn.commit()
+                return removed
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_prune)
+
     async def delete_mission_signals(self, mission_id: UUID) -> int:
         await self._ensure_schema()
 

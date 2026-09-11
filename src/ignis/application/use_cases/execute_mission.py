@@ -71,11 +71,16 @@ class ExecuteMissionUseCase:
                 else []
             )
 
-            # 4. Atomic Replace: withdraw this mission's claims. The observations and sources
-            # survive -- other missions may be standing on them.
-            await self._repo.delete_mission_signals(mission.id)
-
-            # 5. Persist the new sightings, and re-attach the preserved ones by reference
+            # 4. Failure-safe evidence replacement: write first, prune last.
+            #
+            # It withdrew first before, on its own committed statement, so anything that failed
+            # afterwards left the mission with no evidence at all -- neither the new nor the old.
+            # It was labelled an Atomic Replace and was neither.
+            #
+            # This is not atomic either, and does not claim to be. What it guarantees is that at
+            # every point the pass can fail, the mission holds at least the evidence it started
+            # with. Stale claims surviving a failure are removed by the next pass; evidence
+            # deleted by a failed pass is gone.
             if clusters:
                 await self._repo.save_clusters(clusters)
             if signals:
@@ -85,6 +90,13 @@ class ExecuteMissionUseCase:
                 await self._repo.assign_observation_clusters(preserved)
 
             signals = signals + preserved
+
+            # 5. Now, and only now, drop the claims this pass did not renew. The retained set is
+            # the observations that actually survived the writes, read back off the signals
+            # rather than assumed: a sighting the writer skipped carries no observation id and
+            # must not be treated as evidence this mission holds.
+            retained = [s.observation_id for s in signals if s.observation_id]
+            await self._repo.prune_mission_evidence(mission.id, retained)
             active_platforms = list(set(s.platform.value if hasattr(s.platform, "value") else str(s.platform) for s in signals))
             active_plat_str = ", ".join(active_platforms) if active_platforms else "none"
 
