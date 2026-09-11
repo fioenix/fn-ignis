@@ -172,11 +172,23 @@ def test_the_verifier_reads_the_new_tables_not_the_legacy_ones(tmp_path):
         reader.close()
 
 
-def test_the_tracked_baseline_is_the_default():
-    from scripts.post_migration_verification import DEFAULT_BASELINE
+def test_the_baseline_must_be_named_and_is_never_defaulted(tmp_path):
+    """A baseline describes one snapshot, so using one implicitly compares two databases.
 
-    assert DEFAULT_BASELINE.exists(), "the verifier's default target has to be the tracked file"
-    baseline = json.loads(Path(DEFAULT_BASELINE).read_text(encoding="utf-8"))
+    The tracked file is this repository's corpus on 10/09/2026. Another self-hosted install
+    running the verifier without saying which baseline it means would be checking its own
+    database against those numbers.
+    """
+    import pytest as _pytest
+
+    from scripts.post_migration_verification import REFERENCE_BASELINE
+
+    path = _database(tmp_path)
+    with _pytest.raises(SystemExit):
+        main(["--dsn", f"sqlite:///{path}"])
+
+    assert REFERENCE_BASELINE.exists(), "the reference baseline is still tracked"
+    baseline = json.loads(Path(REFERENCE_BASELINE).read_text(encoding="utf-8"))
     assert baseline["schema_version"] == 5
     assert baseline["digests"]["member_counts"] == {
         "sources": 1924,
@@ -184,3 +196,142 @@ def test_the_tracked_baseline_is_the_default():
         "mission_associations": 1301,
         "cluster_memberships": 15754,
     }
+
+
+# --- rows that must not disappear between the table and the comparison -------------------------
+
+
+def _matching_baseline(path) -> dict:
+    """A baseline that the database at `path` satisfies exactly.
+
+    Built from the database itself, so the tests below start from a genuinely green run. A
+    "still green" assertion means nothing unless something was green to begin with.
+    """
+    reader = open_stored_reader(f"sqlite:///{path}")
+    try:
+        observations = list(reader.observations())
+        from scripts.post_migration_verification import digest_of
+
+        sources = list(reader.sources())
+        members = [o.member for o in observations]
+        clusters = [f"{o.cluster_id}\x1f{o.member}" for o in observations if o.cluster_id]
+        member_of = {o.observation_id: o.member for o in observations}
+        evidence = [
+            f"{mission_id}\x1f{member_of[observation_id]}"
+            for mission_id, observation_id in reader.evidence()
+            if observation_id in member_of
+        ]
+    finally:
+        reader.close()
+
+    provenance: dict = {}
+    for observation in observations:
+        provenance[observation.time_provenance or "missing"] = (
+            provenance.get(observation.time_provenance or "missing", 0) + 1
+        )
+    return {
+        "schema_version": 5,
+        "digests": {
+            "sources": digest_of(sources),
+            "observations": digest_of(members),
+            "mission_associations": digest_of(evidence),
+            "cluster_memberships": digest_of(clusters),
+            "member_counts": {
+                "sources": len(sources),
+                "observations": len(members),
+                "mission_associations": len(evidence),
+                "cluster_memberships": len(clusters),
+            },
+        },
+        "observations": {"time_provenance_buckets": provenance},
+    }
+
+
+def _one_good_observation(tmp_path):
+    return _database(
+        tmp_path,
+        rows=[
+            (
+                "INSERT INTO sources (id, platform, external_id)"
+                " VALUES ('s1', 'youtube', 'video:dQw4w9WgXcQ')",
+                (),
+            ),
+            (
+                "INSERT INTO observations (id, source_id, observed_at, time_provenance,"
+                " identity_source, observed_title, metric_value, growth_velocity, geo_code,"
+                " source_url, metadata)"
+                " VALUES ('o1', 's1', '2026-09-11T01:00:00+00:00', 'exact_ingestion',"
+                " 'metadata_external_id', 'A video', 1.0, 0.0, 'VN',"
+                " 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', '{}')",
+                (),
+            ),
+        ],
+    )
+
+
+def test_the_baseline_built_from_a_database_verifies_it(tmp_path):
+    """The control. Every test below starts from this and breaks one thing."""
+    path = _one_good_observation(tmp_path)
+    reader = open_stored_reader(f"sqlite:///{path}")
+    try:
+        report = verify(reader, _matching_baseline(path))
+    finally:
+        reader.close()
+    assert report["verified"] is True
+
+
+def test_an_observation_pointing_at_no_source_cannot_verify(tmp_path):
+    """An inner join drops it, and a dropped row is a row the gate never sees.
+
+    This is the migration failure the verifier exists for: the table holds two observations and
+    the comparison saw one, so every digest matched and the database was broken.
+    """
+    path = _one_good_observation(tmp_path)
+    baseline = _matching_baseline(path)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "INSERT INTO observations (id, source_id, observed_at, time_provenance,"
+            " identity_source, metric_value, metadata)"
+            " VALUES ('orphan', 'no-such-source', '2026-09-11T02:00:00+00:00',"
+            " 'exact_ingestion', 'metadata_external_id', 2.0, '{}')"
+        )
+
+    reader = open_stored_reader(f"sqlite:///{path}")
+    try:
+        report = verify(reader, baseline)
+    finally:
+        reader.close()
+
+    assert report["dangling_source_references"] == 1
+    assert report["observation_rows"] == 2
+    assert report["verified"] is False
+
+
+def test_stored_metadata_that_is_not_json_cannot_verify(tmp_path):
+    """Reading it as {} repairs the corruption and lets a broken row match a healthy baseline."""
+    path = _one_good_observation(tmp_path)
+    baseline = _matching_baseline(path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE observations SET metadata = 'not-json' WHERE id = 'o1'")
+
+    reader = open_stored_reader(f"sqlite:///{path}")
+    try:
+        report = verify(reader, baseline)
+    finally:
+        reader.close()
+
+    assert report["invalid_metadata"] == 1
+    assert report["verified"] is False
+
+
+def test_every_observation_row_is_accounted_for(tmp_path):
+    """The projected count and the raw row count are compared, so no row leaves quietly."""
+    path = _one_good_observation(tmp_path)
+    reader = open_stored_reader(f"sqlite:///{path}")
+    try:
+        report = verify(reader, _matching_baseline(path))
+    finally:
+        reader.close()
+
+    assert report["observation_rows"] == 1
+    assert report["comparisons"][1]["actual_members"] == 1
