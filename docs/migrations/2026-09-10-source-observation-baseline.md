@@ -2,6 +2,7 @@
 
 **Ngày chạy:** 10/09/2026 · **Backend:** PostgreSQL/TimescaleDB (Supabase)
 **Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `6`
+· **digest:** v7 (sinh lại sau khi canonical hoá route identity — xem cuối mục Digest)
 **Lưu ý:** bản baseline đầu tiên của cùng ngày đã bị thay thế — xem mục "Bản sửa" bên dưới.
 **Dữ liệu máy đọc:** [`2026-09-10-source-observation-baseline.json`](2026-09-10-source-observation-baseline.json)
 
@@ -161,16 +162,24 @@ là **multiset** chứ không phải set. Nhãn `algorithm` trong JSON ghi đún
 
 | Tập | SHA-256 (16 ký tự đầu) | Member |
 |---|---|---|
-| sources | `69d72aee192bf526` | 1.924 |
-| observations | `301dd36c688c68de` | 18.597 |
-| mission_associations | `27ef7abf5e2bda15` | 1.301 |
-| cluster_memberships | `12e57ff31fc6a736` | 15.754 |
+| sources | `0eca4a53c92b73d2` | 1.924 |
+| observations | `08ecb119070f04d8` | 18.597 |
+| mission_associations | `c92fee13d5937b8e` | 1.301 |
+| cluster_memberships | `c67c80103be5b144` | 15.754 |
 
 Digest v3 không còn dùng được: identity là thành phần đầu tiên của mọi member trong cả bốn tập,
 nên đổi chính sách identity thì đổi cả bốn chuỗi băm. Sang v5, `sources` giữ nguyên
 `69d72aee192bf526` — source member chỉ gồm identity, mà identity không đổi — còn ba digest kia
 đổi vì member của chúng chứa observation member, nơi `identity_source` vừa trở thành field thứ 11.
 Số member không đổi ở cả bốn tập.
+
+Bản v7 đổi cả bốn digest, lần này vì chính chuỗi `external_id`. Route không còn được phép làm
+biến dạng identifier: Creative Center ghi hashtag là `#aothun` trong metadata nhưng `/tag/aothun`
+trong URL, còn explore URL của Google Trends percent-encode đúng cái keyword mà metadata bên cạnh
+để nguyên. Sau khi canonical hoá, **110 dòng** trong corpus đổi chuỗi identity — 58 TikTok, 52
+Google — và **61 identity** đổi tên. Không dòng nào gộp vào dòng khác: trong corpus này chưa có
+object nào từng đến bằng cả hai route, nên lỗi là lỗi tiềm ẩn chứ chưa gây trùng. Số canonical
+source vẫn là 1.924 trước và sau.
 
 ## Công thức và aggregate
 
