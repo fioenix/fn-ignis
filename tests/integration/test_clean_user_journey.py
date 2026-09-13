@@ -74,6 +74,28 @@ def _clean_checkout(destination: Path) -> Path:
     return destination
 
 
+def _claude_desktop_config_path(home: Path) -> Path:
+    """Where the product will put Claude Desktop's config, for this platform and this HOME.
+
+    Asked rather than assumed. The path is ~/Library/Application Support/Claude on macOS and
+    ~/.config/Claude on Linux, so a test that hard-codes either one seeds a file the code never
+    writes to and then reports that registration failed. On Linux that is doubly wrong: the
+    registration is skipped entirely unless the parent directory already exists, which is exactly
+    what seeding is meant to arrange.
+    """
+    from ignis.interfaces.cli.setup_bundle import get_claude_desktop_config_path
+
+    previous = os.environ.get("HOME")
+    os.environ["HOME"] = str(home)
+    try:
+        return get_claude_desktop_config_path()
+    finally:
+        if previous is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = previous
+
+
 def _seed_client_configs(home: Path) -> dict[str, Path]:
     """Pre-existing client configuration holding entries that belong to other servers.
 
@@ -88,7 +110,7 @@ def _seed_client_configs(home: Path) -> dict[str, Path]:
         encoding="utf-8",
     )
 
-    claude = home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+    claude = _claude_desktop_config_path(home)
     claude.parent.mkdir(parents=True, exist_ok=True)
     claude.write_text(
         json.dumps({"mcpServers": {"unrelated-neighbour": {"command": "echo", "args": ["keep-me"]}}}),
