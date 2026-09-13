@@ -66,11 +66,17 @@ uv venv
 source .venv/bin/activate    # Trên macOS/Linux
 # Hoặc trên Windows PowerShell: .venv\Scripts\Activate.ps1
 
-# Cài đặt package fn-ignis ở editable mode
-uv pip install -e .
+# Cài đặt đúng bộ version đã khoá trong uv.lock
+uv sync --locked --inexact
 ```
 
-*(Nếu dùng pip thông thường: `python3 -m venv .venv && source .venv/bin/activate && pip install -e .`)*
+`--locked` bắt uv dùng đúng lời giải đã commit trong `uv.lock` và báo lỗi nếu lock lệch với
+`pyproject.toml`. `--inexact` không gỡ những package nằm ngoài lock, nên nó không âm thầm xoá bộ
+test của bạn. Muốn có luôn test tooling: `uv sync --locked --inexact --extra dev --extra browser`.
+
+*(Không có uv thì dùng `python3 -m venv .venv && source .venv/bin/activate && pip install -e .`.
+Đường này **không reproducible**: pip tự resolve từ khoảng version trong `pyproject.toml` và bỏ qua
+`uv.lock`.)*
 
 #### Bước 3: Thiết lập file `.env`
 Sao chép file mẫu:

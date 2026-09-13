@@ -178,7 +178,7 @@ Chạy `fn-ignis` trên máy cá nhân **không cần cài đặt Docker hay Pos
 ```bash
 # 1. Clone repo & khởi tạo virtual environment
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
-uv venv && source .venv/bin/activate && uv pip install -e .
+uv venv && source .venv/bin/activate && uv sync --locked --inexact
 
 # 2. Khởi chạy FastMCP Server trực tiếp (SQLite tự động khởi tạo)
 ignis-mcp

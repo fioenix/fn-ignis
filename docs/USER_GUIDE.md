@@ -84,7 +84,10 @@ cd fn-ignis
 ```
 
 The bootstrap script will automatically:
-- Create the Python virtual environment (`.venv`).
+- Create the Python virtual environment (`.venv`) and install the exact solution recorded in the
+  committed `uv.lock` via `uv sync --locked --inexact`. `--locked` fails rather than re-resolving
+  when the lock and `pyproject.toml` disagree; without `uv` the script falls back to `pip` and says
+  plainly that the fallback is best-effort and not reproducible.
 - Generate `.env` with SQLite defaults (`sqlite:///ignis.db`).
 - Generate a persistent Fernet (AES-128-CBC + HMAC-SHA256, 256-bit key) encryption key.
 - Initialize database schemas and load 84+ domain lexicons and noise filters.

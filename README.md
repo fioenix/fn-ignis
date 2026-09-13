@@ -184,7 +184,7 @@ Run `fn-ignis` with **zero external dependencies** using Python standard library
 ```bash
 # 1. Clone repository & initialize virtual environment
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
-uv venv && source .venv/bin/activate && uv pip install -e .
+uv venv && source .venv/bin/activate && uv sync --locked --inexact
 
 # 2. Run FastMCP server directly (Zero-Docker / SQLite auto-provisioned)
 ignis-mcp

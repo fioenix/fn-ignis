@@ -41,10 +41,13 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      # --locked installs the exact solution in the committed uv.lock and fails if that lock
+      # disagrees with pyproject.toml. uv pip install re-resolved from the dependency ranges, so
+      # CI could pass on versions no released checkout would ever reproduce.
+      - name: Install locked dependencies
         run: |
           uv venv
-          uv pip install -e ".[dev,browser]"
+          uv sync --locked --extra dev --extra browser
 
       - name: Run Ruff Linter
         run: |
