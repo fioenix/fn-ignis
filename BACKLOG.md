@@ -82,15 +82,17 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   cùng `captured_at` vì cột đó lúc ấy giữ publish time, nhưng mang 266 giá trị metric khác nhau:
   đây là 275 lần poll, không phải một batch bị nhân bản. Đường `chart=mostPopular` đó không còn
   được public ingress ở HEAD đưa vào corpus.
-- [ ] **SQLite default vẫn nhân đôi source ở HEAD.** `save_clusters` tự insert mọi `c.signals`
-  bằng một UUID mới; `ClusterSignalsUseCase` và `ExecuteMissionUseCase` sau đó lại gọi
-  `save_signals`. Chạy thật qua `ExecuteMissionUseCase` với hai mission cùng một source cho hai
-  row, hai ID và một identity; mỗi mission nhìn thấy một row riêng. Postgres `save_clusters`
-  không insert signal nên không có cơ chế này.
-- [ ] **Postgres chưa enforce source identity ở database.** `trend_signals` không có primary key
-  hoặc unique constraint cho source; `save_signals` vẫn là `SELECT` rồi `INSERT`, nên concurrent
-  writers còn có thể đua. Lookup dùng URL/title đã `strip()` nhưng insert lưu giá trị gốc. Chưa có
-  reproduction chứng minh race đã xảy ra ở HEAD.
+- [x] **SQLite default nhân đôi source — đã sửa trên nhánh này (chốt 11/09/2026).**
+  `save_clusters` tự insert mọi `c.signals` bằng một UUID mới; `ClusterSignalsUseCase` và
+  `ExecuteMissionUseCase` sau đó lại gọi `save_signals`. Chạy thật qua `ExecuteMissionUseCase`
+  với hai mission cùng một source cho hai row, hai ID và một identity. Đã cắt: `save_clusters`
+  chỉ gán `cluster_id` trong bộ nhớ, `save_signals` là đường ghi duy nhất, và
+  `test_saving_a_cluster_writes_no_observation` khoá lại điều đó trên cả hai backend.
+- [x] **Source identity đã được database cưỡng chế (chốt 11/09/2026).** `trend_signals` không có
+  primary key hay unique constraint cho source, và `save_signals` là `SELECT` rồi `INSERT` nên
+  concurrent writer có thể đua. Đã thay: `sources` mang `UNIQUE (platform, external_id)` trên cả
+  hai backend, và writer dùng **một câu** upsert `ON CONFLICT` chứ không còn `SELECT`-rồi-`INSERT`.
+  Bảng legacy giữ nguyên trạng thái cũ vì nó đã thành read-only.
 - [x] **Migration `sql/008_deduplicate_signal_metrics.sql` không thực hiện điều header tuyên bố.**
   File ghi "Deduplicate trend_signals", "keeps earliest row as canonical" và tự gọi mình là
   "Migration 004", nhưng chỉ tạo `signal_metrics` rồi copy metric; không delete duplicate, không
