@@ -157,17 +157,24 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   Chốt hướng thứ hai: **ghi mới trước, prune cũ sau**, không mở transaction abstraction xuyên use
   case. Thêm `prune_mission_evidence(mission_id, retained_ids)`; `delete_mission_signals()` rời
   khỏi đường execute và ở lại đúng vai trò withdrawal tường minh. Bảo đảm mới **yếu hơn atomic và
-  đủ dùng**: ở mọi điểm pass có thể lỗi, mission giữ **ít nhất** số evidence nó đang có. Claim
+  đủ dùng**, và phải phát biểu cho đúng: **mọi lỗi xảy ra trước hoặc trong lúc prune** thì mission
+  giữ **ít nhất** số evidence nó đang có. Prune chạy xong thì replacement đã hoàn tất — lỗi sau đó,
+  ví dụ `update_mission(COMPLETED)`, là lỗi sau khi thay xong chứ không làm mất evidence. Claim
   thừa sót lại sau lỗi thì pass sau dọn; evidence bị xoá bởi một pass lỗi thì mất luôn. Retained
   set đọc từ `observation_id` thực sự ghi được, không phải từ danh sách signal — sighting bị
   writer bỏ qua không mang observation id nên không được tính là evidence.
-- [ ] **Chưa sửa: SQLite làm mất `platforms` của mission (mở 11/09/2026).** Schema SQLite và
+- [x] **SQLite persist `platforms` của mission (chốt 13/09/2026).** Schema SQLite và
   `save_mission`/`get_mission` không persist `platforms`. Mission tạo với đúng YouTube, đọc lại
   thành mặc định năm platform. Quota test không bắt được vì fake registry bỏ qua `target_platforms`.
   Hệ quả user-facing: summary in ra "1 signal across 1/5 responsive platforms" cho một pass thực
   tế thu **0** signal và **0** platform phản hồi — con số duy nhất còn lại đến từ một observation
-  cũ được preserve. Đây là defect về bằng chứng hiển thị cho người dùng, xếp **trước merge**,
-  không gộp vào commit nullable-clock.
+  cũ được preserve. Đây là defect về bằng chứng hiển thị cho người dùng.
+
+  Đã sửa: thêm cột `platforms` (JSON list) cho database mới, `ALTER` idempotent cho database cũ,
+  upsert ghi cả nhánh insert lẫn nhánh conflict, và hai đường hydrate đọc qua `resolve_platform`.
+  Dòng có từ trước cột này **không phục dựng được** target thật — selection chưa từng được ghi —
+  nên chúng nhận default năm platform để giữ đúng hành vi cũ; đây là **assumption của migration,
+  không phải bằng chứng lịch sử**. Postgres không phải đổi, chỉ chạy thêm contract parity.
 - [ ] **Chưa đo: `first_seen_at` đã lưu của các cluster cũ (mở 11/09/2026).** Bản sửa nullable-clock
   chỉ áp cho cluster **mới tính**; nó không sửa giá trị đã nằm trong `topic_clusters`, và cả hai
   upsert đều không cập nhật `first_seen_at` khi cluster đã tồn tại. Nghĩa là một cluster từng được

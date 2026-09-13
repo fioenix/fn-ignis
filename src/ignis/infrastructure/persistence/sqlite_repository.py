@@ -13,11 +13,44 @@ from ignis.resources import sql_seed_file
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.cross_platform_score import cross_platform_score
 from ignis.domain.source_identity import resolve_source_identity
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_timeframe
+from ignis.domain.value_objects import (
+    GeoCode,
+    PlatformType,
+    Timeframe,
+    resolve_geo,
+    resolve_platform,
+    resolve_timeframe,
+)
 
 from ignis.infrastructure.auth.crypto import decrypt_credentials, encrypt_credentials
 
 logger = logging.getLogger(__name__)
+
+
+def _platforms_of(row) -> List[PlatformType]:
+    """Hydrate the stored selection, through resolve_platform so an unknown name is dropped.
+
+    An empty or missing value means the mission never recorded one, and every connector is the
+    behaviour those rows have always had.
+    """
+    try:
+        raw = row["platforms"]
+    except (IndexError, KeyError):
+        raw = None
+    try:
+        names = json.loads(raw) if raw else []
+    except (TypeError, ValueError):
+        names = []
+    resolved = []
+    for name in names:
+        try:
+            resolved.append(resolve_platform(name))
+        except ValueError:
+            # resolve_platform raises on a name PlatformType does not know. Dropping it is
+            # better than failing the read: a connector removed from the enum should not make
+            # every mission that once selected it unreadable.
+            logger.warning("Mission names a platform this build does not know: %s", name)
+    return resolved or list(PlatformType)
 
 
 class SqliteTrendRepository(ITrendRepository):
@@ -160,6 +193,10 @@ class SqliteTrendRepository(ITrendRepository):
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 keywords TEXT NOT NULL,
+                -- JSON list. A mission that asked for one connector must not come back asking
+                -- for five: the extra calls are the smaller harm, the summary counting
+                -- responsive platforms against the wrong denominator is the larger one.
+                platforms TEXT NOT NULL DEFAULT '[]',
                 shortcode TEXT UNIQUE,
                 geo_code TEXT DEFAULT 'VN',
                 timeframe TEXT DEFAULT '30d',
@@ -259,6 +296,20 @@ class SqliteTrendRepository(ITrendRepository):
             )
             conn.commit()
             cur.execute("PRAGMA foreign_keys = ON")
+
+        existing_mission_columns = {
+            row[1] for row in cur.execute("PRAGMA table_info(research_missions)")
+        }
+        if existing_mission_columns and "platforms" not in existing_mission_columns:
+            # Rows written before this column cannot say what the mission asked for -- the
+            # selection was never stored, so there is nothing to recover. They are given the
+            # default every mission used to behave as, which keeps them working exactly as they
+            # did. That is a migration assumption, not evidence about what those missions meant.
+            cur.execute("ALTER TABLE research_missions ADD COLUMN platforms TEXT")
+            cur.execute(
+                "UPDATE research_missions SET platforms = ? WHERE platforms IS NULL",
+                (json.dumps([p.value for p in PlatformType]),),
+            )
 
         existing_signal_columns = {row[1] for row in cur.execute("PRAGMA table_info(trend_signals)")}
         if "published_at" not in existing_signal_columns:
@@ -698,6 +749,9 @@ class SqliteTrendRepository(ITrendRepository):
                 tf = mission.timeframe.value if hasattr(mission.timeframe, "value") else str(mission.timeframe)
                 now_str = datetime.now(timezone.utc).isoformat()
                 c_at = mission.created_at.isoformat() if mission.created_at else now_str
+                plat_json = json.dumps(
+                    [p.value if hasattr(p, "value") else str(p) for p in (mission.platforms or [])]
+                )
 
                 # An upsert, not INSERT OR REPLACE. REPLACE deletes the row first, and
                 # mission_evidence cascades on that delete: every status update would have
@@ -705,11 +759,12 @@ class SqliteTrendRepository(ITrendRepository):
                 cur.execute(
                     """
                     INSERT INTO research_missions
-                    (id, title, keywords, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (id) DO UPDATE SET
                         title = excluded.title,
                         keywords = excluded.keywords,
+                        platforms = excluded.platforms,
                         shortcode = excluded.shortcode,
                         geo_code = excluded.geo_code,
                         timeframe = excluded.timeframe,
@@ -719,7 +774,7 @@ class SqliteTrendRepository(ITrendRepository):
                         summary = excluded.summary,
                         updated_at = excluded.updated_at
                     """,
-                    (m_id, mission.title, kw_json, mission.shortcode, geo, tf, mission.status, mission.agent, mission.session_id, mission.summary, c_at, now_str)
+                    (m_id, mission.title, kw_json, plat_json, mission.shortcode, geo, tf, mission.status, mission.agent, mission.session_id, mission.summary, c_at, now_str)
                 )
                 conn.commit()
                 return mission
@@ -737,7 +792,7 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, title, keywords, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at FROM research_missions WHERE id = ? OR shortcode = ?",
+                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at FROM research_missions WHERE id = ? OR shortcode = ?",
                     (str(mission_id), str(mission_id))
                 )
                 r = cur.fetchone()
@@ -751,6 +806,7 @@ class SqliteTrendRepository(ITrendRepository):
                     id=UUID(r["id"]),
                     title=r["title"],
                     keywords=kws,
+                    platforms=_platforms_of(r),
                     shortcode=r["shortcode"],
                     geo_code=resolve_geo(r["geo_code"]),
                     timeframe=resolve_timeframe(r["timeframe"]),
@@ -778,7 +834,7 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, title, keywords, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at FROM research_missions ORDER BY created_at DESC LIMIT ?",
+                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at FROM research_missions ORDER BY created_at DESC LIMIT ?",
                     (limit,)
                 )
                 rows = cur.fetchall()
@@ -791,6 +847,7 @@ class SqliteTrendRepository(ITrendRepository):
                             id=UUID(r["id"]),
                             title=r["title"],
                             keywords=kws,
+                            platforms=_platforms_of(r),
                             shortcode=r["shortcode"],
                             geo_code=resolve_geo(r["geo_code"]),
                             timeframe=resolve_timeframe(r["timeframe"]),

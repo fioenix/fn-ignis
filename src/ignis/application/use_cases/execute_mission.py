@@ -77,10 +77,13 @@ class ExecuteMissionUseCase:
             # afterwards left the mission with no evidence at all -- neither the new nor the old.
             # It was labelled an Atomic Replace and was neither.
             #
-            # This is not atomic either, and does not claim to be. What it guarantees is that at
-            # every point the pass can fail, the mission holds at least the evidence it started
-            # with. Stale claims surviving a failure are removed by the next pass; evidence
-            # deleted by a failed pass is gone.
+            # This is not atomic either, and does not claim to be. What it guarantees is
+            # narrower than "at every point the pass can fail": any failure before or during the
+            # prune leaves the mission holding at least the evidence it started with. Once the
+            # prune succeeds the replacement is complete, and a later failure -- update_mission
+            # marking the mission COMPLETED, for one -- is a failure after the fact, not a loss
+            # of evidence. Stale claims surviving a failure are removed by the next pass;
+            # evidence deleted by a failed pass is gone.
             if clusters:
                 await self._repo.save_clusters(clusters)
             if signals:
