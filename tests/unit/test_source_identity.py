@@ -108,3 +108,67 @@ def test_an_empty_metadata_value_does_not_win_over_the_url():
     resolved = resolve_source_identity("youtube", "https://youtu.be/abc123", {"video_id": "  "})
     assert resolved.external_id == "video:abc123"
     assert resolved.identity_source == IDENTITY_FROM_URL
+
+
+# --- one object, two routes that disagreed until the value itself was canonicalised ------------
+
+
+def test_a_tiktok_hashtag_is_one_object_whether_or_not_the_route_kept_the_hash():
+    """Creative Center writes "#aothun" in metadata and .../tag/aothun in the URL.
+
+    Same hashtag, same connector, same pass -- and until the value was canonicalised the two
+    routes produced tag:#aothun and tag:aothun, so one hashtag occupied two rows.
+    """
+    assert identity_of("tiktok", "https://www.tiktok.com/tag/aothun", {"hashtag": "#aothun"}) == (
+        identity_of("tiktok", "https://www.tiktok.com/tag/aothun")
+    )
+    assert identity_of("tiktok", None, {"hashtag": "#aothun"}) == "tiktok:tag:aothun"
+
+
+def test_a_google_keyword_is_one_object_whether_it_arrived_encoded_or_not():
+    """The explore URL percent-encodes the keyword the metadata carries verbatim."""
+    assert identity_of(
+        "google",
+        "https://trends.google.com/trends/explore?geo=VN&q=AI%20Agent",
+        {"keyword": "AI Agent"},
+    ) == identity_of("google", "https://trends.google.com/trends/explore?geo=VN&q=AI%20Agent")
+    assert identity_of("google", None, {"keyword": "AI Agent"}) == "google:keyword:AI Agent"
+
+
+def test_a_google_keyword_encoded_with_plus_is_the_same_keyword():
+    assert identity_of("google", "https://trends.google.com/trends/explore?q=AI+Agent") == (
+        identity_of("google", None, {"keyword": "AI Agent"})
+    )
+
+
+# --- two identifier spaces that must not be filed as one --------------------------------------
+
+
+def test_a_threads_numeric_id_and_a_shortcode_are_kept_in_separate_namespaces():
+    """They are different identifier spaces, and this build has no lookup between them.
+
+    The Graph API reports a numeric pk; a permalink carries a shortcode. Filing both under
+    "post:" would be a claim that the two values are comparable, and a shortcode made only of
+    digits would then silently collide with somebody else's pk. Keeping them apart states the
+    truth: two rows, because the corpus cannot yet prove they are one object.
+    """
+    from_metadata = identity_of("threads", None, {"post_id": "123456789"})
+    from_url = identity_of("threads", "https://www.threads.net/@a/post/123456789")
+
+    assert from_metadata == "threads:post:123456789"
+    assert from_url == "threads:post_shortcode:123456789"
+    assert from_metadata != from_url
+
+
+def test_an_instagram_reel_id_and_a_shortcode_are_kept_in_separate_namespaces():
+    assert identity_of("reels", None, {"reel_id": "17912"}) == "reels:reel:17912"
+    assert identity_of("reels", "https://www.instagram.com/reel/17912") == (
+        "reels:reel_shortcode:17912"
+    )
+
+
+def test_the_two_instagram_url_shapes_still_agree_with_each_other():
+    """Separating the namespaces must not undo what /reel/ and /p/ already agreed on."""
+    assert identity_of("reels", "https://www.instagram.com/reel/XYZ") == identity_of(
+        "reels", "https://www.instagram.com/p/XYZ"
+    )

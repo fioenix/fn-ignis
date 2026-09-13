@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
-from urllib.parse import parse_qsl, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote_plus, urlsplit, urlunsplit
 
 # The object namespace each connector's identifier points into. Two routes into one namespace
 # describe one object, so both carry the same kind here. These kind names are ours; the field
@@ -30,6 +30,15 @@ KIND_POST = "post"
 KIND_REEL = "reel"
 KIND_KEYWORD = "keyword"
 KIND_URL = "url"
+
+# Threads and Instagram address one object by two values that are not translations of each other:
+# the Graph API reports a numeric primary key, a permalink carries a shortcode, and this build has
+# no lookup from one to the other. They get their own namespaces rather than being filed together,
+# because "post:<value>" would assert the values are comparable -- and an all-digit shortcode would
+# then collide with somebody else's primary key. Two rows for one object is a gap we can measure
+# and later close with an alias; a wrong merge is silent and unrecoverable.
+KIND_POST_SHORTCODE = "post_shortcode"
+KIND_REEL_SHORTCODE = "reel_shortcode"
 
 # Metadata fields, in the order they are tried. The connector recorded the platform's identifier
 # here, so it is preferred over anything parsed back out of a URL.
@@ -50,10 +59,16 @@ URL_PATTERNS: Dict[str, Tuple[Tuple[str, str], ...]] = {
         (r"youtu\.be/([A-Za-z0-9_-]{6,})", KIND_VIDEO),
     ),
     "tiktok": ((r"/video/(\d+)", KIND_VIDEO), (r"/tag/([^/?#]+)", KIND_TAG)),
-    "threads": ((r"/post/([A-Za-z0-9_-]+)", KIND_POST), (r"/t/([A-Za-z0-9_-]+)", KIND_POST)),
+    "threads": (
+        (r"/post/([A-Za-z0-9_-]+)", KIND_POST_SHORTCODE),
+        (r"/t/([A-Za-z0-9_-]+)", KIND_POST_SHORTCODE),
+    ),
     # Instagram serves one shortcode space under both /reel/ and /p/, and /p/ on a reel's
     # shortcode redirects to the reel. One namespace, named after the connector that writes it.
-    "reels": ((r"/reel/([A-Za-z0-9_-]+)", KIND_REEL), (r"/p/([A-Za-z0-9_-]+)", KIND_REEL)),
+    "reels": (
+        (r"/reel/([A-Za-z0-9_-]+)", KIND_REEL_SHORTCODE),
+        (r"/p/([A-Za-z0-9_-]+)", KIND_REEL_SHORTCODE),
+    ),
     "google": ((r"[?&]q=([^&]+)", KIND_KEYWORD),),
 }
 
@@ -61,6 +76,22 @@ URL_PATTERNS: Dict[str, Tuple[Tuple[str, str], ...]] = {
 TRACKING_PARAMS = frozenset(
     {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"}
 )
+
+def _canonical_value(kind: str, raw: str) -> str:
+    """The identifier itself, freed of whatever the route did to it.
+
+    Only the route differs here, never the object. Creative Center reports a hashtag as "#aothun"
+    in metadata and as /tag/aothun in the URL; Google Trends percent-encodes the keyword into the
+    explore URL that it also carries verbatim in metadata. Canonicalising the value is what stops
+    one object from occupying one row per route.
+    """
+    value = raw.strip()
+    if kind == KIND_TAG:
+        return value.lstrip("#").strip()
+    if kind == KIND_KEYWORD:
+        return unquote_plus(value).strip()
+    return value
+
 
 IDENTITY_FROM_METADATA = "metadata_external_id"
 IDENTITY_FROM_URL = "url_external_id"
@@ -111,20 +142,24 @@ def resolve_source_identity(
     for key, kind in METADATA_KEYS.get(platform, ()):
         value = meta.get(key)
         if isinstance(value, (str, int)) and str(value).strip():
-            return SourceIdentity(
-                platform=platform,
-                external_id=f"{kind}:{str(value).strip()}",
-                identity_source=IDENTITY_FROM_METADATA,
-            )
+            canonical = _canonical_value(kind, str(value))
+            if canonical:
+                return SourceIdentity(
+                    platform=platform,
+                    external_id=f"{kind}:{canonical}",
+                    identity_source=IDENTITY_FROM_METADATA,
+                )
 
     for pattern, kind in URL_PATTERNS.get(platform, ()):
         match = re.search(pattern, source_url or "")
         if match:
-            return SourceIdentity(
-                platform=platform,
-                external_id=f"{kind}:{match.group(1)}",
-                identity_source=IDENTITY_FROM_URL,
-            )
+            canonical = _canonical_value(kind, match.group(1))
+            if canonical:
+                return SourceIdentity(
+                    platform=platform,
+                    external_id=f"{kind}:{canonical}",
+                    identity_source=IDENTITY_FROM_URL,
+                )
 
     normalized = normalize_url(source_url)
     if normalized:
