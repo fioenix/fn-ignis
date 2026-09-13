@@ -93,6 +93,23 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   concurrent writer có thể đua. Đã thay: `sources` mang `UNIQUE (platform, external_id)` trên cả
   hai backend, và writer dùng **một câu** upsert `ON CONFLICT` chứ không còn `SELECT`-rồi-`INSERT`.
   Bảng legacy giữ nguyên trạng thái cũ vì nó đã thành read-only.
+- [ ] **Threads và Reels còn khoảng trống alias — mở, chốt 13/09/2026.** "Một object, một
+  identity dù đến bằng route nào" đã đóng cho TikTok và Google: hashtag hội tụ dù metadata ghi
+  `#aothun` còn URL ghi `/tag/aothun`, keyword hội tụ dù explore URL percent-encode nó. Hai
+  platform kia thì chưa, và cố ý chưa. Graph API trả primary key dạng số, permalink mang
+  shortcode, và build hiện tại không có đường tra từ giá trị này sang giá trị kia:
+
+  ```
+  threads  post:123456789  ≠  post_shortcode:123456789
+  reels    reel:17912      ≠  reel_shortcode:17912
+  ```
+
+  Để chung một namespace `post:` thì một shortcode toàn chữ số sẽ **va vào primary key của bài
+  khác** — base64 có chứa chữ số — và merge sai thì im lặng, vĩnh viễn. Split thì đo được và sửa
+  được bằng alias sau. **Giới hạn thật, ghi đúng như nó là:** corpus hiện tại có **0** cặp như
+  vậy, nhưng ingress tương lai vẫn có thể tạo hai dòng cho cùng một bài, vào đúng lúc một bài
+  được thấy bằng cả hai route. Đóng nó cần một trong hai: connector ghi cả hai giá trị vào
+  metadata, hoặc một bảng alias giữa hai namespace cộng một lượt reconcile corpus.
 - [x] **Migration `sql/008_deduplicate_signal_metrics.sql` không thực hiện điều header tuyên bố.**
   File ghi "Deduplicate trend_signals", "keeps earliest row as canonical" và tự gọi mình là
   "Migration 004", nhưng chỉ tạo `signal_metrics` rồi copy metric; không delete duplicate, không

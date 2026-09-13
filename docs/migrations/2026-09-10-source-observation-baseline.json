@@ -72,7 +72,7 @@
     "trend_signals_rows": 15938
   },
   "sanitized": true,
-  "schema_version": 6,
+  "schema_version": 7,
   "sources": {
     "canonical_sources": 1924,
     "identities_holding_one_row": 1544,

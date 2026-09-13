@@ -1,8 +1,8 @@
 # Baseline đối soát: source / observation / mission evidence
 
 **Ngày chạy:** 10/09/2026 · **Backend:** PostgreSQL/TimescaleDB (Supabase)
-**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `6`
-· **digest:** v7 (sinh lại sau khi canonical hoá route identity — xem cuối mục Digest)
+**Kết quả:** `BALANCED`, 14/14 invariant giữ, exit code `0` · **`schema_version`:** `7`
+(sinh lại sau khi canonical hoá route identity — xem cuối mục Digest)
 **Lưu ý:** bản baseline đầu tiên của cùng ngày đã bị thay thế — xem mục "Bản sửa" bên dưới.
 **Dữ liệu máy đọc:** [`2026-09-10-source-observation-baseline.json`](2026-09-10-source-observation-baseline.json)
 
@@ -173,7 +173,7 @@ nên đổi chính sách identity thì đổi cả bốn chuỗi băm. Sang v5, 
 đổi vì member của chúng chứa observation member, nơi `identity_source` vừa trở thành field thứ 11.
 Số member không đổi ở cả bốn tập.
 
-Bản v7 đổi cả bốn digest, lần này vì chính chuỗi `external_id`. Route không còn được phép làm
+Bản `schema_version` 7 đổi cả bốn digest, lần này vì chính chuỗi `external_id`. Route không còn được phép làm
 biến dạng identifier: Creative Center ghi hashtag là `#aothun` trong metadata nhưng `/tag/aothun`
 trong URL, còn explore URL của Google Trends percent-encode đúng cái keyword mà metadata bên cạnh
 để nguyên. Sau khi canonical hoá, **110 dòng** trong corpus đổi chuỗi identity — 58 TikTok, 52

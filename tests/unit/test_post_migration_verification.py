@@ -33,7 +33,7 @@ CREATE TABLE mission_evidence (
 """
 
 BASELINE = {
-    "schema_version": 6,
+    "schema_version": 7,
     "digests": {
         "sources": "a" * 64,
         "observations": "b" * 64,
@@ -189,7 +189,7 @@ def test_the_baseline_must_be_named_and_is_never_defaulted(tmp_path):
 
     assert REFERENCE_BASELINE.exists(), "the reference baseline is still tracked"
     baseline = json.loads(Path(REFERENCE_BASELINE).read_text(encoding="utf-8"))
-    assert baseline["schema_version"] == 6
+    assert baseline["schema_version"] == 7
     assert baseline["digests"]["member_counts"] == {
         "sources": 1924,
         "observations": 18597,
@@ -230,7 +230,7 @@ def _matching_baseline(path) -> dict:
             provenance.get(observation.time_provenance or "missing", 0) + 1
         )
     return {
-        "schema_version": 6,
+        "schema_version": 7,
         "digests": {
             "sources": digest_of(sources),
             "observations": digest_of(members),

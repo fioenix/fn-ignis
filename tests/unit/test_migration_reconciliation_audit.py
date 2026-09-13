@@ -384,7 +384,7 @@ def test_the_json_report_is_deterministic(hostile_db, tmp_path):
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(first), "--quiet"])
     main(["--dsn", f"sqlite:///{hostile_db}", "--json-out", str(second), "--quiet"])
     assert first.read_text(encoding="utf-8") == second.read_text(encoding="utf-8")
-    assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 6
+    assert json.loads(first.read_text(encoding="utf-8"))["schema_version"] == 7
 
 
 # --- the tracked baseline must carry evidence, not content ------------------------------------

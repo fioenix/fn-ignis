@@ -550,7 +550,11 @@ def audit(reader: ReadOnlyReader) -> Dict[str, Any]:
         # 6: float text is read at full precision. The v5 observation digest was computed
         #    through a pooler that rounds doubles to 15 significant digits, so it described
         #    truncated values and differed from the same corpus read anywhere else.
-        "schema_version": 6,
+        # 7: the route no longer deforms the identifier. A hashtag is the same hashtag whether
+        #    it arrived as "#aothun" or /tag/aothun, a keyword the same keyword encoded or not,
+        #    and a shortcode is kept out of the numeric primary-key namespace it cannot be
+        #    compared with. 110 rows change their identity string; no member count moves.
+        "schema_version": 7,
         "digests": digests,
         "sources": {
             "canonical_sources": len(rows_per_identity),
