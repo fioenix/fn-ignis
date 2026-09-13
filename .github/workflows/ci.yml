@@ -3,8 +3,11 @@ name: CI
 on:
   push:
     branches: [ main, master, develop, "release/*", "hotfix/*" ]
+  # Every pull request, whatever it targets. The previous filter listed only main, master and
+  # develop, so a stacked pull request -- one based on another feature branch while that branch is
+  # still in review -- received no checks at all and looked green because nothing had run.
   pull_request:
-    branches: [ main, master, develop ]
+  workflow_dispatch:
 
 
 jobs:
