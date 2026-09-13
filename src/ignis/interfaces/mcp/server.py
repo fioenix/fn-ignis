@@ -2421,31 +2421,6 @@ Use the `extract_customer_pain_points` tool across top market videos to synthesi
 """
 
 
-def _cleanup_stale_instances():
-    """Terminate any orphan/stale MCP server instances from previous sessions."""
-    import os
-    import signal
-    import subprocess
-    current_pid = os.getpid()
-    try:
-        # Check running python processes executing ignis.interfaces.mcp.server
-        output = subprocess.check_output(
-            ["pgrep", "-f", "ignis.interfaces.mcp.server"],
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-        for line in output.strip().split():
-            try:
-                pid = int(line.strip())
-                if pid != current_pid:
-                    os.kill(pid, signal.SIGTERM)
-                    logger.info(f"Cleaned up stale MCP server process (PID: {pid}).")
-            except (ValueError, ProcessLookupError, PermissionError):
-                pass
-    except (subprocess.SubprocessError, FileNotFoundError):
-        pass
-
-
 def _register_shutdown_handlers():
     """Register graceful teardown on SIGINT/SIGTERM to close connection pool."""
     import asyncio
@@ -2473,8 +2448,14 @@ def _register_shutdown_handlers():
 
 
 def main():
-    """Main CLI entry point for the fn-ignis FastMCP server."""
-    _cleanup_stale_instances()
+    """Main CLI entry point for the fn-ignis FastMCP server.
+
+    Startup does not look for, signal, or terminate any other process. A stdio server belongs
+    to the client that spawned it and exits when that client closes the pipe, so another
+    server matching the same command line is a different client's, not a leak. Startup used to
+    pgrep for "ignis.interfaces.mcp.server" and SIGTERM every match, which meant opening a
+    second editor killed the first one's server mid-session.
+    """
     _register_shutdown_handlers()
     mcp.run()
 
