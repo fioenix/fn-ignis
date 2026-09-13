@@ -44,15 +44,25 @@ class PostgresTimescaleRepository(ITrendRepository):
 
 
     async def _get_pool(self) -> AsyncConnectionPool:
-        if self._pool is None:
-            self._pool = AsyncConnectionPool(
-                conninfo=self._dsn,
-                min_size=self._min_pool_size,
-                max_size=self._max_pool_size,
-                open=False,
-            )
-            await self._pool.open()
-            await self._refuse_an_unbackfilled_corpus(self._pool)
+        if self._pool is not None:
+            return self._pool
+        # Built into a local, and only adopted once the gate has passed. Assigning first left a
+        # live pool on the repository when the check raised, so the next call found it and
+        # returned it without ever reaching the check -- the refusal held exactly once, and any
+        # retry walked through it.
+        pool = AsyncConnectionPool(
+            conninfo=self._dsn,
+            min_size=self._min_pool_size,
+            max_size=self._max_pool_size,
+            open=False,
+        )
+        await pool.open()
+        try:
+            await self._refuse_an_unbackfilled_corpus(pool)
+        except BaseException:
+            await pool.close()
+            raise
+        self._pool = pool
         return self._pool
 
     async def _refuse_an_unbackfilled_corpus(self, pool) -> None:
@@ -180,7 +190,7 @@ class PostgresTimescaleRepository(ITrendRepository):
         default analysis window still describes something the corpus contains. Pruning on the
         window would delete 17,118 observations' worth of topics on the first pass after the
         backfill.
-        
+
         Referenced by the legacy corpus counts as referenced. sql/016 creates the new tables
         empty, so between the migration and the backfill every legacy membership looks like an
         empty cluster here -- and deleting those topics cascades trend_signals.cluster_id to

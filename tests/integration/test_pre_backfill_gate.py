@@ -66,6 +66,31 @@ async def test_a_corpus_that_was_never_backfilled_is_refused(repository_case):
     assert "backfill_observations" in message, "the refusal has to name the way out of it"
 
 
+async def test_the_refusal_holds_on_every_attempt(repository_case):
+    """A gate that only fires once is not a gate.
+
+    The Postgres pool was assigned to the repository before the check ran, so the refusal left a
+    live pool behind: the next call found it and returned it without ever reaching the check.
+    Anything that retried a failed startup -- a supervisor, a health probe, an ordinary second
+    query -- walked straight through on attempt two. Asserting a single refusal cannot see that.
+    """
+    _seed_legacy(repository_case)
+    fresh = _reopen(repository_case)
+
+    refusals = []
+    try:
+        for _ in range(3):
+            try:
+                await _readiness(fresh)
+                refusals.append("opened")
+            except RepositoryException:
+                refusals.append("refused")
+    finally:
+        await fresh.close()
+
+    assert refusals == ["refused", "refused", "refused"]
+
+
 async def test_a_backfilled_corpus_opens_normally(repository_case):
     """One observation is enough: the gate asks whether the backfill ran, not how far it got."""
     _seed_legacy(repository_case)
