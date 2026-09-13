@@ -6,6 +6,7 @@ platforms against the wrong denominator, so a pass that reached nothing could st
 "1 signal across 1/5 responsive platforms" and read like partial success.
 """
 
+import json
 import sqlite3
 
 import pytest
@@ -175,7 +176,13 @@ async def test_a_sqlite_database_from_before_the_column_is_migrated(tmp_path):
 
         stored = await repository.get_mission(UUID("11111111-1111-1111-1111-111111111111"))
         assert stored is not None, "the row must survive the migration"
-        assert len(stored.platforms) == 5, "the compatible default, not a recovered selection"
+        assert [p.value for p in stored.platforms] == [
+            "youtube",
+            "google",
+            "tiktok",
+            "threads",
+            "reels",
+        ], "the five connectors that existed when those rows were written, frozen as a literal"
 
         # And the column is really there now, so a new mission keeps its own selection.
         mission = await _youtube_only(repository)
@@ -194,3 +201,56 @@ async def test_a_sqlite_database_from_before_the_column_is_migrated(tmp_path):
             await again.close()
     finally:
         await repository.close()
+
+
+async def test_the_legacy_default_does_not_follow_a_sixth_connector(monkeypatch, tmp_path):
+    """Reading the default off the enum would rewrite what an old mission is taken to have meant.
+
+    The five values are what existed when those rows were written. Deriving them from
+    PlatformType instead means the day a sixth connector is registered, every mission from
+    before the column starts asking for it too -- a change to history, made by an unrelated
+    commit. Registering that sixth connector here is the only way to tell a frozen literal
+    apart from a list that happens to have five entries today.
+    """
+    from enum import Enum
+
+    from ignis.infrastructure.persistence import sqlite_repository
+
+    class SixConnectors(str, Enum):
+        YOUTUBE = "youtube"
+        GOOGLE_TRENDS = "google"
+        TIKTOK = "tiktok"
+        THREADS = "threads"
+        REELS = "reels"
+        SIXTH = "sixth"
+
+    monkeypatch.setattr(sqlite_repository, "PlatformType", SixConnectors)
+
+    db_path = tmp_path / "vintage_sixth.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE research_missions (
+                id TEXT PRIMARY KEY, title TEXT NOT NULL, keywords TEXT NOT NULL,
+                shortcode TEXT UNIQUE, geo_code TEXT DEFAULT 'VN',
+                timeframe TEXT DEFAULT '30d', status TEXT DEFAULT 'INITIALIZED',
+                agent TEXT DEFAULT 'generic', session_id TEXT, summary TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO research_missions (id, title, keywords, created_at)"
+            " VALUES ('22222222-2222-2222-2222-222222222222', 'an older mission', '[\"k\"]',"
+            " '2026-08-01T00:00:00+00:00')"
+        )
+
+    repository = sqlite_repository.SqliteTrendRepository(str(db_path))
+    try:
+        await repository._ensure_schema()
+        with sqlite3.connect(db_path) as conn:
+            stored = conn.execute("SELECT platforms FROM research_missions").fetchone()[0]
+    finally:
+        await repository.close()
+
+    assert json.loads(stored) == ["youtube", "google", "tiktok", "threads", "reels"]

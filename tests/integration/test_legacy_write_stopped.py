@@ -87,6 +87,10 @@ async def test_a_legacy_row_for_the_same_source_is_left_untouched(repository_cas
         " VALUES ('youtube', 'One video', 1.0, 0.5, ?, 'VN', ?, ?)"
     )
     params = (YT_URL, '{"video_id": "' + YT_ID + '"}', NOW.isoformat())
+    # Open the repository before the legacy row exists. The pre-backfill gate refuses a database
+    # that holds legacy rows and no observations, and that is the state this test builds by hand
+    # -- a real deployment opens against a corpus the backfill has already carried over.
+    await repository_case.repository.get_mission_signals(uuid.uuid4())
     if repository_case.name == "sqlite":
         with sqlite3.connect(repository_case.repository._db_path) as conn:
             conn.execute(statement, params)

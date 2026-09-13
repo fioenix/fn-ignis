@@ -122,6 +122,9 @@ async def test_get_cluster_signals(sample_trend_signal):
             '{"traffic": "50K+"}',
             now,          # observed_at: when this harness pulled it
             None,         # published_at: this platform reports none
+            str(uuid4()),            # the observation this signal was read from
+            "metadata_external_id",  # the route that resolved it
+            "exact_ingestion",       # and whether its clock is real
         )
     ]
     mock_cursor = AsyncMock()
@@ -226,8 +229,9 @@ async def test_get_cluster_signals_keeps_the_two_clocks_apart(sample_trend_signa
             "{}",
             pulled_at,
             posted_at,
-            str(cluster_id),
-            None,
+            str(uuid4()),
+            "url_external_id",
+            "exact_ingestion",
         )
     ]
     mock_cursor = AsyncMock()

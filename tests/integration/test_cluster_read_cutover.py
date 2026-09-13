@@ -215,8 +215,21 @@ async def test_the_pruner_keeps_a_cluster_whose_only_observation_is_legacy(repos
     assert gone[0] == 0
 
 
-async def test_the_pruner_ignores_the_legacy_table(repository_case):
-    """A cluster with legacy rows but no observation is empty in the model that now counts."""
+async def test_the_pruner_keeps_a_cluster_the_legacy_corpus_still_references(repository_case):
+    """This test used to assert the opposite, and the opposite destroys production data.
+
+    sql/016 creates the new tables empty. Between that migration and the backfill, every one of
+    the 15,754 legacy memberships is a cluster the pruner sees no observation for -- so the
+    first clustering pass after the schema lands deletes those topics and, through ON DELETE SET
+    NULL, empties trend_signals.cluster_id as well. The backfill would then have nothing left to
+    carry over and the verifier would report a loss that already happened.
+
+    A cluster referenced by the legacy corpus is not an empty cluster. That stays true after the
+    backfill, where every legacy row has an observation anyway, so the guard costs nothing then.
+    """
+    # Open the repository before any legacy row exists: the pre-backfill gate refuses a database
+    # holding legacy rows and no observations, and that is the state this test builds by hand.
+    await repository_case.repository.prune_empty_clusters()
     cluster_id = _cluster(repository_case, "legacy rows only")
     _exec(
         repository_case,
@@ -233,7 +246,28 @@ async def test_the_pruner_ignores_the_legacy_table(repository_case):
         "SELECT count(*) FROM topic_clusters WHERE id = %s",
         (cluster_id,),
     )
-    assert survived[0] == 0
+    still_attached = repository_case.query_one(
+        "SELECT count(*) FROM trend_signals WHERE cluster_id = ?",
+        "SELECT count(*) FROM trend_signals WHERE cluster_id = %s",
+        (cluster_id,),
+    )
+    assert survived[0] == 1, "the pre-backfill window must not cost the corpus its topics"
+    assert still_attached[0] == 1, "and the legacy membership must survive with it"
+
+
+async def test_the_pruner_still_removes_a_cluster_nothing_references_at_all(repository_case):
+    """The guard is a reference check, not a blanket amnesty."""
+    cluster_id = _cluster(repository_case, "referenced by nothing")
+
+    removed = await repository_case.repository.prune_empty_clusters()
+
+    gone = repository_case.query_one(
+        "SELECT count(*) FROM topic_clusters WHERE id = ?",
+        "SELECT count(*) FROM topic_clusters WHERE id = %s",
+        (cluster_id,),
+    )
+    assert removed >= 1
+    assert gone[0] == 0
 
 
 async def test_one_source_observed_in_two_clusters_counts_in_both(repository_case):
@@ -306,3 +340,25 @@ async def test_repeat_polls_inside_one_cluster_still_collapse_to_the_latest(repo
 
     assert len(clusters[0].signals) == 1
     assert clusters[0].signals[0].metric_value == 30.0
+
+
+async def test_the_cluster_readers_return_the_observation_they_read(repository_case):
+    """A signal that cannot name its observation is not evidence of anything.
+
+    observation_id is what mission_evidence points at and what the failure-safe prune retains;
+    identity_source and time_provenance are what tell a consumer whether a clock is real. The
+    readers selected none of the three, so every signal that came back through a cluster lost
+    its link to the row it was read from, and read_back was (None, None, None).
+    """
+    cluster_id = _cluster(repository_case, "round trip")
+    observation_id = _observe(repository_case, cluster_id, "youtube", f"video:{YT_ID}")
+
+    signals = await repository_case.repository.get_cluster_signals(
+        uuid.UUID(cluster_id), timeframe=Timeframe.LAST_24H
+    )
+    top = await repository_case.repository.get_top_clusters(timeframe=Timeframe.LAST_24H)
+
+    for read_back in (signals[0], top[0].signals[0]):
+        assert str(read_back.observation_id) == str(observation_id)
+        assert read_back.identity_source == "metadata_external_id"
+        assert read_back.time_provenance == "exact_ingestion"

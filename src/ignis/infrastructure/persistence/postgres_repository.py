@@ -10,6 +10,10 @@ from psycopg_pool import AsyncConnectionPool
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
+from ignis.infrastructure.persistence.migration_state import (
+    UNBACKFILLED_CORPUS,
+    is_unbackfilled,
+)
 from ignis.domain.cross_platform_score import cross_platform_score
 from ignis.domain.source_identity import resolve_source_identity
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_platform
@@ -38,6 +42,7 @@ class PostgresTimescaleRepository(ITrendRepository):
         self._max_pool_size = max_pool_size
         self._pool = pool
 
+
     async def _get_pool(self) -> AsyncConnectionPool:
         if self._pool is None:
             self._pool = AsyncConnectionPool(
@@ -47,7 +52,21 @@ class PostgresTimescaleRepository(ITrendRepository):
                 open=False,
             )
             await self._pool.open()
+            await self._refuse_an_unbackfilled_corpus(self._pool)
         return self._pool
+
+    async def _refuse_an_unbackfilled_corpus(self, pool) -> None:
+        """Checked once, as the pool opens: the window is a deploy, not a query."""
+        async with pool.connection() as conn:
+            row = await (
+                await conn.execute(
+                    "SELECT"
+                    " EXISTS (SELECT 1 FROM trend_signals),"
+                    " EXISTS (SELECT 1 FROM observations)"
+                )
+            ).fetchone()
+        if is_unbackfilled(*row):
+            raise RepositoryException(UNBACKFILLED_CORPUS)
 
     async def close(self) -> None:
         if self._pool is not None:
@@ -161,11 +180,18 @@ class PostgresTimescaleRepository(ITrendRepository):
         default analysis window still describes something the corpus contains. Pruning on the
         window would delete 17,118 observations' worth of topics on the first pass after the
         backfill.
+        
+        Referenced by the legacy corpus counts as referenced. sql/016 creates the new tables
+        empty, so between the migration and the backfill every legacy membership looks like an
+        empty cluster here -- and deleting those topics cascades trend_signals.cluster_id to
+        NULL, destroying the very rows the backfill was going to read. After the backfill the
+        guard changes nothing, because a legacy row that was carried over has an observation.
         """
         pool = await self._get_pool()
         query = """
             DELETE FROM topic_clusters tc
-            WHERE NOT EXISTS (SELECT 1 FROM observations o WHERE o.cluster_id = tc.id);
+            WHERE NOT EXISTS (SELECT 1 FROM observations o WHERE o.cluster_id = tc.id)
+              AND NOT EXISTS (SELECT 1 FROM trend_signals ts WHERE ts.cluster_id = tc.id);
         """
         try:
             async with pool.connection() as conn:
@@ -308,6 +334,17 @@ class PostgresTimescaleRepository(ITrendRepository):
         " AND o.observed_at >= NOW() - INTERVAL '{interval}'"
     )
 
+    # Recency, then the payload, then the row id. Two observations of one source may share an
+    # instant -- the schema allows it and a pass that sees one object twice in the same second
+    # produces it -- and ordering on the clock alone left the winner to whatever order the rows
+    # came back in. metric_value and growth_velocity come next because they are what the reader
+    # returns and the score is computed from; once those tie, nothing downstream can tell the
+    # two rows apart, and id only makes the choice repeatable.
+    _LATEST_FIRST = (
+        "o.observed_at DESC, COALESCE(o.metric_value, 0) DESC,"
+        " COALESCE(o.growth_velocity, 0) DESC, o.id DESC"
+    )
+
     # One observation per source: the most recent in the window. A source polled hourly must not
     # outweigh one polled daily, because polling frequency is a property of the harness.
     _LATEST_PER_SOURCE = """
@@ -317,12 +354,13 @@ class PostgresTimescaleRepository(ITrendRepository):
         -- identities in the corpus sit under more than one cluster, which is why cluster_id is
         -- on the observation rather than on the source.
         SELECT DISTINCT ON (o.cluster_id, o.source_id)
-            o.source_id, o.cluster_id, o.metric_value, o.growth_velocity, o.observed_at,
-            o.published_at, o.observed_title, o.geo_code, o.source_url, o.metadata, s.platform
+            o.id AS observation_id, o.source_id, o.cluster_id, o.metric_value, o.growth_velocity,
+            o.observed_at, o.published_at, o.time_provenance, o.identity_source, o.observed_title,
+            o.geo_code, o.source_url, o.metadata, s.platform
         FROM observations o
         JOIN sources s ON s.id = o.source_id
         WHERE o.cluster_id IS NOT NULL AND {window}
-        ORDER BY o.cluster_id, o.source_id, o.observed_at DESC
+        ORDER BY o.cluster_id, o.source_id, {latest_first}
     """
 
     async def get_top_clusters(
@@ -340,7 +378,8 @@ class PostgresTimescaleRepository(ITrendRepository):
         }
         interval = interval_map.get(timeframe, "24 hours")
         latest = self._LATEST_PER_SOURCE.format(
-            window=self._WINDOW_PREDICATE.format(interval=interval)
+            window=self._WINDOW_PREDICATE.format(interval=interval),
+            latest_first=self._LATEST_FIRST,
         )
 
         query = f"""
@@ -361,7 +400,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                     'geo_code', l.geo_code,
                     'metadata', l.metadata,
                     'observed_at', l.observed_at,
-                    'published_at', l.published_at
+                    'published_at', l.published_at,
+                    'observation_id', l.observation_id,
+                    'identity_source', l.identity_source,
+                    'time_provenance', l.time_provenance
                 )) AS signals
             FROM latest l
             JOIN topic_clusters tc ON tc.id = l.cluster_id
@@ -426,6 +468,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 metadata = json.loads(metadata)
             except (TypeError, ValueError):
                 metadata = {}
+        observation_id = data.get("observation_id")
         return TrendSignal(
             platform=PlatformType(data["platform"]),
             raw_title=data.get("raw_title") or "",
@@ -437,6 +480,9 @@ class PostgresTimescaleRepository(ITrendRepository):
             metadata=metadata,
             captured_at=observed_at,
             published_at=published_at,
+            observation_id=UUID(str(observation_id)) if observation_id else None,
+            identity_source=data.get("identity_source"),
+            time_provenance=data.get("time_provenance"),
         )
 
     async def get_cluster_signals(
@@ -462,11 +508,12 @@ class PostgresTimescaleRepository(ITrendRepository):
         query = f"""
             SELECT DISTINCT ON (o.cluster_id, o.source_id)
                 s.platform, o.observed_title, o.metric_value, o.growth_velocity, o.source_url,
-                o.geo_code, o.metadata, o.observed_at, o.published_at
+                o.geo_code, o.metadata, o.observed_at, o.published_at, o.id, o.identity_source,
+                o.time_provenance
             FROM observations o
             JOIN sources s ON s.id = o.source_id
             WHERE o.cluster_id = %s AND {window}
-            ORDER BY o.cluster_id, o.source_id, o.observed_at DESC;
+            ORDER BY o.cluster_id, o.source_id, {self._LATEST_FIRST};
         """
 
         try:
@@ -487,6 +534,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                         "metadata": row[6],
                         "observed_at": row[7],
                         "published_at": row[8],
+                        "observation_id": row[9],
+                        "identity_source": row[10],
+                        "time_provenance": row[11],
                     },
                     cluster_id,
                 )

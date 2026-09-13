@@ -17,12 +17,23 @@ logger = logging.getLogger(__name__)
 
 
 def _is_later(candidate, incumbent) -> bool:
-    """Later by collection time, with a clock-less sighting never displacing one that has a clock."""
+    """Later by collection time, with a clock-less sighting never displacing one that has a clock.
+
+    On an identical clock the larger metric wins, then the larger velocity -- the same rule the
+    SQL readers use. Two sightings of one object can share an instant, and keeping whichever
+    arrived first made the score depend on the order the registry returned them in. Once metric
+    and velocity tie as well, both sightings contribute the same numbers and the choice between
+    them cannot change the score.
+    """
     if candidate.captured_at is None:
         return False
     if incumbent.captured_at is None:
         return True
-    return candidate.captured_at > incumbent.captured_at
+    return (candidate.captured_at, candidate.metric_value, candidate.growth_velocity) > (
+        incumbent.captured_at,
+        incumbent.metric_value,
+        incumbent.growth_velocity,
+    )
 
 
 def _earliest_exact_ingestion(group) -> Optional[datetime]:

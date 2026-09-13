@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from statistics import pvariance
 from ignis.domain.entities import TrendSignal, TopicCluster
 from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
@@ -105,3 +106,31 @@ def test_scoring_weights_follow_platform_metric_velocity_contract():
         for p in (PlatformType.GOOGLE_TRENDS, PlatformType.YOUTUBE, PlatformType.TIKTOK, PlatformType.THREADS, PlatformType.REELS)
     ]
     assert clusterer._calculate_cross_platform_score(platform_only) == 40.0
+
+
+def test_two_sightings_at_one_instant_score_the_same_whatever_order_they_arrive_in():
+    """The scorer keeps one sighting per source, and the pick used to be order-dependent.
+
+    A pass that reports the same object twice with an identical clock is allowed, and the
+    incumbent-wins rule then made the score depend on the order the registry happened to return
+    them in. The rule is now the reader's: later clock, then larger metric, then larger velocity.
+    """
+    clusterer = SemanticClusterer()
+
+    def _sighting(metric, velocity):
+        return TrendSignal(
+            platform=PlatformType.YOUTUBE,
+            raw_title="one video, seen twice in one second",
+            metric_value=metric,
+            growth_velocity=velocity,
+            source_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            geo_code=GeoCode.VN,
+            captured_at=datetime(2026, 9, 13, 1, 0, tzinfo=timezone.utc),
+            metadata={"video_id": "dQw4w9WgXcQ"},
+        )
+
+    bigger_first = [_sighting(200.0, 2.0), _sighting(100.0, 1.0)]
+
+    assert clusterer._calculate_cross_platform_score(
+        bigger_first
+    ) == clusterer._calculate_cross_platform_score(list(reversed(bigger_first)))

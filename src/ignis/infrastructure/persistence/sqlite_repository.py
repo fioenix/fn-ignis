@@ -22,7 +22,12 @@ from ignis.domain.value_objects import (
     resolve_timeframe,
 )
 
+from ignis.domain.exceptions import RepositoryException
 from ignis.infrastructure.auth.crypto import decrypt_credentials, encrypt_credentials
+from ignis.infrastructure.persistence.migration_state import (
+    UNBACKFILLED_CORPUS,
+    is_unbackfilled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +58,13 @@ def _platforms_of(row) -> List[PlatformType]:
     return resolved or list(PlatformType)
 
 
+# The connectors that existed before research_missions had a platforms column. Frozen as a
+# literal rather than read off PlatformType: the rows this default is written into were created
+# when these five were the whole registry, and deriving it from the enum would mean the day a
+# sixth connector is added, every mission from before the column starts asking for it too.
+LEGACY_MISSION_PLATFORMS = ["youtube", "google", "tiktok", "threads", "reels"]
+
+
 class SqliteTrendRepository(ITrendRepository):
     """
     Lightweight, zero-dependency SQLite repository adapter for fn-ignis.
@@ -69,6 +81,9 @@ class SqliteTrendRepository(ITrendRepository):
         if self._db_path == ":memory:":
             self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
             self._mem_conn.row_factory = sqlite3.Row
+            # The pragma is per connection, and this one is handed straight back by
+            # _get_connection without passing the line that sets it there.
+            self._mem_conn.execute("PRAGMA foreign_keys = ON")
 
     async def close(self) -> None:
         """Close SQLite connection if in-memory."""
@@ -94,7 +109,22 @@ class SqliteTrendRepository(ITrendRepository):
         async with self._lock:
             if not self._initialized:
                 await asyncio.to_thread(self._create_tables_and_seed)
+                await asyncio.to_thread(self._refuse_an_unbackfilled_corpus)
                 self._initialized = True
+
+    def _refuse_an_unbackfilled_corpus(self) -> None:
+        """Checked once the schema is ready, which is this backend's equivalent of opening."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT EXISTS (SELECT 1 FROM trend_signals),"
+                " EXISTS (SELECT 1 FROM observations)"
+            ).fetchone()
+        finally:
+            if self._mem_conn is None:
+                conn.close()
+        if is_unbackfilled(row[0], row[1]):
+            raise RepositoryException(UNBACKFILLED_CORPUS)
 
     def _create_tables_and_seed(self) -> None:
         if self._db_path != ":memory:":
@@ -308,7 +338,7 @@ class SqliteTrendRepository(ITrendRepository):
             cur.execute("ALTER TABLE research_missions ADD COLUMN platforms TEXT")
             cur.execute(
                 "UPDATE research_missions SET platforms = ? WHERE platforms IS NULL",
-                (json.dumps([p.value for p in PlatformType]),),
+                (json.dumps(LEGACY_MISSION_PLATFORMS),),
             )
 
         existing_signal_columns = {row[1] for row in cur.execute("PRAGMA table_info(trend_signals)")}
@@ -422,15 +452,30 @@ class SqliteTrendRepository(ITrendRepository):
     # collection time is known. published_at is not a substitute clock: for the 17,118 legacy
     # observations it says when the content was posted, and a window built on it would report a
     # two-year-old video as something seen this week.
+    # Recency, then the payload, then the row id. Two observations of one source may share an
+    # instant -- the schema allows it and a pass that sees one object twice in the same second
+    # produces it -- and ordering on the clock alone left the winner to whatever order the rows
+    # came back in. metric_value and growth_velocity come next because they are what the reader
+    # returns and the score is computed from; once those tie, nothing downstream can tell the
+    # two rows apart, and id only makes the choice repeatable.
+    _LATEST_FIRST = (
+        "o.observed_at DESC, COALESCE(o.metric_value, 0) DESC,"
+        " COALESCE(o.growth_velocity, 0) DESC, o.id DESC"
+    )
+
     _LATEST_PER_SOURCE = """
         WITH latest AS (
             SELECT
-                o.source_id, o.cluster_id, o.metric_value, o.growth_velocity, o.observed_at,
-                o.published_at, o.observed_title, o.geo_code, o.source_url, o.metadata,
+                o.id AS observation_id, o.source_id, o.cluster_id, o.metric_value,
+                o.growth_velocity, o.observed_at, o.published_at, o.time_provenance,
+                o.identity_source, o.observed_title, o.geo_code, o.source_url, o.metadata,
                 s.platform,
                 -- (cluster_id, source_id), not source_id alone: see the Postgres reader.
                 ROW_NUMBER() OVER (
-                    PARTITION BY o.cluster_id, o.source_id ORDER BY o.observed_at DESC
+                    PARTITION BY o.cluster_id, o.source_id
+                    -- The same order the Postgres reader uses; see _LATEST_FIRST there.
+                    ORDER BY o.observed_at DESC, COALESCE(o.metric_value, 0) DESC,
+                             COALESCE(o.growth_velocity, 0) DESC, o.id DESC
                 ) AS rank
             FROM observations o
             JOIN sources s ON s.id = o.source_id
@@ -458,6 +503,11 @@ class SqliteTrendRepository(ITrendRepository):
                     DELETE FROM topic_clusters
                     WHERE id NOT IN (
                         SELECT DISTINCT cluster_id FROM observations WHERE cluster_id IS NOT NULL
+                    )
+                    -- A cluster the legacy corpus still points at is not empty; see the
+                    -- Postgres reader for what deleting it would cascade into.
+                    AND id NOT IN (
+                        SELECT DISTINCT cluster_id FROM trend_signals WHERE cluster_id IS NOT NULL
                     );
                     """
                 )
@@ -622,7 +672,8 @@ class SqliteTrendRepository(ITrendRepository):
                         tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category,
                         tc.first_seen_at, tc.last_updated_at,
                         l.platform, l.observed_title, l.metric_value, l.growth_velocity,
-                        l.source_url, l.geo_code, l.metadata, l.observed_at, l.published_at
+                        l.source_url, l.geo_code, l.metadata, l.observed_at, l.published_at,
+                        l.observation_id, l.identity_source, l.time_provenance
                     FROM latest l
                     JOIN topic_clusters tc ON tc.id = l.cluster_id
                     WHERE l.rank = 1
@@ -692,6 +743,9 @@ class SqliteTrendRepository(ITrendRepository):
             published_at=datetime.fromisoformat(row["published_at"])
             if row["published_at"]
             else None,
+            observation_id=UUID(row["observation_id"]) if row["observation_id"] else None,
+            identity_source=row["identity_source"],
+            time_provenance=row["time_provenance"],
         )
 
     async def get_cluster_signals(
