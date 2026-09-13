@@ -137,6 +137,9 @@ Before completing changes or cutting a release, verify these three checklist gat
 - [ ] Ensure working branch is fully merged into `main` before tagging.
 - [ ] Run distribution packaging verification (`python -m build` or `uv build`).
 - [ ] Atomic Version Synchronization: verify one identical version across all six release-controlled files in a single commit, then tag — `pyproject.toml`, `openclaw.json`, `server.json` (both occurrences), `CITATION.cff` (including `date-released`), `.openclaw/config.yaml`, and the `BACKLOG.md` version banner — plus git tag `vX.Y.Z`. See `AGENTS.md` Section 4 and Checklist C; the obsolete three-file wording is wrong.
+- [ ] Regenerate `uv.lock` with `uv lock` in the same commit as the version bump — the lock carries
+      the project's own version, so skipping it makes `uv sync --locked` fail on a clean checkout.
+      Confirm with `uv lock --check`; never hand-edit the file.
 - [ ] Tag release commit (`git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`) and publish GitHub Release.
 
 

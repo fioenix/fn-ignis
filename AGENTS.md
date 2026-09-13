@@ -308,6 +308,10 @@ Every AI Agent modifying this repository or preparing a release must verify comp
   - `BACKLOG.md` (the version banner)
   - Git Tag (`vX.Y.Z`) on `main`
   - Verify with `grep -rn "<previous version>" --include="*.toml" --include="*.json" --include="*.yaml" --include="*.cff" --include="*.md" .` returning nothing
+- [ ] **Regenerate `uv.lock` in that same commit.** The lock records the project's own version,
+  so bumping `pyproject.toml` without running `uv lock` makes `uv sync --locked` fail on a clean
+  checkout and takes CI down with it. Run `uv lock`; never hand-edit the file. Confirm with
+  `uv lock --check`.
 - [ ] **GitHub Release Tagging**: Tag and push release commit (`git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`) and publish the GitHub Release note.
 - [ ] **SemVer Guardrail**: Increment strictly by `+1` (`PATCH`, `MINOR`, `MAJOR`) according to Section 4 criteria. Never jump versions arbitrarily.
 

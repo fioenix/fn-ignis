@@ -4,7 +4,8 @@
 > **Phiên bản:** `v0.3.5`  
 > **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite) + FastMCP Server (39 Handlers & Tools)  
 > **Trạng thái branch:** PR #8 merge-ready tại `9cb6a08` nhưng chưa merge, chưa migrate production
-> **Trạng thái Tests:** 831 passed, 2 skipped | Ruff Linter Clean | GitHub Actions green
+> **Trạng thái Tests:** 839 passed, 2 skipped (đo trên `codex/v0.4.0-oss-release` với Timescale
+> dùng một lần) | Ruff Linter Clean
 
 ---
 
@@ -74,6 +75,32 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [ ] **Discovery source chưa đúng mục đích sản phẩm:** feed trending VN của Google Trends là tin
   tức tổng hợp (bóng đá, thời sự), nên ghép chủ đề theo nó cho ra corpus tin tức chứ không phải
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
+
+### Chuẩn bị release v0.4.0 — mở 14/09/2026
+
+- [x] **Đã xong (14/09/2026): hai client local chạy Ignis cùng lúc được.** Startup của MCP server
+  `pgrep` chuỗi `ignis.interfaces.mcp.server` rồi `SIGTERM` mọi process khớp. Đó đúng là command
+  line của mọi stdio server, nên "stale instance" nó dọn chính là client mở trước. Đo được: cả hai
+  server initialize và list 39 tool xong, server đầu thoát với `-15` ngay khi server thứ hai khởi
+  động, call tiếp theo raise `BrokenPipeError`. Đã bỏ sweep, giữ handler SIGINT/SIGTERM đóng pool.
+  Contract nằm ở `tests/integration/test_concurrent_stdio_clients.py`, chạy subprocess thật; khôi
+  phục sweep thì test fail lại.
+- [x] **Đã xong (14/09/2026): bootstrap cài đúng bộ version đã khoá.** Trước đây dùng
+  `uv pip install -e .`, tức resolve lại từ khoảng version và không đọc `uv.lock`. Giờ là
+  `uv sync --locked`, fail rõ khi lock lệch `pyproject.toml`. `uv.lock` đã regenerate bằng
+  `uv lock` (nó ghi project ở `0.3.0` trong khi `pyproject.toml` là `0.3.5`).
+- [ ] **Việc của release: bump version phải regenerate `uv.lock` trong cùng commit.** `uv.lock`
+  chứa version của chính project, nên đổi `pyproject.toml` mà không chạy `uv lock` sẽ làm
+  `uv sync --locked` fail trên checkout sạch và đánh sập CI. Thực tế nó là file thứ bảy của nhóm
+  sáu file release-controlled; checklist hiện chưa nhắc.
+- [ ] **Chưa kiểm được: Claude Code gọi tool qua model.** `claude mcp list` từ một HOME tạm sạch
+  báo `✔ Connected` với registration do bootstrap sinh ra, nên client thật có nhận và bắt tay được.
+  Nhưng `claude -p` dừng ở `OAuth session expired and could not be refreshed`; login cần browser
+  flow mà phiên không tương tác không làm được. Bản thân tool call đã được chứng minh bằng JSON-RPC
+  trực tiếp (39 tool, `get_runtime_config` SUCCESS) trong
+  `tests/integration/test_clean_user_journey.py` và `scripts/wheel_mcp_smoke.py`. Cần Fio chạy lại
+  một lượt từ Claude Code đã đăng nhập; lệnh nằm trong
+  `.handoff/2026-09-14-clean-user-acceptance.handoff.md`.
 
 ### Source identity và mission evidence — quyết định 10/09/2026
 

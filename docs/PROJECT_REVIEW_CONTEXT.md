@@ -16,7 +16,7 @@ The branch state independently verified before this documentation refresh:
 
 | Gate | Result |
 |---|---|
-| Full suite | 831 passed, 2 skipped |
+| Full suite | 831 passed, 2 skipped on PR #8; 839 passed, 2 skipped on the stacked release branch |
 | Ruff, package build, clean-install smoke test | passed in GitHub Actions |
 | Dual backend | SQLite plus a real disposable TimescaleDB service; no silent Postgres skip |
 | PR | not draft, mergeable, merge state clean |
@@ -163,8 +163,15 @@ understates supply and inflates the Opportunity Index.
 
 ## 4. What is verified, and what is not
 
-**Current branch verification.** 831 tests pass and 2 skip; CI runs Ruff, `pytest tests/`, package
-build, and a clean-install quickstart. PostgreSQL contracts run against a real TimescaleDB service.
+**Current branch verification.** On the stacked release branch `codex/v0.4.0-oss-release`, 839
+tests pass and 2 skip. The two skips are Postgres-only cases under the SQLite parameter. CI runs
+Ruff, `pytest tests/`, `uv build`, and an MCP session driven against the built wheel rather than an
+editable install. Installation is `uv sync --locked`, so the committed lock is the environment under
+test instead of a fresh resolution from the dependency ranges.
+
+PostgreSQL contracts run against a real TimescaleDB service and are verified not to be skipping
+silently: with `IGNIS_TEST_POSTGRES_DSN` set, 71 of them pass; with it unset, all 72 skip. The
+service is disposable, never live Supabase.
 
 **Convergence gaps measured 13/09/2026.** A local SQLite-only coverage run collected all 833 tests,
 passed 740 and skipped 93 PostgreSQL cases because `IGNIS_TEST_POSTGRES_DSN` was not set. It measured
