@@ -9,3 +9,10 @@
 ## Phase 2: FastMCP Server & Tools
 - [x] T005 Cài đặt FastMCP Server trong `src/ignis/interfaces/mcp/server.py`
 - [x] T006 [P] Viết unit tests cho FastMCP Server Tools trong `tests/unit/test_mcp_server.py`
+
+## Phase 3: As-Built Reporting Contract (2026-09-13)
+
+- [x] T007 Keep the 39-tool catalog independently callable and synchronized across manifests
+- [x] T008 Serialize channel summaries and typed `StrategicInsight` citations from mission analysis
+- [ ] T009 Add observation-addressable typed citations to `MarketOpportunity` and actionable
+  takeaways, then expose them consistently in FastMCP and HTML artifacts

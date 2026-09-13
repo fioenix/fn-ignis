@@ -21,6 +21,9 @@
 - **⚡ Zero-Token Local Ingress**: Collects, filters, and normalizes high-volume signals locally using deterministic Python parsers without burning expensive LLM API tokens on raw scraping.
 - **🏛️ Dual-Track Architecture**: Combines an optional 24/7 background radar daemon (`fn-ignis-worker`, official HTTP APIs only) with interactive, hypothesis-driven strategic deep dives on-demand. Browser-driven channels run in the on-demand track, on your own machine with your own session — the worker image stays lean and needs no Chromium.
 - **📊 Mathematical Opportunity Index**: Quantifies market white spaces (+100 to -100) by mathematically comparing macro search demand velocity against localized content supply volume.
+- **🧾 Lossless Evidence Ledger**: Stores one canonical external source, every immutable collection
+  observation, and the exact mission evidence that used it. Repeated polling cannot inflate source
+  diversity, and one source can support multiple missions and clusters without being copied.
 - **🗣️ Voice of Customer Ingress**: Scrapes and synthesizes real customer pain points, pricing inquiries, and unmet objections directly from public video comment sections.
 - **🧠 Autonomous Dynamic Lexicon Engine**: Persistent PostgreSQL registry allowing agents to dynamically register niche slang, brand names, and vernacular on-the-fly without modifying source code.
 - **🤖 Universal Agent Ecosystem**: Native out-of-the-box support for Claude (Desktop & Code), Antigravity, Codex, OpenClaw, Hermes, and Pi Agent.
@@ -32,6 +35,19 @@
 <p align="center">
   <img src="docs/assets/architecture.png" alt="fn-ignis Dual-Track Architecture" width="100%">
 </p>
+
+Runtime persistence has one source of truth on both backends:
+
+| Entity | Owns |
+|---|---|
+| `sources` | External object identity: exactly `id`, `platform`, `external_id` |
+| `observations` | One collection event: title, URL, metrics, metadata, cluster membership, identity route, and clock provenance |
+| `mission_evidence` | The exact observations used by each research mission |
+
+`trend_signals` and `signal_metrics` are legacy migration inputs only. Runtime never writes them.
+The one runtime read left is the cluster pruner's guard: a cluster the legacy corpus still points at
+is not empty, so deleting it before the backfill would cascade away the rows the backfill was going
+to read.
 <p align="center">
   <small><em>Figure: The Dual-Track Autonomous Trend Intelligence Architecture (<a href="docs/assets/architecture.svg">Vector SVG</a> · <a href="docs/assets/architecture.html">Standalone HTML</a>)</em></small>
 </p>
@@ -40,7 +56,9 @@
 
 ## 🧭 6-Step Standard Operating Procedure (SOP)
 
-Every targeted research mission follows a deterministic 6-step workflow:
+For comprehensive research missions, the following six steps are a reference workflow. Every
+FastMCP tool remains independently callable; the harness does not force this sequence for ad-hoc
+questions.
 
 ```
 Step 1: Clarify Research Objectives & Core Hypothesis
@@ -178,6 +196,11 @@ Deploy the full enterprise self-hosted stack (TimescaleDB + Autonomous Worker Da
 # Spin up complete production stack
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+> Existing PostgreSQL installations with a legacy `trend_signals` corpus require the reviewed
+> [source/observation production cutover](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
+> Do not start the new runtime after applying `sql/016` until the snapshot-specific baseline,
+> backfill, and verifier have returned `VERIFIED`.
 
 
 ---

@@ -24,8 +24,24 @@ Tài liệu này cung cấp hướng dẫn đầy đủ, chi tiết từng bư�
 
 `fn-ignis` được thiết kế theo mô hình **Dual-Track**:
 
-- **Track 1 (Continuous Radar)**: Chạy nền 24/7 bằng daemon scheduler để thu thập dữ liệu macro từ Google Trends, YouTube và TikTok, tự động phát hiện xu hướng mới mỗi 12h-24h và ghi vào cơ sở dữ liệu.
+- **Track 1 (Continuous Radar)**: Chạy nền bằng daemon scheduler để thu thập qua runtime HTTP mà
+  connector tự khai báo. Mặc định là Google Trends RSS và YouTube Data API; Threads/Reels chỉ tham
+  gia khi có Graph API token. Image worker không mang Chromium, nên TikTok và browser fallback
+  thuộc Track 2.
 - **Track 2 (On-Demand Deep Research)**: Chạy chủ động theo nhu cầu nghiên cứu từng chiến dịch cụ thể. Hệ thống sẽ cào gợi ý tìm kiếm (autocomplete), quét lưới video, bóc tách Voice-of-Customer từ bình luận, tính toán **Opportunity Index** (+100 đến -100) và xuất Dashboard HTML tương tác.
+
+Hai backend cùng dùng ba entity persistence:
+
+- `sources`: một dòng cho mỗi object bên ngoài, key theo `(platform, external_id)`.
+- `observations`: một collection event bất biến, giữ payload quan sát, cluster membership,
+  identity-resolution route và clock provenance.
+- `mission_evidence`: đúng observation mà một mission đã dùng.
+
+Poll lặp tạo observation mới, không tạo source mới. Một source có thể phục vụ nhiều mission và nằm
+trong nhiều cluster qua các observation khác nhau. Runtime không bao giờ ghi vào hai bảng legacy
+`trend_signals` và `signal_metrics`; chỗ đọc duy nhất còn lại là guard của cluster pruner, nó coi
+cluster mà corpus legacy vẫn trỏ tới là chưa rỗng, để việc prune trước backfill không cascade mất
+những dòng backfill cần.
 
 ---
 
@@ -113,6 +129,12 @@ docker compose -f docker-compose.prod.yml ps
 ```
 
 Sau khi khởi chạy, bạn có thể mở trình duyệt truy cập `http://localhost:53080/` để xem danh sách các báo cáo HTML đã xuất bản.
+
+Với database mới, stack dùng schema hiện tại ngay. Với PostgreSQL đã có corpus legacy, không khởi
+động worker mới ngay sau khi đưa artifact lên. Chạy đúng
+[production cutover source/observation](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
+quiesce runtime cũ, snapshot, sinh baseline từ chính snapshot đó, apply `sql/016`, backfill, bắt
+buộc verifier trả `VERIFIED`, rồi mới khởi động runtime mới và mở lại ingress.
 
 ---
 
@@ -419,4 +441,3 @@ Khi FastMCP Server khởi chạy (`ignis-mcp`), 39 tools, 2 prompts và 2 resour
 - **Resources**:
   - `fn-ignis://sop/market-research`: Toàn văn hướng dẫn SOP nghiên cứu thị trường.
   - `fn-ignis://methodology/opportunity-index`: Công thức toán học và giải thích Opportunity Index (+100 đến -100).
-

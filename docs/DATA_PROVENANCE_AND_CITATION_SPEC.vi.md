@@ -3,7 +3,8 @@
 
 - **Mã Epic:** `EPIC-PROVENANCE-01`
 - **Mục tiêu:** Xóa bỏ hoàn toàn hiện tượng nhận định mơ hồ (vague insights) và ảo giác (hallucination) trong các báo cáo nghiên cứu thị trường của AI Agent; cung cấp khả năng kiểm toán nguồn gốc dữ liệu (Data Provenance) và giám sát sức khỏe từng kênh ingress (Channel Health Observability).
-- **Trạng thái:** `APPROVED FOR IMPLEMENTATION`
+- **Trạng thái:** `PARTIALLY IMPLEMENTED` — health cấp platform và citation cho strategic insight
+  đã chạy; exact observation reference và hai consumer của report còn mở
 - **Người lập:** Antigravity (Product Manager)
 - **Implementer dự kiến:** Claude Code (Tech Lead)
 
@@ -59,6 +60,7 @@ class ChannelHealthStatus(str, Enum):
 class CitationEvidence:
     """Bằng chứng trích dẫn cụ thể làm căn cứ cho nhận định."""
     citation_id: str                 # Định danh: 'CIT-01', 'CIT-02'
+    observation_id: str              # Observation chính xác trong mission_evidence
     platform: PlatformType           # GOOGLE, YOUTUBE, TIKTOK, THREADS, REELS
     title_or_query: str              # Tiêu đề bài viết / video / từ khóa tìm kiếm
     metric_highlight: str            # '120K views', '+180% velocity', '45 comments'
@@ -82,6 +84,22 @@ class StrategicInsight:
     statement: str                   # Nội dung nhận định
     citations: List[CitationEvidence] = field(default_factory=list)
 ```
+
+`observation_id` là identity của citation. URL và title chỉ là payload hiển thị, không được dùng
+làm một identity key thứ hai. Citation phải trỏ tới observation thuộc mission qua
+`mission_evidence`; không deduplicate bằng `platform + source_url/title`.
+
+### Ranh giới implementation hiện tại — kiểm ngày 13/09/2026
+
+- Đã có: năm `ChannelDataSummary` cấp platform với đủ năm status, top citation cho platform khỏe,
+  typed citation trên `StrategicInsight`, bảng audit và citation pills trong HTML, cùng payload
+  FastMCP tương ứng.
+- Chưa có: health riêng cho TikTok Video Grid và TikTok Comments. Cả hai đang gộp dưới
+  `PlatformType.TIKTOK`, nên một surface khỏe có thể che surface kia hỏng.
+- Chưa có: typed citation trên `MarketOpportunity` và `ActionableTakeaway`; hai model này vẫn giữ
+  chuỗi.
+- Chưa có: `CitationEvidence.observation_id`. Registry hiện key theo platform cộng URL-hoặc-title,
+  nên có thể lệch canonical source identity và không chứng minh được observation nào đã đỡ claim.
 
 Cập nhật `HarnessResearchReport`:
 ```python
@@ -154,10 +172,16 @@ class HarnessResearchReport:
 
 1. **Unit Tests**:
    - `test_channel_summary_generation`: Kiểm tra tạo đúng summary cho cả 5 nền tảng khi có dữ liệu và khi rỗng 0 signals.
+   - `test_connector_surface_health`: Chứng minh TikTok Video Grid và TikTok Comments không che
+     trạng thái của nhau.
    - `test_citation_attribution_binding`: Kiểm tra các insights được sinh ra đều có danh sách citations hợp lệ.
+   - `test_citation_observation_binding`: Mọi citation trỏ tới một observation thuộc
+     `mission_evidence` của mission đang báo cáo.
+   - `test_opportunity_and_actionable_citations`: Opportunity và actionable đều mang typed
+     citations, không phải chuỗi display rời.
    - `test_report_serialization_backward_compat`: Đảm bảo các mission cũ trước phiên bản này khi deserialize vẫn không bị crash (fallback an toàn).
 2. **HTML Generation Test**:
    - Kiểm tra `html_builder.py` render ra HTML chứa đầy đủ bảng Data Ingress và các thẻ Citation pills mà không bị lỗi layout.
 3. **Linter & Test Coverage**:
-   - Toàn bộ test suite giữ vững 100% pass (210 baseline + các test mới).
+   - Toàn bộ test suite giữ vững 100% pass; không hard-code một test-count snapshot vào spec.
    - `ruff check src/ tests/` không có warning/error.

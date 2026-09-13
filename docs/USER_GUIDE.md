@@ -24,6 +24,19 @@ This document provides a comprehensive, step-by-step guide for developers, data 
 
 `fn-ignis` is architected around a **Dual-Track Engine**:
 
+The persistence box contains three distinct records on both backends:
+
+- `sources`: one row per external object, keyed by `(platform, external_id)`.
+- `observations`: one immutable collection event, including the observed payload, cluster
+  membership, identity-resolution route, and clock provenance.
+- `mission_evidence`: the exact observations a mission used.
+
+Repeated polling therefore creates another observation, not another source. A source can support
+multiple missions and can appear in multiple clusters through different observations. Runtime code
+never writes the legacy `trend_signals` and `signal_metrics` tables; the only runtime read left is
+the cluster pruner's guard, which treats a cluster the legacy corpus still references as non-empty
+so that pruning before the backfill cannot cascade away the rows the backfill needs.
+
 ```
                          ┌────────────────────────────────────────────────────────┐
                          │                     Data Ingress                       │
@@ -34,7 +47,7 @@ This document provides a comprehensive, step-by-step guide for developers, data 
 ┌──────────────────────────────────────┐     ┌────────────────────────────────────┐
 │ Track 1: Always-On Autonomous Radar  │     │ Track 2: On-Demand Deep Probes     │
 │ - Continuous surveillance worker     │     │ - Triggered by user or agent       │
-│ - Ingests hourly macro data          │     │ - Search suggestions, live grids   │
+│ - Scheduled HTTP-capable ingress     │     │ - Search suggestions, live grids   │
 │ - Daily digests at 07:00 AM          │     │ - Raw comment & VoC extraction     │
 └──────────────────┬───────────────────┘     └─────────────────┬──────────────────┘
                    │                                           │
@@ -106,6 +119,12 @@ Services started:
 - `fn-ignis-redis`: Redis message queue and caching.
 - `fn-ignis-worker`: Always-On continuous radar ingestion daemon.
 - `fn-ignis-nginx`: Static HTML report server on port 8080.
+
+For a fresh database, the stack starts with the current schema. For an existing PostgreSQL corpus,
+do not start the new worker immediately after deploying its artifact. Follow the canonical
+[source/observation production cutover](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
+quiesce the old runtime, snapshot, generate a baseline from that exact snapshot, apply `sql/016`,
+backfill, require `VERIFIED`, then start the new runtime and reopen ingress.
 
 ---
 

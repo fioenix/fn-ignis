@@ -2,8 +2,9 @@
 
 **Feature Directory**: `specs/002-dynamic-ingress-connectors`
 **Created**: 2026-08-31
-**Status**: Ready for Implementation
+**Status**: Implemented; cross-route alias reconciliation remains open
 **Input**: Pha 2 (Dynamic & Headless Scraping Ingress Feeds) - Triển khai TikTok Plugin, Threads Plugin, và Instagram Reels Plugin.
+**As-built amendment**: 2026-09-13 — dual HTTP/browser runtimes and canonical source identity
 
 ---
 
@@ -63,6 +64,13 @@ Là hệ thống đo lường xu hướng thị giác và lối sống, tôi c�
 - **FR-003**: `ReelsPlugin` PHẢI tuân thủ `IConnectorPlugin`, hỗ trợ trích xuất Reels xu hướng.
 - **FR-004**: Tất cả plugins PHẢI tương thích hoàn toàn với `ConnectorPluginRegistry` và `CircuitBreaker`.
 - **FR-005**: 100% quá trình thu thập PHẢI là Zero-Token Ingress.
+- **FR-006**: Each connector MUST preserve the strongest platform object identifier available in
+  metadata and a resolvable permalink. Source identity is decided by
+  `src/ignis/domain/source_identity.py`, not by title or raw URL equality.
+- **FR-007**: TikTok hashtag/video and Google keyword routes MUST converge on their object
+  namespaces. Threads and Reels numeric primary keys MUST remain separate from permalink
+  shortcodes until a connector supplies both values or an explicit alias ledger can reconcile
+  them; merging those namespaces by string equality can silently join different objects.
 
 ---
 

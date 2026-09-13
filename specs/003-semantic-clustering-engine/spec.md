@@ -2,7 +2,7 @@
 
 **Feature Directory**: `specs/003-semantic-clustering-engine`
 **Created**: 2026-08-31
-**Status**: Ready for Implementation
+**Status**: Implemented; as-built scoring contract amended 2026-09-13
 **Input**: Pha 3 (Semantic Clustering & Cross-Platform Scoring)
 
 ---
@@ -22,10 +22,19 @@ Là hệ thống tổng hợp thông tin, tôi cần tự động gom cụm các
 
 ### User Story 2 - Cross-Platform Momentum Scoring (Priority: P2)
 
-Là nhà phân tích chiến lược, tôi cần mỗi `TopicCluster` có một điểm số đa kênh `cross_platform_score` (0-100) và `MomentumCategory` phản ánh độ lan tỏa và tốc độ tăng trưởng.
+As a strategic analyst, I need each `TopicCluster` to have one reproducible
+`cross_platform_score` (0–100) whose result does not increase merely because the same source was
+polled more often.
 
 **Acceptance Scenarios**:
-1. **Given** Chủ đề xuất hiện trên >= 3 nền tảng với lượng tương tác cao, **When** tính điểm, **Then** `cross_platform_score` >= 80 (MomentumCategory.BREAKOUT).
+1. **Given** a topic appears on at least three independent platforms with high normalized metric
+   volume and velocity, **When** it is scored, **Then** it can reach
+   `cross_platform_score >= 80` (`MomentumCategory.BREAKOUT`).
+2. **Given** one source was observed repeatedly in the same cluster, **When** it is scored in an
+   analysis window, **Then** only its latest exact-ingestion observation contributes.
+3. **Given** one source has observations in two clusters, **When** both clusters are read, **Then**
+   the source contributes once to each cluster; latest selection is partitioned by
+   `(cluster_id, source_id)`, not by source globally.
 
 ---
 
@@ -33,5 +42,14 @@ Là nhà phân tích chiến lược, tôi cần mỗi `TopicCluster` có một 
 
 - **FR-001**: Hệ thống PHẢI định nghĩa `IClusteringEngine` port trong `src/ignis/application/ports/clustering_port.py`.
 - **FR-002**: `SemanticClusterer` PHẢI hỗ trợ nhóm các signals dựa trên embedding / cosine similarity và đặt tên canonical cho cụm.
-- **FR-003**: Hệ thống PHẢI tính toán `cross_platform_score` dựa trên entropy nền tảng và metric volume.
-- **FR-004**: `ClusterSignalsUseCase` PHẢI persist clusters và cập nhật `cluster_id` cho signals vào database.
+- **FR-003**: The system MUST compute `cross_platform_score` through the single implementation in
+  `src/ignis/domain/cross_platform_score.py`: platform bands `1 → 0`, `2 → 20`, `3+ → 40`, metric
+  volume up to 40 points, and average velocity up to 20 points.
+- **FR-004**: `ClusterSignalsUseCase` and autonomous discovery MUST persist clusters and assign
+  `cluster_id` to the already-recorded observation. `save_clusters()` MUST NOT create sources or
+  observations.
+- **FR-005**: Persisted readers and the in-memory clusterer MUST produce the same score inputs: one
+  latest observation per source per cluster. Time-window queries MUST use only observations whose
+  `time_provenance` is `exact_ingestion` and whose `observed_at` lies in the window.
+- **FR-006**: Cluster membership belongs to observations, not canonical sources. One source MAY
+  participate in multiple clusters through different observations.

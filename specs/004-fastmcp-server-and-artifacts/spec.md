@@ -2,8 +2,14 @@
 
 **Feature Directory**: `specs/004-fastmcp-server-and-artifacts`
 **Created**: 2026-08-31
-**Status**: Ready for Implementation
+**Status**: Implemented; citation attribution remains partial
 **Input**: Pha 4 (FastMCP Server & Deterministic Artifact Builder)
+**As-built amendment**: 2026-09-13 — 39 independent tools and typed strategic-insight citations
+
+**Scope boundary**: This feature owns the open-source local MCP interface over standard
+input/output and local-file artifact delivery. Authenticated remote HTTP delivery, hosted artifact
+access, and hosted tool authorization are owned by
+[`specs/006-hosted-mcp-access`](../006-hosted-mcp-access/spec.md).
 
 ---
 
@@ -32,4 +38,15 @@ Là người dùng / AI Agent, tôi cần sinh ra các HTML Artifacts trực qua
 
 - **FR-001**: `IArtifactBuilder` PHẢI định nghĩa hàm `build_dashboard_artifact(clusters, geo)` và `build_topic_card_artifact(cluster, signals)`.
 - **FR-002**: `HtmlArtifactBuilder` PHẢI sử dụng Jinja2 render Single-File HTML nhúng Tailwind CDN và Recharts/Chart.js.
-- **FR-003**: FastMCP server PHẢI expose đầy đủ 4 tools cốt lõi: `get_trending_topics`, `get_topic_detail`, `generate_trend_artifact`, `trigger_ingress_refresh`.
+- **FR-003**: FastMCP server MUST keep the four original tools independently callable within the
+  current 39-tool catalog: `get_trending_topics`, `get_topic_detail`, `generate_trend_artifact`,
+  and `trigger_ingress_refresh`.
+- **FR-004**: `get_mission_analysis` MUST serialize channel summaries and typed citations already
+  attached to strategic insights. Opportunity and actionable-takeaway citations remain incomplete
+  until the residual contract in `docs/DATA_PROVENANCE_AND_CITATION_SPEC.md` is implemented.
+- **FR-005**: The open-source server MUST remain independently usable over local standard
+  input/output without depending on the hosted service or hosted identity provider.
+- **FR-006**: Tool handlers shared with hosted delivery MUST remain one implementation; this feature
+  MUST NOT grow a second hosted copy of domain or scoring behavior.
+- **FR-007**: Local artifact tools MAY return operator-local file paths. That behavior MUST NOT be
+  interpreted as the remote artifact contract defined by feature 006.

@@ -8,14 +8,17 @@
 
 ## Summary
 
-Triển khai tầng Core Storage (Postgres + TimescaleDB Hypertable) và 2 Ingress Connectors ổn định (Google Trends RSS & YouTube Data API v3) cho `fn-ignis` theo chuẩn Clean Architecture (Ports & Adapters) và Zero-Token Ingress.
+Implement dual-backend core storage and stable Google Trends/YouTube ingress under Clean
+Architecture. The as-built storage model separates canonical external sources, immutable
+observations, and mission evidence; legacy `trend_signals`/`signal_metrics` remain read-only
+migration inputs rather than runtime sources of truth.
 
 ---
 
 ## Technical Context
 
 - **Language & Runtime**: Python >= 3.11, Pydantic v2, pydantic-settings
-- **Database**: PostgreSQL 16 + TimescaleDB extension + pgvector extension
+- **Database**: SQLite default; PostgreSQL 16 with optional TimescaleDB and pgvector
 - **Database Driver**: `psycopg` (v3) + `psycopg-pool` (`AsyncConnectionPool`)
 - **Ingress HTTP & Feeds**: `httpx` (async), `feedparser`
 - **Testing**: `pytest`, `pytest-asyncio`
@@ -32,7 +35,7 @@ Triển khai tầng Core Storage (Postgres + TimescaleDB Hypertable) và 2 Ingre
 |---|---|---|
 | I. Zero-Token Ingress | PASS | Google Trends RSS & YouTube Data API v3 chạy thuần code trích xuất dữ liệu, không gọi LLM |
 | II. Pluggable & Isolated Connectors | PASS | Kế thừa `IConnectorPlugin`, quản lý qua `ConnectorPluginRegistry` kèm `CircuitBreaker` |
-| III. Storage-First & Time-Series Rigor | PASS | Bảng `trend_signals` là TimescaleDB hypertable, lưu trữ batch, đánh index `(platform, geo_code, captured_at DESC)` |
+| III. Storage-First & Time-Series Rigor | PASS | `sources` enforces canonical identity; `observations` preserves every sighting and its clock provenance; `mission_evidence` preserves the exact evidence ledger on both backends |
 | IV. Builder Pattern for Artifacts | N/A | Tầng UI Artifacts thuộc Pha tiếp theo |
 | V. Simplicity & Type Safety | PASS | Python 3.11+ dataclasses, Pydantic settings, typed SQL queries, không abstraction thừa |
 
@@ -44,7 +47,9 @@ Triển khai tầng Core Storage (Postgres + TimescaleDB Hypertable) và 2 Ingre
 src/ignis/
 ├── config.py                                      # Settings (DATABASE_URL, YOUTUBE_API_KEY, pool sizes)
 ├── domain/
-│   ├── entities.py                                # TrendSignal, TopicCluster
+│   ├── entities.py                                # Observation-shaped TrendSignal, TopicCluster
+│   ├── source_identity.py                         # Canonical external-object resolver
+│   ├── cross_platform_score.py                    # One score implementation
 │   ├── value_objects.py                           # PlatformType, GeoCode, Timeframe
 │   └── exceptions.py                              # RepositoryException, ConnectorException
 ├── application/
@@ -57,7 +62,10 @@ src/ignis/
 └── infrastructure/
     ├── persistence/
     │   ├── __init__.py
-    │   └── postgres_repository.py                 # PostgresTimescaleRepository (AsyncConnectionPool)
+    │   ├── postgres_repository.py                 # PostgreSQL source/observation repository
+    │   ├── sqlite_repository.py                   # Zero-config parity implementation
+    │   ├── migration_state.py                     # Refuse schema-created/backfill-missing state
+    │   └── ../migration/legacy_projection.py      # Shared audit/backfill/verifier projection
     └── connectors/
         ├── registry.py                            # ConnectorPluginRegistry + CircuitBreaker
         ├── google_trends/
@@ -77,4 +85,17 @@ src/ignis/
    - `GoogleTrendsRssPlugin` tải XML RSS `https://trends.google.com/trending/rss?geo=VN` qua `httpx`, phân tích qua `feedparser`, chuẩn hóa sang `List[TrendSignal]`.
    - `YouTubeDataPlugin` gọi YouTube Data API v3 `videos.list(chart='mostPopular', regionCode='VN')` qua `httpx`, trích xuất views, likes, tags sang `List[TrendSignal]`.
 3. **Circuit Breaking**: Nếu một plugin lỗi hoặc timeout, Circuit Breaker tăng `failure_count`, các plugin khác vẫn hoàn thành nhiệm vụ.
-4. **Persistence**: `PostgresTimescaleRepository.save_signals()` thực hiện batch insert vào hypertable `trend_signals`.
+4. **Persistence**: `save_signals()` resolves each sighting through the canonical identity resolver,
+   upserts one `sources` row, inserts one `observations` row, and attaches mission evidence.
+5. **Clustering**: cluster rows are saved before observation membership is assigned. Saving a
+   cluster never creates another observation.
+6. **Reading and scoring**: readers query `observations → sources`; an analysis window accepts only
+   `exact_ingestion` observations and selects the latest observation per `(cluster_id, source_id)`.
+
+## Existing PostgreSQL corpus cutover
+
+The runtime must not start in the state where `sql/016` exists but the new tables are empty. The
+canonical operating sequence lives in
+[`docs/migrations/2026-09-10-source-observation-baseline.md`](../../docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
+merge, quiesce, snapshot, generate a fresh baseline from that snapshot, apply `sql/016`, dry-run and
+apply the deterministic backfill, obtain `VERIFIED`, then start the new runtime and reopen ingress.
