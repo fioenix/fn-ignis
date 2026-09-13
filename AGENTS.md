@@ -250,10 +250,16 @@ Breaking Feature   Bugfix / Optimization
 
 1. **NO Speculative or Arbitrary Bumps**: Do NOT bump version numbers for routine single-file bug fixes or daily development tasks. Versions are bumped **ONLY during formal release preparation** on `release/*` or `main`.
 2. **NO Number Skipping**: Never jump versions arbitrarily (e.g. from `0.1.0` directly to `0.5.0` or `1.0.0`). Always increment by strictly `+1` at the appropriate level.
-3. **Atomic Triple Synchronization**: When a version bump is performed, the Agent **MUST synchronously update all 3 files in a single atomic commit**:
+3. **Atomic Version Synchronization**: Six files carry the version string, not three. When a version bump is performed, the Agent **MUST update every one of them in a single atomic commit**, then tag:
    - [`pyproject.toml`](pyproject.toml) $\rightarrow$ `version = "X.Y.Z"`
    - [`openclaw.json`](openclaw.json) $\rightarrow$ `"version": "X.Y.Z"`
+   - [`server.json`](server.json) $\rightarrow$ twice: the manifest version and the package version
+   - [`CITATION.cff`](CITATION.cff) $\rightarrow$ `version: X.Y.Z` and `date-released`
+   - [`.openclaw/config.yaml`](.openclaw/config.yaml) $\rightarrow$ `version: X.Y.Z`
+   - [`BACKLOG.md`](BACKLOG.md) $\rightarrow$ the version banner
    - Git Tag on `main` $\rightarrow$ `vX.Y.Z`
+
+   The identical list is enforced in Checklist C below. Do not reintroduce the obsolete three-file wording.
 4. **Beta Phase Principle (`0.X.Y`)**: While in initial beta stages (`0.X.Y`), prioritize `PATCH` and `MINOR` increments. Do NOT rush to `1.0.0` until enterprise multi-tenancy and production stability milestones are reached.
 
 ---
