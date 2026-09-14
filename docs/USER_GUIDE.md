@@ -163,6 +163,7 @@ If you want to manually connect `fn-ignis` to your MCP client without using `boo
     }
   }
 }
+```
 
 `IGNIS_ENV_FILE` is the only variable an MCP config needs, and it is a path rather than a
 credential. The server reads `.env` itself, so the database URL, the Fernet key and the API keys
@@ -170,7 +171,19 @@ live in exactly one file. Copying them into a client config puts secrets in plai
 places and, because a host's `env` overrides the env file, a stale copy silently wins: rotating
 the YouTube key in `.env` while Claude Desktop still held the old one made every YouTube call
 through MCP fail with "API key expired" while the same code run from a shell succeeded.
-```
+
+#### Two client behaviours that look like failures
+
+**Claude Code may ask you to approve the workspace server.** A `.mcp.json` in the workspace root is
+project-scoped, so Claude Code lists it as pending approval until you accept it once. Until then
+`claude mcp list` shows the entry but reports it as unapproved rather than connected, and no tool
+is callable. Run `claude` in that directory and approve the server; a user-scoped registration
+(`claude mcp add-json`) does not need this step.
+
+**Quit Claude Desktop before running bootstrap, then reopen it.** Claude Desktop keeps its
+configuration in memory and rewrites the file when it exits, so a registration written while the
+app is running is overwritten on quit. The order that sticks is: quit the app, run
+`./scripts/bootstrap.sh` (or `python -m ignis.interfaces.cli.setup_bundle`), then start it again.
 
 ---
 

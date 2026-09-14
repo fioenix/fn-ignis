@@ -189,6 +189,19 @@ MCP đều thất bại với "API key expired", trong khi cùng đoạn code ch
 
 *(Mẹo: Bạn chỉ cần chạy lệnh `ignis-setup` hoặc `./scripts/bootstrap.sh`, hệ thống sẽ tự động cấu hình cho Claude Desktop, Antigravity, Codex và workspace `.mcp.json`).*
 
+#### Hai hành vi của client dễ bị hiểu nhầm là lỗi
+
+**Claude Code có thể yêu cầu bạn duyệt server của workspace.** File `.mcp.json` ở thư mục gốc dự án
+thuộc phạm vi project, nên Claude Code để nó ở trạng thái chờ duyệt cho tới khi bạn chấp nhận một
+lần. Trước đó, `claude mcp list` vẫn hiện entry nhưng báo là chưa được duyệt chứ không phải đã kết
+nối, và chưa gọi được tool nào. Hãy chạy `claude` trong thư mục đó rồi duyệt server. Bản đăng ký ở
+phạm vi user (`claude mcp add-json`) không cần bước này.
+
+**Thoát hẳn Claude Desktop trước khi chạy bootstrap, rồi mở lại.** Claude Desktop giữ cấu hình
+trong bộ nhớ và ghi đè file khi thoát, nên bản đăng ký được ghi lúc ứng dụng đang mở sẽ bị ghi đè
+mất. Thứ tự đúng là: thoát ứng dụng, chạy `./scripts/bootstrap.sh` (hoặc
+`python -m ignis.interfaces.cli.setup_bundle`), rồi mở lại.
+
 ---
 
 ## 3. Chi tiết Biến Môi trường & Cấu hình
@@ -203,7 +216,7 @@ Tất cả các biến môi trường được định nghĩa trong file `.env`:
 | `IGNIS_ENCRYPTION_KEY` | Base64 String | *(Tự sinh)* | Không | Khóa Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) để mã hóa cookie/phiên đăng nhập TikTok lưu trong database. |
 | `SCHEDULER_INTERVAL_SECONDS` | Integer | `8640` (~2,4 giờ) | Không | Nhịp chạy một lượt ingress của worker. Mặc định suy ra từ quota YouTube search: 10 từ khoá x 100 unit, tức một ngày chỉ đủ 10 lượt trong 10.000 unit. |
 | `DISCOVERY_INTERVAL_HOURS` | Integer | `24` | Không | Khoảng cách giữa các đợt tự động quét toàn diện Creative Center và phát hiện white space. |
-| `SYNC_INTERVAL_MINUTES` | Integer | `0` | Không | Ghi đè nhịp ingress của worker, tính theo phút. Giá trị lớn hơn 0 sẽ thắng `SCHEDULER_INTERVAL_SECONDS`; để 0 thì biến kia quyết định. Chỉ nâng lên khi mày biết quota YouTube của mình chịu được số lượt tăng thêm. |
+| `SYNC_INTERVAL_MINUTES` | Integer | `0` | Không | Ghi đè nhịp ingress của worker, tính theo phút. Giá trị lớn hơn 0 sẽ thắng `SCHEDULER_INTERVAL_SECONDS`; để 0 thì biến kia quyết định. Chỉ nâng lên khi người vận hành xác định được quota YouTube của mình chịu được số lượt tăng thêm. |
 | `YOUTUBE_CACHE_TTL_SECONDS` | Integer | `86400` (24h) | Không | Thời gian lưu cache kết quả tìm kiếm YouTube để tiết kiệm quota 10,000 unit/ngày. |
 | `PLAYWRIGHT_PROXY_SERVER` | String | `""` | Không | Proxy server HTTP/SOCKS5 (ví dụ: `http://user:pass@proxy.ip:port`) để cào TikTok không bị chặn. |
 | `CONFIDENCE_HIGH_THRESHOLD` | Float | `80.0` | Không | Ngưỡng điểm để đánh giá chất lượng dữ liệu chiến dịch ở mức HIGH. |

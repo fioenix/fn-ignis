@@ -175,7 +175,11 @@ If you are an AI Agent (**Claude Code, Antigravity, OpenAI Codex, OpenClaw, Herm
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
 ./scripts/bootstrap.sh
 ```
-*Automatically sets up Python virtualenv, SQLite database, generates `.env` with encryption keys, registers FastMCP for Claude Desktop, Antigravity, Codex, and verifies all connectors.*
+*Installs the exact environment recorded in `uv.lock`, creates the SQLite database with its
+schema and seed vocabulary, generates `.env` with a fresh Fernet key, and registers the FastMCP
+server with the clients it finds. SQLite is usable immediately. External connectors are reported
+as unavailable or degraded until you supply your own credentials — that is expected on a first
+run, not a failure.*
 
 ---
 

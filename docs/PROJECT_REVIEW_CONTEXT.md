@@ -343,10 +343,10 @@ previous snapshot in hand will otherwise re-raise them.
    audit is closed and re-verified on 10/09: CI green, no `.env` or database file tracked, no
    full-length API key anywhere in `git rev-list --all` (the four commits still matching
    `AIzaSy` carry the placeholder `AIzaSy...`), and `LICENSE`, `CONTRIBUTING.md`,
-   `CODE_OF_CONDUCT.md`, `SECURITY.md` and `.github/` all present with the version triple
-   synchronised at 0.3.5. `gh repo view` still reports `PRIVATE`. Nothing is blocking the switch;
-   nobody has thrown it. This is the project's longest-standing open item and it is a decision,
-   not work.
+   `CODE_OF_CONDUCT.md`, `SECURITY.md` and `.github/` all present, with every release-controlled
+   file carrying one synchronised version (six files, not three; the count was corrected on
+   13/09). `gh repo view` still reports `PRIVATE`. Nothing is blocking the switch; nobody has
+   thrown it. This is the project's longest-standing open item and it is a decision, not work.
 4. **Git history.** A YouTube API key was committed in `.mcp.json` across 18 commits and has
    been rotated. History was rewritten on 09/09 and every ref force-pushed, but GitHub still
    serves unreachable objects by SHA until its own gc runs.
