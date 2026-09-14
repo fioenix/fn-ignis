@@ -6,7 +6,7 @@
 >   + FastMCP Server (39 Handlers & Tools)
 > - **Trạng thái branch:** PR #8 và PR #9 đã merge vào `main` bằng merge commit; production
 >   cutover trên Supabase chưa chạy
-> - **Trạng thái Tests:** 839 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
+> - **Trạng thái Tests:** 853 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
 
 ---
 
@@ -685,7 +685,11 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   `research_missions`, `topic_clusters`, `system_audit_logs`, `platform_credentials`. Hai bảng
   `trend_signals` và `signal_metrics` chỉ còn phục vụ lịch sử migration và chưa bị drop.
 - [x] **Lightweight Worker Container:** Dockerfile tối ưu (~90MB, multi-stage uv build) chạy nền 24/7 trên OrbStack.
-- [x] **Credentials Hardening:** `CryptoService` áp dụng Fernet AES-128-CBC + HMAC-SHA256, có fail-fast (`assert_persistent_key`) và hỗ trợ `key_version` ("v1") sẵn sàng cho key rotation.
+- [x] **Credentials Hardening:** `CryptoService` áp dụng Fernet AES-128-CBC + HMAC-SHA256, có
+  fail-fast (`assert_persistent_key`) từ chối ghi credential dài hạn dưới ephemeral key. Bản ghi
+  mã hóa mang nhãn `key_version` ("v1"), nhưng đó **chỉ là metadata envelope**: `decrypt_credentials()`
+  dựng một Fernet từ khóa hiện tại và không đọc nhãn đó. Chưa có dual-key decryption và chưa có
+  re-encryption tự động, nên **không được mô tả là sẵn sàng cho key rotation**.
 
 ### B. Ingress Connectors & Authentication
 - [x] **YouTube Data API v3:** 

@@ -38,9 +38,16 @@ We will acknowledge receipt of your vulnerability report within 48 hours and wor
   encrypted in that state does not survive a restart.
 - **Parameterized Queries**: Database access uses driver placeholders rather than string
   interpolation — `%s` on PostgreSQL and `?` on SQLite.
-- **No Hardcoded Secrets**: Secrets and database credentials are supplied through environment
-  variables, read from a single `.env` file. Generated MCP client configurations carry the path
-  to that file (`IGNIS_ENV_FILE`), never copies of the values.
+- **No Hardcoded Secrets**: Nothing secret is committed to the repository. Two different stores
+  hold two different kinds of credential, and they have different risks:
+  - **Static deployment configuration** — the database connection settings and
+    `IGNIS_ENCRYPTION_KEY` — is read from environment variables in a single `.env` file, which is
+    gitignored. Generated MCP client configurations carry the path to that file
+    (`IGNIS_ENV_FILE`) rather than copies of the values.
+  - **Platform OAuth tokens and browser-session credentials** are not kept in that file. They are
+    encrypted and stored in the database, in `platform_credentials`, under the key above. Securing
+    the environment file therefore does not secure these; the database holding them needs its own
+    access control and backup handling.
 
 ### Known limitations
 

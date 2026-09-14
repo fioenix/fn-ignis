@@ -198,8 +198,10 @@ Hệ thống `fn-ignis` đã tích hợp sẵn công cụ tự động hóa toà
    - Mã khóa được lưu trữ độc lập qua biến môi trường `IGNIS_ENCRYPTION_KEY`.
 2. **Cơ Chế Fail-Fast Phòng Vệ**:
    - Nếu `IGNIS_ENCRYPTION_KEY` bị thiếu trong production, hệ thống sẽ **lập tức từ chối ghi** (`EncryptionKeyMissingException`) thay vì âm thầm sử dụng ephemeral key tạm thời trong RAM (vốn sẽ làm mất khả năng giải mã token sau khi khởi động lại server).
-3. **Key Versioning Sẵn Sàng (`v1`)**:
-   - Mọi bản ghi mã hóa đều mang metadata `key_version: "v1"`. Khi cần xoay vòng khóa bảo mật (Key Rotation), hệ thống có khả năng nhận biết bản ghi cũ và tự động giải mã nâng cấp sang key mới.
+3. **Nhãn Phiên Bản Khóa (`key_version: "v1"`)**:
+   - Mỗi bản ghi mã hóa mang metadata `key_version: "v1"`. Đây **chỉ là nhãn trong envelope**, không phải một cơ chế.
+   - Runtime v0.4.0 **không đọc** trường này khi giải mã: `decrypt_credentials()` dựng đúng một Fernet từ `IGNIS_ENCRYPTION_KEY` hiện tại. Không có dual-key decryption, không tự nhận biết bản ghi cũ, không tự giải mã bằng khóa cũ và không tự re-encrypt.
+   - Hệ quả khi xoay vòng khóa: mọi giá trị đã mã hóa bằng khóa cũ sẽ **không đọc được nữa**. Phải thu hồi session ở phía nền tảng, xóa bản ghi credential cũ, đặt khóa mới, rồi đăng nhập lại từng connector. Nhãn này tồn tại để một phiên bản sau có thể xây cơ chế đó, chứ bản thân nó chưa làm gì.
 4. **Cơ Chế Tự Động Làm Mới (Proactive Refresh Loop)**:
    - Trước khi hết hạn 60 ngày, `ThreadsAuthManager` định kỳ kiểm tra. Nếu thời gian còn lại $\le 10$ ngày (`REFRESH_THRESHOLD_DAYS`), hệ thống tự động gọi endpoint `/refresh_access_token` để gia hạn thêm 60 ngày mà không làm gián đoạn bất kỳ chiến dịch nghiên cứu nào.
 
