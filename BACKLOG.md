@@ -1,11 +1,12 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> **Cập nhật lần cuối:** 13/09/2026
-> **Phiên bản:** `v0.3.5`  
-> **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite) + FastMCP Server (39 Handlers & Tools)  
-> **Trạng thái branch:** PR #8 merge-ready tại `9cb6a08` nhưng chưa merge, chưa migrate production
-> **Trạng thái Tests:** 839 passed, 2 skipped (đo trên `codex/v0.4.0-oss-release` với Timescale
-> dùng một lần) | Ruff Linter Clean
+> - **Cập nhật lần cuối:** 14/09/2026
+> - **Phiên bản:** `v0.4.0`
+> - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
+>   + FastMCP Server (39 Handlers & Tools)
+> - **Trạng thái branch:** PR #8 và PR #9 đã merge vào `main` bằng merge commit; production
+>   cutover trên Supabase chưa chạy
+> - **Trạng thái Tests:** 839 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
 
 ---
 
@@ -110,7 +111,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 - [x] **Đã xong (14/09/2026): bootstrap cài đúng bộ version đã khoá.** Trước đây dùng
   `uv pip install -e .`, tức resolve lại từ khoảng version và không đọc `uv.lock`. Giờ là
   `uv sync --locked`, fail rõ khi lock lệch `pyproject.toml`. `uv.lock` đã regenerate bằng
-  `uv lock` (nó ghi project ở `0.3.0` trong khi `pyproject.toml` là `0.3.5`).
+  `uv lock`: lúc đó lock ghi project ở `0.3.0` còn `pyproject.toml` đã ở bản v0.3.5 trước đó.
 - [ ] **Việc của release: bump version phải regenerate `uv.lock` trong cùng commit.** `uv.lock`
   chứa version của chính project, nên đổi `pyproject.toml` mà không chạy `uv lock` sẽ làm
   `uv sync --locked` fail trên checkout sạch và đánh sập CI. Thực tế nó là file thứ bảy của nhóm
