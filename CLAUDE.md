@@ -41,7 +41,10 @@ If the user gives you this repository link or asks you to set up `fn-ignis`, exe
 3. Automatically generates `.env` with secure Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) key and default Zero-Docker SQLite configuration (`DATABASE_URL=sqlite:///ignis.db`).
 4. Bootstraps SQLite database schemas and loads 84+ seed domain lexicons & noise filters.
 5. Registers the `fn-ignis` FastMCP server into Claude Desktop (`claude_desktop_config.json`), Google Antigravity, OpenAI Codex (`~/.codex/config.toml`), and workspace `.mcp.json`.
-6. Executes synthetic diagnostic self-tests to ensure 100% operational readiness.
+6. Executes synthetic diagnostic self-tests and reports readiness per component. A fresh SQLite
+   install is fully usable on its own; external connectors stay unavailable or degraded until the
+   operator supplies their own credentials, and the report says so rather than claiming the whole
+   system is operational.
 
 *Zero external Docker or PostgreSQL setup is required for on-demand research missions.*
 
@@ -133,7 +136,10 @@ Before completing changes or cutting a release, verify these three checklist gat
 - [ ] Verify clean git status: no stray files in `docs/`, no uncommitted credentials or SQLite files.
 - [ ] Ensure working branch is fully merged into `main` before tagging.
 - [ ] Run distribution packaging verification (`python -m build` or `uv build`).
-- [ ] Atomic Triple Synchronization: Verify identical version across `pyproject.toml`, `openclaw.json`, and git tag `vX.Y.Z`.
+- [ ] Atomic Version Synchronization: verify one identical version across all six release-controlled files in a single commit, then tag — `pyproject.toml`, `openclaw.json`, `server.json` (both occurrences), `CITATION.cff` (including `date-released`), `.openclaw/config.yaml`, and the `BACKLOG.md` version banner — plus git tag `vX.Y.Z`. See `AGENTS.md` Section 4 and Checklist C; the obsolete three-file wording is wrong.
+- [ ] Regenerate `uv.lock` with `uv lock` in the same commit as the version bump — the lock carries
+      the project's own version, so skipping it makes `uv sync --locked` fail on a clean checkout.
+      Confirm with `uv lock --check`; never hand-edit the file.
 - [ ] Tag release commit (`git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`) and publish GitHub Release.
 
 

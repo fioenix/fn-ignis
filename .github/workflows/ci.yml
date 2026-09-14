@@ -3,8 +3,11 @@ name: CI
 on:
   push:
     branches: [ main, master, develop, "release/*", "hotfix/*" ]
+  # Every pull request, whatever it targets. The previous filter listed only main, master and
+  # develop, so a stacked pull request -- one based on another feature branch while that branch is
+  # still in review -- received no checks at all and looked green because nothing had run.
   pull_request:
-    branches: [ main, master, develop ]
+  workflow_dispatch:
 
 
 jobs:
@@ -41,10 +44,13 @@ jobs:
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      # --locked installs the exact solution in the committed uv.lock and fails if that lock
+      # disagrees with pyproject.toml. uv pip install re-resolved from the dependency ranges, so
+      # CI could pass on versions no released checkout would ever reproduce.
+      - name: Install locked dependencies
         run: |
           uv venv
-          uv pip install -e ".[dev,browser]"
+          uv sync --locked --extra dev --extra browser
 
       - name: Run Ruff Linter
         run: |
@@ -58,12 +64,24 @@ jobs:
         run: |
           uv build
 
-      - name: Verify Quickstart Onboarding from Clean State
+      # The clean-user journey -- bootstrap from a clean checkout, registration, stdio handshake,
+      # 39-tool discovery, a real tool call -- runs inside the suite above as
+      # tests/integration/test_clean_user_journey.py, against the source tree.
+      #
+      # This step covers what that cannot: the wheel. It installs the built artifact into its own
+      # environment and completes an MCP session from it, so a packaging mistake that an editable
+      # install hides -- a missing template, an unshipped SQL seed -- fails here rather than in a
+      # user's first run. The previous step installed the source tree with `uv pip install -e` and
+      # only imported the module, which proved neither packaging nor usability.
+      - name: Verify the Built Wheel Serves a Real MCP Session
         run: |
-          mkdir -p /tmp/clean-test && cd /tmp/clean-test
+          set -euo pipefail
+          WHEEL="$(ls "${GITHUB_WORKSPACE}"/dist/*.whl | head -1)"
+          echo "Testing wheel: ${WHEEL}"
+          mkdir -p /tmp/wheel-test && cd /tmp/wheel-test
           uv venv
-          . .venv/bin/activate
-          uv pip install -e "${GITHUB_WORKSPACE}"
-          DATABASE_URL="sqlite:///test_smoke.db" uv run python -c "from ignis.interfaces.mcp.server import mcp; print('FastMCP Server initialized successfully from clean install')"
+          uv pip install --python .venv/bin/python "${WHEEL}"
+          printf 'DATABASE_URL=sqlite:///%s/wheel_smoke.db\nDEFAULT_GEO=VN\n' "$(pwd)" > wheel.env
+          IGNIS_ENV_FILE="$(pwd)/wheel.env" .venv/bin/python "${GITHUB_WORKSPACE}/scripts/wheel_mcp_smoke.py"
 
 

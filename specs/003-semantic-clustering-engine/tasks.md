@@ -8,3 +8,13 @@
 ## Phase 2: Cluster Signals Use Case
 - [x] T004 [P] Viết unit tests cho `ClusterSignalsUseCase` trong `tests/unit/test_cluster_signals_use_case.py`
 - [x] T005 Cài đặt `ClusterSignalsUseCase` trong `src/ignis/application/use_cases/cluster_signals.py`
+
+## Phase 3: As-Built Observation-Aware Scoring (2026-09-13)
+
+- [x] T006 Centralize score calculation in `src/ignis/domain/cross_platform_score.py`
+- [x] T007 Select one latest observation per `(cluster_id, source_id)` in both repository readers
+- [x] T008 Exclude non-exact clocks from windowed scoring without substituting publication time
+- [x] T009 Persist cluster membership by updating recorded observations; keep `save_clusters()`
+  free of source/observation writes
+- [x] T010 Add dual-backend contracts for repeated polling, multi-cluster membership, provenance
+  filtering, and deterministic tie-breaking

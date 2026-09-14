@@ -5,7 +5,41 @@ It states what the system is, what has actually been measured, what has not, and
 reasoning is thin. It is in English because it describes `src/` and is read alongside
 `AGENTS.md`; regional documentation lives in the `*.vi.md` files.
 
-**Snapshot re-taken 10/09/2026 at 08:10 UTC, after the day's fixes landed.** Every figure below
+## Current review target — 13/09/2026
+
+PR #8 (`codex/source-observation-evidence`, reviewed head `9cb6a08`) replaces the runtime storage
+model that produced the mission-evidence defect documented below. It is merge-ready but **not
+shipped**: `main` remains at `0c50b91`, Supabase has not received `sql/016` or the backfill, and the
+production runtime has not been activated.
+
+The branch state independently verified before this documentation refresh:
+
+| Gate | Result |
+|---|---|
+| Full suite | 831 passed, 2 skipped on PR #8; 839 passed, 2 skipped on the stacked release branch |
+| Ruff, package build, clean-install smoke test | passed in GitHub Actions |
+| Dual backend | SQLite plus a real disposable TimescaleDB service; no silent Postgres skip |
+| PR | not draft, mergeable, merge state clean |
+| Migration rehearsal | `VERIFIED` on a disposable copy of the real corpus; not rerun for the final pool/version-only commits |
+
+The branch has one runtime source of truth:
+
+- `sources`: canonical external object, enforced by `UNIQUE(platform, external_id)`;
+- `observations`: one immutable collection event, including cluster membership, identity route and
+  clock provenance;
+- `mission_evidence`: the exact observation used by each mission.
+
+Readers, writers, scoring and pruning use that model. `trend_signals` and `signal_metrics` remain
+legacy migration inputs and receive no runtime writes. The canonical production sequence is in
+[`docs/migrations/2026-09-10-source-observation-baseline.md`](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
+The tracked JSON is a policy/rehearsal artifact; production must generate a baseline from the exact
+snapshot taken after ingress is quiesced.
+
+Everything below this block describes the **historical 10/09 snapshot** unless explicitly amended.
+It is retained because the failed measurements and reversals explain the contracts now present in
+the branch.
+
+**Historical snapshot re-taken 10/09/2026 at 08:10 UTC, after that day's fixes landed.** Every figure below
 was read from the running system at that moment, not from a changelog — corpus counts came from
 the live Postgres, test counts from `pytest tests/`, CI status from `gh run list`. Re-read them
 before relying on them; `git log docs/PROJECT_REVIEW_CONTEXT.md` shows when this file was last
@@ -37,7 +71,7 @@ Two ways in, and they differ in what they are allowed to filter:
 | | Track 1 — worker | Track 2 — agent |
 |---|---|---|
 | Runs | Docker daemon, optional | On demand, per tool call |
-| Connectors | Google Trends RSS, YouTube Data API | all six, browser included |
+| Connectors | HTTP-capable discovery/probe connectors available in the worker image | all registered connector surfaces, browser included |
 | Cadence | `SCHEDULER_INTERVAL_SECONDS=8640` (~2.4h) | when asked |
 | Off-locale content | filtered by a script guard | kept, in any language |
 
@@ -129,7 +163,25 @@ understates supply and inflates the Opportunity Index.
 
 ## 4. What is verified, and what is not
 
-**Verified.** 573 tests pass; CI runs Ruff then `pytest tests/` then `uv build` then a
+**Current branch verification.** On the stacked release branch `codex/v0.4.0-oss-release`, 839
+tests pass and 2 skip. The two skips are Postgres-only cases under the SQLite parameter. CI runs
+Ruff, `pytest tests/`, `uv build`, and an MCP session driven against the built wheel rather than an
+editable install. Installation is `uv sync --locked`, so the committed lock is the environment under
+test instead of a fresh resolution from the dependency ranges.
+
+PostgreSQL contracts run against a real TimescaleDB service and are verified not to be skipping
+silently: with `IGNIS_TEST_POSTGRES_DSN` set, 71 of them pass; with it unset, all 72 skip. The
+service is disposable, never live Supabase.
+
+**Convergence gaps measured 13/09/2026.** A local SQLite-only coverage run collected all 833 tests,
+passed 740 and skipped 93 PostgreSQL cases because `IGNIS_TEST_POSTGRES_DSN` was not set. It measured
+73% coverage overall and 71% across persistence/connectors. The latest CI run with Timescale reports
+75% overall coverage and does not enforce `--cov-fail-under`; therefore SC-004's 85% target is not
+an achieved gate. SC-001's `get_top_clusters` P95 < 50 ms target also has no reproducible
+10,000-row benchmark in `tests/` or `scripts/`. These are T021 and T022 in the storage feature task
+list.
+
+**Historical snapshot verification.** 573 tests passed; CI ran Ruff then `pytest tests/` then `uv build` then a
 quickstart install from a clean state, and is green. Dual-backend parity is exercised: a fresh
 SQLite file, a pre-migration SQLite file upgraded in place, and the live Postgres. One full
 6-connector pass completed in 171.6s on 09/09/2026 and stored 173 signals into 31 clusters with
@@ -211,8 +263,9 @@ short of what CI runs.
 
 ## 5. Where the design decisions are recorded
 
-`BACKLOG.md` is the decision log, not a task list: 57 closed entries, each with the measurement
-that settled it, and 22 open. Read the closed ones — several record a conclusion that was
+`BACKLOG.md` is the decision log, not a task list. Counts change as evidence closes or splits an
+item; run `rg '^- \[ \]' BACKLOG.md` instead of copying a count into another document. Read the
+closed entries — several record a conclusion that was
 reached, tested, and then reversed, and the reversal is the useful part. In particular:
 
 - Relevance is judged downstream, never at ingress. Judging it at ingress meant the radar could
@@ -228,15 +281,13 @@ reached, tested, and then reversed, and the reversal is the useful part. In part
 
 Ordered by how much a reviewer's conclusions would change if they did not know about it.
 
-0. **Mission evidence is not reproducible, and the two mission paths disagree.** This outranks
-   everything below it. `save_signals` deduplicates globally on
-   `(platform, source_url, raw_title)` and never reassigns `mission_id`, so a source belongs
-   permanently to the first mission that saw it and every later mission's dossier is missing the
-   rows it was built from — see the note in §4. Separately, `AutonomousRefinementOrchestrator`
-   omits the timeframe that `ExecuteMissionUseCase` passes, and skips the
-   `delete_mission_signals` replacement that path performs. One workflow, two implementations,
-   already drifting on two observable contracts. No test covers one source participating in two
-   missions.
+0. **Resolved on PR #8; production cutover remains.** The historical defect was that
+   `trend_signals` combined source identity, observation and one mission owner. The branch now
+   separates `sources`, `observations` and `mission_evidence`; one source can support two missions,
+   one mission can retain two observations of a source, and both backends run the same behavioral
+   contracts. Evidence replacement writes new claims before pruning old ones, and the mission paths
+   preserve timeframe and observation identifiers. This is not production-complete until PR #8 is
+   merged and the snapshot-specific backfill returns `VERIFIED`.
 
 1. **Probe seeds were machinery vocabulary until 10/09/2026.** Adding eight machinery domains to
    `market_lexicons` on 09/09 left an exclusion list in `ingest_trends.py` naming only the two
@@ -308,9 +359,10 @@ previous snapshot in hand will otherwise re-raise them.
    platforms. **Scope of that decision:** the transcript values only. Those secrets are absent
    from git history, verified across `git rev-list --all`. It would need revisiting if anyone
    outside the current users gains access, or if transcripts are shared. Recorded in
-   `BACKLOG.md` as an open item so it stays visible rather than being treated as settled.
-6. **The local config chores are done for three of four clients, and cannot be done for the
-   fourth while Claude Desktop is running.** `./scripts/bootstrap.sh` was run on 10/09;
+   `BACKLOG.md` as a closed decision with its revisit condition, rather than as unfinished work.
+6. **The local config chores are done for three of four clients; Claude Desktop remains stale.**
+   Re-checked 13/09: its entry still has the four credential keys, while the workspace `.mcp.json`
+   has only `IGNIS_ENV_FILE`. `./scripts/bootstrap.sh` was run on 10/09;
    `.mcp.json`, Antigravity's config and `~/.codex/config.toml` now carry only `IGNIS_ENV_FILE`.
    `claude_desktop_config.json` was rewritten too, and verified — then **reverted**.
 
@@ -329,7 +381,8 @@ previous snapshot in hand will otherwise re-raise them.
 
    The previous snapshot listed a duplicate `fn-ignis` registration as the likely cause of
    `Connection closed`; there is one registration per client file, so that hypothesis was wrong
-   and the cause is still unknown.
+   and the cause is still unknown. The durable order is: quit Claude Desktop, run bootstrap, then
+   reopen it.
 
 ## 8. Failure modes this project has actually exhibited
 
@@ -409,42 +462,60 @@ only a non-empty string. `synthetic_probe` still duck-types the same way (§6).
 
 ## 9. Suggested review angles
 
-1. **Read `BACKLOG.md` closed entries first.** They carry the reasoning and the measurements;
+1. **Treat production cutover as the remaining data-model activation blocker, not automatically as
+   the only release blocker.** Review the fresh snapshot baseline, four digests and `VERIFIED`
+   result; do not accept the tracked rehearsal JSON as the production reference. Separately decide
+   whether the inherited but unmet SC-001 latency benchmark and SC-004 coverage threshold block
+   merge or are explicitly re-scoped; a mergeable PR and green CI do not settle either criterion.
+2. **Review citation identity next.** Storage now knows the exact mission observation, but
+   `CitationEvidence` has no `observation_id` and the citation registry keys on platform plus
+   URL-or-title. That is a second source-identity policy and can disagree with the canonical
+   resolver.
+3. **Read `BACKLOG.md` closed entries first.** They carry the reasoning and the measurements;
    the code shows only the outcome.
-2. **Question the Opportunity Index.** It compares demand velocity against localised supply
+4. **Question the Opportunity Index.** It compares demand velocity against localised supply
    volume on a corpus that is 93% one platform, most of that a timestamp artefact. Is the
    formula sound, and is the input good enough for it to mean anything yet? §4 gives the first
    real evidence to argue with: the same keyword moved from `+9.8` to `−62.0` purely because
    supply was being counted correctly, which says the formula responds to input quality exactly
    as designed and that every earlier reading was optimistic.
-3. **Question whether freshness should penalise a larger corpus.** In §4, confidence fell from
+5. **Question whether freshness should penalise a larger corpus.** In §4, confidence fell from
    80.7 `HIGH` to 75.5 `MEDIUM` while signals rose 115 → 156, entirely because the added Threads
    signals were older. `SCORECARD_WEIGHT_FRESHNESS` is 0.30, the largest of the four weights. A
    reviewer should ask whether freshness belongs in a *confidence* score at all: it measures how
    recent the evidence is, not how much of it there is or how well it was verified. Recency may
    belong as a reported dimension rather than a term that can downgrade a wider corpus.
-4. **Ask what the product question is.** Two days before this snapshot the work was foundation
+6. **Ask what the product question is.** Two days before this snapshot the work was foundation
    repair driven by a self-generated backlog, and the owner stopped it to ask whether any of it
    advanced the product. The honest answer was no. §4 exists because of that intervention. A
-   reviewer is better placed than the codebase to say which of the 22 open items actually move a
-   user decision and which are tidiness.
-5. **Question the harness boundary.** The MCP layer is supposed not to dictate workflow
+   reviewer is better placed than the codebase to say which current open entries actually move a
+   user decision and which are tidiness. Count the live set from `BACKLOG.md`; do not copy a count
+   into another document.
+7. **Question the harness boundary.** The MCP layer is supposed not to dictate workflow
    (`CLAUDE.md` Checklist B), yet `run_autonomous_research_mission` and
    `trigger_autonomous_discovery` are end-to-end pipelines. Is that a contradiction worth
    resolving, or two legitimate levels of abstraction?
-6. **Question the fail-open / fail-closed choices.** They are deliberate and inconsistent on
+8. **Question the fail-open / fail-closed choices.** They are deliberate and inconsistent on
    purpose: the TikTok notification guard fails closed because it protects the operator's inbox;
    the clusterer, the probe templates and the language detector fail open with a warning because
    failing closed would empty the corpus. Are they drawn in the right places?
-7. **Look for the next duplicated value.** Given the pattern above, assume there is one.
+9. **Look for the next duplicated value.** Given the pattern above, assume there is one.
 
 ## 10. Running it
 
 ```bash
 ./scripts/bootstrap.sh              # venv, .env, schema, seeds, MCP registration, self-test
-.venv/bin/pytest tests/             # what CI runs; tests/unit/ is 4 integration tests short
+.venv/bin/pytest tests/             # what CI runs
 .venv/bin/pytest tests/unit/test_repo_conventions.py   # the language and vocabulary gates
 python -m ignis.interfaces.cli.setup_bundle --json      # re-register MCP, rewrite configs
+```
+
+Migration tooling is intentionally explicit and fail closed:
+
+```bash
+python scripts/migration_reconciliation_audit.py --help
+python scripts/backfill_observations.py --help
+python scripts/post_migration_verification.py --help
 ```
 
 SQLite is the zero-config default and needs no Docker. `DATABASE_URL=postgresql://…` switches to

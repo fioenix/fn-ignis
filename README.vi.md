@@ -20,6 +20,9 @@
 - **⚡ Cào Dữ liệu Cục bộ $0 Token**: Thu thập, lọc và chuẩn hóa dữ liệu lớn cục bộ bằng các bộ parser Python xác định mà không làm hao tốn token API LLM đắt đỏ.
 - **🏛️ Kiến trúc Dual-Track**: Kết hợp daemon radar nền chạy 24/7 (`fn-ignis-worker` — tùy chọn, chỉ dùng API chính thống) với các đợt nghiên cứu chiến lược chuyên sâu theo giả thuyết khi cần. Các kênh phải điều khiển browser thuộc track theo yêu cầu, chạy trên máy bạn với session của bạn — nhờ vậy image worker vẫn gọn, không cần Chromium.
 - **📊 Chỉ số Cơ hội Toán học (Opportunity Index)**: Định lượng khoảng trống thị trường (+100 đến -100) bằng tương quan toán học giữa tốc độ tăng trưởng nhu cầu tìm kiếm vĩ mô và khối lượng cung cấp nội dung bản địa.
+- **🧾 Evidence Ledger không mất dữ liệu**: Lưu một canonical source cho mỗi object bên ngoài, mọi
+  observation thu thập bất biến, và đúng evidence mà từng mission đã dùng. Poll lặp không làm tăng
+  giả source diversity; một source có thể tham gia nhiều mission và cluster mà không bị copy.
 - **🗣️ Lắng nghe Khách hàng Thực tế (Voice of Customer)**: Cào và tổng hợp các rào cản mua hàng, thắc mắc về giá và nhu cầu chưa được đáp ứng trực tiếp từ phần bình luận video công khai.
 - **🧠 Cơ chế Từ điển Động Tự trị (Dynamic Lexicon)**: Bảng từ vựng lưu trữ bền vững trên SQLite/PostgreSQL cho phép agent đăng ký tiếng lóng ngành, tên thương hiệu mới ngay trong quá trình chạy mà không cần sửa code.
 - **🤖 Tương thích Toàn diện Hệ sinh thái Agent**: Hỗ trợ sẵn sàng out-of-the-box cho Claude (Desktop & Code), Antigravity, Codex, OpenClaw, Hermes và Pi Agent.
@@ -31,6 +34,18 @@
 <p align="center">
   <img src="docs/assets/architecture.png" alt="fn-ignis Kiến trúc Mô hình Song hành" width="100%">
 </p>
+
+Runtime persistence dùng một nguồn sự thật trên cả hai backend:
+
+| Entity | Sở hữu |
+|---|---|
+| `sources` | Identity của object bên ngoài: đúng ba cột `id`, `platform`, `external_id` |
+| `observations` | Một collection event: title, URL, metric, metadata, cluster membership, identity route và clock provenance |
+| `mission_evidence` | Đúng observation mà từng research mission đã dùng |
+
+`trend_signals` và `signal_metrics` chỉ còn là đầu vào migration lịch sử. Runtime không bao giờ ghi
+vào chúng. Chỗ đọc duy nhất còn lại là guard của cluster pruner: cluster mà corpus legacy vẫn trỏ
+tới thì chưa rỗng, xoá nó trước khi backfill sẽ cascade mất đúng những dòng backfill sắp đọc.
 <p align="center">
   <small><em>Sơ đồ: Kiến trúc Tình báo Xu hướng & Nghiên cứu Thị trường Mô hình Song hành (<a href="docs/assets/architecture.svg">Vector SVG</a> · <a href="docs/assets/architecture.html">Bản HTML Độc lập</a>)</em></small>
 </p>
@@ -39,7 +54,8 @@
 
 ## 🧭 Quy trình Vận hành Chuẩn 6 Bước (SOP)
 
-Mọi chiến dịch nghiên cứu thị trường đều tuân theo quy trình 6 bước chuẩn mực:
+Với chiến dịch nghiên cứu toàn diện, sáu bước dưới đây là workflow tham chiếu. Mọi FastMCP tool vẫn
+gọi độc lập được; harness không ép câu hỏi ad-hoc phải chạy cả chuỗi.
 
 ```
 Bước 1: Xác định Mục tiêu Nghiên cứu & Giả thuyết Cốt lõi
@@ -162,7 +178,7 @@ Chạy `fn-ignis` trên máy cá nhân **không cần cài đặt Docker hay Pos
 ```bash
 # 1. Clone repo & khởi tạo virtual environment
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
-uv venv && source .venv/bin/activate && uv pip install -e .
+uv venv && source .venv/bin/activate && uv sync --locked --inexact
 
 # 2. Khởi chạy FastMCP Server trực tiếp (SQLite tự động khởi tạo)
 ignis-mcp
@@ -174,6 +190,11 @@ Triển khai toàn bộ cụm doanh nghiệp (TimescaleDB + Worker Daemon Chạy
 # Khởi chạy full stack
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+> Installation PostgreSQL đã có corpus legacy trong `trend_signals` phải chạy
+> [production cutover source/observation](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
+> Sau khi apply `sql/016`, không khởi động runtime mới cho tới khi baseline sinh từ đúng snapshot,
+> backfill và verifier trả `VERIFIED`.
 
 ---
 

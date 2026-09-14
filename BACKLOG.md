@@ -1,9 +1,11 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> **Cập nhật lần cuối:** 09/09/2026  
+> **Cập nhật lần cuối:** 13/09/2026
 > **Phiên bản:** `v0.3.5`  
 > **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite) + FastMCP Server (39 Handlers & Tools)  
-> **Trạng thái Tests:** 350/350 unit tests PASSED (100%) | Ruff Linter Clean
+> **Trạng thái branch:** PR #8 merge-ready tại `9cb6a08` nhưng chưa merge, chưa migrate production
+> **Trạng thái Tests:** 839 passed, 2 skipped (đo trên `codex/v0.4.0-oss-release` với Timescale
+> dùng một lần) | Ruff Linter Clean
 
 ---
 
@@ -74,8 +76,65 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   tức tổng hợp (bóng đá, thời sự), nên ghép chủ đề theo nó cho ra corpus tin tức chứ không phải
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
 
+### Chuẩn bị release v0.4.0 — mở 14/09/2026
+
+#### Ranh giới blocker — Fio chốt 14/09/2026
+
+Ba mục dưới đây từng nằm chung trong "việc còn lại của release". Chúng không cùng một loại, và gộp
+như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
+
+- [ ] **T020 chặn deployment, không chặn publish.** Production cutover source/observation chặn đúng
+  một thứ: kích hoạt runtime mới trên corpus PostgreSQL/Supabase đã có. Nó không chặn việc publish
+  bản open-source beta chạy SQLite cài mới. Người clone về lần đầu không có corpus legacy nào để
+  migrate, nên chuỗi quiesce/snapshot/baseline/`sql/016`/backfill/verifier không áp dụng cho họ.
+  Chi tiết cutover vẫn nằm ở T020 trong phần source identity bên dưới.
+- [ ] **Blocker của release acceptance v0.4.0: gọi tool Ignis qua model, từ một phiên Claude Code
+  đăng nhập thật.** Hiện mới chứng minh được phần server: `claude mcp list` báo `✔ Connected` với
+  registration do bootstrap sinh ra, và JSON-RPC trực tiếp gọi được tool (39 tool,
+  `get_runtime_config` SUCCESS). Hai thứ đó cộng lại chứng minh đường đi tới server, chứ chưa chứng
+  minh trọn vẹn hành trình người dùng: phần model tự chọn tool rồi đọc kết quả vẫn chưa chạy lần
+  nào. Chưa có một lượt như vậy thì v0.4.0 chưa được coi là accepted.
+- [ ] **P95 benchmark và ngưỡng coverage 85% là khoảng trống đã đo, không chặn beta.** SC-001 chưa
+  có benchmark tái lập được nào trên 10.000 dòng cho `get_top_clusters` P95 < 50 ms. SC-004 đặt mục
+  tiêu 85% nhưng CI đo 75% và không bật `--cov-fail-under`. Cả hai đã ghi rõ là mục tiêu chưa đạt
+  (T021, T022), không phải điều kiện phát hành bản beta. Không được mô tả hai mục này như đã đạt.
+
+
+- [x] **Đã xong (14/09/2026): hai client local chạy Ignis cùng lúc được.** Startup của MCP server
+  `pgrep` chuỗi `ignis.interfaces.mcp.server` rồi `SIGTERM` mọi process khớp. Đó đúng là command
+  line của mọi stdio server, nên "stale instance" nó dọn chính là client mở trước. Đo được: cả hai
+  server initialize và list 39 tool xong, server đầu thoát với `-15` ngay khi server thứ hai khởi
+  động, call tiếp theo raise `BrokenPipeError`. Đã bỏ sweep, giữ handler SIGINT/SIGTERM đóng pool.
+  Contract nằm ở `tests/integration/test_concurrent_stdio_clients.py`, chạy subprocess thật; khôi
+  phục sweep thì test fail lại.
+- [x] **Đã xong (14/09/2026): bootstrap cài đúng bộ version đã khoá.** Trước đây dùng
+  `uv pip install -e .`, tức resolve lại từ khoảng version và không đọc `uv.lock`. Giờ là
+  `uv sync --locked`, fail rõ khi lock lệch `pyproject.toml`. `uv.lock` đã regenerate bằng
+  `uv lock` (nó ghi project ở `0.3.0` trong khi `pyproject.toml` là `0.3.5`).
+- [ ] **Việc của release: bump version phải regenerate `uv.lock` trong cùng commit.** `uv.lock`
+  chứa version của chính project, nên đổi `pyproject.toml` mà không chạy `uv lock` sẽ làm
+  `uv sync --locked` fail trên checkout sạch và đánh sập CI. Thực tế nó là file thứ bảy của nhóm
+  sáu file release-controlled; checklist hiện chưa nhắc.
+- [ ] **Chưa kiểm được: Claude Code gọi tool qua model.** `claude mcp list` từ một HOME tạm sạch
+  báo `✔ Connected` với registration do bootstrap sinh ra, nên client thật có nhận và bắt tay được.
+  Nhưng `claude -p` dừng ở `OAuth session expired and could not be refreshed`; login cần browser
+  flow mà phiên không tương tác không làm được. Bản thân tool call đã được chứng minh bằng JSON-RPC
+  trực tiếp (39 tool, `get_runtime_config` SUCCESS) trong
+  `tests/integration/test_clean_user_journey.py` và `scripts/wheel_mcp_smoke.py`. Cần Fio chạy lại
+  một lượt từ Claude Code đã đăng nhập; lệnh nằm trong
+  `.handoff/2026-09-14-clean-user-acceptance.handoff.md`.
+
 ### Source identity và mission evidence — quyết định 10/09/2026
 
+- [ ] **Production cutover chưa shipped (mở 13/09/2026).** Runtime code path trên PR #8 đã chỉ
+  đọc/ghi `sources`, `observations`, `mission_evidence`, nhưng `main` và Supabase production chưa
+  chuyển. Runbook canonical nằm trong
+  [`docs/migrations/2026-09-10-source-observation-baseline.md`](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
+  Thứ tự bắt buộc: merge; quiesce ingress/runtime cũ; snapshot; sinh baseline **từ chính snapshot**;
+  apply `sql/016`; backfill; verifier trả `VERIFIED`; kích hoạt runtime mới; mở lại ingress. File
+  baseline đã track chỉ là review artifact của corpus diễn tập, không phải reference cho lần apply
+  production. Gate runtime và guard pruner chỉ fail closed khi thứ tự bị vi phạm; chúng không cho
+  phép đổi thứ tự.
 - [x] **Xác nhận duplicate có hai cơ chế, không phải một lỗi duy nhất.** Trên Postgres, nhóm lớn
   nhất là một video YouTube bị lưu 275 lần bởi `save_signals` trước commit
   `478a7c9e5209423a38dcee6cc4a47074bd9d4889`, khi hàm này còn insert vô điều kiện. 275 dòng có
@@ -136,7 +195,8 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [x] **Baseline đối soát là bằng chứng migration lâu dài, không phải handoff (chốt
   10/09/2026).** Bản đã sanitize được track ở `docs/migrations/2026-09-10-source-observation-
   baseline.{json,md}`: chỉ công thức, aggregate count, reason-code total, 11 invariant result và
-  một SHA-256 trên mỗi tập canonical. Không title, URL, external ID hay mission title. Bản
+  một SHA-256 trên mỗi tập canonical. Baseline hiện là `schema_version: 7`, 14/14 invariant. Không
+  title, URL, external ID hay mission title. Bản
   row-level có nêu identity thì ở ngoài git, đi cùng database backup. Digest khoá trên business
   identity chứ không trên `trend_signals.id`, vì digest khoá trên surrogate key sẽ đổi ngay khi
   migration ghi lại dòng — mất giá trị đúng lúc cần nhất.
@@ -422,7 +482,7 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   Cùng lúc xoá bốn default 900 chết trong `scheduler.py`: chúng không bao giờ fire vì mọi caller
   đều đọc từ `Settings`, nhưng 900 chính là con số đã trôi vào cả hai file cấu hình.
 
-- [ ] **Quyết định 10/09/2026 — Fio chấp nhận rủi ro ba secret đã lọt vào transcript.**
+- [x] **Quyết định 10/09/2026 — Fio chấp nhận rủi ro ba secret đã lọt vào transcript.**
   Password Supabase, `IGNIS_ENCRYPTION_KEY` và key YouTube xuất hiện dạng plaintext trong
   transcript phiên 10/09 khi grep `~/.codex/config.toml`. Tao đề nghị rotate cả ba; Fio quyết
   không rotate, lý do: hiện chỉ nội bộ dùng `ignis` và mức độ mật không đáng.
@@ -448,12 +508,18 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   tình cờ khởi động server sẽ ghi đè `.env` của project. Tao dựng decoy để chứng minh: thứ tự cũ
   cho decoy thắng, thứ tự mới cho project thắng. Có test giữ đúng thứ tự vì lỗi này im lặng, chỉ
   sai giá trị chứ không báo gì.
-- [ ] **Còn lại của mày: `claude_desktop_config.json` vẫn giữ key cũ và ba secret.** Tao không
-  sửa file ngoài repo. Chạy `./scripts/bootstrap.sh` (hoặc `python -m ignis.interfaces.cli.setup_bundle`)
-  là nó ghi lại entry `fn-ignis` ở cả bốn nơi theo dạng mới, rồi restart Claude Desktop.
-- [ ] **Còn lại của mày: `fn-ignis` đang đăng ký hai lần.** Có trong cả `.mcp.json` (workspace) và
-  `claude_desktop_config.json` (global), `command` với `args` giống hệt. Đây là nghi phạm cho
-  `Connection closed`; server tự nó bắt tay MCP xong trong 1,2 giây, exit 0. Bỏ một trong hai.
+- [ ] **Còn lại của mày: `claude_desktop_config.json` vẫn giữ key cũ và ba secret.** Kiểm lại
+  13/09/2026: entry global vẫn có bốn key `DATABASE_URL`, `DEFAULT_GEO`,
+  `IGNIS_ENCRYPTION_KEY`, `YOUTUBE_API_KEY`, trong khi `.mcp.json` đã chỉ còn
+  `IGNIS_ENV_FILE`. Claude Desktop giữ config trong memory và ghi đè external edit khi thoát, nên
+  thứ tự đúng là: **quit Claude Desktop trước**, chạy `./scripts/bootstrap.sh` (hoặc
+  `python -m ignis.interfaces.cli.setup_bundle`), rồi mở lại app. Chạy bootstrap khi app còn mở
+  không tạo thay đổi bền vững.
+- [x] **Rút lại giả thuyết `fn-ignis` đăng ký hai lần (13/09/2026).** `.mcp.json` là registration
+  của workspace client, `claude_desktop_config.json` là registration của Claude Desktop; một entry
+  trong mỗi client không phải hai server được cùng một client khởi động. Hai `command`/`args` giống
+  nhau là đúng. Không còn dùng giả thuyết này để giải thích `Connection closed`; nguyên nhân đó vẫn
+  chưa xác định.
 - [x] **Đã xong (10/09/2026): sniffer chỉ ghi khi doc_id thật sự đổi.** `GraphQLDocIdCache.set`
   chạy trong request interceptor của Playwright, nên Threads gọi GraphQL bao nhiêu lần thì nó
   chạy bấy nhiêu lần, và lần nào cũng queue một lệnh ghi database. Một lượt đo được 97 lần ghi,
@@ -511,9 +577,10 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 
   Kiểm ngược trên host thật: bỏ module playwright → cả hai False; trỏ sang host không tồn tại →
   cả hai False; host thật → cả hai True. Đặt lại `return True` thì 3 test fail.
-- [ ] **Còn lại: `BASE_URL` của Creative Center là đường dẫn trước redirect.**
-  `/business/creativecenter/inspiration/popular/hashtag/pc/en` giờ 301 sang
-  `/creative/creativeCenter/trends`. Browser tự follow nên plugin vẫn chạy. Đo ngày 10/09/2026.
+- [x] **Đã xong (10/09/2026): `BASE_URL` của Creative Center dùng URL sau redirect.**
+  `/business/creativecenter/inspiration/popular/hashtag/pc/en` trả 301 sang
+  `/creative/creativeCenter/trends`; commit `cde326c` đã đổi constant sang URL đích. Contract
+  `test_tiktok_health_probes.py` giữ đúng URL này. Mục cũ vẫn để mở dù code và test đã đóng nó.
 - [x] **Đã xong (10/09/2026): health report nói rõ TikTok chặn ở surface nào.**
   Lượt mission trên seed sạch cho TikTok `AUTH_REQUIRED` với 0 signal, trong khi `is_healthy`
   báo HEALTHY. Tao ban đầu nói nguyên nhân là `search_across_all` đòi session — **sai**.
@@ -610,7 +677,9 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 
 ### A. Hạ Tầng & Cơ Sở Dữ Liệu
 - [x] **Supabase Cloud Pooler (Region ap-southeast-1):** Kết nối qua pooler endpoint `aws-0-ap-southeast-1.pooler.supabase.com:5432` với `psycopg_pool.AsyncConnectionPool`.
-- [x] **Schema Bền Vững:** `research_missions`, `topic_clusters`, `trend_signals`, `system_audit_logs`, `platform_credentials`.
+- [x] **Schema Bền Vững:** runtime dùng `sources`, `observations`, `mission_evidence` cùng
+  `research_missions`, `topic_clusters`, `system_audit_logs`, `platform_credentials`. Hai bảng
+  `trend_signals` và `signal_metrics` chỉ còn phục vụ lịch sử migration và chưa bị drop.
 - [x] **Lightweight Worker Container:** Dockerfile tối ưu (~90MB, multi-stage uv build) chạy nền 24/7 trên OrbStack.
 - [x] **Credentials Hardening:** `CryptoService` áp dụng Fernet AES-128-CBC + HMAC-SHA256, có fail-fast (`assert_persistent_key`) và hỗ trợ `key_version` ("v1") sẵn sàng cho key rotation.
 
@@ -648,7 +717,7 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [x] **Deterministic Artifact Builder:** Single-file HTML Report (Tailwind CSS) trực quan hóa Scorecard, Ma trận Cung-Cầu và Bằng chứng đa kênh.
 
 ### D. Tối Ưu Hóa Giao Tiếp & FastMCP Catalog
-- [x] **Danh mục 31 FastMCP Tools:** Hoàn thiện và đồng bộ đối xứng giữa `server.py`, `openclaw.json`, `hermes_manifest.json`, `.hermes/tools.json` và `setup_bundle.py`.
+- [x] **Danh mục 39 FastMCP Tools:** Hoàn thiện và đồng bộ đối xứng giữa `server.py`, `openclaw.json`, `hermes_manifest.json`, `.hermes/tools.json` và `setup_bundle.py`.
 - [x] **Cross-Agent Session Tracing:** Lưu trữ trường `agent` và `session_id`. Tool `get_current_session_mission` tự động khôi phục ngữ cảnh làm việc mà không cần nhập lại ID.
 - [x] **Tài liệu Tích hợp Meta Dedicated:** [docs/META_INTEGRATION_GUIDE.md](docs/META_INTEGRATION_GUIDE.md) định nghĩa toàn diện mô hình Dual-UX và kịch bản tự động hóa cho AI Agent.
 
@@ -666,29 +735,50 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [x] **Insights TTL Caching (2 giờ):** Caching in-memory cho post metrics của Threads/Reels để giải quyết triệt để bài toán N+1 request và bảo vệ hạn mức 200 reqs/user/hour của Meta Graph API.
 - [x] **Registry Multi-Plugin Coexistence (Tech Debt):** Đảm bảo `TikTokPlugin` (Search Video Grid & Comments) và `TikTokCreativeCenterPlugin` (Macro Trends Radar) cùng tồn tại song song trong `ConnectorPluginRegistry` mà không bị ghi đè.
 
-### 🎯 Epic 2: Data Provenance, Ingress Health Audit & Citation Attribution Engine (Sprint Ready)
+### 🎯 Epic 2: Data Provenance, Ingress Health Audit & Citation Attribution Engine (Partial)
 *Mục tiêu: Xóa bỏ nhận định mơ hồ và ảo giác; minh bạch hóa nguồn gốc dữ liệu (Data Provenance) và phát hiện kênh ingress bị rỗng/lỗi.*
-- [ ] **Channel Ingress & Health Summary Table:** Tổng hợp trạng thái (`HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`, `RATE_LIMITED`) và số lượng tín hiệu của từng kênh kết nối (Google Trends, YouTube, TikTok Video Grid, TikTok Comments, Threads, Instagram Reels), đính kèm mẫu tín hiệu tiêu biểu.
-- [ ] **Citation Attribution Engine:** Tự động gắn thẻ dẫn chứng cụ thể (`CitationEvidence`: platform, title, metrics, author, excerpt) vào từng `StrategicInsight`, `MarketOpportunity` và `ActionableTakeaway`.
-- [ ] **HTML Dashboard Visualization:** Trực quan hóa Bảng Kiểm Toán Kênh Dữ Liệu (Ingress Audit Table) và các huy hiệu Citation Badges (Pill Badges) trong báo cáo HTML.
-- [ ] **FastMCP & Agent Reporting Protocol:** Cập nhật payload `get_mission_analysis` và chuẩn hóa quy trình xuất báo cáo bắt buộc có bảng audit và inline citations theo [docs/DATA_PROVENANCE_AND_CITATION_SPEC.md](docs/DATA_PROVENANCE_AND_CITATION_SPEC.md).
+- [ ] **Channel health còn thiếu surface-level identity:** `ChannelDataSummary` đã có đủ năm status
+  và báo năm platform mà mission nhắm tới, kèm count và top citation. Nó chưa tách TikTok Video Grid
+  khỏi TikTok Comments; cả hai đang cùng là `PlatformType.TIKTOK`, nên một surface khỏe có thể che
+  surface kia hỏng. Quyết trước xem health contract là platform hay connector surface rồi mới đổi
+  schema/payload.
+- [ ] **Citation Attribution còn thiếu hai consumer:** `StrategicInsight` và top citation của
+  channel đã dùng `CitationEvidence`; `get_mission_analysis` serialize được chúng. Nhưng
+  `MarketOpportunity.supporting_signals` và `actionable_takeaways` vẫn là `List[str]`, nên chưa có
+  typed citation gắn trực tiếp vào cơ hội và hành động như spec hứa. Quan trọng hơn,
+  `CitationEvidence` chưa mang `observation_id`, còn `_citation_key()` tự định danh bằng
+  `platform | source_url-or-title` thay vì dùng observation/source identity đã được repository
+  giải quyết. Đây là bản source identity thứ hai: URL variant có thể tách một source thành hai
+  citation, còn URL dùng chung hoặc title trùng có thể gộp sai. Contract cần trỏ citation tới đúng
+  observation trong `mission_evidence`; display URL/title chỉ là payload.
+  - **HTML consequence:** dashboard đã render Data Ingress audit và citation pills dưới strategic
+    insights; opportunity và actionable chưa thể có pill cho tới khi model mang typed citation.
+  - **FastMCP consequence:** payload đã có `channel_summaries` và citations cho
+    `strategic_insights`; phần còn lại là serialize đúng typed citation mới, không phải một backlog
+    item độc lập. Xem
+    [docs/DATA_PROVENANCE_AND_CITATION_SPEC.md](docs/DATA_PROVENANCE_AND_CITATION_SPEC.md).
 
-### 🎯 Epic 3: Live Alerts & Notification Webhooks
+### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
+
+Các mục dưới đây chưa có measurement, decision hay release target. Chúng được giữ để không mất ý
+tưởng, nhưng không được tính là việc đang mở cho tới khi một outcome cụ thể được ưu tiên.
+
+#### Epic 3: Live Alerts & Notification Webhooks
 *Mục tiêu: Đẩy thông báo chủ động cho người dùng khi xu hướng bùng nổ.*
-- [ ] **Persisted Discovery State:** Lưu trữ `last_discovery_time` vào cơ sở dữ liệu thay vì biến in-memory, tránh tình trạng khởi động lại daemon worker gửi lại toàn bộ alert cũ.
-- [ ] **Webhook Deliveries & Idempotency:** Thiết kế bảng `webhook_deliveries` với dedup key duy nhất (`topic_id` + `alert_type` + `date`) và pipeline retry/backoff.
-- [ ] **Breakout Trend Webhook:** Tự động gửi cảnh báo qua Slack / Telegram / Discord khi một topic cluster đạt `cross_platform_score >= 80.0` (Momentum: BREAKOUT).
-- [ ] **Weekly Executive Digest:** Tự động chạy báo cáo tổng kết xu hướng hàng tuần và xuất bản trang HTML tĩnh.
+- **Persisted Discovery State:** Lưu trữ `last_discovery_time` vào cơ sở dữ liệu thay vì biến in-memory, tránh tình trạng khởi động lại daemon worker gửi lại toàn bộ alert cũ.
+- **Webhook Deliveries & Idempotency:** Thiết kế bảng `webhook_deliveries` với dedup key duy nhất (`topic_id` + `alert_type` + `date`) và pipeline retry/backoff.
+- **Breakout Trend Webhook:** Tự động gửi cảnh báo qua Slack / Telegram / Discord khi một topic cluster đạt `cross_platform_score >= 80.0` (Momentum: BREAKOUT).
+- **Weekly Executive Digest:** Tự động chạy báo cáo tổng kết xu hướng hàng tuần và xuất bản trang HTML tĩnh.
 
-### 🎯 Epic 2: Multi-Language & Regional Expansion (SEA & Global)
+#### Epic 4: Multi-Language & Regional Expansion (SEA & Global)
 *Mục tiêu: Mở rộng khả năng lắng nghe thị trường ngoài Việt Nam.*
-- [ ] **Đa khu vực (Geo Expansion):** Mở rộng bộ phân tích cho các thị trường Đông Nam Á (`TH`, `ID`, `MY`, `SG`, `PH`) và Toàn cầu (`US`, `GLOBAL`).
-- [ ] **Cross-Language Semantic Alignment:** Đối chiếu các chủ đề đang bùng nổ tại thị trường US/Trung Quốc với tốc độ du nhập về Việt Nam (Time-Lag Arbitrage).
+- **Đa khu vực (Geo Expansion):** Mở rộng bộ phân tích cho các thị trường Đông Nam Á (`TH`, `ID`, `MY`, `SG`, `PH`) và Toàn cầu (`US`, `GLOBAL`).
+- **Cross-Language Semantic Alignment:** Đối chiếu các chủ đề đang bùng nổ tại thị trường US/Trung Quốc với tốc độ du nhập về Việt Nam (Time-Lag Arbitrage).
 
-### 🎯 Epic 4: Trend Velocity Forecasting (Dự Báo Tương Lai)
+#### Epic 5: Trend Velocity Forecasting (Dự Báo Tương Lai)
 *Mục tiêu: Đo lường chu kỳ sống của xu hướng.*
-- [ ] **Time-series Projection:** Sử dụng mô hình ARIMA / Exponential Smoothing trên chuỗi dữ liệu Google Trends để dự đoán thời điểm xu hướng chạm đỉnh (Peak Interest).
-- [ ] **Saturation Index:** Tính toán ngưỡng bão hòa của thị trường dựa trên tốc độ ra mắt video mới của các nhà sáng tạo nội dung.
+- **Time-series Projection:** Sử dụng mô hình ARIMA / Exponential Smoothing trên chuỗi dữ liệu Google Trends để dự đoán thời điểm xu hướng chạm đỉnh (Peak Interest).
+- **Saturation Index:** Tính toán ngưỡng bão hòa của thị trường dựa trên tốc độ ra mắt video mới của các nhà sáng tạo nội dung.
 
 ---
 

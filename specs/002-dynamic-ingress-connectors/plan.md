@@ -15,8 +15,12 @@ Xây dựng 3 Ingress Connectors cho TikTok, Threads và Instagram Reels kế th
 ## Technical Context
 
 - **Protocol**: HTTP/2 & JSON parsing qua `httpx`
+- **Runtime tiers**: official HTTP APIs when configured; operator-side Playwright for browser-only
+  surfaces. The unattended worker registers only runtimes available in its image.
 - **Error Isolation**: Tích hợp với `CircuitBreaker` từ `ConnectorPluginRegistry`
 - **Testing**: `pytest`, `pytest-asyncio` với mock responses
+- **Identity boundary**: connectors expose identifiers and permalinks; the shared domain resolver
+  maps them into namespaced external identities. Titles never participate in identity.
 
 ---
 

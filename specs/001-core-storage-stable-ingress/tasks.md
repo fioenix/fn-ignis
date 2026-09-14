@@ -52,3 +52,32 @@
 - [x] T011 Cài đặt `IngestTrendsUseCase` trong `src/ignis/application/use_cases/ingest_trends.py`
 - [x] T012 Viết integration test điều phối Ingestion với Circuit Breaker trong `tests/integration/test_ingest_orchestration.py`
 - [x] T013 Viết CLI command runner mẫu trong `src/ignis/interfaces/cli/runner.py` để chạy thử nghiệm cào dữ liệu thực tế
+
+---
+
+## Phase 6: As-Built Source / Observation Contract (2026-09-13)
+
+- [x] T014 [US1] Add dual-backend schema contracts for canonical sources, immutable observations,
+  and mission evidence in `tests/integration/test_source_observation_schema_contract.py`
+- [x] T015 [US1] Centralize platform object identity in
+  `src/ignis/domain/source_identity.py` and enforce `UNIQUE(platform, external_id)`
+- [x] T016 [US1] Cut both repositories over to `sources`, `observations`, and `mission_evidence`;
+  stop all runtime writes to `trend_signals` and `signal_metrics`
+- [x] T017 [US1] Add the shared legacy projection, read-only reconciliation audit, deterministic
+  one-transaction backfill, and fail-closed verifier
+- [x] T018 [US1] Make mission evidence replacement failure-safe by writing new claims before
+  pruning old claims
+- [x] T019 [US1] Add pre-backfill repository refusal and legacy-aware pruner protection
+- [ ] T020 [US1] Execute the production cutover runbook after PR #8 merges; use a baseline generated
+  from the quiesced production snapshot and require verifier status `VERIFIED`
+
+---
+
+## Phase 7: Convergence Gaps (2026-09-13)
+
+- [ ] T021 [US1] Add a reproducible dual-backend benchmark with at least 10,000 observations and
+  enforce `get_top_clusters` P95 < 50 ms; SC-001 currently has no benchmark evidence
+- [ ] T022 [US1] Define the coverage scope promised by SC-004, raise it to at least 85%, and enforce
+  the threshold in CI; the 2026-09-13 SQLite-only run measured 73% overall and 71% across
+  persistence/connectors, while the latest Timescale-backed CI run measured 75% overall without
+  `--cov-fail-under`

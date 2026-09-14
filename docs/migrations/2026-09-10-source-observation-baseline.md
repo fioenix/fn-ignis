@@ -12,6 +12,12 @@ và giữ dòng sớm nhất làm canonical — và nó không làm cả hai vi�
 minh được nó đã tính đến những gì thì không phân biệt được với một migration lặng lẽ làm mất dữ
 liệu. Vì vậy con số đi trước, SQL đi sau.
 
+**Không dùng file JSON đã track làm baseline cho production.** Nó mô tả snapshot corpus dùng để
+review và diễn tập ngày 10/09/2026. Bất kỳ observation nào vào sau snapshot đó đều phải làm digest
+production khác đi. Reference cho lần apply thật phải được sinh từ **chính snapshot lấy sau khi đã
+quiesce ingress**; một mismatch với file cũ khi corpus đã đổi là verifier làm đúng việc, không phải
+lỗi migration.
+
 Bản này đã được sanitize: không chứa title, URL, external ID hay mission title. Bản row-level
 (có nêu identity, dùng để tự tay kiểm một phép gộp) nằm ngoài git, đi cùng database backup.
 
@@ -22,6 +28,59 @@ python scripts/migration_reconciliation_audit.py \
   --json-out docs/migrations/<ngày>-source-observation-baseline.json \
   --rows-out .handoff/<ngày>-migration-baseline-rows.json
 ```
+
+## Production cutover runbook
+
+Đây là thứ tự canonical. Gate runtime và guard của pruner chỉ làm hệ thống fail closed nếu ai đó
+vi phạm thứ tự; chúng không phải giấy phép đổi thứ tự.
+
+1. Merge PR chứa runtime mới. Có thể stage/build artifact trước, nhưng **không khởi động runtime
+   mới**.
+2. Quiesce toàn bộ ingress và runtime cũ đang có khả năng ghi.
+3. Lấy snapshot. Qua Supabase pooler, `pg_dump` đã bị từ chối bởi startup protocol trong lần diễn
+   tập; dùng direct connection/provider snapshot, hoặc binary `COPY` đã được chứng minh chạy được.
+4. Sinh baseline từ bản snapshot vừa lấy, tốt nhất trên một restore read-only disposable. Nếu audit
+   chạy trên database production đang quiesce, phải chứng minh nó vẫn byte-equivalent với snapshot.
+   Baseline production và row-level report đều ở `.handoff/` hoặc đi cùng backup, không commit:
+
+   ```bash
+   python scripts/migration_reconciliation_audit.py \
+     --dsn "$SNAPSHOT_DSN" \
+     --json-out .handoff/production-source-observation-baseline.json \
+     --rows-out .handoff/production-source-observation-rows.json
+   ```
+
+   Chỉ tiếp tục khi audit trả `BALANCED` và exit `0`.
+5. Apply `sql/016_source_observation_model.sql` bằng direct Postgres connection. Migration này chỉ
+   tạo schema, không di chuyển dữ liệu.
+6. Chạy dry run trên production đang quiesce; bốn member count phải bằng baseline vừa sinh:
+
+   ```bash
+   python scripts/backfill_observations.py --dsn "$PRODUCTION_DSN" --dry-run
+   ```
+
+7. Apply backfill. Writer chạy trong một transaction và dùng UUIDv5 theo legacy lineage:
+
+   ```bash
+   python scripts/backfill_observations.py --dsn "$PRODUCTION_DSN" --apply
+   ```
+
+8. Verify bằng **baseline production vừa sinh**, không dùng JSON đã track:
+
+   ```bash
+   python scripts/post_migration_verification.py \
+     --dsn "$PRODUCTION_DSN" \
+     --baseline .handoff/production-source-observation-baseline.json
+   ```
+
+   Chỉ `VERIFIED`, exit `0`, raw/projected observation counts bằng nhau, bốn member count và bốn
+   digest khớp tuyệt đối mới mở bước sau.
+9. Khởi động runtime mới. Xác nhận repository mở được và health check xanh.
+10. Mở lại ingress.
+
+Nếu bất kỳ bước nào từ 4 đến 9 không đạt điều kiện, giữ ingress đóng và dừng. Không dùng tracked
+baseline để "sửa" mismatch, không bỏ qua foreign observations, và không chạy runtime mới để thử
+xem gate có cứu được không.
 
 ## Bản sửa: gate cũ cân bằng trên một projection bị mất dữ liệu
 
