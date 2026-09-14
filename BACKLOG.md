@@ -90,11 +90,17 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   migrate, nên chuỗi quiesce/snapshot/baseline/`sql/016`/backfill/verifier không áp dụng cho họ.
   Chi tiết cutover vẫn nằm ở T020 trong phần source identity bên dưới.
 - [ ] **Blocker của release acceptance v0.4.0: gọi tool Ignis qua model, từ một phiên Claude Code
-  đăng nhập thật.** Hiện mới chứng minh được phần server: `claude mcp list` báo `✔ Connected` với
-  registration do bootstrap sinh ra, và JSON-RPC trực tiếp gọi được tool (39 tool,
-  `get_runtime_config` SUCCESS). Hai thứ đó cộng lại chứng minh đường đi tới server, chứ chưa chứng
+  đăng nhập thật.** Đây là mục canonical duy nhất cho khoảng trống này; đừng mở thêm bản thứ hai.
+  Hiện mới chứng minh được phần server: `claude mcp list` từ một HOME tạm sạch báo `✔ Connected`
+  với registration do bootstrap sinh ra, và JSON-RPC trực tiếp gọi được tool (39 tool,
+  `get_runtime_config` SUCCESS) trong `tests/integration/test_clean_user_journey.py` và
+  `scripts/wheel_mcp_smoke.py`. Hai thứ đó cộng lại chứng minh đường đi tới server, chứ chưa chứng
   minh trọn vẹn hành trình người dùng: phần model tự chọn tool rồi đọc kết quả vẫn chưa chạy lần
-  nào. Chưa có một lượt như vậy thì v0.4.0 chưa được coi là accepted.
+  nào. `claude -p` dừng ở `OAuth session expired and could not be refreshed`; login cần browser
+  flow mà phiên không tương tác không làm được, và credential thì không được bê đi nơi khác. Cần
+  Fio chạy một lượt từ Claude Code đã đăng nhập; lệnh nằm trong
+  `.handoff/2026-09-14-clean-user-acceptance.handoff.md`. Chưa có lượt đó thì v0.4.0 chưa được coi
+  là accepted.
 - [ ] **P95 benchmark và ngưỡng coverage 85% là khoảng trống đã đo, không chặn beta.** SC-001 chưa
   có benchmark tái lập được nào trên 10.000 dòng cho `get_top_clusters` P95 < 50 ms. SC-004 đặt mục
   tiêu 85% nhưng CI đo 75% và không bật `--cov-fail-under`. Cả hai đã ghi rõ là mục tiêu chưa đạt
@@ -112,30 +118,28 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   `uv pip install -e .`, tức resolve lại từ khoảng version và không đọc `uv.lock`. Giờ là
   `uv sync --locked`, fail rõ khi lock lệch `pyproject.toml`. `uv.lock` đã regenerate bằng
   `uv lock`: lúc đó lock ghi project ở `0.3.0` còn `pyproject.toml` đã ở bản v0.3.5 trước đó.
-- [ ] **Việc của release: bump version phải regenerate `uv.lock` trong cùng commit.** `uv.lock`
-  chứa version của chính project, nên đổi `pyproject.toml` mà không chạy `uv lock` sẽ làm
-  `uv sync --locked` fail trên checkout sạch và đánh sập CI. Thực tế nó là file thứ bảy của nhóm
-  sáu file release-controlled; checklist hiện chưa nhắc.
-- [ ] **Chưa kiểm được: Claude Code gọi tool qua model.** `claude mcp list` từ một HOME tạm sạch
-  báo `✔ Connected` với registration do bootstrap sinh ra, nên client thật có nhận và bắt tay được.
-  Nhưng `claude -p` dừng ở `OAuth session expired and could not be refreshed`; login cần browser
-  flow mà phiên không tương tác không làm được. Bản thân tool call đã được chứng minh bằng JSON-RPC
-  trực tiếp (39 tool, `get_runtime_config` SUCCESS) trong
-  `tests/integration/test_clean_user_journey.py` và `scripts/wheel_mcp_smoke.py`. Cần Fio chạy lại
-  một lượt từ Claude Code đã đăng nhập; lệnh nằm trong
-  `.handoff/2026-09-14-clean-user-acceptance.handoff.md`.
+- [x] **Đã xong (14/09/2026): bump version regenerate `uv.lock` trong cùng commit.** `uv.lock` chứa
+  version của chính project, nên đổi `pyproject.toml` mà không chạy `uv lock` sẽ làm
+  `uv sync --locked` fail trên checkout sạch và đánh sập CI. Nó là file thứ bảy bên cạnh sáu file
+  release-controlled. Cả hai checklist đã bắt buộc bước này: `AGENTS.md` Checklist C và `CLAUDE.md`
+  Checklist C đều yêu cầu chạy `uv lock` trong đúng commit bump rồi xác nhận bằng `uv lock --check`,
+  và cấm sửa tay file lock. Bump 0.3.5 → 0.4.0 đã chạy đúng như vậy: `uv lock` báo
+  `Updated fn-ignis v0.3.5 -> v0.4.0`, diff đúng một dòng version, `uv lock --check` sạch.
 
 ### Source identity và mission evidence — quyết định 10/09/2026
 
-- [ ] **Production cutover chưa shipped (mở 13/09/2026).** Runtime code path trên PR #8 đã chỉ
-  đọc/ghi `sources`, `observations`, `mission_evidence`, nhưng `main` và Supabase production chưa
-  chuyển. Runbook canonical nằm trong
+- [ ] **T020 — production cutover chưa chạy (mở 13/09/2026, cập nhật 14/09/2026).** Phần code đã
+  xong và đã lên `main`: PR #8 merge bằng merge commit `1377ae9`, PR #9 merge bằng `b328a5d`, nên
+  runtime chỉ còn đọc/ghi `sources`, `observations`, `mission_evidence`. Bước "merge" trong runbook
+  coi như đã hoàn tất. Thứ còn lại đúng một thứ: **corpus Supabase production vẫn chưa migrate.**
+  Runbook canonical nằm trong
   [`docs/migrations/2026-09-10-source-observation-baseline.md`](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
-  Thứ tự bắt buộc: merge; quiesce ingress/runtime cũ; snapshot; sinh baseline **từ chính snapshot**;
-  apply `sql/016`; backfill; verifier trả `VERIFIED`; kích hoạt runtime mới; mở lại ingress. File
-  baseline đã track chỉ là review artifact của corpus diễn tập, không phải reference cho lần apply
+  Thứ tự còn lại: quiesce ingress/runtime cũ; snapshot; sinh baseline **từ chính snapshot**; apply
+  `sql/016`; backfill; verifier trả `VERIFIED`; kích hoạt runtime mới; mở lại ingress. File baseline
+  đã track chỉ là review artifact của corpus diễn tập, không phải reference cho lần apply
   production. Gate runtime và guard pruner chỉ fail closed khi thứ tự bị vi phạm; chúng không cho
-  phép đổi thứ tự.
+  phép đổi thứ tự. Mục này chặn deployment lên corpus đã có, không chặn publish bản beta chạy
+  SQLite cài mới — xem phần ranh giới blocker ở trên.
 - [x] **Xác nhận duplicate có hai cơ chế, không phải một lỗi duy nhất.** Trên Postgres, nhóm lớn
   nhất là một video YouTube bị lưu 275 lần bởi `save_signals` trước commit
   `478a7c9e5209423a38dcee6cc4a47074bd9d4889`, khi hàm này còn insert vô điều kiện. 275 dòng có

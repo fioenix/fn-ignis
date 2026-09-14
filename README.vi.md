@@ -172,7 +172,7 @@ git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
 *Script cài đúng bộ version đã khoá trong `uv.lock`, tạo SQLite database kèm schema và seed từ
 vựng, sinh `.env` với khoá Fernet mới (256-bit: AES-128-CBC + HMAC-SHA256), rồi đăng ký FastMCP
 vào các client nó tìm thấy. SQLite dùng được ngay. Connector bên ngoài sẽ báo unavailable hoặc
-degraded cho tới khi mày đưa credential của mình vào — lần chạy đầu như vậy là đúng, không phải
+degraded cho tới khi bạn cung cấp credential của mình — lần chạy đầu như vậy là đúng, không phải
 lỗi.*
 
 ---
