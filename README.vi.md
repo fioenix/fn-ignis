@@ -169,7 +169,11 @@ Nếu bạn là AI Agent (**Claude Code, Antigravity, OpenAI Codex, OpenClaw, He
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
 ./scripts/bootstrap.sh
 ```
-*Script sẽ tự động khởi tạo môi trường Python virtualenv, SQLite database, sinh file `.env` với khóa bảo mật Fernet (256-bit key: AES-128-CBC + HMAC-SHA256), tự động đăng ký FastMCP vào Claude Desktop, Antigravity, Codex và chạy kiểm tra hệ thống.*
+*Script cài đúng bộ version đã khoá trong `uv.lock`, tạo SQLite database kèm schema và seed từ
+vựng, sinh `.env` với khoá Fernet mới (256-bit: AES-128-CBC + HMAC-SHA256), rồi đăng ký FastMCP
+vào các client nó tìm thấy. SQLite dùng được ngay. Connector bên ngoài sẽ báo unavailable hoặc
+degraded cho tới khi mày đưa credential của mình vào — lần chạy đầu như vậy là đúng, không phải
+lỗi.*
 
 ---
 
