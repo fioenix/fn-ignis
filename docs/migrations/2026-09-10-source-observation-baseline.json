@@ -1,0 +1,92 @@
+{
+  "balanced": true,
+  "cluster_membership": {
+    "distinct_membership_payloads": 15653,
+    "identities_spanning_more_than_one_cluster": 175,
+    "indistinguishable_membership_multiplicity": 101,
+    "memberships": 15754,
+    "rows_mapping_certainly": 15754,
+    "rows_with_dangling_cluster": 0,
+    "rows_without_cluster": 184
+  },
+  "digests": {
+    "algorithm": "sha256 over NUL-separated members of each sorted multiset",
+    "cluster_memberships": "c67c80103be5b144a1d37286e0da93d5d81d781816e55b84cabfd200a1ab55e5",
+    "member_counts": {
+      "cluster_memberships": 15754,
+      "mission_associations": 1301,
+      "observations": 18597,
+      "sources": 1924
+    },
+    "mission_associations": "c92fee13d5937b8e6b19d64daec4e2ec0aa737c8c1d03eadebe6557e2fc632f8",
+    "observations": "08ecb119070f04d8fadf4f2a65ac11cea044b8b8abb274940eec4295182eeac4",
+    "sources": "0eca4a53c92b73d2d42f2c750e1752131f1d883360db89dbd2ed34dfcf8c9c27"
+  },
+  "invariants": {
+    "checked": 14,
+    "failed": 0,
+    "failures": []
+  },
+  "mission_evidence": {
+    "dangling_mission_reference": 0,
+    "distinct_mission_identity_pairs": 1294,
+    "exactly_reconstructable": 1301,
+    "mission_attached_rows": 1301,
+    "missions_with_repeated_identity": 2,
+    "unresolved_identity": 0
+  },
+  "observations": {
+    "distinct_observation_payloads": 18199,
+    "formula": "observations = one per trend_signals row, plus one per signal_metrics point whose (captured_at, metric_value, growth_velocity) does not repeat its parent row's",
+    "indistinguishable_observation_multiplicity": 398,
+    "intentional_losses": {
+      "signal_metrics.id": "surrogate key; the migration reassigns it by design",
+      "trend_signals.cluster_id": "carried by the cluster_memberships digest instead",
+      "trend_signals.id": "surrogate key; the migration reassigns it by design",
+      "trend_signals.mission_id": "carried by the mission_associations digest instead"
+    },
+    "lineage_merges_of_the_sql008_copy": 1018,
+    "naive_sum_for_contrast": 19615,
+    "observations": 18597,
+    "preserved_fields": [
+      "canonical_source_identity",
+      "observed_at",
+      "published_at",
+      "time_provenance",
+      "observed_title",
+      "metric_value",
+      "growth_velocity",
+      "geo_code",
+      "normalized_source_url",
+      "canonical_metadata",
+      "identity_source"
+    ],
+    "signal_metrics_rows": 3677,
+    "signals_carrying_at_least_one_metric_point": 1018,
+    "signals_with_no_metric_point": 14920,
+    "time_provenance_buckets": {
+      "exact_ingestion": 1479,
+      "legacy_publish_only": 17118,
+      "unknown": 0
+    },
+    "trend_signals_rows": 15938
+  },
+  "sanitized": true,
+  "schema_version": 7,
+  "sources": {
+    "canonical_sources": 1924,
+    "identities_holding_one_row": 1544,
+    "merge_reasons": {
+      "observed_title_changed": 287,
+      "repeat_observation_of_one_source": 14095,
+      "url_variant_of_one_source": 12
+    },
+    "resolution_reasons": {
+      "metadata_external_id": 15790,
+      "url_external_id": 148
+    },
+    "rows_inside_merged_identities": 14394,
+    "unclassified_collision_count": 0,
+    "unresolved_rows": 0
+  }
+}

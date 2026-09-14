@@ -8,10 +8,45 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 from ignis.application.ports.clustering_port import IClusteringEngine
+from ignis.domain.cross_platform_score import cross_platform_score
+from ignis.domain.source_identity import resolve_source_identity
 from ignis.domain.entities import TopicCluster, TrendSignal
 from ignis.domain.probe_provenance import probe_keyword_of
 
 logger = logging.getLogger(__name__)
+
+
+def _is_later(candidate, incumbent) -> bool:
+    """Later by collection time, with a clock-less sighting never displacing one that has a clock.
+
+    On an identical clock the larger metric wins, then the larger velocity -- the same rule the
+    SQL readers use. Two sightings of one object can share an instant, and keeping whichever
+    arrived first made the score depend on the order the registry returned them in. Once metric
+    and velocity tie as well, both sightings contribute the same numbers and the choice between
+    them cannot change the score.
+    """
+    if candidate.captured_at is None:
+        return False
+    if incumbent.captured_at is None:
+        return True
+    return (candidate.captured_at, candidate.metric_value, candidate.growth_velocity) > (
+        incumbent.captured_at,
+        incumbent.metric_value,
+        incumbent.growth_velocity,
+    )
+
+
+def _earliest_exact_ingestion(group) -> Optional[datetime]:
+    """When this harness first collected anything in the group, or None if it never did.
+
+    A group can mix observations collected by this harness, which carry an exact ingestion time,
+    with the 17,118 written before sql/015, whose collection time was never recorded. min() over
+    both raises, and every substitute is a fabrication: published_at answers a different question
+    and now() is simply false. So the clock-less ones are skipped, and a group made only of them
+    has no first sighting to report.
+    """
+    clocks = [s.captured_at for s in group if s.captured_at is not None]
+    return min(clocks) if clocks else None
 
 
 class SemanticClusterer(IClusteringEngine):
@@ -296,8 +331,6 @@ class SemanticClusterer(IClusteringEngine):
     # Log10 ceilings calibrating the 40 (platform) / 40 (metric) / 20 (velocity) contract of spec 003 FR-003.
     # They keep realistic volumes on the linear part of the curve instead of pinning every topic at the cap,
     # while a genuine multi-platform breakout can still reach the >= 80 BREAKOUT threshold.
-    METRIC_LOG_CEILING = 8.0
-    VELOCITY_LOG_CEILING = 4.0
 
     # Words kept in a topic label.
     TOPIC_LABEL_MAX_WORDS = 6
@@ -442,19 +475,33 @@ class SemanticClusterer(IClusteringEngine):
         return label.strip(" -:;,.\"'|")
 
     def _calculate_cross_platform_score(self, signals: List[TrendSignal]) -> float:
+        """One observation per source, then the shared formula.
+
+        A source seen three times in the group is one source: counting each sighting would let
+        polling frequency raise a topic's score. The persisted readers take the same view, which
+        is why they can only agree if the arithmetic lives in one place.
+        """
         if not signals:
             return 0.0
 
-        unique_platforms = {s.platform for s in signals}
-        platform_diversity_score = (len(unique_platforms) / 5.0) * 40.0
+        latest_per_source: Dict[str, TrendSignal] = {}
+        for signal in signals:
+            identity = resolve_source_identity(
+                signal.platform.value if hasattr(signal.platform, "value") else str(signal.platform),
+                signal.source_url,
+                signal.metadata,
+            )
+            key = identity.canonical_identity if identity else f"unresolved:{id(signal)}"
+            previous = latest_per_source.get(key)
+            if previous is None or _is_later(signal, previous):
+                latest_per_source[key] = signal
+        counted = list(latest_per_source.values())
 
-        total_metric = sum(s.metric_value for s in signals)
-        metric_score = min(40.0, (math.log10(max(0.0, total_metric) + 1.0) / self.METRIC_LOG_CEILING) * 40.0)
-
-        avg_velocity = sum(s.growth_velocity for s in signals) / len(signals)
-        velocity_score = min(20.0, (math.log10(max(0.0, avg_velocity) + 1.0) / self.VELOCITY_LOG_CEILING) * 20.0)
-
-        return round(min(100.0, platform_diversity_score + metric_score + velocity_score), 1)
+        return cross_platform_score(
+            distinct_platforms=len({s.platform for s in counted}),
+            total_metric=sum(s.metric_value for s in counted),
+            average_velocity=sum(s.growth_velocity for s in counted) / len(counted),
+        )
 
     async def cluster_signals(self, signals: List[TrendSignal]) -> List[TopicCluster]:
         if not signals:
@@ -520,7 +567,7 @@ class SemanticClusterer(IClusteringEngine):
                 category=self._classify_category(group),
                 cross_platform_score=score,
                 signals=group,
-                first_seen_at=min(s.captured_at for s in group),
+                first_seen_at=_earliest_exact_ingestion(group),
                 last_updated_at=datetime.now(timezone.utc),
             )
             cluster.topic_label = self._build_topic_label(

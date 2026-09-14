@@ -73,6 +73,216 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 - [ ] **Discovery source chưa đúng mục đích sản phẩm:** feed trending VN của Google Trends là tin
   tức tổng hợp (bóng đá, thời sự), nên ghép chủ đề theo nó cho ra corpus tin tức chứ không phải
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
+
+### Source identity và mission evidence — quyết định 10/09/2026
+
+- [x] **Xác nhận duplicate có hai cơ chế, không phải một lỗi duy nhất.** Trên Postgres, nhóm lớn
+  nhất là một video YouTube bị lưu 275 lần bởi `save_signals` trước commit
+  `478a7c9e5209423a38dcee6cc4a47074bd9d4889`, khi hàm này còn insert vô điều kiện. 275 dòng có
+  cùng `captured_at` vì cột đó lúc ấy giữ publish time, nhưng mang 266 giá trị metric khác nhau:
+  đây là 275 lần poll, không phải một batch bị nhân bản. Đường `chart=mostPopular` đó không còn
+  được public ingress ở HEAD đưa vào corpus.
+- [x] **SQLite default nhân đôi source — đã sửa trên nhánh này (chốt 11/09/2026).**
+  `save_clusters` tự insert mọi `c.signals` bằng một UUID mới; `ClusterSignalsUseCase` và
+  `ExecuteMissionUseCase` sau đó lại gọi `save_signals`. Chạy thật qua `ExecuteMissionUseCase`
+  với hai mission cùng một source cho hai row, hai ID và một identity. Đã cắt: `save_clusters`
+  chỉ gán `cluster_id` trong bộ nhớ, `save_signals` là đường ghi duy nhất, và
+  `test_saving_a_cluster_writes_no_observation` khoá lại điều đó trên cả hai backend.
+- [x] **Source identity đã được database cưỡng chế (chốt 11/09/2026).** `trend_signals` không có
+  primary key hay unique constraint cho source, và `save_signals` là `SELECT` rồi `INSERT` nên
+  concurrent writer có thể đua. Đã thay: `sources` mang `UNIQUE (platform, external_id)` trên cả
+  hai backend, và writer dùng **một câu** upsert `ON CONFLICT` chứ không còn `SELECT`-rồi-`INSERT`.
+  Bảng legacy giữ nguyên trạng thái cũ vì nó đã thành read-only.
+- [ ] **Threads và Reels còn khoảng trống alias — mở, chốt 13/09/2026.** "Một object, một
+  identity dù đến bằng route nào" đã đóng cho TikTok và Google: hashtag hội tụ dù metadata ghi
+  `#aothun` còn URL ghi `/tag/aothun`, keyword hội tụ dù explore URL percent-encode nó. Hai
+  platform kia thì chưa, và cố ý chưa. Graph API trả primary key dạng số, permalink mang
+  shortcode, và build hiện tại không có đường tra từ giá trị này sang giá trị kia:
+
+  ```
+  threads  post:123456789  ≠  post_shortcode:123456789
+  reels    reel:17912      ≠  reel_shortcode:17912
+  ```
+
+  Để chung một namespace `post:` thì một shortcode toàn chữ số sẽ **va vào primary key của bài
+  khác** — base64 có chứa chữ số — và merge sai thì im lặng, vĩnh viễn. Split thì đo được và sửa
+  được bằng alias sau. **Giới hạn thật, ghi đúng như nó là:** corpus hiện tại có **0** cặp như
+  vậy, nhưng ingress tương lai vẫn có thể tạo hai dòng cho cùng một bài, vào đúng lúc một bài
+  được thấy bằng cả hai route. Đóng nó cần một trong hai: connector ghi cả hai giá trị vào
+  metadata, hoặc một bảng alias giữa hai namespace cộng một lượt reconcile corpus.
+- [x] **Migration `sql/008_deduplicate_signal_metrics.sql` không thực hiện điều header tuyên bố.**
+  File ghi "Deduplicate trend_signals", "keeps earliest row as canonical" và tự gọi mình là
+  "Migration 004", nhưng chỉ tạo `signal_metrics` rồi copy metric; không delete duplicate, không
+  re-parent và không tạo unique constraint.
+- [x] **Chọn mô hình ba thực thể thay cho mission-scoped dedup:** một canonical source theo
+  platform-specific external identity; nhiều immutable observation theo lần thu thập; và
+  mission-evidence association trỏ tới đúng observation mà dossier đã dùng. Lý do đo được:
+  mission chỉ chiếm 1.301/15.938 row (8,2%), trong khi 14.377 row (90,2% corpus) nằm trong 378
+  duplicate identity group của radar — mission-scoped dedup không chạm vào phần hỏng lớn nhất.
+  Migration phải giữ legacy rows tới khi đối soát xong; evidence của các mission chưa từng được
+  persist không thể dựng lại từ count trong summary.
+- [x] **Cluster membership thuộc observation, không thuộc source (chốt 10/09/2026).** Canonical
+  source chỉ trả lời "đây là nội dung nào"; nó không trả lời "lần quan sát này đóng góp cho chủ
+  đề nào". Cùng một video được probe bởi hai keyword khác nhau ở hai thời điểm có thể thuộc hai
+  cluster, và đó là thông tin thật chứ không phải xung đột cần giải. Kéo theo:
+  `cross_platform_score` phải đọc observation trong analysis window rồi đếm distinct platform và
+  distinct source, chứ không đếm row. `cluster_id` vì vậy không được đặt trên bảng source.
+- [x] **Giữ Timescale thật trong CI, không mock và không cho skip (chốt 10/09/2026).** Một
+  dual-backend contract mà nhánh Postgres có thể skip thì chưa phải dual-backend contract: không
+  có service, case đó skip im lặng và suite trông nhẹ hơn thực tế một failure. Chi phí là CI phải
+  boot container mỗi lần chạy và phụ thuộc một image bên thứ ba. Đo lại thời gian sau lần GREEN
+  đầu tiên; nếu ảnh hưởng đáng kể thì **tách Postgres contract thành job song song**, không bỏ và
+  không mock.
+- [x] **Baseline đối soát là bằng chứng migration lâu dài, không phải handoff (chốt
+  10/09/2026).** Bản đã sanitize được track ở `docs/migrations/2026-09-10-source-observation-
+  baseline.{json,md}`: chỉ công thức, aggregate count, reason-code total, 11 invariant result và
+  một SHA-256 trên mỗi tập canonical. Không title, URL, external ID hay mission title. Bản
+  row-level có nêu identity thì ở ngoài git, đi cùng database backup. Digest khoá trên business
+  identity chứ không trên `trend_signals.id`, vì digest khoá trên surrogate key sẽ đổi ngay khi
+  migration ghi lại dòng — mất giá trị đúng lúc cần nhất.
+- [x] **Hai observation cùng source trong một mission: giữ cả hai (chốt 10/09/2026).**
+  Constraint là `UNIQUE (mission_id, observation_id)`, **không** phải
+  `UNIQUE (mission_id, source_id)`. Mission ledger phải lossless; migration không được tự đoán
+  observation nào thừa. Analysis mặc định chọn observation mới nhất của mỗi source để tính score
+  và trình bày headline, còn toàn bộ observation vẫn giữ cho timeline, citation và audit.
+  Baseline đo được 2 mission đang ở tình trạng này.
+- [x] **Contract mới cho `cross_platform_score` (chốt 10/09/2026).** Bản hiện tại ở
+  `semantic_clusterer.py:_calculate_cross_platform_score` cộng `metric_value` của **mọi** row và
+  lấy average velocity trên **mọi** row, nên tần suất poll làm điểm tăng dù không có thêm source
+  độc lập nào — một video bị poll 275 lần đóng góp 275 lần. Nó cũng chia
+  `len(unique_platforms) / 5.0`, tức hard-code 5, và một platform duy nhất vẫn được 8 điểm.
+
+  Contract mới: lọc observation theo analysis window; chọn observation mới nhất cho mỗi canonical
+  source; mỗi source đóng góp đúng một lần vào metric và velocity; platform component tính theo
+  số platform độc lập — `1 platform → 0`, `2 → 20`, `3+ → 40`. Không chia cho tổng connector,
+  không hard-code 5, không để channel lỗi làm topic khác tự nhiên được điểm cao hơn.
+
+  Tổng trọng số tạm giữ `40 platform + 40 metric + 20 velocity`. Việc normalize metric khác đơn vị
+  giữa Google index, view và engagement là một scoring decision riêng, không nhét vào
+  data-model migration.
+- [x] **Timestamp lịch sử: không ghi publish time vào ingestion time (chốt 10/09/2026).**
+  Observation schema cần `observed_at` nullable, `published_at` nullable, và `time_provenance` với
+  ba giá trị `exact_ingestion` / `legacy_publish_only` / `unknown`. Với dòng YouTube và Google
+  Trends lịch sử không chứng minh được thời điểm thu thập: `observed_at = NULL`,
+  `published_at = captured_at` cũ, `time_provenance = legacy_publish_only`. Time-window score mặc
+  định chỉ dùng `exact_ingestion`; dữ liệu legacy vẫn được xuất hiện trong all-history hoặc
+  published-time analysis nhưng output phải gắn cảnh báo approximate.
+- [x] **Thay evidence theo kiểu failure-safe, không còn nhãn "Atomic Replace" (chốt 11/09/2026).**
+  `delete_mission_signals()` commit ở transaction riêng, rồi cluster / save / attach chạy ở các
+  transaction sau. Writer lỗi giữa chừng thì mission mất sạch evidence cũ mà không có gì thay thế:
+  tái hiện được trên SQLite, evidence `1 → 0`; Postgres cùng transaction boundary. Không chặn việc
+  viết backfill, nhưng phải xử lý trước merge.
+
+  Chốt hướng thứ hai: **ghi mới trước, prune cũ sau**, không mở transaction abstraction xuyên use
+  case. Thêm `prune_mission_evidence(mission_id, retained_ids)`; `delete_mission_signals()` rời
+  khỏi đường execute và ở lại đúng vai trò withdrawal tường minh. Bảo đảm mới **yếu hơn atomic và
+  đủ dùng**, và phải phát biểu cho đúng: **mọi lỗi xảy ra trước hoặc trong lúc prune** thì mission
+  giữ **ít nhất** số evidence nó đang có. Prune chạy xong thì replacement đã hoàn tất — lỗi sau đó,
+  ví dụ `update_mission(COMPLETED)`, là lỗi sau khi thay xong chứ không làm mất evidence. Claim
+  thừa sót lại sau lỗi thì pass sau dọn; evidence bị xoá bởi một pass lỗi thì mất luôn. Retained
+  set đọc từ `observation_id` thực sự ghi được, không phải từ danh sách signal — sighting bị
+  writer bỏ qua không mang observation id nên không được tính là evidence.
+- [x] **SQLite persist `platforms` của mission (chốt 13/09/2026).** Schema SQLite và
+  `save_mission`/`get_mission` không persist `platforms`. Mission tạo với đúng YouTube, đọc lại
+  thành mặc định năm platform. Quota test không bắt được vì fake registry bỏ qua `target_platforms`.
+  Hệ quả user-facing: summary in ra "1 signal across 1/5 responsive platforms" cho một pass thực
+  tế thu **0** signal và **0** platform phản hồi — con số duy nhất còn lại đến từ một observation
+  cũ được preserve. Đây là defect về bằng chứng hiển thị cho người dùng.
+
+  Đã sửa: thêm cột `platforms` (JSON list) cho database mới, `ALTER` idempotent cho database cũ,
+  upsert ghi cả nhánh insert lẫn nhánh conflict, và hai đường hydrate đọc qua `resolve_platform`.
+  Dòng có từ trước cột này **không phục dựng được** target thật — selection chưa từng được ghi —
+  nên chúng nhận default năm platform để giữ đúng hành vi cũ; đây là **assumption của migration,
+  không phải bằng chứng lịch sử**. Postgres không phải đổi, chỉ chạy thêm contract parity.
+- [ ] **Chưa đo: `first_seen_at` đã lưu của các cluster cũ (mở 11/09/2026).** Bản sửa nullable-clock
+  chỉ áp cho cluster **mới tính**; nó không sửa giá trị đã nằm trong `topic_clusters`, và cả hai
+  upsert đều không cập nhật `first_seen_at` khi cluster đã tồn tại. Nghĩa là một cluster từng được
+  tính bằng `min()` trên publish-time clock sẽ giữ nguyên giá trị đó vô thời hạn. Baseline **không**
+  digest `topic_clusters.first_seen_at`, nên hiện chưa biết corpus có bao nhiêu giá trị bắt nguồn từ
+  publish time. Không kéo vào backfill. Trình tự: đo trước — đếm cluster có `first_seen_at` trùng
+  `published_at` của một signal thành viên — rồi mới quyết giữ, xoá hay gắn provenance.
+- [x] **Runtime ngừng ghi bảng legacy (chốt 11/09/2026).** `save_signals` chỉ còn ghi `sources`,
+  `observations`, `mission_evidence`; không còn `SELECT/INSERT/UPDATE trend_signals` hay
+  `INSERT signal_metrics` ở bất kỳ đâu trong hai repository. Hai bảng legacy **không** bị drop —
+  audit, backfill và toàn bộ lịch sử migration còn đọc chúng — nhưng chúng thành read-only. Tới
+  đây data-model cutover hoàn tất ở runtime: một nguồn sự thật. Test cũ assert dedup legacy đã
+  **chuyển** sang assert contract source/observation chứ không xoá: poll lặp một source cho một
+  source và hai observation; URL cấp feed của Google Trends không gộp hai keyword; identity test
+  đếm dòng trong `sources`.
+- [x] **Reader / scoring / pruner đọc `observations`, không đọc `trend_signals` (chốt 11/09/2026).**
+  `get_top_clusters`, `get_cluster_signals` và `prune_empty_clusters` chuyển sang
+  `observations → sources` trên cả hai backend. Window mặc định chỉ nhận `exact_ingestion` có
+  `observed_at`; **không** dùng `published_at` thay clock cho 17.118 dòng legacy. Trong window,
+  mỗi source đóng góp đúng một lần — observation mới nhất theo `source_id`, không theo URL, vì
+  corpus có một source xuất hiện dưới hai biến thể URL còn URL cấp feed thì nhiều item dùng chung.
+  Pruner giữ cluster có ít nhất một observation membership, kể cả observation legacy ngoài window.
+  `cross_platform_score` giờ chỉ có **một** implementation ở `src/ignis/domain/cross_platform_score.py`;
+  trước đó có ba, và bản SQL vẫn chia số platform cho 5 trong khi quyết định đã ghi là dải
+  `1 → 0`, `2 → 20`, `3+ → 40`. Metric và velocity giữ nguyên normalization.
+- [x] **`first_seen_at` của cluster là earliest exact ingestion, nullable (chốt 11/09/2026).**
+  `min(s.captured_at for s in group)` raise `TypeError` ngay khi group trộn observation legacy với
+  observation exact — đúng hình dạng sẽ xuất hiện sau backfill. Semantics chốt: bỏ qua observation
+  không có clock; cả group đều legacy thì `first_seen_at = NULL`; **không** thay bằng
+  `published_at` hay `now()`, cùng lý do đã bỏ lifecycle cache khỏi `sources`. Kéo theo:
+  `TopicCluster.first_seen_at` nullable, cột SQLite bỏ `NOT NULL`, và cả hai backend ngừng thay
+  `now()` khi ghi lẫn khi đọc. Database SQLite có sẵn phải rebuild bảng, vì
+  `CREATE TABLE IF NOT EXISTS` không nới được ràng buộc.
+- [x] **Discovery gắn cluster bằng `assign_observation_clusters`, không ghi lại signal (chốt
+  11/09/2026).** `AutonomousDiscoveryUseCase` gọi `save_signals()` ở bước 4 rồi
+  mới `save_clusters()` ở bước 6, và không ghi lại signal sau đó — observation nằm lại với
+  `cluster_id = NULL`. Đây là lỗi **có sẵn**, không phải regression: trên Postgres, `save_clusters`
+  chỉ gán `cluster_id` trong bộ nhớ, nên đường này chưa bao giờ persist membership. Trên SQLite
+  trước đây nó "có" membership nhờ chính đường ghi trùng vừa bị cắt, tức là bằng cách tạo dòng
+  thứ hai cho cùng một source. Hai cách sửa, chưa chọn: (1) đảo thứ tự trong discovery để cluster
+  chạy trước khi persist; (2) thêm thao tác repository gán cluster cho observation đã ghi. Chọn
+  (2), vì membership trên một observation đã tồn tại là `UPDATE`, còn gọi lại `save_signals()`
+  đúng nghĩa tạo collection event thứ hai. Test khoá bằng **thứ tự lời gọi**: sau `save_clusters`
+  không được có `save_signals` nào nữa.
+- [x] **Read contract theo kịp model mới (chốt 11/09/2026).** `TrendSignal` mang thêm
+  `observation_id`, `identity_source`, `time_provenance`, và `captured_at` thành nullable —
+  `None` nghĩa là không biết thời điểm thu thập, đúng trạng thái của 17.118 observation legacy.
+  SQLite trước đây thay `NULL` bằng `datetime.now()`, tức biến "không biết" thành "vừa thu thập",
+  và bỏ luôn `cluster_id` dù query đã đọc. Quota fallback không còn đẩy observation cũ qua writer:
+  nó giữ evidence bằng `attach_mission_evidence`. `save_signals()` trả số observation thật sự ghi,
+  không còn trả số dòng insert vào bảng legacy.
+- [x] **`INSERT OR REPLACE` trên SQLite phá dữ liệu con khi bật foreign key (sửa 11/09/2026).**
+  `REPLACE` là `DELETE` rồi `INSERT`, nên mỗi lần cập nhật trạng thái mission sẽ cascade xoá sạch
+  `mission_evidence` vừa ghi, và mỗi lần lưu lại một cluster sẽ `SET NULL` cluster của mọi
+  observation đang trỏ tới nó. Cả hai chuyển sang `ON CONFLICT (id) DO UPDATE`. Lỗi này chỉ lộ ra
+  sau khi bật `PRAGMA foreign_keys = ON` — trước đó FK không được cưỡng chế nên `REPLACE` trông
+  vô hại.
+- [x] **`sources` chỉ ba cột; route và URL thuộc observation (chốt 11/09/2026).** `sources` giữ
+  `id`, `platform`, `external_id` và không gì khác. `identity_source` xuống `observations`,
+  `NOT NULL`, `CHECK` ba giá trị, và là field thứ 11 của projection — cùng lý do đo được đã dùng
+  để chốt namespace: ba video YouTube vào corpus bằng hai route, nên một cột ở tầng source chỉ giữ
+  được một route. `canonical_url` bỏ hẳn: URL là thứ một lần quan sát báo về, và corpus đã có
+  source xuất hiện dưới hai biến thể URL, nên cột đó là cache "URL mới nhất" không rebuild contract
+  — citation dùng `observation.source_url`, canonical locator derive từ `(platform, external_id)`.
+  `first_seen_at`/`last_seen_at` cũng bỏ, vì 17.118 observation không có ingestion time nên
+  `NOW()` sẽ bịa lifecycle. Baseline lên `schema_version: 5`; digest `sources` giữ nguyên
+  `69d72aee192bf526`, ba digest còn lại đổi, member counts không đổi.
+- [x] **Identity khoá theo namespace của object, không theo nhãn field (chốt 10/09/2026).**
+  Audit đang khoá identity theo `platform:<tên field>:<giá trị>`, mà tên field là cách audit
+  *tìm ra* identifier chứ không phải bản chất object. Hệ quả đo được trên corpus thật: cùng một
+  video YouTube đi vào hai lần, một lần có `video_id` trong metadata và một lần chỉ parse được từ
+  URL (nhãn `video`), nên bị tính thành hai canonical source. Có **3 cặp** như vậy.
+  Nếu chuẩn hoá về namespace của object (`video_id ≡ video`, `item_id ≡ video`,
+  `hashtag ≡ tag`, `post_id ≡ post`, `reel_id ≡ reel`, `keyword ≡ probe_keyword`) thì:
+  source **1.927 → 1.924**; observation vẫn **18.597** và ba bucket provenance không đổi
+  (1.479 / 17.118 / 0); mission evidence vẫn **1.301** với 2 mission lặp identity; cluster
+  membership vẫn **15.754** nhưng identity nằm nhiều cluster tăng **172 → 175**; reason code
+  `repeat_observation_of_one_source` 14.089 → 14.095. Cả bốn digest đổi, audit vẫn `BALANCED`.
+  Đã chốt 1.924: giữ 1.927 đồng nghĩa backfill cố tình tái tạo ba source đã biết là bị chia sai.
+  Đường phân giải có chỗ riêng, không tham gia key — v5 chuyển nó xuống
+  `observations.identity_source`, xem mục dưới. Baseline
+  regenerate thành `schema_version: 4`, member counts `1.924 / 18.597 / 1.301 / 15.754`, cả bốn
+  digest đổi. Kéo theo một quyết định kiến trúc: policy không được nằm trong script audit, vì
+  commit persistence viết lại mapping sẽ thành định nghĩa identity thứ hai. Resolver canonical ở
+  `src/ignis/domain/source_identity.py`; audit, backfill và live write path gọi cùng một hàm.
+- [x] **Không dùng `xfail` cho defect này (chốt 10/09/2026).** `xfail` trên `main` biến một
+  data-integrity defect đang hoạt động thành "known acceptable failure". Giá trị của contract test
+  là làm merge gate; BACKLOG đã đủ để defect hiện diện trên `main`. Contract sống RED trên branch
+  `codex/source-observation-evidence` và chỉ merge khi cả nó lẫn toàn suite đều xanh.
 - [x] **Chất lượng nhãn trên corpus thật:** đã sửa 10/09/2026, xem mục nhãn chủ đề
   ở phần dưới. Ellipsis 24/40 xuống 0 trên chính 40 cluster đã lưu.
 - [x] **Phân loại category:** matcher **không sai** — với taxonomy đã seed, nó phân loại đúng

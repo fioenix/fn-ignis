@@ -90,3 +90,61 @@ async def test_canonical_name_selection_rejects_pure_hashtags():
     assert "#" not in bm_cluster.canonical_name
     assert "bánh mì" in bm_cluster.canonical_name.lower()
 
+
+
+# --- a cluster's first sighting, when some sightings have no clock ------------------------------
+#
+# After the backfill a group can mix the two kinds: observations this harness collected, which
+# carry an exact ingestion time, and the 17,118 written before sql/015, whose collection time was
+# never recorded. min() over both raises, and every way of filling the gap is a fabrication --
+# published_at answers a different question and now() is simply false.
+
+
+def _signal(title: str, captured_at, **overrides):
+    from datetime import datetime, timezone  # noqa: F401  (imported for callers' literals)
+
+    return TrendSignal(
+        platform=overrides.pop("platform", PlatformType.YOUTUBE),
+        raw_title=title,
+        metric_value=overrides.pop("metric_value", 100.0),
+        geo_code=GeoCode.VN,
+        captured_at=captured_at,
+        **overrides,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_cluster_is_first_seen_at_its_earliest_exact_ingestion():
+    """Observations with no clock are skipped, not defaulted into the answer."""
+    from datetime import datetime, timezone
+
+    early = datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
+    late = datetime(2026, 9, 1, 9, 0, tzinfo=timezone.utc)
+    clusterer = SemanticClusterer(similarity_threshold=0.3)
+
+    clusters = await clusterer.cluster_signals(
+        [
+            _signal("Gia vang 9999 hom nay bien dong manh", captured_at=None),
+            _signal("Thi truong gia vang 9999 trong nuoc tang soc", captured_at=late),
+            _signal("Gia vang 9999 va xu huong dau tu", captured_at=early),
+        ]
+    )
+
+    assert clusters, "the group still clusters; a missing clock is not a missing signal"
+    assert clusters[0].first_seen_at == early
+
+
+@pytest.mark.asyncio
+async def test_a_cluster_of_only_legacy_observations_has_no_first_seen_time():
+    """Nothing in the group was ever timestamped, so the cluster cannot claim a first sighting."""
+    clusterer = SemanticClusterer(similarity_threshold=0.3)
+
+    clusters = await clusterer.cluster_signals(
+        [
+            _signal("Gia vang 9999 hom nay bien dong manh", captured_at=None),
+            _signal("Thi truong gia vang 9999 trong nuoc tang soc", captured_at=None),
+        ]
+    )
+
+    assert clusters
+    assert clusters[0].first_seen_at is None

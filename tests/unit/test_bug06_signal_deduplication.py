@@ -22,53 +22,45 @@ async def _query(repo, sql: str):
 
 
 @pytest.mark.asyncio
-async def test_bug06_poll_same_url_twice_deduplicates_signal_and_records_metrics(tmp_path):
-    """Polling the same URL twice leaves one signal row and two signal_metrics rows."""
-    db_path = str(tmp_path / "test_dedup.db")
-    repo = SqliteTrendRepository(db_path=db_path)
-    
+async def test_polling_one_source_twice_keeps_one_source_and_both_metrics(tmp_path):
+    """The original bug06 contract, asserted where the data now lives.
+
+    It used to read: one trend_signals row, two signal_metrics rows, and the row refreshed to
+    the latest metric. The same three statements about the corpus are now one source, two
+    observations, and the later observation carrying the later metric -- with the difference
+    that the earlier metric is a row of its own rather than a value overwritten in place.
+    """
+    repo = SqliteTrendRepository(db_path=str(tmp_path / "test_dedup.db"))
     url = "https://www.tiktok.com/@creator/video/123456789"
-    s1 = TrendSignal(
-        platform=PlatformType.TIKTOK,
-        raw_title="Video viral mẫu",
-        metric_value=1000.0,
-        growth_velocity=10.0,
-        source_url=url,
-        geo_code=GeoCode.VN,
-        captured_at=datetime(2026, 9, 7, 10, 0, 0, tzinfo=timezone.utc),
+
+    for metric, velocity, hour in ((1000.0, 10.0, 10), (2500.0, 25.0, 11)):
+        await repo.save_signals(
+            [
+                TrendSignal(
+                    platform=PlatformType.TIKTOK,
+                    raw_title="Video viral mẫu",
+                    metric_value=metric,
+                    growth_velocity=velocity,
+                    source_url=url,
+                    geo_code=GeoCode.VN,
+                    captured_at=datetime(2026, 9, 7, hour, 0, 0, tzinfo=timezone.utc),
+                    metadata={"item_id": "123456789"},
+                )
+            ]
+        )
+
+    sources = await _query(repo, "SELECT platform, external_id FROM sources;")
+    assert sources == [("tiktok", "video:123456789")], "one external object, one row"
+
+    observations = await _query(
+        repo, "SELECT metric_value, growth_velocity FROM observations ORDER BY observed_at;"
     )
-    
-    # First poll
-    await repo.save_signals([s1])
-    
-    # Second poll: same URL, higher metric and velocity
-    s2 = TrendSignal(
-        platform=PlatformType.TIKTOK,
-        raw_title="Video viral mẫu",
-        metric_value=2500.0,
-        growth_velocity=25.0,
-        source_url=url,
-        geo_code=GeoCode.VN,
-        captured_at=datetime(2026, 9, 7, 11, 0, 0, tzinfo=timezone.utc),
+    assert observations == [(1000.0, 10.0), (2500.0, 25.0)], "both sightings survive"
+
+    legacy = await _query(
+        repo, "SELECT count(*) FROM trend_signals UNION ALL SELECT count(*) FROM signal_metrics;"
     )
-    await repo.save_signals([s2])
-    
-    # trend_signals must hold exactly one row for this URL
-    conn = repo._get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT count(*) FROM trend_signals WHERE source_url = ?", (url,))
-    signal_count = cur.fetchone()[0]
-    assert signal_count == 1, f"trend_signals must hold exactly one row, found {signal_count}"
-    
-    # signal_metrics must keep both time-series points
-    cur.execute("SELECT count(*) FROM signal_metrics")
-    metrics_count = cur.fetchone()[0]
-    assert metrics_count == 2, f"signal_metrics must hold two rows, found {metrics_count}"
-    
-    # The metric on trend_signals is refreshed to the latest value
-    cur.execute("SELECT metric_value FROM trend_signals WHERE source_url = ?", (url,))
-    latest_metric = cur.fetchone()[0]
-    assert latest_metric == 2500.0
+    assert [row[0] for row in legacy] == [0, 0], "and the legacy tables are not written"
 
 
 @pytest.mark.asyncio
@@ -110,30 +102,42 @@ async def test_bug06_get_cluster_signals_no_duplicate_urls(tmp_path):
 
 @pytest.mark.asyncio
 async def test_signals_sharing_a_feed_url_are_kept_apart(tmp_path):
-    """Google Trends reports one RSS URL for every keyword it lists.
+    """Google Trends returns one RSS URL for every keyword it lists.
 
-    Keying dedup on the URL alone collapsed every keyword onto a single row and overwrote it on
-    each poll, so the identity has to include the title.
+    The old writer kept them apart by adding the title to the identity. Identity is resolved
+    from the keyword itself now, so the URL they share never brings them together, and
+    re-polling one of them is a second observation of that keyword rather than an overwrite.
     """
-    repo = SqliteTrendRepository(db_path=str(tmp_path / "feed_url.db"))
+    repo = SqliteTrendRepository(db_path=str(tmp_path / "feed.db"))
     feed_url = "https://trends.google.com/trending/rss?geo=VN"
 
-    await repo.save_signals([
-        TrendSignal(platform=PlatformType.GOOGLE_TRENDS, raw_title="gia vang", metric_value=100.0,
-                    source_url=feed_url, geo_code=GeoCode.VN),
-        TrendSignal(platform=PlatformType.GOOGLE_TRENDS, raw_title="us open", metric_value=200.0,
-                    source_url=feed_url, geo_code=GeoCode.VN),
-    ])
-    # Re-polling the same two keywords must update in place, not append.
-    await repo.save_signals([
-        TrendSignal(platform=PlatformType.GOOGLE_TRENDS, raw_title="gia vang", metric_value=150.0,
-                    source_url=feed_url, geo_code=GeoCode.VN),
-    ])
+    def probe(keyword: str, metric: float, hour: int) -> TrendSignal:
+        return TrendSignal(
+            platform=PlatformType.GOOGLE_TRENDS,
+            raw_title=keyword,
+            metric_value=metric,
+            source_url=feed_url,
+            geo_code=GeoCode.VN,
+            captured_at=datetime(2026, 9, 7, hour, 0, 0, tzinfo=timezone.utc),
+            metadata={"keyword": keyword},
+        )
 
-    rows = await _query(repo, "SELECT raw_title, metric_value FROM trend_signals ORDER BY raw_title;")
-    assert [r[0] for r in rows] == ["gia vang", "us open"], f"Distinct keywords must survive: {rows}"
-    assert dict(rows)["gia vang"] == 150.0
-    assert dict(rows)["us open"] == 200.0
+    await repo.save_signals([probe("gia vang", 100.0, 10), probe("us open", 200.0, 10)])
+    await repo.save_signals([probe("gia vang", 150.0, 11)])
+
+    sources = await _query(repo, "SELECT external_id FROM sources ORDER BY external_id;")
+    assert [row[0] for row in sources] == ["keyword:gia vang", "keyword:us open"]
+
+    per_keyword = await _query(
+        repo,
+        "SELECT s.external_id, o.metric_value FROM observations o"
+        " JOIN sources s ON s.id = o.source_id ORDER BY s.external_id, o.observed_at;",
+    )
+    assert per_keyword == [
+        ("keyword:gia vang", 100.0),
+        ("keyword:gia vang", 150.0),
+        ("keyword:us open", 200.0),
+    ], "the re-poll is a second sighting of one keyword, not an overwrite"
 
 
 @pytest.mark.asyncio

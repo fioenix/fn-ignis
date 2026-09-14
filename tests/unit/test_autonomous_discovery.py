@@ -99,6 +99,19 @@ async def test_autonomous_discovery_use_case_execution(tmp_path):
     assert mock_repo.save_mission.called
     assert mock_repo.log_event.called
 
+    # The discovery cycle persists signals at ingress and clusters them at the end, so the
+    # membership has to land as an update on the observations already written. A save_signals
+    # after the clustering step would record every signal a second time, as sightings that
+    # never happened. Asserted on the call order rather than on a count, because the count is
+    # the same either way until the second write lands.
+    calls = [name for name, _args, _kwargs in mock_repo.method_calls]
+    assert "save_clusters" in calls
+    assert "assign_observation_clusters" in calls
+    assert calls.index("assign_observation_clusters") > calls.index("save_clusters")
+    assert "save_signals" not in calls[calls.index("save_clusters") :], (
+        "clustering must not push already-persisted signals back through the writer"
+    )
+
 
 @pytest.mark.asyncio
 async def test_handle_trigger_autonomous_discovery():

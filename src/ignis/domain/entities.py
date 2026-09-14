@@ -29,9 +29,22 @@ class TrendSignal:
     geo_code: GeoCode = GeoCode.VN
     cluster_id: Optional[UUID] = None
     mission_id: Optional[UUID] = None
+    # Set once the sighting has been stored, and on anything read back. A signal carrying one is
+    # an observation that already exists; a signal without one has not been recorded yet. The
+    # difference matters because re-submitting a stored observation through the writer records a
+    # second collection event for a sighting that happened once.
+    observation_id: Optional[UUID] = None
+    # How the source was resolved for this sighting, and which clock observed_at came from.
+    # Both are written per observation, so both come back on one.
+    identity_source: Optional[str] = None
+    time_provenance: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     # When this harness pulled the signal. This is the clock every timeframe query runs on.
-    captured_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    #
+    # Optional, and None means the collection time is not known -- which is the honest state of
+    # 17,118 observations written before sql/015 by a connector that stamped a publish time. A
+    # fresh sighting still defaults to now, because collecting one is what creates it.
+    captured_at: Optional[datetime] = field(default_factory=lambda: datetime.now(timezone.utc))
     # When the platform says the content itself was posted, where the platform reports it.
     # Kept apart from captured_at because they answer different questions: "what did we see
     # this week" is not "what was posted this week", and holding both in one column made a
@@ -53,7 +66,10 @@ class TopicCluster:
     category: str = "unclassified"
     cross_platform_score: float = 0.0
     signals: List[TrendSignal] = field(default_factory=list)
-    first_seen_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    # The earliest exact ingestion time among the signals in the cluster. None where none of them
+    # has one: a cluster built only from observations written before sql/015 has no recorded
+    # first sighting, and inventing one would date the topic to whenever the query ran.
+    first_seen_at: Optional[datetime] = field(default_factory=lambda: datetime.now(timezone.utc))
     last_updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property

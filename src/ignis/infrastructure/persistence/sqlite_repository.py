@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import math
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -12,11 +11,58 @@ from uuid import UUID, uuid4
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.resources import sql_seed_file
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_timeframe
+from ignis.domain.cross_platform_score import cross_platform_score
+from ignis.domain.source_identity import resolve_source_identity
+from ignis.domain.value_objects import (
+    GeoCode,
+    PlatformType,
+    Timeframe,
+    resolve_geo,
+    resolve_platform,
+    resolve_timeframe,
+)
 
+from ignis.domain.exceptions import RepositoryException
 from ignis.infrastructure.auth.crypto import decrypt_credentials, encrypt_credentials
+from ignis.infrastructure.persistence.migration_state import (
+    UNBACKFILLED_CORPUS,
+    is_unbackfilled,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _platforms_of(row) -> List[PlatformType]:
+    """Hydrate the stored selection, through resolve_platform so an unknown name is dropped.
+
+    An empty or missing value means the mission never recorded one, and every connector is the
+    behaviour those rows have always had.
+    """
+    try:
+        raw = row["platforms"]
+    except (IndexError, KeyError):
+        raw = None
+    try:
+        names = json.loads(raw) if raw else []
+    except (TypeError, ValueError):
+        names = []
+    resolved = []
+    for name in names:
+        try:
+            resolved.append(resolve_platform(name))
+        except ValueError:
+            # resolve_platform raises on a name PlatformType does not know. Dropping it is
+            # better than failing the read: a connector removed from the enum should not make
+            # every mission that once selected it unreadable.
+            logger.warning("Mission names a platform this build does not know: %s", name)
+    return resolved or list(PlatformType)
+
+
+# The connectors that existed before research_missions had a platforms column. Frozen as a
+# literal rather than read off PlatformType: the rows this default is written into were created
+# when these five were the whole registry, and deriving it from the enum would mean the day a
+# sixth connector is added, every mission from before the column starts asking for it too.
+LEGACY_MISSION_PLATFORMS = ["youtube", "google", "tiktok", "threads", "reels"]
 
 
 class SqliteTrendRepository(ITrendRepository):
@@ -35,6 +81,9 @@ class SqliteTrendRepository(ITrendRepository):
         if self._db_path == ":memory:":
             self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
             self._mem_conn.row_factory = sqlite3.Row
+            # The pragma is per connection, and this one is handed straight back by
+            # _get_connection without passing the line that sets it there.
+            self._mem_conn.execute("PRAGMA foreign_keys = ON")
 
     async def close(self) -> None:
         """Close SQLite connection if in-memory."""
@@ -48,6 +97,10 @@ class SqliteTrendRepository(ITrendRepository):
             return self._mem_conn
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        # SQLite defaults foreign keys off per connection, which would make every REFERENCES
+        # clause in the schema decoration: ON DELETE SET NULL would never fire and a dangling
+        # source_id would insert cleanly. Only the three tables from sql/016 declare any.
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     async def _ensure_schema(self) -> None:
@@ -56,7 +109,22 @@ class SqliteTrendRepository(ITrendRepository):
         async with self._lock:
             if not self._initialized:
                 await asyncio.to_thread(self._create_tables_and_seed)
+                await asyncio.to_thread(self._refuse_an_unbackfilled_corpus)
                 self._initialized = True
+
+    def _refuse_an_unbackfilled_corpus(self) -> None:
+        """Checked once the schema is ready, which is this backend's equivalent of opening."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT EXISTS (SELECT 1 FROM trend_signals),"
+                " EXISTS (SELECT 1 FROM observations)"
+            ).fetchone()
+        finally:
+            if self._mem_conn is None:
+                conn.close()
+        if is_unbackfilled(row[0], row[1]):
+            raise RepositoryException(UNBACKFILLED_CORPUS)
 
     def _create_tables_and_seed(self) -> None:
         if self._db_path != ":memory:":
@@ -91,6 +159,52 @@ class SqliteTrendRepository(ITrendRepository):
             );
             CREATE INDEX IF NOT EXISTS idx_signal_metrics_sig ON signal_metrics (signal_id, captured_at DESC);
 
+            -- The three entities sql/016_source_observation_model.sql creates on Postgres.
+            -- SQLite does not read the sql/ files, so the same constraints are restated here;
+            -- a backend that only agrees on column names is not the same contract.
+            CREATE TABLE IF NOT EXISTS sources (
+                id TEXT PRIMARY KEY,
+                platform TEXT NOT NULL,
+                -- "<kind>:<value>", so that a TikTok hashtag named "12345" and item 12345 stay
+                -- two objects. See the migration header for why the namespace is inside the key.
+                external_id TEXT NOT NULL,
+                -- Three columns only. A URL, a resolution route and a first/last seen range
+                -- are all facts about a sighting, so they live on observations; see the header
+                -- of sql/016_source_observation_model.sql.
+                UNIQUE (platform, external_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS observations (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+                cluster_id TEXT REFERENCES topic_clusters(id) ON DELETE SET NULL,
+                observed_at TEXT,
+                published_at TEXT,
+                time_provenance TEXT NOT NULL
+                    CHECK (time_provenance IN ('exact_ingestion', 'legacy_publish_only', 'unknown')),
+                identity_source TEXT NOT NULL
+                    CHECK (identity_source IN ('metadata_external_id', 'url_external_id',
+                                               'normalized_url_fallback')),
+                observed_title TEXT,
+                metric_value REAL DEFAULT 0.0,
+                growth_velocity REAL DEFAULT 0.0,
+                geo_code TEXT DEFAULT 'VN',
+                source_url TEXT,
+                metadata TEXT,
+                CHECK (time_provenance <> 'exact_ingestion' OR observed_at IS NOT NULL)
+            );
+            CREATE INDEX IF NOT EXISTS idx_observations_source ON observations (source_id, observed_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_observations_cluster ON observations (cluster_id, observed_at DESC);
+
+            CREATE TABLE IF NOT EXISTS mission_evidence (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+                recorded_at TEXT NOT NULL,
+                UNIQUE (mission_id, observation_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_mission_evidence_observation ON mission_evidence (observation_id);
+
             CREATE TABLE IF NOT EXISTS topic_clusters (
                 id TEXT PRIMARY KEY,
                 canonical_name TEXT NOT NULL UNIQUE,
@@ -98,7 +212,9 @@ class SqliteTrendRepository(ITrendRepository):
                 cross_platform_score REAL DEFAULT 0.0,
                 summary_text TEXT,
                 category TEXT DEFAULT 'general',
-                first_seen_at TEXT NOT NULL,
+                -- Nullable: a cluster built only from observations whose ingestion time was
+                -- never recorded has no first sighting to store.
+                first_seen_at TEXT,
                 last_updated_at TEXT NOT NULL
             );
 
@@ -107,6 +223,10 @@ class SqliteTrendRepository(ITrendRepository):
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 keywords TEXT NOT NULL,
+                -- JSON list. A mission that asked for one connector must not come back asking
+                -- for five: the extra calls are the smaller harm, the summary counting
+                -- responsive platforms against the wrong denominator is the larger one.
+                platforms TEXT NOT NULL DEFAULT '[]',
                 shortcode TEXT UNIQUE,
                 geo_code TEXT DEFAULT 'VN',
                 timeframe TEXT DEFAULT '30d',
@@ -173,6 +293,53 @@ class SqliteTrendRepository(ITrendRepository):
         existing_cluster_columns = {row[1] for row in cur.execute("PRAGMA table_info(topic_clusters)")}
         if "topic_label" not in existing_cluster_columns:
             cur.execute("ALTER TABLE topic_clusters ADD COLUMN topic_label TEXT")
+
+        # SQLite cannot drop a NOT NULL, so relaxing one means rebuilding the table. Only a
+        # database created before clusters could be clock-less needs it, which is what the
+        # PRAGMA check decides. Foreign keys go off for the swap: dropping the old table would
+        # otherwise fire ON DELETE SET NULL and strip the cluster off every observation.
+        cluster_info = list(cur.execute("PRAGMA table_info(topic_clusters)"))
+        first_seen = next((row for row in cluster_info if row[1] == "first_seen_at"), None)
+        if first_seen is not None and first_seen[3] == 1:
+            cur.execute("PRAGMA foreign_keys = OFF")
+            cur.executescript(
+                """
+                CREATE TABLE topic_clusters_rebuilt (
+                    id TEXT PRIMARY KEY,
+                    canonical_name TEXT NOT NULL UNIQUE,
+                    topic_label TEXT,
+                    cross_platform_score REAL DEFAULT 0.0,
+                    summary_text TEXT,
+                    category TEXT DEFAULT 'general',
+                    first_seen_at TEXT,
+                    last_updated_at TEXT NOT NULL
+                );
+                INSERT INTO topic_clusters_rebuilt
+                    (id, canonical_name, topic_label, cross_platform_score, summary_text,
+                     category, first_seen_at, last_updated_at)
+                SELECT id, canonical_name, topic_label, cross_platform_score, summary_text,
+                       category, first_seen_at, last_updated_at
+                FROM topic_clusters;
+                DROP TABLE topic_clusters;
+                ALTER TABLE topic_clusters_rebuilt RENAME TO topic_clusters;
+                """
+            )
+            conn.commit()
+            cur.execute("PRAGMA foreign_keys = ON")
+
+        existing_mission_columns = {
+            row[1] for row in cur.execute("PRAGMA table_info(research_missions)")
+        }
+        if existing_mission_columns and "platforms" not in existing_mission_columns:
+            # Rows written before this column cannot say what the mission asked for -- the
+            # selection was never stored, so there is nothing to recover. They are given the
+            # default every mission used to behave as, which keeps them working exactly as they
+            # did. That is a migration assumption, not evidence about what those missions meant.
+            cur.execute("ALTER TABLE research_missions ADD COLUMN platforms TEXT")
+            cur.execute(
+                "UPDATE research_missions SET platforms = ? WHERE platforms IS NULL",
+                (json.dumps(LEGACY_MISSION_PLATFORMS),),
+            )
 
         existing_signal_columns = {row[1] for row in cur.execute("PRAGMA table_info(trend_signals)")}
         if "published_at" not in existing_signal_columns:
@@ -256,6 +423,14 @@ class SqliteTrendRepository(ITrendRepository):
             conn.close()
 
     async def save_signals(self, signals: List[TrendSignal]) -> int:
+        """Record each sighting in the source/observation model. Nothing else is written.
+
+        trend_signals and signal_metrics are read-only from here on. They stay in the schema --
+        the audit reads them, the backfill reads them, and they are the only record of what the
+        corpus looked like before the migration -- but a write to them now would restart the
+        divergence the migration closed: the legacy side growing while the new model stands
+        still, with nothing linking a row on one side to an observation on the other.
+        """
         if not signals:
             return 0
         await self._ensure_schema()
@@ -264,70 +439,59 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                inserted = 0
-                for s in signals:
-                    plat = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
-                    geo = s.geo_code.value if hasattr(s.geo_code, "value") else str(s.geo_code)
-                    c_id = str(s.cluster_id) if s.cluster_id else None
-                    m_id = str(s.mission_id) if s.mission_id else None
-                    meta_json = json.dumps(s.metadata or {}, ensure_ascii=False)
-                    cap_at = s.captured_at.isoformat() if s.captured_at else datetime.now(timezone.utc).isoformat()
-                    pub_at = s.published_at.isoformat() if s.published_at else None
-                    url = s.source_url.strip() if s.source_url else ""
-
-                    existing_id = None
-                    if url:
-                        # Title is part of the identity: a feed-level URL is shared by every item
-                        # it lists, so matching on the URL alone overwrote unrelated signals.
-                        cur.execute(
-                            "SELECT id FROM trend_signals WHERE platform = ? AND source_url = ? "
-                            "AND raw_title = ? ORDER BY captured_at DESC LIMIT 1;",
-                            (plat, url, s.raw_title),
-                        )
-                        found = cur.fetchone()
-                        if found:
-                            existing_id = found["id"] if isinstance(found, dict) or hasattr(found, "keys") else found[0]
-
-                    if existing_id:
-                        s_id = existing_id
-                        cur.execute(
-                            """
-                            UPDATE trend_signals 
-                            SET metric_value = ?, growth_velocity = ?, raw_title = ?, metadata = ?, captured_at = ?,
-                                published_at = COALESCE(?, published_at), cluster_id = COALESCE(?, cluster_id)
-                            WHERE id = ?;
-                            """,
-                            (s.metric_value, s.growth_velocity, s.raw_title, meta_json, cap_at, pub_at, c_id, s_id),
-                        )
-                    else:
-                        s_id = str(uuid4())
-                        cur.execute(
-                            """
-                            INSERT INTO trend_signals 
-                            (id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at, published_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-                            """,
-                            (s_id, plat, s.raw_title, s.metric_value, s.growth_velocity, url or None, geo, c_id, m_id, meta_json, cap_at, pub_at),
-                        )
-                        inserted += 1
-
-                    cur.execute(
-                        """
-                        INSERT INTO signal_metrics (signal_id, captured_at, metric_value, growth_velocity)
-                        VALUES (?, ?, ?, ?);
-                        """,
-                        (s_id, cap_at, s.metric_value, s.growth_velocity),
-                    )
+                recorded = self._record_observations(cur, signals)
                 conn.commit()
-                return inserted
+                return recorded
             finally:
                 if self._mem_conn is None:
                     conn.close()
 
         return await asyncio.to_thread(_sync_save)
 
+    # One observation per source, the most recent in the window, and only observations whose
+    # collection time is known. published_at is not a substitute clock: for the 17,118 legacy
+    # observations it says when the content was posted, and a window built on it would report a
+    # two-year-old video as something seen this week.
+    # Recency, then the payload, then the row id. Two observations of one source may share an
+    # instant -- the schema allows it and a pass that sees one object twice in the same second
+    # produces it -- and ordering on the clock alone left the winner to whatever order the rows
+    # came back in. metric_value and growth_velocity come next because they are what the reader
+    # returns and the score is computed from; once those tie, nothing downstream can tell the
+    # two rows apart, and id only makes the choice repeatable.
+    _LATEST_FIRST = (
+        "o.observed_at DESC, COALESCE(o.metric_value, 0) DESC,"
+        " COALESCE(o.growth_velocity, 0) DESC, o.id DESC"
+    )
+
+    _LATEST_PER_SOURCE = """
+        WITH latest AS (
+            SELECT
+                o.id AS observation_id, o.source_id, o.cluster_id, o.metric_value,
+                o.growth_velocity, o.observed_at, o.published_at, o.time_provenance,
+                o.identity_source, o.observed_title, o.geo_code, o.source_url, o.metadata,
+                s.platform,
+                -- (cluster_id, source_id), not source_id alone: see the Postgres reader.
+                ROW_NUMBER() OVER (
+                    PARTITION BY o.cluster_id, o.source_id
+                    -- The same order the Postgres reader uses; see _LATEST_FIRST there.
+                    ORDER BY o.observed_at DESC, COALESCE(o.metric_value, 0) DESC,
+                             COALESCE(o.growth_velocity, 0) DESC, o.id DESC
+                ) AS rank
+            FROM observations o
+            JOIN sources s ON s.id = o.source_id
+            WHERE o.cluster_id IS NOT NULL
+              AND o.time_provenance = 'exact_ingestion'
+              AND o.observed_at IS NOT NULL
+              AND o.observed_at >= datetime('now', '{modifier}')
+        )
+    """
+
     async def prune_empty_clusters(self) -> int:
-        """Remove clusters left holding no signals after re-clustering."""
+        """Remove clusters holding no observation at all.
+
+        Membership, not recency: a cluster whose only observations are legacy ones outside the
+        default analysis window still describes something the corpus contains.
+        """
         await self._ensure_schema()
 
         def _sync_prune():
@@ -338,6 +502,11 @@ class SqliteTrendRepository(ITrendRepository):
                     """
                     DELETE FROM topic_clusters
                     WHERE id NOT IN (
+                        SELECT DISTINCT cluster_id FROM observations WHERE cluster_id IS NOT NULL
+                    )
+                    -- A cluster the legacy corpus still points at is not empty; see the
+                    -- Postgres reader for what deleting it would cascade into.
+                    AND id NOT IN (
                         SELECT DISTINCT cluster_id FROM trend_signals WHERE cluster_id IS NOT NULL
                     );
                     """
@@ -351,6 +520,82 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_prune)
 
+    def _record_observations(self, cur, signals: List[TrendSignal]) -> int:
+        """Write each signal as one observation of one canonical source.
+
+        The same three properties as the Postgres path, restated here rather than shared, because
+        the two backends speak different SQL. What is shared is the part that must never diverge:
+        both resolve identity through ignis.domain.source_identity.
+        """
+        written = 0
+        for signal in signals:
+            platform = (
+                signal.platform.value if hasattr(signal.platform, "value") else str(signal.platform)
+            )
+            identity = resolve_source_identity(platform, signal.source_url, signal.metadata)
+            if identity is None:
+                logger.warning("Signal has no resolvable external identity, skipped: %s", platform)
+                continue
+
+            # One statement, not a SELECT then an INSERT: two passes racing on one video would
+            # both find nothing and both insert.
+            row = cur.execute(
+                "INSERT INTO sources (id, platform, external_id) VALUES (?, ?, ?)"
+                " ON CONFLICT (platform, external_id) DO UPDATE SET platform = excluded.platform"
+                " RETURNING id;",
+                (str(uuid4()), identity.platform, identity.external_id),
+            ).fetchone()
+            source_id = row["id"] if hasattr(row, "keys") else row[0]
+
+            # A live write knows its own collection time, so the clock is exact. Legacy rows
+            # carrying a publish time arrive through the backfill, not through here.
+            observed_at = (
+                signal.captured_at.isoformat()
+                if signal.captured_at
+                else datetime.now(timezone.utc).isoformat()
+            )
+            observation_id = str(uuid4())
+            cur.execute(
+                "INSERT INTO observations (id, source_id, cluster_id, observed_at, published_at,"
+                " time_provenance, identity_source, observed_title, metric_value,"
+                " growth_velocity, geo_code, source_url, metadata)"
+                " VALUES (?, ?, ?, ?, ?, 'exact_ingestion', ?, ?, ?, ?, ?, ?, ?);",
+                (
+                    observation_id,
+                    source_id,
+                    str(signal.cluster_id) if signal.cluster_id else None,
+                    observed_at,
+                    signal.published_at.isoformat() if signal.published_at else None,
+                    identity.identity_source,
+                    signal.raw_title,
+                    signal.metric_value,
+                    signal.growth_velocity,
+                    signal.geo_code.value
+                    if hasattr(signal.geo_code, "value")
+                    else str(signal.geo_code),
+                    signal.source_url,
+                    json.dumps(signal.metadata or {}, ensure_ascii=False),
+                ),
+            )
+            signal.observation_id = UUID(observation_id)
+            signal.identity_source = identity.identity_source
+            signal.time_provenance = "exact_ingestion"
+            written += 1
+
+            if signal.mission_id:
+                cur.execute(
+                    "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at)"
+                    " VALUES (?, ?, ?, ?)"
+                    " ON CONFLICT (mission_id, observation_id) DO NOTHING;",
+                    (
+                        str(uuid4()),
+                        str(signal.mission_id),
+                        observation_id,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+        return written
+
     async def save_clusters(self, clusters: List[TopicCluster]) -> None:
         if not clusters:
             return
@@ -363,35 +608,36 @@ class SqliteTrendRepository(ITrendRepository):
                 for c in clusters:
                     c_id = str(c.id)
                     now_str = datetime.now(timezone.utc).isoformat()
-                    first_seen = c.first_seen_at.isoformat() if c.first_seen_at else now_str
+                    first_seen = c.first_seen_at.isoformat() if c.first_seen_at else None
                     last_updated = c.last_updated_at.isoformat() if c.last_updated_at else now_str
 
+                    # An upsert, not INSERT OR REPLACE. REPLACE is a DELETE followed by an
+                    # INSERT, so with foreign keys enforced it fires ON DELETE SET NULL on every
+                    # observation already pointing at this cluster -- re-saving a cluster would
+                    # quietly erase the membership history it exists to accumulate.
                     cur.execute(
                         """
-                        INSERT OR REPLACE INTO topic_clusters
+                        INSERT INTO topic_clusters
                         (id, canonical_name, topic_label, cross_platform_score, summary_text, category, first_seen_at, last_updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET
+                            canonical_name = excluded.canonical_name,
+                            topic_label = excluded.topic_label,
+                            cross_platform_score = excluded.cross_platform_score,
+                            summary_text = excluded.summary_text,
+                            category = excluded.category,
+                            last_updated_at = excluded.last_updated_at
                         """,
                         (c_id, c.canonical_name, c.topic_label, c.cross_platform_score, c.summary_text, c.category, first_seen, last_updated)
                     )
 
+                    # Assign the cluster in memory and stop there. This used to insert every
+                    # signal under a fresh uuid4, which made save_clusters a second write path:
+                    # one external source became two rows, and the contract test measured it.
+                    # save_signals is the only place a signal is written, and the pipeline calls
+                    # this first so the cluster exists before an observation references it.
                     for s in c.signals:
-                        s_id = str(uuid4())
-                        plat = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
-                        geo = s.geo_code.value if hasattr(s.geo_code, "value") else str(s.geo_code)
-                        m_id = str(s.mission_id) if s.mission_id else None
-                        meta_json = json.dumps(s.metadata or {}, ensure_ascii=False)
-                        cap_at = s.captured_at.isoformat() if s.captured_at else now_str
-                        pub_at = s.published_at.isoformat() if s.published_at else None
-
-                        cur.execute(
-                            """
-                            INSERT OR REPLACE INTO trend_signals
-                            (id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at, published_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (s_id, plat, s.raw_title, s.metric_value, s.growth_velocity, s.source_url, geo, c_id, m_id, meta_json, cap_at, pub_at)
-                        )
+                        s.cluster_id = c.id
                 conn.commit()
             finally:
                 if self._mem_conn is None:
@@ -405,6 +651,7 @@ class SqliteTrendRepository(ITrendRepository):
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 10,
     ) -> List[TopicCluster]:
+        """Rank clusters by what was observed in the window, from the new model only."""
         await self._ensure_schema()
 
         interval_map = {
@@ -418,125 +665,99 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                query = f"""
-                    WITH ranked_clusters AS (
-                        SELECT 
-                            tc.id,
-                            tc.canonical_name,
-                            tc.topic_label,
-                            tc.summary_text,
-                            tc.category,
-                            tc.cross_platform_score,
-                            tc.first_seen_at,
-                            tc.last_updated_at,
-                            COUNT(ts.id) AS sig_count,
-                            COUNT(DISTINCT ts.platform) AS plat_count,
-                            COALESCE(SUM(ts.metric_value), 0.0) AS total_metric,
-                            COALESCE(AVG(ts.growth_velocity), 0.0) AS avg_velocity
-                        FROM topic_clusters tc
-                        INNER JOIN trend_signals ts ON ts.cluster_id = tc.id
-                        WHERE datetime(ts.captured_at) >= datetime('now', '{interval_modifier}')
-                        GROUP BY tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category, tc.cross_platform_score, tc.first_seen_at, tc.last_updated_at
-                        ORDER BY sig_count DESC
-                        LIMIT ?
-                    )
-                    SELECT 
-                        rc.id,
-                        rc.canonical_name,
-                        rc.topic_label,
-                        rc.summary_text,
-                        rc.category,
-                        rc.cross_platform_score,
-                        rc.first_seen_at,
-                        rc.last_updated_at,
-                        rc.sig_count,
-                        rc.plat_count,
-                        rc.total_metric,
-                        rc.avg_velocity
-                    FROM ranked_clusters rc;
-                """
-                cur.execute(query, (limit,))
-                rows = cur.fetchall()
-
-                clusters: List[TopicCluster] = []
-                for row in rows:
-                    c_id = row["id"]
-                    first_seen = datetime.fromisoformat(row["first_seen_at"]) if row["first_seen_at"] else datetime.now(timezone.utc)
-                    last_updated = datetime.fromisoformat(row["last_updated_at"]) if row["last_updated_at"] else datetime.now(timezone.utc)
-
-                    # Fetch signals captured within the timeframe window for this cluster
-                    sig_query = f"""
-                        SELECT platform, raw_title, metric_value, growth_velocity, source_url, geo_code, metadata, captured_at, published_at
-                        FROM trend_signals
-                        WHERE cluster_id = ? AND datetime(captured_at) >= datetime('now', '{interval_modifier}')
-                        ORDER BY captured_at DESC;
+                rows = cur.execute(
+                    f"""
+                    {self._LATEST_PER_SOURCE.format(modifier=interval_modifier)}
+                    SELECT
+                        tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category,
+                        tc.first_seen_at, tc.last_updated_at,
+                        l.platform, l.observed_title, l.metric_value, l.growth_velocity,
+                        l.source_url, l.geo_code, l.metadata, l.observed_at, l.published_at,
+                        l.observation_id, l.identity_source, l.time_provenance
+                    FROM latest l
+                    JOIN topic_clusters tc ON tc.id = l.cluster_id
+                    WHERE l.rank = 1
                     """
-                    cur.execute(sig_query, (c_id,))
-                    sig_rows = cur.fetchall()
-
-                    signals_list: List[TrendSignal] = []
-                    for sr in sig_rows:
-                        meta = json.loads(sr["metadata"]) if sr["metadata"] else {}
-                        cap_at = datetime.fromisoformat(sr["captured_at"]) if sr["captured_at"] else datetime.now(timezone.utc)
-                        pub_at = datetime.fromisoformat(sr["published_at"]) if sr["published_at"] else None
-                        signals_list.append(
-                            TrendSignal(
-                                platform=PlatformType(sr["platform"]),
-                                raw_title=sr["raw_title"],
-                                metric_value=sr["metric_value"],
-                                growth_velocity=sr["growth_velocity"],
-                                source_url=sr["source_url"],
-                                geo_code=GeoCode(sr["geo_code"]),
-                                cluster_id=UUID(c_id),
-                                metadata=meta,
-                                captured_at=cap_at,
-                                published_at=pub_at,
-                            )
-                        )
-
-                    # Calculate dynamic cross-platform score matching SemanticClusterer equation
-                    plat_count = row["plat_count"]
-                    total_metric = row["total_metric"]
-                    avg_velocity = row["avg_velocity"]
-
-                    platform_diversity_score = (plat_count / 5.0) * 40.0
-                    metric_score = min(40.0, (math.log10(max(1.0, total_metric + 1.0)) / 8.0) * 40.0)
-                    velocity_score = min(20.0, (math.log10(max(1.0, avg_velocity + 1.0)) / 4.0) * 20.0)
-                    dynamic_score = round(min(100.0, platform_diversity_score + metric_score + velocity_score), 1)
-
-                    persisted_score = row["cross_platform_score"]
-                    final_score = persisted_score if (persisted_score is not None and persisted_score > 0) else dynamic_score
-
-                    plat_cnt = len({s.platform for s in signals_list})
-                    dynamic_summary = f"Aggregated topic from {len(signals_list)} signals across {plat_cnt} platforms."
-                    clusters.append(
-                        TopicCluster(
-                            id=UUID(c_id),
-                            canonical_name=row["canonical_name"],
-                            _topic_label=row["topic_label"],
-                            cross_platform_score=final_score,
-                            summary_text=dynamic_summary,
-                            category=row["category"] or "unclassified",
-                            first_seen_at=first_seen,
-                            last_updated_at=last_updated,
-                            signals=signals_list,
-                        )
-                    )
-
-                # Sort by dynamic cross platform score descending
-                clusters.sort(key=lambda c: (c.cross_platform_score, len(c.signals)), reverse=True)
-                return clusters
+                ).fetchall()
             finally:
                 if self._mem_conn is None:
                     conn.close()
 
+            grouped: Dict[str, List[Any]] = {}
+            for row in rows:
+                grouped.setdefault(row["id"], []).append(row)
+
+            clusters: List[TopicCluster] = []
+            for cluster_id, cluster_rows in grouped.items():
+                head = cluster_rows[0]
+                signals = [
+                    self._signal_from_observation(row, UUID(cluster_id)) for row in cluster_rows
+                ]
+                # Scored by the same function the clusterer uses, from one observation per
+                # source. The arithmetic used to be restated in this query.
+                score = cross_platform_score(
+                    distinct_platforms=len({s.platform for s in signals}),
+                    total_metric=sum(s.metric_value for s in signals),
+                    average_velocity=sum(s.growth_velocity for s in signals) / len(signals),
+                )
+                cluster = TopicCluster(
+                    id=UUID(cluster_id),
+                    canonical_name=head["canonical_name"],
+                    summary_text=head["summary_text"]
+                    or f"{len(signals)} sources across"
+                    f" {len({s.platform for s in signals})} platforms.",
+                    category=head["category"] or "general",
+                    cross_platform_score=score,
+                    signals=signals,
+                    first_seen_at=datetime.fromisoformat(head["first_seen_at"])
+                    if head["first_seen_at"]
+                    else None,
+                    last_updated_at=datetime.fromisoformat(head["last_updated_at"])
+                    if head["last_updated_at"]
+                    else datetime.now(timezone.utc),
+                )
+                cluster.topic_label = head["topic_label"]
+                clusters.append(cluster)
+
+            clusters.sort(key=lambda c: (c.cross_platform_score, len(c.signals)), reverse=True)
+            return clusters[:limit]
+
         return await asyncio.to_thread(_sync_get)
+
+    @staticmethod
+    def _signal_from_observation(row, cluster_id: UUID) -> TrendSignal:
+        try:
+            metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+        except (TypeError, ValueError):
+            metadata = {}
+        return TrendSignal(
+            platform=PlatformType(row["platform"]),
+            raw_title=row["observed_title"] or "",
+            metric_value=float(row["metric_value"] or 0.0),
+            growth_velocity=float(row["growth_velocity"] or 0.0),
+            source_url=row["source_url"],
+            geo_code=GeoCode(row["geo_code"] or "VN"),
+            cluster_id=cluster_id,
+            metadata=metadata,
+            captured_at=datetime.fromisoformat(row["observed_at"]) if row["observed_at"] else None,
+            published_at=datetime.fromisoformat(row["published_at"])
+            if row["published_at"]
+            else None,
+            observation_id=UUID(row["observation_id"]) if row["observation_id"] else None,
+            identity_source=row["identity_source"],
+            time_provenance=row["time_provenance"],
+        )
 
     async def get_cluster_signals(
         self,
         cluster_id: UUID,
         timeframe: Timeframe = Timeframe.LAST_7D,
     ) -> List[TrendSignal]:
+        """One signal per source, the most recent observation of it in the window.
+
+        Deduplication is on source_id, not on the URL: the corpus holds one source seen under
+        two URL variants, and a feed-level URL shared by many items.
+        """
         await self._ensure_schema()
 
         interval_map = {
@@ -550,48 +771,18 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                cur.execute(
+                rows = cur.execute(
                     f"""
-                    SELECT platform, raw_title, metric_value, growth_velocity, source_url, geo_code, cluster_id, mission_id, metadata, captured_at, published_at
-                    FROM trend_signals
-                    WHERE cluster_id = ? AND datetime(captured_at) >= datetime('now', '{interval_modifier}')
-                    ORDER BY captured_at DESC
+                    {self._LATEST_PER_SOURCE.format(modifier=interval_modifier)}
+                    SELECT * FROM latest WHERE rank = 1 AND cluster_id = ?
+                    ORDER BY observed_at ASC
                     """,
-                    (str(cluster_id),)
-                )
-                rows = cur.fetchall()
-                signals: List[TrendSignal] = []
-                seen_urls = set()
-                for r in rows:
-                    url = r["source_url"]
-                    if url:
-                        plat = r["platform"]
-                        key = (plat, url)
-                        if key in seen_urls:
-                            continue
-                        seen_urls.add(key)
-                    meta = json.loads(r["metadata"]) if r["metadata"] else {}
-                    cap_at = datetime.fromisoformat(r["captured_at"]) if r["captured_at"] else datetime.now(timezone.utc)
-                    pub_at = datetime.fromisoformat(r["published_at"]) if r["published_at"] else None
-                    signals.append(
-                        TrendSignal(
-                            platform=PlatformType(r["platform"]),
-                            raw_title=r["raw_title"],
-                            metric_value=r["metric_value"],
-                            growth_velocity=r["growth_velocity"],
-                            source_url=r["source_url"],
-                            geo_code=GeoCode(r["geo_code"]),
-                            cluster_id=UUID(r["cluster_id"]) if r["cluster_id"] else None,
-                            mission_id=UUID(r["mission_id"]) if r["mission_id"] else None,
-                            metadata=meta,
-                            captured_at=cap_at,
-                            published_at=pub_at,
-                        )
-                    )
-                return signals
+                    (str(cluster_id),),
+                ).fetchall()
             finally:
                 if self._mem_conn is None:
                     conn.close()
+            return [self._signal_from_observation(row, cluster_id) for row in rows]
 
         return await asyncio.to_thread(_sync_get)
 
@@ -612,14 +803,32 @@ class SqliteTrendRepository(ITrendRepository):
                 tf = mission.timeframe.value if hasattr(mission.timeframe, "value") else str(mission.timeframe)
                 now_str = datetime.now(timezone.utc).isoformat()
                 c_at = mission.created_at.isoformat() if mission.created_at else now_str
+                plat_json = json.dumps(
+                    [p.value if hasattr(p, "value") else str(p) for p in (mission.platforms or [])]
+                )
 
+                # An upsert, not INSERT OR REPLACE. REPLACE deletes the row first, and
+                # mission_evidence cascades on that delete: every status update would have
+                # thrown away the evidence the mission had just recorded.
                 cur.execute(
                     """
-                    INSERT OR REPLACE INTO research_missions
-                    (id, title, keywords, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO research_missions
+                    (id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO UPDATE SET
+                        title = excluded.title,
+                        keywords = excluded.keywords,
+                        platforms = excluded.platforms,
+                        shortcode = excluded.shortcode,
+                        geo_code = excluded.geo_code,
+                        timeframe = excluded.timeframe,
+                        status = excluded.status,
+                        agent = excluded.agent,
+                        session_id = excluded.session_id,
+                        summary = excluded.summary,
+                        updated_at = excluded.updated_at
                     """,
-                    (m_id, mission.title, kw_json, mission.shortcode, geo, tf, mission.status, mission.agent, mission.session_id, mission.summary, c_at, now_str)
+                    (m_id, mission.title, kw_json, plat_json, mission.shortcode, geo, tf, mission.status, mission.agent, mission.session_id, mission.summary, c_at, now_str)
                 )
                 conn.commit()
                 return mission
@@ -637,7 +846,7 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, title, keywords, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at FROM research_missions WHERE id = ? OR shortcode = ?",
+                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at FROM research_missions WHERE id = ? OR shortcode = ?",
                     (str(mission_id), str(mission_id))
                 )
                 r = cur.fetchone()
@@ -651,6 +860,7 @@ class SqliteTrendRepository(ITrendRepository):
                     id=UUID(r["id"]),
                     title=r["title"],
                     keywords=kws,
+                    platforms=_platforms_of(r),
                     shortcode=r["shortcode"],
                     geo_code=resolve_geo(r["geo_code"]),
                     timeframe=resolve_timeframe(r["timeframe"]),
@@ -678,7 +888,7 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, title, keywords, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at FROM research_missions ORDER BY created_at DESC LIMIT ?",
+                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at FROM research_missions ORDER BY created_at DESC LIMIT ?",
                     (limit,)
                 )
                 rows = cur.fetchall()
@@ -691,6 +901,7 @@ class SqliteTrendRepository(ITrendRepository):
                             id=UUID(r["id"]),
                             title=r["title"],
                             keywords=kws,
+                            platforms=_platforms_of(r),
                             shortcode=r["shortcode"],
                             geo_code=resolve_geo(r["geo_code"]),
                             timeframe=resolve_timeframe(r["timeframe"]),
@@ -716,25 +927,43 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
+                # mission_evidence -> observations -> sources. The legacy mission_id column
+                # held one mission per source, so whichever mission wrote last owned the row.
                 cur.execute(
-                    "SELECT id, platform, raw_title, metric_value, growth_velocity, source_url, geo_code, mission_id, metadata, captured_at, published_at FROM trend_signals WHERE mission_id = ? ORDER BY captured_at DESC",
+                    "SELECT s.platform, o.observed_title, o.metric_value, o.growth_velocity,"
+                    " o.source_url, o.geo_code, e.mission_id, o.metadata, o.observed_at,"
+                    " o.published_at, o.cluster_id, o.id AS observation_id, o.identity_source,"
+                    " o.time_provenance"
+                    " FROM mission_evidence e"
+                    " JOIN observations o ON o.id = e.observation_id"
+                    " JOIN sources s ON s.id = o.source_id"
+                    " WHERE e.mission_id = ? ORDER BY o.observed_at DESC",
                     (str(mission_id),)
                 )
                 rows = cur.fetchall()
                 signals: List[TrendSignal] = []
                 for r in rows:
                     meta = json.loads(r["metadata"]) if r["metadata"] else {}
-                    cap_at = datetime.fromisoformat(r["captured_at"]) if r["captured_at"] else datetime.now(timezone.utc)
+                    # No substitute clock. A NULL observed_at means the collection time was
+                    # never recorded, and datetime.now() here would have turned every one of
+                    # the 17,118 legacy observations into "collected when you ran the query".
+                    cap_at = (
+                        datetime.fromisoformat(r["observed_at"]) if r["observed_at"] else None
+                    )
                     pub_at = datetime.fromisoformat(r["published_at"]) if r["published_at"] else None
                     signals.append(
                         TrendSignal(
                             platform=PlatformType(r["platform"]),
-                            raw_title=r["raw_title"],
+                            raw_title=r["observed_title"],
                             metric_value=r["metric_value"],
                             growth_velocity=r["growth_velocity"],
                             source_url=r["source_url"],
                             geo_code=GeoCode(r["geo_code"]),
+                            cluster_id=UUID(r["cluster_id"]) if r["cluster_id"] else None,
                             mission_id=UUID(r["mission_id"]) if r["mission_id"] else None,
+                            observation_id=UUID(r["observation_id"]),
+                            identity_source=r["identity_source"],
+                            time_provenance=r["time_provenance"],
                             metadata=meta,
                             captured_at=cap_at,
                             published_at=pub_at,
@@ -748,6 +977,86 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_get)
 
+    async def assign_observation_clusters(self, signals: List[TrendSignal]) -> int:
+        """Set the cluster on observations already written. See the Postgres docstring."""
+        updates = [
+            (str(s.cluster_id), str(s.observation_id))
+            for s in signals
+            if s.observation_id and s.cluster_id
+        ]
+        if not updates:
+            return 0
+        await self._ensure_schema()
+
+        def _sync_assign():
+            conn = self._get_connection()
+            try:
+                conn.executemany("UPDATE observations SET cluster_id = ? WHERE id = ?", updates)
+                conn.commit()
+                return len(updates)
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_assign)
+
+    async def attach_mission_evidence(self, mission_id: UUID, signals: List[TrendSignal]) -> int:
+        """Record that a mission used observations that already exist. See Postgres."""
+        rows = [
+            (str(uuid4()), str(mission_id), str(s.observation_id),
+             datetime.now(timezone.utc).isoformat())
+            for s in signals
+            if s.observation_id
+        ]
+        if not rows:
+            return 0
+        await self._ensure_schema()
+
+        def _sync_attach():
+            conn = self._get_connection()
+            try:
+                conn.executemany(
+                    "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at)"
+                    " VALUES (?, ?, ?, ?) ON CONFLICT (mission_id, observation_id) DO NOTHING",
+                    rows,
+                )
+                conn.commit()
+                return len(rows)
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_attach)
+
+    async def prune_mission_evidence(self, mission_id: UUID, retained_observation_ids) -> int:
+        """Drop this mission's claims on anything outside the retained set. See Postgres."""
+        retained = [str(observation_id) for observation_id in retained_observation_ids]
+        await self._ensure_schema()
+
+        def _sync_prune():
+            conn = self._get_connection()
+            try:
+                cur = conn.cursor()
+                if retained:
+                    placeholders = ", ".join("?" for _ in retained)
+                    cur.execute(
+                        "DELETE FROM mission_evidence"
+                        f" WHERE mission_id = ? AND observation_id NOT IN ({placeholders})",
+                        (str(mission_id), *retained),
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM mission_evidence WHERE mission_id = ?", (str(mission_id),)
+                    )
+                removed = cur.rowcount or 0
+                conn.commit()
+                return removed
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_prune)
+
     async def delete_mission_signals(self, mission_id: UUID) -> int:
         await self._ensure_schema()
 
@@ -755,7 +1064,10 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                cur.execute("DELETE FROM trend_signals WHERE mission_id = ?", (str(mission_id),))
+                # Only the mission's claims. A source and its observations are shared with
+                # every other mission that observed them, and the cluster history is built on
+                # those observations.
+                cur.execute("DELETE FROM mission_evidence WHERE mission_id = ?", (str(mission_id),))
                 deleted = cur.rowcount
                 conn.commit()
                 return deleted
