@@ -89,18 +89,14 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   bản open-source beta chạy SQLite cài mới. Người clone về lần đầu không có corpus legacy nào để
   migrate, nên chuỗi quiesce/snapshot/baseline/`sql/016`/backfill/verifier không áp dụng cho họ.
   Chi tiết cutover vẫn nằm ở T020 trong phần source identity bên dưới.
-- [ ] **Blocker của release acceptance v0.4.0: gọi tool Ignis qua model, từ một phiên Claude Code
-  đăng nhập thật.** Đây là mục canonical duy nhất cho khoảng trống này; đừng mở thêm bản thứ hai.
-  Hiện mới chứng minh được phần server: `claude mcp list` từ một HOME tạm sạch báo `✔ Connected`
-  với registration do bootstrap sinh ra, và JSON-RPC trực tiếp gọi được tool (39 tool,
-  `get_runtime_config` SUCCESS) trong `tests/integration/test_clean_user_journey.py` và
-  `scripts/wheel_mcp_smoke.py`. Hai thứ đó cộng lại chứng minh đường đi tới server, chứ chưa chứng
-  minh trọn vẹn hành trình người dùng: phần model tự chọn tool rồi đọc kết quả vẫn chưa chạy lần
-  nào. `claude -p` dừng ở `OAuth session expired and could not be refreshed`; login cần browser
-  flow mà phiên không tương tác không làm được, và credential thì không được bê đi nơi khác. Cần
-  Fio chạy một lượt từ Claude Code đã đăng nhập; lệnh nằm trong
-  `.handoff/2026-09-14-clean-user-acceptance.handoff.md`. Chưa có lượt đó thì v0.4.0 chưa được coi
-  là accepted.
+- [x] **Đã đạt release acceptance v0.4.0 qua một phiên Claude Code đăng nhập thật
+  (14/09/2026).** Từ checkout dùng một lần của `release/0.4.0` tại `49e2be4`, bootstrap tạo cấu
+  hình project-scoped chỉ trỏ tới SQLite trong checkout đó. Sau khi Fio đăng nhập và duyệt server,
+  model gọi `mcp__fn-ignis__get_runtime_config` với input `{}`. Tool trả `status: SUCCESS` và
+  `total_configs: 6`; model đọc kết quả rồi báo lại `total_configs` bằng 6. Phần bằng chứng đã
+  sanitize không chứa DSN, Supabase, token, API key hay password. Lượt này đóng khoảng trống mà
+  `claude mcp list` và JSON-RPC trực tiếp không chứng minh được: model trong client thật đã gọi
+  tool Ignis và đọc kết quả.
 - [ ] **P95 benchmark và ngưỡng coverage 85% là khoảng trống đã đo, không chặn beta.** SC-001 chưa
   có benchmark tái lập được nào trên 10.000 dòng cho `get_top_clusters` P95 < 50 ms. SC-004 đặt mục
   tiêu 85% nhưng CI đo 75% và không bật `--cov-fail-under`. Cả hai đã ghi rõ là mục tiêu chưa đạt
