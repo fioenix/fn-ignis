@@ -78,6 +78,28 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 
 ### Chuẩn bị release v0.4.0 — mở 14/09/2026
 
+#### Ranh giới blocker — Fio chốt 14/09/2026
+
+Ba mục dưới đây từng nằm chung trong "việc còn lại của release". Chúng không cùng một loại, và gộp
+như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
+
+- [ ] **T020 chặn deployment, không chặn publish.** Production cutover source/observation chặn đúng
+  một thứ: kích hoạt runtime mới trên corpus PostgreSQL/Supabase đã có. Nó không chặn việc publish
+  bản open-source beta chạy SQLite cài mới. Người clone về lần đầu không có corpus legacy nào để
+  migrate, nên chuỗi quiesce/snapshot/baseline/`sql/016`/backfill/verifier không áp dụng cho họ.
+  Chi tiết cutover vẫn nằm ở T020 trong phần source identity bên dưới.
+- [ ] **Blocker của release acceptance v0.4.0: gọi tool Ignis qua model, từ một phiên Claude Code
+  đăng nhập thật.** Hiện mới chứng minh được phần server: `claude mcp list` báo `✔ Connected` với
+  registration do bootstrap sinh ra, và JSON-RPC trực tiếp gọi được tool (39 tool,
+  `get_runtime_config` SUCCESS). Hai thứ đó cộng lại chứng minh đường đi tới server, chứ chưa chứng
+  minh trọn vẹn hành trình người dùng: phần model tự chọn tool rồi đọc kết quả vẫn chưa chạy lần
+  nào. Chưa có một lượt như vậy thì v0.4.0 chưa được coi là accepted.
+- [ ] **P95 benchmark và ngưỡng coverage 85% là khoảng trống đã đo, không chặn beta.** SC-001 chưa
+  có benchmark tái lập được nào trên 10.000 dòng cho `get_top_clusters` P95 < 50 ms. SC-004 đặt mục
+  tiêu 85% nhưng CI đo 75% và không bật `--cov-fail-under`. Cả hai đã ghi rõ là mục tiêu chưa đạt
+  (T021, T022), không phải điều kiện phát hành bản beta. Không được mô tả hai mục này như đã đạt.
+
+
 - [x] **Đã xong (14/09/2026): hai client local chạy Ignis cùng lúc được.** Startup của MCP server
   `pgrep` chuỗi `ignis.interfaces.mcp.server` rồi `SIGTERM` mọi process khớp. Đó đúng là command
   line của mọi stdio server, nên "stale instance" nó dọn chính là client mở trước. Đo được: cả hai
