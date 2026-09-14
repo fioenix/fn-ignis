@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fn-ignis Source Map</title>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F7F7FB; --paper-2:#EEEEF5; --ink:#0B0B17; --muted:#5B5B79; --soft:#8B8BA6;
+    --rule:rgba(11,11,23,0.12); --accent:#4B1E73; --link:#14627A;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+       font-family:'Space Grotesk',system-ui,sans-serif;padding:3rem 2rem}
+  main{max-width:900px;margin:0 auto}
+  .eyebrow{font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:500;
+           letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin:0 0 .5rem}
+  h1{font-family:'Anton',sans-serif;font-size:1.75rem;font-weight:400;letter-spacing:-0.01em;
+     text-transform:uppercase;margin:0 0 .35rem}
+  .sub{color:var(--muted);font-size:.9rem;margin:0 0 2rem;max-width:64ch;line-height:1.5}
+  svg{width:100%;height:auto;display:block}
+  footer{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--rule);
+         font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:0.14em;
+         text-transform:uppercase;color:var(--soft)}
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">FINOLABS · FN-IGNIS</p>
+  <h1>Where the data comes from</h1>
+  <p class="sub">Six connectors, grouped by the runtime each one needs rather than by platform.
+     That grouping is the one that decides what an install can actually do: the unattended worker
+     image ships no browser, so it registers only the connectors that can pull over HTTP, and
+     everything else runs on the operator's own machine with the operator's own session. Threads
+     and Instagram Reels sit in both groups and move between them on their own, depending on
+     whether a Graph API token is configured.</p>
+
+<svg viewBox="0 0 840 600" role="img" aria-labelledby="src-title src-desc"
+     xmlns="http://www.w3.org/2000/svg">
+  <title id="src-title">fn-ignis data source map</title>
+  <desc id="src-desc">Six data sources in three runtime groups. Google Trends RSS and the YouTube
+    Data API pull over HTTP and can run in the unattended worker. Threads and Instagram Reels use
+    HTTP when a Graph API token is configured and a browser otherwise, so they join the worker only
+    in the first case. TikTok Creative Center and TikTok video and comments are browser-only and
+    stay on the operator's machine. Each source notes the credential it needs and whether an
+    untargeted pull can discover new topics.</desc>
+  <defs>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="11" cy="11" r="0.8" fill="rgba(11,11,23,0.10)"/>
+    </pattern>
+    <marker id="a-muted" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5B5B79"/></marker>
+    <marker id="a-accent" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#4B1E73"/></marker>
+    <marker id="a-link" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#14627A"/></marker>
+  </defs>
+
+  <rect width="840" height="600" fill="#F7F7FB"/>
+  <rect width="840" height="600" fill="url(#dots)" opacity="0.6"/>
+
+  <!-- ================= band A: HTTP only ================= -->
+  <rect x="36" y="74" width="524" height="112" rx="8" fill="rgba(11,11,23,0.035)"/>
+  <rect x="48" y="66" width="118" height="14" rx="3" fill="#F7F7FB" stroke="rgba(11,11,23,0.18)" stroke-width="0.8"/>
+  <text x="107" y="76" fill="#5B5B79" font-size="7" font-family="'JetBrains Mono',monospace" text-anchor="middle" letter-spacing="0.10em">HTTP API ONLY</text>
+
+  <rect x="56" y="96" width="230" height="72" rx="6" fill="#FFFFFF" stroke="#BCBCD0" stroke-width="1"/>
+  <text x="70" y="118" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif">Google Trends RSS</text>
+  <text x="70" y="134" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">no credential</text>
+  <text x="70" y="148" fill="#14627A" font-size="7.5" font-family="'JetBrains Mono',monospace">discovers topics</text>
+  <text x="70" y="161" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">what a region is searching</text>
+
+  <rect x="310" y="96" width="230" height="72" rx="6" fill="#FFFFFF" stroke="#BCBCD0" stroke-width="1"/>
+  <text x="324" y="118" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif">YouTube Data API</text>
+  <text x="324" y="134" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">YOUTUBE_API_KEY</text>
+  <text x="324" y="148" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">answers only when asked</text>
+  <text x="324" y="161" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">search 100 units · quota 10k/day</text>
+
+  <!-- ================= band B: dual tier ================= -->
+  <rect x="36" y="212" width="524" height="112" rx="8" fill="rgba(75,30,115,0.07)" stroke="#4B1E73" stroke-width="1"/>
+  <rect x="48" y="204" width="150" height="14" rx="3" fill="#F7F7FB" stroke="rgba(75,30,115,0.40)" stroke-width="0.8"/>
+  <text x="123" y="214" fill="#4B1E73" font-size="7" font-family="'JetBrains Mono',monospace" text-anchor="middle" letter-spacing="0.10em">DUAL TIER · SELF-SELECTING</text>
+
+  <rect x="56" y="234" width="230" height="72" rx="6" fill="#FFFFFF" stroke="#BCBCD0" stroke-width="1"/>
+  <text x="70" y="256" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif">Threads</text>
+  <text x="70" y="272" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">Graph token → HTTP</text>
+  <text x="70" y="286" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">browser login → browser</text>
+  <text x="70" y="299" fill="#14627A" font-size="7.5" font-family="'JetBrains Mono',monospace">discovers topics</text>
+
+  <rect x="310" y="234" width="230" height="72" rx="6" fill="#FFFFFF" stroke="#BCBCD0" stroke-width="1"/>
+  <text x="324" y="256" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif">Instagram Reels</text>
+  <text x="324" y="272" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">Graph token → HTTP</text>
+  <text x="324" y="286" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">browser login → browser</text>
+  <text x="324" y="299" fill="#14627A" font-size="7.5" font-family="'JetBrains Mono',monospace">discovers topics</text>
+
+  <!-- ================= band C: browser only ================= -->
+  <rect x="36" y="350" width="524" height="112" rx="8" fill="rgba(11,11,23,0.035)"/>
+  <rect x="48" y="342" width="128" height="14" rx="3" fill="#F7F7FB" stroke="rgba(11,11,23,0.18)" stroke-width="0.8"/>
+  <text x="112" y="352" fill="#5B5B79" font-size="7" font-family="'JetBrains Mono',monospace" text-anchor="middle" letter-spacing="0.10em">BROWSER ONLY</text>
+
+  <rect x="56" y="372" width="230" height="72" rx="6" fill="#FFFFFF" stroke="#BCBCD0" stroke-width="1"/>
+  <text x="70" y="394" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif">TikTok Creative Center</text>
+  <text x="70" y="410" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">no credential · Playwright</text>
+  <text x="70" y="424" fill="#14627A" font-size="7.5" font-family="'JetBrains Mono',monospace">discovers topics</text>
+  <text x="70" y="437" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">trending hashtags</text>
+
+  <rect x="310" y="372" width="230" height="72" rx="6" fill="#FFFFFF" stroke="#BCBCD0" stroke-width="1"/>
+  <text x="324" y="394" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif">TikTok video &amp; comments</text>
+  <text x="324" y="410" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">session · encrypted at rest</text>
+  <text x="324" y="424" fill="#14627A" font-size="7.5" font-family="'JetBrains Mono',monospace">discovers topics</text>
+  <text x="324" y="437" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">voice of customer</text>
+
+  <!-- ================= destinations ================= -->
+  <rect x="620" y="96" width="188" height="72" rx="6" fill="rgba(11,11,23,0.05)" stroke="#5B5B79" stroke-width="1" stroke-dasharray="3 2"/>
+  <text x="714" y="120" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif" text-anchor="middle">Track 1 · Radar</text>
+  <text x="714" y="136" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace" text-anchor="middle">worker image · optional</text>
+  <text x="714" y="150" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace" text-anchor="middle">no browser runtime</text>
+
+  <rect x="620" y="372" width="188" height="72" rx="6" fill="rgba(20,98,122,0.08)" stroke="#14627A" stroke-width="1"/>
+  <text x="714" y="396" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif" text-anchor="middle">Track 2 · On demand</text>
+  <text x="714" y="412" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace" text-anchor="middle">operator machine</text>
+  <text x="714" y="426" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace" text-anchor="middle">own session · agent driven</text>
+
+  <!-- ================= edges ================= -->
+  <path d="M560 132 L612 132" stroke="#5B5B79" stroke-width="1.2" fill="none" marker-end="url(#a-muted)"/>
+  <path d="M560 150 L596 150 L596 400 L612 400" stroke="#5B5B79" stroke-width="1.2" fill="none" marker-end="url(#a-muted)" opacity="0.55"/>
+
+  <path d="M560 258 L586 258 L586 160 L612 160" stroke="#4B1E73" stroke-width="1.3" fill="none"
+        stroke-dasharray="5 3" marker-end="url(#a-accent)"/>
+  <text x="592" y="198" fill="#4B1E73" font-size="7" font-family="'JetBrains Mono',monospace">token</text>
+
+  <path d="M560 286 L586 286 L586 388 L612 388" stroke="#4B1E73" stroke-width="1.3" fill="none" marker-end="url(#a-accent)"/>
+  <text x="592" y="336" fill="#4B1E73" font-size="7" font-family="'JetBrains Mono',monospace">no token</text>
+
+  <path d="M560 408 L612 408" stroke="#14627A" stroke-width="1.3" fill="none" marker-end="url(#a-link)"/>
+  <path d="M560 426 L596 426 L596 432 L612 432" stroke="#14627A" stroke-width="1.3" fill="none" marker-end="url(#a-link)" opacity="0.7"/>
+
+  <!-- ================= legend ================= -->
+  <line x1="36" y1="500" x2="808" y2="500" stroke="rgba(11,11,23,0.12)" stroke-width="1"/>
+  <text x="36" y="522" fill="#8B8BA6" font-size="7" font-family="'JetBrains Mono',monospace" letter-spacing="0.14em">LEGEND</text>
+
+  <path d="M120 534 L152 534" stroke="#5B5B79" stroke-width="1.2" marker-end="url(#a-muted)"/>
+  <text x="162" y="537" fill="#5B5B79" font-size="8" font-family="'JetBrains Mono',monospace">registered in the worker</text>
+
+  <path d="M330 534 L362 534" stroke="#4B1E73" stroke-width="1.3" stroke-dasharray="5 3" marker-end="url(#a-accent)"/>
+  <text x="372" y="537" fill="#5B5B79" font-size="8" font-family="'JetBrains Mono',monospace">only when a token exists</text>
+
+  <path d="M566 534 L598 534" stroke="#14627A" stroke-width="1.3" marker-end="url(#a-link)"/>
+  <text x="608" y="537" fill="#5B5B79" font-size="8" font-family="'JetBrains Mono',monospace">needs a browser</text>
+
+  <text x="120" y="560" fill="#8B8BA6" font-size="8" font-family="'JetBrains Mono',monospace">“discovers topics” = an untargeted pull returns subjects nobody seeded.</text>
+  <text x="120" y="574" fill="#8B8BA6" font-size="8" font-family="'JetBrains Mono',monospace">YouTube is the one source that does not: its chart ranks popularity, not questions.</text>
+</svg>
+
+  <footer>fn-ignis · source map as of 14/09/2026 · finolabs design system</footer>
+</main>
+</body>
+</html>

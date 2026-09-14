@@ -2,7 +2,7 @@
 
 **Feature Directory**: `specs/001-core-storage-stable-ingress`
 **Created**: 2026-08-31
-**Status**: Implemented on PR #8; production cutover and convergence verification pending
+**Status**: Shipped in `v0.4.0` on `main`. The storage model is live in the released runtime; migrating an existing PostgreSQL corpus and the SC-001/SC-004 convergence gaps remain open
 **Input**: Pha 1 (Core Storage & Stable Ingress Feeds) - Postgres TimescaleDB Repository Adapter + YouTube Data API v3 Plugin + Google Trends RSS Plugin
 **As-built amendment**: 2026-09-13 — source/observation/mission-evidence storage contract
 

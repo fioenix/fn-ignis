@@ -21,3 +21,18 @@
 - [x] T009 Converge TikTok tag/video and Google keyword identities across metadata and URL routes
 - [ ] T010 Reconcile Threads/Reels numeric primary keys with permalink shortcodes after connectors
   expose both values or an explicit alias ledger is designed
+
+## Phase 6: Credential Lifecycle Contract (2026-09-14)
+
+- [x] T011 Make `delete_platform_credentials` erase the stored row on both backends. PostgreSQL had
+  been running `UPDATE ... SET is_active = FALSE` while SQLite deleted, so the same method name
+  meant two different things and the encrypted payload survived a clear on one of them.
+- [x] T012 Add dual-backend erasure contracts that query `platform_credentials` directly, rather
+  than trusting a reader that filters on the active flag
+- [x] T013 Remove the upstream-revocation claim from both clear handlers, both FastMCP tool
+  descriptions, the repository port docstring, and the public documentation; direct operators to
+  the provider's security settings instead
+- [x] T014 Gate the wording with contracts that permit a denial and an instruction to revoke at the
+  provider, and fail only an affirmative claim that Ignis revoked something
+- [ ] T015 Implement an actual provider-side revocation request, behaviourally tested, before any
+  surface is allowed to claim revocation

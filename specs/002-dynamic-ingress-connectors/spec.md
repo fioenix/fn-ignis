@@ -2,9 +2,10 @@
 
 **Feature Directory**: `specs/002-dynamic-ingress-connectors`
 **Created**: 2026-08-31
-**Status**: Implemented; cross-route alias reconciliation remains open
+**Status**: Implemented; cross-route alias reconciliation remains open, and upstream credential revocation is explicitly out of scope
 **Input**: Pha 2 (Dynamic & Headless Scraping Ingress Feeds) - Triển khai TikTok Plugin, Threads Plugin, và Instagram Reels Plugin.
 **As-built amendment**: 2026-09-13 — dual HTTP/browser runtimes and canonical source identity
+**As-built amendment**: 2026-09-14 — credential storage lifecycle and the revocation boundary
 
 ---
 
@@ -71,6 +72,30 @@ Là hệ thống đo lường xu hướng thị giác và lối sống, tôi c�
   namespaces. Threads and Reels numeric primary keys MUST remain separate from permalink
   shortcodes until a connector supplies both values or an explicit alias ledger can reconcile
   them; merging those namespaces by string equality can silently join different objects.
+
+### Credential lifecycle
+
+Connectors that authenticate hold long-lived material, so where it lives and what removing it
+means are part of this feature's contract rather than an implementation detail.
+
+- **FR-008**: Platform OAuth tokens and captured browser sessions MUST be encrypted at rest before
+  storage and MUST NOT be written to any client configuration file. Configuration references the
+  environment file by path; the encrypted records live in `platform_credentials`.
+- **FR-009**: `delete_platform_credentials(platform)` MUST permanently remove the stored row on
+  every backend. Deactivating a row is not deletion: the encrypted payload survives in the table
+  and in every backup, while the caller — an operator responding to a leak, decommissioning a
+  machine, or rotating the encryption key — has been told the material is gone. A second call MUST
+  return `False`, and a cleared platform MUST disappear from both single-record reads and listings.
+  This is verified by querying the table directly, because a reader that filters on an active flag
+  reports "no credential" for a row that is still present.
+- **FR-010**: Clearing local storage and revoking access at the provider are separate operations,
+  and this feature implements only the first. No tool result, tool description, or document may
+  state or imply that Ignis revoked an upstream token. Where revocation is also needed, the
+  operator MUST be directed to perform it in the provider's own security settings.
+- **FR-011**: The current release has no dual-key decryption path. `key_version` in the ciphertext
+  envelope is a label, not a mechanism, and MUST NOT be described as rotation support. Replacing
+  the encryption key makes existing records unreadable, so rotation requires clearing stored
+  records first and re-authenticating each connector afterwards.
 
 ---
 

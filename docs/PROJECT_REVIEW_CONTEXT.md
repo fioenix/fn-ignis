@@ -21,7 +21,7 @@ The branch state independently verified before this documentation refresh:
 
 | Gate | Result |
 |---|---|
-| Full suite | 831 passed, 2 skipped on PR #8; 839 passed, 2 skipped on the stacked release branch |
+| Full suite | 866 passed, 2 skipped on the current tree (831 when the storage model was first reviewed) |
 | Ruff, package build, clean-install smoke test | passed in GitHub Actions |
 | Dual backend | SQLite plus a real disposable TimescaleDB service; no silent Postgres skip |
 | PR | not draft, mergeable, merge state clean |
@@ -168,8 +168,7 @@ understates supply and inflates the Opportunity Index.
 
 ## 4. What is verified, and what is not
 
-**Current branch verification.** On the stacked release branch `codex/v0.4.0-oss-release`, 839
-tests pass and 2 skip. The two skips are Postgres-only cases under the SQLite parameter. CI runs
+**Current verification.** On the current tree, 866 tests pass and 2 skip. The two skips are Postgres-only cases under the SQLite parameter. CI runs
 Ruff, `pytest tests/`, `uv build`, and an MCP session driven against the built wheel rather than an
 editable install. Installation is `uv sync --locked`, so the committed lock is the environment under
 test instead of a fresh resolution from the dependency ranges.
@@ -286,13 +285,14 @@ reached, tested, and then reversed, and the reversal is the useful part. In part
 
 Ordered by how much a reviewer's conclusions would change if they did not know about it.
 
-0. **Resolved on PR #8; production cutover remains.** The historical defect was that
+0. **Resolved and released; migrating an existing corpus remains.** The historical defect was that
    `trend_signals` combined source identity, observation and one mission owner. The branch now
    separates `sources`, `observations` and `mission_evidence`; one source can support two missions,
    one mission can retain two observations of a source, and both backends run the same behavioral
    contracts. Evidence replacement writes new claims before pruning old ones, and the mission paths
-   preserve timeframe and observation identifiers. This is not production-complete until PR #8 is
-   merged and the snapshot-specific backfill returns `VERIFIED`.
+   preserve timeframe and observation identifiers. The runtime shipped in `v0.4.0`; a deployment
+   carrying a legacy corpus is not complete until its snapshot-specific backfill returns
+   `VERIFIED`.
 
 1. **Probe seeds were machinery vocabulary until 10/09/2026.** Adding eight machinery domains to
    `market_lexicons` on 09/09 left an exclusion list in `ingest_trends.py` naming only the two

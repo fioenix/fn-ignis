@@ -4,9 +4,9 @@
 > - **Phiên bản:** `v0.4.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (39 Handlers & Tools)
-> - **Trạng thái branch:** PR #8 và PR #9 đã merge vào `main` bằng merge commit; production
->   cutover trên Supabase chưa chạy
-> - **Trạng thái Tests:** 853 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
+> - **Trạng thái:** `v0.4.0` đã nằm trên `main` (PR #8, #9, #10 merge bằng merge commit). Chưa
+>   tag, chưa publish release, repo vẫn private. Cutover trên corpus PostgreSQL hiện hữu chưa chạy.
+> - **Trạng thái Tests:** 866 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
 
 ---
 
