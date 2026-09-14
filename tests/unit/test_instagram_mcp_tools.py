@@ -167,7 +167,9 @@ async def test_get_instagram_auth_status_works_without_a_browser_manager():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cleared,expected_fragment", [(True, "revoked"), (False, "No active")])
+# "revoked" was the old wording and was wrong: nothing is sent to Meta, so the token stayed
+# valid while the operator was told otherwise. The success path now states local deletion.
+@pytest.mark.parametrize("cleared,expected_fragment", [(True, "deleted from local"), (False, "No stored")])
 async def test_clear_instagram_auth_clears_both_tiers(cleared, expected_fragment):
     oauth = AsyncMock()
     oauth.clear_auth.return_value = cleared

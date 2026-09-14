@@ -32,6 +32,10 @@ YT_URL = f"https://www.youtube.com/watch?v={YT_ID}"
 
 SCHEMA_MIGRATIONS = (
     "001_initial_schema.sql",
+    # platform_credentials lives here, not in 001. Without it the Postgres case cannot exercise
+    # any credential contract, and a test that needs it would fail on a missing relation -- a
+    # fixture error dressed up as a behavioural one.
+    "002_platform_credentials.sql",
     "008_deduplicate_signal_metrics.sql",
     "015_split_published_at.sql",
     "016_source_observation_model.sql",

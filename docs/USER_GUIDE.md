@@ -316,12 +316,12 @@ The `fn-ignis` FastMCP server exposes **39 atomic and strategic tools**:
 - `get_threads_search_suggestions`: Uncover colloquial search intent and phrases.
 - `authenticate_threads`: Complete OAuth 2.0 flow or set access tokens.
 - `get_threads_auth_status`: Check health, expiration, and token validity.
-- `clear_threads_auth`: Revoke and wipe stored Threads credentials.
+- `clear_threads_auth`: Delete stored Threads credentials from local encrypted storage. Does not revoke the token at Meta; do that separately in Meta account security settings.
 
 ### 5. Instagram Reels Intelligence (3 Tools)
 - `authenticate_instagram`: Authenticate Instagram Graph API credentials.
 - `get_instagram_auth_status`: Verify connection and token health.
-- `clear_instagram_auth`: Revoke and wipe Instagram credentials.
+- `clear_instagram_auth`: Delete stored Instagram credentials from local encrypted storage. Does not revoke the token at Meta; do that separately in Meta account security settings.
 
 ### 6. Dynamic Configuration & System Health (6 Tools)
 - `diagnose_system_health`: Full synthetic diagnostics of database, connectors, and encryption.

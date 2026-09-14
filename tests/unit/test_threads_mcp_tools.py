@@ -66,7 +66,9 @@ async def test_get_threads_auth_status_passes_through_manager_report():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cleared,expected_fragment", [(True, "revoked"), (False, "No active")])
+# "revoked" was the old wording and was wrong: nothing is sent to Meta, so the token stayed
+# valid while the operator was told otherwise. The success path now states local deletion.
+@pytest.mark.parametrize("cleared,expected_fragment", [(True, "deleted from local"), (False, "No stored")])
 async def test_clear_threads_auth_reports_outcome(cleared, expected_fragment):
     auth_mgr = AsyncMock()
     auth_mgr.clear_auth.return_value = cleared

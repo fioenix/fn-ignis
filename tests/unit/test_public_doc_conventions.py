@@ -17,6 +17,8 @@ sentence under it said the wrong thing.
 import re
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 
 SECURITY_POLICY = REPO / "SECURITY.md"
@@ -315,4 +317,71 @@ def test_handoff_rule_does_not_reach_local_output_paths_in_migration_docs():
     assert ".handoff/" in (REPO / runbook).read_text(encoding="utf-8"), (
         "The migration runbook no longer writes to .handoff/. If that changed on purpose, remove "
         "this exception rather than leaving a test that guards nothing."
+    )
+
+
+# A revocation verb attributed to an Ignis tool. Telling an operator to revoke access themselves
+# at the provider is the correct instruction and has to keep passing, so the marker list below
+# exempts a line that points at the provider or at a manual action.
+REVOCATION_VERB = re.compile(r"\brevoke[ds]?\b|thu hồi", re.IGNORECASE)
+IGNIS_SUBJECT = re.compile(r"clear_\w*auth|\bIgnis\b|fn-ignis", re.IGNORECASE)
+PROVIDER_SIDE_MARKER = re.compile(
+    r"provider|Meta|Facebook|Instagram account|security settings|manually|yourself|separately"
+    r"|phía nền tảng|thủ công|tự|riêng",
+    re.IGNORECASE,
+)
+
+
+def test_documentation_does_not_claim_ignis_revokes_upstream_access():
+    """Local deletion and provider revocation are different operations; only one is implemented.
+
+    An operator who reads that a tool "revoked" a credential has no reason to open the provider's
+    security settings, so a leaked token stays valid while they believe it does not. Instructions
+    telling the operator to revoke access at the provider are the correct advice and are allowed.
+    """
+    offenders = []
+    for relative in PUBLIC_DOCS:
+        for lineno, line in enumerate(_read(relative).splitlines(), 1):
+            if not REVOCATION_VERB.search(line):
+                continue
+            if not IGNIS_SUBJECT.search(line):
+                continue
+            if PROVIDER_SIDE_MARKER.search(line):
+                continue
+            offenders.append(f"{relative}:{lineno}: {line.strip()[:110]}")
+    assert not offenders, (
+        "Documentation attributes revocation to an Ignis tool. The runtime sends no revocation "
+        "request upstream; it deletes the locally stored encrypted credential. Say that, and tell "
+        "the operator to revoke provider-side access separately:\n" + "\n".join(offenders)
+    )
+
+
+# The rotation runbook lives in .handoff/, which is gitignored, so this check can only run on a
+# machine that has it. It is skipped in CI rather than silently absent, so the skip line says why
+# instead of the rule looking green when nothing ran.
+ROTATION_RUNBOOK = REPO / ".handoff" / "2026-09-14-pre-public-credential-rotation.handoff.md"
+
+
+@pytest.mark.skipif(
+    not ROTATION_RUNBOOK.exists(),
+    reason="rotation runbook is an ignored local note; not present in a clean checkout or in CI",
+)
+def test_rotation_runbook_counts_stored_rows_not_only_active_ones():
+    """Counting only active rows would have hidden the defect this branch fixes.
+
+    Before the erasure fix, clearing a credential on PostgreSQL set `is_active = FALSE` and left
+    the encrypted payload in place. An inventory that reported active rows only would show zero
+    and read as finished while the ciphertext was still on disk -- and the key about to be replaced
+    was the only thing that could ever read it.
+    """
+    text = ROTATION_RUNBOOK.read_text(encoding="utf-8")
+    assert "stored_rows" in text, (
+        "The runbook inventory does not count stored rows. An active-only count cannot tell an "
+        "operator whether encrypted material survives."
+    )
+    assert re.search(r"is_active\s*=\s*TRUE", text, re.IGNORECASE), (
+        "The runbook does not distinguish active rows from stored rows."
+    )
+    assert re.search(r"stored_rows\s*=\s*0", text), (
+        "The runbook does not gate key replacement on stored rows reaching zero."
     )
