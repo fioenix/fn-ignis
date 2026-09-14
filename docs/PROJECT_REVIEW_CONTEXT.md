@@ -5,12 +5,17 @@ It states what the system is, what has actually been measured, what has not, and
 reasoning is thin. It is in English because it describes `src/` and is read alongside
 `AGENTS.md`; regional documentation lives in the `*.vi.md` files.
 
-## Current review target — 13/09/2026
+## Current review target — updated 14/09/2026
 
-PR #8 (`codex/source-observation-evidence`, reviewed head `9cb6a08`) replaces the runtime storage
-model that produced the mission-evidence defect documented below. It is merge-ready but **not
-shipped**: `main` remains at `0c50b91`, Supabase has not received `sql/016` or the backfill, and the
-production runtime has not been activated.
+The runtime storage model that produced the mission-evidence defect documented below has been
+replaced, and the replacement is now on `main` at `v0.4.0`. Two things are still **not shipped**,
+and they are separate:
+
+- **The existing PostgreSQL corpus has not been migrated.** It has received neither `sql/016` nor
+  the backfill, and the new runtime has not been activated against it. This blocks activation on
+  that corpus; it does not block publishing a release that a new user installs on a fresh SQLite
+  database, because such an install has no legacy corpus to migrate.
+- **The repository is still private,** pending credential rotation and this documentation pass.
 
 The branch state independently verified before this documentation refresh:
 
@@ -56,7 +61,7 @@ evidence is not reproducible from the database, and the two mission execution pa
 timeframe and on replacement semantics. Both were independently verified before this amendment —
 see the note in §4 and item 0 in §6. The §4 signal counts are annotated rather than deleted,
 because the gap between what a run summarised and what it persisted is the evidence for the
-defect. The review itself is at `.handoff/2026-09-10-repository-review.handoff.md`.
+defect. The review itself is kept outside the repository.
 
 ---
 
@@ -339,27 +344,34 @@ previous snapshot in hand will otherwise re-raise them.
    so "what is everyone discussing" is answered as "what is happening around terms we already
    seeded". A two-pass shape — discovery first, then the agent picks what to probe — is what the
    two-stage ingress was built for, and nothing currently does the picking.
-3. **Whether to make the repository public.** Every blocker identified in the 09/09 readiness
-   audit is closed and re-verified on 10/09: CI green, no `.env` or database file tracked, no
-   full-length API key anywhere in `git rev-list --all` (the four commits still matching
-   `AIzaSy` carry the placeholder `AIzaSy...`), and `LICENSE`, `CONTRIBUTING.md`,
-   `CODE_OF_CONDUCT.md`, `SECURITY.md` and `.github/` all present, with every release-controlled
-   file carrying one synchronised version (six files, not three; the count was corrected on
-   13/09). `gh repo view` still reports `PRIVATE`. Nothing is blocking the switch; nobody has
-   thrown it. This is the project's longest-standing open item and it is a decision, not work.
-4. **Git history.** A YouTube API key was committed in `.mcp.json` across 18 commits and has
-   been rotated. History was rewritten on 09/09 and every ref force-pushed, but GitHub still
-   serves unreachable objects by SHA until its own gc runs.
-5. **Decided 10/09: three secrets that reached a session transcript will not be rotated.** A
-   Supabase password, the Fernet key and a YouTube key appeared in plaintext in the 10/09
-   transcript while diagnosing `~/.codex/config.toml`. Rotation was recommended and the owner
-   declined, on the grounds that `ignis` is internal-only and the material is not sensitive
-   enough to justify the cost — rotating `IGNIS_ENCRYPTION_KEY` in particular strands every
-   credential already encrypted under it, requiring a fresh login on all three browser
-   platforms. **Scope of that decision:** the transcript values only. Those secrets are absent
-   from git history, verified across `git rev-list --all`. It would need revisiting if anyone
-   outside the current users gains access, or if transcripts are shared. Recorded in
-   `BACKLOG.md` as a closed decision with its revisit condition, rather than as unfinished work.
+3. **Whether to make the repository public.** The code side is finished: `v0.4.0` is on `main`,
+   CI is green on the merge commit, release acceptance was demonstrated through an authenticated
+   client rather than inferred, and the community files are present with one synchronised version
+   across every release-controlled file (six files, not three; the count was corrected on 13/09).
+   The earlier statement that nothing blocked the switch no longer holds. **Two things block it
+   now**, and both are work rather than a decision:
+   - operational credentials must be rotated or revoked before visibility changes (item 5);
+   - public-facing documents must not carry the internal register, infrastructure identifiers, or
+     references to files that are not published.
+   `gh repo view` still reports `PRIVATE`.
+4. **Git history.** A platform API key was once committed and has since been rotated. History was
+   rewritten on 09/09 and every ref force-pushed, so the value is unreachable from any ref;
+   `git rev-list --all` carries no full-length key. Whether the remote has finished garbage
+   collecting the unreachable objects has not been verified from this side, so treat that as
+   unknown rather than complete.
+5. **Superseded on 14/09: the deferral of credential rotation no longer applies.** On 10/09 three
+   operational credentials reached a session transcript, and rotation was deferred on the express
+   condition that it be revisited if anyone outside the current users gained access. Publishing
+   the repository is that condition. The deferral is therefore withdrawn, and rotation is an open
+   blocker ahead of any visibility change.
+
+   The values are absent from git history, verified across `git rev-list --all`. One constraint
+   shapes the work: the current release has no dual-key decryption path, so replacing the
+   encryption key makes existing ciphertext unreadable and each connector must be re-authenticated
+   afterwards. That is a sequencing problem, not a reason to skip rotation.
+
+   No rotation evidence exists yet, so `BACKLOG.md` carries this as an open item. It must not be
+   marked done, and nothing may claim rotation has happened, until the operator confirms it.
 6. **The local config chores are done for three of four clients; Claude Desktop remains stale.**
    Re-checked 13/09: its entry still has the four credential keys, while the workspace `.mcp.json`
    has only `IGNIS_ENV_FILE`. `./scripts/bootstrap.sh` was run on 10/09;
@@ -420,10 +432,10 @@ daring to continue. It printed on two consecutive runs while the key was provabl
 **A masked value is only masked where someone remembered to mask it.** pytest prints `repr()` of
 every object in a failing assertion's frame. With `str`-typed settings, one failing test in any
 function holding a `Settings` reference dumped the database password, the Fernet key and the
-YouTube key into the log — which on a public repository is world-readable. This was observed,
-not theorised: a failing scheduler test in this session printed the live Supabase password.
-`verify_connectors_health` independently echoed the full proxy URI, credentials included, into
-tool output. Both are fixed; the general lesson is that a secret leaks through whatever generic
+platform keys into the log — which on a public repository would be world-readable. This was
+observed, not theorised: a failing scheduler test in that session printed an operational database
+password into pytest output. `verify_connectors_health` independently echoed a full proxy URI,
+credentials included, into tool output. Both are fixed; the general lesson is that a secret leaks through whatever generic
 machinery touches it, not through the code that was written to handle it.
 
 **A gate with an allowlist stops being a gate.** `test_repo_conventions.py` tracked hardcoded
