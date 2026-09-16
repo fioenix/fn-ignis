@@ -11,17 +11,18 @@ The runtime storage model that produced the mission-evidence defect documented b
 replaced, and the replacement is now on `main` at `v0.4.0`. That version is **not released**: no
 tag exists and no GitHub Release is published. `python scripts/check_release_state.py` reads that
 off Git and GitHub, which is where the answer lives; no document in this repository can settle it.
-Two further things are outstanding, and they are separate from each other:
+What remains outstanding is separate from the release state, and the items below are
+separate from each other:
 
 - **The existing PostgreSQL corpus has not been migrated.** It has received neither `sql/016` nor
   the backfill, and the new runtime has not been activated against it. This blocks activation on
   that corpus; it does not block publishing a release that a new user installs on a fresh SQLite
   database, because such an install has no legacy corpus to migrate.
-- **The repository is private, and two conditions gate changing that.** The operational
-  credentials must be rotated or revoked first, and the public-document hardening must be present
-  on `main` before the switch. Both are stated as conditions rather than as the state of any
-  branch, because a sentence about where work currently sits stops being true the day it merges
-  and nothing brings a reader back to correct it.
+- **The repository is private.** Every pre-public condition in the public-visibility decision
+  below must be satisfied, and the commits that enforce them must be on `main` before visibility
+  changes. The conditions are written once, in that decision, and this summary points at them
+  rather than restating or counting them: a count here has to be re-counted by whoever changes
+  the list, and nothing makes them.
 
 The branch state independently verified before this documentation refresh:
 

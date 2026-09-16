@@ -295,16 +295,37 @@ def test_the_visibility_item_states_both_ordering_conditions():
     )
 
 
-def test_pre_public_blockers_are_not_stated_as_a_fixed_count():
-    """A written count goes stale the moment a blocker is added, and nothing forces it updated."""
-    section = _visibility_section()
-    counted = re.search(
-        r"\b(one|two|three|four|1|2|3|4)\s+things?\s+block", section, re.IGNORECASE
-    )
-    assert not counted, (
-        "The pre-public blocker list states a fixed count "
-        f"({counted.group(0)!r}). Counts drift silently as blockers are opened and closed; list "
-        "the blockers and let the list be the count."
+# A number in front of a noun that stands for a blocker or a precondition. It is deliberately
+# blind to the current count: a contract that knew there were three today would have to be edited
+# by whoever adds the fourth, which is the same hand-maintenance the count itself fails at.
+COUNTED_CONDITIONS = re.compile(
+    # At most two words may sit between the number and the noun, and none of them may be a
+    # connective: without that, a cross-reference like "see §4 and item 0" reads as a count.
+    r"\b(one|two|three|four|five|six|\d+)\s+(?:(?!and\b|or\b|in\b)[\w-]+\s+){0,2}"
+    r"(things?|conditions?|blockers?|items?|gates?|requirements?|steps?)\b",
+    re.IGNORECASE,
+)
+
+
+def test_durable_sections_do_not_count_the_pre_public_conditions():
+    """One passage said "two conditions" while the decision below listed three.
+
+    A summary that counts has to be re-counted by whoever changes the list, and nothing makes them.
+    The two passages are checked together because the contradiction was between them: the count
+    sat in the header and the list it was counting sat in the visibility item.
+    """
+    offenders = []
+    for name, section in (
+        ("the visibility item", _visibility_section()),
+        ("the current-state header", _current_state_header()),
+    ):
+        for match in COUNTED_CONDITIONS.finditer(re.sub(r"\s+", " ", section)):
+            offenders.append(f"{name}: {match.group(0)!r}")
+    assert not offenders, (
+        "These passages state how many pre-public conditions there are:\n"
+        + "\n".join(offenders)
+        + "\nName them once, in the visibility decision, and refer to that list rather than "
+        "counting it."
     )
 
 
