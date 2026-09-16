@@ -364,7 +364,7 @@ class ThreadsAuthManager:
         cleared = await self._repository.delete_platform_credentials(self.PLATFORM_NAME)
         await self._log_event(
             event_type="OAUTH_TOKEN_CLEARED",
-            message="Threads OAuth credentials revoked from local storage."
+            message="Threads OAuth credentials deleted from local storage. Access at Meta is not revoked by this operation."
             if cleared else "No Threads OAuth credentials to clear.",
             level="INFO",
         )

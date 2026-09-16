@@ -137,10 +137,10 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 - **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Quản lý phiên đăng nhập trình duyệt có mã hóa Fernet (256-bit key: AES-128-CBC + HMAC-SHA256).
 - **`authenticate_threads(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: Kết nối Meta theo mô hình Dual-UX. Gọi mà không truyền `auth_code` (hoặc đặt `browser_login=true`) sẽ chạy luồng Tier 1 — bắt phiên trình duyệt 1 chạm bằng tài khoản cá nhân thông thường, không cần Meta Developer App. Khi truyền `auth_code`, hệ thống chạy luồng Tier 2 OAuth 2.0 Graph API (authorization code → short-lived token → long-lived user token 60 ngày), lưu trữ mã hóa AES.
 - **`get_threads_auth_status()`**: Kiểm tra cả hai tier — trạng thái token, scopes, `key_version`, số ngày còn lại, có cần refresh hay không, kèm thông tin phiên trình duyệt đã bắt được.
-- **`clear_threads_auth()`**: Thu hồi và xóa credentials OAuth cùng phiên trình duyệt của Threads khỏi bộ lưu trữ mã hóa.
+- **`clear_threads_auth()`**: Xóa credentials OAuth và phiên trình duyệt của Threads khỏi bộ lưu trữ mã hóa cục bộ. Việc xóa cục bộ **không** thu hồi token ở phía Meta — nếu cần, hãy tự gỡ quyền truy cập của app trong phần bảo mật tài khoản Meta.
 - **`authenticate_instagram(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: Luồng kết nối Dual-UX tương tự cho Instagram, phục vụ ingress Reels.
 - **`get_instagram_auth_status()`**: Kiểm tra credentials Instagram đang lưu trên cả hai tier.
-- **`clear_instagram_auth()`**: Thu hồi và xóa credentials OAuth cùng phiên trình duyệt của Instagram.
+- **`clear_instagram_auth()`**: Xóa credentials OAuth và phiên trình duyệt của Instagram khỏi bộ lưu trữ cục bộ. Không thu hồi token ở phía Meta; thao tác đó phải làm riêng trong phần bảo mật tài khoản Meta.
 - **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo, format)`**, **`trigger_ingress_refresh(geo, scope)`**: Khám phá xu hướng thời gian thực.
 
 ### 4. FastMCP Native Resources & Prompts

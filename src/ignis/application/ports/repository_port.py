@@ -162,7 +162,12 @@ class ITrendRepository(ABC):
 
     @abstractmethod
     async def delete_platform_credentials(self, platform: str) -> bool:
-        """Revoke or delete authentication session for a platform."""
+        """Permanently delete locally stored credential or session data for a platform.
+
+        This does not revoke access at the upstream provider. Implementations must remove the
+        stored row rather than deactivate it, so no encrypted payload is retained, and must
+        return False when there was nothing to delete.
+        """
         pass
 
 

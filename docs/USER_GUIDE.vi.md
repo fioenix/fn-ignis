@@ -430,10 +430,10 @@ Khi FastMCP Server khởi chạy (`ignis-mcp`), 39 tools, 2 prompts và 2 resour
 |---|---|---|
 | `authenticate_threads` | `auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?, headless?, timeout_seconds?` | Kết nối Threads theo Dual-UX: không có `auth_code` (hoặc `browser_login=true`) chạy Tier 1 bắt phiên trình duyệt 1 chạm; có `auth_code` chạy Tier 2 OAuth 2.0 nâng cấp Long-Lived Token 60 ngày, mã hóa AES. |
 | `get_threads_auth_status` | Không | Kiểm tra Threads trên cả hai tier: trạng thái token, scopes, key_version, số ngày còn lại, có cần refresh không, kèm phiên trình duyệt. |
-| `clear_threads_auth` | Không | Thu hồi và xóa an toàn thông tin xác thực Threads (OAuth và phiên trình duyệt) khỏi bộ lưu trữ mã hóa. |
+| `clear_threads_auth` | Không | Xóa thông tin xác thực Threads (OAuth và phiên trình duyệt) khỏi bộ lưu trữ mã hóa cục bộ. Không thu hồi token ở phía Meta; làm riêng trong phần bảo mật tài khoản Meta nếu cần. |
 | `authenticate_instagram` | `auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?, headless?, timeout_seconds?` | Kết nối Instagram theo Dual-UX: Tier 1 bắt phiên trình duyệt 1 chạm hoặc Tier 2 OAuth 2.0 Instagram Graph API với Long-Lived Token 60 ngày. |
 | `get_instagram_auth_status` | Không | Kiểm tra Instagram trên cả hai tier: trạng thái token, scopes, số ngày còn lại, kèm phiên trình duyệt. |
-| `clear_instagram_auth` | Không | Thu hồi và xóa an toàn thông tin xác thực Instagram (OAuth và phiên trình duyệt) khỏi bộ lưu trữ mã hóa. |
+| `clear_instagram_auth` | Không | Xóa thông tin xác thực Instagram (OAuth và phiên trình duyệt) khỏi bộ lưu trữ mã hóa cục bộ. Không thu hồi token ở phía Meta; làm riêng trong phần bảo mật tài khoản Meta nếu cần. |
 
 *(Hướng dẫn chi tiết tích hợp Threads & Instagram Reels xem tại [META_INTEGRATION_GUIDE.vi.md](META_INTEGRATION_GUIDE.vi.md))*
 

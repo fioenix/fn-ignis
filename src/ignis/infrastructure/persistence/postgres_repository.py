@@ -1109,15 +1109,27 @@ class PostgresTimescaleRepository(ITrendRepository):
             return []
 
     async def delete_platform_credentials(self, platform: str) -> bool:
+        """Delete the stored row, rather than marking it inactive.
+
+        This used to run UPDATE ... SET is_active = FALSE. The row survived with its encrypted
+        payload intact, so a credential the operator had been told was deleted was still
+        recoverable from any copy of the database, and a second call kept returning True because
+        there was always a row left to update. SQLite had always deleted, so the two backends
+        disagreed about what the same method name meant.
+
+        Deleting is also what the callers need: clearing a credential is what an operator reaches
+        for after a leak, before decommissioning a machine, and as a step of key rotation. All
+        three assume the material is gone.
+        """
         pool = await self._get_pool()
-        query = "UPDATE platform_credentials SET is_active = FALSE, updated_at = NOW() WHERE platform = %s;"
+        query = "DELETE FROM platform_credentials WHERE platform = %s;"
         try:
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute(query, (platform.lower(),))
                     return cur.rowcount > 0
         except Exception as e:
-            logger.error(f"Error deactivating credentials for {platform}: {e}", exc_info=True)
+            logger.error(f"Error deleting credentials for {platform}: {e}", exc_info=True)
             return False
 
     async def get_domain_lexicons(self, domain: Optional[str] = None) -> List[Dict[str, Any]]:

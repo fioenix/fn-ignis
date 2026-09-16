@@ -777,8 +777,12 @@ async def handle_clear_threads_auth() -> str:
             "platform": ThreadsAuthManager.PLATFORM_NAME,
             "cleared": cleared,
             "browser_session_cleared": browser_cleared,
-            "message": "Threads OAuth credentials revoked."
-            if cleared else "No active Threads OAuth session found.",
+            "message": (
+                "Threads OAuth credentials deleted from local encrypted storage. This does not "
+                "revoke the token at Meta -- remove the app's access in Meta account security "
+                "settings if that is also required."
+            )
+            if cleared else "No stored Threads OAuth credentials found.",
         },
         ensure_ascii=False,
         indent=2,
@@ -829,8 +833,12 @@ async def handle_clear_instagram_auth() -> str:
             "platform": InstagramAuthManager.PLATFORM_NAME,
             "cleared": cleared,
             "browser_session_cleared": browser_cleared,
-            "message": "Instagram OAuth credentials revoked."
-            if cleared else "No active Instagram OAuth session found.",
+            "message": (
+                "Instagram OAuth credentials deleted from local encrypted storage. This does not "
+                "revoke the token at Meta -- remove the app's access in Meta account security "
+                "settings if that is also required."
+            )
+            if cleared else "No stored Instagram OAuth credentials found.",
         },
         ensure_ascii=False,
         indent=2,
@@ -1502,7 +1510,7 @@ async def get_threads_auth_status() -> str:
     return await handle_get_threads_auth_status()
 
 
-@mcp.tool(name="clear_threads_auth", description="Revoke and delete the stored Meta Threads OAuth 2.0 credentials from local encrypted storage.")
+@mcp.tool(name="clear_threads_auth", description="Delete the stored Meta Threads OAuth 2.0 credentials and browser session from local encrypted storage. Does not revoke the token at Meta.")
 async def clear_threads_auth() -> str:
     return await handle_clear_threads_auth()
 
@@ -1658,7 +1666,7 @@ async def get_instagram_auth_status() -> str:
     return await handle_get_instagram_auth_status()
 
 
-@mcp.tool(name="clear_instagram_auth", description="Revoke and delete the stored Instagram OAuth 2.0 credentials and captured browser session from local encrypted storage.")
+@mcp.tool(name="clear_instagram_auth", description="Delete the stored Instagram OAuth 2.0 credentials and captured browser session from local encrypted storage. Does not revoke the token at Meta.")
 async def clear_instagram_auth() -> str:
     return await handle_clear_instagram_auth()
 
