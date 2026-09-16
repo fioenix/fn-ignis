@@ -358,10 +358,59 @@ class ThreadsAuthManager:
             "refresh_count": record.get("refresh_count", 0),
         }
 
+    @property
+    def keyword_search_verdict_key(self) -> str:
+        """Where this platform's keyword-search verdict is stored.
+
+        Scoped by platform because InstagramAuthManager subclasses this one; a shared key would
+        let one platform's grant decide the other's routing.
+        """
+        return f"{self.PLATFORM_NAME}_keyword_search_access"
+
+    async def record_keyword_search_verdict(self, status: str) -> None:
+        """Persist what the access probe established, so routing can read it later.
+
+        The probe costs an API call and a token; recomputing it on every pass is not an option,
+        and a verdict that lives only in one tool's response is a verdict nothing can route on.
+        """
+        if not self._repository:
+            return
+        await self._repository.set_runtime_config(
+            key=self.keyword_search_verdict_key,
+            value=status,
+            category="connector",
+            description=(
+                f"Whether the stored {self.PLATFORM_NAME} token can search public posts, as "
+                "established by probing the endpoint's behaviour. Meta reports no scopes, so this "
+                "is measured rather than read."
+            ),
+            updated_by=f"{self.PLATFORM_NAME}_auth",
+        )
+
+    async def get_keyword_search_verdict(self) -> Optional[str]:
+        """The stored verdict, or None when the endpoint has never been probed.
+
+        None is not a negative verdict. An install that never probed keeps whatever behaviour it
+        had; only a verdict that was actually established changes routing.
+        """
+        if not self._repository:
+            return None
+        try:
+            return await self._repository.get_runtime_config(self.keyword_search_verdict_key)
+        except Exception as e:  # An advisory lookup must never break the path that reads it.
+            logger.warning(f"Could not read the {self.PLATFORM_NAME} keyword-search verdict: {e}")
+            return None
+
     async def clear_auth(self) -> bool:
         if not self._repository:
             return False
         cleared = await self._repository.delete_platform_credentials(self.PLATFORM_NAME)
+        # The verdict describes a specific token's grant. Left behind, the next token inherits the
+        # previous one's permissions, which is exactly backwards for a token that has more.
+        try:
+            await self._repository.delete_runtime_config(self.keyword_search_verdict_key)
+        except Exception as e:
+            logger.warning(f"Could not clear the {self.PLATFORM_NAME} keyword-search verdict: {e}")
         await self._log_event(
             event_type="OAUTH_TOKEN_CLEARED",
             message="Threads OAuth credentials deleted from local storage. Access at Meta is not revoked by this operation."

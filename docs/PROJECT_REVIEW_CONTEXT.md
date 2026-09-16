@@ -388,13 +388,13 @@ previous snapshot in hand will otherwise re-raise them.
    The acceptance gate that an MCP connection and direct JSON-RPC could not close is closed: on
    14/09 a signed-in Claude Code session had the model itself call `get_runtime_config`, which
    returned `SUCCESS` and `total_configs: 6`, and the model read that back. `BACKLOG.md` records
-   it with the evidence. The earlier statement that nothing blocked the switch still does not hold.
-   What remains, each of them work rather than a decision:
+   it with the evidence. The keyword-search authority gap is closed too: the verdict the access
+   probe establishes is now persisted, and the tier resolution, the runtime resolution and the
+   search path all read it, so a public-market probe can no longer query an endpoint the system
+   has already established searches the operator's own account. The earlier statement that nothing
+   blocked the switch still does not hold. What remains, each of them work rather than a decision:
    - operational credentials must be rotated or revoked before visibility changes (item 5). No
      rotation evidence exists, so nothing may record that it happened;
-   - the Threads keyword-search verdict is neither stored nor consulted, so a public-market probe
-     can still call an endpoint the system already established searches the operator's own account
-     only. False market evidence is worse than none, and it reaches the Opportunity Index;
    - no public-facing document may carry the internal register, infrastructure identifiers, or a
      reference to a file that is not published, and the commits that enforce this must be on
      `main` before visibility changes. Written and reviewed is not the condition; being an

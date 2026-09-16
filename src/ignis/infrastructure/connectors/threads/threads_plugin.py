@@ -148,10 +148,23 @@ class ThreadsPlugin(IConnectorPlugin):
         if self._auth_manager:
             try:
                 token = await self._auth_manager.get_access_token()
-                if token:
-                    return "oauth2", token
             except Exception as e:
                 logger.warning(f"Threads OAuth token lookup error: {e}")
+                token = None
+            if token:
+                # A token without the keyword_search grant still reads its own feed, so it is not
+                # useless -- but it cannot answer a market question, and the browser session can.
+                # Preferring the token here is what let a public pass query an endpoint the system
+                # had already established searches the operator's own posts.
+                if await self._keyword_search_is_blocked():
+                    storage_state = await self._browser_storage_state()
+                    if storage_state:
+                        logger.info(
+                            "Threads: the stored Graph token cannot search public posts, so the "
+                            "Tier 1 browser session takes precedence for this install."
+                        )
+                        return "session_cookies", storage_state
+                return "oauth2", token
 
         storage_state = await self._browser_storage_state()
         if storage_state:
@@ -270,6 +283,19 @@ class ThreadsPlugin(IConnectorPlugin):
             if not self._auth_manager:
                 return await self._fetch_legacy_public(geo=geo, limit=limit)
 
+        # Reached only when the Graph token is the sole remaining path. If it is already known to
+        # search the authenticated account's own posts, the results would look exactly like market
+        # evidence while being this install's own content. Missing data is recoverable; evidence
+        # that is wrong and confident is not, and it reaches the Opportunity Index either way.
+        if await self._keyword_search_is_blocked():
+            raise ConnectorAuthenticationException(
+                "The stored Threads token cannot search public posts: Meta grants "
+                "threads_keyword_search only through App Review, and this token's probe found the "
+                "endpoint returning the authenticated account's own posts. Refusing rather than "
+                "reporting them as market evidence. Sign in with a personal account instead: "
+                "authenticate_threads(browser_login=True)."
+            )
+
         token = await self._require_token()
         since, until = self._resolve_window(timeframe)
 
@@ -305,7 +331,51 @@ class ThreadsPlugin(IConnectorPlugin):
     KEYWORD_SEARCH_INCONCLUSIVE = "INCONCLUSIVE"
     KEYWORD_SEARCH_NO_TOKEN = "NO_GRAPH_TOKEN"
 
+    # Verdicts that mean this token cannot answer a public-market question. Both return HTTP 200
+    # and a populated body, which is why they have to be remembered rather than re-derived from
+    # whether a call succeeded.
+    KEYWORD_SEARCH_BLOCKED = (KEYWORD_SEARCH_SELF_ONLY, KEYWORD_SEARCH_NOT_PERMITTED)
+    # Verdicts worth storing. INCONCLUSIVE and NO_GRAPH_TOKEN say the probe learned nothing, and
+    # writing them down would erase a verdict that was actually established.
+    KEYWORD_SEARCH_CONCLUSIVE = (
+        KEYWORD_SEARCH_PUBLIC,
+        KEYWORD_SEARCH_SELF_ONLY,
+        KEYWORD_SEARCH_NOT_PERMITTED,
+    )
+
     async def check_keyword_search_access(self, query: str) -> Dict[str, Any]:
+        """Probe the endpoint, then persist what was established.
+
+        The probe costs a real API call, so its answer belongs in storage where the tier and
+        search paths can read it, not only in the response of the tool that triggered it.
+        """
+        report = await self._probe_keyword_search_access(query)
+        status = report.get("status")
+        if status in self.KEYWORD_SEARCH_CONCLUSIVE and self._auth_manager is not None:
+            recorder = getattr(self._auth_manager, "record_keyword_search_verdict", None)
+            if recorder is not None:
+                try:
+                    await recorder(status)
+                except Exception as e:  # Reporting the verdict must not fail the probe.
+                    logger.warning(f"Could not persist the Threads keyword-search verdict: {e}")
+        return report
+
+    async def _keyword_search_is_blocked(self) -> bool:
+        """Whether a stored verdict says this token cannot search public posts.
+
+        Absence of a verdict is not a negative verdict: an install that never probed keeps the
+        behaviour it had.
+        """
+        reader = getattr(self._auth_manager, "get_keyword_search_verdict", None)
+        if reader is None:
+            return False
+        try:
+            return await reader() in self.KEYWORD_SEARCH_BLOCKED
+        except Exception as e:
+            logger.warning(f"Could not read the Threads keyword-search verdict: {e}")
+            return False
+
+    async def _probe_keyword_search_access(self, query: str) -> Dict[str, Any]:
         """Establish whether this token can actually search public Threads posts.
 
         Meta grants `threads_keyword_search` only after App Review. Without it the endpoint still
