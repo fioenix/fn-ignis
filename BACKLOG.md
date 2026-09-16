@@ -79,20 +79,28 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 
 ### Chuẩn bị release v0.4.0 — mở 14/09/2026
 
-- [ ] **Blocker trước public: verdict quyền của Threads không được lưu và không ai đọc (mở
-  16/09/2026).** `authenticate_threads()` có dò và trả về `keyword_search_access`, có thể là
-  `SELF_ONLY` hoặc `NOT_PERMITTED` — nghĩa là endpoint keyword search chỉ tìm trong bài của chính
-  tài khoản đã đăng nhập. Nhưng verdict đó **không được persist**, và **không** được
-  `resolve_auth_tier()`, `resolve_ingest_runtime()` hay bước đăng ký worker đọc lại. Thêm vào đó,
-  OAuth token hiện thắng browser session khi cả hai cùng có.
+- [x] **Đã xong (16/09/2026): verdict quyền của Threads được lưu và mọi chỗ định tuyến đều đọc.**
+  `check_keyword_search_access()` vẫn dò như cũ, nhưng giờ ghi verdict vào `runtime_configs` dưới
+  khoá `threads_keyword_search_access` qua `ThreadsAuthManager.record_keyword_search_verdict()`.
+  Chỉ ghi ba verdict kết luận được (`PUBLIC_SEARCH_ENABLED`, `SELF_ONLY`, `NOT_PERMITTED`);
+  `INCONCLUSIVE` và `NO_GRAPH_TOKEN` nghĩa là lần dò đó không học được gì, ghi xuống sẽ xoá mất
+  một verdict đã xác lập.
 
-  Hệ quả: một keyword probe cho public market có thể gọi Graph endpoint **sau khi** hệ thống đã
-  biết endpoint đó chỉ tìm trong tài khoản của chính mình. Cái nguy không phải "không có dữ liệu"
-  — mà là dữ liệu trả về trông như bằng chứng thị trường, trong khi thực chất là nội dung của
-  chính install đó. Đó là bằng chứng thị trường giả, và nó đi thẳng vào Opportunity Index.
+  Ba chỗ đọc lại:
+  - `resolve_auth_tier()` — token bị chặn search mà có browser session thì session thắng. Đây là
+    chỗ sửa "OAuth token thắng browser session".
+  - `resolve_ingest_runtime()` — theo tier ở trên, nên trả `BROWSER`.
+  - `search_signals()` — khi Graph token là đường duy nhất còn lại và verdict nói chỉ tìm được bài
+    của chính mình thì **raise `ConnectorAuthenticationException`** kèm cách khắc phục, thay vì trả
+    về timeline của chính install như bằng chứng thị trường.
 
-  Phải sửa trước khi public. Đây là mục canonical duy nhất cho khoảng trống này; đừng mở bản thứ
-  hai ở chỗ khác.
+  Khoá được scope theo `PLATFORM_NAME` vì `InstagramAuthManager` kế thừa `ThreadsAuthManager`;
+  dùng chung khoá thì grant của platform này quyết định định tuyến của platform kia. `clear_auth()`
+  xoá luôn verdict — verdict sống lâu hơn token nó mô tả thì token mới thừa hưởng quyền của token
+  cũ.
+
+  Không có verdict **không phải** verdict phủ định: install chưa bao giờ dò thì giữ nguyên hành vi
+  cũ. Contract: `tests/unit/test_threads_keyword_search_authority.py` (7 test, 3 negative control).
 
 
 #### Ranh giới blocker — Fio chốt 14/09/2026

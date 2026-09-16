@@ -191,8 +191,16 @@ def test_credential_rotation_is_still_an_open_blocker():
     )
 
 
-def test_the_threads_authority_gap_is_still_an_open_blocker():
-    assert _blocker_is_open(PRE_PUBLIC_BLOCKERS[1])
+def test_the_threads_authority_gap_is_closed():
+    """Closed on 16/09 with a contract of its own; asserted here so the two documents agree.
+
+    Its state is checked rather than assumed for the same reason as the other two: whichever way
+    it goes, both documents have to move together.
+    """
+    assert not _blocker_is_open(PRE_PUBLIC_BLOCKERS[1]), (
+        "BACKLOG.md reopened the Threads authority gap. If that is right, the visibility decision "
+        "has to list it again."
+    )
 
 
 def test_model_driven_release_acceptance_is_closed():
