@@ -121,8 +121,20 @@ When an AI Agent is tasked with connecting Meta channels, it follows this sequen
 ## 5. Credential Security Architecture & Token Lifecycle
 
 - **Encryption at Rest**: Tokens and secrets are encrypted with Fernet (AES-128-CBC + HMAC-SHA256, 256-bit key) using `IGNIS_ENCRYPTION_KEY`.
-- **In-Memory Sanitization**: Plaintext credentials are never logged or exposed in LLM prompt contexts.
-- **PII Scrubbing**: All inbound social payloads are stripped of phone numbers, emails, and auth tokens before ingestion.
+- **Key version label**: Each encrypted record carries `key_version: "v1"`. This is an envelope
+  label, not a mechanism — `decrypt_credentials()` builds one Fernet from the current
+  `IGNIS_ENCRYPTION_KEY` and does not read it. There is no dual-key decryption and no automatic
+  re-encryption, so replacing the key makes existing records unreadable and each connector has to
+  be re-authenticated.
+- **Output sanitization**: Credential fields are redacted from the outputs and log lines the
+  project controls, and settings holding secrets are typed so a failing assertion does not print
+  them. This covers the paths in this codebase; it is not a guarantee about every future code path
+  or about tooling outside it. **Do not paste long-lived credentials into a chat session** — an
+  agent transcript is outside what this project can scrub.
+- **PII filtering**: Inbound social payloads are passed through a pattern-based sanitizer that
+  targets phone numbers, email addresses and token-shaped strings. Pattern matching cannot certify
+  that every identifier in third-party content has been found, so treat it as risk reduction rather
+  than removal.
 
 ---
 

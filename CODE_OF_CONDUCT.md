@@ -19,6 +19,21 @@ Examples of behavior that contributes to a positive environment for our communit
 
 Community leaders are responsible for clarifying and enforcing our standards of acceptable behavior and will take appropriate and fair corrective action in response to any behavior that they deem inappropriate, threatening, offensive, or harmful.
 
+## Reporting
+
+Report abusive, harassing, or otherwise unacceptable behavior privately, by email to
+**fioenix@finolabs.io**.
+
+Do not open a public issue for a conduct report. A public issue exposes the reporter and anyone
+else involved before the report has been looked at.
+
+Include whatever you are comfortable sharing: what happened, where it happened, and links or
+screenshots if you have them. You do not need to have the full picture to report something.
+
+All reports are reviewed and investigated promptly and fairly. Community leaders are obliged to
+respect the privacy and security of the reporter of any incident, and will not share reporter
+identity without consent except where required to act on the report or by law.
+
 ## Attribution
 
 This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org), version 2.1.

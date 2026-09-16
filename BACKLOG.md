@@ -6,13 +6,13 @@
 >   + FastMCP Server (39 Handlers & Tools)
 > - **Trạng thái branch:** PR #8 và PR #9 đã merge vào `main` bằng merge commit; production
 >   cutover trên Supabase chưa chạy
-> - **Trạng thái Tests:** 839 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
+> - **Trạng thái Tests:** 853 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
 
 ---
 
 ## 0. Chất Lượng Corpus (Epic Đang Mở)
 
-Đo trực tiếp trên Postgres ngày 09/09/2026. Chi tiết trong `.handoff/2026-09-09-corpus-audit.handoff.md`.
+Đo trực tiếp trên Postgres ngày 09/09/2026. Bản đo chi tiết giữ ngoài repository.
 
 Điểm cross-platform momentum dành 40/100 điểm cho số platform cùng nói về một chủ đề, nhưng
 **96,6% cluster (995/1030) chỉ có tín hiệu từ một platform**, nên phần 40 điểm đó gần như không
@@ -402,10 +402,10 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 
   `QualityEvaluator` giờ đọc thẳng field cho điểm freshness, vì độ tươi là thuộc tính của nội
   dung. Guard chống tái phát là một test đọc AST của mọi connector: đặt lại lỗi cũ thì nó fail
-  đúng dòng, tao đã thử.
+  đúng dòng, đã thử.
 
   **Chỗ không lấy lại được:** với các dòng ghi trước migration bởi ba code path đó, `captured_at`
-  vẫn là ngày đăng, và thời điểm thu thập thật chưa từng được lưu. Tao để nguyên chứ không đóng
+  vẫn là ngày đăng, và thời điểm thu thập thật chưa từng được lưu. Giữ nguyên chứ không đóng
   một mốc thời gian bịa. Cửa sổ thời gian trên các dòng đó còn xấp xỉ cho tới khi chúng rơi ra
   khỏi cửa sổ.
 
@@ -421,12 +421,12 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Việc nối này mở ra một lỗ phải bịt luôn: `Timeframe._missing_` dựng member từ **bất kỳ** chuỗi,
   nên `'bogus'` thành `Timeframe.BOGUS` rồi bị map ngầm về mặc định ở hạ nguồn. Giờ trả
   `INVALID_TIMEFRAME` kèm danh sách giá trị hợp lệ. Rỗng vẫn là mặc định 24h, giống `resolve_geo`.
-- [x] **Đã sửa (10/09/2026): seed keyword bị nhiễm từ vựng máy móc.** Đây là regression tao gây
+- [x] **Đã sửa (10/09/2026): seed keyword bị nhiễm từ vựng máy móc.** Đây là regression tự gây
   ra ngày 09/09: `NON_TOPIC_LEXICON_DOMAINS` trong `ingest_trends.py` chỉ loại 2 domain cũ, nên 8
   domain máy móc thêm hôm đó chảy thẳng vào seed. Đo trên Postgres thật: **cả 10 seed** đều là hư
   từ tiếng Việt, vì `ambiguous_unigrams` sắp trước theo bảng chữ cái và chiếm trọn budget.
 
-  Nghĩa là lượt 6 connector tao báo hôm qua đã probe các nền tảng bằng hư từ. Phần signal từ
+  Nghĩa là lượt 6 connector báo cáo hôm qua đã probe các nền tảng bằng hư từ. Phần signal từ
   stage 1 vẫn thật, nhưng phần keyword fan-out thì gần như vô nghĩa.
 
   Danh sách domain máy móc giờ chỉ còn một bản trong `vocabulary_loader`, và có test chặn bản
@@ -483,14 +483,18 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Cùng lúc xoá bốn default 900 chết trong `scheduler.py`: chúng không bao giờ fire vì mọi caller
   đều đọc từ `Settings`, nhưng 900 chính là con số đã trôi vào cả hai file cấu hình.
 
-- [x] **Quyết định 10/09/2026 — Fio chấp nhận rủi ro ba secret đã lọt vào transcript.**
-  Password Supabase, `IGNIS_ENCRYPTION_KEY` và key YouTube xuất hiện dạng plaintext trong
-  transcript phiên 10/09 khi grep `~/.codex/config.toml`. Tao đề nghị rotate cả ba; Fio quyết
-  không rotate, lý do: hiện chỉ nội bộ dùng `ignis` và mức độ mật không đáng.
+- [ ] **Blocker trước khi public: xoay vòng ba credential vận hành (mở 14/09/2026).**
+  Ngày 10/09/2026 có một quyết định hoãn xoay vòng, với điều kiện xem lại ghi ngay trong quyết
+  định đó: xem lại nếu có người ngoài truy cập được hệ thống. Chuyển repository sang public chính
+  là điều kiện ấy, nên **quyết định hoãn đã hết hiệu lực**.
 
-  Phạm vi quyết định này: chỉ các giá trị đã lọt vào transcript. Ba secret đó **không** nằm trong
-  git history — đã quét toàn bộ `git rev-list --all`. Cần xem lại nếu có thêm người ngoài truy
-  cập được `ignis`, hoặc nếu transcript được chia sẻ ra ngoài.
+  Ba credential vận hành — mật khẩu database, khoá mã hoá, và khoá API nền tảng video — phải được
+  xoay vòng hoặc thu hồi **trước** khi đổi visibility. Không có giá trị nào trong số đó nằm trong
+  git history; đã quét toàn bộ `git rev-list --all`.
+
+  Chưa có bằng chứng xoay vòng, nên mục này để mở. Không được đánh dấu hoàn tất, và không được ghi
+  "đã rotate", cho tới khi có xác nhận từ người vận hành. Quy trình thực hiện nằm ngoài repository
+  và không ghi giá trị nào vào đây.
 
 - [x] **Đã xong (10/09/2026): MCP config giữ đường dẫn tới `.env`, không giữ secret.**
   `build_mcp_entry` từng sao `DATABASE_URL`, `IGNIS_ENCRYPTION_KEY` và `YOUTUBE_API_KEY` vào
@@ -500,19 +504,18 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Hậu quả thật đã xảy ra: sau khi rotate key YouTube, `.env` và `.mcp.json` được cập nhật nhưng
   config Claude Desktop còn giữ key cũ. Vì `env` của host ghi đè file env, mọi lệnh gọi YouTube
   qua MCP thất bại với "API key expired", trong khi cùng đoạn code chạy từ shell lại thành công.
-  Đó chính là chỗ tao báo "key expired" rồi ngay sau đó một lượt pass lấy được 95 signal.
+  Đó chính là chỗ báo cáo "key expired" rồi ngay sau đó một lượt pass lấy được 95 signal.
 
   Giờ entry chỉ mang `IGNIS_ENV_FILE`, một đường dẫn tuyệt đối. Kiểm với `env -i`: chỉ một biến
   đó là server load đủ DSN, key YouTube và khoá Fernet.
 - [x] **Đã sửa (10/09/2026): thứ tự đọc env file bị ngược.** `env_file=(_PROJECT_ENV, ".env")` —
   pydantic-settings cho file **cuối** quyền cao nhất, nên một `.env` lạ nằm ở thư mục mà host
-  tình cờ khởi động server sẽ ghi đè `.env` của project. Tao dựng decoy để chứng minh: thứ tự cũ
+  tình cờ khởi động server sẽ ghi đè `.env` của project. Một decoy dựng lên để chứng minh: thứ tự cũ
   cho decoy thắng, thứ tự mới cho project thắng. Có test giữ đúng thứ tự vì lỗi này im lặng, chỉ
   sai giá trị chứ không báo gì.
-- [ ] **Còn lại của mày: `claude_desktop_config.json` vẫn giữ key cũ và ba secret.** Kiểm lại
-  13/09/2026: entry global vẫn có bốn key `DATABASE_URL`, `DEFAULT_GEO`,
-  `IGNIS_ENCRYPTION_KEY`, `YOUTUBE_API_KEY`, trong khi `.mcp.json` đã chỉ còn
-  `IGNIS_ENV_FILE`. Claude Desktop giữ config trong memory và ghi đè external edit khi thoát, nên
+- [ ] **Việc của người vận hành: `claude_desktop_config.json` vẫn còn giá trị cũ.** Kiểm lại
+  13/09/2026: entry global vẫn mang trực tiếp bốn biến môi trường thay vì một đường dẫn, trong
+  khi `.mcp.json` đã chỉ còn `IGNIS_ENV_FILE`. Claude Desktop giữ config trong memory và ghi đè external edit khi thoát, nên
   thứ tự đúng là: **quit Claude Desktop trước**, chạy `./scripts/bootstrap.sh` (hoặc
   `python -m ignis.interfaces.cli.setup_bundle`), rồi mở lại app. Chạy bootstrap khi app còn mở
   không tạo thay đổi bền vững.
@@ -549,9 +552,9 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 
   Sau khi sửa, trên đúng 40 cluster đó: ellipsis 24 → **0**, ngoặc kép và ngoặc đơn cân hết.
   Token-soup còn 3, vì `_contiguous_phrase` chỉ soi `canonical_name`, và có trường hợp token
-  đắt giá nằm ở tiêu đề của signal khác. Chỗ đó tao chưa sửa.
+  đắt giá nằm ở tiêu đề của signal khác. Chỗ đó chưa sửa.
 
-  Ba guard tao thử ngược: đặt lại ellipsis thì 2 test fail, hạ floor về 2 thì test fragment fail,
+  Ba guard đã thử ngược: đặt lại ellipsis thì 2 test fail, hạ floor về 2 thì test fragment fail,
   trả lại phép so sánh ngoặc kép sai thì test parity fail. Khôi phục thì 10 test pass.
 - [x] **Đã xong (10/09/2026): `is_healthy()` của hai connector TikTok là phép đo thật.**
   Cả hai từng `return True` vô điều kiện, nên `verify_connectors_health` báo HEALTHY trong mọi
@@ -584,7 +587,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   `test_tiktok_health_probes.py` giữ đúng URL này. Mục cũ vẫn để mở dù code và test đã đóng nó.
 - [x] **Đã xong (10/09/2026): health report nói rõ TikTok chặn ở surface nào.**
   Lượt mission trên seed sạch cho TikTok `AUTH_REQUIRED` với 0 signal, trong khi `is_healthy`
-  báo HEALTHY. Tao ban đầu nói nguyên nhân là `search_across_all` đòi session — **sai**.
+  báo HEALTHY. Chẩn đoán ban đầu cho rằng nguyên nhân là `search_across_all` đòi session — **sai**.
   `AUTH_REQUIRED` do `strategic_reasoner` suy từ map `auth_status`, còn `search_signals` truyền
   `storage_state=None` xuống Playwright rồi cào bình thường, không đòi gì.
 
@@ -608,7 +611,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 
   Kiến trúc plugin vốn đã đúng: nó chặn response JSON của TikTok (`page.on("response")`) và ưu
   tiên `_parse_json_item` — đường đó có `playCount`, `likes`, `comments`, `shares`. Chỉ khi
-  **không bắt được JSON** nó mới rơi về `_parse_dom_card`. Và trong DOM **không có số view**: tao
+  **không bắt được JSON** nó mới rơi về `_parse_dom_card`. Và trong DOM **không có số view**:
   dò `card`, `parent`, `grandparent`, không `data-e2e` count, không `<strong>` số. Nên sửa
   selector là vô ích.
 
@@ -628,7 +631,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   | `salon toc` | 24/24 | **0/24** |
   | `tay toc` | 9/24 | 1/24 |
 
-  Ba lần tao chẩn sai trước khi tới đây, ghi lại vì cùng một hình dạng: đoán "parse theo vị trí"
+  Ba lần chẩn sai trước khi tới đây, ghi lại vì cùng một hình dạng: đoán "parse theo vị trí"
   (đúng mô tả, sai nguyên nhân); kết luận "card chưa render" trong khi probe đọc `card` còn
   parser đọc `parent`, tức **đo sai element**; và tưởng `views=0` là đặc tính đường search trong
   khi 197/201 row lịch sử có metric.
@@ -670,19 +673,23 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   (không bao giờ vào surface đó), còn bộ lọc text này là lớp phụ và đang đắt.
 
   **Đề nghị:** bỏ ba term `live`, `thông báo`, `tin nhắn` khỏi domain `tiktok_ui_noise`, giữ
-  `đang phát trực tiếp` cho badge live tiếng Việt. Tao không tự làm vì đây là từ vựng của một
-  privacy guard, và guard đang fail-closed — bỏ term là quyết định của mày.
+  `đang phát trực tiếp` cho badge live tiếng Việt. Chưa tự thay vì đây là từ vựng của một
+  privacy guard, và guard đang fail-closed — bỏ term là quyết định của người vận hành.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)
 
 ### A. Hạ Tầng & Cơ Sở Dữ Liệu
-- [x] **Supabase Cloud Pooler (Region ap-southeast-1):** Kết nối qua pooler endpoint `aws-0-ap-southeast-1.pooler.supabase.com:5432` với `psycopg_pool.AsyncConnectionPool`.
+- [x] **Supabase Cloud Pooler:** Kết nối qua Supabase pooler bằng `psycopg_pool.AsyncConnectionPool`. Endpoint và region lấy từ `DATABASE_URL`, không ghi vào repository.
 - [x] **Schema Bền Vững:** runtime dùng `sources`, `observations`, `mission_evidence` cùng
   `research_missions`, `topic_clusters`, `system_audit_logs`, `platform_credentials`. Hai bảng
   `trend_signals` và `signal_metrics` chỉ còn phục vụ lịch sử migration và chưa bị drop.
 - [x] **Lightweight Worker Container:** Dockerfile tối ưu (~90MB, multi-stage uv build) chạy nền 24/7 trên OrbStack.
-- [x] **Credentials Hardening:** `CryptoService` áp dụng Fernet AES-128-CBC + HMAC-SHA256, có fail-fast (`assert_persistent_key`) và hỗ trợ `key_version` ("v1") sẵn sàng cho key rotation.
+- [x] **Credentials Hardening:** `CryptoService` áp dụng Fernet AES-128-CBC + HMAC-SHA256, có
+  fail-fast (`assert_persistent_key`) từ chối ghi credential dài hạn dưới ephemeral key. Bản ghi
+  mã hóa mang nhãn `key_version` ("v1"), nhưng đó **chỉ là metadata envelope**: `decrypt_credentials()`
+  dựng một Fernet từ khóa hiện tại và không đọc nhãn đó. Chưa có dual-key decryption và chưa có
+  re-encryption tự động, nên **không được mô tả là sẵn sàng cho key rotation**.
 
 ### B. Ingress Connectors & Authentication
 - [x] **YouTube Data API v3:** 
