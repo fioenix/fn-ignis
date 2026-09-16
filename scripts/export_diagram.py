@@ -60,6 +60,9 @@ DIGEST_KEYWORD = b"ignis-source-sha256"
 # exporter can actually account for.
 SUPPORTED_PIXEL_LAYOUTS = {(8, 2): 3, (8, 6): 4}
 
+# None, Sub, Up, Average, Paeth. The set is closed: PNG has defined no sixth filter.
+DEFINED_SCANLINE_FILTERS = frozenset({0, 1, 2, 3, 4})
+
 
 def extract_inline_svg(html_text: str) -> str:
     """The one inline SVG in the document.
@@ -208,6 +211,8 @@ def decode_png(data: bytes) -> tuple[int, int]:
         if chunk_type == b"IDAT":
             idat += body
         elif chunk_type == b"IEND":
+            if body:
+                raise ValueError(f"IEND carries {len(body)} bytes; the end marker is empty")
             end_offset = end
         seen.append(chunk_type)
 
@@ -227,12 +232,24 @@ def decode_png(data: bytes) -> tuple[int, int]:
 
     width, height = size
     channels = SUPPORTED_PIXEL_LAYOUTS[(depth, colour)]
-    expected = height * (1 + width * channels)
+    stride = 1 + width * channels
+    expected = height * stride
     if len(raw) != expected:
         raise ValueError(
             f"decompressed image is {len(raw)} bytes; {width} x {height} at {channels} "
             f"channels per pixel needs {expected}"
         )
+
+    # Each scanline opens with the filter its pixels were encoded under. PNG defines five, and a
+    # sixth value is not a filter a decoder can reverse -- the byte count still adds up, so this
+    # is the last place a file that inflates cleanly can still fail to be the exported picture.
+    for row in range(height):
+        applied = raw[row * stride]
+        if applied not in DEFINED_SCANLINE_FILTERS:
+            raise ValueError(
+                f"scanline {row} declares filter {applied}; PNG defines "
+                f"{min(DEFINED_SCANLINE_FILTERS)} to {max(DEFINED_SCANLINE_FILTERS)}"
+            )
     return size
 
 

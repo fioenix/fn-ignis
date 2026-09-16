@@ -236,6 +236,65 @@ def test_the_review_context_does_not_list_a_closed_blocker():
     )
 
 
+# Wording that describes where a change currently sits in review rather than what has to be true.
+# It is accurate for a day and wrong afterwards, and nothing makes anyone come back to fix it.
+TRANSIENT_STATE_WORDING = (
+    r"stacked branch",
+    r"\bunmerged\b",
+    r"not yet merged",
+    r"reviewed but",
+    r"this documentation pass",
+)
+
+
+def _current_state_header() -> str:
+    """The opening summary, which is the other place that has carried review-state wording."""
+    text = _read(REVIEW_CONTEXT)
+    start = text.index("## Current review target")
+    return text[start: text.index("\n## ", start + 1)]
+
+
+def test_durable_sections_state_conditions_rather_than_review_state():
+    """These two passages outlive any branch; a sentence about a branch in them expires unread.
+
+    Scoped to the two passages that make the claim, not to the whole document: elsewhere,
+    describing what is merged is a legitimate record of what happened on a date.
+    """
+    offenders = []
+    for name, section in (
+        ("the visibility item", _visibility_section()),
+        ("the current-state header", _current_state_header()),
+    ):
+        for pattern in TRANSIENT_STATE_WORDING:
+            match = re.search(pattern, section, re.IGNORECASE)
+            if match:
+                offenders.append(f"{name}: {match.group(0)!r}")
+    assert not offenders, (
+        "These passages describe where work currently sits in review instead of what must be true "
+        "before visibility changes. Such a sentence is wrong the moment the work merges, and "
+        "nothing brings anyone back to it:\n" + "\n".join(offenders)
+    )
+
+
+def test_the_visibility_item_states_both_ordering_conditions():
+    """The invariants themselves: what must have happened before the switch, in what order."""
+    # Flattened first: the prose wraps, so a phrase can straddle two lines and a pattern keyed to
+    # the raw text would report a missing invariant that is sitting right there.
+    section = re.sub(r"\s+", " ", _visibility_section())
+    missing = [
+        name
+        for name, pattern in (
+            ("rotation before the visibility change", r"rotated or revoked before"),
+            ("the hardening commits on `main` before the visibility change", r"on `main` before"),
+        )
+        if not re.search(pattern, section, re.IGNORECASE)
+    ]
+    assert not missing, (
+        "The visibility item no longer states: " + ", ".join(missing) + ". Both are conditions "
+        "that hold before and after any branch merges, which is what makes them worth writing."
+    )
+
+
 def test_pre_public_blockers_are_not_stated_as_a_fixed_count():
     """A written count goes stale the moment a blocker is added, and nothing forces it updated."""
     section = _visibility_section()
@@ -624,8 +683,27 @@ def test_check_rejects_a_png_whose_dimensions_do_not_match_the_viewbox(tmp_path)
     assert _check_exit_code(tmp_path, png=resized) == 1
 
 
-def _broken(data: bytes, transform) -> bytes:
-    return transform(bytearray(data))
+def _with_image_data(data: bytes, raw: bytes) -> bytes:
+    """Rebuild the PNG around new decompressed image data, with a valid stream and CRC."""
+    module = _exporter()
+    out = bytearray(module.PNG_SIGNATURE)
+    written = False
+    for chunk_type, _, start, end in module._chunks(data):
+        if chunk_type != b"IDAT":
+            out += data[start:end]
+        elif not written:
+            out += _png_chunk(b"IDAT", zlib.compress(raw, 9))
+            written = True
+    return bytes(out)
+
+
+def _decompressed_image_data(data: bytes) -> bytearray:
+    module = _exporter()
+    return bytearray(
+        zlib.decompress(
+            b"".join(body for kind, body, _, _ in module._chunks(data) if kind == b"IDAT")
+        )
+    )
 
 
 def test_committed_png_decodes_to_its_declared_size():
@@ -674,3 +752,38 @@ def test_check_rejects_a_png_whose_image_data_does_not_decompress(tmp_path):
 def test_check_rejects_bytes_after_the_end_marker(tmp_path):
     """Anything past IEND means two writers touched the file, and only one of them is known."""
     assert _check_exit_code(tmp_path, png=ARCHITECTURE_PNG.read_bytes() + b"appended") == 1
+
+
+def test_check_rejects_a_scanline_with_an_undefined_filter_byte(tmp_path):
+    """PNG defines filter types 0 to 4. A fifth is not a filter, so the row cannot be unpacked.
+
+    Everything else about the file stays valid -- the zlib stream inflates, the CRC matches, the
+    byte count is exactly what the header calls for. Only the per-row filter is wrong, and that is
+    enough for the picture a viewer draws to stop being the picture that was exported.
+    """
+    data = ARCHITECTURE_PNG.read_bytes()
+    raw = _decompressed_image_data(data)
+    raw[0] = 5
+    assert _check_exit_code(tmp_path, png=_with_image_data(data, bytes(raw))) == 1
+
+
+def test_check_accepts_every_defined_filter_byte(tmp_path):
+    """The other side: 0 to 4 are all legal, so the check must not narrow to whatever this file uses."""
+    module = _exporter()
+    data = ARCHITECTURE_PNG.read_bytes()
+    width, _ = module.png_dimensions(data)
+    stride = 1 + width * 3  # colour type 2: three channels
+    raw = _decompressed_image_data(data)
+    for row, filter_byte in enumerate((0, 1, 2, 3, 4)):
+        raw[row * stride] = filter_byte
+    assert _check_exit_code(tmp_path, png=_with_image_data(data, bytes(raw))) == 0
+
+
+def test_check_rejects_an_iend_that_carries_a_body(tmp_path):
+    """IEND is empty by definition; bytes inside it are a payload riding in the end marker."""
+    module = _exporter()
+    data = ARCHITECTURE_PNG.read_bytes()
+    out = bytearray(module.PNG_SIGNATURE)
+    for chunk_type, _, start, end in module._chunks(data):
+        out += _png_chunk(b"IEND", b"junk") if chunk_type == b"IEND" else data[start:end]
+    assert _check_exit_code(tmp_path, png=bytes(out)) == 1

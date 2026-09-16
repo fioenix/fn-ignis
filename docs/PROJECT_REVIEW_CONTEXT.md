@@ -17,7 +17,11 @@ Two further things are outstanding, and they are separate from each other:
   the backfill, and the new runtime has not been activated against it. This blocks activation on
   that corpus; it does not block publishing a release that a new user installs on a fresh SQLite
   database, because such an install has no legacy corpus to migrate.
-- **The repository is still private,** pending credential rotation and this documentation pass.
+- **The repository is private, and two conditions gate changing that.** The operational
+  credentials must be rotated or revoked first, and the public-document hardening must be present
+  on `main` before the switch. Both are stated as conditions rather than as the state of any
+  branch, because a sentence about where work currently sits stops being true the day it merges
+  and nothing brings a reader back to correct it.
 
 The branch state independently verified before this documentation refresh:
 
@@ -390,10 +394,10 @@ previous snapshot in hand will otherwise re-raise them.
    - the Threads keyword-search verdict is neither stored nor consulted, so a public-market probe
      can still call an endpoint the system already established searches the operator's own account
      only. False market evidence is worse than none, and it reaches the Opportunity Index;
-   - the documentation-hardening work is an integration boundary rather than an unfinished one:
-     public-facing documents must not carry the internal register, infrastructure identifiers, or
-     references to files that are not published, and the stacked branches that do this are
-     reviewed but unmerged.
+   - no public-facing document may carry the internal register, infrastructure identifiers, or a
+     reference to a file that is not published, and the commits that enforce this must be on
+     `main` before visibility changes. Written and reviewed is not the condition; being an
+     ancestor of `main` at the moment of the switch is.
    `gh repo view` still reports `PRIVATE`, and no tag or Release exists for `0.4.0`;
    `python scripts/check_release_state.py` is what reads those three facts, and it reports a fact
    it could not establish as unknown rather than as a negative.
