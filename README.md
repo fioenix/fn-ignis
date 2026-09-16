@@ -34,6 +34,7 @@
 
 <p align="center">
   <img src="docs/assets/architecture.png" alt="fn-ignis Dual-Track Architecture" width="100%">
+  <br><small><em>The Dual-Track Autonomous Trend Intelligence Architecture (<a href="docs/assets/architecture.svg">Vector SVG</a> · <a href="docs/assets/architecture.html">Standalone HTML</a>)</em></small>
 </p>
 
 Runtime persistence has one source of truth on both backends:
@@ -48,8 +49,19 @@ Runtime persistence has one source of truth on both backends:
 The one runtime read left is the cluster pruner's guard: a cluster the legacy corpus still points at
 is not empty, so deleting it before the backfill would cascade away the rows the backfill was going
 to read.
+
+### Where the data comes from
+
 <p align="center">
-  <small><em>Figure: The Dual-Track Autonomous Trend Intelligence Architecture (<a href="docs/assets/architecture.svg">Vector SVG</a> · <a href="docs/assets/architecture.html">Standalone HTML</a>)</em></small>
+  <img src="docs/diagrams/ignis-source-map.png" alt="fn-ignis connector source map" width="100%">
+  <br><small><em>Six connectors grouped by the runtime each one needs, which is what decides whether the unattended worker can register it (<a href="docs/diagrams/ignis-source-map.svg">Vector SVG</a> · <a href="docs/diagrams/ignis-source-map.html">Standalone HTML</a>)</em></small>
+</p>
+
+### How a signal becomes a dossier
+
+<p align="center">
+  <img src="docs/diagrams/ignis-pipeline.png" alt="fn-ignis ingress-to-dossier pipeline" width="100%">
+  <br><small><em>Lane-scoped flow from discovery through the quality gate to the artifact (<a href="docs/diagrams/ignis-pipeline.svg">Vector SVG</a> · <a href="docs/diagrams/ignis-pipeline.html">Standalone HTML</a>)</em></small>
 </p>
 
 ---

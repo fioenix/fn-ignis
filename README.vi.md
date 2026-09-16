@@ -33,6 +33,7 @@
 
 <p align="center">
   <img src="docs/assets/architecture.png" alt="fn-ignis Kiến trúc Mô hình Song hành" width="100%">
+  <br><small><em>Kiến trúc Tình báo Xu hướng &amp; Nghiên cứu Thị trường Mô hình Song hành (<a href="docs/assets/architecture.svg">Vector SVG</a> · <a href="docs/assets/architecture.html">Bản HTML Độc lập</a>)</em></small>
 </p>
 
 Runtime persistence dùng một nguồn sự thật trên cả hai backend:
@@ -46,8 +47,19 @@ Runtime persistence dùng một nguồn sự thật trên cả hai backend:
 `trend_signals` và `signal_metrics` chỉ còn là đầu vào migration lịch sử. Runtime không bao giờ ghi
 vào chúng. Chỗ đọc duy nhất còn lại là guard của cluster pruner: cluster mà corpus legacy vẫn trỏ
 tới thì chưa rỗng, xoá nó trước khi backfill sẽ cascade mất đúng những dòng backfill sắp đọc.
+
+### Dữ liệu đến từ đâu
+
 <p align="center">
-  <small><em>Sơ đồ: Kiến trúc Tình báo Xu hướng & Nghiên cứu Thị trường Mô hình Song hành (<a href="docs/assets/architecture.svg">Vector SVG</a> · <a href="docs/assets/architecture.html">Bản HTML Độc lập</a>)</em></small>
+  <img src="docs/diagrams/ignis-source-map.png" alt="fn-ignis bản đồ nguồn dữ liệu" width="100%">
+  <br><small><em>Sáu connector nhóm theo runtime mà mỗi cái cần — đây mới là thứ quyết định worker chạy nền có đăng ký được nó hay không (<a href="docs/diagrams/ignis-source-map.svg">Vector SVG</a> · <a href="docs/diagrams/ignis-source-map.html">Bản HTML Độc lập</a>)</em></small>
+</p>
+
+### Một tín hiệu thành bản dossier ra sao
+
+<p align="center">
+  <img src="docs/diagrams/ignis-pipeline.png" alt="fn-ignis pipeline từ ingress tới dossier" width="100%">
+  <br><small><em>Dòng chảy theo lane, từ discovery qua quality gate tới artifact (<a href="docs/diagrams/ignis-pipeline.svg">Vector SVG</a> · <a href="docs/diagrams/ignis-pipeline.html">Bản HTML Độc lập</a>)</em></small>
 </p>
 
 ---

@@ -583,6 +583,23 @@ ARCHITECTURE_SVG = REPO / "docs" / "assets" / "architecture.svg"
 ARCHITECTURE_PNG = REPO / "docs" / "assets" / "architecture.png"
 
 
+def _exported_diagrams() -> list[Path]:
+    """Every diagram that has exports, read from disk rather than listed here.
+
+    Naming them would mean the contract covered whatever was true the day it was written. When
+    `ignis-source-map` and `ignis-pipeline` gained exports, a hand-written list would have kept
+    testing `architecture` alone and reported that as full coverage.
+    """
+    found = sorted(
+        html
+        for html in list((REPO / "docs" / "diagrams").glob("*.html"))
+        + [REPO / "docs" / "assets" / "architecture.html"]
+        if html.with_suffix(".svg").exists() or html.with_suffix(".png").exists()
+    )
+    assert found, "no diagram has exports; the provenance gate would be testing nothing"
+    return found
+
+
 def _png_chunk(chunk_type: bytes, body: bytes) -> bytes:
     crc = zlib.crc32(chunk_type + body) & 0xFFFFFFFF
     return struct.pack(">I", len(body)) + chunk_type + body + struct.pack(">I", crc)
@@ -816,3 +833,34 @@ def test_check_rejects_an_iend_that_carries_a_body(tmp_path):
     for chunk_type, _, start, end in module._chunks(data):
         out += _png_chunk(b"IEND", b"junk") if chunk_type == b"IEND" else data[start:end]
     assert _check_exit_code(tmp_path, png=bytes(out)) == 1
+
+
+@pytest.mark.parametrize(
+    "html", _exported_diagrams(), ids=lambda p: p.stem
+)
+def test_every_exported_diagram_matches_its_html(html):
+    """The parity gate, applied to whatever has exports rather than to one named file."""
+    module = _exporter()
+    assert module.check(html) == 0, (
+        f"{html.relative_to(REPO)} and its exports disagree. Regenerate them with "
+        "scripts/export_diagram.py rather than editing the SVG or PNG by hand."
+    )
+
+
+def test_a_diagram_a_readme_embeds_has_exports():
+    """The convention's own condition: embedding as an image is what earns a diagram its exports."""
+    embedded = set()
+    for readme in (REPO / "README.md", REPO / "README.vi.md"):
+        for match in re.finditer(r'<img src="(docs/[^"]+\.png)"', _read(readme)):
+            embedded.add(match.group(1))
+    assert embedded, "neither README embeds a diagram; the convention has nothing to enforce"
+
+    missing = [
+        path
+        for path in sorted(embedded)
+        if not (REPO / path).exists() or not (REPO / path).with_suffix(".html").exists()
+    ]
+    assert not missing, (
+        "A README embeds these images, but the PNG or its authored HTML source is absent:\n"
+        + "\n".join(missing)
+    )
