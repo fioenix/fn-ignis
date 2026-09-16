@@ -105,12 +105,12 @@ old one was checked.
 
 - `docs/assets/architecture.{png,svg,html}` — **what the shape is** (footer verified 16/09/2026).
   The dual-track model, the two-stage ingress, and the evidence store it writes into.
-- `docs/diagrams/ignis-source-map.html` — **where the data comes from** (footer verified
+- `docs/diagrams/ignis-source-map.{png,svg,html}` — **where the data comes from** (footer verified
   16/09/2026). Six connectors grouped by the runtime each needs, which is what decides whether the
   unattended worker can register it, with the credential each wants and whether it discovers topics
   or answers keyword probes.
-- `docs/diagrams/ignis-pipeline.html` — **how a signal becomes a dossier** (footer verified
-  14/09/2026). Lane-scoped flow from discovery through the quality gate to the artifact.
+- `docs/diagrams/ignis-pipeline.{png,svg,html}` — **how a signal becomes a dossier** (footer
+  verified 17/09/2026). Lane-scoped flow from discovery through the quality gate to the artifact.
 
 A fourth diagram, a tool-by-tool call trace of one session, was retired on 14/09/2026. It
 documented a defect fixed on 10/09 — `trigger_ingress_refresh` took no timeframe, so every
@@ -130,15 +130,20 @@ was rasterized from in a `tEXt` chunk, and `--check` verifies the signature, tha
 is the viewBox at 2x, and that the stamped digest is the one the HTML exports to today. Before
 that, replacing the PNG with a line of text left `--check` reporting success.
 
-**Only a diagram a document embeds as an image gets exports.** That is `architecture` alone: the
-READMEs place it with an `<img>` tag, which cannot render HTML. `ignis-source-map.html` and
-`ignis-pipeline.html` are opened directly, so exporting them would create four more generated
-files with nothing consuming them — more surface to drift, which is the failure this convention
-exists to prevent. This is a narrowing of the rule rather than an exception to it: if a document
-ever embeds one of those two, it gets exports at that point. The reason is the
-first failure mode in §8: a mermaid block was labelled as the source of a hand-authored SVG, the
-two drifted, and the label was the thing that lied. Do not add mermaid blocks when recommending
-changes here.
+**Only a diagram a document embeds as an image gets exports.** All three qualify as of 17/09/2026:
+both READMEs place each of them with an `<img>` tag, which cannot render HTML. Until then only
+`architecture` was embedded and only `architecture` had exports, because generated files nothing
+consumes are surface that drifts — the failure this convention exists to prevent. The rule was
+written with that condition stated in advance ("if a document ever embeds one of those two, it
+gets exports at that point"), so this is the rule firing rather than an exception to it. A
+diagram that stops being embedded loses its exports again. The reason is the first failure mode in
+§8: a mermaid block was labelled as the source of a hand-authored SVG, the two drifted, and the
+label was the thing that lied. Do not add mermaid blocks when recommending changes here.
+
+`ignis-pipeline` was redrawn on 17/09 before it could be embedded: six detail lines overflowed
+their cards, measured with `getComputedTextLength()` rather than judged by eye. The export gate
+had passed on it the whole time, because provenance says the picture came from its source, not
+that the picture is legible.
 
 Three things those diagrams got wrong until 09/09/2026, worth knowing because the old shape is
 still in people's heads:

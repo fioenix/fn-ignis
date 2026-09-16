@@ -1,42 +1,4 @@
-<!doctype html>
-<html lang="vi">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>fn-ignis Pipeline</title>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --paper:#F7F7FB; --paper-2:#EEEEF5; --ink:#0B0B17; --muted:#5B5B79; --soft:#8B8BA6;
-    --rule:rgba(11,11,23,0.12); --rule-solid:#BCBCD0;
-    --accent:#4B1E73; --accent-tint:#EDDFF7; --link:#14627A;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--paper);color:var(--ink);
-       font-family:'Space Grotesk',system-ui,sans-serif;padding:3rem 2rem}
-  main{max-width:900px;margin:0 auto}
-  .eyebrow{font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:500;
-           letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin:0 0 .5rem}
-  h1{font-family:'Anton',sans-serif;font-size:1.75rem;font-weight:400;letter-spacing:-0.01em;
-     text-transform:uppercase;margin:0 0 .35rem}
-  .sub{color:var(--muted);font-size:.9rem;margin:0 0 2rem;max-width:64ch;line-height:1.5}
-  svg{width:100%;height:auto;display:block}
-  footer{margin-top:2.5rem;padding-top:1rem;border-top:1px solid var(--rule);
-         font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:0.14em;
-         text-transform:uppercase;color:var(--soft)}
-</style>
-</head>
-<body>
-<main>
-  <p class="eyebrow">FINOLABS · FN-IGNIS</p>
-  <h1>Ingress to dossier</h1>
-  <p class="sub">Track 1 discovers topics and fans them out as keyword probes; Track 2 does the same
-     on demand. Only the scheduled sweep is script-gated, because it accumulates a corpus nobody
-     reviews; Latin script always passes, so the English that runs through Vietnamese social
-     content reaches the corpus like Vietnamese does. Anything somebody asked for keeps what it
-     found, in any language, whether that is an agent probe or a hand-triggered refresh. Relevance
-     is decided at the quality gate, never at ingress.</p>
-
+<?xml version="1.0" encoding="UTF-8"?>
 <svg viewBox="0 0 840 456" role="img" aria-labelledby="ignis-pipeline-title ignis-pipeline-desc"
      xmlns="http://www.w3.org/2000/svg">
   <title id="ignis-pipeline-title">fn-ignis ingress and analysis pipeline</title>
@@ -45,6 +7,9 @@
     and hand-triggered refreshes skip that gate, and a shared core stores signals, clusters them by
     probe provenance, then hands scored topics to a quality gate and on to dossier and graph
     artifacts.</desc>
+  <defs>
+    <style>@import url('https://fonts.googleapis.com/css2?family=Anton&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap');</style>
+  </defs>
   <defs>
     <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
       <circle cx="11" cy="11" r="0.8" fill="rgba(11,11,23,0.10)"/>
@@ -253,8 +218,3 @@
     <text x="162" y="436" font-size="7" fill="#8B8BA6" letter-spacing="0.06em">boundary, scheduled sweeps only: judges the script a title is written in, never whether it is interesting</text>
   </g>
 </svg>
-
-  <footer>fn-ignis · pipeline as of 17/09/2026 · finolabs design system</footer>
-</main>
-</body>
-</html>
