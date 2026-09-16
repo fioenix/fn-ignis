@@ -380,20 +380,23 @@ previous snapshot in hand will otherwise re-raise them.
 3. **Whether to make the repository public.** The code side is close: `v0.4.0` is on `main`, CI is
    green on the merge commit, and the community files are present with one synchronised version
    across every release-controlled file (six files, not three; the count was corrected on 13/09).
-   The earlier statement that nothing blocked the switch no longer holds. The following block it,
-   and each is work rather than a decision:
-   - operational credentials must be rotated or revoked before visibility changes (item 5);
+   The acceptance gate that an MCP connection and direct JSON-RPC could not close is closed: on
+   14/09 a signed-in Claude Code session had the model itself call `get_runtime_config`, which
+   returned `SUCCESS` and `total_configs: 6`, and the model read that back. `BACKLOG.md` records
+   it with the evidence. The earlier statement that nothing blocked the switch still does not hold.
+   What remains, each of them work rather than a decision:
+   - operational credentials must be rotated or revoked before visibility changes (item 5). No
+     rotation evidence exists, so nothing may record that it happened;
    - the Threads keyword-search verdict is neither stored nor consulted, so a public-market probe
      can still call an endpoint the system already established searches the operator's own account
-     only. False market evidence is worse than none, and it reaches the Opportunity Index.
-     `BACKLOG.md` carries this as an open pre-public blocker;
-   - a model-driven tool invocation through a real authenticated client remains an open release
-     acceptance gate. An MCP connection plus direct JSON-RPC proves the server path, not the
-     complete user journey;
-   - public-facing documents must not carry the internal register, infrastructure identifiers, or
-     references to files that are not published. This is addressed on the stacked branches and is
-     not yet merged.
-   `gh repo view` still reports `PRIVATE`, and no tag or Release exists for `0.4.0`.
+     only. False market evidence is worse than none, and it reaches the Opportunity Index;
+   - the documentation-hardening work is an integration boundary rather than an unfinished one:
+     public-facing documents must not carry the internal register, infrastructure identifiers, or
+     references to files that are not published, and the stacked branches that do this are
+     reviewed but unmerged.
+   `gh repo view` still reports `PRIVATE`, and no tag or Release exists for `0.4.0`;
+   `python scripts/check_release_state.py` is what reads those three facts, and it reports a fact
+   it could not establish as unknown rather than as a negative.
 4. **Git history.** A platform API key was once committed and has since been rotated. History was
    rewritten on 09/09 and every ref force-pushed, so the value is unreachable from any ref;
    `git rev-list --all` carries no full-length key. Whether the remote has finished garbage

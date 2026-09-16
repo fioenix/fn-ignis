@@ -23,8 +23,11 @@ replacing it with a line of text left `--check` reporting success.
 
 import ast
 import re
+import struct
 import subprocess
 import sys
+import zlib
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -116,22 +119,120 @@ def _visibility_section() -> str:
     return text[start: end if end != -1 else len(text)]
 
 
-def test_pre_public_blockers_name_rotation_and_the_threads_authority_gap():
+@dataclass(frozen=True)
+class Blocker:
+    """One pre-public blocker, named in two documents that word it in two languages.
+
+    The patterns are a naming link, not a state claim: whether the blocker is open is read from
+    BACKLOG.md's checkbox, never from either pattern. That is the whole point -- an earlier version
+    of this contract searched for the word "Threads" in a blob of text, which stayed green when
+    another blocker was closed and when a heading wrapped onto a second line.
+    """
+
+    name: str
+    backlog: str  # matches the BACKLOG item, which is written in Vietnamese
+    review: str  # matches the review context's bullet, which is written in English
+
+
+PRE_PUBLIC_BLOCKERS = (
+    Blocker("credential rotation", r"xoay vòng ba credential", r"rotated or revoked"),
+    Blocker("the Threads authority gap", r"verdict quyền của Threads", r"Threads"),
+    Blocker("model-driven release acceptance", r"release acceptance v0\.4\.0", r"model-driven"),
+)
+
+
+def _backlog_items() -> list[tuple[bool, str]]:
+    """Every checkbox item in BACKLOG.md as (is_open, the item's full block of text).
+
+    Reading the whole block matters: these items run to several paragraphs, and matching a single
+    line means a heading that wraps, or a detail recorded one paragraph down, is invisible.
+    """
+    items: list[tuple[bool, list[str]]] = []
+    inside = False
+    for line in _read(BACKLOG).splitlines():
+        start = re.match(r"^- \[([ x])\] (.*)$", line)
+        if start:
+            items.append((start.group(1) == " ", [start.group(2)]))
+            inside = True
+        elif inside and (not line.strip() or line.startswith((" ", "\t"))):
+            items[-1][1].append(line.strip())
+        else:
+            inside = False
+    return [(is_open, " ".join(body)) for is_open, body in items]
+
+
+def _blocker_is_open(blocker: Blocker) -> bool:
+    matched = [item for item in _backlog_items() if re.search(blocker.backlog, item[1])]
+    assert len(matched) == 1, (
+        f"{blocker.backlog!r} matches {len(matched)} BACKLOG items, not one. A pattern matching "
+        "none passes every assertion that follows it, which is the failure this count exists to "
+        "stop; a pattern matching several means the state read back is ambiguous."
+    )
+    return matched[0][0]
+
+
+def _review_blocker_bullets() -> list[str]:
+    """The bullets the review context presents as things blocking a visibility change."""
+    bullets: list[str] = []
+    for line in _visibility_section().splitlines():
+        if re.match(r"^ {3}- ", line):
+            bullets.append(line.strip())
+        elif bullets and re.match(r"^ {5,}\S", line):
+            bullets[-1] += " " + line.strip()
+        elif bullets:
+            break
+    return bullets
+
+
+def test_credential_rotation_is_still_an_open_blocker():
+    assert _blocker_is_open(PRE_PUBLIC_BLOCKERS[0]), (
+        "BACKLOG.md marks credential rotation done. Nothing may record that rotation happened "
+        "until the operator confirms it."
+    )
+
+
+def test_the_threads_authority_gap_is_still_an_open_blocker():
+    assert _blocker_is_open(PRE_PUBLIC_BLOCKERS[1])
+
+
+def test_model_driven_release_acceptance_is_closed():
+    """Asserted separately, because it is the one whose state the review context got wrong."""
+    assert not _blocker_is_open(PRE_PUBLIC_BLOCKERS[2]), (
+        "BACKLOG.md records release acceptance as still open. If that is right, the review "
+        "context should list it again; if not, one of the two documents is stale."
+    )
+
+
+def test_every_open_blocker_is_listed_in_the_review_context():
     """A blocker list that omits an open blocker reads as clearance to proceed."""
-    section = _visibility_section()
+    bullets = _review_blocker_bullets()
+    assert bullets, "the review context's visibility item lists no blockers at all"
+
     missing = [
-        name
-        for name, pattern in (
-            ("credential rotation", r"rotat"),
-            ("the Threads authority gap", r"Threads"),
-        )
-        if not re.search(pattern, section, re.IGNORECASE)
+        blocker.name
+        for blocker in PRE_PUBLIC_BLOCKERS
+        if _blocker_is_open(blocker)
+        and not any(re.search(blocker.review, text, re.IGNORECASE) for text in bullets)
     ]
     assert not missing, (
-        "The review context's pre-public blocker list does not name: "
-        + ", ".join(missing)
-        + ". BACKLOG.md carries both as open blockers, so a reader of this document would "
-        "conclude fewer things stand in the way than actually do."
+        "BACKLOG.md carries these as open pre-public blockers, but the review context's list does "
+        "not name them: " + ", ".join(missing)
+    )
+
+
+def test_the_review_context_does_not_list_a_closed_blocker():
+    """Reopening a finished item costs the same as hiding an unfinished one: the list stops being read."""
+    bullets = _review_blocker_bullets()
+    reopened = [
+        f"{blocker.name}: {text[:100]}"
+        for blocker in PRE_PUBLIC_BLOCKERS
+        if not _blocker_is_open(blocker)
+        for text in bullets
+        if re.search(blocker.review, text, re.IGNORECASE)
+    ]
+    assert not reopened, (
+        "The review context lists a blocker that BACKLOG.md has closed with evidence:\n"
+        + "\n".join(reopened)
     )
 
 
@@ -148,19 +249,6 @@ def test_pre_public_blockers_are_not_stated_as_a_fixed_count():
     )
 
 
-def test_backlog_still_carries_both_pre_public_blockers_open():
-    """The other half of the agreement: the list above must describe items that are still open."""
-    text = _read(BACKLOG)
-    open_blockers = [
-        line for line in text.splitlines() if line.lstrip().startswith("- [ ]") and "public" in line
-    ]
-    joined = "\n".join(open_blockers)
-    assert re.search(r"Threads", joined), (
-        "BACKLOG.md has no open pre-public blocker mentioning Threads, but the review context "
-        "lists one. One of the two documents is out of date."
-    )
-
-
 # --------------------------------------------------------------------------------------------
 # b) Release acceptance, decided by the real Git/GitHub surface
 # --------------------------------------------------------------------------------------------
@@ -173,23 +261,26 @@ def _release_checker():
     return check_release_state
 
 
+def _surface(module, **overrides):
+    facts = {"tag_exists": True, "release_published": True, "repository_public": True}
+    facts.update(overrides)
+    return module.ReleaseSurface(**facts)
+
+
 def test_release_acceptance_needs_a_tag_and_a_published_release():
     module = _release_checker()
-    surface = module.ReleaseSurface
 
-    released, missing = module.release_verdict(
-        "0.4.0", surface(tag_exists=True, release_published=True, repository_public=True)
-    )
-    assert released and not missing
+    released, missing, unknown = module.release_verdict("0.4.0", _surface(module))
+    assert released and not missing and not unknown
 
-    released, missing = module.release_verdict(
-        "0.4.0", surface(tag_exists=True, release_published=False, repository_public=True)
+    released, missing, _ = module.release_verdict(
+        "0.4.0", _surface(module, release_published=False)
     )
     assert not released
     assert any("Release" in item for item in missing)
 
-    released, missing = module.release_verdict(
-        "0.4.0", surface(tag_exists=False, release_published=False, repository_public=False)
+    released, missing, _ = module.release_verdict(
+        "0.4.0", _surface(module, tag_exists=False, release_published=False)
     )
     assert not released
     assert len(missing) == 2
@@ -198,13 +289,80 @@ def test_release_acceptance_needs_a_tag_and_a_published_release():
 def test_a_public_repository_alone_is_not_a_release():
     """Visibility is a separate fact; flipping it releases nothing."""
     module = _release_checker()
-    released, _ = module.release_verdict(
-        "0.4.0",
-        module.ReleaseSurface(
-            tag_exists=False, release_published=False, repository_public=True
-        ),
+    released, _, _ = module.release_verdict(
+        "0.4.0", _surface(module, tag_exists=False, release_published=False)
     )
     assert not released
+
+
+def test_an_unread_fact_is_not_a_negative_one():
+    """Unknown must not collapse into False: that is how a tool outage becomes a finding."""
+    module = _release_checker()
+    released, missing, unknown = module.release_verdict(
+        "0.4.0", _surface(module, release_published=None)
+    )
+    assert not released
+    assert unknown, "a surface fact that could not be read was reported as known"
+    assert not any("no published" in item for item in missing), (
+        "an unread Release was listed as missing evidence, which states it is absent"
+    )
+
+
+def test_a_failed_release_lookup_is_unknown_rather_than_unpublished(monkeypatch):
+    """gh writes auth and network failures to stderr and leaves stdout empty.
+
+    Inferring "no release" from an empty stdout turns every outage into the same answer as a
+    genuinely unreleased version, and the two call for opposite actions.
+    """
+    module = _release_checker()
+    real = module._run
+
+    def failing(command):
+        if command[:3] == ["gh", "release", "view"]:
+            return module.CommandResult(1, "", "authentication failed")
+        return real(command)
+
+    monkeypatch.setattr(module, "_run", failing)
+    surface, unknown = module.read_surface("0.4.0")
+    assert surface.release_published is None
+    assert any("auth" in note.lower() for note in unknown), unknown
+
+
+def test_a_genuinely_missing_release_is_a_fact_not_an_unknown(monkeypatch):
+    """The other side of the same call: gh says 'release not found' when it really is not there."""
+    module = _release_checker()
+    real = module._run
+
+    def not_found(command):
+        if command[:3] == ["gh", "release", "view"]:
+            return module.CommandResult(1, "", "release not found")
+        return real(command)
+
+    monkeypatch.setattr(module, "_run", not_found)
+    surface, unknown = module.read_surface("0.4.0")
+    assert surface.release_published is False
+    assert not any("release view" in note for note in unknown), unknown
+
+
+def test_the_report_does_not_state_an_unread_fact(monkeypatch, capsys):
+    module = _release_checker()
+    real = module._run
+
+    def failing(command):
+        if command[:3] == ["gh", "release", "view"]:
+            return module.CommandResult(1, "", "authentication failed")
+        return real(command)
+
+    monkeypatch.setattr(module, "_run", failing)
+    exit_code = module.main(["0.4.0"])
+    printed = capsys.readouterr().out
+
+    assert exit_code != 0
+    assert "not published" not in printed, (
+        "the report states the Release is not published, when the lookup failed and it was never "
+        f"read:\n{printed}"
+    )
+    assert "unknown" in printed.lower()
 
 
 def test_the_acceptance_checker_does_not_read_documents():
@@ -337,6 +495,11 @@ ARCHITECTURE_SVG = REPO / "docs" / "assets" / "architecture.svg"
 ARCHITECTURE_PNG = REPO / "docs" / "assets" / "architecture.png"
 
 
+def _png_chunk(chunk_type: bytes, body: bytes) -> bytes:
+    crc = zlib.crc32(chunk_type + body) & 0xFFFFFFFF
+    return struct.pack(">I", len(body)) + chunk_type + body + struct.pack(">I", crc)
+
+
 def _exporter():
     sys.path.insert(0, str(REPO / "scripts"))
     import export_diagram  # noqa: PLC0415
@@ -459,3 +622,55 @@ def test_check_rejects_a_png_whose_dimensions_do_not_match_the_viewbox(tmp_path)
         module.source_digest(module.svg_from_html(_read(ARCHITECTURE_HTML))),
     )
     assert _check_exit_code(tmp_path, png=resized) == 1
+
+
+def _broken(data: bytes, transform) -> bytes:
+    return transform(bytearray(data))
+
+
+def test_committed_png_decodes_to_its_declared_size():
+    """The positive case: the committed raster is an image a viewer can actually open."""
+    module = _exporter()
+    assert module.decode_png(ARCHITECTURE_PNG.read_bytes()) == module.png_dimensions(
+        ARCHITECTURE_PNG.read_bytes()
+    )
+
+
+def test_check_rejects_a_png_with_a_header_and_no_image(tmp_path):
+    """A signature, an IHDR and the right digest are metadata; a viewer gets naturalWidth 0."""
+    module = _exporter()
+    svg = module.svg_from_html(_read(ARCHITECTURE_HTML))
+    width, height = module.viewbox_size(svg)
+    header = struct.pack(">IIBBBBB", width * module.SCALE, height * module.SCALE, 8, 2, 0, 0, 0)
+    metadata_only = (
+        module.PNG_SIGNATURE
+        + _png_chunk(b"IHDR", header)
+        + _png_chunk(
+            b"tEXt", module.DIGEST_KEYWORD + b"\x00" + module.source_digest(svg).encode()
+        )
+    )
+    assert _check_exit_code(tmp_path, png=metadata_only) == 1
+
+
+def test_check_rejects_a_png_with_a_corrupt_chunk_crc(tmp_path):
+    """A flipped byte a stamping tool wrote back without recomputing the checksum."""
+    data = bytearray(ARCHITECTURE_PNG.read_bytes())
+    data[-1] ^= 0xFF  # the IEND chunk's CRC
+    assert _check_exit_code(tmp_path, png=bytes(data)) == 1
+
+
+def test_check_rejects_a_png_whose_image_data_does_not_decompress(tmp_path):
+    """Structurally intact, zlib stream destroyed -- exactly what a truncated write leaves."""
+    module = _exporter()
+    rebuilt = bytearray(module.PNG_SIGNATURE)
+    for chunk_type, body, start, end in module._chunks(ARCHITECTURE_PNG.read_bytes()):
+        if chunk_type == b"IDAT":
+            rebuilt += _png_chunk(b"IDAT", b"\x00" * len(body))
+        else:
+            rebuilt += ARCHITECTURE_PNG.read_bytes()[start:end]
+    assert _check_exit_code(tmp_path, png=bytes(rebuilt)) == 1
+
+
+def test_check_rejects_bytes_after_the_end_marker(tmp_path):
+    """Anything past IEND means two writers touched the file, and only one of them is known."""
+    assert _check_exit_code(tmp_path, png=ARCHITECTURE_PNG.read_bytes() + b"appended") == 1

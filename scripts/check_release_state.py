@@ -31,26 +31,61 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
+class CommandResult:
+    """A finished command, with stderr kept.
+
+    `gh` reports authentication and network failures on stderr and leaves stdout empty. Reading
+    only stdout makes an outage indistinguishable from an answer, and the two call for opposite
+    actions: one is "fix your credentials", the other is "you have not released this".
+    """
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+    @property
+    def message(self) -> str:
+        """The first line the command said, wherever it said it."""
+        text = self.stderr.strip() or self.stdout.strip()
+        return text.splitlines()[0][:90] if text else ""
+
+
+@dataclass(frozen=True)
 class ReleaseSurface:
-    """The three facts, already read. Kept separate from the reading so the verdict is testable."""
+    """The three facts, already read. `None` means the fact could not be established.
 
-    tag_exists: bool
-    release_published: bool
-    repository_public: bool
+    Tri-state on purpose. A fact that was never read is not a fact that came back negative, and
+    collapsing the two is how a broken tool starts reporting findings.
+    """
+
+    tag_exists: bool | None
+    release_published: bool | None
+    repository_public: bool | None
 
 
-def release_verdict(version: str, surface: ReleaseSurface) -> tuple[bool, list[str]]:
-    """Whether `version` is released, and what evidence is missing if it is not.
+def release_verdict(
+    version: str, surface: ReleaseSurface
+) -> tuple[bool, list[str], list[str]]:
+    """Whether `version` is released, what evidence is absent, and what could not be read.
 
     Visibility is reported alongside but is not part of the verdict: a private repository can hold
     a tag and a Release, and a public one with neither has released nothing.
     """
     missing = []
-    if not surface.tag_exists:
-        missing.append(f"no git tag v{version}")
-    if not surface.release_published:
-        missing.append(f"no published GitHub Release v{version}")
-    return not missing, missing
+    unknown = []
+    for value, label in (
+        (surface.tag_exists, f"git tag v{version}"),
+        (surface.release_published, f"published GitHub Release v{version}"),
+    ):
+        if value is None:
+            unknown.append(f"{label} could not be read")
+        elif not value:
+            missing.append(f"no {label}")
+    return (not missing and not unknown), missing, unknown
 
 
 def declared_version() -> str:
@@ -58,37 +93,55 @@ def declared_version() -> str:
     return data["project"]["version"]
 
 
-def _run(command: list[str]) -> tuple[int, str]:
+def _run(command: list[str]) -> CommandResult:
     completed = subprocess.run(command, capture_output=True, text=True, check=False, cwd=REPO)
-    return completed.returncode, completed.stdout.strip()
+    return CommandResult(completed.returncode, completed.stdout.strip(), completed.stderr.strip())
+
+
+# What `gh release view` says when the release genuinely is not there, as opposed to when the
+# call could not be made at all. Only this answer is a fact about the repository.
+RELEASE_NOT_FOUND = "release not found"
 
 
 def read_surface(version: str) -> tuple[ReleaseSurface, list[str]]:
-    """Read the three facts. Returns the surface plus any fact that could not be established."""
-    unknown = []
+    """Read the three facts. Returns the surface plus a note for each one that could not be read."""
+    unknown: list[str] = []
 
-    code, out = _run(["git", "tag", "--list", f"v{version}"])
-    tag_exists = code == 0 and out != ""
-    if code != 0:
-        unknown.append("git tag --list failed")
-
-    release_published = False
-    repository_public = False
-    if shutil.which("gh") is None:
-        unknown.append("gh is not installed; GitHub Release and visibility unknown")
+    result = _run(["git", "tag", "--list", f"v{version}"])
+    if result.ok:
+        tag_exists = result.stdout != ""
     else:
-        code, out = _run(["gh", "release", "view", f"v{version}", "--json", "isDraft,publishedAt"])
-        if code == 0:
-            payload = json.loads(out)
-            release_published = not payload.get("isDraft") and bool(payload.get("publishedAt"))
-        elif "release not found" not in out.lower() and out:
-            unknown.append(f"gh release view: {out.splitlines()[0][:90]}")
+        tag_exists = None
+        unknown.append(f"git tag --list failed: {result.message}")
 
-        code, out = _run(["gh", "repo", "view", "--json", "visibility"])
-        if code == 0:
-            repository_public = json.loads(out).get("visibility", "").upper() == "PUBLIC"
+    release_published: bool | None = None
+    repository_public: bool | None = None
+
+    if shutil.which("gh") is None:
+        unknown.append("gh is not installed, so the Release and the visibility were not read")
+        return ReleaseSurface(tag_exists, release_published, repository_public), unknown
+
+    result = _run(["gh", "release", "view", f"v{version}", "--json", "isDraft,publishedAt"])
+    if result.ok:
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            unknown.append(f"gh release view returned unreadable JSON: {error}")
         else:
-            unknown.append("gh repo view failed; visibility unknown")
+            release_published = not payload.get("isDraft") and bool(payload.get("publishedAt"))
+    elif RELEASE_NOT_FOUND in f"{result.stderr} {result.stdout}".lower():
+        release_published = False
+    else:
+        unknown.append(f"gh release view failed: {result.message or 'no output'}")
+
+    result = _run(["gh", "repo", "view", "--json", "visibility"])
+    if result.ok:
+        try:
+            repository_public = json.loads(result.stdout).get("visibility", "").upper() == "PUBLIC"
+        except json.JSONDecodeError as error:
+            unknown.append(f"gh repo view returned unreadable JSON: {error}")
+    else:
+        unknown.append(f"gh repo view failed: {result.message or 'no output'}")
 
     return ReleaseSurface(tag_exists, release_published, repository_public), unknown
 
@@ -104,20 +157,25 @@ def main(argv: list[str] | None = None) -> int:
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise SystemExit(f"not a version: {version}")
 
-    surface, unknown = read_surface(version)
-    released, missing = release_verdict(version, surface)
+    surface, read_notes = read_surface(version)
+    released, missing, unread = release_verdict(version, surface)
+
+    def state(value: bool | None, yes: str, no: str) -> str:
+        return "unknown (not read)" if value is None else (yes if value else no)
 
     print(f"version            {version}")
-    print(f"git tag v{version}    {'present' if surface.tag_exists else 'absent'}")
-    print(f"GitHub Release     {'published' if surface.release_published else 'not published'}")
-    print(f"visibility         {'PUBLIC' if surface.repository_public else 'not public'}")
-    for note in unknown:
+    print(f"git tag v{version}    {state(surface.tag_exists, 'present', 'absent')}")
+    print(f"GitHub Release     {state(surface.release_published, 'published', 'not published')}")
+    print(f"visibility         {state(surface.repository_public, 'PUBLIC', 'not public')}")
+    for note in read_notes:
         print(f"unknown            {note}")
     print(f"verdict            {'RELEASED' if released else 'NOT RELEASED'}")
     for item in missing:
         print(f"  missing          {item}")
+    for item in unread:
+        print(f"  unknown          {item}")
     # An unknown is not a pass: it means the surface was not read, not that it was read and was fine.
-    return 0 if released and not unknown else 1
+    return 0 if released else 1
 
 
 if __name__ == "__main__":

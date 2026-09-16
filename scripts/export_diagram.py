@@ -55,6 +55,11 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # from, in a tEXt chunk, and `--check` compares that against the SVG the HTML exports to now.
 DIGEST_KEYWORD = b"ignis-source-sha256"
 
+# (bit depth, colour type) -> bytes per pixel, for what Chromium writes. Anything else is rejected
+# rather than guessed at: the point of the scanline check is that it only passes for a layout this
+# exporter can actually account for.
+SUPPORTED_PIXEL_LAYOUTS = {(8, 2): 3, (8, 6): 4}
+
 
 def extract_inline_svg(html_text: str) -> str:
     """The one inline SVG in the document.
@@ -165,6 +170,72 @@ def with_ihdr_size(data: bytes, width: int, height: int) -> bytes:
     return bytes(out)
 
 
+def decode_png(data: bytes) -> tuple[int, int]:
+    """Validate the PNG far enough to know a viewer can draw it, and return its size.
+
+    A signature and an IHDR are cheap to fake and cost nothing to write by accident: a 129-byte
+    file of header plus digest satisfied every earlier check while Chromium reported
+    `naturalWidth = 0`. Checking that the pixels are there, that they decompress, and that they
+    unpack to the shape the header promises is what makes the file an image rather than a claim
+    about one.
+
+    Everything here is standard library: the compression is zlib and the framing is four fields.
+    """
+    seen: list[bytes] = []
+    idat = bytearray()
+    size = None
+    end_offset = None
+
+    for index, (chunk_type, body, start, end) in enumerate(_chunks(data)):
+        declared = struct.unpack(">I", data[end - 4: end])[0]
+        if zlib.crc32(chunk_type + body) & 0xFFFFFFFF != declared:
+            raise ValueError(f"{chunk_type.decode('latin-1')} chunk fails its CRC")
+        if index == 0:
+            if chunk_type != b"IHDR":
+                raise ValueError(f"first chunk is {chunk_type.decode('latin-1')}, not IHDR")
+            if len(body) != 13:
+                raise ValueError(f"IHDR is {len(body)} bytes, not 13")
+            width, height, depth, colour, compression, filtering, interlace = struct.unpack(
+                ">IIBBBBB", body
+            )
+            if (depth, colour) not in SUPPORTED_PIXEL_LAYOUTS:
+                raise ValueError(f"unsupported bit depth {depth} / colour type {colour}")
+            if compression or filtering or interlace:
+                raise ValueError("unsupported compression, filter or interlace method")
+            size = (width, height)
+        elif end_offset is not None:
+            raise ValueError(f"{chunk_type.decode('latin-1')} chunk follows IEND")
+        if chunk_type == b"IDAT":
+            idat += body
+        elif chunk_type == b"IEND":
+            end_offset = end
+        seen.append(chunk_type)
+
+    if size is None:
+        raise ValueError("the file carries a PNG signature but no chunks")
+    if b"IDAT" not in seen:
+        raise ValueError("no IDAT chunk: the file declares an image and carries no pixels")
+    if seen.count(b"IEND") != 1:
+        raise ValueError(f"{seen.count(b'IEND')} IEND chunks; a PNG ends exactly once")
+    if end_offset != len(data):
+        raise ValueError(f"{len(data) - end_offset} bytes follow IEND")
+
+    try:
+        raw = zlib.decompress(bytes(idat))
+    except zlib.error as error:
+        raise ValueError(f"the image data does not decompress: {error}") from error
+
+    width, height = size
+    channels = SUPPORTED_PIXEL_LAYOUTS[(depth, colour)]
+    expected = height * (1 + width * channels)
+    if len(raw) != expected:
+        raise ValueError(
+            f"decompressed image is {len(raw)} bytes; {width} x {height} at {channels} "
+            f"channels per pixel needs {expected}"
+        )
+    return size
+
+
 def _render_png(
     svg_path: Path, png_path: Path, width: int, height: int, digest: str
 ) -> None:
@@ -226,7 +297,7 @@ def check(html_path: Path) -> int:
     else:
         data = png_path.read_bytes()
         try:
-            size = png_dimensions(data)
+            size = decode_png(data)
             stamped = png_source_digest(data)
         except ValueError as error:
             failures.append(f"{png_path}: {error}")
