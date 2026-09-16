@@ -4,9 +4,9 @@
 > - **Phiên bản:** `v0.4.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (39 Handlers & Tools)
-> - **Trạng thái branch:** PR #8 và PR #9 đã merge vào `main` bằng merge commit; production
->   cutover trên Supabase chưa chạy
-> - **Trạng thái Tests:** 853 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
+> - **Trạng thái:** `v0.4.0` đã nằm trên `main` (PR #8, #9, #10 merge bằng merge commit). Chưa
+>   tag, chưa publish release, repo vẫn private. Cutover trên corpus PostgreSQL hiện hữu chưa chạy.
+> - **Trạng thái Tests:** 866 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
 
 ---
 
@@ -78,6 +78,22 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
 
 ### Chuẩn bị release v0.4.0 — mở 14/09/2026
+
+- [ ] **Blocker trước public: verdict quyền của Threads không được lưu và không ai đọc (mở
+  16/09/2026).** `authenticate_threads()` có dò và trả về `keyword_search_access`, có thể là
+  `SELF_ONLY` hoặc `NOT_PERMITTED` — nghĩa là endpoint keyword search chỉ tìm trong bài của chính
+  tài khoản đã đăng nhập. Nhưng verdict đó **không được persist**, và **không** được
+  `resolve_auth_tier()`, `resolve_ingest_runtime()` hay bước đăng ký worker đọc lại. Thêm vào đó,
+  OAuth token hiện thắng browser session khi cả hai cùng có.
+
+  Hệ quả: một keyword probe cho public market có thể gọi Graph endpoint **sau khi** hệ thống đã
+  biết endpoint đó chỉ tìm trong tài khoản của chính mình. Cái nguy không phải "không có dữ liệu"
+  — mà là dữ liệu trả về trông như bằng chứng thị trường, trong khi thực chất là nội dung của
+  chính install đó. Đó là bằng chứng thị trường giả, và nó đi thẳng vào Opportunity Index.
+
+  Phải sửa trước khi public. Đây là mục canonical duy nhất cho khoảng trống này; đừng mở bản thứ
+  hai ở chỗ khác.
+
 
 #### Ranh giới blocker — Fio chốt 14/09/2026
 

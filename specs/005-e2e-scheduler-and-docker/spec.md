@@ -37,9 +37,10 @@ are separate operations during a data-model migration.
 **Acceptance Scenarios**:
 1. **Given** a fresh install, **When** bootstrap completes, **Then** MCP tools work against SQLite
    without a PostgreSQL service or background worker.
-2. **Given** a legacy PostgreSQL production corpus, **When** PR #8 is released, **Then** the old
-   runtime is quiesced before the snapshot and the new runtime starts only after the migration
-   verifier returns `VERIFIED` against a baseline generated from that exact snapshot.
+2. **Given** a legacy PostgreSQL production corpus and the `0.4.0` runtime now on `main`, **When** the
+   operator upgrades that deployment, **Then** the old runtime is quiesced before the snapshot and
+   the new runtime starts only after the migration verifier returns `VERIFIED` against a baseline
+   generated from that exact snapshot.
 
 ---
 

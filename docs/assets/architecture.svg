@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg viewBox="0 0 1232 640" role="img" aria-labelledby="arch-title arch-desc" xmlns="http://www.w3.org/2000/svg">
   <title id="arch-title">fn-ignis Dual-Track Architecture</title>
-  <desc id="arch-desc">Architecture diagram: an optional worker daemon and an on-demand agent harness both feed a two-stage ingress that discovers topics and then probes them by keyword; the clusterer writes every signal to the baseline database, and the quality gate scores that stored corpus, feeding the opportunity engine and optionally triggering one further pass.</desc>
+  <desc id="arch-desc">Architecture diagram: an optional worker daemon and an on-demand agent harness both feed a two-stage ingress that discovers topics and then probes them by keyword; the clusterer records every sighting in the evidence store -- one canonical source, one immutable observation per sighting, and the exact observations each mission used -- and the quality gate scores that stored corpus, feeding the opportunity engine and optionally triggering one further pass.</desc>
 
   <defs>
     <style>@import url('https://fonts.googleapis.com/css2?family=Anton&amp;family=Space+Grotesk:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap');</style>
@@ -124,8 +124,9 @@
   <rect x="656" y="232" width="208" height="64" rx="6" fill="rgba(75,30,115,0.08)" stroke="#4B1E73" stroke-width="1"/>
   <rect x="664" y="240" width="44" height="12" rx="2" fill="transparent" stroke="rgba(75,30,115,0.40)" stroke-width="0.8"/>
   <text x="686" y="249" fill="#4B1E73" font-size="7" font-family="'JetBrains Mono',monospace" text-anchor="middle" letter-spacing="0.08em">STORE</text>
-  <text x="760" y="270" fill="#0B0B17" font-size="12" font-weight="600" font-family="'Space Grotesk',sans-serif" text-anchor="middle">Baseline DB</text>
-  <text x="760" y="286" fill="#8B8BA6" font-size="9" font-family="'JetBrains Mono',monospace" text-anchor="middle">postgres · timescale · sqlite</text>
+  <text x="760" y="263" fill="#0B0B17" font-size="12" font-weight="600" font-family="'Space Grotesk',sans-serif" text-anchor="middle">Evidence Store</text>
+  <text x="760" y="277" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace" text-anchor="middle">source · observation · mission claim</text>
+  <text x="760" y="289" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace" text-anchor="middle">postgres · timescale · sqlite</text>
 
   <!-- quality gate (focal) -->
   <rect x="656" y="376" width="208" height="64" rx="6" fill="#F7F7FB"/>

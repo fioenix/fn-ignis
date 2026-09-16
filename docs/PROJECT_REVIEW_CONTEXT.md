@@ -5,23 +5,30 @@ It states what the system is, what has actually been measured, what has not, and
 reasoning is thin. It is in English because it describes `src/` and is read alongside
 `AGENTS.md`; regional documentation lives in the `*.vi.md` files.
 
-## Current review target — updated 14/09/2026
+## Current review target — updated 16/09/2026
 
 The runtime storage model that produced the mission-evidence defect documented below has been
-replaced, and the replacement is now on `main` at `v0.4.0`. Two things are still **not shipped**,
-and they are separate:
+replaced, and the replacement is now on `main` at `v0.4.0`. That version is **not released**: no
+tag exists and no GitHub Release is published. `python scripts/check_release_state.py` reads that
+off Git and GitHub, which is where the answer lives; no document in this repository can settle it.
+What remains outstanding is separate from the release state, and the items below are
+separate from each other:
 
 - **The existing PostgreSQL corpus has not been migrated.** It has received neither `sql/016` nor
   the backfill, and the new runtime has not been activated against it. This blocks activation on
   that corpus; it does not block publishing a release that a new user installs on a fresh SQLite
   database, because such an install has no legacy corpus to migrate.
-- **The repository is still private,** pending credential rotation and this documentation pass.
+- **The repository is private.** Every pre-public condition in the public-visibility decision
+  below must be satisfied, and the commits that enforce them must be on `main` before visibility
+  changes. The conditions are written once, in that decision, and this summary points at them
+  rather than restating or counting them: a count here has to be re-counted by whoever changes
+  the list, and nothing makes them.
 
 The branch state independently verified before this documentation refresh:
 
 | Gate | Result |
 |---|---|
-| Full suite | 831 passed, 2 skipped on PR #8; 839 passed, 2 skipped on the stacked release branch |
+| Full suite | 866 passed, 2 skipped on the current tree (831 when the storage model was first reviewed) |
 | Ruff, package build, clean-install smoke test | passed in GitHub Actions |
 | Dual backend | SQLite plus a real disposable TimescaleDB service; no silent Postgres skip |
 | PR | not draft, mergeable, merge state clean |
@@ -90,14 +97,45 @@ did. See `AGENTS.md` § "Ingress Filtering Depends on Who Asked".
 
 ## 2. Reading the architecture
 
-Two diagrams, both verified against code on the date in their footers:
+Three diagrams, each answering a different question, all verified against code on the date in
+their footers. The set is deliberately small: a reader choosing between six pictures reads none.
+The date is recorded here as well as in the footer, and a test fails when the two disagree —
+otherwise redrawing a diagram and leaving its footer alone dates the new picture to the day the
+old one was checked.
 
-- `docs/assets/architecture.{png,svg,html}` — the dual-track model and the two-stage ingress.
-- `docs/diagrams/ignis-social-listening-trace.html` — the tool-by-tool trace of one real
-  question, with the gaps that question exposes.
+- `docs/assets/architecture.{png,svg,html}` — **what the shape is** (footer verified 16/09/2026).
+  The dual-track model, the two-stage ingress, and the evidence store it writes into.
+- `docs/diagrams/ignis-source-map.html` — **where the data comes from** (footer verified
+  16/09/2026). Six connectors grouped by the runtime each needs, which is what decides whether the
+  unattended worker can register it, with the credential each wants and whether it discovers topics
+  or answers keyword probes.
+- `docs/diagrams/ignis-pipeline.html` — **how a signal becomes a dossier** (footer verified
+  14/09/2026). Lane-scoped flow from discovery through the quality gate to the artifact.
 
-**Convention, decided 10/09/2026: this repository does not use mermaid.** Diagrams are authored
-as HTML, exported to SVG and PNG, and the image is what goes into a document. The reason is the
+A fourth diagram, a tool-by-tool call trace of one session, was retired on 14/09/2026. It
+documented a defect fixed on 10/09 — `trigger_ingress_refresh` took no timeframe, so every
+requested pass ran at 24h — beside corpus counts from the day it was drawn. A picture of a bug that
+no longer exists is worse than no picture; the fix is recorded in `BACKLOG.md`, where a decision
+belongs.
+
+**Convention, decided 10/09/2026, narrowed 16/09/2026: this repository does not use mermaid.**
+A diagram is authored as HTML with one inline SVG, and that HTML is the only file anyone edits.
+
+Exports are generated, never hand-written, by `scripts/export_diagram.py`, which reads the HTML,
+extracts the inline SVG, writes the standalone `.svg`, and rasterizes the `.png` from it. `--check`
+verifies both derived artifacts, and tests enforce the same thing. The SVG is compared byte for
+byte, because it is generated deterministically. The PNG cannot be — a different Chromium on a
+different OS renders the same picture to different bytes — so it carries the SHA-256 of the SVG it
+was rasterized from in a `tEXt` chunk, and `--check` verifies the signature, that the declared size
+is the viewBox at 2x, and that the stamped digest is the one the HTML exports to today. Before
+that, replacing the PNG with a line of text left `--check` reporting success.
+
+**Only a diagram a document embeds as an image gets exports.** That is `architecture` alone: the
+READMEs place it with an `<img>` tag, which cannot render HTML. `ignis-source-map.html` and
+`ignis-pipeline.html` are opened directly, so exporting them would create four more generated
+files with nothing consuming them — more surface to drift, which is the failure this convention
+exists to prevent. This is a narrowing of the rule rather than an exception to it: if a document
+ever embeds one of those two, it gets exports at that point. The reason is the
 first failure mode in §8: a mermaid block was labelled as the source of a hand-authored SVG, the
 two drifted, and the label was the thing that lied. Do not add mermaid blocks when recommending
 changes here.
@@ -168,8 +206,7 @@ understates supply and inflates the Opportunity Index.
 
 ## 4. What is verified, and what is not
 
-**Current branch verification.** On the stacked release branch `codex/v0.4.0-oss-release`, 839
-tests pass and 2 skip. The two skips are Postgres-only cases under the SQLite parameter. CI runs
+**Current verification.** On the current tree, 866 tests pass and 2 skip. The two skips are Postgres-only cases under the SQLite parameter. CI runs
 Ruff, `pytest tests/`, `uv build`, and an MCP session driven against the built wheel rather than an
 editable install. Installation is `uv sync --locked`, so the committed lock is the environment under
 test instead of a fresh resolution from the dependency ranges.
@@ -286,13 +323,14 @@ reached, tested, and then reversed, and the reversal is the useful part. In part
 
 Ordered by how much a reviewer's conclusions would change if they did not know about it.
 
-0. **Resolved on PR #8; production cutover remains.** The historical defect was that
+0. **Resolved in code; migrating an existing corpus remains.** The historical defect was that
    `trend_signals` combined source identity, observation and one mission owner. The branch now
    separates `sources`, `observations` and `mission_evidence`; one source can support two missions,
    one mission can retain two observations of a source, and both backends run the same behavioral
    contracts. Evidence replacement writes new claims before pruning old ones, and the mission paths
-   preserve timeframe and observation identifiers. This is not production-complete until PR #8 is
-   merged and the snapshot-specific backfill returns `VERIFIED`.
+   preserve timeframe and observation identifiers. The `0.4.0` runtime is present on `main`; a
+   deployment carrying a legacy corpus is not complete until its snapshot-specific backfill returns
+   `VERIFIED`.
 
 1. **Probe seeds were machinery vocabulary until 10/09/2026.** Adding eight machinery domains to
    `market_lexicons` on 09/09 left an exclusion list in `ingest_trends.py` naming only the two
@@ -344,16 +382,26 @@ previous snapshot in hand will otherwise re-raise them.
    so "what is everyone discussing" is answered as "what is happening around terms we already
    seeded". A two-pass shape — discovery first, then the agent picks what to probe — is what the
    two-stage ingress was built for, and nothing currently does the picking.
-3. **Whether to make the repository public.** The code side is finished: `v0.4.0` is on `main`,
-   CI is green on the merge commit, release acceptance was demonstrated through an authenticated
-   client rather than inferred, and the community files are present with one synchronised version
+3. **Whether to make the repository public.** The code side is close: `v0.4.0` is on `main`, CI is
+   green on the merge commit, and the community files are present with one synchronised version
    across every release-controlled file (six files, not three; the count was corrected on 13/09).
-   The earlier statement that nothing blocked the switch no longer holds. **Two things block it
-   now**, and both are work rather than a decision:
-   - operational credentials must be rotated or revoked before visibility changes (item 5);
-   - public-facing documents must not carry the internal register, infrastructure identifiers, or
-     references to files that are not published.
-   `gh repo view` still reports `PRIVATE`.
+   The acceptance gate that an MCP connection and direct JSON-RPC could not close is closed: on
+   14/09 a signed-in Claude Code session had the model itself call `get_runtime_config`, which
+   returned `SUCCESS` and `total_configs: 6`, and the model read that back. `BACKLOG.md` records
+   it with the evidence. The earlier statement that nothing blocked the switch still does not hold.
+   What remains, each of them work rather than a decision:
+   - operational credentials must be rotated or revoked before visibility changes (item 5). No
+     rotation evidence exists, so nothing may record that it happened;
+   - the Threads keyword-search verdict is neither stored nor consulted, so a public-market probe
+     can still call an endpoint the system already established searches the operator's own account
+     only. False market evidence is worse than none, and it reaches the Opportunity Index;
+   - no public-facing document may carry the internal register, infrastructure identifiers, or a
+     reference to a file that is not published, and the commits that enforce this must be on
+     `main` before visibility changes. Written and reviewed is not the condition; being an
+     ancestor of `main` at the moment of the switch is.
+   `gh repo view` still reports `PRIVATE`, and no tag or Release exists for `0.4.0`;
+   `python scripts/check_release_state.py` is what reads those three facts, and it reports a fact
+   it could not establish as unknown rather than as a negative.
 4. **Git history.** A platform API key was once committed and has since been rotated. History was
    rewritten on 09/09 and every ref force-pushed, so the value is unreachable from any ref;
    `git rev-list --all` carries no full-length key. Whether the remote has finished garbage
