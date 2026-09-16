@@ -90,14 +90,36 @@ did. See `AGENTS.md` § "Ingress Filtering Depends on Who Asked".
 
 ## 2. Reading the architecture
 
-Two diagrams, both verified against code on the date in their footers:
+Three diagrams, each answering a different question, all verified against code on the date in
+their footers. The set is deliberately small: a reader choosing between six pictures reads none.
 
-- `docs/assets/architecture.{png,svg,html}` — the dual-track model and the two-stage ingress.
-- `docs/diagrams/ignis-social-listening-trace.html` — the tool-by-tool trace of one real
-  question, with the gaps that question exposes.
+- `docs/assets/architecture.{png,svg,html}` — **what the shape is.** The dual-track model, the
+  two-stage ingress, and the evidence store it writes into.
+- `docs/diagrams/ignis-source-map.html` — **where the data comes from.** Six connectors grouped by
+  the runtime each needs, which is what decides whether the unattended worker can register it,
+  with the credential each wants and whether it discovers topics or answers keyword probes.
+- `docs/diagrams/ignis-pipeline.html` — **how a signal becomes a dossier.** Lane-scoped flow from
+  discovery through the quality gate to the artifact.
 
-**Convention, decided 10/09/2026: this repository does not use mermaid.** Diagrams are authored
-as HTML, exported to SVG and PNG, and the image is what goes into a document. The reason is the
+A fourth diagram, a tool-by-tool call trace of one session, was retired on 14/09/2026. It
+documented a defect fixed on 10/09 — `trigger_ingress_refresh` took no timeframe, so every
+requested pass ran at 24h — beside corpus counts from the day it was drawn. A picture of a bug that
+no longer exists is worse than no picture; the fix is recorded in `BACKLOG.md`, where a decision
+belongs.
+
+**Convention, decided 10/09/2026, narrowed 16/09/2026: this repository does not use mermaid.**
+A diagram is authored as HTML with one inline SVG, and that HTML is the only file anyone edits.
+
+Exports are generated, never hand-written, by `scripts/export_diagram.py`, which reads the HTML,
+extracts the inline SVG, writes the standalone `.svg`, and rasterizes the `.png` from it.
+`--check` verifies the committed SVG still matches its HTML, and a test enforces that parity.
+
+**Only a diagram a document embeds as an image gets exports.** That is `architecture` alone: the
+READMEs place it with an `<img>` tag, which cannot render HTML. `ignis-source-map.html` and
+`ignis-pipeline.html` are opened directly, so exporting them would create four more generated
+files with nothing consuming them — more surface to drift, which is the failure this convention
+exists to prevent. This is a narrowing of the rule rather than an exception to it: if a document
+ever embeds one of those two, it gets exports at that point. The reason is the
 first failure mode in §8: a mermaid block was labelled as the source of a hand-authored SVG, the
 two drifted, and the label was the thing that lied. Do not add mermaid blocks when recommending
 changes here.

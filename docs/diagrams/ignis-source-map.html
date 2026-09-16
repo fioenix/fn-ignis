@@ -34,7 +34,10 @@
      image ships no browser, so it registers only the connectors that can pull over HTTP, and
      everything else runs on the operator's own machine with the operator's own session. Threads
      and Instagram Reels sit in both groups and move between them on their own, depending on
-     whether a Graph API token is configured.</p>
+     whether a Graph API token is configured. What a connector contributes is a second question:
+     only three of the six can discover topics on an untargeted pull. The other three own a feed
+     that belongs to the authenticated account, or a popularity chart, so a public-market pass
+     sends them keywords instead.</p>
 
 <svg viewBox="0 0 840 600" role="img" aria-labelledby="src-title src-desc"
      xmlns="http://www.w3.org/2000/svg">
@@ -43,8 +46,10 @@
     Data API pull over HTTP and can run in the unattended worker. Threads and Instagram Reels use
     HTTP when a Graph API token is configured and a browser otherwise, so they join the worker only
     in the first case. TikTok Creative Center and TikTok video and comments are browser-only and
-    stay on the operator's machine. Each source notes the credential it needs and whether an
-    untargeted pull can discover new topics.</desc>
+    stay on the operator's machine. Each source notes the credential it needs and whether a
+    public-market pass can discover topics from it or sends it keyword probes instead; Google
+    Trends and TikTok Creative Center discover, while YouTube, Threads and Instagram Reels are
+    probed.</desc>
   <defs>
     <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
       <circle cx="11" cy="11" r="0.8" fill="rgba(11,11,23,0.10)"/>
@@ -71,7 +76,7 @@
   <rect x="310" y="96" width="230" height="72" rx="6" fill="#FFFFFF" stroke="#BCBCD0" stroke-width="1"/>
   <text x="324" y="118" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif">YouTube Data API</text>
   <text x="324" y="134" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">YOUTUBE_API_KEY</text>
-  <text x="324" y="148" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">answers only when asked</text>
+  <text x="324" y="148" fill="#4B1E73" font-size="7.5" font-family="'JetBrains Mono',monospace">keyword probe · not discovery</text>
   <text x="324" y="161" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">search 100 units · quota 10k/day</text>
 
   <!-- ================= band B: dual tier ================= -->
@@ -81,15 +86,15 @@
 
   <rect x="56" y="234" width="230" height="72" rx="6" fill="#FFFFFF" stroke="#BCBCD0" stroke-width="1"/>
   <text x="70" y="256" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif">Threads</text>
-  <text x="70" y="272" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">Graph token → HTTP</text>
-  <text x="70" y="286" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">browser login → browser</text>
-  <text x="70" y="299" fill="#14627A" font-size="7.5" font-family="'JetBrains Mono',monospace">discovers topics</text>
+  <text x="70" y="272" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">Graph token → HTTP · else browser</text>
+  <text x="70" y="286" fill="#4B1E73" font-size="7.5" font-family="'JetBrains Mono',monospace">keyword probe · not discovery</text>
+  <text x="70" y="299" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">token ≠ public search permission</text>
 
   <rect x="310" y="234" width="230" height="72" rx="6" fill="#FFFFFF" stroke="#BCBCD0" stroke-width="1"/>
   <text x="324" y="256" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif">Instagram Reels</text>
-  <text x="324" y="272" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">Graph token → HTTP</text>
-  <text x="324" y="286" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">browser login → browser</text>
-  <text x="324" y="299" fill="#14627A" font-size="7.5" font-family="'JetBrains Mono',monospace">discovers topics</text>
+  <text x="324" y="272" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">Graph token → HTTP · else browser</text>
+  <text x="324" y="286" fill="#4B1E73" font-size="7.5" font-family="'JetBrains Mono',monospace">keyword probe · not discovery</text>
+  <text x="324" y="299" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">own feed is account-scoped</text>
 
   <!-- ================= band C: browser only ================= -->
   <rect x="36" y="350" width="524" height="112" rx="8" fill="rgba(11,11,23,0.035)"/>
@@ -104,9 +109,9 @@
 
   <rect x="310" y="372" width="230" height="72" rx="6" fill="#FFFFFF" stroke="#BCBCD0" stroke-width="1"/>
   <text x="324" y="394" fill="#0B0B17" font-size="11.5" font-weight="600" font-family="'Space Grotesk',sans-serif">TikTok video &amp; comments</text>
-  <text x="324" y="410" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">session · encrypted at rest</text>
+  <text x="324" y="410" fill="#5B5B79" font-size="7.5" font-family="'JetBrains Mono',monospace">session optional · encrypted</text>
   <text x="324" y="424" fill="#14627A" font-size="7.5" font-family="'JetBrains Mono',monospace">discovers topics</text>
-  <text x="324" y="437" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">voice of customer</text>
+  <text x="324" y="437" fill="#8B8BA6" font-size="7.5" font-family="'JetBrains Mono',monospace">comments may need a session</text>
 
   <!-- ================= destinations ================= -->
   <rect x="620" y="96" width="188" height="72" rx="6" fill="rgba(11,11,23,0.05)" stroke="#5B5B79" stroke-width="1" stroke-dasharray="3 2"/>
@@ -147,7 +152,7 @@
   <text x="608" y="537" fill="#5B5B79" font-size="8" font-family="'JetBrains Mono',monospace">needs a browser</text>
 
   <text x="120" y="560" fill="#8B8BA6" font-size="8" font-family="'JetBrains Mono',monospace">“discovers topics” = an untargeted pull returns subjects nobody seeded.</text>
-  <text x="120" y="574" fill="#8B8BA6" font-size="8" font-family="'JetBrains Mono',monospace">YouTube is the one source that does not: its chart ranks popularity, not questions.</text>
+  <text x="120" y="574" fill="#8B8BA6" font-size="8" font-family="'JetBrains Mono',monospace">“keyword probe” = a public pass sends it keywords; its own feed is account-scoped or a chart.</text>
 </svg>
 
   <footer>fn-ignis · source map as of 14/09/2026 · finolabs design system</footer>

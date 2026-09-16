@@ -69,8 +69,8 @@
   pruning old claims
 - [x] T019 [US1] Add pre-backfill repository refusal and legacy-aware pruner protection
 - [ ] T020 [US1] Execute the production cutover runbook against the existing PostgreSQL corpus.
-  The code half is done and released: the source/observation runtime merged into `main` and shipped
-  as `v0.4.0`, so what remains is the data migration itself -- a baseline generated from the
+  The code half is done and on `main` as version `0.4.0` -- not tagged, not published as a
+  GitHub Release -- so what remains is the data migration itself -- a baseline generated from the
   quiesced production snapshot, the backfill, and verifier status `VERIFIED` before the new runtime
   is pointed at that corpus. This blocks activation on an existing corpus; it does not block a
   fresh SQLite install, which has nothing to migrate.
