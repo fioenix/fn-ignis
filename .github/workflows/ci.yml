@@ -11,6 +11,25 @@ on:
 
 
 jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        # Full history: a secret is usually added in an earlier commit of the branch and removed
+        # in a later one, which a shallow clone cannot see.
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Secret scan (gitleaks)
+        # Pinned: `latest` means the rules that ran yesterday are not the rules running today, so a
+        # build that goes red tells you nothing about what changed. --redact keeps a finding out of
+        # the log, because a public build log is a worse place for a credential than the commit was.
+        run: |
+          docker run --rm -v "${GITHUB_WORKSPACE}:/repo" -w /repo \
+            ghcr.io/gitleaks/gitleaks:v8.28.0 git --no-banner --redact --exit-code 1
+
   test:
     name: Test & Lint (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

@@ -1,0 +1,26 @@
+# Secret scanning configuration.
+#
+# The default ruleset does the work. This file exists only to name the two findings that are test
+# fixtures, so the first CI run does not arrive red with nothing to fix -- an alert that is always
+# on is an alert nobody reads.
+#
+# Both exemptions are single named files, never a directory. Exempting `tests/` would mean the next
+# real credential pasted into a test is invisible, and pasting one into a test while debugging is
+# exactly how credentials escape.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+Fake keys that exist so a test can assert they are scrubbed or encrypted. Both are asserted
+against in the test that contains them, so replacing either with a real value would fail that
+test long before it reached this allowlist.
+"""
+paths = [
+  # `sk-...` planted in a sample string; the test asserts sanitize_pii_text removes it.
+  '''tests/unit/test_pii_sanitization\.py''',
+  # `sk-secret-12345` passed to encrypt_credentials; the test asserts it is absent from the
+  # ciphertext. Present in history at 5990054e rather than in the current file.
+  '''tests/unit/test_round2_regressions\.py''',
+]
