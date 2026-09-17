@@ -8,7 +8,7 @@ has to mean the same thing for every platform.
 
 import ast
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -19,7 +19,13 @@ from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendReposi
 
 CONNECTORS = Path(__file__).resolve().parents[2] / "src" / "ignis" / "infrastructure" / "connectors"
 
-PULLED_AT = datetime(2026, 9, 9, 12, 0, tzinfo=timezone.utc)
+# Relative to now, because `get_cluster_signals` defaults to a 7-day window measured from the
+# clock. Written as an absolute date, this fixture passed until the date it named fell out of that
+# window and then failed every run afterwards -- a test that changes verdict without the code
+# changing. It went red on 17/09/2026, eight days after the 09/09 it had hard-coded.
+PULLED_AT = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=6)
+# Absolute on purpose: this is when the content was posted, which no query windows on, and the
+# point of the test is that the two clocks stay far apart and independent.
 POSTED_AT = datetime(2026, 7, 1, 8, 30, tzinfo=timezone.utc)
 
 

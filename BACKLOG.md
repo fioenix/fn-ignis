@@ -1,12 +1,13 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> - **Cập nhật lần cuối:** 14/09/2026
+> - **Cập nhật lần cuối:** 17/09/2026
 > - **Phiên bản:** `v0.4.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (39 Handlers & Tools)
-> - **Trạng thái:** `v0.4.0` đã nằm trên `main` (PR #8, #9, #10 merge bằng merge commit). Chưa
->   tag, chưa publish release, repo vẫn private. Cutover trên corpus PostgreSQL hiện hữu chưa chạy.
-> - **Trạng thái Tests:** 866 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
+> - **Trạng thái:** `v0.4.0` đã tag và publish release, repo public từ 17/09/2026. Đọc trạng thái
+>   thật bằng `python scripts/check_release_state.py` chứ đừng tin dòng này — nó là tài liệu, còn
+>   tag với release nằm trên Git và GitHub. Cutover trên corpus PostgreSQL hiện hữu chưa chạy.
+> - **Trạng thái Tests:** 919 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
 
 ---
 
@@ -78,6 +79,17 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
 
 ### Chuẩn bị release v0.4.0 — mở 14/09/2026
+
+- [ ] **Rà soát các test cắm cứng ngày tháng (mở 17/09/2026).**
+  `test_capture_and_publish_clocks.py` đặt `captured_at = 09/09/2026` bằng hằng số, trong khi
+  `get_cluster_signals` mặc định lọc theo cửa sổ `LAST_7D` tính từ đồng hồ thật. Test xanh cho tới
+  16/09 rồi đỏ từ 17/09 mà **không có dòng code nào đổi** — CI xanh lần cuối lúc 16/09 17:11 UTC,
+  đúng ngày cuối cùng còn lọt cửa sổ. Đã sửa: `captured_at` giờ tính tương đối với hiện tại,
+  `published_at` giữ tuyệt đối vì không query nào lọc theo nó.
+
+  Còn lại là rà soát: `grep -rl "datetime(2026" tests/` ra 10 file khác. Chúng xanh hôm nay nhưng
+  chưa ai kiểm cái nào trong số đó cũng đang đếm ngược. Nguyên tắc: hằng số ngày chỉ được dùng khi
+  **không có query nào lọc theo nó**; thứ gì mang nghĩa "vừa mới" phải tính từ đồng hồ.
 
 - [x] **Đã xong (16/09/2026): verdict quyền của Threads được lưu và mọi chỗ định tuyến đều đọc.**
   `check_keyword_search_access()` vẫn dò như cũ, nhưng giờ ghi verdict vào `runtime_configs` dưới
@@ -507,18 +519,25 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Cùng lúc xoá bốn default 900 chết trong `scheduler.py`: chúng không bao giờ fire vì mọi caller
   đều đọc từ `Settings`, nhưng 900 chính là con số đã trôi vào cả hai file cấu hình.
 
-- [ ] **Blocker trước khi public: xoay vòng ba credential vận hành (mở 14/09/2026).**
+- [x] **Đã xong (17/09/2026): ba credential vận hành đã xoay vòng, Fio xác nhận.**
   Ngày 10/09/2026 có một quyết định hoãn xoay vòng, với điều kiện xem lại ghi ngay trong quyết
   định đó: xem lại nếu có người ngoài truy cập được hệ thống. Chuyển repository sang public chính
-  là điều kiện ấy, nên **quyết định hoãn đã hết hiệu lực**.
+  là điều kiện ấy, nên quyết định hoãn đã hết hiệu lực và việc xoay vòng được thực hiện.
 
-  Ba credential vận hành — mật khẩu database, khoá mã hoá, và khoá API nền tảng video — phải được
-  xoay vòng hoặc thu hồi **trước** khi đổi visibility. Không có giá trị nào trong số đó nằm trong
-  git history; đã quét toàn bộ `git rev-list --all`.
+  Ba credential — mật khẩu database, khoá mã hoá, và khoá API nền tảng video — đều đã được thay.
+  Quy trình chạy ngoài repository; không giá trị nào được ghi vào đây, và mục này chỉ ghi lại xác
+  nhận của người vận hành chứ không tự suy ra từ bất kỳ phép đo nào.
 
-  Chưa có bằng chứng xoay vòng, nên mục này để mở. Không được đánh dấu hoàn tất, và không được ghi
-  "đã rotate", cho tới khi có xác nhận từ người vận hành. Quy trình thực hiện nằm ngoài repository
-  và không ghi giá trị nào vào đây.
+  Một phần có bằng chứng độc lập: GitHub secret scanning bật ngày 17/09 đã dựng alert #1 cho một
+  Google API key nằm trong `.mcp.json` ở commit `8a7b376e` (07/09). Commit đó không còn reachable
+  từ ref nào sau lần viết lại history ngày 09/09, nhưng GitHub vẫn giữ object mồ côi — trả lời dứt
+  điểm câu hỏi treo trong `docs/PROJECT_REVIEW_CONTEXT.md` mục 4 là remote **chưa** garbage-collect.
+  Fio đối chiếu mười ký tự đầu với key đang dùng, xác nhận đã khác; alert được đóng với resolution
+  `revoked`. Object mồ côi vẫn còn cho tới khi GitHub Support purge, nhưng giá trị trong đó đã chết.
+
+  Việc còn lại của người vận hành, không chặn gì: đổi khoá mã hoá làm ciphertext cũ không đọc được,
+  nên từng connector phải `authenticate_*` lại; và `claude_desktop_config.json` trên máy vận hành
+  cần bỏ bốn khoá credential còn sót, xem mục ngay bên dưới.
 
 - [x] **Đã xong (10/09/2026): MCP config giữ đường dẫn tới `.env`, không giữ secret.**
   `build_mcp_entry` từng sao `DATABASE_URL`, `IGNIS_ENCRYPTION_KEY` và `YOUTUBE_API_KEY` vào

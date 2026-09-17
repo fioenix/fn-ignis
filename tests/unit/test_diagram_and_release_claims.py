@@ -57,6 +57,18 @@ UNRELEASED_BANNER = re.compile(
     re.IGNORECASE,
 )
 
+# The mirror. Once a version really is tagged and published, "not tagged" is the false claim, and
+# a contract that only knew the unreleased shape would go quietly dormant at exactly the moment
+# the documents started being wrong in the other direction.
+RELEASED_BANNER = re.compile(
+    r"(đã tag|tagged)[^.\n]{0,80}(publish|released)"
+    r"|(đã publish|published|released)[^.\n]{0,80}(đã tag|tagged)",
+    re.IGNORECASE,
+)
+
+# Wording that asserts the version is still unreleased.
+UNRELEASED_CLAIM = re.compile(r"\b(not tagged|untagged|not published|unpublished)\b", re.IGNORECASE)
+
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -76,12 +88,52 @@ def _banner_text() -> str:
 # --------------------------------------------------------------------------------------------
 
 
-def test_release_state_banner_exists_and_is_explicit():
-    """The comparisons below need one declaration to compare against; it has to be there."""
-    assert UNRELEASED_BANNER.search(_banner_text()), (
-        "BACKLOG.md has no explicit release-state banner saying the current version is neither "
-        "tagged nor published. That banner is the declaration the wording comparisons below use, "
-        "and without it they cannot be evaluated offline."
+def test_release_state_banner_is_explicit_either_way():
+    """The comparisons below need one declaration to compare against; it has to be there.
+
+    Either shape counts. What is not allowed is a banner that says nothing, because then every
+    wording comparison below has nothing to contradict and passes on silence.
+    """
+    banner = _banner_text()
+    declared = [
+        name
+        for name, pattern in (("unreleased", UNRELEASED_BANNER), ("released", RELEASED_BANNER))
+        if pattern.search(banner)
+    ]
+    assert declared, (
+        "BACKLOG.md's banner states neither that the current version is tagged and published nor "
+        "that it is not. That banner is the declaration the wording comparisons below use, and "
+        "without it they cannot be evaluated offline."
+    )
+    assert len(declared) == 1, (
+        f"the banner declares both states at once ({declared}); which one documents must agree "
+        "with is ambiguous"
+    )
+
+
+def test_tracked_documents_do_not_call_a_released_version_unreleased():
+    """The mirror of the contract below, for the half of the life cycle that comes after release."""
+    if not RELEASED_BANNER.search(_banner_text()):
+        pytest.skip("the banner does not declare a released state; nothing to contradict")
+
+    offenders = []
+    for path in TRACKED_DOCS:
+        for lineno, line in enumerate(_read(path).splitlines(), 1):
+            match = UNRELEASED_CLAIM.search(line)
+            if not match:
+                continue
+            # The claim has to be about the version. "a file that is not published" is about a
+            # file, and reading it as a release-state claim would make this contract noise.
+            if not re.search(r"\b\d+\.\d+\.\d+\b|\bversion\b|\bRelease\b", line):
+                continue
+            window = line[max(0, match.start() - 60): match.start()]
+            if re.search(r"\b(was|were|had|until|before|once|while)\b", window, re.IGNORECASE):
+                continue
+            offenders.append(f"{path.relative_to(REPO)}:{lineno}: {line.strip()[:110]}")
+
+    assert not offenders, (
+        "A tracked document says the current version is not tagged or not published, while "
+        "BACKLOG.md's banner says it is both:\n" + "\n".join(offenders)
     )
 
 
@@ -135,7 +187,7 @@ class Blocker:
 
 
 PRE_PUBLIC_BLOCKERS = (
-    Blocker("credential rotation", r"xoay vòng ba credential", r"rotated or revoked"),
+    Blocker("credential rotation", r"ba credential", r"rotated or revoked"),
     Blocker("the Threads authority gap", r"verdict quyền của Threads", r"Threads"),
     Blocker("model-driven release acceptance", r"release acceptance v0\.4\.0", r"model-driven"),
 )
@@ -184,10 +236,15 @@ def _review_blocker_bullets() -> list[str]:
     return bullets
 
 
-def test_credential_rotation_is_still_an_open_blocker():
-    assert _blocker_is_open(PRE_PUBLIC_BLOCKERS[0]), (
-        "BACKLOG.md marks credential rotation done. Nothing may record that rotation happened "
-        "until the operator confirms it."
+def test_credential_rotation_is_closed():
+    """Closed on 17/09 on the operator's confirmation, which is the only evidence that counts.
+
+    Asserted rather than assumed: if it is ever reopened, the visibility decision has to list it
+    again, and the contract below is what makes that happen.
+    """
+    assert not _blocker_is_open(PRE_PUBLIC_BLOCKERS[0]), (
+        "BACKLOG.md reopened credential rotation. If that is right, the visibility decision has "
+        "to list it again."
     )
 
 
@@ -213,8 +270,10 @@ def test_model_driven_release_acceptance_is_closed():
 
 def test_every_open_blocker_is_listed_in_the_review_context():
     """A blocker list that omits an open blocker reads as clearance to proceed."""
+    # No assertion that the list is non-empty: every blocker being closed is a legitimate state,
+    # and it is the state this repository reached on 17/09. What keeps this from passing on
+    # nothing is that each blocker's BACKLOG state is asserted by name above.
     bullets = _review_blocker_bullets()
-    assert bullets, "the review context's visibility item lists no blockers at all"
 
     missing = [
         blocker.name

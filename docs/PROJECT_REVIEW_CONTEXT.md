@@ -18,11 +18,10 @@ separate from each other:
   the backfill, and the new runtime has not been activated against it. This blocks activation on
   that corpus; it does not block publishing a release that a new user installs on a fresh SQLite
   database, because such an install has no legacy corpus to migrate.
-- **The repository is private.** Every pre-public condition in the public-visibility decision
-  below must be satisfied, and the commits that enforce them must be on `main` before visibility
-  changes. The conditions are written once, in that decision, and this summary points at them
-  rather than restating or counting them: a count here has to be re-counted by whoever changes
-  the list, and nothing makes them.
+- **The repository is public as of 17/09/2026, and `v0.4.0` is released.** Every condition the
+  public-visibility decision below set was satisfied first. The conditions and the evidence for
+  each are written once, in that decision; this summary points at them rather than restating or
+  counting them.
 
 The branch state independently verified before this documentation refresh:
 
@@ -396,17 +395,23 @@ previous snapshot in hand will otherwise re-raise them.
    it with the evidence. The keyword-search authority gap is closed too: the verdict the access
    probe establishes is now persisted, and the tier resolution, the runtime resolution and the
    search path all read it, so a public-market probe can no longer query an endpoint the system
-   has already established searches the operator's own account. The earlier statement that nothing
-   blocked the switch still does not hold. What remains, each of them work rather than a decision:
-   - operational credentials must be rotated or revoked before visibility changes (item 5). No
-     rotation evidence exists, so nothing may record that it happened;
-   - no public-facing document may carry the internal register, infrastructure identifiers, or a
-     reference to a file that is not published, and the commits that enforce this must be on
-     `main` before visibility changes. Written and reviewed is not the condition; being an
-     ancestor of `main` at the moment of the switch is.
-   `gh repo view` still reports `PRIVATE`, and no tag or Release exists for `0.4.0`;
-   `python scripts/check_release_state.py` is what reads those three facts, and it reports a fact
-   it could not establish as unknown rather than as a negative.
+   has already established searches the operator's own account. **Decided on 17/09/2026: the
+   repository is public.** Each condition was satisfied before the switch. Operational credentials
+   were rotated or revoked before visibility changed (item 5), confirmed by the operator, which is
+   the only evidence that counts here because no measurement in this repository can establish it.
+   No public-facing document carries the internal register, infrastructure identifiers, or a
+   reference to a file that is not published, and the commits that enforce this were on `main`
+   before visibility changed — written and reviewed was never the condition, being an ancestor of
+   `main` at the moment of the switch was.
+
+   What the switch turned on, which was unavailable while the repository was private: GitHub
+   secret scanning with push protection, and branch protection on `main`. Both need a public
+   repository on this plan, so the order could not have been reversed. Protection required
+   `enforce_admins`; without it GitHub prints the rules and lets an owner push anyway, which a
+   direct push proved before the setting was corrected.
+
+   `python scripts/check_release_state.py` reads tag, Release and visibility from Git and GitHub,
+   and reports a fact it could not establish as unknown rather than as a negative.
 4. **Git history.** A platform API key was once committed and has since been rotated. History was
    rewritten on 09/09 and every ref force-pushed, so the value is unreachable from any ref;
    `git rev-list --all` carries no full-length key. Whether the remote has finished garbage
