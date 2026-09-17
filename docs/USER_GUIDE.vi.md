@@ -52,7 +52,7 @@ những dòng backfill cần.
 Chế độ này phù hợp để chạy ngay trên máy tính cá nhân (macOS, Linux, Windows) mà **không cần cài đặt Docker hay PostgreSQL**. Toàn bộ dữ liệu được lưu tự động trong file `ignis.db`.
 
 #### Bước 1: Yêu cầu môi trường
-- Python $\ge 3.11$ (Khuyến nghị Python 3.11 hoặc 3.12).
+- Python $\ge 3.11$. CI kiểm 3.11, 3.12, 3.13 và 3.14 trên mỗi commit, nên bốn bản này đều đã chạy qua toàn bộ test suite.
 - Trình quản lý gói `uv` (khuyên dùng để cài đặt siêu tốc) hoặc `pip` tiêu chuẩn.
 
 #### Bước 2: Clone repository & Tạo Virtual Environment

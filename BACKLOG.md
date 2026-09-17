@@ -80,16 +80,23 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 
 ### Chuẩn bị release v0.4.0 — mở 14/09/2026
 
-- [ ] **Rà soát các test cắm cứng ngày tháng (mở 17/09/2026).**
+- [x] **Đã xong (17/09/2026): rà soát các test cắm cứng ngày tháng.**
   `test_capture_and_publish_clocks.py` đặt `captured_at = 09/09/2026` bằng hằng số, trong khi
   `get_cluster_signals` mặc định lọc theo cửa sổ `LAST_7D` tính từ đồng hồ thật. Test xanh cho tới
   16/09 rồi đỏ từ 17/09 mà **không có dòng code nào đổi** — CI xanh lần cuối lúc 16/09 17:11 UTC,
   đúng ngày cuối cùng còn lọt cửa sổ. Đã sửa: `captured_at` giờ tính tương đối với hiện tại,
   `published_at` giữ tuyệt đối vì không query nào lọc theo nó.
 
-  Còn lại là rà soát: `grep -rl "datetime(2026" tests/` ra 10 file khác. Chúng xanh hôm nay nhưng
-  chưa ai kiểm cái nào trong số đó cũng đang đếm ngược. Nguyên tắc: hằng số ngày chỉ được dùng khi
-  **không có query nào lọc theo nó**; thứ gì mang nghĩa "vừa mới" phải tính từ đồng hồ.
+  Mười file còn lại đã rà, và không file nào là bom. Cách rà: đẩy **mọi** hằng số ngày trong file
+  lùi 60 ngày rồi chạy lại — mô phỏng đúng thứ đã làm nổ quả bom kia là fixture già đi so với đồng
+  hồ. Cả mười giữ nguyên số test pass. Chạy với Postgres thật, vì nhóm integration skip khi không
+  có DSN và "pass" do skip thì không chứng minh gì — lần rà đầu tiên chạy không có DSN và suýt
+  được nghiệm thu như một kết quả thật.
+  Cũng kiểm lớp bom ngược — hằng số nằm ở tương lai rồi thành quá khứ: không có cái nào.
+
+  Nguyên tắc rút ra: hằng số ngày chỉ dùng được khi **không query nào lọc theo nó**; thứ mang nghĩa
+  "vừa mới" phải tính từ đồng hồ. Không dựng contract tự động cho luật này vì không diễn đạt được
+  một cách đáng tin — một cổng chỉ nhận ra được cách viết hôm nay thì tệ hơn là không có cổng.
 
 - [x] **Đã xong (16/09/2026): verdict quyền của Threads được lưu và mọi chỗ định tuyến đều đọc.**
   `check_keyword_search_access()` vẫn dò như cũ, nhưng giờ ghi verdict vào `runtime_configs` dưới
