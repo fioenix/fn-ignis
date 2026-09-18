@@ -135,6 +135,25 @@ class Journal:
         self.path.write_text(json.dumps(self.data, indent=2, sort_keys=True) + "\n")
 
 
+DIRECT_CONNECTION_KEY = "DATABASE_DIRECT_CONNECTION"
+
+
+def dsn_from_env_file(path: Path = REPO / ".env") -> str:
+    """The direct connection out of .env, if it is there.
+
+    Deliberately not DATABASE_URL. That is the runtime's DSN and on this deployment it points at
+    the pooler, which preflight refuses -- reading it here would turn a clear refusal into a
+    confusing one.
+    """
+    if not path.exists():
+        return ""
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if line.startswith(f"{DIRECT_CONNECTION_KEY}="):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
+
+
 def find_tool(name: str) -> Path:
     found = shutil.which(name)
     if found:
@@ -208,7 +227,7 @@ def psql_value(psql: Path, dsn: str, sql: str) -> Ran:
 def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
     heading(0, "preflight")
     if not dsn:
-        raise Unrunnable("No DSN: pass --dsn or set PRODUCTION_DSN.")
+        raise Unrunnable(f"No DSN: pass --dsn, set PRODUCTION_DSN, or put {DIRECT_CONNECTION_KEY} in .env.")
 
     host = dsn_host(dsn)
     if "pooler" in host:
@@ -560,7 +579,11 @@ def closing_note(journal: Journal, report: Dict[str, Any]) -> None:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dsn", default=os.environ.get("PRODUCTION_DSN", ""))
+    parser.add_argument(
+        "--dsn",
+        default="",
+        help=f"default: $PRODUCTION_DSN, else {DIRECT_CONNECTION_KEY} from .env",
+    )
     parser.add_argument(
         "--run-dir",
         type=Path,
@@ -581,6 +604,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="skip the typed confirmation in step 1, having already stopped every writer",
     )
     args = parser.parse_args(argv)
+    if not args.dsn:
+        args.dsn = os.environ.get("PRODUCTION_DSN", "") or dsn_from_env_file()
 
     say()
     say("  T020 production cutover")
