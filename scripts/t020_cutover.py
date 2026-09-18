@@ -27,9 +27,11 @@ automated. They depend on what the operator has running, and doing them early is
 things the runbook forbids.
 
 Usage:
-    export PRODUCTION_DSN='<direct connection string, not the pooler>'
-    .venv/bin/python scripts/t020_cutover.py --dsn "$PRODUCTION_DSN"
-    .venv/bin/python scripts/t020_cutover.py --dsn "$PRODUCTION_DSN" --start-at 5
+    .venv/bin/python scripts/t020_cutover.py
+    .venv/bin/python scripts/t020_cutover.py --start-at 5
+
+The DSN comes from --dsn, else $PRODUCTION_DSN, else the direct-connection key in .env. It must
+be a direct connection; preflight refuses a pooler.
 
 Exit codes: 0 every step through verification passed, 1 a gate failed, 2 could not run.
 """
@@ -81,6 +83,11 @@ def compare_counts(plan: Dict[str, Any], baseline_counts: Dict[str, int]) -> Lis
         if plan[plan_key] != baseline_counts[audit_key]
     ]
 
+
+# libpq honours this itself, which is what makes a host that accepts no connection fail rather
+# than hang. The wall-clock timeout on the probe is the backstop for whatever gets past connect.
+CONNECT_TIMEOUT_SECONDS = "15"
+PROBE_TIMEOUT = 45
 
 APPLY_CONFIRMATION = "APPLY"
 QUIESCE_CONFIRMATION = "QUIESCED"
@@ -185,17 +192,35 @@ class Ran:
         return self.returncode == 0
 
 
-def run(command: Sequence[str], capture: bool = False, echo: bool = False) -> Ran:
+def run(
+    command: Sequence[str],
+    capture: bool = False,
+    echo: bool = False,
+    timeout: Optional[int] = None,
+) -> Ran:
     """Run a command. `capture` keeps the output for inspection; otherwise it streams.
 
     stderr is never discarded. The reason a step failed is usually only there.
+
+    A captured child gets no stdin. Captured output and an inherited terminal is how a command
+    that decides to ask something -- psql wanting a password, say -- waits forever while the
+    operator sees nothing at all.
     """
     if echo:
         say(f"  $ {' '.join(redact(part) for part in command)}")
-    if capture:
-        completed = subprocess.run(command, capture_output=True, text=True)
-        return Ran(completed.returncode, completed.stdout, completed.stderr)
-    completed = subprocess.run(command, stderr=subprocess.PIPE, text=True)
+    try:
+        if capture:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=timeout,
+            )
+            return Ran(completed.returncode, completed.stdout, completed.stderr)
+        completed = subprocess.run(command, stderr=subprocess.PIPE, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return Ran(-1, "", f"gave no answer in {timeout}s")
     if completed.stderr:
         sys.stderr.write(completed.stderr)
     return Ran(completed.returncode, "", completed.stderr or "")
@@ -217,8 +242,13 @@ def dsn_host(dsn: str) -> str:
     return authority.split("/", 1)[0]
 
 
-def psql_value(psql: Path, dsn: str, sql: str) -> Ran:
-    return run([str(psql), dsn, "-tAX", "-v", "ON_ERROR_STOP=1", "-c", sql], capture=True)
+def psql_value(psql: Path, dsn: str, sql: str, timeout: int = PROBE_TIMEOUT) -> Ran:
+    """One value out of the database, or a failure. Never a prompt, never an unbounded wait."""
+    return run(
+        [str(psql), dsn, "-tAX", "-w", "-v", "ON_ERROR_STOP=1", "-c", sql],
+        capture=True,
+        timeout=timeout,
+    )
 
 
 # ───────────────────────────── step 0: preflight ─────────────────────────────
@@ -254,6 +284,12 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
     run_dir.mkdir(parents=True, exist_ok=True)
     free_gb = shutil.disk_usage(run_dir).free / 1024**3
 
+    say(f"  host            {host}")
+    say(f"  run dir         {run_dir} ({free_gb:.1f} GiB free)")
+    # the value in force, not the default: an environment override that the line does not
+    # reflect is the same class of untruth this whole script exists to remove
+    say(f"  connecting ... ({os.environ['PGCONNECT_TIMEOUT']}s connect timeout)")
+
     probe = psql_value(
         psql,
         dsn,
@@ -261,18 +297,19 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
     )
     if not probe.ok:
         raise Unrunnable(
-            "Could not read the database. The credentials were rotated on 17/09/2026 -- check "
-            f".env and the DSN you exported.\n{probe.stderr.strip()}"
+            "Could not reach the database.\n"
+            f"  psql said: {probe.stderr.strip() or '(nothing)'}\n"
+            "  Check the direct-connection key in .env. Two causes produce exactly this: a\n"
+            "  password that no longer matches after the 17/09/2026 rotation, and a host that\n"
+            "  accepts no connection from this network."
         )
     database, user, server_version = [field.strip() for field in probe.stdout.strip().split("|")]
     server_major = int(server_version.split(".")[0])
     dump_major = tool_major_version(pg_dump)
 
-    say(f"  host            {host}")
     say(f"  database        {database} as {user}")
     say(f"  server          {server_version}")
     say(f"  pg_dump         {dump_major} ({pg_dump})")
-    say(f"  run dir         {run_dir} ({free_gb:.1f} GiB free)")
 
     if dump_major is not None and dump_major < server_major:
         raise Unrunnable(f"pg_dump {dump_major} cannot dump a server {server_major} cluster. Upgrade libpq.")
@@ -344,7 +381,7 @@ def step_snapshot(tools: Dict[str, Any], dsn: str, run_dir: Path, journal: Journ
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     target = run_dir / f"production-{stamp}.dump"
 
-    dumped = run([str(tools["pg_dump"]), dsn, "-Fc", "-f", str(target)], capture=True)
+    dumped = run([str(tools["pg_dump"]), dsn, "-w", "-Fc", "-f", str(target)], capture=True)
     if not dumped.ok:
         raise Stop(
             "pg_dump failed, so there is no snapshot and nothing after this step may run.\n"
@@ -425,7 +462,7 @@ def step_baseline(dsn: str, run_dir: Path, journal: Journal) -> Dict[str, Any]:
 def step_schema(tools: Dict[str, Any], dsn: str, journal: Journal) -> None:
     heading(4, "apply the schema")
     result = run(
-        [str(tools["psql"]), dsn, "-v", "ON_ERROR_STOP=1", "-f", str(MIGRATION_SQL)],
+        [str(tools["psql"]), dsn, "-w", "-v", "ON_ERROR_STOP=1", "-f", str(MIGRATION_SQL)],
         echo=True,
     )
     if not result.ok:
@@ -604,6 +641,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="skip the typed confirmation in step 1, having already stopped every writer",
     )
     args = parser.parse_args(argv)
+    os.environ.setdefault("PGCONNECT_TIMEOUT", CONNECT_TIMEOUT_SECONDS)
     if not args.dsn:
         args.dsn = os.environ.get("PRODUCTION_DSN", "") or dsn_from_env_file()
 
