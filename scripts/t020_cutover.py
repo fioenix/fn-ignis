@@ -43,11 +43,13 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from urllib.parse import urlsplit, urlunsplit
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
@@ -134,8 +136,18 @@ class Journal:
         }
         self._flush()
 
+    def begin(self, step: int, title: str) -> None:
+        """Written before the step runs, not after it succeeds.
+
+        A run that is killed mid-step used to leave nothing behind: the journal ended at the
+        last step that finished, so which step was in flight -- and therefore whether anything
+        had been written -- had to be guessed. It happened during a real apply.
+        """
+        self.data["steps"].append({"step": step, "title": title, "at": now(), "state": "started"})
+        self._flush()
+
     def record(self, step: int, title: str, **evidence: Any) -> None:
-        self.data["steps"].append({"step": step, "title": title, "at": now(), **evidence})
+        self.data["steps"].append({"step": step, "title": title, "at": now(), "state": "done", **evidence})
         self._flush()
 
     def _flush(self) -> None:
@@ -197,6 +209,7 @@ def run(
     capture: bool = False,
     echo: bool = False,
     timeout: Optional[int] = None,
+    env: Optional[Dict[str, str]] = None,
 ) -> Ran:
     """Run a command. `capture` keeps the output for inspection; otherwise it streams.
 
@@ -216,14 +229,39 @@ def run(
                 text=True,
                 stdin=subprocess.DEVNULL,
                 timeout=timeout,
+                env=env,
             )
             return Ran(completed.returncode, completed.stdout, completed.stderr)
-        completed = subprocess.run(command, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        completed = subprocess.run(command, stderr=subprocess.PIPE, text=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         return Ran(-1, "", f"gave no answer in {timeout}s")
     if completed.stderr:
         sys.stderr.write(completed.stderr)
     return Ran(completed.returncode, "", completed.stderr or "")
+
+
+def without_password(dsn: str) -> Tuple[str, Dict[str, str]]:
+    """The DSN with its password removed, and the environment that carries it instead.
+
+    argv is world-readable. On this machine `ps` printed a full connection string, password
+    included, to an unprivileged process during a real run -- so the password travels in the
+    environment, which `ps` cannot show another user, and never as an argument.
+
+    psql and pg_dump take it from PGPASSWORD. The three migration scripts already default their
+    --dsn from DATABASE_URL, so they are given the whole DSN that way and no --dsn at all.
+    """
+    parsed = urlsplit(dsn)
+    if not parsed.password:
+        return dsn, dict(os.environ)
+    host = parsed.hostname or ""
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    authority = f"{parsed.username}@{host}" if parsed.username else host
+    stripped = urlunsplit((parsed.scheme, authority, parsed.path, parsed.query, parsed.fragment))
+    environment = dict(os.environ)
+    environment["PGPASSWORD"] = parsed.password
+    environment["DATABASE_URL"] = dsn
+    return stripped, environment
 
 
 def redact(part: str) -> str:
@@ -244,10 +282,12 @@ def dsn_host(dsn: str) -> str:
 
 def psql_value(psql: Path, dsn: str, sql: str, timeout: int = PROBE_TIMEOUT) -> Ran:
     """One value out of the database, or a failure. Never a prompt, never an unbounded wait."""
+    safe, environment = without_password(dsn)
     return run(
-        [str(psql), dsn, "-tAX", "-w", "-v", "ON_ERROR_STOP=1", "-c", sql],
+        [str(psql), safe, "-tAX", "-w", "-v", "ON_ERROR_STOP=1", "-c", sql],
         capture=True,
         timeout=timeout,
+        env=environment,
     )
 
 
@@ -338,6 +378,7 @@ order by query_start nulls last
 
 def step_quiesce(tools: Dict[str, Any], dsn: str, journal: Journal, assume: bool) -> None:
     heading(1, "quiesce every writer")
+    journal.begin(1, "quiesce")
     result = psql_value(tools["psql"], dsn, QUIESCE_SQL)
     if not result.ok:
         raise Stop(f"Could not read pg_stat_activity.\n{result.stderr.strip()}")
@@ -378,10 +419,16 @@ def confirm(prompt: str, expected: str, on_refusal: str) -> None:
 
 def step_snapshot(tools: Dict[str, Any], dsn: str, run_dir: Path, journal: Journal) -> Path:
     heading(2, "snapshot, and prove it reads back")
+    journal.begin(2, "snapshot")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     target = run_dir / f"production-{stamp}.dump"
 
-    dumped = run([str(tools["pg_dump"]), dsn, "-w", "-Fc", "-f", str(target)], capture=True)
+    safe, environment = without_password(dsn)
+    dumped = run(
+        [str(tools["pg_dump"]), safe, "-w", "-Fc", "-f", str(target)],
+        capture=True,
+        env=environment,
+    )
     if not dumped.ok:
         raise Stop(
             "pg_dump failed, so there is no snapshot and nothing after this step may run.\n"
@@ -410,6 +457,7 @@ def step_snapshot(tools: Dict[str, Any], dsn: str, run_dir: Path, journal: Journ
 
 def step_baseline(dsn: str, run_dir: Path, journal: Journal) -> Dict[str, Any]:
     heading(3, "baseline, from the corpus about to be migrated")
+    journal.begin(3, "baseline")
     baseline_path = run_dir / "source-observation-baseline.json"
     rows_path = run_dir / "source-observation-rows.json"
 
@@ -417,14 +465,13 @@ def step_baseline(dsn: str, run_dir: Path, journal: Journal) -> Dict[str, Any]:
         [
             str(VENV_PYTHON),
             str(REPO / "scripts" / "migration_reconciliation_audit.py"),
-            "--dsn",
-            dsn,
             "--json-out",
             str(baseline_path),
             "--rows-out",
             str(rows_path),
         ],
         echo=True,
+        env=without_password(dsn)[1],
     )
     if not result.ok:
         raise Stop(
@@ -461,9 +508,12 @@ def step_baseline(dsn: str, run_dir: Path, journal: Journal) -> Dict[str, Any]:
 
 def step_schema(tools: Dict[str, Any], dsn: str, journal: Journal) -> None:
     heading(4, "apply the schema")
+    journal.begin(4, "schema")
+    safe, environment = without_password(dsn)
     result = run(
-        [str(tools["psql"]), dsn, "-w", "-v", "ON_ERROR_STOP=1", "-f", str(MIGRATION_SQL)],
+        [str(tools["psql"]), safe, "-w", "-v", "ON_ERROR_STOP=1", "-f", str(MIGRATION_SQL)],
         echo=True,
+        env=environment,
     )
     if not result.ok:
         raise Stop(f"psql exited {result.returncode} applying {MIGRATION_SQL.name}.")
@@ -476,6 +526,7 @@ def step_schema(tools: Dict[str, Any], dsn: str, journal: Journal) -> None:
 
 def step_dry_run(dsn: str, baseline: Dict[str, Any], journal: Journal) -> None:
     heading(5, "dry run, compared with the baseline by value")
+    journal.begin(5, "dry run")
     try:
         import backfill_observations as backfill_module
     except Exception as exc:  # pragma: no cover - import failure is a broken checkout
@@ -532,15 +583,15 @@ def step_apply(dsn: str, journal: Journal) -> None:
         APPLY_CONFIRMATION,
         "Nothing was written; the database is as step 4 left it.",
     )
+    journal.begin(6, "apply")
     result = run(
         [
             str(VENV_PYTHON),
             str(REPO / "scripts" / "backfill_observations.py"),
-            "--dsn",
-            dsn,
             "--apply",
         ],
         echo=True,
+        env=without_password(dsn)[1],
     )
     journal.record(6, "apply", exit_code=result.returncode)
     if not result.ok:
@@ -555,6 +606,7 @@ def step_apply(dsn: str, journal: Journal) -> None:
 
 def step_verify(dsn: str, run_dir: Path, journal: Journal) -> Dict[str, Any]:
     heading(7, "verify against the baseline from step 3")
+    journal.begin(7, "verify")
     baseline_path = run_dir / "source-observation-baseline.json"
     report_path = run_dir / "post-migration-verification.json"
     if not baseline_path.exists():
@@ -567,14 +619,13 @@ def step_verify(dsn: str, run_dir: Path, journal: Journal) -> Dict[str, Any]:
         [
             str(VENV_PYTHON),
             str(REPO / "scripts" / "post_migration_verification.py"),
-            "--dsn",
-            dsn,
             "--baseline",
             str(baseline_path),
             "--json-out",
             str(report_path),
         ],
         echo=True,
+        env=without_password(dsn)[1],
     )
     report = json.loads(report_path.read_text()) if report_path.exists() else {}
     journal.record(
@@ -614,6 +665,10 @@ def closing_note(journal: Journal, report: Dict[str, Any]) -> None:
         say(f"    {comparison['set']:<22} {comparison['actual_digest']}")
 
 
+def _interrupt(signum: int, _frame: Any) -> None:
+    raise KeyboardInterrupt(f"signal {signum}")
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -642,6 +697,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
     os.environ.setdefault("PGCONNECT_TIMEOUT", CONNECT_TIMEOUT_SECONDS)
+    # SIGHUP is a closed terminal, SIGTERM a kill. Both used to end the process with no journal
+    # entry at all; both now take the same path as Ctrl-C.
+    signal.signal(signal.SIGHUP, _interrupt)
+    signal.signal(signal.SIGTERM, _interrupt)
     if not args.dsn:
         args.dsn = os.environ.get("PRODUCTION_DSN", "") or dsn_from_env_file()
 
@@ -702,9 +761,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         say()
         say(f"  CANNOT RUN: {exc}")
         return 2
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as interrupt:
         say()
-        say("  Interrupted. If step 6 had started, it is one transaction: check before retrying.")
+        say(f"  INTERRUPTED ({interrupt or 'Ctrl-C'}).")
+        if journal is not None:
+            journal.record(-1, "interrupted", reason=str(interrupt) or "Ctrl-C")
+            say(f"  Journal: {shown(journal.path)}")
+        say("  The backfill is one transaction, so an interrupted write rolled back -- but the")
+        say("  journal's last entry is what says which step was in flight. Rerun --start-at 5:")
+        say("  the dry run reports how many planned observations already exist, which is 0 after")
+        say("  a rollback and the full count after a commit.")
         return 2
 
 

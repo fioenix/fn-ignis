@@ -21,6 +21,7 @@ from t020_cutover import (  # noqa: E402
     dsn_host,
     preflight,
     redact,
+    without_password,
 )
 
 BASELINE = {
@@ -65,3 +66,26 @@ def test_a_dsn_never_reaches_the_terminal_with_its_password():
     dsn = "postgresql://postgres:hunter2@db.example.com:5432/postgres"
     assert "hunter2" not in redact(dsn)
     assert dsn_host(dsn) == "db.example.com:5432"
+
+
+def test_the_password_travels_in_the_environment_not_in_argv():
+    """argv is world-readable.
+
+    During a real run `ps` printed a full connection string, password included, to an
+    unprivileged process on the same machine. Whatever else changes, the string handed to psql
+    must not carry the password, and the three migration scripts must be given it the way they
+    already accept it -- DATABASE_URL -- rather than on a command line.
+    """
+    dsn = "postgresql://postgres:hunter2@db.example.com:5432/postgres"
+    safe, environment = without_password(dsn)
+
+    assert "hunter2" not in safe
+    assert safe == "postgresql://postgres@db.example.com:5432/postgres"
+    assert environment["PGPASSWORD"] == "hunter2"
+    assert environment["DATABASE_URL"] == dsn
+
+
+def test_a_dsn_with_no_password_is_left_alone():
+    dsn = "postgresql://postgres@db.example.com:5432/postgres"
+    safe, _ = without_password(dsn)
+    assert safe == dsn
