@@ -34,6 +34,23 @@ python scripts/migration_reconciliation_audit.py \
 Đây là thứ tự canonical. Gate runtime và guard của pruner chỉ làm hệ thống fail closed nếu ai đó
 vi phạm thứ tự; chúng không phải giấy phép đổi thứ tự.
 
+`scripts/t020_cutover.py` chạy các bước 2–8 dưới đây theo đúng thứ tự này và dừng ở gate đầu tiên
+không đạt. Nó tồn tại vì một gate trong danh sách này không có ai gác: `backfill_observations.py
+--dry-run` exit 0 dù bốn member count khớp baseline, lệch baseline, hay không tìm thấy schema đích,
+nên gate ở bước 6 chỉ nằm trong sự chú ý của người đọc. Script so bốn con số bằng giá trị, đọc lại
+snapshot bằng `pg_restore --list` thay vì tin exit code của `pg_dump`, từ chối DSN đi qua pooler, và
+ghi journal JSON cho mọi bước. Dùng một DSN duy nhất cho audit, backfill và verification, vì hai lần
+đọc cùng một corpus qua hai đường có thể cho hai digest khác nhau.
+
+```bash
+export PRODUCTION_DSN='<direct connection, không phải pooler>'
+python scripts/t020_cutover.py --dsn "$PRODUCTION_DSN"
+```
+
+Trên macOS, `psql`/`pg_dump`/`pg_restore` đến từ `libpq` keg-only, nên không có trên PATH mặc định:
+`brew install libpq` rồi thêm `/opt/homebrew/opt/libpq/bin` vào PATH. Script tự tìm ở đó nếu PATH
+thiếu, và từ chối chạy khi `pg_dump` cũ hơn server.
+
 1. Merge PR chứa runtime mới. Có thể stage/build artifact trước, nhưng **không khởi động runtime
    mới**.
 2. Quiesce toàn bộ ingress và runtime cũ đang có khả năng ghi.
