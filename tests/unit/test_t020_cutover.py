@@ -273,7 +273,9 @@ def test_the_same_count_with_a_different_digest_is_still_drift(name):
 ARCHIVE_LISTING = "; Archive created at 2026-09-20\n250; 1259 16384 TABLE public trend_signals postgres\n"
 
 
-IDENTITY = {"database": "postgres", "database_oid": "5", "cluster_fingerprint": "f" * 32}
+# The shape of a default catalog is not an identity: two freshly initialised clusters were
+# measured holding the same databases at the same OIDs. Only the cluster identifier differs.
+IDENTITY = {"database": "postgres", "database_oid": "5", "system_identifier": "7687662728097828896"}
 
 
 def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=None, identity=None):
@@ -282,7 +284,12 @@ def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=
     Only the network is stubbed. Every gate, every comparison and the order the steps run in are
     the real ones, which is the part under test.
     """
-    applied = []
+    class Applied(list):
+        """A list that also carries the measurements the run took."""
+
+        taken: list = []
+
+    applied = Applied()
     remaining = list(measurements)
 
     monkeypatch.setattr(
@@ -304,7 +311,14 @@ def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=
     monkeypatch.setattr(t020_cutover, "psql_value", lambda *a, **k: t020_cutover.Ran(0, "", ""))
     monkeypatch.setattr(t020_cutover, "step_dry_run", lambda *a, **k: None)
     monkeypatch.setattr(t020_cutover, "step_apply", lambda *a, **k: applied.append(True))
-    monkeypatch.setattr(t020_cutover, "legacy_digests", lambda dsn: remaining.pop(0))
+    taken = []
+
+    def measure(dsn):
+        taken.append(dsn)
+        return remaining.pop(0)
+
+    monkeypatch.setattr(t020_cutover, "legacy_digests", measure)
+    applied.taken = taken
 
     measured = baseline_digests if baseline_digests is not None else measurements[0]
     baseline_file = dict(
@@ -448,7 +462,7 @@ def test_a_resume_with_no_earlier_journal_is_refused(monkeypatch, tmp_path):
 def test_a_resume_against_another_database_is_refused(monkeypatch, tmp_path, capsys):
     """A baseline describes one corpus. Resuming against a second one migrates it blind."""
     _one_completed_run(monkeypatch, tmp_path)
-    elsewhere = dict(IDENTITY, database_oid="9", cluster_fingerprint="e" * 32)
+    elsewhere = dict(IDENTITY, database_oid="9", system_identifier="7687670984410218528")
 
     code, applied = _resume(monkeypatch, tmp_path, identity=elsewhere)
 
@@ -606,3 +620,87 @@ def test_no_shape_of_password_survives_into_the_command_line(dsn):
     assert "pw" not in safe
     assert "password" not in conninfo_to_dict(safe)
     assert environment["PGPASSWORD"] == "pw"
+
+
+# --- identity has to name a deployment, not the shape of a default catalog ---------------------
+
+# Measured, not assumed: two independently initialised timescale/timescaledb-ha:pg16 clusters
+# both answered `postgres|5|ed7a80635ab66418335140c1261b7a11` to the catalog-shape query. Their
+# system_identifiers were 7687662728097828896 and 7687670984410218528.
+ANOTHER_DEPLOYMENT = dict(IDENTITY, system_identifier="7687670984410218528")
+
+
+def test_a_second_deployment_with_the_same_catalog_shape_is_still_refused(monkeypatch, tmp_path):
+    """Same database name, same OID, same set of databases -- a different cluster.
+
+    This is the whole finding: a fresh Postgres always holds `postgres` at OID 5 beside the two
+    templates, so every deployment that has not been reshaped looks alike.
+    """
+    _one_completed_run(monkeypatch, tmp_path)
+
+    code, applied = _resume(monkeypatch, tmp_path, identity=ANOTHER_DEPLOYMENT)
+
+    assert code == 2
+    assert applied == []
+
+
+def test_the_same_cluster_identifier_is_what_lets_a_resume_through(monkeypatch, tmp_path):
+    """Negative control: only the cluster identifier changed above, and only it matters here."""
+    _one_completed_run(monkeypatch, tmp_path)
+    code, applied = _resume(monkeypatch, tmp_path, identity=dict(IDENTITY))
+    assert code == 0
+    assert applied == [True]
+
+
+UNIDENTIFIED = {"database": "postgres", "database_oid": "5", "system_identifier": ""}
+
+
+def test_an_unreadable_cluster_identifier_falls_back_to_the_corpus(monkeypatch, tmp_path, capsys):
+    """A provider may revoke EXECUTE on pg_control_system().
+
+    Refusing every resume there would be a real regression, and trusting the catalog shape would
+    be the defect again. What is left that actually identifies the corpus is the corpus: 18,597
+    observations hashing to the journal's digest is not a coincidence between deployments.
+
+    Asserted as "the corpus was measured for this" rather than "the run did not object", because
+    doing nothing at all also produces a run that does not object.
+    """
+    _one_completed_run(monkeypatch, tmp_path)
+
+    code, applied = _resume(
+        monkeypatch, tmp_path, measurements=[_measurement(), _measurement()], identity=UNIDENTIFIED
+    )
+
+    assert code == 0
+    assert applied == [True]
+    assert len(applied.taken) == 2, "one measurement to identify the corpus, one before the write"
+    assert "corpus" in capsys.readouterr().out
+
+
+def test_an_unreadable_identifier_and_a_corpus_that_differs_is_refused(monkeypatch, tmp_path):
+    _one_completed_run(monkeypatch, tmp_path)
+
+    code, applied = _resume(
+        monkeypatch,
+        tmp_path,
+        measurements=[_measurement(sources="z" * 64), _measurement()],
+        identity=UNIDENTIFIED,
+    )
+
+    assert code in (1, 2)
+    assert applied == []
+    assert len(applied.taken) == 1, "it must stop on the identifying measurement, not after it"
+
+
+def test_an_unreadable_identifier_and_an_empty_corpus_identifies_nothing(monkeypatch, tmp_path):
+    """Every empty corpus hashes alike, so a match between two of them says nothing."""
+    empty = {"digests": {name: "e" * 64 for name in CANONICAL}, "member_counts": {name: 0 for name in CANONICAL}}
+    _orchestrator_harness(monkeypatch, tmp_path, [empty] * 3, baseline_digests=empty)
+    assert t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"]) == 0
+
+    code, applied = _resume(
+        monkeypatch, tmp_path, measurements=[empty, empty], identity=UNIDENTIFIED
+    )
+
+    assert code == 2
+    assert applied == []

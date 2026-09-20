@@ -558,21 +558,21 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
         )
     database, user, server_version = [field.strip() for field in probe.stdout.strip().split("|")]
 
-    fingerprint = psql_value(psql, dsn, IDENTITY_SQL)
-    if not fingerprint.ok:
+    which_database = psql_value(psql, dsn, IDENTITY_SQL)
+    if not which_database.ok:
         raise Unrunnable(
             "Could not read this database's identity.\n"
-            f"  psql said: {fingerprint.stderr.strip() or '(nothing)'}\n"
+            f"  psql said: {which_database.stderr.strip() or '(nothing)'}\n"
             "  A resumed run has nothing to check its journal against without it."
         )
-    identity_name, identity_oid, cluster_fingerprint = [
-        field.strip() for field in fingerprint.stdout.strip().split("|")
-    ]
-    identity = {
-        "database": identity_name,
-        "database_oid": identity_oid,
-        "cluster_fingerprint": cluster_fingerprint,
-    }
+    which_cluster = psql_value(psql, dsn, SYSTEM_IDENTIFIER_SQL)
+    identity = identity_fields(
+        which_database.stdout, which_cluster.stdout if which_cluster.ok else ""
+    )
+    if identity["system_identifier"]:
+        say(f"  cluster         {identity['system_identifier']}")
+    else:
+        say("  cluster         identifier not readable on this connection")
     server_major = int(server_version.split(".")[0])
     dump_major = tool_major_version(pg_dump)
 
@@ -637,6 +637,17 @@ def identity_differences(recorded: Dict[str, Any], observed: Dict[str, Any]) -> 
     ]
 
 
+def cluster_identified(recorded: Dict[str, Any], observed: Dict[str, Any]) -> bool:
+    """Whether the two runs agree on a value that actually names one cluster.
+
+    Only system_identifier does. The database name and OID separate two databases inside one
+    cluster and say nothing at all between clusters, so agreeing on them is not identification.
+    """
+    return bool(recorded.get("system_identifier")) and recorded.get("system_identifier") == observed.get(
+        "system_identifier"
+    )
+
+
 def verified_artifact(entry: Dict[str, Any], key: str, what: str) -> Path:
     """The file the earlier run wrote, proven to still be that file."""
     recorded = entry.get(key)
@@ -661,7 +672,7 @@ def verified_artifact(entry: Dict[str, Any], key: str, what: str) -> Path:
 
 
 def resume_context(
-    run_dir: Path, supplied: Optional[Path], tools: Dict[str, Any], start_at: int
+    run_dir: Path, supplied: Optional[Path], tools: Dict[str, Any], start_at: int, dsn: str
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Bind this run to the run it resumes: same database, same files, same measurement.
 
@@ -686,6 +697,9 @@ def resume_context(
             + "\n  The baseline describes that corpus, not this one."
         )
     say(f"  same database   {recorded_identity.get('database')} (oid {recorded_identity.get('database_oid')})")
+    identified = cluster_identified(recorded_identity, tools["identity"])
+    if identified:
+        say(f"  same cluster    {recorded_identity['system_identifier']}")
 
     if start_at > 2:
         snapshot = verified_artifact(last_done(data, "snapshot") or {}, "path", "snapshot")
@@ -698,7 +712,9 @@ def resume_context(
         baseline = json.loads(baseline_path.read_text())
         # The reference the pre-apply gate compares against is the earlier run's measurement.
         # One taken now could only ever agree with whatever it found.
-        return baseline, {"digests": entry["digests"], "member_counts": entry["member_counts"]}
+        standstill = {"digests": entry["digests"], "member_counts": entry["member_counts"]}
+        identify_by_corpus(dsn, standstill, identified)
+        return baseline, standstill
 
     quiesce = last_done(data, "quiesce") or {}
     standstill = quiesce.get("standstill")
@@ -706,22 +722,54 @@ def resume_context(
         raise Unrunnable(
             f"{shown(path)} records no corpus measurement to resume against. Start from step 1."
         )
+    identify_by_corpus(dsn, standstill, identified)
     return {}, standstill
+
+
+def identify_by_corpus(dsn: str, standstill: Dict[str, Any], identified: bool) -> None:
+    """When the cluster will not name itself, make the corpus do it.
+
+    A provider may revoke EXECUTE on pg_control_system(). Refusing every resume there would be a
+    real regression, and falling back to the shape of the catalog is the defect this replaced.
+    What is left that actually distinguishes one deployment from another is the data: a corpus
+    hashing to the journal's four digests is not a coincidence between two databases.
+    """
+    if identified:
+        return
+    if not any(standstill["member_counts"].values()):
+        raise Unrunnable(
+            "This connection will not name its cluster, and the earlier run measured an empty\n"
+            "  corpus. Every empty corpus hashes alike, so nothing here distinguishes this\n"
+            "  database from any other. Start from step 1."
+        )
+    say("  the cluster will not name itself; identifying this database by its corpus instead")
+    require_no_drift(standstill, legacy_digests(dsn), "against the journal's own measurement")
 
 
 # ───────────────────────────── step 1: quiesce ─────────────────────────────
 
-# The database, its OID, and a fingerprint of every database in the cluster. All three are
-# readable without any grant, which the privileged alternatives -- pg_control_system() and its
-# system_identifier -- are not. It is a fingerprint and not a proof: two clusters could in
-# principle hold the same set of database OIDs and names. What it does rule out is the case this
-# gate exists for, a journal from one deployment resumed against another.
+# Which database, within whatever cluster this connection reached.
 IDENTITY_SQL = (
     "select current_database()"
     " || '|' || (select oid from pg_database where datname = current_database())::text"
-    " || '|' || (select md5(string_agg(oid::text || ':' || datname, ',' order by oid))"
-    " from pg_database)"
 )
+
+# Which cluster. initdb writes this once from the clock and a random value, so it is the only
+# non-privileged answer measured to differ between two freshly initialised servers. The shape of
+# the catalog is not: two independent timescale/timescaledb-ha:pg16 clusters both reported
+# `postgres` at OID 5 beside the two templates, hashing identically, because that is what every
+# default cluster holds. EXECUTE on pg_control_system() is held by PUBLIC (proacl `=X/postgres`),
+# but a provider may revoke it, so an unreadable answer is handled rather than assumed.
+SYSTEM_IDENTIFIER_SQL = "select system_identifier::text from pg_control_system()"
+
+
+def identity_fields(identity_row: str, system_identifier: str) -> Dict[str, str]:
+    database, database_oid = [field.strip() for field in identity_row.strip().split("|")]
+    return {
+        "database": database,
+        "database_oid": database_oid,
+        "system_identifier": system_identifier.strip(),
+    }
 
 QUIESCE_SQL = """
 select pid, coalesce(nullif(application_name, ''), '?'), state, coalesce(query_start::text, '-')
@@ -1163,7 +1211,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.start_at > 1:
             say()
             say(f"  --start-at {args.start_at}: steps 1 to {args.start_at - 1} are being skipped.")
-            baseline, standstill = resume_context(args.run_dir, args.journal, tools, args.start_at)
+            baseline, standstill = resume_context(
+                args.run_dir, args.journal, tools, args.start_at, args.dsn
+            )
 
         journal = Journal(
             args.run_dir / f"t020-run-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.json",
