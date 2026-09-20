@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
@@ -109,15 +110,20 @@ def test_the_password_travels_in_the_environment_not_in_argv():
     safe, environment = without_password(dsn)
 
     assert "hunter2" not in safe
-    assert safe == "postgresql://postgres@db.example.com:5432/postgres"
+    assert conninfo_to_dict(safe) == {
+        "user": "postgres",
+        "host": "db.example.com",
+        "port": "5432",
+        "dbname": "postgres",
+    }
     assert environment["PGPASSWORD"] == "hunter2"
     assert environment["DATABASE_URL"] == dsn
 
 
-def test_a_dsn_with_no_password_is_left_alone():
+def test_a_dsn_with_no_password_keeps_every_other_field():
     dsn = "postgresql://postgres@db.example.com:5432/postgres"
     safe, _ = without_password(dsn)
-    assert safe == dsn
+    assert conninfo_to_dict(safe) == conninfo_to_dict(dsn)
 
 
 # --- the child processes have to be pointed at the DSN this run chose --------------------------
@@ -136,7 +142,7 @@ def test_a_passwordless_dsn_still_overrides_an_inherited_database_url(monkeypatc
     monkeypatch.setenv("DATABASE_URL", DB_A)
     safe, environment = without_password(DB_B)
 
-    assert safe == DB_B
+    assert conninfo_to_dict(safe)["host"] == "db-b.example.com"
     assert environment["DATABASE_URL"] == DB_B
 
 
@@ -159,15 +165,15 @@ def test_a_percent_encoded_password_reaches_libpq_decoded():
 
     assert environment["PGPASSWORD"] == "hun@ter#2"
     assert "hun%40ter" not in safe
-    assert safe == "postgresql://postgres@db.example.com:5432/postgres"
+    assert conninfo_to_dict(safe)["user"] == "postgres"
 
 
-def test_a_percent_encoded_username_is_not_mangled_on_the_way_through():
-    """Negative control for the decode above: the user name keeps its own escaping."""
+def test_a_percent_encoded_username_arrives_as_the_name_it_denotes():
+    """Negative control for the decode above: the user name is not left double-escaped."""
     dsn = "postgresql://po%40st:pw@db.example.com:5432/postgres"
     safe, _ = without_password(dsn)
 
-    assert safe == "postgresql://po%40st@db.example.com:5432/postgres"
+    assert conninfo_to_dict(safe)["user"] == "po@st"
 
 
 BALANCED_BASELINE = {
@@ -548,3 +554,55 @@ def test_the_journal_shows_the_write_started_and_never_finished(monkeypatch, tmp
     steps = json.loads(sorted(tmp_path.glob("t020-run-*.json"))[-1].read_text())["steps"]
     assert {"step": 6, "state": "started"}.items() <= [e for e in steps if e["step"] == 6][0].items()
     assert not [e for e in steps if e["step"] == 6 and e["state"] == "done"]
+
+
+# --- libpq decides what a DSN says, not a hand-rolled URI split --------------------------------
+
+
+def test_a_password_in_the_query_string_does_not_reach_argv():
+    """libpq accepts `?password=`, and urlsplit().password reports None for it.
+
+    The hand-rolled split therefore concluded there was no password to move, handed the whole
+    DSN to psql on the command line, and dropped PGPASSWORD -- the exact failure the environment
+    was introduced to prevent, for a DSN shape libpq treats as ordinary.
+    """
+    dsn = "postgresql://user@host:5432/db?password=query-secret"
+    safe, environment = without_password(dsn)
+
+    assert "query-secret" not in safe
+    assert environment["PGPASSWORD"] == "query-secret"
+
+
+def test_an_ipv6_literal_host_survives_being_rebuilt():
+    """Reassembling `user@host:port` by hand loses the brackets an IPv6 literal needs.
+
+    `[2001:db8::1]:5432` came back as `2001:db8::1:5432`, which names no host at all -- and the
+    only reachable route to this deployment is decided by address family.
+    """
+    dsn = "postgresql://u:pw@[2001:db8::1]:5432/db"
+    safe, environment = without_password(dsn)
+
+    assert "pw" not in safe
+    parsed = conninfo_to_dict(safe)
+    assert parsed["host"] == "2001:db8::1"
+    assert parsed["port"] == "5432"
+    assert "password" not in parsed
+    assert environment["PGPASSWORD"] == "pw"
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "postgresql://user:pw@host:5432/db",
+        "postgresql://user@host:5432/db?password=pw",
+        "postgresql://u:pw@[2001:db8::1]:5432/db",
+        "host=host port=5432 dbname=db user=user password=pw",
+    ],
+)
+def test_no_shape_of_password_survives_into_the_command_line(dsn):
+    """One assertion over every shape libpq accepts, including keyword/value."""
+    safe, environment = without_password(dsn)
+
+    assert "pw" not in safe
+    assert "password" not in conninfo_to_dict(safe)
+    assert environment["PGPASSWORD"] == "pw"

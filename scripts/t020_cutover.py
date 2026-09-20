@@ -64,8 +64,12 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import unquote, urlsplit, urlunsplit
 from typing import Any, Dict, List, Optional, Sequence, Tuple
+
+# libpq's own parser, not a URI split. It is the only thing that agrees with what psql, pg_dump
+# and psycopg will actually connect to: it reads ?password= and keyword/value strings, decodes
+# percent-escapes, and keeps an IPv6 literal a host rather than a colon-separated string.
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
@@ -411,6 +415,20 @@ def run(
     return Ran(completed.returncode, "", completed.stderr or "")
 
 
+def dsn_fields(dsn: str) -> Dict[str, str]:
+    """Every connection parameter libpq reads out of this DSN.
+
+    Hand-rolled URI splitting got two shapes wrong that libpq treats as ordinary. A password
+    given as `?password=` is invisible to urlsplit().password, so the old code concluded there
+    was nothing to move and handed the whole string to psql on the command line. An IPv6 literal
+    lost its brackets on the way back into a URI and stopped naming a host at all.
+    """
+    try:
+        return conninfo_to_dict(dsn)
+    except Exception as exc:
+        raise Unrunnable(f"libpq cannot read this connection string: {exc}")
+
+
 def without_password(dsn: str) -> Tuple[str, Dict[str, str]]:
     """The DSN with its password removed, and the environment that carries it instead.
 
@@ -426,23 +444,18 @@ def without_password(dsn: str) -> Tuple[str, Dict[str, str]]:
     measured the database this run chose while the audit, the backfill and the verifier read
     whichever one the operator's shell already named.
     """
-    parsed = urlsplit(dsn)
+    fields = dsn_fields(dsn)
     environment = dict(os.environ)
     environment["DATABASE_URL"] = dsn
-    if not parsed.password:
+    password = fields.pop("password", None)
+    if password is None:
         # An inherited one would authenticate a connection this run never described.
         environment.pop("PGPASSWORD", None)
-        return dsn, environment
-    host = parsed.hostname or ""
-    if parsed.port:
-        host = f"{host}:{parsed.port}"
-    # parsed.username keeps its percent-encoding, which is what belongs back in a URI. The
-    # password does not: PGPASSWORD is a literal, and handing libpq the escaped text
-    # authenticates with a password nobody set.
-    authority = f"{parsed.username}@{host}" if parsed.username else host
-    stripped = urlunsplit((parsed.scheme, authority, parsed.path, parsed.query, parsed.fragment))
-    environment["PGPASSWORD"] = unquote(parsed.password)
-    return stripped, environment
+    else:
+        environment["PGPASSWORD"] = password
+    # Keyword/value, which psql and pg_dump accept as readily as a URI and which cannot be
+    # reassembled wrongly. libpq has already decoded every percent-escape.
+    return make_conninfo(**fields), environment
 
 
 def redact(part: str) -> str:
@@ -454,11 +467,10 @@ def redact(part: str) -> str:
 
 
 def dsn_host(dsn: str) -> str:
-    if "://" not in dsn:
-        return "?"
-    rest = dsn.split("://", 1)[1]
-    authority = rest.split("@", 1)[1] if "@" in rest else rest
-    return authority.split("/", 1)[0]
+    fields = dsn_fields(dsn)
+    host = fields.get("host", "")
+    port = fields.get("port", "")
+    return f"{host}:{port}" if port else host or "?"
 
 
 def psql_value(psql: Path, dsn: str, sql: str, timeout: int = PROBE_TIMEOUT) -> Ran:
@@ -480,9 +492,8 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
     if not dsn:
         raise Unrunnable(f"No DSN: pass --dsn, set PRODUCTION_DSN, or put {DIRECT_CONNECTION_KEY} in .env.")
 
+    fields = dsn_fields(dsn)
     host = dsn_host(dsn)
-    if not dsn.startswith("postgres"):
-        raise Unrunnable(f"This cutover targets PostgreSQL. Got a {dsn.split(':', 1)[0]} DSN.")
 
     if not MIGRATION_SQL.exists():
         raise Unrunnable(f"Missing {MIGRATION_SQL.relative_to(REPO)}")
@@ -499,8 +510,7 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
     say(f"  host            {host}")
     say(f"  run dir         {run_dir} ({free_gb:.1f} GiB free)")
 
-    target = urlsplit(dsn)
-    resolve(target.hostname or "", target.port or 5432)
+    resolve(fields.get("host", ""), int(fields.get("port") or 5432))
     safe_dsn, environment = without_password(dsn)
     # the value in force, not the default: an environment override that the line does not
     # reflect is the same class of untruth this whole script exists to remove
