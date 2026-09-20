@@ -208,7 +208,7 @@ def test_every_child_is_sent_at_the_dsn_this_run_chose(monkeypatch, tmp_path, st
     journal = t020_cutover.Journal(tmp_path / "journal.json", "db-b.example.com")
 
     if step == "baseline":
-        t020_cutover.step_baseline(DB_B, tmp_path, journal)
+        t020_cutover.step_baseline(DB_B, tmp_path, journal, _measurement())
     elif step == "apply":
         t020_cutover.step_apply(DB_B, journal)
     else:
@@ -216,3 +216,179 @@ def test_every_child_is_sent_at_the_dsn_this_run_chose(monkeypatch, tmp_path, st
 
     assert seen, "the step ran no child at all"
     assert [environment.get("DATABASE_URL") for environment in seen] == [DB_B] * len(seen)
+
+
+# --- the corpus has to be measured standing still, not declared standing still -----------------
+
+CANONICAL = tuple(audit_key for _, audit_key in COUNT_PAIRS)
+
+
+def _measurement(**overrides):
+    """One legacy-projection measurement: four digests and four member counts."""
+    digests = {name: name[0] * 64 for name in CANONICAL}
+    counts = dict(BASELINE)
+    for name, value in overrides.items():
+        if isinstance(value, int):
+            counts[name] = value
+        else:
+            digests[name] = value
+    return {"digests": digests, "member_counts": counts}
+
+
+def test_a_corpus_that_did_not_move_reports_no_drift():
+    assert t020_cutover.corpus_drift(_measurement(), _measurement()) == []
+
+
+@pytest.mark.parametrize("name", CANONICAL)
+def test_a_member_count_that_moved_is_named(name):
+    drift = t020_cutover.corpus_drift(_measurement(), _measurement(**{name: BASELINE[name] + 1}))
+    assert len(drift) == 1
+    assert drift[0].startswith(f"{name}:")
+
+
+@pytest.mark.parametrize("name", CANONICAL)
+def test_the_same_count_with_a_different_digest_is_still_drift(name):
+    """An update in place moves no count.
+
+    A pass that rewrites a row rather than adding one leaves all four member counts exactly where
+    they were, so a gate that compares counts alone reads a changed corpus as an unchanged one --
+    and the snapshot in hand no longer restores what is about to be migrated.
+    """
+    drift = t020_cutover.corpus_drift(_measurement(), _measurement(**{name: "z" * 64}))
+    assert len(drift) == 1
+    assert drift[0].startswith(f"{name}:")
+    assert "digest" in drift[0]
+
+
+ARCHIVE_LISTING = "; Archive created at 2026-09-20\n250; 1259 16384 TABLE public trend_signals postgres\n"
+
+
+def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=None):
+    """Run main() with everything that needs a database replaced by a measurement it hands back.
+
+    Only the network is stubbed. Every gate, every comparison and the order the steps run in are
+    the real ones, which is the part under test.
+    """
+    applied = []
+    remaining = list(measurements)
+
+    monkeypatch.setattr(
+        t020_cutover,
+        "preflight",
+        lambda dsn, run_dir: {
+            "psql": Path("/usr/bin/psql"),
+            "pg_dump": Path("/usr/bin/pg_dump"),
+            "pg_restore": Path("/usr/bin/pg_restore"),
+            "host": "db-b.example.com:5432",
+            "database": "postgres",
+            "user": "postgres",
+            "server_version": "16.4",
+            "pg_dump_major": 16,
+        },
+    )
+    monkeypatch.setattr(t020_cutover, "confirm", lambda *a, **k: None)
+    monkeypatch.setattr(t020_cutover, "psql_value", lambda *a, **k: t020_cutover.Ran(0, "", ""))
+    monkeypatch.setattr(t020_cutover, "step_dry_run", lambda *a, **k: None)
+    monkeypatch.setattr(t020_cutover, "step_apply", lambda *a, **k: applied.append(True))
+    monkeypatch.setattr(t020_cutover, "legacy_digests", lambda dsn: remaining.pop(0))
+
+    measured = baseline_digests if baseline_digests is not None else measurements[0]
+    baseline_file = dict(
+        BALANCED_BASELINE,
+        digests=dict(measured["digests"], member_counts=measured["member_counts"]),
+    )
+
+    def fake_run(command, capture=False, echo=False, timeout=None, env=None):
+        text = " ".join(str(part) for part in command)
+        if "pg_dump" in text:
+            Path(command[-1]).write_bytes(b"PGDMP fake archive")
+            return t020_cutover.Ran(0, "", "")
+        if "pg_restore" in text:
+            return t020_cutover.Ran(0, ARCHIVE_LISTING, "")
+        if "migration_reconciliation_audit" in text:
+            (tmp_path / "source-observation-baseline.json").write_text(json.dumps(baseline_file))
+            return t020_cutover.Ran(0, "", "")
+        if "post_migration_verification" in text:
+            (tmp_path / "post-migration-verification.json").write_text(
+                json.dumps({"verified": True, "comparisons": []})
+            )
+            return t020_cutover.Ran(0, "", "")
+        return t020_cutover.Ran(0, "", "")
+
+    monkeypatch.setattr(t020_cutover, "run", fake_run)
+    return applied
+
+
+def test_a_still_corpus_runs_all_the_way_to_the_write(monkeypatch, tmp_path):
+    """The negative control for every standstill test below: nothing moved, so nothing stops."""
+    applied = _orchestrator_harness(monkeypatch, tmp_path, [_measurement()] * 3)
+    code = t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"])
+    assert code == 0
+    assert applied == [True]
+
+
+def test_a_write_between_the_quiesce_and_the_snapshot_stops_the_run(monkeypatch, tmp_path, capsys):
+    """The typed QUIESCED is an operator's belief. This is the measurement."""
+    applied = _orchestrator_harness(
+        monkeypatch, tmp_path, [_measurement(), _measurement(observations=BASELINE["observations"] + 1), _measurement()]
+    )
+    code = t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"])
+    assert code == 1
+    assert applied == [], "nothing may be written once the snapshot no longer matches the corpus"
+    # Which gate stopped it, not merely that something did: the later gate would otherwise
+    # cover for this one having been removed.
+    assert "while the snapshot was taken" in capsys.readouterr().out
+
+
+def test_a_write_between_the_snapshot_and_the_apply_stops_before_the_write(monkeypatch, tmp_path, capsys):
+    """The last measurement is taken immediately before step 6, and step 6 must not start.
+
+    The snapshot is the only way back from an applied backfill. A row written after it was taken
+    is a row the snapshot cannot restore, so the run has to end on the side of the gate where
+    nothing has been written yet.
+    """
+    applied = _orchestrator_harness(
+        monkeypatch, tmp_path, [_measurement(), _measurement(), _measurement(sources="z" * 64)]
+    )
+    code = t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"])
+    assert code == 1
+    assert applied == []
+    assert "between the snapshot and the write" in capsys.readouterr().out
+
+
+def test_assume_quiesced_does_not_stand_in_for_the_measurement(monkeypatch, tmp_path):
+    """--assume-quiesced skips a question, not a gate.
+
+    Every test above passes it, so the flag cannot be what makes them stop. This one states it
+    directly: the corpus moves and the flag is given, and the run still refuses.
+    """
+    applied = _orchestrator_harness(
+        monkeypatch, tmp_path, [_measurement(), _measurement(), _measurement(observations=1)]
+    )
+    code = t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"])
+    assert code == 1
+    assert applied == []
+
+
+def test_the_baseline_the_verifier_will_use_is_bound_to_the_measured_corpus(monkeypatch, tmp_path):
+    """Step 3's artifact is what step 7 compares against, so it has to describe the same corpus."""
+    applied = _orchestrator_harness(
+        monkeypatch,
+        tmp_path,
+        [_measurement()] * 3,
+        baseline_digests=_measurement(observations="z" * 64),
+    )
+    code = t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"])
+    assert code == 1
+    assert applied == []
+
+
+def test_the_snapshot_is_hashed_into_the_journal(monkeypatch, tmp_path):
+    """A resumed run has to be able to tell that the file on disk is the file that was taken."""
+    _orchestrator_harness(monkeypatch, tmp_path, [_measurement()] * 3)
+    assert t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"]) == 0
+
+    journal = json.loads(sorted(tmp_path.glob("t020-run-*.json"))[-1].read_text())
+    snapshot = [entry for entry in journal["steps"] if entry["title"] == "snapshot" and entry["state"] == "done"][0]
+    assert snapshot["sha256"] == t020_cutover.sha256_of(Path(snapshot["path"]))
+    assert len(snapshot["sha256"]) == 64

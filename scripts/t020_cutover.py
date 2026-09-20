@@ -16,6 +16,11 @@ What this adds over running the commands by hand:
                             transaction is refused for what it does rather than for its name.
   proves the snapshot       pg_dump exiting 0 is not a restorable file. pg_restore --list must
                             read the archive back and name objects in it.
+  measures the standstill   the legacy projection is hashed before the snapshot, after it, and
+                            again immediately before the write. A typed QUIESCED records that an
+                            operator believes the writers are stopped; these three measurements
+                            are what can contradict them, including an update in place, which
+                            moves no member count at all.
   compares four counts      the dry-run plan against the baseline taken from the snapshot, by
                             value, before anything is written.
   one irreversible step     step 6 is the only step that writes, and it asks for a typed word.
@@ -40,6 +45,7 @@ Exit codes: 0 every step through verification passed, 1 a gate failed, 2 could n
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -86,6 +92,91 @@ def compare_counts(plan: Dict[str, Any], baseline_counts: Dict[str, int]) -> Lis
         for plan_key, audit_key in COUNT_PAIRS
         if plan[plan_key] != baseline_counts[audit_key]
     ]
+
+
+# The same four sets, named the way the audit names them. Written from COUNT_PAIRS rather than
+# beside it so a set can never be added to one and forgotten in the other.
+CANONICAL_SETS = tuple(audit_key for _, audit_key in COUNT_PAIRS)
+
+
+def canonical_digests(digests: Dict[str, Any]) -> Dict[str, Any]:
+    """The four digests and the four member counts, and nothing else.
+
+    The audit publishes more than this -- an algorithm label, breakdowns -- and none of it
+    describes the corpus. Comparing whole reports would make a rewording of a label look like
+    data moving.
+    """
+    return {
+        "digests": {name: digests[name] for name in CANONICAL_SETS},
+        "member_counts": {name: digests["member_counts"][name] for name in CANONICAL_SETS},
+    }
+
+
+def corpus_drift(reference: Dict[str, Any], observed: Dict[str, Any]) -> List[str]:
+    """Name every canonical set that is not byte-identical to the reference.
+
+    The digest is compared even where the count agrees. A pass that rewrites a row rather than
+    adding one leaves all four counts exactly where they were, so a count-only gate reads a
+    corpus that moved as one that stood still -- and the snapshot in hand no longer restores
+    what is about to be migrated.
+    """
+    moved = []
+    for name in CANONICAL_SETS:
+        was = reference["member_counts"][name]
+        became = observed["member_counts"][name]
+        if was != became:
+            moved.append(f"{name}: {was} members became {became}")
+        elif reference["digests"][name] != observed["digests"][name]:
+            moved.append(f"{name}: {was} members both times, different digest")
+    return moved
+
+
+def legacy_digests(dsn: str) -> Dict[str, Any]:
+    """Hash the whole legacy projection, the way the baseline does.
+
+    The audit's own reader and its own projection, imported rather than reimplemented: a second
+    way of hashing the same corpus would disagree with the baseline for reasons that have
+    nothing to do with the data. It reads every legacy row, which on the production corpus is a
+    few seconds -- paid three times over a cutover, against a snapshot that would otherwise be
+    trusted on an operator's word.
+    """
+    import migration_reconciliation_audit as audit_module
+
+    reader = audit_module.open_reader(dsn)
+    try:
+        report = audit_module.audit(reader)
+    finally:
+        reader.close()
+    return canonical_digests(report["digests"])
+
+
+def require_no_drift(reference: Dict[str, Any], observed: Dict[str, Any], moment: str) -> None:
+    drift = corpus_drift(reference, observed)
+    if not drift:
+        say(f"  corpus unchanged {moment}")
+        return
+    raise Stop(
+        f"The legacy corpus changed {moment}:\n    "
+        + "\n    ".join(drift)
+        + "\n  A typed QUIESCED says a writer was meant to be stopped; this says one was not.\n"
+        "  The snapshot no longer restores the corpus the next step would migrate, so nothing\n"
+        "  after this point may run. Find the writer, stop it, and start again from step 1."
+    )
+
+
+def require_standstill(dsn: str, reference: Dict[str, Any], moment: str) -> Dict[str, Any]:
+    observed = legacy_digests(dsn)
+    require_no_drift(reference, observed, moment)
+    return observed
+
+
+def sha256_of(path: Path) -> str:
+    """The file's own identity, so a resumed run can tell it from another file of that name."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 # libpq honours this itself, which is what makes a host that accepts no connection fail rather
@@ -479,7 +570,7 @@ order by query_start nulls last
 """
 
 
-def step_quiesce(tools: Dict[str, Any], dsn: str, journal: Journal, assume: bool) -> None:
+def step_quiesce(tools: Dict[str, Any], dsn: str, journal: Journal, assume: bool) -> Dict[str, Any]:
     heading(1, "quiesce every writer")
     journal.begin(1, "quiesce")
     result = psql_value(tools["psql"], dsn, QUIESCE_SQL)
@@ -505,7 +596,22 @@ def step_quiesce(tools: Dict[str, Any], dsn: str, journal: Journal, assume: bool
             QUIESCE_CONFIRMATION,
             "Nothing was touched.",
         )
-    journal.record(1, "quiesce", other_backends=len(rows), backends=rows)
+
+    # The reference every later measurement is compared against. The typed word and the
+    # pg_stat_activity listing are both an operator's reading of the situation; this is the
+    # corpus itself, and it is the only one of the three that can contradict the other two.
+    standstill = legacy_digests(dsn)
+    say("  measured the legacy corpus:")
+    for name in CANONICAL_SETS:
+        say(f"    {name:<22} {standstill['member_counts'][name]:>8}  {standstill['digests'][name][:16]}")
+    journal.record(
+        1,
+        "quiesce",
+        other_backends=len(rows),
+        backends=rows,
+        standstill=standstill,
+    )
+    return standstill
 
 
 def confirm(prompt: str, expected: str, on_refusal: str) -> None:
@@ -520,7 +626,14 @@ def confirm(prompt: str, expected: str, on_refusal: str) -> None:
 # ───────────────────────────── step 2: snapshot ─────────────────────────────
 
 
-def step_snapshot(tools: Dict[str, Any], dsn: str, run_dir: Path, journal: Journal, supplied: Optional[Path]) -> Path:
+def step_snapshot(
+    tools: Dict[str, Any],
+    dsn: str,
+    run_dir: Path,
+    journal: Journal,
+    supplied: Optional[Path],
+    standstill: Dict[str, Any],
+) -> Path:
     heading(2, "snapshot, and prove it reads back")
     journal.begin(2, "snapshot")
 
@@ -562,11 +675,16 @@ def step_snapshot(tools: Dict[str, Any], dsn: str, run_dir: Path, journal: Journ
             f"not a snapshot.\n{listed.stderr.strip()}"
         )
 
+    # A snapshot of a corpus that was moving is a snapshot of neither state. Measured after the
+    # archive is proven readable, so a file that cannot be restored fails for that reason first.
+    require_standstill(dsn, standstill, "while the snapshot was taken")
+
     journal.record(
         2,
         "snapshot",
         path=str(target),
         bytes=size,
+        sha256=sha256_of(target),
         archive_entries=len(objects),
         taken_by="operator" if supplied is not None else "pg_dump",
     )
@@ -576,7 +694,7 @@ def step_snapshot(tools: Dict[str, Any], dsn: str, run_dir: Path, journal: Journ
 # ───────────────────────────── step 3: baseline ─────────────────────────────
 
 
-def step_baseline(dsn: str, run_dir: Path, journal: Journal) -> Dict[str, Any]:
+def step_baseline(dsn: str, run_dir: Path, journal: Journal, standstill: Dict[str, Any]) -> Dict[str, Any]:
     heading(3, "baseline, from the corpus about to be migrated")
     journal.begin(3, "baseline")
     baseline_path = run_dir / "source-observation-baseline.json"
@@ -606,6 +724,10 @@ def step_baseline(dsn: str, run_dir: Path, journal: Journal) -> Dict[str, Any]:
     if not baseline.get("balanced"):
         raise Stop("The audit exited 0 but the report says the corpus is not balanced.")
 
+    # This file is what step 7 compares the migrated corpus against. If it describes a
+    # different corpus than the one measured at step 1, the whole chain verifies the wrong thing.
+    require_no_drift(standstill, canonical_digests(baseline["digests"]), "in the audit's own baseline")
+
     counts = baseline["digests"]["member_counts"]
     say(f"  baseline  {shown(baseline_path)} (schema_version {baseline['schema_version']})")
     for _, audit_key in COUNT_PAIRS:
@@ -619,7 +741,8 @@ def step_baseline(dsn: str, run_dir: Path, journal: Journal) -> Dict[str, Any]:
         baseline=str(baseline_path),
         schema_version=baseline["schema_version"],
         member_counts=counts,
-        digests={name: baseline["digests"][name] for _, name in COUNT_PAIRS},
+        digests={name: baseline["digests"][name] for name in CANONICAL_SETS},
+        sha256=sha256_of(baseline_path),
     )
     return baseline
 
@@ -851,26 +974,36 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 say("  The snapshot from the earlier run is the only thing standing between a")
                 say("  failed step 6 and data loss. Confirm it still exists before continuing.")
 
-        if args.start_at <= 1:
-            step_quiesce(tools, args.dsn, journal, args.assume_quiesced)
-        if args.start_at <= 2:
-            step_snapshot(tools, args.dsn, args.run_dir, journal, args.snapshot)
-
-        baseline: Dict[str, Any]
-        if args.start_at <= 3:
-            baseline = step_baseline(args.dsn, args.run_dir, journal)
-        else:
+        baseline: Dict[str, Any] = {}
+        standstill: Dict[str, Any]
+        if args.start_at > 3:
             baseline_path = args.run_dir / "source-observation-baseline.json"
             if not baseline_path.exists():
                 raise Unrunnable(f"--start-at {args.start_at} needs {baseline_path.name} from step 3.")
             baseline = json.loads(baseline_path.read_text())
             say(f"  reusing {shown(baseline_path)} from the earlier run")
+            # The earlier run's measurement, not a fresh one: a reference taken now could not
+            # contradict anything written since that run's snapshot.
+            standstill = canonical_digests(baseline["digests"])
+
+        if args.start_at <= 1:
+            standstill = step_quiesce(tools, args.dsn, journal, args.assume_quiesced)
+        elif args.start_at <= 3:
+            standstill = legacy_digests(args.dsn)
+        if args.start_at <= 2:
+            step_snapshot(tools, args.dsn, args.run_dir, journal, args.snapshot, standstill)
+        if args.start_at <= 3:
+            baseline = step_baseline(args.dsn, args.run_dir, journal, standstill)
 
         if args.start_at <= 4:
             step_schema(tools, args.dsn, journal)
         if args.start_at <= 5:
             step_dry_run(args.dsn, baseline, journal)
         if args.start_at <= 6:
+            # The last thing measured before the only step that writes. Everything after this
+            # line is recoverable only from the snapshot, so the snapshot has to still describe
+            # the corpus -- and step 6 must not start if it does not.
+            require_standstill(args.dsn, standstill, "between the snapshot and the write")
             step_apply(args.dsn, journal)
         report = step_verify(args.dsn, args.run_dir, journal)
         closing_note(journal, report)
