@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import ResearchMission
-from ignis.domain.value_objects import GeoCode, PlatformType
+from ignis.domain.value_objects import GeoCode, PlatformType, timeframe_to_days
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,13 @@ class CreateMissionUseCase:
         geo: GeoCode = GeoCode.VN,
         timeframe: str = "7d",
     ) -> ResearchMission:
+        # The canonical refusal, called for its exception rather than its value. Timeframe
+        # ._missing_ manufactures a member for any string, so an unvalidated timeframe used to
+        # reach the database intact and fail only when analysis asked it for a span -- leaving a
+        # stored mission nobody could window. Validating in the use case covers every caller
+        # rather than whichever handler was patched.
+        timeframe_to_days(timeframe)
+
         mission = ResearchMission(
             title=title,
             keywords=keywords,

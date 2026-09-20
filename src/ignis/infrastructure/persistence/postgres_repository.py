@@ -16,7 +16,7 @@ from ignis.infrastructure.persistence.migration_state import (
 )
 from ignis.domain.cross_platform_score import cross_platform_score
 from ignis.domain.source_identity import resolve_source_identity
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_platform
+from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_platform, timeframe_to_days
 
 from ignis.infrastructure.auth.crypto import encrypt_credentials, decrypt_credentials
 
@@ -381,12 +381,11 @@ class PostgresTimescaleRepository(ITrendRepository):
     ) -> List[TopicCluster]:
         """Rank clusters by what was observed in the window, from the new model only."""
         pool = await self._get_pool()
-        interval_map = {
-            Timeframe.LAST_24H: "24 hours",
-            Timeframe.LAST_7D: "7 days",
-            Timeframe.LAST_30D: "30 days",
-        }
-        interval = interval_map.get(timeframe, "24 hours")
+        # Built from the canonical day count rather than a local map. Four such maps existed,
+        # each covering three of the five Timeframe members, each with a different silent
+        # default -- which is how a ninety-day request came to be served a twenty-four hour
+        # window with a successful status.
+        interval = f"{timeframe_to_days(timeframe)} days"
         latest = self._LATEST_PER_SOURCE.format(
             window=self._WINDOW_PREDICATE.format(interval=interval),
             latest_first=self._LATEST_FIRST,
@@ -507,12 +506,11 @@ class PostgresTimescaleRepository(ITrendRepository):
         source twice, and a feed-level URL shared by many items counted them as one.
         """
         pool = await self._get_pool()
-        interval_map = {
-            Timeframe.LAST_24H: "24 hours",
-            Timeframe.LAST_7D: "7 days",
-            Timeframe.LAST_30D: "30 days",
-        }
-        interval = interval_map.get(timeframe, "7 days")
+        # Built from the canonical day count rather than a local map. Four such maps existed,
+        # each covering three of the five Timeframe members, each with a different silent
+        # default -- which is how a ninety-day request came to be served a twenty-four hour
+        # window with a successful status.
+        interval = f"{timeframe_to_days(timeframe)} days"
         window = self._WINDOW_PREDICATE.format(interval=interval)
 
         query = f"""

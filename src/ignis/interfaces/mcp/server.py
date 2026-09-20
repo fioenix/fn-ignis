@@ -397,6 +397,21 @@ async def _sync_self_identities(comp: Dict[str, Any]) -> None:
 
 # --- Handlers for Agent Harness Operations ---
 
+def _invalid_timeframe(value: object) -> str:
+    """The one refusal body, so four tools cannot drift into four wordings."""
+    return json.dumps(
+        {
+            "status": "INVALID_TIMEFRAME",
+            "message": (
+                f"Unknown timeframe '{value}'. Use one of: "
+                + ", ".join(t.value for t in Timeframe)
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 async def handle_run_autonomous_research_mission(
     topic: str,
     keywords: List[str],
@@ -414,14 +429,17 @@ async def handle_run_autonomous_research_mission(
 
 
     # 1. Initialize Mission
-    mission = await comp["create_mission_use_case"].execute(
-        title=topic,
-        keywords=keywords,
-        agent=agent,
-        session_id=session_id,
-        geo=geo_val,
-        timeframe=timeframe,
-    )
+    try:
+        mission = await comp["create_mission_use_case"].execute(
+            title=topic,
+            keywords=keywords,
+            agent=agent,
+            session_id=session_id,
+            geo=geo_val,
+            timeframe=timeframe,
+        )
+    except ValueError:
+        return _invalid_timeframe(timeframe)
 
     # 2. Execute Harness Orchestrator
     report = await comp["harness_orchestrator"].run_mission_harness(
@@ -865,15 +883,18 @@ async def handle_create_research_mission(
     target_platforms = [resolve_platform(p) for p in platforms] if platforms else None
 
 
-    mission = await comp["create_mission_use_case"].execute(
-        title=final_title,
-        keywords=final_keywords,
-        agent=agent,
-        session_id=session_id,
-        platforms=target_platforms,
-        geo=geo_val,
-        timeframe=timeframe,
-    )
+    try:
+        mission = await comp["create_mission_use_case"].execute(
+            title=final_title,
+            keywords=final_keywords,
+            agent=agent,
+            session_id=session_id,
+            platforms=target_platforms,
+            geo=geo_val,
+            timeframe=timeframe,
+        )
+    except ValueError:
+        return _invalid_timeframe(timeframe)
 
     return json.dumps(
         {
@@ -1124,6 +1145,10 @@ async def handle_get_trending_topics(
     comp = get_components()
     geo_val = resolve_geo(geo)
     tf_val = resolve_timeframe(timeframe)
+    # Same refusal the ingress tool gives, for the same reason: Timeframe._missing_ manufactures
+    # a member for any string, so an unrecognised value reaches the reader looking valid.
+    if tf_val not in tuple(Timeframe):
+        return _invalid_timeframe(timeframe)
 
     now = datetime.now(timezone.utc)
     tf_days = timeframe_to_days(tf_val)
@@ -1295,17 +1320,7 @@ async def handle_trigger_ingress_refresh(
     # it here instead, the same way an unknown scope is refused below.
     timeframe_val = resolve_timeframe(timeframe)
     if timeframe_val not in tuple(Timeframe):
-        return json.dumps(
-            {
-                "status": "INVALID_TIMEFRAME",
-                "message": (
-                    f"Unknown timeframe '{timeframe}'. Use one of: "
-                    + ", ".join(t.value for t in Timeframe)
-                ),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+        return _invalid_timeframe(timeframe)
 
     scope_val = IngressScope(scope)
     if scope_val is None:
