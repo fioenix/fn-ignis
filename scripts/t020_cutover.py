@@ -50,7 +50,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 REPO = Path(__file__).resolve().parents[1]
@@ -320,18 +320,28 @@ def without_password(dsn: str) -> Tuple[str, Dict[str, str]]:
 
     psql and pg_dump take it from PGPASSWORD. The three migration scripts already default their
     --dsn from DATABASE_URL, so they are given the whole DSN that way and no --dsn at all.
+
+    DATABASE_URL is set on every call, not only when a password had to be moved out of the URI.
+    A passwordless DSN used to be handed back with the environment untouched, so preflight
+    measured the database this run chose while the audit, the backfill and the verifier read
+    whichever one the operator's shell already named.
     """
     parsed = urlsplit(dsn)
+    environment = dict(os.environ)
+    environment["DATABASE_URL"] = dsn
     if not parsed.password:
-        return dsn, dict(os.environ)
+        # An inherited one would authenticate a connection this run never described.
+        environment.pop("PGPASSWORD", None)
+        return dsn, environment
     host = parsed.hostname or ""
     if parsed.port:
         host = f"{host}:{parsed.port}"
+    # parsed.username keeps its percent-encoding, which is what belongs back in a URI. The
+    # password does not: PGPASSWORD is a literal, and handing libpq the escaped text
+    # authenticates with a password nobody set.
     authority = f"{parsed.username}@{host}" if parsed.username else host
     stripped = urlunsplit((parsed.scheme, authority, parsed.path, parsed.query, parsed.fragment))
-    environment = dict(os.environ)
-    environment["PGPASSWORD"] = parsed.password
-    environment["DATABASE_URL"] = dsn
+    environment["PGPASSWORD"] = unquote(parsed.password)
     return stripped, environment
 
 
