@@ -9,11 +9,12 @@ a comparison the process performs and fails on.
 
 What this adds over running the commands by hand:
 
-  measures the connection   the three migration scripts open their session with
-                            SET extra_float_digits = 3, without which a double arrives rounded
-                            and lands in the observation digest. Preflight sets it and reads it
-                            back on a second statement, so a pooler that scopes a SET to one
-                            transaction is refused for what it does rather than for its name.
+  measures the connection   a double whose text needs 17 significant digits is sent and read
+                            back. metric_value and growth_velocity enter the observation digest,
+                            so a connection that rounds them makes one corpus hash two ways.
+                            The measurement, not the hostname, decides: the 20/09/2026 cutover
+                            ran entirely through a session-mode pooler, which returned the
+                            number intact.
   proves the snapshot       pg_dump exiting 0 is not a restorable file. pg_restore --list must
                             read the archive back and name objects in it.
   measures the standstill   the legacy projection is hashed before the snapshot, after it, and
@@ -41,9 +42,10 @@ Usage:
     .venv/bin/python scripts/t020_cutover.py --start-at 5
     .venv/bin/python scripts/t020_cutover.py --start-at 5 --journal .handoff/t020-run-...json
 
-The DSN comes from --dsn, else $PRODUCTION_DSN, else the direct-connection key in .env. A
-session-mode pooler is fine; pg_dump cannot run through one, so pass --snapshot with a snapshot
-taken another way.
+The DSN comes from --dsn, else $PRODUCTION_DSN, else the direct-connection key in .env. Any DSN
+that passes preflight will do -- no connection is refused for the shape of its hostname. In the
+20/09/2026 cutover the session-mode pooler was the only route that worked at all, and pg_dump ran
+through it; if yours refuses pg_dump, take the snapshot another way and pass --snapshot.
 
 Exit codes: 0 every step through verification passed, 1 a gate failed, 2 could not run.
 """
@@ -192,7 +194,7 @@ PROBE_TIMEOUT = 45
 
 # A double whose shortest round-trip text needs 17 significant digits. Rounded to 15 it becomes
 # 262600000.0, and that value is inside the observation digest -- this exact number is the one
-# the corpus contains and the one that first showed a pooler changing a digest.
+# the corpus contains and the one that first showed a connection changing a digest.
 EXACT_DOUBLE = "262600000.00000003"
 
 
@@ -336,8 +338,9 @@ def resolve(host: str, port: int) -> None:
             if dns_answer
             else "  DNS has no address for this name either. Check the host in .env.\n"
         )
-        + "  The pooler host resolves over IPv4 and is a usable fallback for every step except\n"
-        "  the snapshot -- take that one from the provider's dashboard and pass --snapshot."
+        + "  Another route to the same database is a fine answer -- a pooler host that resolves\n"
+        "  over IPv4, for instance. Nothing here refuses a connection for its hostname; what it\n"
+        "  has to do is pass the measurements above."
     )
 
 
@@ -526,8 +529,8 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
             f"  sent {EXACT_DOUBLE}, read back {read_back or 'nothing'}\n"
             "  metric_value and growth_velocity are inside the observation digest, so a\n"
             "  connection that rounds them makes the same corpus hash two different ways and\n"
-            "  step 7 cannot mean anything. Supabase's pooler answers with\n"
-            "  extra_float_digits = 0, which does exactly this. Use a direct connection."
+            "  step 7 cannot mean anything. A connection answering with extra_float_digits = 0\n"
+            "  does exactly this, whatever kind of endpoint it is. Find one that does not."
         )
 
     probe = psql_value(
@@ -803,9 +806,9 @@ def step_snapshot(
             raise Stop(
                 "pg_dump failed, so there is no snapshot and nothing after this step may run.\n"
                 f"{dumped.stderr.strip()}\n"
-                "A pooler may refuse pg_dump at the startup protocol; Supabase's session-mode\n"
-                "pooler on 5432 did not, in the 20/09/2026 cutover. If yours does, take the\n"
-                "snapshot from the provider's dashboard and pass it with --snapshot."
+                "Some endpoints refuse pg_dump at the startup protocol. The session-mode pooler\n"
+                "used in the 20/09/2026 cutover did not, and produced an 844-entry archive. If\n"
+                "this one does, take the snapshot another way and pass it with --snapshot."
             )
 
     size = target.stat().st_size if target.exists() else 0

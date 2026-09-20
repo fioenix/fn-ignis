@@ -1,10 +1,14 @@
 """What the cutover orchestrator must refuse.
 
 The three migration scripts are covered by their own modules. What is only true of the
-orchestrator is that it turns two things the runbook asks a reader to notice into things a
-process fails on: a plan that does not match the baseline, and a DSN that goes through a pooler.
-`backfill_observations.py --dry-run` exits 0 in both a matching and a short plan, so a test that
-merely ran the dry run would pass on either.
+orchestrator is that it turns things the runbook asks a reader to notice into things a process
+fails on: a plan that does not match the baseline, a corpus that moved while the snapshot was
+taken, a resumed run pointed at a different database. `backfill_observations.py --dry-run` exits
+0 in both a matching and a short plan, so a test that merely ran the dry run would pass on either.
+
+No connection is judged by its hostname here. The 20/09/2026 cutover ran end to end through a
+session-mode pooler, which was the only route the network offered and which returned an exact
+double and an 844-entry pg_dump archive.
 """
 
 import json

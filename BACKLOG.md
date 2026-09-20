@@ -205,8 +205,11 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   - **Pooler không làm tròn double.** Preflight gửi `262600000.00000003` qua connection và nhận về
     nguyên vẹn, nên lo ngại digest cũ không áp dụng cho session mode.
 
-  Bước 8 và 9 của runbook — kích hoạt runtime mới, mở lại ingress — vẫn do người vận hành làm, theo
-  đúng thứ tự đó.
+  Bước 8 và 9 đã chạy xong cùng ngày, đúng thứ tự: runtime mới khởi động với ingress đóng, smoke
+  test read-only xanh, sau đó mới mở lại ingress theo lịch. Không còn bước nào của T020 đang chờ.
+
+  Kích hoạt runtime làm lộ một defect timeframe nằm ngoài phạm vi cutover; nó được sửa riêng trên
+  PR #21 chứ không nhét vào PR #20.
 
 - [x] **Xác nhận duplicate có hai cơ chế, không phải một lỗi duy nhất.** Trên Postgres, nhóm lớn
   nhất là một video YouTube bị lưu 275 lần bởi `save_signals` trước commit
