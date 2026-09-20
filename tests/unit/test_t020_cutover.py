@@ -19,6 +19,8 @@ from t020_cutover import (  # noqa: E402
     Unrunnable,
     compare_counts,
     dsn_host,
+    EXACT_DOUBLE,
+    double_survives,
     preflight,
     redact,
     without_password,
@@ -56,10 +58,31 @@ def test_each_of_the_four_sets_is_compared(plan_key, audit_key):
     assert mismatches[0].startswith(f"{audit_key}:")
 
 
-def test_a_pooler_dsn_is_refused_before_anything_is_read(tmp_path):
+def test_a_connection_is_judged_by_the_double_it_returns():
+    """Not by the host's name, and not by a session parameter read back.
+
+    The name test was wrong twice over: the pooler is the only way in from a network without
+    IPv6, and all three migration scripts already set extra_float_digits = 3 themselves.
+    Reading that parameter back was wrong too -- through pgbouncer in transaction mode with an
+    idle pool the same server connection is reused and the setting appears to hold, so the
+    check passed on exactly the configuration it existed to catch. What the digest needs is
+    the number arriving intact, so that is what is measured.
+    """
+    assert double_survives(EXACT_DOUBLE)
+    assert not double_survives("262600000.0")
+    assert not double_survives("")
+
+
+def test_a_pooler_is_not_refused_for_its_name(tmp_path):
+    """A pooler host gets no special treatment; it fails or passes on the ordinary checks.
+
+    Asserted as "the refusal is the resolution one" rather than "the word pooler is absent",
+    because the word is in the hostname under test and that assertion passed for the wrong
+    reason.
+    """
     with pytest.raises(Unrunnable) as refusal:
-        preflight("postgresql://u:p@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres", tmp_path)
-    assert "pooler" in str(refusal.value)
+        preflight("postgresql://u:p@pooler.no-such-host-fnignis.supabase.com:5432/db", tmp_path)
+    assert "does not resolve to an address" in str(refusal.value)
 
 
 def test_a_dsn_never_reaches_the_terminal_with_its_password():

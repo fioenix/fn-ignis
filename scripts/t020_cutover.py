@@ -9,11 +9,11 @@ a comparison the process performs and fails on.
 
 What this adds over running the commands by hand:
 
-  refuses a pooler DSN      the rehearsal could not pg_dump through one, and the audit's own
-                            history records a pooler rounding doubles to 15 significant digits,
-                            which moved the observation digest. One DSN is used for the audit,
-                            the backfill and the verification, so a digest cannot be compared
-                            across two different reads of the same corpus.
+  measures the connection   the three migration scripts open their session with
+                            SET extra_float_digits = 3, without which a double arrives rounded
+                            and lands in the observation digest. Preflight sets it and reads it
+                            back on a second statement, so a pooler that scopes a SET to one
+                            transaction is refused for what it does rather than for its name.
   proves the snapshot       pg_dump exiting 0 is not a restorable file. pg_restore --list must
                             read the archive back and name objects in it.
   compares four counts      the dry-run plan against the baseline taken from the snapshot, by
@@ -30,8 +30,9 @@ Usage:
     .venv/bin/python scripts/t020_cutover.py
     .venv/bin/python scripts/t020_cutover.py --start-at 5
 
-The DSN comes from --dsn, else $PRODUCTION_DSN, else the direct-connection key in .env. It must
-be a direct connection; preflight refuses a pooler.
+The DSN comes from --dsn, else $PRODUCTION_DSN, else the direct-connection key in .env. A
+session-mode pooler is fine; pg_dump cannot run through one, so pass --snapshot with a snapshot
+taken another way.
 
 Exit codes: 0 every step through verification passed, 1 a gate failed, 2 could not run.
 """
@@ -91,6 +92,23 @@ def compare_counts(plan: Dict[str, Any], baseline_counts: Dict[str, int]) -> Lis
 # than hang. The wall-clock timeout on the probe is the backstop for whatever gets past connect.
 CONNECT_TIMEOUT_SECONDS = "15"
 PROBE_TIMEOUT = 45
+
+# A double whose shortest round-trip text needs 17 significant digits. Rounded to 15 it becomes
+# 262600000.0, and that value is inside the observation digest -- this exact number is the one
+# the corpus contains and the one that first showed a pooler changing a digest.
+EXACT_DOUBLE = "262600000.00000003"
+
+
+def double_survives(read_back: str) -> bool:
+    """Whether the connection returned the double intact.
+
+    The property, not the mechanism. An earlier version of this check set a session parameter
+    and read the parameter back, which proves nothing: through pgbouncer in transaction mode
+    with an idle pool the same server connection is reused and the setting appears to hold. What
+    protects the digest is that the number arrives unrounded, so that is what is measured.
+    """
+    return read_back == EXACT_DOUBLE
+
 
 APPLY_CONFIRMATION = "APPLY"
 QUIESCE_CONFIRMATION = "QUIESCED"
@@ -161,9 +179,9 @@ DIRECT_CONNECTION_KEY = "DATABASE_DIRECT_CONNECTION"
 def dsn_from_env_file(path: Path = REPO / ".env") -> str:
     """The direct connection out of .env, if it is there.
 
-    Deliberately not DATABASE_URL. That is the runtime's DSN and on this deployment it points at
-    the pooler, which preflight refuses -- reading it here would turn a clear refusal into a
-    confusing one.
+    Deliberately not DATABASE_URL. That is the runtime's DSN, and a cutover choosing its own
+    connection rather than inheriting the application's is the point: which connection the
+    migration ran through is part of what the journal records.
     """
     if not path.exists():
         return ""
@@ -221,7 +239,8 @@ def resolve(host: str, port: int) -> None:
             if dns_answer
             else "  DNS has no address for this name either. Check the host in .env.\n"
         )
-        + "  The pooler is not an alternative: preflight refuses it, for reasons unchanged."
+        + "  The pooler host resolves over IPv4 and is a usable fallback for every step except\n"
+        "  the snapshot -- take that one from the provider's dashboard and pass --snapshot."
     )
 
 
@@ -352,15 +371,6 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
         raise Unrunnable(f"No DSN: pass --dsn, set PRODUCTION_DSN, or put {DIRECT_CONNECTION_KEY} in .env.")
 
     host = dsn_host(dsn)
-    if "pooler" in host:
-        raise Unrunnable(
-            f"{host} is a pooler. Two independent reasons this run must not use it: pg_dump was "
-            f"rejected by the pooler's startup protocol in the rehearsal, so step 2 would leave "
-            f"you with no snapshot; and the audit's own record shows a pooler rounding doubles to "
-            f"15 significant digits, which changes the observation digest and would make step 7 "
-            f"compare two different reads of one corpus. Use Supabase → Settings → Database → "
-            f"Connection string → Direct connection."
-        )
     if not dsn.startswith("postgres"):
         raise Unrunnable(f"This cutover targets PostgreSQL. Got a {dsn.split(':', 1)[0]} DSN.")
 
@@ -381,9 +391,37 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
 
     target = urlsplit(dsn)
     resolve(target.hostname or "", target.port or 5432)
+    safe_dsn, environment = without_password(dsn)
     # the value in force, not the default: an environment override that the line does not
     # reflect is the same class of untruth this whole script exists to remove
     say(f"  connecting ... ({os.environ['PGCONNECT_TIMEOUT']}s connect timeout)")
+
+    reading = run(
+        [
+            str(psql),
+            safe_dsn,
+            "-tAX",
+            "-w",
+            "-c",
+            "SET extra_float_digits = 3",
+            "-c",
+            f"select {EXACT_DOUBLE}::float8::text",
+        ],
+        capture=True,
+        timeout=PROBE_TIMEOUT,
+        env=environment,
+    )
+    read_back = reading.stdout.strip().splitlines()[-1].strip() if reading.stdout.strip() else ""
+    say(f"  float precision {read_back or '(nothing)'}")
+    if not double_survives(read_back):
+        raise Unrunnable(
+            "A double does not survive this connection intact.\n"
+            f"  sent {EXACT_DOUBLE}, read back {read_back or 'nothing'}\n"
+            "  metric_value and growth_velocity are inside the observation digest, so a\n"
+            "  connection that rounds them makes the same corpus hash two different ways and\n"
+            "  step 7 cannot mean anything. Supabase's pooler answers with\n"
+            "  extra_float_digits = 0, which does exactly this. Use a direct connection."
+        )
 
     probe = psql_value(
         psql,
@@ -472,29 +510,40 @@ def confirm(prompt: str, expected: str, on_refusal: str) -> None:
 # ───────────────────────────── step 2: snapshot ─────────────────────────────
 
 
-def step_snapshot(tools: Dict[str, Any], dsn: str, run_dir: Path, journal: Journal) -> Path:
+def step_snapshot(tools: Dict[str, Any], dsn: str, run_dir: Path, journal: Journal, supplied: Optional[Path]) -> Path:
     heading(2, "snapshot, and prove it reads back")
     journal.begin(2, "snapshot")
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    target = run_dir / f"production-{stamp}.dump"
 
-    safe, environment = without_password(dsn)
-    dumped = run(
-        [str(tools["pg_dump"]), safe, "-w", "-Fc", "-f", str(target)],
-        capture=True,
-        env=environment,
-    )
-    if not dumped.ok:
-        raise Stop(
-            "pg_dump failed, so there is no snapshot and nothing after this step may run.\n"
-            f"{dumped.stderr.strip()}\n"
-            "Fall back to the Supabase dashboard's own snapshot before continuing."
+    if supplied is not None:
+        if not supplied.exists():
+            raise Stop(f"--snapshot {supplied} does not exist.")
+        target = supplied
+        say(f"  using    {shown(target)} (taken elsewhere; this step only proves it reads back)")
+    else:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        target = run_dir / f"snapshot-{stamp}.dump"
+        safe, environment = without_password(dsn)
+        dumped = run(
+            [str(tools["pg_dump"]), safe, "-w", "-Fc", "-f", str(target)],
+            capture=True,
+            env=environment,
         )
+        if not dumped.ok:
+            raise Stop(
+                "pg_dump failed, so there is no snapshot and nothing after this step may run.\n"
+                f"{dumped.stderr.strip()}\n"
+                "Supabase's pooler rejected pg_dump at the startup protocol in the rehearsal;\n"
+                "other poolers pass it through. If this is that case, take the snapshot from\n"
+                "the provider's dashboard and pass it with --snapshot."
+            )
 
     size = target.stat().st_size if target.exists() else 0
     listed = run([str(tools["pg_restore"]), "--list", str(target)], capture=True)
     objects = [line for line in listed.stdout.splitlines() if line and not line.startswith(";")]
-    say(f"  wrote     {shown(target)} ({size / 1024**2:.1f} MiB)")
+    if supplied is None:
+        say(f"  wrote     {shown(target)} ({size / 1024**2:.1f} MiB)")
+    else:
+        say(f"            {size / 1024**2:.1f} MiB")
     say(f"  reads back as {len(objects)} archive entries")
 
     if not listed.ok or not objects:
@@ -503,7 +552,14 @@ def step_snapshot(tools: Dict[str, Any], dsn: str, run_dir: Path, journal: Journ
             f"not a snapshot.\n{listed.stderr.strip()}"
         )
 
-    journal.record(2, "snapshot", path=str(target), bytes=size, archive_entries=len(objects))
+    journal.record(
+        2,
+        "snapshot",
+        path=str(target),
+        bytes=size,
+        archive_entries=len(objects),
+        taken_by="operator" if supplied is not None else "pg_dump",
+    )
     return target
 
 
@@ -746,6 +802,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="resume after a gate stopped the run; preflight always runs",
     )
     parser.add_argument(
+        "--snapshot",
+        type=Path,
+        default=None,
+        help="a snapshot taken another way; step 2 then only proves it reads back",
+    )
+    parser.add_argument(
         "--assume-quiesced",
         action="store_true",
         help="skip the typed confirmation in step 1, having already stopped every writer",
@@ -782,7 +844,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.start_at <= 1:
             step_quiesce(tools, args.dsn, journal, args.assume_quiesced)
         if args.start_at <= 2:
-            step_snapshot(tools, args.dsn, args.run_dir, journal)
+            step_snapshot(tools, args.dsn, args.run_dir, journal, args.snapshot)
 
         baseline: Dict[str, Any]
         if args.start_at <= 3:
