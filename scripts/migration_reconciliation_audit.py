@@ -123,18 +123,37 @@ class ReadOnlyReader:
 
 
 class PostgresReader(ReadOnlyReader):
-    def __init__(self, dsn: str):
+    def __init__(self, dsn: str = "", connection: Any = None):
         import psycopg  # imported here so SQLite-only runs need no driver
 
+        if connection is not None:
+            # Handed a transaction someone else opened and will close -- the cutover's standstill
+            # guard, which holds the legacy tables still for as long as it needs them.
+            self._conn = connection
+            self._owned = False
+            return
+
         self._conn = psycopg.connect(dsn)
+        self._owned = True
         # Enforced by the server, not by convention: any write in this session is refused.
-        self._conn.execute("SET TRANSACTION READ ONLY")
+        self._conn.read_only = True
+        # One instant, not several. The audit builds each digest from several statements, and at
+        # READ COMMITTED each one saw whatever had committed by the time it ran: a writer landing
+        # mid-read produced four digests of a corpus that was never simultaneously true. Measured
+        # on a live server -- count 0, an insert from another connection, then count 1, inside one
+        # transaction that had already declared itself read only.
+        self._conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
         # Exact float text, whatever the server defaults to. Supabase's pooler answers with
         # extra_float_digits = 0, which rounds a double to 15 significant digits: 262,600,000.00000003
         # arrives as 262,600,000.0. The value enters the observation digest, so the same corpus
         # read through two connections hashed to two different digests -- a reconciliation that
         # depends on a session setting is not a reconciliation.
         self._conn.execute("SET extra_float_digits = 3")
+
+    @property
+    def connection(self) -> Any:
+        """The transaction these reads happen inside, so a caller can assert what it is."""
+        return self._conn
 
     def signals(self) -> Iterable[SignalRow]:
         for row in self._conn.execute(
@@ -180,7 +199,8 @@ class PostgresReader(ReadOnlyReader):
         return [str(r[0]) for r in self._conn.execute("SELECT id FROM topic_clusters")]
 
     def close(self) -> None:
-        self._conn.close()
+        if self._owned:
+            self._conn.close()
 
 
 class SqliteReader(ReadOnlyReader):
@@ -243,7 +263,9 @@ class SqliteReader(ReadOnlyReader):
         self._conn.close()
 
 
-def open_reader(dsn: str) -> ReadOnlyReader:
+def open_reader(dsn: str, connection: Any = None) -> ReadOnlyReader:
+    if connection is not None:
+        return PostgresReader(connection=connection)
     if dsn.startswith("sqlite"):
         path = dsn.split("///", 1)[1] if "///" in dsn else dsn.replace("sqlite:", "").lstrip(":/")
         if not Path(path).exists():

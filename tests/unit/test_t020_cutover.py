@@ -13,6 +13,7 @@ double and an 844-entry pg_dump archive.
 
 import json
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -310,7 +311,6 @@ def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=
     monkeypatch.setattr(t020_cutover, "confirm", lambda *a, **k: None)
     monkeypatch.setattr(t020_cutover, "psql_value", lambda *a, **k: t020_cutover.Ran(0, "", ""))
     monkeypatch.setattr(t020_cutover, "step_dry_run", lambda *a, **k: None)
-    monkeypatch.setattr(t020_cutover, "step_apply", lambda *a, **k: applied.append(True))
     taken = []
 
     def measure(dsn):
@@ -319,6 +319,26 @@ def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=
 
     monkeypatch.setattr(t020_cutover, "legacy_digests", measure)
     applied.taken = taken
+    held = []
+
+    class FakeGuard:
+        def measure(self):
+            taken.append("guard")
+            return remaining.pop(0)
+
+    @contextmanager
+    def fake_guard(dsn):
+        held.append(True)
+        try:
+            yield FakeGuard()
+        finally:
+            held.pop()
+
+    monkeypatch.setattr(t020_cutover, "standstill_guard", fake_guard)
+    monkeypatch.setattr(
+        t020_cutover, "step_apply", lambda *a, **k: applied.append(bool(held))
+    )
+    applied.held_during_write = held
 
     measured = baseline_digests if baseline_digests is not None else measurements[0]
     baseline_file = dict(
@@ -704,3 +724,48 @@ def test_an_unreadable_identifier_and_an_empty_corpus_identifies_nothing(monkeyp
 
     assert code == 2
     assert applied == []
+
+
+# --- the last measurement and the write are one interval, not two adjacent moments ------------
+
+
+def test_the_write_runs_while_the_guard_is_still_held(monkeypatch, tmp_path):
+    """The measurement used to close its connection before the child was spawned.
+
+    Between those two moments nothing watched the corpus, and the snapshot that is the only way
+    back from step 6 could stop describing it without anything noticing.
+    """
+    applied = _orchestrator_harness(monkeypatch, tmp_path, [_measurement()] * 3)
+
+    assert t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"]) == 0
+    assert applied == [True], "step 6 ran outside the interval that holds the corpus still"
+
+
+def test_verification_alone_still_measures_the_corpus(monkeypatch, tmp_path):
+    """--start-at 7 writes nothing, and used to check nothing either.
+
+    Step 7 judges the migrated corpus against a baseline describing the legacy one. A run that
+    reports VERIFIED without ever asking whether the legacy corpus still matches that baseline
+    is reporting on a comparison it did not make.
+    """
+    _one_completed_run(monkeypatch, tmp_path)
+    applied = _orchestrator_harness(monkeypatch, tmp_path, [_measurement()])
+
+    code = t020_cutover.main(
+        ["--dsn", DB_B, "--run-dir", str(tmp_path), "--start-at", "7"]
+    )
+
+    assert code == 0
+    assert applied.taken, "nothing measured the corpus before verification"
+
+
+def test_verification_alone_refuses_a_corpus_that_moved(monkeypatch, tmp_path):
+    """The negative control for the test above: the measurement has to be able to fail."""
+    _one_completed_run(monkeypatch, tmp_path)
+    _orchestrator_harness(monkeypatch, tmp_path, [_measurement(observations="z" * 64)])
+
+    code = t020_cutover.main(
+        ["--dsn", DB_B, "--run-dir", str(tmp_path), "--start-at", "7"]
+    )
+
+    assert code == 1

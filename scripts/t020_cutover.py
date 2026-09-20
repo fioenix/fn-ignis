@@ -62,6 +62,7 @@ import signal
 import socket
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -143,7 +144,16 @@ def corpus_drift(reference: Dict[str, Any], observed: Dict[str, Any]) -> List[st
     return moved
 
 
-def legacy_digests(dsn: str) -> Dict[str, Any]:
+# What the legacy projection is built from. Held still as a set, because a digest of four
+# tables read one after another is not a measurement of any one moment.
+LEGACY_TABLES = ("trend_signals", "signal_metrics", "research_missions", "topic_clusters")
+
+# Long enough for a connection that is finishing a statement, short enough that a cutover does
+# not sit there. Without it, LOCK TABLE waits for as long as the writer holds its row locks.
+LOCK_TIMEOUT = "30s"
+
+
+def legacy_digests(dsn: str = "", connection: Any = None) -> Dict[str, Any]:
     """Hash the whole legacy projection, the way the baseline does.
 
     The audit's own reader and its own projection, imported rather than reimplemented: a second
@@ -154,12 +164,58 @@ def legacy_digests(dsn: str) -> Dict[str, Any]:
     """
     import migration_reconciliation_audit as audit_module
 
-    reader = audit_module.open_reader(dsn)
+    reader = audit_module.open_reader(dsn, connection=connection)
     try:
         report = audit_module.audit(reader)
     finally:
         reader.close()
     return canonical_digests(report["digests"])
+
+
+class Standstill:
+    """Measures the corpus from inside the transaction that is holding it still."""
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def measure(self) -> Dict[str, Any]:
+        return legacy_digests(connection=self._connection)
+
+
+@contextmanager
+def standstill_guard(dsn: str) -> Any:
+    """One transaction that blocks legacy writers and stays open for as long as it is needed.
+
+    The last measurement before the write used to open a connection, read, and close it before
+    the backfill was spawned. Nothing watched the corpus in between, and that gap sits directly
+    in front of the only step that cannot be undone: a row written there is a row the snapshot
+    cannot restore.
+
+    SHARE blocks INSERT, UPDATE and DELETE and admits readers, which is what the backfill needs
+    -- it reads every legacy row and writes only to sources, observations and mission_evidence.
+    REPEATABLE READ makes the four digests describe one instant rather than four.
+    """
+    import psycopg
+
+    connection = psycopg.connect(dsn)
+    try:
+        connection.read_only = True
+        connection.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+        connection.execute(f"SET lock_timeout = '{LOCK_TIMEOUT}'")
+        connection.execute("SET extra_float_digits = 3")
+        try:
+            connection.execute("LOCK TABLE " + ", ".join(LEGACY_TABLES) + " IN SHARE MODE")
+        except psycopg.errors.LockNotAvailable:
+            raise Stop(
+                "A writer still holds one of the legacy tables after "
+                f"{LOCK_TIMEOUT}:\n    " + ", ".join(LEGACY_TABLES) + "\n"
+                "  The corpus cannot be held still, so the snapshot cannot be shown to still\n"
+                "  describe it. Stop the writer and start again from step 1."
+            )
+        yield Standstill(connection)
+    finally:
+        connection.rollback()
+        connection.close()
 
 
 def require_no_drift(reference: Dict[str, Any], observed: Dict[str, Any], moment: str) -> None:
@@ -177,6 +233,7 @@ def require_no_drift(reference: Dict[str, Any], observed: Dict[str, Any], moment
 
 
 def require_standstill(dsn: str, reference: Dict[str, Any], moment: str) -> Dict[str, Any]:
+    """For the moments where nothing is about to be written and no interval has to be held."""
     observed = legacy_digests(dsn)
     require_no_drift(reference, observed, moment)
     return observed
@@ -1237,12 +1294,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             step_schema(tools, args.dsn, journal)
         if args.start_at <= 5:
             step_dry_run(args.dsn, baseline, journal)
-        if args.start_at <= 6:
-            # The last thing measured before the only step that writes. Everything after this
-            # line is recoverable only from the snapshot, so the snapshot has to still describe
-            # the corpus -- and step 6 must not start if it does not.
-            require_standstill(args.dsn, standstill, "between the snapshot and the write")
-            step_apply(args.dsn, journal)
+        # The measurement and the write are one interval. The guard holds the legacy tables
+        # against writers from before the last digest is taken until after the backfill has
+        # committed, so there is no moment in between for a row to arrive unseen.
+        with standstill_guard(args.dsn) as guard:
+            if args.start_at <= 6:
+                require_no_drift(standstill, guard.measure(), "between the snapshot and the write")
+                step_apply(args.dsn, journal)
+            else:
+                # Nothing is written, but step 7 judges the migrated corpus against a baseline
+                # describing the legacy one; reporting VERIFIED without asking whether that
+                # baseline still describes it is reporting on a comparison nobody made.
+                require_no_drift(standstill, guard.measure(), "before verification")
         report = step_verify(args.dsn, args.run_dir, journal)
         closing_note(journal, report)
         return 0
