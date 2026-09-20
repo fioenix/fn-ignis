@@ -730,7 +730,7 @@ def verified_artifact(entry: Dict[str, Any], key: str, what: str) -> Path:
 
 def resume_context(
     run_dir: Path, supplied: Optional[Path], tools: Dict[str, Any], start_at: int, dsn: str
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[Path]]:
     """Bind this run to the run it resumes: same database, same files, same measurement.
 
     The old check was that a file called source-observation-baseline.json existed in the run
@@ -771,7 +771,7 @@ def resume_context(
         # One taken now could only ever agree with whatever it found.
         standstill = {"digests": entry["digests"], "member_counts": entry["member_counts"]}
         identify_by_corpus(dsn, standstill, identified)
-        return baseline, standstill
+        return baseline, standstill, baseline_path
 
     quiesce = last_done(data, "quiesce") or {}
     standstill = quiesce.get("standstill")
@@ -780,7 +780,7 @@ def resume_context(
             f"{shown(path)} records no corpus measurement to resume against. Start from step 1."
         )
     identify_by_corpus(dsn, standstill, identified)
-    return {}, standstill
+    return {}, standstill, None
 
 
 def identify_by_corpus(dsn: str, standstill: Dict[str, Any], identified: bool) -> None:
@@ -960,7 +960,9 @@ def step_snapshot(
 # ───────────────────────────── step 3: baseline ─────────────────────────────
 
 
-def step_baseline(dsn: str, run_dir: Path, journal: Journal, standstill: Dict[str, Any]) -> Dict[str, Any]:
+def step_baseline(
+    dsn: str, run_dir: Path, journal: Journal, standstill: Dict[str, Any]
+) -> Tuple[Dict[str, Any], Path]:
     heading(3, "baseline, from the corpus about to be migrated")
     journal.begin(3, "baseline")
     baseline_path = run_dir / "source-observation-baseline.json"
@@ -1010,7 +1012,7 @@ def step_baseline(dsn: str, run_dir: Path, journal: Journal, standstill: Dict[st
         digests={name: baseline["digests"][name] for name in CANONICAL_SETS},
         sha256=sha256_of(baseline_path),
     )
-    return baseline
+    return baseline, baseline_path
 
 
 # ───────────────────────────── step 4: schema ─────────────────────────────
@@ -1114,16 +1116,23 @@ def step_apply(dsn: str, journal: Journal) -> None:
 # ───────────────────────────── step 7: verify ─────────────────────────────
 
 
-def step_verify(dsn: str, run_dir: Path, journal: Journal) -> Dict[str, Any]:
+def step_verify(dsn: str, baseline_path: Path, run_dir: Path, journal: Journal) -> Dict[str, Any]:
+    """Judge the migrated corpus against a named baseline file.
+
+    The path is passed in rather than rebuilt from the run directory. A resumed run hashes the
+    journal's baseline and then used to hand the verifier whatever file happened to sit in the
+    current --run-dir under that name: the run said "same baseline" about one file and decided
+    VERIFIED from another.
+    """
     heading(7, "verify against the baseline from step 3")
     journal.begin(7, "verify")
-    baseline_path = run_dir / "source-observation-baseline.json"
     report_path = run_dir / "post-migration-verification.json"
     if not baseline_path.exists():
         raise Unrunnable(
-            f"{baseline_path.name} is missing. Verification must use the baseline taken from the "
-            "snapshot that was migrated, never the rehearsal artifact tracked in docs/."
+            f"{shown(baseline_path)} is missing. Verification must use the baseline taken from "
+            "the snapshot that was migrated, never the rehearsal artifact tracked in docs/."
         )
+    say(f"  baseline  {shown(baseline_path)}")
 
     result = run(
         [
@@ -1265,10 +1274,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # the run directory" cannot mean the empty one this process just created.
         baseline: Dict[str, Any] = {}
         standstill: Dict[str, Any] = {}
+        baseline_path: Optional[Path] = None
         if args.start_at > 1:
             say()
             say(f"  --start-at {args.start_at}: steps 1 to {args.start_at - 1} are being skipped.")
-            baseline, standstill = resume_context(
+            baseline, standstill, baseline_path = resume_context(
                 args.run_dir, args.journal, tools, args.start_at, args.dsn
             )
 
@@ -1288,7 +1298,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.start_at <= 2:
             step_snapshot(tools, args.dsn, args.run_dir, journal, args.snapshot, standstill)
         if args.start_at <= 3:
-            baseline = step_baseline(args.dsn, args.run_dir, journal, standstill)
+            baseline, baseline_path = step_baseline(args.dsn, args.run_dir, journal, standstill)
 
         if args.start_at <= 4:
             step_schema(tools, args.dsn, journal)
@@ -1306,7 +1316,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 # describing the legacy one; reporting VERIFIED without asking whether that
                 # baseline still describes it is reporting on a comparison nobody made.
                 require_no_drift(standstill, guard.measure(), "before verification")
-        report = step_verify(args.dsn, args.run_dir, journal)
+        if baseline_path is None:
+            raise Unrunnable(
+                "No baseline was taken or verified in this run, so step 7 has nothing to judge "
+                "the migrated corpus against. Start from step 3."
+            )
+        report = step_verify(args.dsn, baseline_path, args.run_dir, journal)
         closing_note(journal, report)
         return 0
 

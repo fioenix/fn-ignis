@@ -223,7 +223,9 @@ def test_every_child_is_sent_at_the_dsn_this_run_chose(monkeypatch, tmp_path, st
     elif step == "apply":
         t020_cutover.step_apply(DB_B, journal)
     else:
-        t020_cutover.step_verify(DB_B, tmp_path, journal)
+        t020_cutover.step_verify(
+            DB_B, tmp_path / "source-observation-baseline.json", tmp_path, journal
+        )
 
     assert seen, "the step ran no child at all"
     assert [environment.get("DATABASE_URL") for environment in seen] == [DB_B] * len(seen)
@@ -289,8 +291,10 @@ def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=
         """A list that also carries the measurements the run took."""
 
         taken: list = []
+        verified_against: list = []
 
     applied = Applied()
+    applied.verified_against = []
     remaining = list(measurements)
 
     monkeypatch.setattr(
@@ -346,6 +350,10 @@ def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=
         digests=dict(measured["digests"], member_counts=measured["member_counts"]),
     )
 
+    def flag(command, name):
+        parts = [str(part) for part in command]
+        return parts[parts.index(name) + 1] if name in parts else None
+
     def fake_run(command, capture=False, echo=False, timeout=None, env=None):
         text = " ".join(str(part) for part in command)
         if "pg_dump" in text:
@@ -354,10 +362,11 @@ def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=
         if "pg_restore" in text:
             return t020_cutover.Ran(0, ARCHIVE_LISTING, "")
         if "migration_reconciliation_audit" in text:
-            (tmp_path / "source-observation-baseline.json").write_text(json.dumps(baseline_file))
+            Path(flag(command, "--json-out")).write_text(json.dumps(baseline_file))
             return t020_cutover.Ran(0, "", "")
         if "post_migration_verification" in text:
-            (tmp_path / "post-migration-verification.json").write_text(
+            applied.verified_against.append(flag(command, "--baseline"))
+            Path(flag(command, "--json-out")).write_text(
                 json.dumps({"verified": True, "comparisons": []})
             )
             return t020_cutover.Ran(0, "", "")
@@ -769,3 +778,43 @@ def test_verification_alone_refuses_a_corpus_that_moved(monkeypatch, tmp_path):
     )
 
     assert code == 1
+
+
+# --- the baseline a resume verified is the baseline step 7 must use ---------------------------
+
+
+def test_verification_uses_the_baseline_the_resume_verified(monkeypatch, tmp_path):
+    """The resume hashes the journal's baseline, then step 7 rebuilt a path from the run dir.
+
+    With the journal in one directory and --run-dir pointing at another, the run said "same
+    baseline" about the file it checked and handed the verifier a different one. Whatever else
+    the gate proved, the comparison that decides VERIFIED was made against an unchecked file.
+    """
+    earlier, now = tmp_path / "earlier", tmp_path / "now"
+    earlier.mkdir()
+    now.mkdir()
+    _one_completed_run(monkeypatch, earlier)
+    journal = sorted(earlier.glob("t020-run-*.json"))[-1]
+    verified = earlier / "source-observation-baseline.json"
+
+    # A file of the right name, in the new run directory, describing a different corpus.
+    decoy = _measurement(observations="d" * 64)
+    (now / "source-observation-baseline.json").write_text(
+        json.dumps(dict(BALANCED_BASELINE, digests=dict(decoy["digests"], member_counts=decoy["member_counts"])))
+    )
+
+    applied = _orchestrator_harness(monkeypatch, tmp_path, [_measurement()])
+    code = t020_cutover.main(
+        ["--dsn", DB_B, "--run-dir", str(now), "--start-at", "4", "--journal", str(journal)]
+    )
+
+    assert code == 0
+    assert applied.verified_against == [str(verified)]
+
+
+def test_a_run_from_step_one_verifies_against_the_baseline_it_just_took(monkeypatch, tmp_path):
+    """Negative control: the path has to still come from step 3 on an ordinary run."""
+    applied = _orchestrator_harness(monkeypatch, tmp_path, [_measurement()] * 3)
+
+    assert t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"]) == 0
+    assert applied.verified_against == [str(tmp_path / "source-observation-baseline.json")]
