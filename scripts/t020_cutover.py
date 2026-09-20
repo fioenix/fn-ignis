@@ -44,6 +44,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -171,6 +172,57 @@ def dsn_from_env_file(path: Path = REPO / ".env") -> str:
         if line.startswith(f"{DIRECT_CONNECTION_KEY}="):
             return line.split("=", 1)[1].strip().strip('"').strip("'")
     return ""
+
+
+def resolve(host: str, port: int) -> None:
+    """Fail on a name the machine cannot use, before blaming the credentials.
+
+    getaddrinfo is what psql calls, and it does not always agree with dig. dig sends its own
+    query; getaddrinfo goes through the system resolver, which a VPN can own. On 20/09/2026 dig
+    printed this host's AAAA record while getaddrinfo failed for every family, with Cloudflare
+    WARP running and every configured nameserver pointing at its local resolver.
+
+    The message reports what was measured rather than a mechanism. An earlier version asserted a
+    missing IPv6 default route; netstat showed several, through the VPN's own tunnels.
+    """
+    try:
+        socket.getaddrinfo(host, port)
+        return
+    except socket.gaierror as failure:
+        reason = failure
+
+    usable = []
+    for family, label in ((socket.AF_INET6, "AAAA"), (socket.AF_INET, "A")):
+        try:
+            socket.getaddrinfo(host, port, family)
+            usable.append(label)
+        except socket.gaierror:
+            pass
+
+    # dig asks DNS directly. Disagreement between the two is the whole diagnosis, so it is
+    # measured here rather than described.
+    direct = run(["dig", "+short", "AAAA", host], capture=True, timeout=10)
+    dns_answer = direct.stdout.strip().splitlines()[-1] if direct.stdout.strip() else ""
+
+    tunnels = run(["netstat", "-rn", "-f", "inet6"], capture=True, timeout=10)
+    via_tunnel = sorted(
+        {line.split()[-1] for line in tunnels.stdout.splitlines() if line.startswith("default") and "utun" in line}
+    )
+
+    raise Unrunnable(
+        f"{host} does not resolve to an address this machine can use.\n"
+        f"  getaddrinfo: {reason}\n"
+        f"  families getaddrinfo can use: {', '.join(usable) or 'none'}\n"
+        f"  the same name asked of DNS directly: {dns_answer or 'no answer'}\n"
+        f"  IPv6 default routes through a tunnel: {', '.join(via_tunnel) or 'none'}\n"
+        + (
+            "  DNS has the address and getaddrinfo will not use it, which is what a VPN owning\n"
+            "  the system resolver looks like. Disconnect it and run again.\n"
+            if dns_answer
+            else "  DNS has no address for this name either. Check the host in .env.\n"
+        )
+        + "  The pooler is not an alternative: preflight refuses it, for reasons unchanged."
+    )
 
 
 def find_tool(name: str) -> Path:
@@ -326,6 +378,9 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
 
     say(f"  host            {host}")
     say(f"  run dir         {run_dir} ({free_gb:.1f} GiB free)")
+
+    target = urlsplit(dsn)
+    resolve(target.hostname or "", target.port or 5432)
     # the value in force, not the default: an environment override that the line does not
     # reflect is the same class of untruth this whole script exists to remove
     say(f"  connecting ... ({os.environ['PGCONNECT_TIMEOUT']}s connect timeout)")
@@ -339,9 +394,9 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
         raise Unrunnable(
             "Could not reach the database.\n"
             f"  psql said: {probe.stderr.strip() or '(nothing)'}\n"
-            "  Check the direct-connection key in .env. Two causes produce exactly this: a\n"
-            "  password that no longer matches after the 17/09/2026 rotation, and a host that\n"
-            "  accepts no connection from this network."
+            "  The name resolves to an address this machine can use, so what is left is a\n"
+            "  password that no longer matches a rotation, or a host that accepts no\n"
+            "  connection from this network."
         )
     database, user, server_version = [field.strip() for field in probe.stdout.strip().split("|")]
     server_major = int(server_version.split(".")[0])
