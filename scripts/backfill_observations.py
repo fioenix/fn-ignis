@@ -120,14 +120,14 @@ def build_plan(signals: Sequence[SignalRow], points: Sequence[MetricPoint]) -> P
             # Never skipped. The corpus has 0 of these and the audit asserts it; one appearing
             # means the identity policy changed under the migration, and a silently dropped row
             # is the failure the reconciliation cannot see.
-            raise BackfillRefused(
-                f"trend_signals row {row.signal_id} resolves to no external identity"
-            )
+            raise BackfillRefused(f"trend_signals row {row.signal_id} resolves to no external identity")
         key = (identity.platform, identity.external_id)
         identities.setdefault(key, None)
 
         for event in observation_events_for_row(
-            row, identity.canonical_identity, identity.identity_source,
+            row,
+            identity.canonical_identity,
+            identity.identity_source,
             points_by_signal.get(row.signal_id, []),
         ):
             is_parent = event.lineage_table == "trend_signals"
@@ -158,9 +158,7 @@ def build_plan(signals: Sequence[SignalRow], points: Sequence[MetricPoint]) -> P
 
     duplicates = len(planned) - len({o.observation_id for o in planned})
     if duplicates:
-        raise BackfillRefused(
-            f"{duplicates} planned observations share an id; lineage is not unique"
-        )
+        raise BackfillRefused(f"{duplicates} planned observations share an id; lineage is not unique")
     return Plan(sources=list(identities), observations=planned)
 
 
@@ -180,13 +178,14 @@ class BackfillTarget:
     def existing_observation_ids(self) -> set:
         raise NotImplementedError
 
-    def upsert_source(self, platform: str, external_id: str) -> str:
+    def upsert_sources(self, pairs: Sequence[Tuple[str, str]]) -> Dict[Tuple[str, str], str]:
+        """Every source at once, returning the id the database holds for each pair."""
         raise NotImplementedError
 
-    def write_observation(self, observation: PlannedObservation, source_id: str) -> None:
+    def write_observations(self, rows: Sequence[Tuple[PlannedObservation, str]]) -> None:
         raise NotImplementedError
 
-    def write_evidence(self, mission_id: str, observation_id: str) -> None:
+    def write_evidence_rows(self, rows: Sequence[Tuple[str, str]]) -> None:
         raise NotImplementedError
 
     def commit(self) -> None:
@@ -254,8 +253,7 @@ class PostgresTarget(BackfillTarget):
                 metric_id=str(r[4]),
             )
             for r in self._conn.execute(
-                "SELECT signal_id, captured_at, metric_value, growth_velocity, id"
-                " FROM signal_metrics ORDER BY id"
+                "SELECT signal_id, captured_at, metric_value, growth_velocity, id FROM signal_metrics ORDER BY id"
             )
         ]
         return signals, points
@@ -270,52 +268,83 @@ class PostgresTarget(BackfillTarget):
             return None  # sql/016 has not been applied here
         return {str(r[0]) for r in self._conn.execute("SELECT id FROM observations")}
 
-    def upsert_source(self, platform: str, external_id: str) -> str:
-        row = self._conn.execute(
-            "INSERT INTO sources (platform, external_id) VALUES (%s, %s)"
+    def upsert_sources(self, pairs: Sequence[Tuple[str, str]]) -> Dict[Tuple[str, str], str]:
+        """One statement for every source, still returning what the database holds.
+
+        The set is unnested server-side rather than sent a row at a time. DO UPDATE rather than
+        DO NOTHING because RETURNING must yield the rows that already existed too: a source may
+        have been written by the live writer with a random id, and an observation pointed at a
+        derived id instead would collide on UNIQUE(platform, external_id).
+
+        plan.sources is keyed by identity, so the set carries no duplicate pair -- which is what
+        lets one statement do this at all. ON CONFLICT DO UPDATE refuses to touch the same row
+        twice in a single command.
+        """
+        if not pairs:
+            return {}
+        platforms = [pair[0] for pair in pairs]
+        external_ids = [pair[1] for pair in pairs]
+        rows = self._conn.execute(
+            "INSERT INTO sources (platform, external_id)"
+            " SELECT p, e FROM unnest(%s::text[], %s::text[]) AS t(p, e)"
             " ON CONFLICT (platform, external_id) DO UPDATE SET platform = EXCLUDED.platform"
-            " RETURNING id",
-            (platform, external_id),
-        ).fetchone()
-        return str(row[0])
+            " RETURNING id, platform, external_id",
+            (platforms, external_ids),
+        ).fetchall()
+        return {(str(r[1]), str(r[2])): str(r[0]) for r in rows}
 
-    def write_observation(self, observation: PlannedObservation, source_id: str) -> None:
-        self._conn.execute(
-            "INSERT INTO observations (id, source_id, cluster_id, observed_at, published_at,"
-            " time_provenance, identity_source, observed_title, metric_value, growth_velocity,"
-            " geo_code, source_url, metadata)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            " ON CONFLICT (id) DO UPDATE SET"
-            " source_id = EXCLUDED.source_id, cluster_id = EXCLUDED.cluster_id,"
-            " observed_at = EXCLUDED.observed_at, published_at = EXCLUDED.published_at,"
-            " time_provenance = EXCLUDED.time_provenance,"
-            " identity_source = EXCLUDED.identity_source,"
-            " observed_title = EXCLUDED.observed_title, metric_value = EXCLUDED.metric_value,"
-            " growth_velocity = EXCLUDED.growth_velocity, geo_code = EXCLUDED.geo_code,"
-            " source_url = EXCLUDED.source_url, metadata = EXCLUDED.metadata",
-            (
-                observation.observation_id,
-                source_id,
-                observation.cluster_id,
-                observation.observed_at,
-                observation.published_at,
-                observation.time_provenance,
-                observation.identity_source,
-                observation.observed_title,
-                observation.metric_value,
-                observation.growth_velocity,
-                observation.geo_code,
-                observation.source_url,
-                observation.metadata,
-            ),
-        )
+    def write_observations(self, rows: Sequence[Tuple[PlannedObservation, str]]) -> None:
+        """Every observation in one pipelined batch.
 
-    def write_evidence(self, mission_id: str, observation_id: str) -> None:
-        self._conn.execute(
-            "INSERT INTO mission_evidence (mission_id, observation_id) VALUES (%s, %s)"
-            " ON CONFLICT (mission_id, observation_id) DO NOTHING",
-            (mission_id, observation_id),
-        )
+        executemany sends the whole sequence before waiting for the first result, so the cost
+        stops being one network round trip per row. Sent a row at a time against a database a
+        continent away, 18,597 observations took over twenty-four minutes and did not finish.
+        """
+        if not rows:
+            return
+        with self._conn.cursor() as cursor:
+            cursor.executemany(
+                "INSERT INTO observations (id, source_id, cluster_id, observed_at, published_at,"
+                " time_provenance, identity_source, observed_title, metric_value, growth_velocity,"
+                " geo_code, source_url, metadata)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                " ON CONFLICT (id) DO UPDATE SET"
+                " source_id = EXCLUDED.source_id, cluster_id = EXCLUDED.cluster_id,"
+                " observed_at = EXCLUDED.observed_at, published_at = EXCLUDED.published_at,"
+                " time_provenance = EXCLUDED.time_provenance,"
+                " identity_source = EXCLUDED.identity_source,"
+                " observed_title = EXCLUDED.observed_title, metric_value = EXCLUDED.metric_value,"
+                " growth_velocity = EXCLUDED.growth_velocity, geo_code = EXCLUDED.geo_code,"
+                " source_url = EXCLUDED.source_url, metadata = EXCLUDED.metadata",
+                [
+                    (
+                        observation.observation_id,
+                        source_id,
+                        observation.cluster_id,
+                        observation.observed_at,
+                        observation.published_at,
+                        observation.time_provenance,
+                        observation.identity_source,
+                        observation.observed_title,
+                        observation.metric_value,
+                        observation.growth_velocity,
+                        observation.geo_code,
+                        observation.source_url,
+                        observation.metadata,
+                    )
+                    for observation, source_id in rows
+                ],
+            )
+
+    def write_evidence_rows(self, rows: Sequence[Tuple[str, str]]) -> None:
+        if not rows:
+            return
+        with self._conn.cursor() as cursor:
+            cursor.executemany(
+                "INSERT INTO mission_evidence (mission_id, observation_id) VALUES (%s, %s)"
+                " ON CONFLICT (mission_id, observation_id) DO NOTHING",
+                list(rows),
+            )
 
     def commit(self) -> None:
         self._conn.commit()
@@ -367,8 +396,7 @@ class SqliteTarget(BackfillTarget):
                 metric_id=str(r[4]),
             )
             for r in self._conn.execute(
-                "SELECT signal_id, captured_at, metric_value, growth_velocity, id"
-                " FROM signal_metrics ORDER BY id"
+                "SELECT signal_id, captured_at, metric_value, growth_velocity, id FROM signal_metrics ORDER BY id"
             ).fetchall()
         ]
         return signals, points
@@ -381,17 +409,28 @@ class SqliteTarget(BackfillTarget):
             return None  # sql/016 has not been applied here
         return {str(r[0]) for r in self._conn.execute("SELECT id FROM observations")}
 
-    def upsert_source(self, platform: str, external_id: str) -> str:
-        row = self._conn.execute(
-            "INSERT INTO sources (id, platform, external_id) VALUES (?, ?, ?)"
-            " ON CONFLICT (platform, external_id) DO UPDATE SET platform = excluded.platform"
-            " RETURNING id",
-            (str(uuid.uuid4()), platform, external_id),
-        ).fetchone()
-        return str(row[0])
+    def upsert_sources(self, pairs: Sequence[Tuple[str, str]]) -> Dict[Tuple[str, str], str]:
+        """A loop, deliberately.
 
-    def write_observation(self, observation: PlannedObservation, source_id: str) -> None:
-        self._conn.execute(
+        The batching on the Postgres side exists to remove network round trips, and this
+        backend has none. Keeping the statement one row at a time keeps RETURNING simple and
+        keeps the id generation exactly where it was.
+        """
+        ids: Dict[Tuple[str, str], str] = {}
+        for platform, external_id in pairs:
+            row = self._conn.execute(
+                "INSERT INTO sources (id, platform, external_id) VALUES (?, ?, ?)"
+                " ON CONFLICT (platform, external_id) DO UPDATE SET platform = excluded.platform"
+                " RETURNING id",
+                (str(uuid.uuid4()), platform, external_id),
+            ).fetchone()
+            ids[(platform, external_id)] = str(row[0])
+        return ids
+
+    def write_observations(self, rows: Sequence[Tuple[PlannedObservation, str]]) -> None:
+        if not rows:
+            return
+        self._conn.executemany(
             "INSERT INTO observations (id, source_id, cluster_id, observed_at, published_at,"
             " time_provenance, identity_source, observed_title, metric_value, growth_velocity,"
             " geo_code, source_url, metadata)"
@@ -404,29 +443,34 @@ class SqliteTarget(BackfillTarget):
             " observed_title = excluded.observed_title, metric_value = excluded.metric_value,"
             " growth_velocity = excluded.growth_velocity, geo_code = excluded.geo_code,"
             " source_url = excluded.source_url, metadata = excluded.metadata",
-            (
-                observation.observation_id,
-                source_id,
-                observation.cluster_id,
-                observation.observed_at,
-                observation.published_at,
-                observation.time_provenance,
-                observation.identity_source,
-                observation.observed_title,
-                observation.metric_value,
-                observation.growth_velocity,
-                observation.geo_code,
-                observation.source_url,
-                observation.metadata,
-            ),
+            [
+                (
+                    observation.observation_id,
+                    source_id,
+                    observation.cluster_id,
+                    observation.observed_at,
+                    observation.published_at,
+                    observation.time_provenance,
+                    observation.identity_source,
+                    observation.observed_title,
+                    observation.metric_value,
+                    observation.growth_velocity,
+                    observation.geo_code,
+                    observation.source_url,
+                    observation.metadata,
+                )
+                for observation, source_id in rows
+            ],
         )
 
-    def write_evidence(self, mission_id: str, observation_id: str) -> None:
-        self._conn.execute(
+    def write_evidence_rows(self, rows: Sequence[Tuple[str, str]]) -> None:
+        if not rows:
+            return
+        self._conn.executemany(
             "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at)"
             " VALUES (?, ?, ?, ?)"
             " ON CONFLICT (mission_id, observation_id) DO NOTHING",
-            (str(uuid.uuid4()), mission_id, observation_id, "backfill"),
+            [(str(uuid.uuid4()), mission_id, observation_id, "backfill") for mission_id, observation_id in rows],
         )
 
     def commit(self) -> None:
@@ -467,9 +511,7 @@ def backfill(target: BackfillTarget, apply: bool, after_sources=None) -> Dict[st
     target_tables_present = existing is not None
     if existing is None:
         if apply:
-            raise BackfillRefused(
-                "the target tables do not exist; apply sql/016_source_observation_model.sql first"
-            )
+            raise BackfillRefused("the target tables do not exist; apply sql/016_source_observation_model.sql first")
         existing = set()
     unexpected = existing - planned_ids
     if unexpected:
@@ -500,19 +542,14 @@ def backfill(target: BackfillTarget, apply: bool, after_sources=None) -> Dict[st
         return summary
 
     try:
-        source_ids: Dict[Tuple[str, str], str] = {}
-        for platform, external_id in plan.sources:
-            # Whatever the database returns. The row may already exist with a random id, written
-            # by the live writer; assuming a derived id here would collide on
-            # UNIQUE(platform, external_id) and lose the observations already pointing at it.
-            source_ids[(platform, external_id)] = target.upsert_source(platform, external_id)
+        # Whatever the database returns. A row may already exist with a random id, written by
+        # the live writer; assuming a derived id here would collide on
+        # UNIQUE(platform, external_id) and lose the observations already pointing at it.
+        source_ids = target.upsert_sources(plan.sources)
         if after_sources is not None:
             after_sources()
-        for observation in plan.observations:
-            target.write_observation(observation, source_ids[observation.identity_key])
-        for observation in plan.observations:
-            if observation.mission_id:
-                target.write_evidence(observation.mission_id, observation.observation_id)
+        target.write_observations([(o, source_ids[o.identity_key]) for o in plan.observations])
+        target.write_evidence_rows([(o.mission_id, o.observation_id) for o in plan.observations if o.mission_id])
         target.commit()
     except Exception:
         target.rollback()
@@ -556,8 +593,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not summary["applied"]:
         if summary["target_tables_present"]:
             print(
-                f"  target schema present, holding"
-                f" {summary['pre_existing_observations']} of the planned observations"
+                f"  target schema present, holding {summary['pre_existing_observations']} of the planned observations"
             )
         else:
             print("  target schema absent: apply sql/016_source_observation_model.sql first")
