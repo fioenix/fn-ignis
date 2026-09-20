@@ -21,7 +21,9 @@ What this adds over running the commands by hand:
                             again immediately before the write. A typed QUIESCED records that an
                             operator believes the writers are stopped; these three measurements
                             are what can contradict them, including an update in place, which
-                            moves no member count at all.
+                            moves no member count at all. The last of them and the write happen
+                            inside one transaction holding the legacy tables IN SHARE MODE, so
+                            there is no moment between them for a row to arrive unseen.
   compares four counts      the dry-run plan against the baseline taken from the snapshot, by
                             value, before anything is written.
   one irreversible step     step 6 is the only step that writes, and it asks for a typed word.
@@ -33,9 +35,11 @@ automated. They depend on what the operator has running, and doing them early is
 things the runbook forbids.
 
   binds a resumed run       --start-at reads the earlier run's journal, and refuses unless this
-                            connection reaches the same database, the snapshot and the baseline
-                            still hash to what that run recorded, and the corpus still matches
-                            the measurement that run took.
+                            connection reaches the same cluster -- by system_identifier, since
+                            two default catalogs are indistinguishable -- the snapshot and the
+                            baseline still hash to what that run recorded, and the corpus still
+                            matches the measurement that run took. The baseline it verified is
+                            the file step 7 judges against, not one rebuilt from --run-dir.
 
 Usage:
     .venv/bin/python scripts/t020_cutover.py

@@ -46,6 +46,10 @@ legacy migration inputs and receive no runtime writes. The canonical production 
 The tracked JSON is a policy/rehearsal artifact; production must generate a baseline from the exact
 snapshot taken after ingress is quiesced.
 
+**That sequence has run.** The cutover completed on 20/09/2026: the verifier returned `VERIFIED`
+with all four digests identical to a baseline taken from the snapshot, the new runtime started,
+and scheduled ingress reopened. `BACKLOG.md` holds the digests and the per-step evidence.
+
 Everything below this block describes the **historical 10/09 snapshot** unless explicitly amended.
 It is retained because the failed measurements and reversals explain the contracts now present in
 the branch.
@@ -532,11 +536,12 @@ only a non-empty string. `synthetic_probe` still duck-types the same way (§6).
 
 ## 9. Suggested review angles
 
-1. **Treat production cutover as the remaining data-model activation blocker, not automatically as
-   the only release blocker.** Review the fresh snapshot baseline, four digests and `VERIFIED`
-   result; do not accept the tracked rehearsal JSON as the production reference. Separately decide
-   whether the inherited but unmet SC-001 latency benchmark and SC-004 coverage threshold block
-   merge or are explicitly re-scoped; a mergeable PR and green CI do not settle either criterion.
+1. **The production cutover is no longer a blocker; review what it produced.** It ran on
+   20/09/2026. Review the baseline generated from that run's own snapshot, the four digests and
+   the `VERIFIED` result recorded in `BACKLOG.md`; do not accept the tracked rehearsal JSON as the
+   production reference. Separately decide whether the inherited but unmet SC-001 latency
+   benchmark and SC-004 coverage threshold block merge or are explicitly re-scoped; a mergeable PR
+   and green CI do not settle either criterion.
 2. **Review citation identity next.** Storage now knows the exact mission observation, but
    `CitationEvidence` has no `observation_id` and the citation registry keys on platform plus
    URL-or-title. That is a second source-identity policy and can disagree with the canonical

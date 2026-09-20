@@ -6,7 +6,8 @@
 >   + FastMCP Server (39 Handlers & Tools)
 > - **Trạng thái:** `v0.4.0` đã tag và publish release, repo public từ 17/09/2026. Đọc trạng thái
 >   thật bằng `python scripts/check_release_state.py` chứ đừng tin dòng này — nó là tài liệu, còn
->   tag với release nằm trên Git và GitHub. Cutover trên corpus PostgreSQL hiện hữu chưa chạy.
+>   tag với release nằm trên Git và GitHub. Cutover T020 trên corpus PostgreSQL hiện hữu đã chạy
+>   xong 20/09/2026: verifier trả `VERIFIED`, runtime mới đã khởi động, ingress theo lịch đã mở lại.
 > - **Trạng thái Tests:** 919 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
 
 ---
