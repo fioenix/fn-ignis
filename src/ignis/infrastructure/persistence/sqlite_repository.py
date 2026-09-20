@@ -20,6 +20,7 @@ from ignis.domain.value_objects import (
     resolve_geo,
     resolve_platform,
     resolve_timeframe,
+    timeframe_to_days,
 )
 
 from ignis.domain.exceptions import RepositoryException
@@ -654,12 +655,11 @@ class SqliteTrendRepository(ITrendRepository):
         """Rank clusters by what was observed in the window, from the new model only."""
         await self._ensure_schema()
 
-        interval_map = {
-            Timeframe.LAST_24H: "-24 hours",
-            Timeframe.LAST_7D: "-7 days",
-            Timeframe.LAST_30D: "-30 days",
-        }
-        interval_modifier = interval_map.get(timeframe, "-24 hours")
+        # Built from the canonical day count rather than a local map. Four such maps existed,
+        # each covering three of the five Timeframe members, each with a different silent
+        # default -- which is how a ninety-day request came to be served a twenty-four hour
+        # window with a successful status.
+        interval_modifier = f"-{timeframe_to_days(timeframe)} days"
 
         def _sync_get():
             conn = self._get_connection()
@@ -760,12 +760,11 @@ class SqliteTrendRepository(ITrendRepository):
         """
         await self._ensure_schema()
 
-        interval_map = {
-            Timeframe.LAST_24H: "-24 hours",
-            Timeframe.LAST_7D: "-7 days",
-            Timeframe.LAST_30D: "-30 days",
-        }
-        interval_modifier = interval_map.get(timeframe, "-7 days")
+        # Built from the canonical day count rather than a local map. Four such maps existed,
+        # each covering three of the five Timeframe members, each with a different silent
+        # default -- which is how a ninety-day request came to be served a twenty-four hour
+        # window with a successful status.
+        interval_modifier = f"-{timeframe_to_days(timeframe)} days"
 
         def _sync_get():
             conn = self._get_connection()

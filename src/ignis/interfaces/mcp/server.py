@@ -1124,6 +1124,20 @@ async def handle_get_trending_topics(
     comp = get_components()
     geo_val = resolve_geo(geo)
     tf_val = resolve_timeframe(timeframe)
+    # Same refusal the ingress tool gives, for the same reason: Timeframe._missing_ manufactures
+    # a member for any string, so an unrecognised value reaches the reader looking valid.
+    if tf_val not in tuple(Timeframe):
+        return json.dumps(
+            {
+                "status": "INVALID_TIMEFRAME",
+                "message": (
+                    f"Unknown timeframe '{timeframe}'. Use one of: "
+                    + ", ".join(t.value for t in Timeframe)
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     now = datetime.now(timezone.utc)
     tf_days = timeframe_to_days(tf_val)

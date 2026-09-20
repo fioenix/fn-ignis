@@ -185,19 +185,32 @@ def resolve_timeframe(timeframe_input: object) -> Timeframe:
     return Timeframe(clean)
 
 
+# The one place a Timeframe becomes a span. Every window in the system is built from this,
+# so a member missing here cannot quietly mean something narrower somewhere else.
+_DAYS_PER_TIMEFRAME = {
+    Timeframe.LAST_24H: 1,
+    Timeframe.LAST_7D: 7,
+    Timeframe.LAST_30D: 30,
+    Timeframe.LAST_90D: 90,
+    Timeframe.LAST_12M: 365,
+}
+
+
 def timeframe_to_days(timeframe_input: object) -> int:
-    """Convert timeframe enum or string into number of days for window calculations."""
-    tf = resolve_timeframe(timeframe_input).value
-    if tf == "24h":
-        return 1
-    elif tf == "7d":
-        return 7
-    elif tf == "30d":
-        return 30
-    elif tf == "90d":
-        return 90
-    elif tf == "12m":
-        return 365
-    return 90
+    """Days in the window, or a refusal.
+
+    It used to end in `return 90`, which turned every value it did not recognise into a quarter.
+    Timeframe._missing_ manufactures a member for any string, so that default was reachable from
+    plain user input -- and the two readers had defaults of their own, twenty-four hours and seven
+    days. One value meant three different spans and none of them was an error.
+    """
+    timeframe = resolve_timeframe(timeframe_input)
+    try:
+        return _DAYS_PER_TIMEFRAME[timeframe]
+    except KeyError:
+        raise ValueError(
+            f"Unknown timeframe {timeframe.value!r}. Use one of: "
+            + ", ".join(t.value for t in Timeframe)
+        ) from None
 
 
