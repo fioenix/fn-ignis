@@ -8,7 +8,8 @@
 >   thật bằng `python scripts/check_release_state.py` chứ đừng tin dòng này — nó là tài liệu, còn
 >   tag với release nằm trên Git và GitHub. Cutover T020 trên corpus PostgreSQL hiện hữu đã chạy
 >   xong 20/09/2026: verifier trả `VERIFIED`, runtime mới đã khởi động, ingress theo lịch đã mở lại.
-> - **Trạng thái Tests:** 919 passed, 2 skipped (SQLite + Timescale dùng một lần) | Ruff clean
+> - **Trạng thái Tests:** 1.032 passed, 4 skipped trên CI tại `fd1577e` (SQLite + Timescale dùng
+>   một lần) | Ruff clean
 
 ---
 
@@ -211,6 +212,13 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 
   Kích hoạt runtime làm lộ một defect timeframe nằm ngoài phạm vi cutover; nó được sửa riêng trên
   PR #21 chứ không nhét vào PR #20.
+
+- [ ] **T023 — journal của cutover phải chống ghi đè (mở 21/09/2026).** T020 đã hoàn tất và không
+  cần chạy lại. Khoảng trống còn lại nằm ở công cụ: tên journal hiện chỉ chính xác đến giây, còn
+  `Journal.__init__()` ghi file bằng thao tác có thể thay thế nội dung cũ. Hai lần chạy dùng cùng
+  `run-dir` và bắt đầu trong cùng một giây có thể làm mất bằng chứng của lần chạy trước. Bản sửa
+  phải tạo đường dẫn duy nhất, mở file theo chế độ độc quyền và có test đóng băng đồng hồ để chứng
+  minh journal đầu tiên giữ nguyên byte khi lần chạy thứ hai bắt đầu.
 
 - [x] **Xác nhận duplicate có hai cơ chế, không phải một lỗi duy nhất.** Trên Postgres, nhóm lớn
   nhất là một video YouTube bị lưu 275 lần bởi `save_signals` trước commit

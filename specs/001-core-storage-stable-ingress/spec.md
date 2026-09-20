@@ -2,7 +2,7 @@
 
 **Feature Directory**: `specs/001-core-storage-stable-ingress`
 **Created**: 2026-08-31
-**Status**: Released in `v0.4.0` on 17/09/2026 -- tagged, published as a GitHub Release, and the repository is public. `python scripts/check_release_state.py` reads that from Git and GitHub rather than from this line. Migrating an existing PostgreSQL corpus and the SC-001/SC-004 convergence gaps remain open
+**Status**: Released in `v0.4.0` on 17/09/2026 -- tagged, published as a GitHub Release, and the repository is public. `python scripts/check_release_state.py` reads that from Git and GitHub rather than from this line. The existing PostgreSQL corpus completed its production cutover on 20/09/2026; the SC-001/SC-004 convergence gaps remain open
 **Input**: Pha 1 (Core Storage & Stable Ingress Feeds) - Postgres TimescaleDB Repository Adapter + YouTube Data API v3 Plugin + Google Trends RSS Plugin
 **As-built amendment**: 2026-09-13 — source/observation/mission-evidence storage contract
 
@@ -34,6 +34,9 @@ cross-mission evidence remain auditable on both SQLite and PostgreSQL.
 4. **Given** a legacy PostgreSQL corpus, **When** the production cutover runs, **Then** a baseline
    generated from the quiesced snapshot, the schema migration, the backfill, and the verifier must
    preserve the four source/observation/mission/cluster multisets before the new runtime starts.
+5. **Given** two cutover invocations begin in the same second and use the same run directory,
+   **When** each creates its journal, **Then** each invocation must receive a distinct path and
+   neither invocation may overwrite evidence written by the other.
 
 ---
 
@@ -107,6 +110,9 @@ Là hệ thống lắng nghe xu hướng đa kênh, tôi cần một Ingress Plu
 - **FR-010**: Existing PostgreSQL corpora MUST be migrated by the reviewed `sql/016` schema,
   deterministic lineage-based backfill, and fail-closed post-migration verification. The tracked
   baseline is a policy review artifact, not the production reference.
+- **FR-011**: Every production-cutover invocation MUST create its journal atomically at a unique
+  path. A later invocation MUST fail rather than overwrite an existing journal, including when two
+  invocations begin within the same second and share a run directory.
 
 ### Key Entities
 

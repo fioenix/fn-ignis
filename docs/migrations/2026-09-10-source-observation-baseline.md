@@ -47,6 +47,11 @@ projection ba lần — trước snapshot, sau snapshot và ngay trước khi gh
 khác biệt nào, buộc một lần chạy `--start-at` phải khớp journal của lần chạy trước, và ghi journal
 JSON cho mọi bước.
 
+**Khoảng trống công cụ còn mở:** journal hiện lấy tên theo giây rồi ghi bằng thao tác có thể ghi đè.
+Cho đến khi T023 hoàn tất, không được bắt đầu hai lần chạy trong cùng `run-dir` ở cùng một giây.
+T023 phải chuyển sang đường dẫn duy nhất và tạo file theo chế độ độc quyền; nếu đã có file trùng tên
+thì lần chạy mới phải dừng, không được thay thế bằng chứng của lần chạy trước.
+
 Không kết nối nào bị từ chối vì tên host. Preflight đo đúng thứ nó cần: một double 17 chữ số có
 nghĩa về tới nơi còn nguyên. Dùng một DSN duy nhất cho audit, backfill và verification, vì hai lần
 đọc cùng một corpus qua hai đường có thể cho hai digest khác nhau.
