@@ -477,3 +477,70 @@ def test_a_resume_whose_corpus_kept_its_counts_but_changed_its_payload_is_refuse
 
     assert code == 1
     assert applied == []
+
+
+# --- an interrupted write has an outcome nobody in this process can see ------------------------
+
+REAL_STEP_APPLY = t020_cutover.step_apply
+
+
+def _interrupt_journal_at(monkeypatch, step):
+    """Make the journal raise where a signal would land, and keep the entries written so far."""
+    original = t020_cutover.Journal.record
+
+    def record(self, recorded_step, title, **evidence):
+        if recorded_step == step:
+            raise KeyboardInterrupt("signal 15")
+        return original(self, recorded_step, title, **evidence)
+
+    monkeypatch.setattr(t020_cutover.Journal, "record", record)
+
+
+def test_an_interrupt_between_the_commit_and_the_journal_reports_an_unknown_outcome(
+    monkeypatch, tmp_path, capsys
+):
+    """The child exits 0, having committed, and the signal lands before the entry is written.
+
+    Claiming a rollback here is the one thing the message must not do: the transaction the claim
+    rests on had already committed, and from this process the two outcomes look identical.
+    """
+    _orchestrator_harness(monkeypatch, tmp_path, [_measurement()] * 3)
+    monkeypatch.setattr(t020_cutover, "step_apply", REAL_STEP_APPLY)
+    _interrupt_journal_at(monkeypatch, 6)
+
+    code = t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"])
+    out = capsys.readouterr().out
+
+    assert code == 2
+    assert "rolled back" not in out or "unknown" in out.lower()
+    assert "outcome is unknown" in out
+    assert "ingress closed" in out
+    assert "--start-at 5" in out
+
+
+def test_an_interrupt_before_the_write_does_not_call_the_outcome_unknown(monkeypatch, tmp_path, capsys):
+    """Negative control: the same handler, interrupted where nothing can have been written.
+
+    Without this, a message that always said "unknown" would pass the test above.
+    """
+    _orchestrator_harness(monkeypatch, tmp_path, [_measurement()] * 3)
+    _interrupt_journal_at(monkeypatch, 3)
+
+    code = t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"])
+    out = capsys.readouterr().out
+
+    assert code == 2
+    assert "outcome is unknown" not in out
+    assert "nothing was written" in out
+
+
+def test_the_journal_shows_the_write_started_and_never_finished(monkeypatch, tmp_path):
+    """What the operator has to read afterwards, and the reason the message can say 'unknown'."""
+    _orchestrator_harness(monkeypatch, tmp_path, [_measurement()] * 3)
+    monkeypatch.setattr(t020_cutover, "step_apply", REAL_STEP_APPLY)
+    _interrupt_journal_at(monkeypatch, 6)
+    t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"])
+
+    steps = json.loads(sorted(tmp_path.glob("t020-run-*.json"))[-1].read_text())["steps"]
+    assert {"step": 6, "state": "started"}.items() <= [e for e in steps if e["step"] == 6][0].items()
+    assert not [e for e in steps if e["step"] == 6 and e["state"] == "done"]

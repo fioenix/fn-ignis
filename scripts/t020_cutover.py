@@ -1057,6 +1057,33 @@ def closing_note(journal: Journal, report: Dict[str, Any]) -> None:
         say(f"    {comparison['set']:<22} {comparison['actual_digest']}")
 
 
+def interrupted_message(journal: Optional[Journal]) -> str:
+    """What the operator can and cannot conclude from a run that was killed.
+
+    The old message said an interrupted write rolled back, unconditionally. It cannot: step 6
+    runs the backfill as a child, and a signal that arrives after that child committed and
+    before this process wrote the entry leaves a committed migration with no record of one.
+    From inside this process the two outcomes are the same absence.
+    """
+    entries = journal.data["steps"] if journal is not None else []
+    started = any(entry["step"] == 6 and entry["state"] == "started" for entry in entries)
+    finished = any(entry["step"] == 6 and entry["state"] == "done" for entry in entries)
+    if not started or finished:
+        return (
+            "  The write either had not started or had already been recorded, so nothing was written\n"
+            "  that the journal does not name. Rerun from the step its last entry names."
+        )
+    return (
+        "  The write was in flight and its outcome is unknown. The backfill runs in one\n"
+        "  transaction, so an interrupt during it rolls back -- but a signal that arrived after\n"
+        "  the child committed and before this journal recorded it leaves a committed migration\n"
+        "  and no entry saying so. The two look identical from here.\n"
+        "  Hold ingress closed. Rerun with --start-at 5 and read the dry run's count of planned\n"
+        "  observations that already exist: 0 after a rollback, the full count after a commit.\n"
+        "  Do not run step 6 again until that number has said which happened."
+    )
+
+
 def _interrupt(signum: int, _frame: Any) -> None:
     raise KeyboardInterrupt(f"signal {signum}")
 
@@ -1173,13 +1200,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         say()
         # an exception object is always truthy, so the reason has to come from its text
         say(f"  INTERRUPTED ({str(interrupt) or 'Ctrl-C'}).")
+        outcome = interrupted_message(journal)
         if journal is not None:
             journal.record(-1, "interrupted", reason=str(interrupt) or "Ctrl-C")
             say(f"  Journal: {shown(journal.path)}")
-        say("  The backfill is one transaction, so an interrupted write rolled back -- but the")
-        say("  journal's last entry is what says which step was in flight. Rerun --start-at 5:")
-        say("  the dry run reports how many planned observations already exist, which is 0 after")
-        say("  a rollback and the full count after a commit.")
+        say(outcome)
         return 2
 
 
