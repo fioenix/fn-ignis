@@ -532,9 +532,9 @@ def step_snapshot(tools: Dict[str, Any], dsn: str, run_dir: Path, journal: Journ
             raise Stop(
                 "pg_dump failed, so there is no snapshot and nothing after this step may run.\n"
                 f"{dumped.stderr.strip()}\n"
-                "Supabase's pooler rejected pg_dump at the startup protocol in the rehearsal;\n"
-                "other poolers pass it through. If this is that case, take the snapshot from\n"
-                "the provider's dashboard and pass it with --snapshot."
+                "A pooler may refuse pg_dump at the startup protocol; Supabase's session-mode\n"
+                "pooler on 5432 did not, in the 20/09/2026 cutover. If yours does, take the\n"
+                "snapshot from the provider's dashboard and pass it with --snapshot."
             )
 
     size = target.stat().st_size if target.exists() else 0

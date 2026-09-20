@@ -127,11 +127,10 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
 Ba mục dưới đây từng nằm chung trong "việc còn lại của release". Chúng không cùng một loại, và gộp
 như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 
-- [ ] **T020 chặn deployment, không chặn publish.** Production cutover source/observation chặn đúng
-  một thứ: kích hoạt runtime mới trên corpus PostgreSQL/Supabase đã có. Nó không chặn việc publish
-  bản open-source beta chạy SQLite cài mới. Người clone về lần đầu không có corpus legacy nào để
-  migrate, nên chuỗi quiesce/snapshot/baseline/`sql/016`/backfill/verifier không áp dụng cho họ.
-  Chi tiết cutover vẫn nằm ở T020 trong phần source identity bên dưới.
+- [x] **T020 đã chạy xong (20/09/2026).** Cutover source/observation đã hoàn tất trên corpus
+  PostgreSQL/Supabase; verifier trả `VERIFIED`. Mục này trước đây chặn việc kích hoạt runtime mới
+  trên corpus đã có, và chưa bao giờ chặn publish bản open-source beta chạy SQLite cài mới. Bằng
+  chứng nằm ở T020 trong phần source identity bên dưới.
 - [x] **Đã đạt release acceptance v0.4.0 qua một phiên Claude Code đăng nhập thật
   (14/09/2026).** Từ checkout dùng một lần của `release/0.4.0` tại `49e2be4`, bootstrap tạo cấu
   hình project-scoped chỉ trỏ tới SQLite trong checkout đó. Sau khi Fio đăng nhập và duyệt server,
@@ -167,18 +166,48 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 
 ### Source identity và mission evidence — quyết định 10/09/2026
 
-- [ ] **T020 — production cutover chưa chạy (mở 13/09/2026, cập nhật 14/09/2026).** Phần code đã
-  xong và đã lên `main`: PR #8 merge bằng merge commit `1377ae9`, PR #9 merge bằng `b328a5d`, nên
-  runtime chỉ còn đọc/ghi `sources`, `observations`, `mission_evidence`. Bước "merge" trong runbook
-  coi như đã hoàn tất. Thứ còn lại đúng một thứ: **corpus Supabase production vẫn chưa migrate.**
-  Runbook canonical nằm trong
-  [`docs/migrations/2026-09-10-source-observation-baseline.md`](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
-  Thứ tự còn lại: quiesce ingress/runtime cũ; snapshot; sinh baseline **từ chính snapshot**; apply
-  `sql/016`; backfill; verifier trả `VERIFIED`; kích hoạt runtime mới; mở lại ingress. File baseline
-  đã track chỉ là review artifact của corpus diễn tập, không phải reference cho lần apply
-  production. Gate runtime và guard pruner chỉ fail closed khi thứ tự bị vi phạm; chúng không cho
-  phép đổi thứ tự. Mục này chặn deployment lên corpus đã có, không chặn publish bản beta chạy
-  SQLite cài mới — xem phần ranh giới blocker ở trên.
+- [x] **T020 — cutover đã chạy (mở 13/09/2026, đóng 20/09/2026).** Corpus Supabase đã migrate sang
+  `sources` / `observations` / `mission_evidence`. Chạy bằng
+  [`scripts/t020_cutover.py`](scripts/t020_cutover.py), viết chính trong lần chạy này vì runbook
+  chạy tay có một gate không ai gác: `backfill_observations.py --dry-run` trả exit 0 dù bốn member
+  count khớp baseline, lệch baseline, hay không tìm thấy schema đích.
+
+  Bằng chứng, từ journal của lần chạy (giữ cùng snapshot, không commit):
+
+  | Bước | Kết quả |
+  |---|---|
+  | snapshot | 5.484.109 byte, đọc lại được 844 archive entry |
+  | baseline (audit) | exit 0, `BALANCED`, schema_version 7 |
+  | `sql/016` | exit 0 |
+  | dry run | bốn count khớp baseline, `pre_existing_observations = 0` |
+  | backfill apply | exit 0, **8 giây** |
+  | verification | exit 0, `VERIFIED` |
+
+  Bốn digest khớp tuyệt đối giữa baseline và corpus sau migrate:
+
+  ```
+  sources               0eca4a53c92b73d2d42f2c750e1752131f1d883360db89dbd2ed34dfcf8c9c27   1.924
+  observations          08ecb119070f04d8fadf4f2a65ac11cea044b8b8abb274940eec4295182eeac4  18.597
+  mission_associations  c92fee13d5937b8e6b19d64daec4e2ec0aa737c8c1d03eadebe6557e2fc632f8   1.301
+  cluster_memberships   c67c80103be5b144a1d37286e0da93d5d81d781816e55b84cabfd200a1ab55e5  15.754
+  ```
+
+  Ngoài ra: 18.597 dòng observation khớp đúng 18.597 dòng projected; 0 evidence mồ côi, 0
+  observation trỏ vào source không tồn tại, 0 metadata sai kiểu; time provenance khớp từng nhóm
+  (1.479 `exact_ingestion`, 17.118 `legacy_publish_only`, 0 `unknown`).
+
+  Ba điều lần chạy này đính chính lại so với ghi chép cũ:
+
+  - **`pg_dump` chạy được qua pooler session mode.** Lần diễn tập ghi là pooler từ chối ở startup
+    protocol; lần này snapshot 844 entry được lấy qua chính pooler, port 5432.
+  - **Host direct connection chỉ có AAAA record** và mạng tại chỗ không có IPv6, nên direct
+    connection không tới được. Pooler là đường vào duy nhất.
+  - **Pooler không làm tròn double.** Preflight gửi `262600000.00000003` qua connection và nhận về
+    nguyên vẹn, nên lo ngại digest cũ không áp dụng cho session mode.
+
+  Bước 8 và 9 của runbook — kích hoạt runtime mới, mở lại ingress — vẫn do người vận hành làm, theo
+  đúng thứ tự đó.
+
 - [x] **Xác nhận duplicate có hai cơ chế, không phải một lỗi duy nhất.** Trên Postgres, nhóm lớn
   nhất là một video YouTube bị lưu 275 lần bởi `save_signals` trước commit
   `478a7c9e5209423a38dcee6cc4a47074bd9d4889`, khi hàm này còn insert vô điều kiện. 275 dòng có
