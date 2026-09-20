@@ -263,7 +263,10 @@ def test_the_same_count_with_a_different_digest_is_still_drift(name):
 ARCHIVE_LISTING = "; Archive created at 2026-09-20\n250; 1259 16384 TABLE public trend_signals postgres\n"
 
 
-def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=None):
+IDENTITY = {"database": "postgres", "database_oid": "5", "cluster_fingerprint": "f" * 32}
+
+
+def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=None, identity=None):
     """Run main() with everything that needs a database replaced by a measurement it hands back.
 
     Only the network is stubbed. Every gate, every comparison and the order the steps run in are
@@ -284,6 +287,7 @@ def _orchestrator_harness(monkeypatch, tmp_path, measurements, baseline_digests=
             "user": "postgres",
             "server_version": "16.4",
             "pg_dump_major": 16,
+            "identity": dict(identity or IDENTITY),
         },
     )
     monkeypatch.setattr(t020_cutover, "confirm", lambda *a, **k: None)
@@ -392,3 +396,84 @@ def test_the_snapshot_is_hashed_into_the_journal(monkeypatch, tmp_path):
     snapshot = [entry for entry in journal["steps"] if entry["title"] == "snapshot" and entry["state"] == "done"][0]
     assert snapshot["sha256"] == t020_cutover.sha256_of(Path(snapshot["path"]))
     assert len(snapshot["sha256"]) == 64
+
+
+# --- a resumed run has to be the same run, against the same database --------------------------
+
+
+def _one_completed_run(monkeypatch, tmp_path):
+    """A real run through step 7, leaving a real journal, snapshot and baseline behind."""
+    _orchestrator_harness(monkeypatch, tmp_path, [_measurement()] * 3)
+    assert t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"]) == 0
+
+
+def _resume(monkeypatch, tmp_path, measurements=None, identity=None, argv=()):
+    applied = _orchestrator_harness(
+        monkeypatch, tmp_path, measurements or [_measurement()], identity=identity
+    )
+    code = t020_cutover.main(
+        ["--dsn", DB_B, "--run-dir", str(tmp_path), "--start-at", "4", *argv]
+    )
+    return code, applied
+
+
+def test_a_resume_that_matches_the_earlier_run_reaches_the_write(monkeypatch, tmp_path):
+    """The negative control for every refusal below."""
+    _one_completed_run(monkeypatch, tmp_path)
+    code, applied = _resume(monkeypatch, tmp_path)
+    assert code == 0
+    assert applied == [True]
+
+
+def test_a_resume_with_no_earlier_journal_is_refused(monkeypatch, tmp_path):
+    """The baseline file having the right name was the whole of the old check."""
+    (tmp_path / "source-observation-baseline.json").write_text(
+        json.dumps(dict(BALANCED_BASELINE, digests=dict(_measurement()["digests"], member_counts=BASELINE)))
+    )
+    code, applied = _resume(monkeypatch, tmp_path)
+    assert code == 2
+    assert applied == []
+
+
+def test_a_resume_against_another_database_is_refused(monkeypatch, tmp_path, capsys):
+    """A baseline describes one corpus. Resuming against a second one migrates it blind."""
+    _one_completed_run(monkeypatch, tmp_path)
+    elsewhere = dict(IDENTITY, database_oid="9", cluster_fingerprint="e" * 32)
+
+    code, applied = _resume(monkeypatch, tmp_path, identity=elsewhere)
+
+    assert code == 2
+    assert applied == []
+    assert "database" in capsys.readouterr().out.lower()
+
+
+@pytest.mark.parametrize("artifact", ["snapshot", "baseline"])
+def test_a_resume_whose_artifact_changed_since_the_earlier_run_is_refused(monkeypatch, tmp_path, artifact):
+    """Both files are hashed into the journal, so a replacement is not merely a same-named file.
+
+    The snapshot is the only way back from step 6 and the baseline is what step 7 judges the
+    result against; a run that cannot prove either is the one it left behind has neither.
+    """
+    _one_completed_run(monkeypatch, tmp_path)
+    journal = json.loads(sorted(tmp_path.glob("t020-run-*.json"))[-1].read_text())
+    entry = [e for e in journal["steps"] if e["title"] == artifact and e["state"] == "done"][-1]
+    path = Path(entry["path"] if artifact == "snapshot" else entry["baseline"])
+    path.write_bytes(path.read_bytes() + b"  ")
+
+    code, applied = _resume(monkeypatch, tmp_path)
+
+    assert code == 2
+    assert applied == []
+
+
+def test_a_resume_whose_corpus_kept_its_counts_but_changed_its_payload_is_refused(monkeypatch, tmp_path):
+    """The reference is the earlier run's measurement, so a write since then is still visible.
+
+    Measuring afresh at resume time would make this gate agree with whatever it found.
+    """
+    _one_completed_run(monkeypatch, tmp_path)
+
+    code, applied = _resume(monkeypatch, tmp_path, measurements=[_measurement(observations="z" * 64)])
+
+    assert code == 1
+    assert applied == []

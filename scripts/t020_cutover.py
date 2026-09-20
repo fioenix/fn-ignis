@@ -31,9 +31,15 @@ Steps 8 and 9 of the runbook -- start the new runtime, reopen ingress -- are del
 automated. They depend on what the operator has running, and doing them early is one of the three
 things the runbook forbids.
 
+  binds a resumed run       --start-at reads the earlier run's journal, and refuses unless this
+                            connection reaches the same database, the snapshot and the baseline
+                            still hash to what that run recorded, and the corpus still matches
+                            the measurement that run took.
+
 Usage:
     .venv/bin/python scripts/t020_cutover.py
     .venv/bin/python scripts/t020_cutover.py --start-at 5
+    .venv/bin/python scripts/t020_cutover.py --start-at 5 --journal .handoff/t020-run-...json
 
 The DSN comes from --dsn, else $PRODUCTION_DSN, else the direct-connection key in .env. A
 session-mode pooler is fine; pg_dump cannot run through one, so pass --snapshot with a snapshot
@@ -538,6 +544,22 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
             "  connection from this network."
         )
     database, user, server_version = [field.strip() for field in probe.stdout.strip().split("|")]
+
+    fingerprint = psql_value(psql, dsn, IDENTITY_SQL)
+    if not fingerprint.ok:
+        raise Unrunnable(
+            "Could not read this database's identity.\n"
+            f"  psql said: {fingerprint.stderr.strip() or '(nothing)'}\n"
+            "  A resumed run has nothing to check its journal against without it."
+        )
+    identity_name, identity_oid, cluster_fingerprint = [
+        field.strip() for field in fingerprint.stdout.strip().split("|")
+    ]
+    identity = {
+        "database": identity_name,
+        "database_oid": identity_oid,
+        "cluster_fingerprint": cluster_fingerprint,
+    }
     server_major = int(server_version.split(".")[0])
     dump_major = tool_major_version(pg_dump)
 
@@ -557,10 +579,136 @@ def preflight(dsn: str, run_dir: Path) -> Dict[str, Any]:
         "user": user,
         "server_version": server_version,
         "pg_dump_major": dump_major,
+        "identity": identity,
     }
 
 
+# ───────────────────────────── resuming an earlier run ─────────────────────────────
+
+
+def previous_journal(run_dir: Path, supplied: Optional[Path]) -> Tuple[Path, Dict[str, Any]]:
+    """The journal of the run being resumed, named or found, never guessed at."""
+    if supplied is not None:
+        if not supplied.exists():
+            raise Unrunnable(f"--journal {supplied} does not exist.")
+        path = supplied
+    else:
+        candidates = sorted(run_dir.glob("t020-run-*.json"))
+        if not candidates:
+            raise Unrunnable(
+                f"--start-at needs the journal of the run it resumes, and {shown(run_dir)} holds "
+                "none. Pass --journal, or start from step 1.\n"
+                "  The baseline file alone is not enough: its name says nothing about which "
+                "database it was taken from or whether it is still the file that was written."
+            )
+        path = candidates[-1]
+    try:
+        return path, json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise Unrunnable(f"Could not read {shown(path)}: {exc}")
+
+
+def last_done(data: Dict[str, Any], title: str) -> Optional[Dict[str, Any]]:
+    finished = [
+        entry for entry in data.get("steps", []) if entry.get("title") == title and entry.get("state") == "done"
+    ]
+    return finished[-1] if finished else None
+
+
+def identity_differences(recorded: Dict[str, Any], observed: Dict[str, Any]) -> List[str]:
+    """Every identity field the two runs can both state and state differently."""
+    return [
+        f"{field}: the earlier run recorded {recorded[field]}, this connection reports {observed.get(field)}"
+        for field in sorted(recorded)
+        if recorded.get(field) and observed.get(field) and recorded[field] != observed[field]
+    ]
+
+
+def verified_artifact(entry: Dict[str, Any], key: str, what: str) -> Path:
+    """The file the earlier run wrote, proven to still be that file."""
+    recorded = entry.get(key)
+    recorded_sha = entry.get("sha256")
+    if not recorded or not recorded_sha:
+        raise Unrunnable(
+            f"The earlier run's journal records no hashed {what}. It predates this check, so "
+            "there is nothing to resume against. Start from step 1."
+        )
+    path = Path(recorded)
+    if not path.exists():
+        raise Unrunnable(f"The {what} the earlier run wrote is gone: {shown(path)}")
+    actual = sha256_of(path)
+    if actual != recorded_sha:
+        raise Unrunnable(
+            f"The {what} at {shown(path)} is not the file the earlier run wrote.\n"
+            f"  journal  {recorded_sha}\n"
+            f"  on disk  {actual}\n"
+            "  A file of the right name is not the right file. Start from step 1."
+        )
+    return path
+
+
+def resume_context(
+    run_dir: Path, supplied: Optional[Path], tools: Dict[str, Any], start_at: int
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Bind this run to the run it resumes: same database, same files, same measurement.
+
+    The old check was that a file called source-observation-baseline.json existed in the run
+    directory. That is satisfied by a rehearsal artifact, by a baseline taken from a different
+    deployment, and by the right file after something rewrote it.
+    """
+    path, data = previous_journal(run_dir, supplied)
+    say(f"  resuming the run journalled in {shown(path)}")
+
+    recorded_identity = (last_done(data, "preflight") or {}).get("identity") or {}
+    differences = identity_differences(recorded_identity, tools["identity"])
+    if not recorded_identity:
+        raise Unrunnable(
+            f"{shown(path)} records no database identity, so this connection cannot be shown to "
+            "reach the database that run migrated. Start from step 1."
+        )
+    if differences:
+        raise Unrunnable(
+            "This connection does not reach the database the earlier run measured:\n    "
+            + "\n    ".join(differences)
+            + "\n  The baseline describes that corpus, not this one."
+        )
+    say(f"  same database   {recorded_identity.get('database')} (oid {recorded_identity.get('database_oid')})")
+
+    if start_at > 2:
+        snapshot = verified_artifact(last_done(data, "snapshot") or {}, "path", "snapshot")
+        say(f"  same snapshot   {shown(snapshot)}")
+
+    if start_at > 3:
+        entry = last_done(data, "baseline") or {}
+        baseline_path = verified_artifact(entry, "baseline", "baseline")
+        say(f"  same baseline   {shown(baseline_path)}")
+        baseline = json.loads(baseline_path.read_text())
+        # The reference the pre-apply gate compares against is the earlier run's measurement.
+        # One taken now could only ever agree with whatever it found.
+        return baseline, {"digests": entry["digests"], "member_counts": entry["member_counts"]}
+
+    quiesce = last_done(data, "quiesce") or {}
+    standstill = quiesce.get("standstill")
+    if not standstill:
+        raise Unrunnable(
+            f"{shown(path)} records no corpus measurement to resume against. Start from step 1."
+        )
+    return {}, standstill
+
+
 # ───────────────────────────── step 1: quiesce ─────────────────────────────
+
+# The database, its OID, and a fingerprint of every database in the cluster. All three are
+# readable without any grant, which the privileged alternatives -- pg_control_system() and its
+# system_identifier -- are not. It is a fingerprint and not a proof: two clusters could in
+# principle hold the same set of database OIDs and names. What it does rule out is the case this
+# gate exists for, a journal from one deployment resumed against another.
+IDENTITY_SQL = (
+    "select current_database()"
+    " || '|' || (select oid from pg_database where datname = current_database())::text"
+    " || '|' || (select md5(string_agg(oid::text || ':' || datname, ',' order by oid))"
+    " from pg_database)"
+)
 
 QUIESCE_SQL = """
 select pid, coalesce(nullif(application_name, ''), '?'), state, coalesce(query_start::text, '-')
@@ -935,6 +1083,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="resume after a gate stopped the run; preflight always runs",
     )
     parser.add_argument(
+        "--journal",
+        type=Path,
+        default=None,
+        help="the journal of the run being resumed; default: the newest one in the run dir",
+    )
+    parser.add_argument(
         "--snapshot",
         type=Path,
         default=None,
@@ -961,35 +1115,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     journal: Optional[Journal] = None
     try:
         tools = preflight(args.dsn, args.run_dir)
+
+        # Resolved before this run opens a journal of its own, so that "the newest journal in
+        # the run directory" cannot mean the empty one this process just created.
+        baseline: Dict[str, Any] = {}
+        standstill: Dict[str, Any] = {}
+        if args.start_at > 1:
+            say()
+            say(f"  --start-at {args.start_at}: steps 1 to {args.start_at - 1} are being skipped.")
+            baseline, standstill = resume_context(args.run_dir, args.journal, tools, args.start_at)
+
         journal = Journal(
             args.run_dir / f"t020-run-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.json",
             tools["host"],
         )
-        journal.record(0, "preflight", **{key: tools[key] for key in ("host", "database", "user", "server_version")})
-
-        if args.start_at > 1:
-            say()
-            say(f"  --start-at {args.start_at}: steps 1 to {args.start_at - 1} are being skipped.")
-            if args.start_at > 2:
-                say("  The snapshot from the earlier run is the only thing standing between a")
-                say("  failed step 6 and data loss. Confirm it still exists before continuing.")
-
-        baseline: Dict[str, Any] = {}
-        standstill: Dict[str, Any]
-        if args.start_at > 3:
-            baseline_path = args.run_dir / "source-observation-baseline.json"
-            if not baseline_path.exists():
-                raise Unrunnable(f"--start-at {args.start_at} needs {baseline_path.name} from step 3.")
-            baseline = json.loads(baseline_path.read_text())
-            say(f"  reusing {shown(baseline_path)} from the earlier run")
-            # The earlier run's measurement, not a fresh one: a reference taken now could not
-            # contradict anything written since that run's snapshot.
-            standstill = canonical_digests(baseline["digests"])
+        journal.record(
+            0,
+            "preflight",
+            identity=tools["identity"],
+            **{key: tools[key] for key in ("host", "database", "user", "server_version")},
+        )
 
         if args.start_at <= 1:
             standstill = step_quiesce(tools, args.dsn, journal, args.assume_quiesced)
-        elif args.start_at <= 3:
-            standstill = legacy_digests(args.dsn)
         if args.start_at <= 2:
             step_snapshot(tools, args.dsn, args.run_dir, journal, args.snapshot, standstill)
         if args.start_at <= 3:
