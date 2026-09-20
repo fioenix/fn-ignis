@@ -763,7 +763,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     except KeyboardInterrupt as interrupt:
         say()
-        say(f"  INTERRUPTED ({interrupt or 'Ctrl-C'}).")
+        # an exception object is always truthy, so the reason has to come from its text
+        say(f"  INTERRUPTED ({str(interrupt) or 'Ctrl-C'}).")
         if journal is not None:
             journal.record(-1, "interrupted", reason=str(interrupt) or "Ctrl-C")
             say(f"  Journal: {shown(journal.path)}")
