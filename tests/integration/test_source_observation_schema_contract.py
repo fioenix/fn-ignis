@@ -21,6 +21,8 @@ import pytest_asyncio
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from tests.integration.conftest import _drop_test_database
+
 pytestmark = pytest.mark.asyncio
 
 NOW = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
@@ -62,12 +64,9 @@ async def postgres_schema():
                 conn.execute((repo_root / "sql" / migration).read_text(encoding="utf-8"))
         yield test_dsn
     finally:
-        with psycopg.connect(admin_dsn, autocommit=True) as conn:
-            conn.execute(
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
-                (database_name,),
-            )
-            conn.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(database_name)))
+        # Shared with conftest rather than repeated here: a plain terminate-then-drop races a
+        # connection pooler, which reopens a server session between the two statements.
+        _drop_test_database(admin_dsn, database_name)
 
 
 def table_exists(conn, name: str) -> bool:

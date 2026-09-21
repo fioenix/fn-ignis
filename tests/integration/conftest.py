@@ -8,6 +8,7 @@ divergence these tests exist to catch.
 
 import os
 import sqlite3
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -262,6 +263,65 @@ def _apply_postgres_schema(dsn: str) -> None:
             conn.execute((repo_root / "sql" / migration).read_text(encoding="utf-8"))
 
 
+def _drop_test_database(admin_dsn: str, database_name: str, attempts: int = 5) -> None:
+    """Drop the throwaway contract database, even behind a pooler and without SUPERUSER.
+
+    Two things get in the way on a hosted instance, and neither is a reason to leave a scratch
+    database behind:
+
+    - a pooler answers a client disconnect by keeping its own server session alive, and may
+      reopen one between a terminate and the DROP; and
+    - `pg_terminate_backend` refuses outright when one of those sessions belongs to a SUPERUSER
+      role. Supabase's own background workers connect as one, and the project's `postgres` role
+      is not superuser, so that refusal is routine rather than exceptional.
+
+    So the terminate is best-effort and its failure is swallowed: `DROP DATABASE ... WITH (FORCE)`
+    terminates inside the same statement anyway, and the retry covers the pooler reconnecting.
+    The plain DROP is the fallback for a server older than 13, which is where WITH (FORCE)
+    arrived.
+    """
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                conn.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+                    " WHERE datname = %s AND pid <> pg_backend_pid()",
+                    (database_name,),
+                )
+        except psycopg.Error:
+            # Nothing to do about a session this role may not signal. WITH (FORCE) is the
+            # answer, and if that cannot close it either the retry and the final assertion will
+            # say so rather than this line hiding it.
+            pass
+
+        try:
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                try:
+                    conn.execute(
+                        sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                            sql.Identifier(database_name)
+                        )
+                    )
+                except psycopg.errors.SyntaxError:
+                    conn.execute(
+                        sql.SQL("DROP DATABASE IF EXISTS {}").format(
+                            sql.Identifier(database_name)
+                        )
+                    )
+            return
+        except psycopg.Error as exc:
+            last_error = exc
+            time.sleep(0.5 * (attempt + 1))
+
+    # Raised rather than swallowed: a database left behind on a shared server is litter the next
+    # run has no way to notice, and silence here would hide a real leak of open connections.
+    raise AssertionError(
+        f"Could not drop the contract database {database_name} after {attempts} attempts. "
+        f"Something is still holding a session open: {last_error}"
+    )
+
+
 @pytest_asyncio.fixture(params=("sqlite", "postgres"))
 async def repository_case(request, tmp_path):
     if request.param == "sqlite":
@@ -285,9 +345,4 @@ async def repository_case(request, tmp_path):
         finally:
             await repository.close()
     finally:
-        with psycopg.connect(admin_dsn, autocommit=True) as conn:
-            conn.execute(
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
-                (database_name,),
-            )
-            conn.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(database_name)))
+        _drop_test_database(admin_dsn, database_name)

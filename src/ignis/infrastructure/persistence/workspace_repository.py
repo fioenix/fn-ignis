@@ -43,6 +43,16 @@ JOURNAL_PREFIX = "run-"
 JOURNAL_SEQUENCE_LIMIT = 1000
 
 
+def _utc_now() -> datetime:
+    """The run clock, in one place so a test can freeze it.
+
+    The collision this allocator exists to prevent only happens inside one second, so a test
+    that cannot hold the clock still is not testing the invariant -- it is testing whether two
+    statements happened to land in the same second, which on a loaded run they do not.
+    """
+    return datetime.now(timezone.utc)
+
+
 class RunJournalExhaustedError(Exception):
     """Every journal name for this second is taken, so this run has no name of its own."""
 
@@ -199,7 +209,7 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         makes the name unique, and the exclusive create is what proves it.
         """
         run_id = run_id or uuid4()
-        started_at = datetime.now(timezone.utc)
+        started_at = _utc_now()
         journal_dir = workspace.root_path / JOURNAL_DIRNAME
         journal_dir.mkdir(parents=True, exist_ok=True)
         stamp = started_at.strftime("%Y%m%d-%H%M%S")

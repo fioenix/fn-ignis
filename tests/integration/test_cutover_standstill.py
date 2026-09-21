@@ -12,9 +12,13 @@ Neither is visible from a stubbed test. Both are properties of the server.
 import os
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg
 import pytest
+from psycopg import sql
+
+from tests.integration.conftest import _drop_test_database
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
@@ -28,10 +32,13 @@ def legacy_tables():
     admin_dsn = os.environ.get("IGNIS_TEST_POSTGRES_DSN", "").strip()
     if not admin_dsn:
         pytest.skip("IGNIS_TEST_POSTGRES_DSN is required to ask a real server what it does")
-    name = "ignis_standstill_probe"
+    # A fresh name per run, never a fixed one. The fixed name meant the fixture opened by
+    # dropping a database it had not created -- the only place in the suite that could destroy
+    # something pre-existing, and a name collision away from destroying the wrong thing. A uuid
+    # name cannot collide, so there is nothing to drop before creating.
+    name = f"ignis_standstill_{uuid4().hex}"
     with psycopg.connect(admin_dsn, autocommit=True) as admin:
-        admin.execute(f'DROP DATABASE IF EXISTS {name} WITH (FORCE)')
-        admin.execute(f'CREATE DATABASE {name}')
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     dsn = t020_cutover.make_conninfo(
         **dict(t020_cutover.dsn_fields(admin_dsn), dbname=name)
     )
@@ -41,8 +48,9 @@ def legacy_tables():
     try:
         yield dsn
     finally:
-        with psycopg.connect(admin_dsn, autocommit=True) as admin:
-            admin.execute(f'DROP DATABASE IF EXISTS {name} WITH (FORCE)')
+        # Shared with conftest: a plain drop races a connection pooler, which reopens a server
+        # session between the terminate and the DROP and leaves the scratch database behind.
+        _drop_test_database(admin_dsn, name)
 
 
 def test_the_audit_reader_reads_one_instant(legacy_tables):
