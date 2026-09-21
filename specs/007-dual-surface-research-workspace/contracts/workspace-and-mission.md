@@ -37,6 +37,16 @@ manifest and the workspace's logical record scope in the configured shared Ignis
 Adoption of a non-empty folder without a manifest requires a separate explicit confirmation and
 preserves unrelated files.
 
+## Host-Agent Q&A boundary
+
+The host Agent owns the interactive Market framing loop. It asks at most seven primary questions,
+one at a time, may skip a field already answered, shows the draft for editing, and asks for an
+explicit requester confirmation. The host keeps that draft in Agent context only. If the requester
+abandons the interaction, the host MUST NOT call the Brief confirmation operation.
+
+fn-ignis receives no Q&A transcript and has no draft-persistence operation. The only durable input
+is the complete confirmed payload below.
+
 ## Attention mission
 
 ```json
@@ -92,6 +102,22 @@ Every analysis response MUST identify:
 - channel status and evidence counts;
 - citations or an explicit no-data/degraded status; and
 - whether a value is Attention context, Market evidence, or a derived conclusion.
+
+Every Market citation attached to a conclusion, opportunity, or actionable takeaway MUST have this
+shape, with `observation_id` as the canonical identity:
+
+```json
+{
+  "observation_id": "observation-uuid",
+  "source_id": "source-uuid",
+  "platform": "youtube",
+  "title": "display title",
+  "url": "display URL"
+}
+```
+
+If no observation exists, the response must return the explicit connector-surface state instead
+of fabricating a citation or treating missing data as zero evidence.
 
 All records returned by the contract MUST belong to the requested `workspace_id`; a workspace
 scope mismatch is an error, not an empty result.

@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-21
 
-**Status**: Draft
+**Status**: Accepted for P1 implementation (US1-US3)
 
 **Input**: User decision note: `docs/decisions/2026-09-21-dual-surface-research-workspace.md`
 
@@ -198,6 +198,15 @@ duplicate writer.
   multiple runs begin within the same second.
 - **FR-024**: The system MUST preserve connector health and no-data states as evidence metadata;
   missing data MUST NOT be represented as zero evidence.
+- **FR-025**: The host Agent MUST own adaptive Market Q&A and MUST send fn-ignis only the
+  requester-confirmed Brief payload; fn-ignis MUST NOT persist abandoned questions, draft answers,
+  or a transcript.
+- **FR-026**: Every Market citation attached to a conclusion, opportunity, or actionable takeaway
+  MUST identify the canonical `observation_id`, or explicitly identify the relevant no-data or
+  degraded channel state.
+- **FR-027**: Channel health in the P1 response contract MUST be keyed by connector surface, so
+  distinct surfaces such as TikTok video search and TikTok comments cannot mask one another behind
+  a single platform aggregate.
 
 ### Key Entities
 
@@ -239,6 +248,8 @@ duplicate writer.
   or an explicit no-data/degraded status; no missing channel is silently represented as zero.
 - **SC-008**: Reviewers can distinguish Attention context, Market evidence, and Opportunity Index
   output in every generated Market analysis artifact.
+- **SC-009**: A host Agent can abandon Market Q&A without creating a Brief, mission, journal, or
+  other canonical research record.
 
 ## Assumptions
 

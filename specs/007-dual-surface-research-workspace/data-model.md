@@ -39,6 +39,9 @@ An analysis run inside a research workspace.
 The Agent chat/session identifier may be recorded as non-authoritative integration metadata. It
 does not determine mission or workspace ownership.
 
+The existing `research_missions` record is extended with the workspace and surface fields needed
+above. There is no second mission table or alternate mission identity for the feature.
+
 ## Market Brief Revision
 
 The immutable decision frame that authorizes a Market mission.
@@ -72,6 +75,8 @@ Reuse the existing canonical model:
 The feature adds workspace, surface, and lineage metadata around these existing records; it must
 not introduce source identity in titles, URLs, or a second legacy signal table. SQLite and
 PostgreSQL implementations must enforce the same workspace-scoping and provenance invariants.
+Market citations resolve through `mission_evidence.observation_id`; a URL or title is display
+payload only and cannot be used as the citation identity.
 
 ## Run Journal
 
