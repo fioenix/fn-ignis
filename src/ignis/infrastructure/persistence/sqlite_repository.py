@@ -263,12 +263,19 @@ class SqliteTrendRepository(ITrendRepository):
                 parent_attention_mission_id TEXT REFERENCES research_missions(id) ON DELETE SET NULL,
                 parent_cluster_id TEXT REFERENCES topic_clusters(id) ON DELETE SET NULL,
                 brief_revision_id TEXT,
+                -- The Market mission whose confirmed Brief was changed to produce this one.
+                -- Recorded on the newer mission, because the revised one is immutable from the
+                -- moment its Brief was confirmed.
+                revises_mission_id TEXT REFERENCES research_missions(id) ON DELETE SET NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT,
                 -- An Attention mission has no Brief, by definition. Stating it as a constraint
                 -- keeps a caller from binding one and then reading an Opportunity Index off the
                 -- result.
-                CHECK (surface <> 'ATTENTION' OR brief_revision_id IS NULL)
+                CHECK (surface <> 'ATTENTION' OR brief_revision_id IS NULL),
+                -- And with no Brief there is nothing for it to revise.
+                CHECK (surface <> 'ATTENTION' OR revises_mission_id IS NULL),
+                CHECK (revises_mission_id IS NULL OR revises_mission_id <> id)
             );
 
             CREATE TABLE IF NOT EXISTS platform_credentials (
@@ -459,6 +466,7 @@ class SqliteTrendRepository(ITrendRepository):
             "parent_attention_mission_id",
             "parent_cluster_id",
             "brief_revision_id",
+            "revises_mission_id",
         ):
             if existing_mission_columns and column not in existing_mission_columns:
                 cur.execute(f"ALTER TABLE research_missions ADD COLUMN {column} TEXT")
@@ -936,8 +944,8 @@ class SqliteTrendRepository(ITrendRepository):
             INSERT INTO research_missions
             (id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary,
              workspace_id, surface, parent_attention_mission_id, parent_cluster_id, brief_revision_id,
-             created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             revises_mission_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 title = excluded.title,
                 keywords = excluded.keywords,
@@ -953,6 +961,7 @@ class SqliteTrendRepository(ITrendRepository):
                 parent_attention_mission_id = excluded.parent_attention_mission_id,
                 parent_cluster_id = excluded.parent_cluster_id,
                 brief_revision_id = excluded.brief_revision_id,
+                revises_mission_id = excluded.revises_mission_id,
                 updated_at = excluded.updated_at
             """,
             (
@@ -969,6 +978,7 @@ class SqliteTrendRepository(ITrendRepository):
                 _uuid_text(mission.parent_attention_mission_id),
                 _uuid_text(mission.parent_cluster_id),
                 _uuid_text(mission.brief_revision_id),
+                _uuid_text(mission.revises_mission_id),
                 mission.created_at.isoformat() if mission.created_at else now_str,
                 now_str,
             ),
@@ -997,7 +1007,7 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, workspace_id, surface, parent_attention_mission_id, parent_cluster_id, brief_revision_id, created_at, updated_at FROM research_missions WHERE id = ? OR shortcode = ?",
+                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, workspace_id, surface, parent_attention_mission_id, parent_cluster_id, brief_revision_id, revises_mission_id, created_at, updated_at FROM research_missions WHERE id = ? OR shortcode = ?",
                     (str(mission_id), str(mission_id))
                 )
                 r = cur.fetchone()
@@ -1024,6 +1034,7 @@ class SqliteTrendRepository(ITrendRepository):
                     parent_attention_mission_id=_uuid_or_none(r["parent_attention_mission_id"]),
                     parent_cluster_id=_uuid_or_none(r["parent_cluster_id"]),
                     brief_revision_id=_uuid_or_none(r["brief_revision_id"]),
+                    revises_mission_id=_uuid_or_none(r["revises_mission_id"]),
                     created_at=c_at,
                     updated_at=u_at,
                 )
@@ -1044,7 +1055,7 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, workspace_id, surface, parent_attention_mission_id, parent_cluster_id, brief_revision_id, created_at, updated_at FROM research_missions ORDER BY created_at DESC LIMIT ?",
+                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, workspace_id, surface, parent_attention_mission_id, parent_cluster_id, brief_revision_id, revises_mission_id, created_at, updated_at FROM research_missions ORDER BY created_at DESC LIMIT ?",
                     (limit,)
                 )
                 rows = cur.fetchall()
@@ -1072,6 +1083,7 @@ class SqliteTrendRepository(ITrendRepository):
                             ),
                             parent_cluster_id=_uuid_or_none(r["parent_cluster_id"]),
                             brief_revision_id=_uuid_or_none(r["brief_revision_id"]),
+                            revises_mission_id=_uuid_or_none(r["revises_mission_id"]),
                             created_at=c_at,
                         )
                     )
@@ -1935,7 +1947,7 @@ class SqliteTrendRepository(ITrendRepository):
                     "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe,"
                     " status, agent, session_id, summary, workspace_id, surface,"
                     " parent_attention_mission_id, parent_cluster_id, brief_revision_id,"
-                    " created_at, updated_at FROM research_missions"
+                    " revises_mission_id, created_at, updated_at FROM research_missions"
                     " WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
                     (str(workspace_id), limit),
                 ).fetchall()
@@ -1961,6 +1973,7 @@ class SqliteTrendRepository(ITrendRepository):
                             ),
                             parent_cluster_id=_uuid_or_none(r["parent_cluster_id"]),
                             brief_revision_id=_uuid_or_none(r["brief_revision_id"]),
+                            revises_mission_id=_uuid_or_none(r["revises_mission_id"]),
                             created_at=datetime.fromisoformat(r["created_at"]),
                         )
                     )

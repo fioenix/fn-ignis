@@ -415,3 +415,131 @@ async def test_revision_numbers_are_allocated_once_when_two_callers_confirm_toge
         assert await store.next_brief_revision_number(workspace.workspace_id) == 5
     finally:
         await repository.close()
+
+
+# --- User Story 4: the revision relation is durable and is not caller-editable ---
+
+@pytest.mark.asyncio
+async def test_a_revision_records_the_market_mission_it_revises(sqlite_repository, tmp_path):
+    """The relation survives the session that created it.
+
+    A revision reported only in the confirmation response is unreadable to the next Agent host
+    that reopens the research, which is the one reader the workspace exists for.
+    """
+    store, workspace = await _open_workspace(sqlite_repository, tmp_path)
+    use_case = _revision_use_case(sqlite_repository, store)
+
+    first, _ = await use_case.execute(
+        workspace_id=workspace.workspace_id, confirmed_by="requester", **COMPLETE_PAYLOAD
+    )
+    assert first.revises_mission_id is None
+
+    second, _ = await use_case.execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        previous_mission_id=first.id,
+        **{**COMPLETE_PAYLOAD, "hypothesis": "A narrower hypothesis"},
+    )
+    assert second.revises_mission_id == first.id
+
+    reopened = await sqlite_repository.get_mission(second.id)
+    assert reopened.revises_mission_id == first.id
+    listed = {m.id: m for m in await store.list_workspace_missions(workspace.workspace_id)}
+    assert listed[second.id].revises_mission_id == first.id
+    # The mission being revised is untouched.
+    assert listed[first.id].revises_mission_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_revision_cannot_be_given_a_different_attention_origin(
+    sqlite_repository, tmp_path
+):
+    """Sharpening a hypothesis does not change where the question came from."""
+    store, workspace = await _open_workspace(sqlite_repository, tmp_path)
+    use_case = _revision_use_case(sqlite_repository, store)
+    origin = await _attention_mission(sqlite_repository, workspace)
+    other_origin = await _attention_mission(sqlite_repository, workspace)
+
+    first, _ = await use_case.execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        lineage=MissionLineage(parent_attention_mission_id=origin.id),
+        **COMPLETE_PAYLOAD,
+    )
+
+    with pytest.raises(InvalidMissionLineageError) as excinfo:
+        await use_case.execute(
+            workspace_id=workspace.workspace_id,
+            confirmed_by="requester",
+            previous_mission_id=first.id,
+            lineage=MissionLineage(parent_attention_mission_id=other_origin.id),
+            **COMPLETE_PAYLOAD,
+        )
+    assert str(other_origin.id) in str(excinfo.value)
+    # Refused before anything was written: still one Market mission and one revision.
+    market_missions = [
+        m
+        for m in await store.list_workspace_missions(workspace.workspace_id)
+        if m.surface == ResearchSurface.MARKET.value
+    ]
+    assert [m.id for m in market_missions] == [first.id]
+    assert await store.next_brief_revision_number(workspace.workspace_id) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_revision_may_restate_the_lineage_it_is_inheriting(sqlite_repository, tmp_path):
+    """Passing the same origin back is not an override, so it is accepted."""
+    store, workspace = await _open_workspace(sqlite_repository, tmp_path)
+    use_case = _revision_use_case(sqlite_repository, store)
+    cluster_id = await _cluster(sqlite_repository)
+    origin = await _attention_mission(sqlite_repository, workspace, cluster_id=cluster_id)
+
+    first, _ = await use_case.execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        lineage=MissionLineage(
+            parent_attention_mission_id=origin.id, parent_cluster_id=cluster_id
+        ),
+        **COMPLETE_PAYLOAD,
+    )
+    second, _ = await use_case.execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        previous_mission_id=first.id,
+        lineage=MissionLineage(
+            parent_attention_mission_id=origin.id, parent_cluster_id=cluster_id
+        ),
+        **{**COMPLETE_PAYLOAD, "hypothesis": "A narrower hypothesis"},
+    )
+    assert second.parent_attention_mission_id == origin.id
+    assert second.parent_cluster_id == cluster_id
+    assert second.revises_mission_id == first.id
+
+
+@pytest.mark.asyncio
+async def test_a_revision_of_a_mission_with_no_origin_cannot_be_given_one(
+    sqlite_repository, tmp_path
+):
+    """Adding an origin to an existing line would backdate a handoff that never happened."""
+    store, workspace = await _open_workspace(sqlite_repository, tmp_path)
+    use_case = _revision_use_case(sqlite_repository, store)
+    origin = await _attention_mission(sqlite_repository, workspace)
+
+    direct, _ = await use_case.execute(
+        workspace_id=workspace.workspace_id, confirmed_by="requester", **COMPLETE_PAYLOAD
+    )
+    with pytest.raises(InvalidMissionLineageError) as excinfo:
+        await use_case.execute(
+            workspace_id=workspace.workspace_id,
+            confirmed_by="requester",
+            previous_mission_id=direct.id,
+            lineage=MissionLineage(parent_attention_mission_id=origin.id),
+            **COMPLETE_PAYLOAD,
+        )
+    assert "handoff" in str(excinfo.value)
+    market_missions = [
+        m
+        for m in await store.list_workspace_missions(workspace.workspace_id)
+        if m.surface == ResearchSurface.MARKET.value
+    ]
+    assert [m.id for m in market_missions] == [direct.id]

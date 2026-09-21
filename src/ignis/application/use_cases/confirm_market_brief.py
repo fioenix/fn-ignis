@@ -115,6 +115,7 @@ class ConfirmMarketBriefUseCase:
             surface=ResearchSurface.MARKET.value,
             parent_attention_mission_id=lineage.parent_attention_mission_id,
             parent_cluster_id=lineage.parent_cluster_id,
+            revises_mission_id=lineage.revises_mission_id,
             brief_revision_id=revision.brief_revision_id,
         )
 

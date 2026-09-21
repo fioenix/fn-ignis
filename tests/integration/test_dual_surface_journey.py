@@ -905,7 +905,65 @@ async def test_the_brief_tool_revises_a_confirmed_brief_into_a_new_mission(
     assert second["mission_id"] != first["mission_id"]
     assert second["brief_revision_id"] != first["brief_revision_id"]
     assert second["lineage"]["revises_mission_id"] == first["mission_id"]
+    assert first["lineage"]["revises_mission_id"] is None
 
     # The first Brief still reads exactly as it was confirmed.
     stored_first = await store.get_brief_revision_for_mission(UUID(first["mission_id"]))
     assert stored_first.hypothesis == COMPLETE_BRIEF["hypothesis"]
+
+    # And the relation is durable: a host that only has the database finds it.
+    reopened = await repository.get_mission(UUID(second["mission_id"]))
+    assert reopened.revises_mission_id == UUID(first["mission_id"])
+    revised = await repository.get_mission(UUID(first["mission_id"]))
+    assert revised.revises_mission_id is None
+
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(second["mission_id"]))
+    assert analysis["lineage"]["revises_mission_id"] == first["mission_id"]
+    assert analysis["mission"]["lineage"]["revises_mission_id"] == first["mission_id"]
+
+
+@pytest.mark.asyncio
+async def test_the_brief_tool_refuses_a_revision_that_re_points_the_attention_origin(
+    repository_case, host_workspace, monkeypatch
+):
+    """A revision inherits its origin; a payload that contradicts it is refused, not ignored."""
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    components = _mcp_components(repository, store, ProbeCountingRegistry(_probe_signals()))
+    components["create_market_revision_use_case"] = _revision_use_case(repository, store)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    origin = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id, title="Origin", seed="ai customer service"
+    )
+    elsewhere = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id, title="Elsewhere", seed="something else"
+    )
+    first, _ = await _revision_use_case(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        lineage=MissionLineage(parent_attention_mission_id=origin.id),
+        **COMPLETE_BRIEF,
+    )
+
+    payload = json.loads(
+        await mcp_server.handle_confirm_market_brief(
+            workspace_id=str(workspace.workspace_id),
+            confirmed_by="requester",
+            previous_mission_id=str(first.id),
+            parent_attention_mission_id=str(elsewhere.id),
+            **{**COMPLETE_BRIEF, "hypothesis": "A narrower hypothesis"},
+        )
+    )
+    assert "error" in payload
+    assert str(elsewhere.id) in payload["error"]
+
+    market_missions = [
+        m
+        for m in await store.list_workspace_missions(workspace.workspace_id)
+        if m.surface == ResearchSurface.MARKET.value
+    ]
+    assert [m.id for m in market_missions] == [first.id]
+    assert await store.next_brief_revision_number(workspace.workspace_id) == 2

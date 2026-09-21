@@ -590,9 +590,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                 parent_attention_mission_id,
                 parent_cluster_id,
                 brief_revision_id,
+                revises_mission_id,
                 created_at,
                 updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id;
         """
         platforms_str = [p.value if hasattr(p, "value") else str(p) for p in mission.platforms]
@@ -615,6 +616,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 _uuid_text(mission.parent_attention_mission_id),
                 _uuid_text(mission.parent_cluster_id),
                 _uuid_text(mission.brief_revision_id),
+                _uuid_text(mission.revises_mission_id),
                 mission.created_at,
                 mission.updated_at,
             ),
@@ -661,6 +663,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 parent_attention_mission_id,
                 parent_cluster_id,
                 brief_revision_id,
+                revises_mission_id,
                 created_at,
                 updated_at
             FROM research_missions
@@ -680,7 +683,8 @@ class PostgresTimescaleRepository(ITrendRepository):
                 return None
 
             (m_id, title, kws, sc, agent_val, sess_id, plats, geo, tf, status, summary,
-             ws_id, surface, parent_mission, parent_cluster, brief_id, created, updated) = row
+             ws_id, surface, parent_mission, parent_cluster, brief_id, revises_id,
+             created, updated) = row
             return ResearchMission(
                 id=UUID(str(m_id)),
                 title=title,
@@ -699,6 +703,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 parent_attention_mission_id=_uuid_or_none(parent_mission),
                 parent_cluster_id=_uuid_or_none(parent_cluster),
                 brief_revision_id=_uuid_or_none(brief_id),
+                revises_mission_id=_uuid_or_none(revises_id),
                 created_at=created,
                 updated_at=updated,
             )
@@ -722,6 +727,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 parent_attention_mission_id = %s,
                 parent_cluster_id = %s,
                 brief_revision_id = %s,
+                revises_mission_id = %s,
                 updated_at = NOW()
             WHERE id = %s;
         """
@@ -741,6 +747,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             _uuid_text(mission.parent_attention_mission_id),
             _uuid_text(mission.parent_cluster_id),
             _uuid_text(mission.brief_revision_id),
+            _uuid_text(mission.revises_mission_id),
             str(mission.id),
         )
         try:
@@ -771,6 +778,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 parent_attention_mission_id,
                 parent_cluster_id,
                 brief_revision_id,
+                revises_mission_id,
                 created_at,
                 updated_at
             FROM research_missions
@@ -786,7 +794,8 @@ class PostgresTimescaleRepository(ITrendRepository):
             missions = []
             for row in rows:
                 (m_id, title, kws, sc, agent_val, sess_id, plats, geo, tf, status, summary,
-                 ws_id, surface, parent_mission, parent_cluster, brief_id, created, updated) = row
+                 ws_id, surface, parent_mission, parent_cluster, brief_id, revises_id,
+             created, updated) = row
                 mission = ResearchMission(
                     id=UUID(str(m_id)),
                     title=title,
@@ -805,6 +814,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     parent_attention_mission_id=_uuid_or_none(parent_mission),
                     parent_cluster_id=_uuid_or_none(parent_cluster),
                     brief_revision_id=_uuid_or_none(brief_id),
+                    revises_mission_id=_uuid_or_none(revises_id),
                     created_at=created,
                     updated_at=updated,
                 )
@@ -1633,7 +1643,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             SELECT id, title, keywords, shortcode, agent, session_id, platforms, geo_code,
                    timeframe, status, summary, workspace_id, surface,
                    parent_attention_mission_id, parent_cluster_id, brief_revision_id,
-                   created_at, updated_at
+                   revises_mission_id, created_at, updated_at
             FROM research_missions
             WHERE workspace_id = %s
             ORDER BY created_at DESC
@@ -1647,7 +1657,8 @@ class PostgresTimescaleRepository(ITrendRepository):
         missions: List[ResearchMission] = []
         for row in rows:
             (m_id, title, kws, sc, agent_val, sess_id, plats, geo, tf, status, summary,
-             ws_id, surface, parent_mission, parent_cluster, brief_id, created, updated) = row
+             ws_id, surface, parent_mission, parent_cluster, brief_id, revises_id,
+             created, updated) = row
             missions.append(
                 ResearchMission(
                     id=UUID(str(m_id)),
@@ -1666,6 +1677,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     parent_attention_mission_id=_uuid_or_none(parent_mission),
                     parent_cluster_id=_uuid_or_none(parent_cluster),
                     brief_revision_id=_uuid_or_none(brief_id),
+                    revises_mission_id=_uuid_or_none(revises_id),
                     created_at=created,
                     updated_at=updated,
                 )

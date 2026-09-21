@@ -86,10 +86,16 @@ class CreateMarketRevisionUseCase:
                     "A Market investigation opened from an Attention result is a handoff, not a "
                     "revision: pass it as lineage instead."
                 )
-            # The origin of the question does not change when the question is sharpened, so a
-            # revision that says nothing about lineage keeps the lineage it is revising.
-            if lineage is None:
-                lineage = MissionLineage.of_mission(previous)
+            lineage = self._inherited_origin(previous, lineage)
+        elif lineage is not None and lineage.revises_mission_id is not None:
+            # The relation is what `previous_mission_id` means, so accepting it through the
+            # lineage payload as well would be a second way to say the same thing -- and the
+            # only one that skips the checks above.
+            raise InvalidMissionLineageError(
+                "A revised mission is named by previous_mission_id, not inside the lineage "
+                "payload, so that the mission it points at is validated before anything is "
+                "written."
+            )
 
         lineage = lineage or MissionLineage()
         await self._validate_lineage(workspace_id, lineage)
@@ -127,6 +133,41 @@ class CreateMarketRevisionUseCase:
     # Lineage
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _inherited_origin(
+        previous: ResearchMission, supplied: Optional[MissionLineage]
+    ) -> MissionLineage:
+        """The revision keeps the origin of the mission it revises, exactly.
+
+        Sharpening a hypothesis does not change where the question came from, so a caller
+        cannot re-point it. A payload that restates the same origin is the host Agent echoing
+        back what it read and is accepted; one that names a different Attention mission or
+        cluster -- or adds an origin to a line that never had one -- is refused before anything
+        is written, because either would make the earlier evidence look like it answered a
+        question it was never collected for.
+        """
+        inherited = MissionLineage.of_mission(previous).attention_origin
+        if supplied is not None and supplied.attention_origin != inherited:
+            if inherited.is_empty:
+                raise InvalidMissionLineageError(
+                    f"Mission {previous.id} was framed directly and records no Attention "
+                    "origin, so a revision of it cannot be given one. Open a separate "
+                    "Attention-to-Market handoff instead."
+                )
+            raise InvalidMissionLineageError(
+                f"Mission {previous.id} came from Attention mission "
+                f"{inherited.parent_attention_mission_id} (cluster "
+                f"{inherited.parent_cluster_id}), and a revision inherits that origin. The "
+                f"payload named {supplied.parent_attention_mission_id} (cluster "
+                f"{supplied.parent_cluster_id}) instead. Open a separate handoff if the "
+                "question really came from somewhere else."
+            )
+        return MissionLineage(
+            parent_attention_mission_id=inherited.parent_attention_mission_id,
+            parent_cluster_id=inherited.parent_cluster_id,
+            revises_mission_id=previous.id,
+        )
+
     async def _validate_lineage(self, workspace_id: UUID, lineage: MissionLineage) -> None:
         """Refuse an origin nobody could follow back.
 
@@ -138,6 +179,9 @@ class CreateMarketRevisionUseCase:
             return
 
         if lineage.parent_attention_mission_id is None:
+            if lineage.parent_cluster_id is None:
+                # Nothing but the revision relation, which the caller has already had validated.
+                return
             raise InvalidMissionLineageError(
                 "A selected cluster does not say which Attention run selected it. Pass the "
                 "parent Attention mission together with the cluster."

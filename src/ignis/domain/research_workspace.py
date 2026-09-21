@@ -270,18 +270,36 @@ class ResearchWorkspace:
 
 @dataclass(frozen=True)
 class MissionLineage:
-    """Where a Market mission came from, when it came from an Attention result.
+    """Where a Market mission came from: an Attention result, an earlier Brief, or both.
 
     Lineage is context. It records which Attention mission and cluster were selected for
-    investigation; it never makes that Attention evidence into support for the Market hypothesis.
+    investigation, and which Market mission's confirmed Brief was changed to produce this one.
+    It never makes the earlier evidence into support for the new hypothesis.
+
+    `revises_mission_id` is the one canonical name for the Market-to-Market relation, and it is
+    held by the newer mission: the revised one is immutable from the moment its Brief was
+    confirmed, so a pointer written onto it afterwards would be the later work editing history.
     """
 
     parent_attention_mission_id: Optional[UUID] = None
     parent_cluster_id: Optional[UUID] = None
+    revises_mission_id: Optional[UUID] = None
 
     @property
     def is_empty(self) -> bool:
-        return self.parent_attention_mission_id is None and self.parent_cluster_id is None
+        return (
+            self.parent_attention_mission_id is None
+            and self.parent_cluster_id is None
+            and self.revises_mission_id is None
+        )
+
+    @property
+    def attention_origin(self) -> "MissionLineage":
+        """Only the Attention half, for comparing two missions' origins."""
+        return MissionLineage(
+            parent_attention_mission_id=self.parent_attention_mission_id,
+            parent_cluster_id=self.parent_cluster_id,
+        )
 
     def to_payload(self) -> Dict[str, Any]:
         return {
@@ -292,6 +310,9 @@ class MissionLineage:
             "parent_cluster_id": (
                 str(self.parent_cluster_id) if self.parent_cluster_id else None
             ),
+            "revises_mission_id": (
+                str(self.revises_mission_id) if self.revises_mission_id else None
+            ),
         }
 
     @classmethod
@@ -300,6 +321,7 @@ class MissionLineage:
         return cls(
             parent_attention_mission_id=getattr(mission, "parent_attention_mission_id", None),
             parent_cluster_id=getattr(mission, "parent_cluster_id", None),
+            revises_mission_id=getattr(mission, "revises_mission_id", None),
         )
 
 

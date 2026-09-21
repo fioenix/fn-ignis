@@ -52,6 +52,13 @@ ALTER TABLE research_missions ADD COLUMN IF NOT EXISTS parent_attention_mission_
 ALTER TABLE research_missions ADD COLUMN IF NOT EXISTS parent_cluster_id UUID
     REFERENCES topic_clusters(id) ON DELETE SET NULL;
 ALTER TABLE research_missions ADD COLUMN IF NOT EXISTS brief_revision_id UUID;
+-- The Market mission this one revises. One canonical relation for "the requester changed a
+-- confirmed Brief", recorded on the new mission rather than on the old one: the old mission is
+-- immutable from the moment its Brief was confirmed, and a pointer written onto it afterwards
+-- would be an edit to history made by the thing that came later. ON DELETE SET NULL, because
+-- losing the revised mission must not cascade away the revision that replaced it.
+ALTER TABLE research_missions ADD COLUMN IF NOT EXISTS revises_mission_id UUID
+    REFERENCES research_missions(id) ON DELETE SET NULL;
 
 DO $$
 BEGIN
@@ -69,6 +76,28 @@ BEGIN
     ALTER TABLE research_missions
         ADD CONSTRAINT research_missions_attention_has_no_brief_check
         CHECK (surface <> 'ATTENTION' OR brief_revision_id IS NULL);
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Only a Market mission revises anything. An Attention mission has no Brief to change, so a
+-- revision pointer on one would describe a change that cannot have happened.
+DO $$
+BEGIN
+    ALTER TABLE research_missions
+        ADD CONSTRAINT research_missions_attention_revises_nothing_check
+        CHECK (surface <> 'ATTENTION' OR revises_mission_id IS NULL);
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
+
+-- A mission cannot revise itself: that is a cycle of length one, and it would make the head of
+-- a research line unfindable.
+DO $$
+BEGIN
+    ALTER TABLE research_missions
+        ADD CONSTRAINT research_missions_revises_another_mission_check
+        CHECK (revises_mission_id IS NULL OR revises_mission_id <> id);
 EXCEPTION
     WHEN duplicate_object THEN NULL;
 END $$;

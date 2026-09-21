@@ -1302,20 +1302,14 @@ async def handle_confirm_market_brief(
             "confirmed_by": revision.confirmed_by,
             "confirmed_at": revision.confirmed_at.isoformat(),
             "falsifiers": list(revision.falsifiers),
-            "lineage": {
-                "parent_attention_mission_id": (
-                    str(mission.parent_attention_mission_id)
-                    if mission.parent_attention_mission_id else None
-                ),
-                "parent_cluster_id": (
-                    str(mission.parent_cluster_id) if mission.parent_cluster_id else None
-                ),
-                "revises_mission_id": previous_mission_id,
-            },
+            # Read back off the stored mission, not echoed from the request: what the next
+            # Agent host will find in the database is the only lineage worth reporting.
+            "lineage": MissionLineage.of_mission(mission).to_payload(),
             "note": (
                 "This revision is immutable. Changing any required field creates a new revision "
-                "and a new Market mission rather than rewriting this one. Attention lineage is "
-                "context; it is not counted as support for this hypothesis."
+                "and a new Market mission rather than rewriting this one, and the new mission "
+                "records this one in revises_mission_id. Attention lineage is context; it is "
+                "not counted as support for this hypothesis."
             ),
             "next_step": f"Call execute_mission_ingress(mission_id='{mission.shortcode}').",
         },

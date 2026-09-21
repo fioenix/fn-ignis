@@ -129,6 +129,10 @@ class ResearchMission:
     parent_cluster_id: Optional[UUID] = None
     # The confirmed Brief that authorizes a Market run. Null for ATTENTION by definition.
     brief_revision_id: Optional[UUID] = None
+    # The Market mission whose confirmed Brief was changed to produce this one. The canonical
+    # name for that relation, recorded on the newer mission: the revised mission is immutable
+    # once its Brief is confirmed, so the pointer belongs to the side that came second.
+    revises_mission_id: Optional[UUID] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
