@@ -87,6 +87,10 @@
 
 ## Phase 8: Production Cutover Tooling Hardening (2026-09-21)
 
-- [ ] T023 [US1] Make journal creation in `scripts/t020_cutover.py` collision-safe per FR-011:
+- [x] T023 [US1] Make journal creation in `scripts/t020_cutover.py` collision-safe per FR-011:
   generate a unique path, create it exclusively, and add a clock-frozen test proving that two runs
   started in the same second cannot overwrite the first journal.
+  Done 2026-09-21: `Journal.create()` names each run `t020-run-<stamp>-<NNN>.json` and opens it
+  with `O_EXCL`; five clock-frozen tests in `tests/unit/test_t020_cutover.py`, including a
+  negative control for a candidate path already on disk. `pytest tests/` 926 passed, 115 skipped
+  (Postgres cases, `IGNIS_TEST_POSTGRES_DSN` absent).
