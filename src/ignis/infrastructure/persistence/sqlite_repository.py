@@ -5,7 +5,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from ignis.application.ports.repository_port import ITrendRepository
@@ -75,6 +75,14 @@ def _platforms_of(row) -> List[PlatformType]:
 # when these five were the whole registry, and deriving it from the enum would mean the day a
 # sixth connector is added, every mission from before the column starts asking for it too.
 LEGACY_MISSION_PLATFORMS = ["youtube", "google", "tiktok", "threads", "reels"]
+
+# One wording for the refusal, shared by both write paths, so a caller cannot tell from the
+# message whether it collided on the mission or on the revision number -- both mean the same
+# thing: this confirmed Brief already exists and is not being rewritten.
+BRIEF_ALREADY_CONFIRMED = (
+    "A confirmed Market Brief revision already exists for this mission. Create a new revision "
+    "instead of rewriting the confirmed one."
+)
 
 
 class SqliteTrendRepository(ITrendRepository):
@@ -907,65 +915,71 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await self.save_mission(mission)
 
+    @staticmethod
+    def _write_mission_row(cur, mission: ResearchMission) -> None:
+        """One mission upsert, so every caller writes the same row the same way.
+
+        An upsert, not INSERT OR REPLACE. REPLACE deletes the row first, and mission_evidence
+        cascades on that delete: every status update would have thrown away the evidence the
+        mission had just recorded.
+
+        `surface` is not in the DO UPDATE list. A mission answers one question for its whole
+        life, and letting a later save move it from ATTENTION to MARKET would re-label evidence
+        that was collected to answer the other one.
+        """
+        geo = mission.geo_code.value if hasattr(mission.geo_code, "value") else str(mission.geo_code)
+        tf = mission.timeframe.value if hasattr(mission.timeframe, "value") else str(mission.timeframe)
+        now_str = datetime.now(timezone.utc).isoformat()
+        cur.execute(
+            """
+            INSERT INTO research_missions
+            (id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary,
+             workspace_id, surface, parent_attention_mission_id, parent_cluster_id, brief_revision_id,
+             created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+                title = excluded.title,
+                keywords = excluded.keywords,
+                platforms = excluded.platforms,
+                shortcode = excluded.shortcode,
+                geo_code = excluded.geo_code,
+                timeframe = excluded.timeframe,
+                status = excluded.status,
+                agent = excluded.agent,
+                session_id = excluded.session_id,
+                summary = excluded.summary,
+                workspace_id = excluded.workspace_id,
+                parent_attention_mission_id = excluded.parent_attention_mission_id,
+                parent_cluster_id = excluded.parent_cluster_id,
+                brief_revision_id = excluded.brief_revision_id,
+                updated_at = excluded.updated_at
+            """,
+            (
+                str(mission.id),
+                mission.title,
+                json.dumps(mission.keywords, ensure_ascii=False),
+                json.dumps(
+                    [p.value if hasattr(p, "value") else str(p) for p in (mission.platforms or [])]
+                ),
+                mission.shortcode, geo, tf,
+                mission.status, mission.agent, mission.session_id, mission.summary,
+                _uuid_text(mission.workspace_id),
+                mission.surface,
+                _uuid_text(mission.parent_attention_mission_id),
+                _uuid_text(mission.parent_cluster_id),
+                _uuid_text(mission.brief_revision_id),
+                mission.created_at.isoformat() if mission.created_at else now_str,
+                now_str,
+            ),
+        )
+
     async def save_mission(self, mission: ResearchMission) -> ResearchMission:
         await self._ensure_schema()
 
         def _sync_save():
             conn = self._get_connection()
             try:
-                cur = conn.cursor()
-                m_id = str(mission.id)
-                kw_json = json.dumps(mission.keywords, ensure_ascii=False)
-                geo = mission.geo_code.value if hasattr(mission.geo_code, "value") else str(mission.geo_code)
-                tf = mission.timeframe.value if hasattr(mission.timeframe, "value") else str(mission.timeframe)
-                now_str = datetime.now(timezone.utc).isoformat()
-                c_at = mission.created_at.isoformat() if mission.created_at else now_str
-                plat_json = json.dumps(
-                    [p.value if hasattr(p, "value") else str(p) for p in (mission.platforms or [])]
-                )
-
-                # An upsert, not INSERT OR REPLACE. REPLACE deletes the row first, and
-                # mission_evidence cascades on that delete: every status update would have
-                # thrown away the evidence the mission had just recorded.
-                #
-                # `surface` is not in the DO UPDATE list. A mission answers one question for its
-                # whole life, and letting a later save move it from ATTENTION to MARKET would
-                # re-label evidence that was collected to answer the other one.
-                cur.execute(
-                    """
-                    INSERT INTO research_missions
-                    (id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary,
-                     workspace_id, surface, parent_attention_mission_id, parent_cluster_id, brief_revision_id,
-                     created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT (id) DO UPDATE SET
-                        title = excluded.title,
-                        keywords = excluded.keywords,
-                        platforms = excluded.platforms,
-                        shortcode = excluded.shortcode,
-                        geo_code = excluded.geo_code,
-                        timeframe = excluded.timeframe,
-                        status = excluded.status,
-                        agent = excluded.agent,
-                        session_id = excluded.session_id,
-                        summary = excluded.summary,
-                        workspace_id = excluded.workspace_id,
-                        parent_attention_mission_id = excluded.parent_attention_mission_id,
-                        parent_cluster_id = excluded.parent_cluster_id,
-                        brief_revision_id = excluded.brief_revision_id,
-                        updated_at = excluded.updated_at
-                    """,
-                    (
-                        m_id, mission.title, kw_json, plat_json, mission.shortcode, geo, tf,
-                        mission.status, mission.agent, mission.session_id, mission.summary,
-                        _uuid_text(mission.workspace_id),
-                        mission.surface,
-                        _uuid_text(mission.parent_attention_mission_id),
-                        _uuid_text(mission.parent_cluster_id),
-                        _uuid_text(mission.brief_revision_id),
-                        c_at, now_str,
-                    ),
-                )
+                self._write_mission_row(conn.cursor(), mission)
                 conn.commit()
                 return mission
             finally:
@@ -1720,50 +1734,88 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_list)
 
+    @staticmethod
+    def _write_brief_revision_row(cur, revision: MarketBriefRevision) -> None:
+        """A plain INSERT, never an upsert.
+
+        A confirmed Brief is immutable, so a second write against the same mission or revision
+        number is a caller trying to edit history rather than a retry to absorb.
+        """
+        cur.execute(
+            """
+            INSERT INTO market_brief_revisions
+            (id, workspace_id, mission_id, revision_number, decision, target_user,
+             problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(revision.brief_revision_id),
+                str(revision.workspace_id),
+                str(revision.mission_id),
+                revision.revision_number,
+                revision.decision,
+                revision.target_user,
+                revision.problem,
+                revision.geo,
+                revision.timeframe,
+                revision.hypothesis,
+                json.dumps(list(revision.falsifiers), ensure_ascii=False),
+                revision.confirmed_by,
+                revision.confirmed_at.isoformat(),
+            ),
+        )
+
     async def save_brief_revision(self, revision: MarketBriefRevision) -> MarketBriefRevision:
         await self._ensure_schema()
 
         def _sync_save():
             conn = self._get_connection()
             try:
-                conn.execute(
-                    """
-                    INSERT INTO market_brief_revisions
-                    (id, workspace_id, mission_id, revision_number, decision, target_user,
-                     problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        str(revision.brief_revision_id),
-                        str(revision.workspace_id),
-                        str(revision.mission_id),
-                        revision.revision_number,
-                        revision.decision,
-                        revision.target_user,
-                        revision.problem,
-                        revision.geo,
-                        revision.timeframe,
-                        revision.hypothesis,
-                        json.dumps(list(revision.falsifiers), ensure_ascii=False),
-                        revision.confirmed_by,
-                        revision.confirmed_at.isoformat(),
-                    ),
-                )
+                self._write_brief_revision_row(conn.cursor(), revision)
                 conn.commit()
                 return revision
             except sqlite3.IntegrityError as exc:
-                # A plain INSERT, never an upsert. A confirmed Brief is immutable, so a second
-                # write against the same mission or revision number is a caller trying to edit
-                # history rather than a retry to absorb.
-                raise RepositoryException(
-                    "A confirmed Market Brief revision already exists for this mission. "
-                    "Create a new revision instead of rewriting the confirmed one."
-                ) from exc
+                conn.rollback()
+                raise RepositoryException(BRIEF_ALREADY_CONFIRMED) from exc
             finally:
                 if self._mem_conn is None:
                     conn.close()
 
         return await asyncio.to_thread(_sync_save)
+
+    async def create_market_mission_with_brief(
+        self, mission: ResearchMission, revision: MarketBriefRevision
+    ) -> Tuple[ResearchMission, MarketBriefRevision]:
+        """Write the Market mission and the Brief that authorizes it, or write neither.
+
+        One transaction, because the two rows are one fact. Writing the mission first and the
+        revision second left an orphan MARKET mission behind whenever the second write failed --
+        a mission that cannot run, because the execution gate refuses a Market mission with no
+        confirmed Brief, and that nothing would ever clean up. A compensating delete is not the
+        fix: the mission row cascades to mission_evidence, so a delete that raced anything would
+        withdraw evidence rather than undo a half-write.
+        """
+        await self._ensure_schema()
+
+        def _sync_create():
+            conn = self._get_connection()
+            try:
+                cur = conn.cursor()
+                self._write_mission_row(cur, mission)
+                self._write_brief_revision_row(cur, revision)
+                conn.commit()
+                return mission, revision
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                raise RepositoryException(BRIEF_ALREADY_CONFIRMED) from exc
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_create)
 
     @staticmethod
     def _brief_from_row(row: Any) -> MarketBriefRevision:

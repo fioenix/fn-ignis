@@ -111,6 +111,16 @@ class IResearchWorkspaceStore(ABC):
         """Persist a requester-confirmed Brief revision. Drafts never reach this method."""
 
     @abstractmethod
+    async def create_market_mission_with_brief(self, mission, revision):
+        """Write a Market mission and the Brief that authorizes it, or write neither.
+
+        One operation rather than two calls, because the two rows are one fact: a Market mission
+        with no confirmed Brief cannot run -- the execution gate refuses it -- so a half-write
+        leaves an unusable mission that nothing would ever clean up. Implementations must put
+        both writes inside one transaction on both backends.
+        """
+
+    @abstractmethod
     async def get_brief_revision(
         self, workspace_id: UUID, brief_revision_id: UUID
     ) -> Optional[MarketBriefRevision]:

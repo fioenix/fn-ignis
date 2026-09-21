@@ -33,6 +33,7 @@ from ignis.domain.entities import TopicCluster
 from ignis.domain.exceptions import IgnisDomainException
 from ignis.domain.research_workspace import (
     RESEARCH_ROOT_SEGMENTS,
+    REQUIRED_BRIEF_FIELDS,
     IncompleteMarketBriefError,
     MissionLineage,
     ResearchSurface,
@@ -350,6 +351,59 @@ async def _market_brief_payload(comp: Dict[str, Any], mission: Any) -> Optional[
     return revision.to_payload() if revision else None
 
 
+def _market_brief_blocked(
+    mission: Any,
+    operation: str,
+    missing_fields: Optional[List[str]] = None,
+    detail: Optional[str] = None,
+) -> str:
+    """The one refusal every Market boundary returns when no confirmed Brief authorizes it.
+
+    Execution, analysis and export all speak the same contract on purpose. An unauthorized
+    Market mission that could still be read would hand back an Opportunity Index derived from
+    evidence nobody framed a question for, which is the failure the Brief gate exists to
+    prevent -- and it would be a quieter failure than refusing to probe.
+    """
+    return json.dumps(
+        {
+            "status": "BLOCKED",
+            "surface": ResearchSurface.MARKET.value,
+            "operation": operation,
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+            "missing_fields": list(missing_fields or REQUIRED_BRIEF_FIELDS),
+            "opportunity_index_applies": False,
+            "error": detail
+            or (
+                "Market execution is not authorized until the requester confirms every required "
+                "Brief field."
+            ),
+            "note": (
+                "No probe ran, no analysis was derived and no artifact was written. Collect the "
+                "missing fields with the requester, show them the complete draft, and call "
+                "confirm_market_brief once they confirm it."
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def _refuse_unauthorized_market(comp: Dict[str, Any], mission: Any, operation: str):
+    """Return (brief_payload, refusal). Exactly one of the two is ever set.
+
+    A mission on no surface, or on ATTENTION, is not a Market read and passes through with no
+    Brief -- which is what keeps every pre-workspace mission working unchanged.
+    """
+    if resolve_surface(getattr(mission, "surface", None)) is not ResearchSurface.MARKET:
+        return None, None
+    brief = await _market_brief_payload(comp, mission)
+    if brief is None:
+        return None, _market_brief_blocked(mission, operation)
+    return brief, None
+
+
 def _serialize_opportunity(opp: Any, include_supporting: int = 0) -> Dict[str, Any]:
     payload = {
         "topic": opp.topic,
@@ -614,6 +668,12 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
     m_id = mission.id
 
 
+    brief, refusal = await _refuse_unauthorized_market(
+        comp, mission, operation="discover_market_opportunities"
+    )
+    if refusal:
+        return refusal
+
     signals = await comp["repository"].get_mission_signals(m_id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
     tf_days = timeframe_to_days(mission.timeframe)
@@ -627,7 +687,7 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
         scorecard=scorecard,
         auth_status=auth_status,
         connector_health=connector_health,
-        market_brief=await _market_brief_payload(comp, mission),
+        market_brief=brief,
     )
 
     return json.dumps(
@@ -1281,7 +1341,20 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
     if not mission:
         return json.dumps({"error": f"No research mission found with ID or shortcode: '{mission_id}'"}, ensure_ascii=False)
 
-    result = await comp["execute_mission_use_case"].execute(mission_id=mission.id)
+    try:
+        result = await comp["execute_mission_use_case"].execute(mission_id=mission.id)
+    except IncompleteMarketBriefError as exc:
+        # The use case has already set the mission BLOCKED and refused before any connector was
+        # called. Re-raising past the tool boundary would have surfaced as a transport error,
+        # which tells the Agent that something broke rather than that the requester still owes
+        # the Brief.
+        return _market_brief_blocked(
+            mission,
+            operation="execute_mission_ingress",
+            missing_fields=exc.missing_fields,
+            detail=str(exc),
+        )
+
     result["shortcode"] = mission.shortcode
     result["display_label"] = f"[{mission.shortcode}] {mission.title}" 
     return json.dumps(result, ensure_ascii=False, indent=2)
@@ -1293,6 +1366,12 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
         return json.dumps({"error": f"No research mission found with ID or shortcode: '{mission_id}'"}, ensure_ascii=False)
+
+    brief, refusal = await _refuse_unauthorized_market(
+        comp, mission, operation="get_mission_analysis"
+    )
+    if refusal:
+        return refusal
 
     analysis = await comp["get_mission_analysis_use_case"].execute(
         mission_id=mission.id, 
@@ -1315,7 +1394,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         scorecard=scorecard,
         auth_status=auth_status,
         connector_health=connector_health,
-        market_brief=await _market_brief_payload(comp, mission),
+        market_brief=brief,
     )
 
     analysis["quality_scorecard"] = {
@@ -1377,6 +1456,15 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         return json.dumps({"error": f"Mission with ID/shortcode '{mission_id}' not found."}, ensure_ascii=False)
     m_id = mission.id
 
+    brief, refusal = await _refuse_unauthorized_market(
+        comp, mission, operation="generate_mission_artifact"
+    )
+    if refusal:
+        # Returned before the builder runs and before anything reaches disk: an exported dossier
+        # is the copy that outlives the chat, so an unauthorized one is the worst place for a
+        # Market conclusion to end up.
+        return refusal
+
     signals = await comp["repository"].get_mission_signals(m_id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
     tf_days = timeframe_to_days(mission.timeframe)
@@ -1391,7 +1479,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         scorecard=scorecard,
         auth_status=auth_status,
         connector_health=connector_health,
-        market_brief=await _market_brief_payload(comp, mission),
+        market_brief=brief,
     )
     
     platform_breakdown = {}

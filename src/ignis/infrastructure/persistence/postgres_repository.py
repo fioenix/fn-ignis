@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from psycopg.rows import tuple_row
@@ -568,8 +568,9 @@ class PostgresTimescaleRepository(ITrendRepository):
             logger.error(f"Error fetching signals for cluster {cluster_id}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to fetch cluster signals: {e}") from e
 
-    async def create_mission(self, mission: ResearchMission) -> ResearchMission:
-        pool = await self._get_pool()
+    @staticmethod
+    async def _write_mission_row(cur, mission: ResearchMission) -> None:
+        """One mission insert, so every caller writes the same row the same way."""
         query = """
             INSERT INTO research_missions (
                 id,
@@ -594,31 +595,36 @@ class PostgresTimescaleRepository(ITrendRepository):
             RETURNING id;
         """
         platforms_str = [p.value if hasattr(p, "value") else str(p) for p in mission.platforms]
-        params = (
-            str(mission.id),
-            mission.title,
-            mission.keywords,
-            mission.shortcode,
-            mission.agent,
-            mission.session_id,
-            platforms_str,
-            mission.geo_code.value if hasattr(mission.geo_code, "value") else str(mission.geo_code),
-            mission.timeframe,
-            mission.status,
-            mission.summary,
-            _uuid_text(mission.workspace_id),
-            mission.surface,
-            _uuid_text(mission.parent_attention_mission_id),
-            _uuid_text(mission.parent_cluster_id),
-            _uuid_text(mission.brief_revision_id),
-            mission.created_at,
-            mission.updated_at,
+        await cur.execute(
+            query,
+            (
+                str(mission.id),
+                mission.title,
+                mission.keywords,
+                mission.shortcode,
+                mission.agent,
+                mission.session_id,
+                platforms_str,
+                mission.geo_code.value if hasattr(mission.geo_code, "value") else str(mission.geo_code),
+                mission.timeframe,
+                mission.status,
+                mission.summary,
+                _uuid_text(mission.workspace_id),
+                mission.surface,
+                _uuid_text(mission.parent_attention_mission_id),
+                _uuid_text(mission.parent_cluster_id),
+                _uuid_text(mission.brief_revision_id),
+                mission.created_at,
+                mission.updated_at,
+            ),
         )
 
+    async def create_mission(self, mission: ResearchMission) -> ResearchMission:
+        pool = await self._get_pool()
         try:
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
-                    await cur.execute(query, params)
+                    await self._write_mission_row(cur, mission)
             return mission
         except Exception as e:
             logger.error(f"Error creating research mission: {e}", exc_info=True)
@@ -1474,44 +1480,78 @@ class PostgresTimescaleRepository(ITrendRepository):
                 rows = await cur.fetchall()
         return [self._workspace_from_row(r) for r in rows]
 
-    async def save_brief_revision(self, revision: MarketBriefRevision) -> MarketBriefRevision:
-        pool = await self._get_pool()
-        # A plain INSERT, never an upsert. A confirmed Brief is immutable, so a second write
-        # against the same mission or revision number is a caller trying to edit history rather
-        # than a retry to absorb.
-        query = """
+    @staticmethod
+    async def _write_brief_revision_row(cur, revision: MarketBriefRevision) -> None:
+        """A plain INSERT, never an upsert.
+
+        A confirmed Brief is immutable, so a second write against the same mission or revision
+        number is a caller trying to edit history rather than a retry to absorb.
+        """
+        await cur.execute(
+            """
             INSERT INTO market_brief_revisions
             (id, workspace_id, mission_id, revision_number, decision, target_user, problem,
              geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-        """
+            """,
+            (
+                str(revision.brief_revision_id),
+                str(revision.workspace_id),
+                str(revision.mission_id),
+                revision.revision_number,
+                revision.decision,
+                revision.target_user,
+                revision.problem,
+                revision.geo,
+                revision.timeframe,
+                revision.hypothesis,
+                list(revision.falsifiers),
+                revision.confirmed_by,
+                revision.confirmed_at,
+            ),
+        )
+
+    async def save_brief_revision(self, revision: MarketBriefRevision) -> MarketBriefRevision:
+        pool = await self._get_pool()
         try:
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
-                    await cur.execute(
-                        query,
-                        (
-                            str(revision.brief_revision_id),
-                            str(revision.workspace_id),
-                            str(revision.mission_id),
-                            revision.revision_number,
-                            revision.decision,
-                            revision.target_user,
-                            revision.problem,
-                            revision.geo,
-                            revision.timeframe,
-                            revision.hypothesis,
-                            list(revision.falsifiers),
-                            revision.confirmed_by,
-                            revision.confirmed_at,
-                        ),
-                    )
+                    await self._write_brief_revision_row(cur, revision)
             return revision
         except Exception as e:
             logger.error(f"Error saving Market Brief revision: {e}", exc_info=True)
             raise RepositoryException(
                 "A confirmed Market Brief revision already exists for this mission, or the "
                 f"revision could not be written: {e}"
+            ) from e
+
+    async def create_market_mission_with_brief(
+        self, mission: ResearchMission, revision: MarketBriefRevision
+    ) -> Tuple[ResearchMission, MarketBriefRevision]:
+        """Write the Market mission and the Brief that authorizes it, or write neither.
+
+        One connection and one transaction, because the two rows are one fact. Writing the
+        mission first and the revision second left an orphan MARKET mission behind whenever the
+        second write failed -- a mission that cannot run, because the execution gate refuses a
+        Market mission with no confirmed Brief, and that nothing would ever clean up. A
+        compensating delete is not the fix: research_missions cascades to mission_evidence, so a
+        delete that raced anything would withdraw evidence rather than undo a half-write.
+        """
+        pool = await self._get_pool()
+        try:
+            # psycopg commits this block on a clean exit and rolls it back on any exception, so
+            # the two statements land together or not at all.
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await self._write_mission_row(cur, mission)
+                    await self._write_brief_revision_row(cur, revision)
+            return mission, revision
+        except Exception as e:
+            logger.error(
+                f"Error confirming Market Brief for mission {mission.id}: {e}", exc_info=True
+            )
+            raise RepositoryException(
+                f"Market Brief confirmation failed and nothing was written: {e}"
             ) from e
 
     async def get_brief_revision(

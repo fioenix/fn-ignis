@@ -115,11 +115,11 @@ class ConfirmMarketBriefUseCase:
             brief_revision_id=revision.brief_revision_id,
         )
 
-        # The mission row first, because the revision holds a foreign key to it. A revision
-        # written against a mission that does not exist is the kind of orphan that only shows up
-        # when someone later asks what authorized a run.
-        await self._repo.create_mission(mission)
-        await self._store.save_brief_revision(revision)
+        # Both rows in one transaction, never two calls. The revision holds a foreign key to
+        # the mission, so the mission has to be written first -- and writing it first on its own
+        # is exactly what left an orphan MARKET mission behind when the revision write failed: a
+        # mission the execution gate refuses to run, with no Brief anyone could confirm for it.
+        await self._store.create_market_mission_with_brief(mission, revision)
 
         logger.info(
             "Confirmed Market Brief revision %s (#%s) authorizing mission %s in workspace %s.",

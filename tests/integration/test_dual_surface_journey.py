@@ -6,6 +6,7 @@ Opportunity Index, that Market cannot probe without a confirmed Brief, and that 
 citation reaches a canonical observation -- are claims about what those paths actually do.
 """
 
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -19,7 +20,7 @@ from ignis.application.use_cases.create_research_workspace import (
     CreateResearchWorkspaceUseCase,
 )
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
-from ignis.domain.entities import TrendSignal
+from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.harness_models import ChannelHealthStatus, QualityScorecard
 from ignis.domain.research_workspace import (
     IncompleteMarketBriefError,
@@ -353,3 +354,252 @@ async def test_an_attention_result_can_be_carried_into_a_market_brief_as_context
     assert stored.parent_attention_mission_id == attention.id
     # Lineage is context, not evidence: the new mission starts holding none of its own.
     assert await repository.get_mission_signals(market.id) == []
+
+
+# --- The Market authorization gate, at the real MCP tool boundary -------------
+
+class ProbeCountingRegistry(StubRegistry):
+    """A registry that records whether any connector was actually reached."""
+
+    def __init__(self, signals):
+        super().__init__(signals)
+        self.probe_calls = 0
+
+    async def search_across_all(self, **kwargs):
+        self.probe_calls += 1
+        return await super().search_across_all(**kwargs)
+
+    def get_health_status(self):
+        return {
+            "google_rss": {"platform": "google", "circuit_state": "CLOSED"},
+            "tiktok": {"platform": "tiktok", "circuit_state": "CLOSED"},
+        }
+
+
+def _mcp_components(repository, store, registry):
+    """The real handlers over the real database, with only the connectors replaced."""
+    from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
+    from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
+    from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
+    from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
+
+    return {
+        "repository": repository,
+        "workspace_store": store,
+        "registry": registry,
+        "clusterer": SemanticClusterer(),
+        "quality_evaluator": QualityEvaluator(),
+        "strategic_reasoner": StrategicMarketReasoner(),
+        "artifact_builder": HtmlArtifactBuilder(),
+        "top_clusters_use_case": GetTopClustersUseCase(repository=repository),
+        "get_mission_analysis_use_case": GetMissionAnalysisUseCase(repository=repository),
+        "execute_mission_use_case": ExecuteMissionUseCase(
+            repository=repository,
+            registry=registry,
+            clusterer=SemanticClusterer(),
+            workspace_store=store,
+        ),
+    }
+
+
+async def _unauthorized_market_mission(repository, workspace):
+    """A MARKET mission with no confirmed Brief -- the state every gate has to refuse."""
+    mission = ResearchMission(
+        title="Unauthorized market investigation",
+        keywords=["ai customer service"],
+        workspace_id=workspace.workspace_id,
+        surface=ResearchSurface.MARKET.value,
+    )
+    await repository.save_mission(mission)
+    return mission
+
+
+@pytest.mark.asyncio
+async def test_ingress_on_an_unauthorized_market_mission_returns_the_blocked_contract(
+    repository_case, host_workspace, monkeypatch
+):
+    from ignis.domain.research_workspace import REQUIRED_BRIEF_FIELDS
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    mission = await _unauthorized_market_mission(repository, workspace)
+
+    registry = ProbeCountingRegistry(_probe_signals())
+    components = _mcp_components(repository, store, registry)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    payload = json.loads(await mcp_server.handle_execute_mission_ingress(str(mission.id)))
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["surface"] == "MARKET"
+    assert payload["missing_fields"] == list(REQUIRED_BRIEF_FIELDS)
+    assert payload["mission_id"] == str(mission.id)
+    # Refused as a tool result, not as a transport error, and refused before any probe ran.
+    assert registry.probe_calls == 0
+
+    stored = await repository.get_mission(mission.id)
+    assert stored.status == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_analysis_of_an_unauthorized_market_mission_derives_no_opportunity_index(
+    repository_case, host_workspace, monkeypatch
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    mission = await _unauthorized_market_mission(repository, workspace)
+
+    components = _mcp_components(repository, store, ProbeCountingRegistry(_probe_signals()))
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    raw = await mcp_server.handle_get_mission_analysis(str(mission.id))
+    payload = json.loads(raw)
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["opportunity_index_applies"] is False
+    # No successful analysis shape at all, and no index anywhere in the response text.
+    assert "market_opportunities" not in payload
+    assert "quality_scorecard" not in payload
+    assert "market_brief" not in payload
+    # `opportunity_index_applies: false` is the only occurrence; no index value is computed.
+    assert '"opportunity_index"' not in raw
+
+    discover = json.loads(await mcp_server.handle_discover_market_opportunities(str(mission.id)))
+    assert discover["status"] == "BLOCKED"
+    assert "market_opportunities" not in discover
+
+
+@pytest.mark.asyncio
+async def test_an_unauthorized_market_mission_exports_no_artifact(
+    repository_case, host_workspace, monkeypatch, tmp_path
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    mission = await _unauthorized_market_mission(repository, workspace)
+
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    components = _mcp_components(repository, store, ProbeCountingRegistry(_probe_signals()))
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+    monkeypatch.setattr(mcp_server, "_get_secure_reports_dir", lambda: reports_dir)
+
+    payload = json.loads(await mcp_server.handle_generate_mission_artifact(str(mission.id)))
+
+    assert payload["status"] == "BLOCKED"
+    assert "artifact_file" not in payload
+    # The exported dossier is the copy that outlives the chat, so nothing reaches disk.
+    assert list(reports_dir.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_the_gate_does_not_block_a_confirmed_brief_or_an_attention_mission(
+    repository_case, host_workspace, monkeypatch, tmp_path
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    registry = ProbeCountingRegistry(_probe_signals())
+    components = _mcp_components(repository, store, registry)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    monkeypatch.setattr(mcp_server, "_get_secure_reports_dir", lambda: reports_dir)
+
+    attention = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        title="VN customer service attention",
+        seed="ai customer service",
+    )
+    attention_run = json.loads(
+        await mcp_server.handle_execute_mission_ingress(str(attention.id))
+    )
+    assert attention_run["status"] == "COMPLETED"
+
+    market, _revision = await ConfirmMarketBriefUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        keywords=["ai customer service"],
+        **COMPLETE_BRIEF,
+    )
+    market_run = json.loads(await mcp_server.handle_execute_mission_ingress(str(market.id)))
+    assert market_run["status"] == "COMPLETED"
+
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(market.id)))
+    assert analysis["surface"] == "MARKET"
+    assert analysis["opportunity_index_applies"] is True
+    assert analysis["market_brief"]["falsifiers"] == COMPLETE_BRIEF["falsifiers"]
+
+    artifact = json.loads(await mcp_server.handle_generate_mission_artifact(str(market.id)))
+    assert artifact["status"] == "SUCCESS"
+    assert list(reports_dir.iterdir())
+
+
+# --- Atomic Brief confirmation ----------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_failed_brief_write_leaves_no_orphan_market_mission(
+    repository_case, host_workspace, monkeypatch
+):
+    """The mission and its Brief are one fact, so a failed confirmation writes neither.
+
+    Failure is injected at the row writer rather than at the use case, because the invariant
+    under test belongs to the transaction: writing the mission first and failing on the revision
+    is exactly the sequence that used to leave a MARKET mission no Brief could ever authorize.
+    """
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+
+    def _explode(*_args, **_kwargs):
+        raise RuntimeError("injected failure while persisting the Brief revision")
+
+    monkeypatch.setattr(repository, "_write_brief_revision_row", _explode)
+
+    with pytest.raises(Exception):
+        await ConfirmMarketBriefUseCase(repository, store).execute(
+            workspace_id=workspace.workspace_id,
+            confirmed_by="requester",
+            keywords=["ai customer service"],
+            **COMPLETE_BRIEF,
+        )
+
+    assert await store.list_workspace_missions(workspace.workspace_id) == []
+    assert await store.next_brief_revision_number(workspace.workspace_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_confirmation_that_failed_can_simply_be_retried(
+    repository_case, host_workspace, monkeypatch
+):
+    """Nothing is left behind to collide with, so the requester just confirms again."""
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+
+    original = repository._write_brief_revision_row
+    calls = {"n": 0}
+
+    def _fail_once(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("injected failure while persisting the Brief revision")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(repository, "_write_brief_revision_row", _fail_once)
+
+    use_case = ConfirmMarketBriefUseCase(repository, store)
+    with pytest.raises(Exception):
+        await use_case.execute(
+            workspace_id=workspace.workspace_id, confirmed_by="requester", **COMPLETE_BRIEF
+        )
+
+    mission, revision = await use_case.execute(
+        workspace_id=workspace.workspace_id, confirmed_by="requester", **COMPLETE_BRIEF
+    )
+    assert revision.revision_number == 1
+    missions = await store.list_workspace_missions(workspace.workspace_id)
+    assert [m.id for m in missions] == [mission.id]

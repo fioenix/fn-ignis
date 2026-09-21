@@ -15,7 +15,7 @@ Which backend is configured is not this class's decision. It delegates to whiche
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from ignis.application.ports.repository_port import ITrendRepository
@@ -78,6 +78,11 @@ class WorkspaceRepository(IResearchWorkspaceStore):
 
     async def save_brief_revision(self, revision: MarketBriefRevision) -> MarketBriefRevision:
         return await self._repo.save_brief_revision(revision)
+
+    async def create_market_mission_with_brief(
+        self, mission: ResearchMission, revision: MarketBriefRevision
+    ) -> Tuple[ResearchMission, MarketBriefRevision]:
+        return await self._repo.create_market_mission_with_brief(mission, revision)
 
     async def get_brief_revision(
         self, workspace_id: UUID, brief_revision_id: UUID
