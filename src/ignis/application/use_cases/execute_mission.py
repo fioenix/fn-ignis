@@ -10,6 +10,7 @@ from ignis.domain.research_workspace import (
     REQUIRED_BRIEF_FIELDS,
     IncompleteMarketBriefError,
     ResearchSurface,
+    WorkspaceScopeMismatchError,
     resolve_surface,
 )
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
@@ -64,6 +65,25 @@ class ExecuteMissionUseCase:
         await self._repo.update_mission(mission)
         raise IncompleteMarketBriefError(REQUIRED_BRIEF_FIELDS)
 
+    async def _run_workspace(self, mission):
+        """The research this run writes into, or None when the mission belongs to none.
+
+        Every mission created before the workspace feature is in that second state, so a run
+        path that required a workspace would stop all of them. Those runs take no writer claim
+        and write no journal, exactly as they did before.
+        """
+        if self._workspace_store is None or mission.workspace_id is None:
+            return None
+        workspace = await self._workspace_store.get_research_workspace(mission.workspace_id)
+        if workspace is None:
+            # The mission names a research the configured database does not hold. Running it
+            # anyway would write evidence into a scope nothing can address afterwards.
+            raise WorkspaceScopeMismatchError(
+                f"Mission {mission.id} belongs to research workspace {mission.workspace_id}, "
+                "which does not exist in the configured Ignis database."
+            )
+        return workspace
+
     async def execute(self, mission_id: UUID) -> Dict[str, Any]:
         mission = await self._repo.get_mission(mission_id)
         if not mission:
@@ -71,6 +91,25 @@ class ExecuteMissionUseCase:
 
         await self._require_confirmed_brief(mission)
 
+        workspace = await self._run_workspace(mission)
+        if workspace is None:
+            return await self._execute_pass(mission)
+
+        # The claim is taken before the mission is moved to RUNNING, so a refused second run
+        # never touches the state of the run that holds the mission. Both the claim and the
+        # journal are given back by the context manager, including when the pass raises.
+        async with self._workspace_store.mission_run(workspace, mission.id) as journal:
+            result = await self._execute_pass(mission)
+            result["run"] = {
+                "run_id": str(journal.run_id),
+                "workspace_id": str(journal.workspace_id),
+                "journal_path": str(journal.journal_path),
+                "journal_status": "COMPLETED",
+            }
+            return result
+
+    async def _execute_pass(self, mission) -> Dict[str, Any]:
+        mission_id = mission.id
         logger.info(f"Executing Research Mission '{mission.title}' [ID: {mission_id}] with keywords: {mission.keywords} (Timeframe: {mission.timeframe})...")
         mission.status = "RUNNING"
         await self._repo.update_mission(mission)

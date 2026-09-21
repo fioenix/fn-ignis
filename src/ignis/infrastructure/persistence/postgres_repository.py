@@ -18,7 +18,10 @@ from ignis.domain.research_workspace import (
     WorkspaceScopeMismatchError,
     WorkspaceStatus,
 )
-from ignis.application.ports.research_workspace_port import RunJournal
+from ignis.application.ports.research_workspace_port import (
+    MissionWriterClaim,
+    RunJournal,
+)
 from ignis.infrastructure.persistence.identifiers import (
     uuid_or_none as _uuid_or_none,
     uuid_text as _uuid_text,
@@ -1708,6 +1711,49 @@ class PostgresTimescaleRepository(ITrendRepository):
                     "DELETE FROM mission_writer_claims WHERE mission_id = %s AND run_id = %s;",
                     (str(mission_id), str(run_id)),
                 )
+
+    async def get_mission_writer_claim(self, mission_id: UUID) -> Optional[MissionWriterClaim]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    "SELECT mission_id, run_id, claimed_at FROM mission_writer_claims"
+                    " WHERE mission_id = %s;",
+                    (str(mission_id),),
+                )
+                row = await cur.fetchone()
+        if not row:
+            return None
+        return MissionWriterClaim(
+            mission_id=UUID(str(row[0])), run_id=UUID(str(row[1])), claimed_at=row[2]
+        )
+
+    async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    "SELECT id, workspace_id, mission_id, journal_path, sequence, status,"
+                    " started_at, completed_at FROM mission_run_journals"
+                    " WHERE mission_id = %s ORDER BY started_at DESC, sequence DESC LIMIT %s;",
+                    (str(mission_id), limit),
+                )
+                rows = await cur.fetchall()
+        return [
+            RunJournal(
+                run_id=UUID(str(r[0])),
+                mission_id=UUID(str(r[2])),
+                workspace_id=UUID(str(r[1])),
+                journal_path=Path(r[3]),
+                sequence=int(r[4]),
+                status=r[5],
+                started_at=r[6],
+                # Left as stored. NULL means the run never finished, and filling it in at read
+                # time would report every interrupted run as completed.
+                completed_at=r[7],
+            )
+            for r in rows
+        ]
 
     async def record_run_journal(self, journal: RunJournal) -> RunJournal:
         pool = await self._get_pool()

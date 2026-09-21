@@ -37,6 +37,7 @@ from ignis.domain.research_workspace import (
     REQUIRED_BRIEF_FIELDS,
     IncompleteMarketBriefError,
     MissionLineage,
+    MissionWriterConflictError,
     ResearchSurface,
     opportunity_index_is_allowed,
     resolve_surface,
@@ -1370,6 +1371,41 @@ async def handle_create_research_mission(
     )
 
 
+async def _mission_writer_conflict(comp: Dict[str, Any], mission: Any, detail: str) -> str:
+    """The one refusal a second writer gets, naming the run it is waiting for.
+
+    The active run is read back rather than guessed at, because "someone else is writing" is
+    not actionable on its own: the run id and the time it took the mission are what let an
+    operator tell an active run from one that died holding the slot.
+    """
+    claim = None
+    store = comp.get("workspace_store")
+    if store is not None:
+        claim = await store.get_mission_writer_claim(mission.id)
+    return json.dumps(
+        {
+            "status": "CONFLICT",
+            "operation": "execute_mission_ingress",
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+            "active_run_id": str(claim.run_id) if claim else None,
+            "active_since": claim.claimed_at.isoformat()
+            if claim and hasattr(claim.claimed_at, "isoformat")
+            else None,
+            "error": detail,
+            "note": (
+                "No probe ran and nothing was written, so the active run keeps its evidence "
+                "and its journal. Wait for it to finish and read the result, or -- if that run "
+                "is known to have died -- release its claim by naming the run id above. Other "
+                "missions in this research are unaffected."
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 async def handle_execute_mission_ingress(mission_id: str) -> str:
     comp = get_components()
     mission = await comp["repository"].get_mission(mission_id)
@@ -1378,6 +1414,11 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
 
     try:
         result = await comp["execute_mission_use_case"].execute(mission_id=mission.id)
+    except MissionWriterConflictError as exc:
+        # A refusal, not a breakage. The run that holds the mission is still writing, and
+        # raising past the tool boundary would reach the Agent as a transport error -- which
+        # reads as "the server fell over" rather than "wait for the run that is already going".
+        return await _mission_writer_conflict(comp, mission, detail=str(exc))
     except IncompleteMarketBriefError as exc:
         # The use case has already set the mission BLOCKED and refused before any connector was
         # called. Re-raising past the tool boundary would have surfaced as a transport error,

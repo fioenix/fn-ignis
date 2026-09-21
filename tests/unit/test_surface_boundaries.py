@@ -284,3 +284,125 @@ def test_a_context_citation_is_dropped_from_anything_a_conclusion_rests_on():
     strip_context_citations([opportunity, insight])
     assert [c.observation_id for c in opportunity.citations] == ["kept"]
     assert [c.observation_id for c in insight.citations] == ["kept"]
+
+
+# --- User Story 5: mission state under a run ---------------------------------
+
+class _ExplodingRegistry:
+    """A connector pass that fails, which is what the failure path exists for."""
+
+    async def search_across_all(self, **_kwargs):
+        raise RuntimeError("connector pass failed")
+
+
+class _SilentRegistry:
+    async def search_across_all(self, **_kwargs):
+        return []
+
+
+async def _workspace_mission(repository, store, tmp_path, title="VN customer service"):
+    from ignis.application.use_cases.create_research_workspace import (
+        CreateResearchWorkspaceUseCase,
+    )
+    from ignis.domain.entities import ResearchMission
+
+    use_case = CreateResearchWorkspaceUseCase(store=store)
+    host = tmp_path / "host"
+    host.mkdir(exist_ok=True)
+    workspace = await use_case.confirm(
+        await use_case.propose(host, "AI customer service"), confirmation=True
+    )
+    mission = ResearchMission(
+        title=title,
+        keywords=["ai customer service"],
+        workspace_id=workspace.workspace_id,
+        surface=ResearchSurface.ATTENTION.value,
+    )
+    await repository.create_mission(mission)
+    return workspace, mission
+
+
+def _executor(repository, store, registry):
+    from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
+    from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
+
+    return ExecuteMissionUseCase(
+        repository=repository,
+        registry=registry,
+        clusterer=SemanticClusterer(),
+        workspace_store=store,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_failed_run_leaves_no_false_running_state_and_no_active_writer(tmp_path):
+    """A mission left RUNNING with nobody writing is the state recovery cannot tell from work.
+
+    The failure has to land somewhere readable: the mission FAILED, the journal FAILED, and the
+    writer slot free so the next attempt is not locked out by the attempt that broke.
+    """
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+
+    repository = SqliteTrendRepository(db_path="sqlite:///:memory:")
+    store = WorkspaceRepository(repository=repository)
+    try:
+        workspace, mission = await _workspace_mission(repository, store, tmp_path)
+
+        with pytest.raises(RuntimeError):
+            await _executor(repository, store, _ExplodingRegistry()).execute(mission.id)
+
+        stored = await repository.get_mission(mission.id)
+        assert stored.status == "FAILED"
+        # The question it answers is not something a failed run gets to change.
+        assert stored.surface == ResearchSurface.ATTENTION.value
+        assert await store.get_mission_writer_claim(mission.id) is None
+        assert (await store.latest_run_journal(mission.id)).status == "FAILED"
+    finally:
+        await repository.close()
+
+
+@pytest.mark.asyncio
+async def test_a_completed_run_reports_its_own_run_and_journal(tmp_path):
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+
+    repository = SqliteTrendRepository(db_path="sqlite:///:memory:")
+    store = WorkspaceRepository(repository=repository)
+    try:
+        workspace, mission = await _workspace_mission(repository, store, tmp_path)
+        result = await _executor(repository, store, _SilentRegistry()).execute(mission.id)
+
+        assert result["status"] == "COMPLETED"
+        journal = await store.latest_run_journal(mission.id)
+        assert result["run"]["run_id"] == str(journal.run_id)
+        assert result["run"]["workspace_id"] == str(workspace.workspace_id)
+        assert result["run"]["journal_status"] == "COMPLETED"
+        assert await store.get_mission_writer_claim(mission.id) is None
+    finally:
+        await repository.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mission_outside_a_research_workspace_runs_exactly_as_before(tmp_path):
+    """No workspace means no journal to write and no research to serialize against.
+
+    Every mission created before this feature is in that state, and making the run path depend
+    on a workspace would stop all of them.
+    """
+    from ignis.domain.entities import ResearchMission
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+
+    repository = SqliteTrendRepository(db_path="sqlite:///:memory:")
+    store = WorkspaceRepository(repository=repository)
+    try:
+        mission = ResearchMission(title="Legacy mission", keywords=["ai customer service"])
+        await repository.create_mission(mission)
+
+        result = await _executor(repository, store, _SilentRegistry()).execute(mission.id)
+        assert result["status"] == "COMPLETED"
+        assert "run" not in result
+        assert await store.list_run_journals(mission.id) == []
+    finally:
+        await repository.close()

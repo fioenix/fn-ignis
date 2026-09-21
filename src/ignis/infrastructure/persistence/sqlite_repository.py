@@ -19,7 +19,10 @@ from ignis.domain.research_workspace import (
     WorkspaceScopeMismatchError,
     WorkspaceStatus,
 )
-from ignis.application.ports.research_workspace_port import RunJournal
+from ignis.application.ports.research_workspace_port import (
+    MissionWriterClaim,
+    RunJournal,
+)
 from ignis.infrastructure.persistence.identifiers import (
     uuid_or_none as _uuid_or_none,
     uuid_text as _uuid_text,
@@ -2023,6 +2026,69 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.close()
 
         await asyncio.to_thread(_sync_release)
+
+    async def get_mission_writer_claim(self, mission_id: UUID) -> Optional[MissionWriterClaim]:
+        await self._ensure_schema()
+
+        def _sync_get():
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT mission_id, run_id, claimed_at FROM mission_writer_claims"
+                    " WHERE mission_id = ?",
+                    (str(mission_id),),
+                ).fetchone()
+                if not row:
+                    return None
+                return MissionWriterClaim(
+                    mission_id=UUID(row["mission_id"]),
+                    run_id=UUID(row["run_id"]),
+                    claimed_at=datetime.fromisoformat(row["claimed_at"])
+                    if row["claimed_at"]
+                    else None,
+                )
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_get)
+
+    async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
+        await self._ensure_schema()
+
+        def _sync_list():
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT id, workspace_id, mission_id, journal_path, sequence, status,"
+                    " started_at, completed_at FROM mission_run_journals"
+                    " WHERE mission_id = ? ORDER BY started_at DESC, sequence DESC LIMIT ?",
+                    (str(mission_id), limit),
+                ).fetchall()
+                return [
+                    RunJournal(
+                        run_id=UUID(r["id"]),
+                        mission_id=UUID(r["mission_id"]),
+                        workspace_id=UUID(r["workspace_id"]),
+                        journal_path=Path(r["journal_path"]),
+                        sequence=int(r["sequence"]),
+                        status=r["status"],
+                        started_at=datetime.fromisoformat(r["started_at"])
+                        if r["started_at"]
+                        else None,
+                        # Left as None when the run never finished. A substitute clock here
+                        # would report every interrupted run as having completed on read.
+                        completed_at=datetime.fromisoformat(r["completed_at"])
+                        if r["completed_at"]
+                        else None,
+                    )
+                    for r in rows
+                ]
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_list)
 
     async def record_run_journal(self, journal: RunJournal) -> RunJournal:
         await self._ensure_schema()

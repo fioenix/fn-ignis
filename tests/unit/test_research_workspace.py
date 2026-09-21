@@ -196,3 +196,181 @@ async def test_a_manifest_naming_another_research_is_not_silently_reused(
 
     proposal = await workspace_use_case.propose(host_workspace, "AI customer service")
     assert proposal.requires_adoption is True
+
+
+# --- User Story 5: one writer per mission, one journal per run ---------------
+
+@pytest_asyncio.fixture
+async def concurrency_workspace(tmp_path):
+    """A confirmed workspace on its own in-memory database, plus the store that owns it."""
+    repository = SqliteTrendRepository(db_path="sqlite:///:memory:")
+    store = WorkspaceRepository(repository=repository)
+    use_case = CreateResearchWorkspaceUseCase(store=store)
+    host = tmp_path / "concurrency-host"
+    host.mkdir()
+    workspace = await use_case.confirm(
+        await use_case.propose(host, "AI customer service"), confirmation=True
+    )
+    try:
+        yield repository, store, workspace
+    finally:
+        await repository.close()
+
+
+async def _mission(repository, workspace, title="AI customer service"):
+    from ignis.domain.entities import ResearchMission
+    from ignis.domain.research_workspace import ResearchSurface
+
+    mission = ResearchMission(
+        title=title,
+        keywords=["ai customer service"],
+        workspace_id=workspace.workspace_id,
+        surface=ResearchSurface.ATTENTION.value,
+    )
+    await repository.create_mission(mission)
+    return mission
+
+
+@pytest.mark.asyncio
+async def test_a_second_writer_for_one_mission_is_refused_by_name(concurrency_workspace):
+    from ignis.domain.research_workspace import MissionWriterConflictError
+
+    repository, store, workspace = concurrency_workspace
+    mission = await _mission(repository, workspace)
+
+    holder, intruder = uuid4(), uuid4()
+    await store.require_mission_writer(mission.id, holder)
+    with pytest.raises(MissionWriterConflictError) as excinfo:
+        await store.require_mission_writer(mission.id, intruder)
+    assert str(mission.id) in str(excinfo.value)
+
+    # The refusal changed nothing: the first run still holds the slot.
+    claim = await store.get_mission_writer_claim(mission.id)
+    assert claim is not None and claim.run_id == holder
+
+
+@pytest.mark.asyncio
+async def test_releasing_the_claim_hands_the_slot_to_the_next_run(concurrency_workspace):
+    repository, store, workspace = concurrency_workspace
+    mission = await _mission(repository, workspace)
+
+    first, second = uuid4(), uuid4()
+    await store.require_mission_writer(mission.id, first)
+    await store.release_mission_writer(mission.id, first)
+    assert await store.get_mission_writer_claim(mission.id) is None
+    await store.require_mission_writer(mission.id, second)
+    assert (await store.get_mission_writer_claim(mission.id)).run_id == second
+
+
+@pytest.mark.asyncio
+async def test_two_missions_in_one_workspace_are_claimed_independently(concurrency_workspace):
+    """The claim is per mission. Serializing a whole research would be a different contract."""
+    repository, store, workspace = concurrency_workspace
+    first = await _mission(repository, workspace, title="First question")
+    second = await _mission(repository, workspace, title="Second question")
+
+    assert await store.claim_mission_writer(first.id, uuid4()) is True
+    assert await store.claim_mission_writer(second.id, uuid4()) is True
+
+
+@pytest.mark.asyncio
+async def test_a_run_holds_the_slot_for_its_body_and_gives_it_back_on_success(
+    concurrency_workspace,
+):
+    from ignis.domain.research_workspace import MissionWriterConflictError
+
+    repository, store, workspace = concurrency_workspace
+    mission = await _mission(repository, workspace)
+
+    async with store.mission_run(workspace, mission.id) as journal:
+        assert journal.mission_id == mission.id
+        assert journal.workspace_id == workspace.workspace_id
+        assert journal.status == "STARTED"
+        with pytest.raises(MissionWriterConflictError):
+            await store.require_mission_writer(mission.id, uuid4())
+
+    assert await store.get_mission_writer_claim(mission.id) is None
+    finished = await store.latest_run_journal(mission.id)
+    assert (finished.run_id, finished.status) == (journal.run_id, "COMPLETED")
+    assert finished.completed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_run_gives_the_slot_back_and_records_the_failure(concurrency_workspace):
+    """The claim is released in a finally path, so a failed run does not lock the mission out."""
+    repository, store, workspace = concurrency_workspace
+    mission = await _mission(repository, workspace)
+
+    with pytest.raises(RuntimeError):
+        async with store.mission_run(workspace, mission.id):
+            raise RuntimeError("ingress exploded")
+
+    assert await store.get_mission_writer_claim(mission.id) is None
+    failed = await store.latest_run_journal(mission.id)
+    assert failed.status == "FAILED"
+    assert failed.completed_at is not None
+    # And the next run can start.
+    async with store.mission_run(workspace, mission.id):
+        pass
+    assert len(await store.list_run_journals(mission.id)) == 2
+
+
+@pytest.mark.asyncio
+async def test_an_interrupted_run_reads_back_as_unfinished_rather_than_completed(
+    concurrency_workspace,
+):
+    """A run that never finalized claims no completion.
+
+    completed_at stays NULL, which is the difference between "this run ended" and "nobody ever
+    heard from it again". Reporting NOW() at read time would turn the second into the first.
+    """
+    repository, store, workspace = concurrency_workspace
+    mission = await _mission(repository, workspace)
+
+    run_id = uuid4()
+    await store.require_mission_writer(mission.id, run_id)
+    journal = await store.allocate_run_journal(workspace, mission.id, run_id=run_id)
+
+    interrupted = await store.latest_run_journal(mission.id)
+    assert (interrupted.run_id, interrupted.status) == (run_id, "STARTED")
+    assert interrupted.completed_at is None
+    # The writer state is readable too, which is what makes the stale claim recoverable.
+    claim = await store.get_mission_writer_claim(mission.id)
+    assert claim.run_id == run_id and claim.claimed_at is not None
+    assert journal.journal_path.is_file()
+
+
+@pytest.mark.asyncio
+async def test_the_journal_file_records_what_the_readback_reports(concurrency_workspace):
+    import json
+
+    repository, store, workspace = concurrency_workspace
+    mission = await _mission(repository, workspace)
+
+    async with store.mission_run(workspace, mission.id) as journal:
+        started = json.loads(journal.journal_path.read_text(encoding="utf-8"))
+        assert started["status"] == "STARTED"
+        assert started["mission_id"] == str(mission.id)
+        assert started["workspace_id"] == str(workspace.workspace_id)
+
+    finished = json.loads(journal.journal_path.read_text(encoding="utf-8"))
+    assert finished["status"] == "COMPLETED"
+    assert finished["run_id"] == str(journal.run_id)
+    assert finished["completed_at"]
+    stored = await store.latest_run_journal(mission.id)
+    assert finished["completed_at"] == stored.completed_at.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_a_run_that_cannot_take_the_slot_writes_no_journal(concurrency_workspace):
+    from ignis.domain.research_workspace import MissionWriterConflictError
+
+    repository, store, workspace = concurrency_workspace
+    mission = await _mission(repository, workspace)
+
+    async with store.mission_run(workspace, mission.id):
+        with pytest.raises(MissionWriterConflictError):
+            async with store.mission_run(workspace, mission.id):
+                pass
+        # Exactly one journal exists: the refused run never got a name of its own.
+        assert len(await store.list_run_journals(mission.id)) == 1

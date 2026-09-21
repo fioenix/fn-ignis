@@ -12,15 +12,19 @@ Which backend is configured is not this class's decision. It delegates to whiche
 -- so the workspace contract is identical on both.
 """
 
+import dataclasses
+import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import (
     IResearchWorkspaceStore,
+    MissionWriterClaim,
     RunJournal,
 )
 from ignis.domain.entities import ResearchMission
@@ -51,6 +55,26 @@ def _utc_now() -> datetime:
     statements happened to land in the same second, which on a loaded run they do not.
     """
     return datetime.now(timezone.utc)
+
+
+def _journal_payload(journal: RunJournal) -> str:
+    """What one run writes about itself, in one place so start and finish agree.
+
+    `completed_at` is omitted rather than nulled while the run is open, and the status is the
+    run's own: a reader finding STARTED with no completion is looking at a run that never
+    reported back, which is a different fact from one that failed.
+    """
+    payload: Dict[str, Any] = {
+        "run_id": str(journal.run_id),
+        "mission_id": str(journal.mission_id),
+        "workspace_id": str(journal.workspace_id),
+        "sequence": journal.sequence,
+        "status": journal.status,
+        "started_at": journal.started_at.isoformat() if journal.started_at else None,
+    }
+    if journal.completed_at is not None:
+        payload["completed_at"] = journal.completed_at.isoformat()
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
 class RunJournalExhaustedError(Exception):
@@ -141,6 +165,9 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     async def release_mission_writer(self, mission_id: UUID, run_id: UUID) -> None:
         await self._repo.release_mission_writer(mission_id, run_id)
 
+    async def get_mission_writer_claim(self, mission_id: UUID) -> Optional[MissionWriterClaim]:
+        return await self._repo.get_mission_writer_claim(mission_id)
+
     async def require_mission_writer(self, mission_id: UUID, run_id: UUID) -> None:
         """Take the writer slot, or say plainly that another run holds it.
 
@@ -148,10 +175,73 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         two runs' state updates on one mission and leave neither recoverable.
         """
         if not await self.claim_mission_writer(mission_id, run_id):
+            held = await self.get_mission_writer_claim(mission_id)
+            holder = f" Run {held.run_id} has held it since {held.claimed_at}." if held else ""
             raise MissionWriterConflictError(
-                f"Mission {mission_id} already has an active writer. Wait for that run to "
-                "finish, or start a new revision instead of writing into this one."
+                f"Mission {mission_id} already has an active writer.{holder} Wait for that run "
+                "to finish, or start a new revision instead of writing into this one."
             )
+
+    @asynccontextmanager
+    async def mission_run(
+        self,
+        workspace: ResearchWorkspace,
+        mission_id: UUID,
+        run_id: Optional[UUID] = None,
+    ) -> AsyncIterator[RunJournal]:
+        """Take the mission for one run: claim the writer, take a journal, give both back.
+
+        The order is the contract. The claim comes first, so a second run is refused before it
+        takes a journal name and starts looking like a run that happened. The journal comes
+        before the body, so anything the run writes is already recoverable. Both are given back
+        in a `finally`, so a run that fails -- or fails while failing -- does not leave the
+        mission locked behind a writer nobody is.
+
+        The claim is per mission. Two missions of one research take two different rows and
+        never wait for each other.
+        """
+        run_id = run_id or uuid4()
+        await self.require_mission_writer(mission_id, run_id)
+        try:
+            journal = await self.allocate_run_journal(workspace, mission_id, run_id=run_id)
+        except BaseException:
+            # No journal, so there is no run to record -- and holding the slot for a run that
+            # never started is exactly the stale claim the release exists to prevent.
+            await self.release_mission_writer(mission_id, run_id)
+            raise
+
+        try:
+            yield journal
+        except BaseException:
+            await self._finish_run_journal(journal, status="FAILED")
+            raise
+        else:
+            await self._finish_run_journal(journal, status="COMPLETED")
+        finally:
+            await self.release_mission_writer(mission_id, run_id)
+
+    async def _finish_run_journal(self, journal: RunJournal, status: str) -> RunJournal:
+        """Close a run's journal on disk and in the database, without raising over the run.
+
+        A finalization failure must not replace the error the run is already carrying, and must
+        not turn a successful run into a failed one. It is logged and the run keeps its own
+        outcome; the journal is then simply a run that never reported back, which is a state
+        the readback already describes honestly.
+        """
+        finished = dataclasses.replace(
+            journal, status=status, completed_at=_utc_now()
+        )
+        try:
+            journal.journal_path.write_text(_journal_payload(finished), encoding="utf-8")
+            return await self.record_run_journal(finished)
+        except Exception:
+            logger.exception(
+                "Could not finalize run journal %s for mission %s; it stays readable as an "
+                "unfinished run.",
+                journal.journal_path,
+                journal.mission_id,
+            )
+            return journal
 
     # ------------------------------------------------------------------
     # Filesystem: manifest and run journals
@@ -216,19 +306,6 @@ class WorkspaceRepository(IResearchWorkspaceStore):
 
         for sequence in range(1, JOURNAL_SEQUENCE_LIMIT):
             candidate = journal_dir / f"{JOURNAL_PREFIX}{stamp}-{sequence:03d}.json"
-            try:
-                # Written through the handle that created it, so there is no moment at which the
-                # journal exists and holds nothing a recovery could read.
-                with open(candidate, "x", encoding="utf-8") as opened:
-                    opened.write(
-                        '{\n  "run_id": "%s",\n  "mission_id": "%s",\n'
-                        '  "workspace_id": "%s",\n  "started_at": "%s",\n'
-                        '  "status": "STARTED"\n}\n'
-                        % (run_id, mission_id, workspace.workspace_id, started_at.isoformat())
-                    )
-            except FileExistsError:
-                continue
-
             journal = RunJournal(
                 run_id=run_id,
                 mission_id=mission_id,
@@ -238,6 +315,14 @@ class WorkspaceRepository(IResearchWorkspaceStore):
                 status="STARTED",
                 started_at=started_at,
             )
+            try:
+                # Written through the handle that created it, so there is no moment at which the
+                # journal exists and holds nothing a recovery could read.
+                with open(candidate, "x", encoding="utf-8") as opened:
+                    opened.write(_journal_payload(journal))
+            except FileExistsError:
+                continue
+
             return await self.record_run_journal(journal)
 
         raise RunJournalExhaustedError(
@@ -247,3 +332,11 @@ class WorkspaceRepository(IResearchWorkspaceStore):
 
     async def record_run_journal(self, journal: RunJournal) -> RunJournal:
         return await self._repo.record_run_journal(journal)
+
+    async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
+        return await self._repo.list_run_journals(mission_id, limit)
+
+    async def latest_run_journal(self, mission_id: UUID) -> Optional[RunJournal]:
+        """The most recent run of a mission, or None when it has never run."""
+        journals = await self.list_run_journals(mission_id, limit=1)
+        return journals[0] if journals else None

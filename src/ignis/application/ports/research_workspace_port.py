@@ -62,6 +62,20 @@ class WorkspaceProposal:
 
 
 @dataclass(frozen=True)
+class MissionWriterClaim:
+    """Who is writing a mission right now, and since when.
+
+    Readable rather than inferred. A claim left behind by a process that died is
+    indistinguishable from an active run unless someone can look at it, and the age is what
+    tells an operator which of the two they are looking at.
+    """
+
+    mission_id: UUID
+    run_id: UUID
+    claimed_at: Any
+
+
+@dataclass(frozen=True)
 class RunJournal:
     """One run's exclusive recovery record.
 
@@ -160,5 +174,24 @@ class IResearchWorkspaceStore(ABC):
         """Give the writer slot back. A run that never claimed it releases nothing."""
 
     @abstractmethod
+    async def get_mission_writer_claim(self, mission_id: UUID) -> Optional["MissionWriterClaim"]:
+        """Who holds the writer slot for this mission, or None when it is free.
+
+        The recovery readback. A claim is only ever released by the run that took it, so a run
+        that died holding one blocks the mission until an operator names that run id and
+        releases it. Expiring claims on a timer instead would hand the slot to a second writer
+        while the first may still be running, which is the failure the slot exists to prevent.
+        """
+
+    @abstractmethod
     async def record_run_journal(self, journal: RunJournal) -> RunJournal:
         """Record the run journal identity that the filesystem has already granted exclusively."""
+
+    @abstractmethod
+    async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
+        """The runs of one mission, newest first.
+
+        `completed_at` is absent for a run that never finished. That is the difference between
+        a run that ended and a run nobody ever heard from again, so it is read back as stored
+        rather than filled in at read time.
+        """
