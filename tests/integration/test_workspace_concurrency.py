@@ -406,3 +406,152 @@ async def test_two_distinct_missions_stay_independently_executable_through_the_c
     two = json.loads(await mcp_server.handle_execute_mission_ingress(str(second.id)))
     assert (one["status"], two["status"]) == ("COMPLETED", "COMPLETED")
     assert one["run"]["run_id"] != two["run"]["run_id"]
+
+
+# --- Recovery from a writer that died holding the slot ----------------------
+
+def _recovery_components(repository, store, registry):
+    """The handlers the recovery path actually uses, over the real database."""
+    return {
+        "repository": repository,
+        "workspace_store": store,
+        "execute_mission_use_case": _executor(repository, store, registry),
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_claim_left_by_a_dead_run_is_released_by_naming_that_run(
+    repository_case, host_workspace, monkeypatch
+):
+    """The recovery an operator can actually reach, end to end.
+
+    A process that died holding the slot leaves a claim nothing expires, by design. What makes
+    that safe rather than terminal is that the claim is readable and releasable by name through
+    the same boundary the conflict was reported on.
+    """
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _confirmed_workspace(repository, host_workspace)
+    mission = await _attention_mission(repository, workspace, "One question", "ai chatbot")
+
+    # A run that took the slot and never came back.
+    dead_run = uuid4()
+    assert await store.claim_mission_writer(mission.id, dead_run) is True
+
+    components = _recovery_components(repository, store, GatedRegistry(_signals_for))
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    # 1. The stale claim is visible, and it is what blocks the mission.
+    blocked = json.loads(await mcp_server.handle_execute_mission_ingress(str(mission.id)))
+    assert blocked["status"] == "CONFLICT"
+    assert blocked["active_run_id"] == str(dead_run)
+    assert blocked["active_since"]
+    assert "release_mission_writer" in blocked["note"]
+
+    # 2. A different run id cannot take the claim away from the run that holds it.
+    wrong = json.loads(
+        await mcp_server.handle_release_mission_writer(str(mission.id), str(uuid4()))
+    )
+    assert wrong["status"] == "CONFLICT"
+    assert wrong["active_run_id"] == str(dead_run)
+    still_held = await store.get_mission_writer_claim(mission.id)
+    assert still_held is not None and still_held.run_id == dead_run
+
+    # 3. The exact run id releases it.
+    released = json.loads(
+        await mcp_server.handle_release_mission_writer(str(mission.id), str(dead_run))
+    )
+    assert released["status"] == "RELEASED"
+    assert released["mission_id"] == str(mission.id)
+    assert released["workspace_id"] == str(workspace.workspace_id)
+    assert released["run_id"] == str(dead_run)
+    assert await store.get_mission_writer_claim(mission.id) is None
+
+    # 4. Releasing again says so plainly rather than pretending it did something.
+    again = json.loads(
+        await mcp_server.handle_release_mission_writer(str(mission.id), str(dead_run))
+    )
+    assert again["status"] == "NOT_FOUND"
+
+    # 5. The mission runs again, and the recovered run writes its own journal.
+    result = json.loads(await mcp_server.handle_execute_mission_ingress(str(mission.id)))
+    assert result["status"] == "COMPLETED"
+    assert result["run"]["run_id"] != str(dead_run)
+    assert await store.get_mission_writer_claim(mission.id) is None
+
+
+@pytest.mark.asyncio
+async def test_releasing_the_writer_of_an_active_run_needs_that_run_s_own_id(
+    repository_case, host_workspace, monkeypatch
+):
+    """Release is scoped to the holder, so it cannot be used to evict a run that is working."""
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _confirmed_workspace(repository, host_workspace)
+    mission = await _attention_mission(repository, workspace, "One question", "ai chatbot")
+
+    gate = asyncio.Event()
+    holder = GatedRegistry(_signals_for, gate)
+    components = _recovery_components(repository, store, holder)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    run = asyncio.create_task(mcp_server.handle_execute_mission_ingress(str(mission.id)))
+    await asyncio.wait_for(holder.started.wait(), timeout=10)
+    active = await store.get_mission_writer_claim(mission.id)
+    assert active is not None
+
+    refused = json.loads(
+        await mcp_server.handle_release_mission_writer(str(mission.id), str(uuid4()))
+    )
+    assert refused["status"] == "CONFLICT"
+    assert (await store.get_mission_writer_claim(mission.id)).run_id == active.run_id
+
+    gate.set()
+    completed = json.loads(await asyncio.wait_for(run, timeout=30))
+    assert completed["status"] == "COMPLETED"
+    assert completed["run"]["run_id"] == str(active.run_id)
+
+
+@pytest.mark.asyncio
+async def test_a_mission_whose_research_cannot_be_read_is_refused_as_a_result(
+    repository_case, host_workspace, monkeypatch
+):
+    """An unaddressable scope is a refusal the Agent can read, not a transport error.
+
+    The missing workspace is injected at the store rather than written as a row, because the
+    schema will not hold that row: research_missions.workspace_id is a foreign key, and the
+    cascade takes the mission with the research. What remains reachable is the read returning
+    nothing -- a second host that dropped the research between this mission's creation and its
+    run -- and that is the case the handler has to answer for.
+
+    Nothing may run first: evidence written under a workspace nothing can address again is
+    evidence lost in place.
+    """
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _confirmed_workspace(repository, host_workspace)
+    mission = await _attention_mission(repository, workspace, "One question", "ai chatbot")
+
+    async def _research_is_gone(_workspace_id):
+        return None
+
+    monkeypatch.setattr(store, "get_research_workspace", _research_is_gone)
+
+    registry = GatedRegistry(_signals_for)
+    components = _recovery_components(repository, store, registry)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    payload = json.loads(await mcp_server.handle_execute_mission_ingress(str(mission.id)))
+
+    assert payload["status"] == "BLOCKED"
+    assert payload["mission_id"] == str(mission.id)
+    assert payload["workspace_id"] == str(workspace.workspace_id)
+    assert str(workspace.workspace_id) in payload["error"]
+    # No probe, no claim, no journal: the refusal happened before any of them.
+    assert registry.calls == 0
+    assert await store.get_mission_writer_claim(mission.id) is None
+    assert await store.list_run_journals(mission.id) == []
+    assert (await repository.get_mission(mission.id)).status == "PENDING"

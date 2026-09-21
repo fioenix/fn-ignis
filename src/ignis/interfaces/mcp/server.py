@@ -39,6 +39,7 @@ from ignis.domain.research_workspace import (
     MissionLineage,
     MissionWriterConflictError,
     ResearchSurface,
+    WorkspaceScopeMismatchError,
     opportunity_index_is_allowed,
     resolve_surface,
 )
@@ -1396,14 +1397,134 @@ async def _mission_writer_conflict(comp: Dict[str, Any], mission: Any, detail: s
             "error": detail,
             "note": (
                 "No probe ran and nothing was written, so the active run keeps its evidence "
-                "and its journal. Wait for it to finish and read the result, or -- if that run "
-                "is known to have died -- release its claim by naming the run id above. Other "
-                "missions in this research are unaffected."
+                "and its journal. Wait for it to finish and read the result, or -- only if "
+                "that run is known to have died -- recover the mission with "
+                "release_mission_writer(mission_id, run_id) using exactly the active_run_id "
+                "above. Other missions in this research are unaffected."
             ),
         },
         ensure_ascii=False,
         indent=2,
     )
+
+
+def _workspace_scope_blocked(mission: Any, detail: str) -> str:
+    """A mission whose research the database does not hold cannot be run anywhere.
+
+    Refused as a result rather than an exception for the same reason as the Brief gate: the
+    Agent needs to read which research is missing, not that the server raised. And refused
+    before anything runs -- evidence written under a workspace nothing can address again is
+    evidence lost in place.
+    """
+    return json.dumps(
+        {
+            "status": "BLOCKED",
+            "operation": "execute_mission_ingress",
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+            "error": detail,
+            "note": (
+                "No probe ran, no writer was claimed and no journal was written. Reopen or "
+                "confirm the research workspace this mission belongs to, then run it again."
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def handle_release_mission_writer(mission_id: str, run_id: str) -> str:
+    """Give a mission back after the run holding it died, by naming that exact run.
+
+    Both identifiers are required and both must match the claim on record. There is no expiry
+    and no force: a claim released without naming its holder is a claim taken from a run that
+    may still be writing, which is the failure the single writer slot exists to prevent. The
+    run id is the one the CONFLICT payload reported.
+    """
+    comp = get_components()
+    mission = await comp["repository"].get_mission(mission_id)
+    if not mission:
+        return json.dumps(
+            {"error": f"No research mission found with ID or shortcode: '{mission_id}'"},
+            ensure_ascii=False,
+        )
+
+    try:
+        requested_run = UUID(run_id)
+    except (TypeError, ValueError):
+        return json.dumps(
+            {
+                "status": "CONFLICT",
+                "operation": "release_mission_writer",
+                "mission_id": str(mission.id),
+                "error": (
+                    f"'{run_id}' is not a run identifier. Pass the active_run_id exactly as the "
+                    "conflict result reported it."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    store = comp["workspace_store"]
+    claim = await store.get_mission_writer_claim(mission.id)
+    payload: Dict[str, Any] = {
+        "operation": "release_mission_writer",
+        "mission_id": str(mission.id),
+        "shortcode": mission.shortcode,
+        "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+        "run_id": run_id,
+        "active_run_id": str(claim.run_id) if claim else None,
+    }
+
+    if claim is None:
+        payload["status"] = "NOT_FOUND"
+        payload["note"] = (
+            "This mission has no active writer, so there was nothing to release and nothing "
+            "was changed. It can be run again as it is."
+        )
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    if claim.run_id != requested_run:
+        payload["status"] = "CONFLICT"
+        payload["active_since"] = (
+            claim.claimed_at.isoformat()
+            if hasattr(claim.claimed_at, "isoformat") else str(claim.claimed_at)
+        )
+        payload["error"] = (
+            f"Mission {mission.id} is held by run {claim.run_id}, not by {requested_run}. "
+            "The claim was not released."
+        )
+        payload["note"] = (
+            "A claim is only ever released by naming the run that holds it. If that run is "
+            "known to have died, call this again with active_run_id."
+        )
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    await store.release_mission_writer(mission.id, requested_run)
+    remaining = await store.get_mission_writer_claim(mission.id)
+    if remaining is not None:
+        payload["status"] = "CONFLICT"
+        payload["active_run_id"] = str(remaining.run_id)
+        payload["error"] = (
+            f"Mission {mission.id} is still held by run {remaining.run_id} after the release. "
+            "Another run claimed it in the meantime."
+        )
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    payload["status"] = "RELEASED"
+    payload["active_run_id"] = None
+    payload["note"] = (
+        "The writer slot is free and the mission can be run again. Nothing else was touched: "
+        "the released run keeps whatever journal and evidence it had already written."
+    )
+    logger.warning(
+        "Released the writer claim of run %s on mission %s at an operator's request.",
+        requested_run,
+        mission.id,
+    )
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 async def handle_execute_mission_ingress(mission_id: str) -> str:
@@ -1414,6 +1535,10 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
 
     try:
         result = await comp["execute_mission_use_case"].execute(mission_id=mission.id)
+    except WorkspaceScopeMismatchError as exc:
+        # Raised before the writer claim and before any connector call, so there is nothing to
+        # undo -- only something to tell the Agent.
+        return _workspace_scope_blocked(mission, detail=str(exc))
     except MissionWriterConflictError as exc:
         # A refusal, not a breakage. The run that holds the mission is still writing, and
         # raising past the tool boundary would reach the Agent as a transport error -- which
@@ -1972,6 +2097,11 @@ async def create_research_mission(
 @mcp.tool(name="execute_mission_ingress", description="Trigger deep multi-platform data collection and clustering for a research mission (idempotent replace mode).")
 async def execute_mission_ingress(mission_id: str) -> str:
     return await handle_execute_mission_ingress(mission_id)
+
+
+@mcp.tool(name="release_mission_writer", description="Recover a mission whose run died while holding its single writer slot. Pass the mission and exactly the active_run_id that the CONFLICT result reported: the claim is released only when both match, a wrong run_id refuses and changes nothing, and there is no expiry and no force release -- a claim taken from a run that is still writing is the failure the slot exists to prevent. Use it only when that run is known to have died; otherwise wait for it to finish.")
+async def release_mission_writer(mission_id: str, run_id: str) -> str:
+    return await handle_release_mission_writer(mission_id, run_id)
 
 
 @mcp.tool(name="get_mission_analysis", description="Retrieve full strategic analysis payload (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) for in-chat Native Artifact rendering.")

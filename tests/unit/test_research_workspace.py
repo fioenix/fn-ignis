@@ -374,3 +374,37 @@ async def test_a_run_that_cannot_take_the_slot_writes_no_journal(concurrency_wor
                 pass
         # Exactly one journal exists: the refused run never got a name of its own.
         assert len(await store.list_run_journals(mission.id)) == 1
+
+
+def test_the_writer_slot_has_no_expiry_and_no_force_release():
+    """Recovery is by name, and there is no second way to take a claim.
+
+    A structural check, because the guarantee is about what does not exist. A timer that
+    expired a claim, or a release that skipped the run id, would hand the slot to a second
+    writer while the first may still be running -- which is the one thing the slot is for.
+    """
+    import inspect
+
+    from ignis.infrastructure.persistence import workspace_repository as repo_module
+    from ignis.interfaces.mcp import server as mcp_server
+
+    release = inspect.signature(mcp_server.handle_release_mission_writer)
+    assert list(release.parameters) == ["mission_id", "run_id"]
+    assert all(p.default is inspect.Parameter.empty for p in release.parameters.values())
+
+    # Scoped to the writer machinery. The module namespaces hold unrelated constants -- token
+    # expiry among them -- and a check that flagged those would be measuring the wrong thing.
+    surface = set(dir(WorkspaceRepository)) | set(dir(repo_module)) | set(dir(mcp_server))
+    writer_names = [
+        name
+        for name in surface
+        if not name.startswith("__")
+        and any(word in name.lower() for word in ("claim", "writer"))
+    ]
+    assert "get_mission_writer_claim" in writer_names, "the readback is what recovery starts from"
+    forbidden = sorted(
+        name
+        for name in writer_names
+        if any(word in name.lower() for word in ("force", "expire", "steal", "takeover"))
+    )
+    assert forbidden == []

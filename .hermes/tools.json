@@ -1311,5 +1311,28 @@
         "type": "object"
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "release_mission_writer",
+      "description": "Recover a mission whose run died while holding its single writer slot. Pass the mission and exactly the active_run_id that the CONFLICT result reported: the claim is released only when both match, a wrong run_id refuses and changes nothing, and there is no expiry and no force release -- a claim taken from a run that is still writing is the failure the slot exists to prevent. Use it only when that run is known to have died; otherwise wait for it to finish.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mission_id",
+          "run_id"
+        ],
+        "type": "object"
+      }
+    }
   }
 ]
