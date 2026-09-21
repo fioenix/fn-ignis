@@ -1080,8 +1080,8 @@ class SqliteTrendRepository(ITrendRepository):
                 cur.execute(
                     "SELECT s.platform, o.observed_title, o.metric_value, o.growth_velocity,"
                     " o.source_url, o.geo_code, e.mission_id, o.metadata, o.observed_at,"
-                    " o.published_at, o.cluster_id, o.id AS observation_id, o.identity_source,"
-                    " o.time_provenance"
+                    " o.published_at, o.cluster_id, o.id AS observation_id, o.source_id,"
+                    " o.identity_source, o.time_provenance"
                     " FROM mission_evidence e"
                     " JOIN observations o ON o.id = e.observation_id"
                     " JOIN sources s ON s.id = o.source_id"
@@ -1110,6 +1110,7 @@ class SqliteTrendRepository(ITrendRepository):
                             cluster_id=UUID(r["cluster_id"]) if r["cluster_id"] else None,
                             mission_id=UUID(r["mission_id"]) if r["mission_id"] else None,
                             observation_id=UUID(r["observation_id"]),
+                            source_id=_uuid_or_none(r["source_id"]),
                             identity_source=r["identity_source"],
                             time_provenance=r["time_provenance"],
                             metadata=meta,

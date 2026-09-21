@@ -34,6 +34,10 @@ class TrendSignal:
     # difference matters because re-submitting a stored observation through the writer records a
     # second collection event for a sighting that happened once.
     observation_id: Optional[UUID] = None
+    # The external object this sighting is of. Display payload for a citation, never its
+    # identity: two observations of one source are two pieces of evidence, and collapsing them
+    # onto the source would count one sighting twice or lose the other.
+    source_id: Optional[UUID] = None
     # How the source was resolved for this sighting, and which clock observed_at came from.
     # Both are written per observation, so both come back on one.
     identity_source: Optional[str] = None

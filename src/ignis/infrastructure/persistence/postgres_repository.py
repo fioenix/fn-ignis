@@ -829,6 +829,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 o.cluster_id,
                 e.mission_id,
                 o.id,
+                o.source_id,
                 o.identity_source,
                 o.time_provenance
             FROM mission_evidence e
@@ -847,7 +848,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             for row in rows:
                 (
                     platform_str, title, metric, velocity, url, geo_str, meta_json, observed,
-                    published, c_id, m_id, o_id, route, provenance,
+                    published, c_id, m_id, o_id, src_id, route, provenance,
                 ) = row
                 meta = meta_json if isinstance(meta_json, dict) else json.loads(meta_json or "{}")
                 sig = TrendSignal(
@@ -860,6 +861,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     cluster_id=UUID(str(c_id)) if c_id else None,
                     mission_id=UUID(str(m_id)) if m_id else None,
                     observation_id=UUID(str(o_id)),
+                    source_id=_uuid_or_none(src_id),
                     identity_source=route,
                     time_provenance=provenance,
                     metadata=meta,

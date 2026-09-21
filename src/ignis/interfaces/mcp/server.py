@@ -316,16 +316,72 @@ def _describe_proxy(proxy_uri: str) -> str:
 
 
 def _serialize_citation(cit: Any) -> Dict[str, Any]:
+    """`observation_id` first, because that is the citation's identity.
+
+    The URL and the title are display payload. A reader that keys on either can merge two
+    observations of one source or split one in half, so they are never the thing a conclusion is
+    traced through.
+    """
     platform = getattr(cit, "platform", None)
     return {
+        "observation_id": getattr(cit, "observation_id", None),
+        "source_id": getattr(cit, "source_id", None),
         "citation_id": getattr(cit, "citation_id", None),
         "platform": platform.value if hasattr(platform, "value") else str(platform),
+        "connector_surface": getattr(cit, "connector_surface", None),
         "title_or_query": getattr(cit, "title_or_query", None),
         "metric_highlight": getattr(cit, "metric_highlight", None),
         "author_or_channel": getattr(cit, "author_or_channel", None),
         "url": getattr(cit, "url", None),
         "excerpt": getattr(cit, "excerpt", None),
     }
+
+
+async def _market_brief_payload(comp: Dict[str, Any], mission: Any) -> Optional[Dict[str, Any]]:
+    """The confirmed Brief a Market analysis was authorized by, or None.
+
+    Carried into the report so a reader can see which hypothesis the evidence was collected
+    against, and which conditions would disconfirm it. A Market conclusion presented without its
+    falsifiers is a claim the reader has no way to argue with.
+    """
+    if resolve_surface(getattr(mission, "surface", None)) is not ResearchSurface.MARKET:
+        return None
+    revision = await comp["workspace_store"].get_brief_revision_for_mission(mission.id)
+    return revision.to_payload() if revision else None
+
+
+def _serialize_opportunity(opp: Any, include_supporting: int = 0) -> Dict[str, Any]:
+    payload = {
+        "topic": opp.topic,
+        "type": opp.opportunity_type,
+        "demand_score": opp.search_interest_score,
+        "supply_score": opp.content_supply_score,
+        "opportunity_index": opp.opportunity_index,
+        "recommendation": opp.strategic_recommendation,
+        "citations": [_serialize_citation(c) for c in getattr(opp, "citations", []) or []],
+    }
+    if include_supporting:
+        payload["supporting_signals"] = opp.supporting_signals[:include_supporting]
+    return payload
+
+
+def _surface_payload(report: Any, mission: Any) -> Dict[str, Any]:
+    """What surface this analysis speaks for, and what that surface is allowed to say."""
+    surface = resolve_surface(getattr(mission, "surface", None))
+    payload: Dict[str, Any] = {
+        "surface": surface.value if surface else None,
+        "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+        "opportunity_index_applies": opportunity_index_is_allowed(surface),
+    }
+    if surface is ResearchSurface.ATTENTION:
+        payload["note"] = (
+            "ATTENTION context. Ranked topics, momentum, freshness and source coverage are "
+            "reported as candidates for investigation; no Opportunity Index and no commercial "
+            "verdict are derived from them."
+        )
+    if getattr(report, "market_brief", None):
+        payload["market_brief"] = report.market_brief
+    return payload
 
 
 def _serialize_insights(insights: Any) -> List[Dict[str, Any]]:
@@ -350,6 +406,10 @@ def _serialize_channel_summaries(summaries: Any) -> List[Dict[str, Any]]:
         top = getattr(ch, "top_citation", None)
         out.append({
             "platform": platform.value if hasattr(platform, "value") else str(platform),
+            # The probe, not just the platform: a healthy TikTok video grid must not be able to
+            # answer on behalf of a TikTok comments surface that never ran.
+            "connector_surface": getattr(ch, "connector_surface", None)
+            or (platform.value if hasattr(platform, "value") else str(platform)),
             "status": status.value if hasattr(status, "value") else str(status),
             "signals_count": getattr(ch, "signals_count", 0),
             "timeframe_used": getattr(ch, "timeframe_used", None),
@@ -508,7 +568,7 @@ async def handle_run_autonomous_research_mission(
             ],
             "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
             "strategic_insights": _serialize_insights(report.strategic_insights),
-            "actionable_takeaways": report.actionable_takeaways,
+            "actionable_takeaways": _serialize_insights(report.actionable_takeaways),
             "next_step": f"Call generate_mission_artifact(mission_id='{mission.id}') to render the full interactive HTML dossier."
         },
         ensure_ascii=False,
@@ -567,26 +627,20 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
         scorecard=scorecard,
         auth_status=auth_status,
         connector_health=connector_health,
+        market_brief=await _market_brief_payload(comp, mission),
     )
 
     return json.dumps(
         {
             "mission_id": str(mission.id),
             "maturity_stage": report.maturity_stage.value,
+            **_surface_payload(report, mission),
             "market_opportunities": [
-                {
-                    "topic": opp.topic,
-                    "type": opp.opportunity_type,
-                    "demand_score": opp.search_interest_score,
-                    "supply_score": opp.content_supply_score,
-                    "opportunity_index": opp.opportunity_index,
-                    "recommendation": opp.strategic_recommendation,
-                }
-                for opp in report.market_opportunities
+                _serialize_opportunity(opp) for opp in report.market_opportunities
             ],
             "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
             "strategic_insights": _serialize_insights(report.strategic_insights),
-            "actionables": report.actionable_takeaways,
+            "actionables": _serialize_insights(report.actionable_takeaways),
         },
         ensure_ascii=False,
         indent=2
@@ -1261,6 +1315,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         scorecard=scorecard,
         auth_status=auth_status,
         connector_health=connector_health,
+        market_brief=await _market_brief_payload(comp, mission),
     )
 
     analysis["quality_scorecard"] = {
@@ -1274,21 +1329,13 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         "flaws": scorecard.flaws_detected,
     }
     analysis["maturity_stage"] = report.maturity_stage.value
+    analysis.update(_surface_payload(report, mission))
     analysis["market_opportunities"] = [
-        {
-            "topic": opp.topic,
-            "type": opp.opportunity_type,
-            "demand_score": opp.search_interest_score,
-            "supply_score": opp.content_supply_score,
-            "opportunity_index": opp.opportunity_index,
-            "recommendation": opp.strategic_recommendation,
-            "supporting_signals": opp.supporting_signals[:2],
-        }
-        for opp in report.market_opportunities
+        _serialize_opportunity(opp, include_supporting=2) for opp in report.market_opportunities
     ]
     analysis["channel_summaries"] = _serialize_channel_summaries(report.channel_summaries)
     analysis["strategic_insights"] = _serialize_insights(report.strategic_insights)
-    analysis["actionable_takeaways"] = report.actionable_takeaways
+    analysis["actionable_takeaways"] = _serialize_insights(report.actionable_takeaways)
     analysis["native_artifact_guideline"] = "Render these strategic insights directly as a visual, high-contrast Claude Native Artifact in the chat window. Only export a local HTML file when the user explicitly requests it."
 
     return json.dumps(analysis, ensure_ascii=False, indent=2)
@@ -1344,6 +1391,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         scorecard=scorecard,
         auth_status=auth_status,
         connector_health=connector_health,
+        market_brief=await _market_brief_payload(comp, mission),
     )
     
     platform_breakdown = {}
@@ -1413,7 +1461,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
             ],
             "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
             "strategic_insights": _serialize_insights(report.strategic_insights)[:3],
-            "actionable_takeaways": report.actionable_takeaways[:3],
+            "actionable_takeaways": _serialize_insights(report.actionable_takeaways[:3]),
             "instructions_for_user": f"Interactive HTML dossier ({len(signals)} signals) exported successfully. Open file://{abs_path} directly in your browser.",
         },
         ensure_ascii=False,

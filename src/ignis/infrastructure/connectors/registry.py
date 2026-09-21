@@ -538,6 +538,23 @@ class ConnectorPluginRegistry:
                 )
         return kept
 
+    @staticmethod
+    def _stamp_connector_surface(plugin: IConnectorPlugin, signals: List[TrendSignal]) -> List[TrendSignal]:
+        """Record which connector surface returned each signal.
+
+        A platform can be served by several probes -- the TikTok video grid and the Creative
+        Center are two, and a token-less Threads browser session is a third surface on one
+        platform. Health reported per platform lets a healthy grid hide a failed comment probe,
+        so the surface has to travel with the signal and survive being read back out of an
+        observation. `setdefault`, because a connector that knows its own sub-surface better
+        than the registry does keeps what it set.
+        """
+        for signal in signals or []:
+            if signal.metadata is None:
+                signal.metadata = {}
+            signal.metadata.setdefault("connector_surface", plugin.plugin_id)
+        return signals or []
+
     async def _safe_fetch(
         self,
         plugin: IConnectorPlugin,
@@ -556,7 +573,7 @@ class ConnectorPluginRegistry:
             else:
                 signals = await plugin.fetch_signals(geo=geo, timeframe=timeframe)
             breaker.record_success()
-            return signals
+            return self._stamp_connector_surface(plugin, signals)
         except Exception as e:
             breaker.record_failure(e)
             raise e
@@ -581,7 +598,7 @@ class ConnectorPluginRegistry:
                 kwargs["limit"] = limit
             signals = await plugin.search_signals(**kwargs)
             breaker.record_success()
-            return signals
+            return self._stamp_connector_surface(plugin, signals)
         except Exception as e:
             breaker.record_failure(e)
             raise e

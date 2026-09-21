@@ -243,7 +243,7 @@ def test_partial_ingress_coverage_is_reported_as_an_insight():
     coverage = [i for i in report.strategic_insights if "Incomplete ingress coverage" in i.statement]
     assert coverage
     assert "THREADS (AUTH_REQUIRED)" in coverage[0].statement
-    assert any("Restore empty ingress channels" in a for a in report.actionable_takeaways)
+    assert any("Restore empty ingress channels" in a.statement for a in report.actionable_takeaways)
 
 
 # --- test_report_serialization_backward_compat ---------------------------
@@ -516,7 +516,10 @@ def test_dynamic_report_copy_is_rendered_in_english():
     )
 
     assert report.strategic_insights[0].statement.startswith("Market maturity stage")
-    assert any("Schedule periodic ingress surveillance" in a for a in report.actionable_takeaways)
+    assert any(
+        "Schedule periodic ingress surveillance" in a.statement
+        for a in report.actionable_takeaways
+    )
     assert all(
         any(marker in o.strategic_recommendation for marker in ("Opportunity Index", "equilibrium"))
         for o in report.market_opportunities

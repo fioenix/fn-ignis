@@ -147,13 +147,45 @@
     </section>
 
 
+    <!-- SURFACE AND, FOR MARKET, THE CONFIRMED BRIEF THIS EVIDENCE ANSWERS -->
+    {% if surface %}
+    <section class="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-4">
+      <div class="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <h2 class="text-lg md:text-xl font-black text-slate-900">Research Surface</h2>
+        <span class="text-xs px-3 py-1 rounded-full font-black tracking-wide border
+          {% if surface == 'MARKET' %}bg-indigo-50 text-indigo-800 border-indigo-200{% else %}bg-sky-50 text-sky-800 border-sky-200{% endif %}">
+          {{ surface }}
+        </span>
+      </div>
+      {% if surface == 'ATTENTION' %}
+      <p class="text-xs text-slate-600">Attention context. Ranked topics, momentum, freshness and source coverage are reported as candidates for investigation. No Opportunity Index is derived, and nothing here is a commercial verdict.</p>
+      {% elif market_brief %}
+      <div class="grid md:grid-cols-2 gap-3 text-xs text-slate-700">
+        <div><span class="font-black text-slate-900">Decision</span><div>{{ market_brief.decision }}</div></div>
+        <div><span class="font-black text-slate-900">Target user</span><div>{{ market_brief.target_user }}</div></div>
+        <div><span class="font-black text-slate-900">Problem</span><div>{{ market_brief.problem }}</div></div>
+        <div><span class="font-black text-slate-900">Hypothesis</span><div>{{ market_brief.hypothesis }}</div></div>
+      </div>
+      <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-1">
+        <div class="text-[10px] uppercase tracking-wider font-bold text-slate-500">This hypothesis is wrong if</div>
+        <ul class="text-xs text-slate-700 list-disc list-inside space-y-0.5">
+          {% for f in market_brief.falsifiers %}<li>{{ f }}</li>{% endfor %}
+        </ul>
+      </div>
+      <p class="text-[11px] text-slate-500">Brief revision {{ market_brief.revision_number }} ({{ market_brief.brief_revision_id }}), confirmed by {{ market_brief.confirmed_by }} at {{ market_brief.confirmed_at }}. The revision is immutable; changing a required field creates a new revision and a new mission.</p>
+      {% else %}
+      <p class="text-xs text-rose-700 font-medium">No confirmed Market Brief could be read for this mission. Market conclusions below are not authorized by a requester-confirmed decision frame.</p>
+      {% endif %}
+    </section>
+    {% endif %}
+
     <!-- ACT 1.5: DATA INGRESS & PROVENANCE AUDIT -->
     {% if channel_summaries %}
     <section class="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-5">
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-100 pb-4">
         <div>
           <h2 class="text-lg md:text-xl font-black text-slate-900">Data Ingress &amp; Provenance Audit</h2>
-          <p class="text-xs text-slate-500">Per-channel collection health. An empty channel is reported, never silently omitted.</p>
+          <p class="text-xs text-slate-500">Collection health per connector surface, not per platform: a healthy probe never answers on behalf of one that did not run. An empty surface is reported, never silently omitted.</p>
         </div>
         {% set healthy_count = channel_summaries|selectattr('status.value', 'equalto', 'HEALTHY')|list|length %}
         <span class="text-xs px-3 py-1 rounded-full font-bold border {% if healthy_count == channel_summaries|length %}bg-emerald-50 text-emerald-800 border-emerald-200{% else %}bg-amber-50 text-amber-800 border-amber-200{% endif %}">
@@ -166,6 +198,7 @@
           <thead>
             <tr class="text-[10px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
               <th class="py-2 pr-3 font-bold">Platform</th>
+              <th class="py-2 px-3 font-bold">Connector Surface</th>
               <th class="py-2 px-3 font-bold">Status</th>
               <th class="py-2 px-3 font-bold text-right">Signals</th>
               <th class="py-2 px-3 font-bold">Timeframe &amp; Geo</th>
@@ -177,6 +210,7 @@
             {% set st = ch.status.value if ch.status.value is defined else ch.status %}
             <tr class="align-top">
               <td class="py-3 pr-3 text-xs font-extrabold text-slate-900 whitespace-nowrap">{{ platform_label(ch.platform) }}</td>
+              <td class="py-3 px-3 text-[11px] font-mono text-slate-600 whitespace-nowrap">{{ ch.connector_surface or platform_label(ch.platform)|lower }}</td>
               <td class="py-3 px-3">
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black tracking-wide
                   {% if st == 'HEALTHY' %}bg-emerald-100 text-emerald-800
@@ -253,7 +287,7 @@
           <div class="text-orange-200 uppercase text-[10px] tracking-wider">Core Action:</div>
           <div>
             {% if actionable_takeaways %}
-            {{ actionable_takeaways[0] }}
+            {{ actionable_takeaways[0].statement }}
             {% else %}
             Deploy targeted category positioning on identified white space topics.
             {% endif %}
@@ -354,7 +388,14 @@
           {% for act in actionable_takeaways %}
           <div class="flex items-start space-x-3 bg-emerald-50/50 border border-emerald-100 p-3.5 rounded-2xl">
             <span class="text-emerald-600 font-black text-sm">→</span>
-            <p class="text-xs text-slate-700 leading-relaxed font-medium">{{ act }}</p>
+            <div class="space-y-1.5">
+              <p class="text-xs text-slate-700 leading-relaxed font-medium">{{ act.statement }}</p>
+              {% if act.citations %}
+              <div class="flex flex-wrap gap-1.5">
+                {% for cit in act.citations %}{{ citation_pill(cit) }}{% endfor %}
+              </div>
+              {% endif %}
+            </div>
           </div>
           {% endfor %}
         </div>

@@ -20,6 +20,11 @@ from ignis.domain.harness_models import (
 )
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
+from ignis.domain.research_workspace import (
+    ResearchSurface,
+    opportunity_index_is_allowed,
+    resolve_surface,
+)
 from ignis.domain.value_objects import PlatformType, GeoCode
 
 logger = logging.getLogger(__name__)
@@ -89,14 +94,29 @@ class StrategicMarketReasoner:
         scorecard: QualityScorecard,
         auth_status: Optional[Dict[str, bool]] = None,
         connector_health: Optional[Dict[str, Any]] = None,
+        market_brief: Optional[Dict[str, Any]] = None,
     ) -> HarnessResearchReport:
         maturity_stage, maturity_reasons = self._assess_maturity(signals, clusters, geo=mission.geo_code)
-        opportunities = self._discover_market_opportunities(signals, mission.keywords, geo=mission.geo_code)
         verified_trends = self._extract_verified_trends(signals, clusters, geo=mission.geo_code)
 
-        # One registry per dossier: the same source keeps one CIT-xx identifier
-        # wherever it is cited, so a reader never mistakes one video for two.
+        # One registry per dossier: the same observation keeps one CIT-xx identifier
+        # wherever it is cited, so a reader never mistakes one sighting for two.
         citation_registry: Dict[str, CitationEvidence] = {}
+
+        # ATTENTION measures what is being looked at. Running the demand-versus-supply
+        # comparison for it and then hiding the number downstream would leave the reasoning
+        # available to any caller that read the object directly, so it is not computed at all.
+        surface = resolve_surface(mission.surface)
+        opportunities = (
+            self._discover_market_opportunities(
+                signals,
+                mission.keywords,
+                geo=mission.geo_code,
+                citation_registry=citation_registry,
+            )
+            if opportunity_index_is_allowed(surface)
+            else []
+        )
 
         channel_summaries = self.summarize_channel_ingress(
             mission=mission,
@@ -126,6 +146,8 @@ class StrategicMarketReasoner:
             market_opportunities=opportunities,
             strategic_insights=insights,
             actionable_takeaways=actionables,
+            surface=surface.value if surface else None,
+            market_brief=market_brief if surface is ResearchSurface.MARKET else None,
         )
 
     # ------------------------------------------------------------------
@@ -184,10 +206,37 @@ class StrategicMarketReasoner:
             author_or_channel=author,
             url=signal.source_url,
             excerpt=excerpt,
+            observation_id=str(signal.observation_id) if signal.observation_id else None,
+            source_id=str(signal.source_id) if signal.source_id else None,
+            connector_surface=self._connector_surface_of(signal),
         )
 
+    @staticmethod
+    def _connector_surface_of(signal: TrendSignal) -> str:
+        """Which probe returned this signal, falling back to the platform name.
+
+        An observation written before the surface was recorded carries none. The platform value
+        is what a single-probe platform's surface is called anyway, so the fallback names the
+        primary probe rather than inventing a surface the signal cannot be attributed to.
+        """
+        recorded = (signal.metadata or {}).get("connector_surface")
+        if isinstance(recorded, str) and recorded.strip():
+            return recorded.strip()
+        platform = signal.platform
+        return platform.value if hasattr(platform, "value") else str(platform)
+
     def _citation_key(self, signal: TrendSignal) -> str:
-        return f"{self._platform_value(signal.platform)}|{signal.source_url or signal.raw_title}"
+        """The identity one citation is registered under.
+
+        `observation_id` when the sighting has been stored, because that is the canonical
+        evidence identity and is the only key that keeps two observations of one source apart.
+        The platform-and-URL key is kept only for a signal that has not been written yet -- it
+        merges two sightings of one URL, which is exactly why it cannot be the identity of
+        anything a conclusion rests on.
+        """
+        if signal.observation_id:
+            return f"observation:{signal.observation_id}"
+        return f"unstored:{self._platform_value(signal.platform)}|{signal.source_url or signal.raw_title}"
 
     def _mint_citation(
         self,
@@ -210,12 +259,22 @@ class StrategicMarketReasoner:
 
     def _resolve_circuit_state(
         self,
+        connector_surface: str,
         platform_value: str,
         connector_health: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        """Return the worst-off plugin health entry serving a platform, if any."""
+        """Return the health entry for one connector surface.
+
+        Looked up by plugin id first. Collapsing every plugin of a platform into one entry is
+        what let a healthy TikTok video grid report on behalf of a failed Creative Center probe;
+        the platform-wide fallback is kept only for a surface that has no registered plugin of
+        its own, which is itself reported as DEGRADED below.
+        """
         if not connector_health:
             return None
+        entry = connector_health.get(connector_surface)
+        if isinstance(entry, dict):
+            return entry
         entries = [
             e for e in connector_health.values()
             if isinstance(e, dict) and self._platform_value(e.get("platform")) == platform_value
@@ -224,6 +283,32 @@ class StrategicMarketReasoner:
             return None
         open_entries = [e for e in entries if e.get("circuit_state") == "OPEN"]
         return open_entries[0] if open_entries else entries[0]
+
+    def _registered_surfaces_of(
+        self, platform_value: str, connector_health: Optional[Dict[str, Any]]
+    ) -> List[str]:
+        """The plugin ids serving one platform, as the registry reports them."""
+        return sorted(
+            str(plugin_id)
+            for plugin_id, entry in (connector_health or {}).items()
+            if isinstance(entry, dict)
+            and self._platform_value(entry.get("platform")) == platform_value
+        )
+
+    def _surfaces_of(
+        self,
+        platform_value: str,
+        registered: List[str],
+        seen_in_signals: Optional[List[str]] = None,
+    ) -> List[str]:
+        """Every connector surface that serves one platform, registered or observed.
+
+        The union of the two matters: a plugin that is registered but returned nothing has to be
+        reported -- that silent failure is what the audit exists for -- and a surface that
+        appears only in the evidence has to be reported too rather than being dropped because
+        the registry was unavailable at read time.
+        """
+        return sorted(set(registered) | set(seen_in_signals or [])) or [platform_value]
 
     def _looks_rate_limited(self, health_entry: Dict[str, Any]) -> bool:
         blob = " ".join(
@@ -251,66 +336,98 @@ class StrategicMarketReasoner:
         geo_value = self._platform_value(mission.geo_code).upper()
         timeframe_used = f"{mission.timeframe} ({geo_value})"
 
-        by_platform: Dict[str, List[TrendSignal]] = defaultdict(list)
+        # Grouped by connector surface, not by platform. One row per probe is the whole point:
+        # a platform aggregate lets a healthy surface answer on behalf of a failed one, and a
+        # failed probe reported as an empty platform reads downstream as an absent market.
+        by_surface: Dict[str, List[TrendSignal]] = defaultdict(list)
+        surfaces_seen: Dict[str, List[str]] = defaultdict(list)
         for s in signals:
-            by_platform[self._platform_value(s.platform)].append(s)
+            p_val = self._platform_value(s.platform)
+            surface = self._connector_surface_of(s)
+            by_surface[surface].append(s)
+            if surface not in surfaces_seen[p_val]:
+                surfaces_seen[p_val].append(surface)
 
         summaries: List[ChannelDataSummary] = []
         registry = citation_registry if citation_registry is not None else {}
 
         for platform in mission.platforms:
             p_val = self._platform_value(platform)
-            channel_signals = by_platform.get(p_val, [])
+            registered = self._registered_surfaces_of(p_val, connector_health)
 
-            if channel_signals:
-                top_signal = max(channel_signals, key=self._engagement_rank)
+            # A signal whose surface was never recorded carries the platform name instead. When
+            # exactly one probe serves that platform, the attribution is unambiguous and the
+            # signals belong to it; reporting them as a second surface named after the platform
+            # would invent a probe that does not exist. When several probes serve it, the
+            # attribution genuinely is not known, so those signals keep their own row and say so.
+            unattributed = by_surface.get(p_val)
+            if unattributed and len(registered) == 1 and p_val not in registered:
+                by_surface[registered[0]] = by_surface.get(registered[0], []) + unattributed
+                by_surface.pop(p_val, None)
+                surfaces_seen[p_val] = [s for s in surfaces_seen.get(p_val, []) if s != p_val]
+
+            for surface in self._surfaces_of(p_val, registered, surfaces_seen.get(p_val)):
+                channel_signals = by_surface.get(surface, [])
+                ambiguous = surface == p_val and len(registered) > 1
+
+                if channel_signals:
+                    top_signal = max(channel_signals, key=self._engagement_rank)
+                    summaries.append(
+                        ChannelDataSummary(
+                            platform=platform,
+                            connector_surface=surface,
+                            status=ChannelHealthStatus.HEALTHY,
+                            signals_count=len(channel_signals),
+                            timeframe_used=timeframe_used,
+                            top_citation=self._mint_citation(
+                                top_signal, registry, geo=mission.geo_code
+                            ),
+                            notes=(
+                                "Recorded before the connector surface was tracked, and this "
+                                "platform is served by more than one probe, so these signals "
+                                "cannot be attributed to a single surface."
+                                if ambiguous else None
+                            ),
+                        )
+                    )
+                    continue
+
+                health_entry = self._resolve_circuit_state(surface, p_val, connector_health)
+                needs_auth = (
+                    auth_status is not None
+                    and p_val in self.AUTH_SENSITIVE_PLATFORMS
+                    and auth_status.get(p_val) is False
+                )
+
+                if needs_auth:
+                    status = ChannelHealthStatus.AUTH_REQUIRED
+                    notes = "Missing token or browser session for this channel."
+                elif health_entry and health_entry.get("circuit_state") == "OPEN":
+                    if self._looks_rate_limited(health_entry):
+                        status = ChannelHealthStatus.RATE_LIMITED
+                        notes = "Rate limit reached (429/quota); Circuit Breaker is OPEN."
+                    else:
+                        status = ChannelHealthStatus.DEGRADED
+                        fails = health_entry.get('consecutive_failures', 0)
+                        notes = f"Circuit Breaker is OPEN after {fails} consecutive failures."
+                elif connector_health is not None and health_entry is None:
+                    status = ChannelHealthStatus.DEGRADED
+                    notes = "No connector plugin registered for this channel."
+                else:
+                    status = ChannelHealthStatus.EMPTY_NO_DATA
+                    notes = "No signals matched keywords in timeframe."
+
                 summaries.append(
                     ChannelDataSummary(
                         platform=platform,
-                        status=ChannelHealthStatus.HEALTHY,
-                        signals_count=len(channel_signals),
+                        connector_surface=surface,
+                        status=status,
+                        signals_count=0,
                         timeframe_used=timeframe_used,
-                        top_citation=self._mint_citation(top_signal, registry, geo=mission.geo_code),
-                        notes=None,
+                        top_citation=None,
+                        notes=notes,
                     )
                 )
-                continue
-
-            health_entry = self._resolve_circuit_state(p_val, connector_health)
-            needs_auth = (
-                auth_status is not None
-                and p_val in self.AUTH_SENSITIVE_PLATFORMS
-                and auth_status.get(p_val) is False
-            )
-
-            if needs_auth:
-                status = ChannelHealthStatus.AUTH_REQUIRED
-                notes = "Missing token or browser session for this channel."
-            elif health_entry and health_entry.get("circuit_state") == "OPEN":
-                if self._looks_rate_limited(health_entry):
-                    status = ChannelHealthStatus.RATE_LIMITED
-                    notes = "Rate limit reached (429/quota); Circuit Breaker is OPEN."
-                else:
-                    status = ChannelHealthStatus.DEGRADED
-                    fails = health_entry.get('consecutive_failures', 0)
-                    notes = f"Circuit Breaker is OPEN after {fails} consecutive failures."
-            elif connector_health is not None and health_entry is None:
-                status = ChannelHealthStatus.DEGRADED
-                notes = "No connector plugin registered for this channel."
-            else:
-                status = ChannelHealthStatus.EMPTY_NO_DATA
-                notes = "No signals matched keywords in timeframe."
-
-            summaries.append(
-                ChannelDataSummary(
-                    platform=platform,
-                    status=status,
-                    signals_count=0,
-                    timeframe_used=timeframe_used,
-                    top_citation=None,
-                    notes=notes,
-                )
-            )
 
         return summaries
 
@@ -489,8 +606,10 @@ class StrategicMarketReasoner:
         signals: List[TrendSignal],
         target_keywords: List[str],
         geo: GeoCode = GeoCode.VN,
+        citation_registry: Optional[Dict[str, CitationEvidence]] = None,
     ) -> List[MarketOpportunity]:
         opportunities: List[MarketOpportunity] = []
+        registry = citation_registry if citation_registry is not None else {}
         if not target_keywords:
             return opportunities
 
@@ -593,6 +712,22 @@ class StrategicMarketReasoner:
             else:
                 support_sigs = ["No localized videos recorded on YouTube or TikTok within selected timeframe."]
 
+            # Both sides of the comparison, so the reader can reach the observation behind the
+            # index rather than a title that may belong to two different sightings. An empty
+            # list stays empty: an opportunity resting on a measured absence of supply has
+            # nothing on the supply side to cite, and inventing one would be the fabrication
+            # the citation contract exists to prevent.
+            demand_evidence = [
+                s for s in demand_signals
+                if self._matches_topic_strictly(
+                    s.metadata.get("keyword", "") or s.raw_title, kw_clean
+                )
+            ]
+            citations = [
+                self._mint_citation(s, registry, geo=geo)
+                for s in (demand_evidence[:2] + localized_videos[:3])
+            ]
+
             opportunities.append(
                 MarketOpportunity(
                     topic=raw_kw,
@@ -602,6 +737,7 @@ class StrategicMarketReasoner:
                     opportunity_index=opportunity_index,
                     strategic_recommendation=rec,
                     supporting_signals=support_sigs,
+                    citations=citations,
                 )
             )
 
@@ -618,9 +754,12 @@ class StrategicMarketReasoner:
         maturity_reasons: List[str],
         channel_summaries: Optional[List[ChannelDataSummary]] = None,
         citation_registry: Optional[Dict[str, CitationEvidence]] = None,
-    ) -> Tuple[List[StrategicInsight], List[str]]:
+    ) -> Tuple[List[StrategicInsight], List[StrategicInsight]]:
         statements: List[Tuple[str, List[TrendSignal]]] = []
-        actionables: List[str] = []
+        # Each takeaway travels with the signals it was derived from, for the same reason an
+        # insight does: an action a reader cannot trace back to an observation is advice, and
+        # the report has no way to say which of the two it is handing over.
+        actions: List[Tuple[str, List[TrendSignal]]] = []
 
         video_signals = [
             s for s in signals
@@ -650,7 +789,7 @@ class StrategicMarketReasoner:
             gap_stmt = f"Top strategic white spaces concentrated in: {gap_names}."
             gap_action = f"Allocate resources to high-demand topics {gap_names} to capture first-mover advantage."
             statements.append((gap_stmt, gap_evidence))
-            actionables.append(gap_action)
+            actions.append((gap_action, gap_evidence))
 
         # Identify dominant discussion topic dynamically from signal volume
         topic_counts: Dict[str, int] = {}
@@ -667,7 +806,7 @@ class StrategicMarketReasoner:
                 dom_stmt = f"Practitioner content is concentrated around '{dominant_kw}' ({max_count} verified signals)."
                 dom_action = f"Differentiate positioning to avoid direct head-to-head competition with saturated supply in '{dominant_kw}'."
                 statements.append((dom_stmt, topic_signals[dominant_kw]))
-                actionables.append(dom_action)
+                actions.append((dom_action, topic_signals[dominant_kw]))
 
         # Voice of Customer: pain point clusters must cite the discussion carrying them.
         discussed = [s for s in signals if self._comment_count(s) > 0]
@@ -693,13 +832,15 @@ class StrategicMarketReasoner:
                 )
                 broken_action = f"Restore empty ingress channels ({broken_desc}) and re-run mission prior to capital allocation."
                 statements.append((broken_stmt, []))
-                actionables.append(broken_action)
+                actions.append((broken_action, []))
 
-        actionables.append(
-            "Schedule periodic ingress surveillance to track supply shifts and search demand growth velocity."
-        )
+        actions.append((
+            "Schedule periodic ingress surveillance to track supply shifts and search demand growth velocity.",
+            [],
+        ))
 
         insights = self.attribute_citations(statements, citation_registry=citation_registry, geo=mission.geo_code)
+        actionables = self.attribute_citations(actions, citation_registry=citation_registry, geo=mission.geo_code)
         return insights, actionables
 
     @staticmethod
