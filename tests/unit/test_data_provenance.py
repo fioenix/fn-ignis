@@ -13,9 +13,21 @@ from ignis.domain.harness_models import (
     StrategicInsight,
     TrendMaturityStage,
 )
+from ignis.domain.research_workspace import (
+    JOURNAL_DIRNAME,
+    MANIFEST_FILENAME,
+    IncompleteMarketBriefError,
+    ResearchSurface,
+)
 from ignis.domain.value_objects import GeoCode, PlatformType
+from ignis.application.use_cases.create_market_revision import CreateMarketRevisionUseCase
+from ignis.application.use_cases.create_research_workspace import (
+    CreateResearchWorkspaceUseCase,
+)
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
 
@@ -541,3 +553,240 @@ def test_jinja_template_carries_no_hardcoded_vietnamese():
     # Diacritics only ever arrive through injected data, never from the template.
     for marker in ("Không có tín hiệu", "Chưa cấu hình", "lượt xem", "Kênh chạm trần"):
         assert marker not in template
+
+
+# --- Dual-surface provenance: where the data lives, and what it is allowed to support ---
+
+CONFIRMED_BRIEF = {
+    "decision": "Should we test a VN-focused customer service assistant?",
+    "target_user": "VN fashion retailers running their own support inbox",
+    "problem": "Support replies take hours and lose the sale",
+    "geo": "VN",
+    "timeframe": "30d",
+    "hypothesis": "VN retailers will pay for an assistant that answers in under a minute",
+    "falsifiers": ["No retailer reports reply latency as a top-three cost"],
+    "confirmed_by": "requester@example.com",
+}
+
+
+def _stored_signal(title, connector_surface, platform=PlatformType.GOOGLE_TRENDS, metric=90.0):
+    """A signal that has already been written, so it carries the citation identity."""
+    return TrendSignal(
+        platform=platform,
+        raw_title=title,
+        metric_value=metric,
+        growth_velocity=150.0,
+        geo_code=GeoCode.VN,
+        observation_id=uuid4(),
+        metadata={"keyword": title, "connector_surface": connector_surface, "comments": 12},
+    )
+
+
+def _market_report(own_signals, carried_signals=None, parent_mission_id=None):
+    mission = _mission(
+        workspace_id=uuid4(),
+        surface=ResearchSurface.MARKET.value,
+        parent_attention_mission_id=parent_mission_id,
+    )
+    scorecard = QualityEvaluator().evaluate_quality(own_signals, geo=GeoCode.VN)
+    report = StrategicMarketReasoner().analyze_mission(
+        mission,
+        own_signals,
+        [TopicCluster(canonical_name="AI Agent", cross_platform_score=75.0, signals=own_signals)],
+        scorecard,
+        attention_context_signals=carried_signals,
+    )
+    return mission, report
+
+
+def _cited_observation_ids(report) -> set:
+    """Every observation a conclusion of this report is traced through."""
+    from ignis.interfaces.mcp.server import _serialize_insights, _serialize_opportunity
+
+    payloads = (
+        _serialize_insights(report.strategic_insights)
+        + _serialize_insights(report.actionable_takeaways)
+        + [_serialize_opportunity(o) for o in report.market_opportunities]
+    )
+    return {c["observation_id"] for p in payloads for c in p["citations"]}
+
+
+def test_market_conclusions_are_serialized_with_canonical_observation_ids():
+    """A Market citation is traced through the observation, not through a title or a URL."""
+    signals = [
+        _stored_signal("ai customer service", "google_rss"),
+        _stored_signal("chatbot vn", "youtube", platform=PlatformType.YOUTUBE, metric=50000.0),
+    ]
+    _, report = _market_report(signals)
+
+    from ignis.interfaces.mcp.server import _serialize_insights, _serialize_opportunity
+
+    cited = (
+        _serialize_insights(report.strategic_insights)
+        + [_serialize_opportunity(o) for o in report.market_opportunities]
+    )
+    citations = [c for payload in cited for c in payload["citations"]]
+    assert citations, "A Market analysis of stored observations must cite at least one of them."
+
+    known = {str(s.observation_id) for s in signals}
+    for citation in citations:
+        assert citation["observation_id"] in known
+        assert citation["evidence_role"] == "MARKET_EVIDENCE"
+        assert citation["connector_surface"] in {"google_rss", "youtube"}
+
+
+def test_carried_attention_observations_are_serialized_only_as_context():
+    """Lineage records where the question came from; it never becomes support for the Brief."""
+    from ignis.interfaces.mcp.server import _surface_payload
+
+    own = [_stored_signal("ai customer service", "google_rss")]
+    carried = [_stored_signal("ai agent hype", "google_rss", metric=70.0)]
+    mission, report = _market_report(own, carried, parent_mission_id=uuid4())
+
+    payload = _surface_payload(report, mission)
+    context = payload["attention_context"]
+    assert [c["observation_id"] for c in context] == [str(carried[0].observation_id)]
+    assert all(c["evidence_role"] == "ATTENTION_CONTEXT" for c in context)
+    assert payload["attention_context_note"]
+
+    # The same observation must not also appear under an opportunity, an insight or a takeaway.
+    assert str(carried[0].observation_id) not in _cited_observation_ids(report)
+    assert str(own[0].observation_id) in _cited_observation_ids(report)
+
+
+def test_an_attention_analysis_is_serialized_without_any_market_verdict():
+    """ATTENTION reports what is being looked at; no Opportunity Index is derived from it."""
+    from ignis.interfaces.mcp.server import _surface_payload
+
+    signals = [_stored_signal("ai customer service", "google_rss")]
+    mission = _mission(workspace_id=uuid4(), surface=ResearchSurface.ATTENTION.value)
+    scorecard = QualityEvaluator().evaluate_quality(signals, geo=GeoCode.VN)
+    report = StrategicMarketReasoner().analyze_mission(
+        mission,
+        signals,
+        [TopicCluster(canonical_name="AI Agent", cross_platform_score=75.0, signals=signals)],
+        scorecard,
+    )
+
+    assert report.market_opportunities == []
+    payload = _surface_payload(report, mission)
+    assert payload["surface"] == "ATTENTION"
+    assert payload["opportunity_index_applies"] is False
+    assert "no Opportunity Index" in payload["note"]
+    assert "market_brief" not in payload
+    for insight in report.strategic_insights:
+        assert "Opportunity Index" not in insight.statement
+
+
+def test_two_probes_on_one_platform_stay_two_channel_health_rows():
+    """A healthy video grid must not answer on behalf of a comments probe that never ran."""
+    from ignis.interfaces.mcp.server import _serialize_channel_summaries
+
+    grid_signal = TrendSignal(
+        platform=PlatformType.TIKTOK,
+        raw_title="Cách làm AI Agent bán hàng tự động cho shop",
+        metric_value=52000.0,
+        geo_code=GeoCode.VN,
+        metadata={"connector_surface": "tiktok_grid", "author": "@shopai"},
+    )
+    summaries = StrategicMarketReasoner().summarize_channel_ingress(
+        mission=_mission(platforms=[PlatformType.TIKTOK]),
+        signals=[grid_signal],
+        auth_status={"tiktok": True},
+        connector_health={
+            "tiktok_grid": {"platform": "tiktok", "circuit_state": "CLOSED"},
+            "tiktok_comments": {
+                "platform": "tiktok",
+                "circuit_state": "OPEN",
+                "consecutive_failures": 3,
+                "last_error": "comment page returned nothing",
+            },
+        },
+    )
+
+    payload = _serialize_channel_summaries(summaries)
+    by_surface = {row["connector_surface"]: row for row in payload}
+    assert set(by_surface) == {"tiktok_grid", "tiktok_comments"}
+    assert {row["platform"] for row in payload} == {"tiktok"}
+    assert by_surface["tiktok_grid"]["status"] == "HEALTHY"
+    assert by_surface["tiktok_comments"]["status"] == "DEGRADED"
+    assert by_surface["tiktok_comments"]["signals_count"] == 0
+
+
+# --- Workspace-local data: the folder holds files, the shared database holds records ---
+
+async def _confirmed_workspace(store, host_workspace):
+    """Propose and confirm one research, the way a requester reaches a Market mission."""
+    use_case = CreateResearchWorkspaceUseCase(store=store)
+    proposal = await use_case.propose(
+        host_workspace=host_workspace, research_name="AI customer service"
+    )
+    assert not proposal.proposed_path.exists(), "Proposing must stay read-only."
+    return await use_case.confirm(proposal, confirmation=True)
+
+
+@pytest.mark.asyncio
+async def test_a_confirmed_research_folder_carries_no_database_of_its_own(tmp_path):
+    """The folder holds the manifest and the run journals; every record stays in one database."""
+    repository = SqliteTrendRepository(db_path="sqlite:///:memory:")
+    store = WorkspaceRepository(repository=repository)
+    try:
+        host = tmp_path / "project"
+        host.mkdir()
+        workspace = await _confirmed_workspace(store, host)
+
+        mission, revision = await CreateMarketRevisionUseCase(repository, store).execute(
+            workspace_id=workspace.workspace_id, **CONFIRMED_BRIEF
+        )
+        async with store.mission_run(workspace, mission.id) as journal:
+            assert journal.journal_path.is_file()
+
+        assert sorted(p.name for p in workspace.root_path.iterdir()) == [
+            JOURNAL_DIRNAME,
+            MANIFEST_FILENAME,
+        ]
+        journals = sorted((workspace.root_path / JOURNAL_DIRNAME).iterdir())
+        assert journals and all(
+            p.name.startswith("run-") and p.suffix == ".json" for p in journals
+        )
+        stray = [
+            p.relative_to(host).as_posix()
+            for p in host.rglob("*")
+            if p.suffix.lower() in {".db", ".sqlite", ".sqlite3"}
+        ]
+        assert stray == [], f"A per-research database was written under the host workspace: {stray}"
+
+        # Identity, mission, Brief revision and run journal all read back from the database.
+        assert await store.get_research_workspace(workspace.workspace_id) is not None
+        assert [m.id for m in await store.list_workspace_missions(workspace.workspace_id)] == [
+            mission.id
+        ]
+        stored_brief = await store.get_brief_revision_for_mission(mission.id)
+        assert stored_brief.brief_revision_id == revision.brief_revision_id
+        assert [j.run_id for j in await store.list_run_journals(mission.id)] == [journal.run_id]
+    finally:
+        await repository.close()
+
+
+@pytest.mark.asyncio
+async def test_an_abandoned_framing_leaves_no_mission_revision_or_journal(tmp_path):
+    """The host Agent owns the Q&A, so a framing that was never confirmed has nowhere to land."""
+    repository = SqliteTrendRepository(db_path="sqlite:///:memory:")
+    store = WorkspaceRepository(repository=repository)
+    try:
+        host = tmp_path / "project"
+        host.mkdir()
+        workspace = await _confirmed_workspace(store, host)
+
+        incomplete = {**CONFIRMED_BRIEF, "hypothesis": "   ", "falsifiers": []}
+        with pytest.raises(IncompleteMarketBriefError) as raised:
+            await CreateMarketRevisionUseCase(repository, store).execute(
+                workspace_id=workspace.workspace_id, **incomplete
+            )
+        assert set(raised.value.missing_fields) == {"hypothesis", "falsifiers"}
+
+        assert await store.list_workspace_missions(workspace.workspace_id) == []
+        assert await store.next_brief_revision_number(workspace.workspace_id) == 1
+        assert [p.name for p in workspace.root_path.iterdir()] == [MANIFEST_FILENAME]
+    finally:
+        await repository.close()
