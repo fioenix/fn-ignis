@@ -6,6 +6,7 @@ Opportunity Index, that Market cannot probe without a confirmed Brief, and that 
 citation reaches a canonical observation -- are claims about what those paths actually do.
 """
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -967,3 +968,88 @@ async def test_the_brief_tool_refuses_a_revision_that_re_points_the_attention_or
     ]
     assert [m.id for m in market_missions] == [first.id]
     assert await store.next_brief_revision_number(workspace.workspace_id) == 2
+
+
+@pytest.mark.asyncio
+async def test_four_concurrent_confirmations_take_four_distinct_revision_numbers(
+    repository_case, host_workspace
+):
+    """The revision number is allocated by the write, on whichever backend is configured.
+
+    The two backends serialise this differently -- SQLite takes the write lock with
+    BEGIN IMMEDIATE, PostgreSQL locks the owning workspace row -- so a scenario that only ever
+    runs on one of them proves nothing about the other. Four confirmations race for one
+    research line and all four have to come back with a number of their own.
+    """
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    use_case = _revision_use_case(repository, store)
+
+    results = await asyncio.gather(
+        *(
+            use_case.execute(
+                workspace_id=workspace.workspace_id,
+                confirmed_by="requester",
+                keywords=["ai customer service"],
+                **{**COMPLETE_BRIEF, "hypothesis": f"Variant {n} of the latency hypothesis"},
+            )
+            for n in range(4)
+        ),
+        return_exceptions=True,
+    )
+
+    failures = [r for r in results if isinstance(r, BaseException)]
+    assert failures == [], f"every confirmation must succeed, got: {failures}"
+
+    missions = [mission for mission, _revision in results]
+    revisions = [revision for _mission, revision in results]
+    assert sorted(r.revision_number for r in revisions) == [1, 2, 3, 4]
+    assert await store.next_brief_revision_number(workspace.workspace_id) == 5
+
+    # Four missions, four revisions, and each revision belongs to exactly one mission.
+    assert len({m.id for m in missions}) == 4
+    assert len({r.brief_revision_id for r in revisions}) == 4
+    stored_missions = await store.list_workspace_missions(workspace.workspace_id)
+    assert len(stored_missions) == 4
+    for mission in stored_missions:
+        revision = await store.get_brief_revision_for_mission(mission.id)
+        assert revision is not None
+        assert mission.brief_revision_id == revision.brief_revision_id
+        assert revision.workspace_id == workspace.workspace_id
+
+    workspace_text = str(workspace.workspace_id)
+    counts = {
+        "missions": repository_case.query_one(
+            "SELECT count(*) FROM research_missions WHERE workspace_id = ?",
+            "SELECT count(*) FROM research_missions WHERE workspace_id::text = %s",
+            (workspace_text,),
+        )[0],
+        "revisions": repository_case.query_one(
+            "SELECT count(*) FROM market_brief_revisions WHERE workspace_id = ?",
+            "SELECT count(*) FROM market_brief_revisions WHERE workspace_id::text = %s",
+            (workspace_text,),
+        )[0],
+    }
+    assert counts == {"missions": 4, "revisions": 4}
+
+    # No half-write survived the race in either direction: a Market mission no Brief authorizes
+    # can never run, and a revision whose mission is missing is a Brief nobody can act on.
+    unauthorized = repository_case.query_one(
+        "SELECT count(*) FROM research_missions m"
+        " LEFT JOIN market_brief_revisions r ON r.mission_id = m.id"
+        " WHERE m.workspace_id = ? AND m.surface = 'MARKET' AND r.id IS NULL",
+        "SELECT count(*) FROM research_missions m"
+        " LEFT JOIN market_brief_revisions r ON r.mission_id = m.id"
+        " WHERE m.workspace_id::text = %s AND m.surface = 'MARKET' AND r.id IS NULL",
+        (workspace_text,),
+    )[0]
+    detached = repository_case.query_one(
+        "SELECT count(*) FROM market_brief_revisions r"
+        " LEFT JOIN research_missions m ON m.id = r.mission_id"
+        " WHERE r.workspace_id = ? AND m.id IS NULL",
+        "SELECT count(*) FROM market_brief_revisions r"
+        " LEFT JOIN research_missions m ON m.id = r.mission_id"
+        " WHERE r.workspace_id::text = %s AND m.id IS NULL",
+        (workspace_text,),
+    )[0]
+    assert (unauthorized, detached) == (0, 0)
