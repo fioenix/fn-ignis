@@ -22,8 +22,8 @@ an independently demonstrable increment.
 
 **Purpose**: Establish the local-first workspace boundary and feature test locations.
 
-- [ ] T001 Add `.ignis/research/` to the repository ignore policy and document the local-first rule in `.gitignore` and `docs/decisions/2026-09-21-dual-surface-research-workspace.md` (touches: `.gitignore`, decision note; depends-on: none)
-- [ ] T002 [P] Add feature test module placeholders and shared fixtures for temporary host workspaces in `tests/unit/test_research_workspace.py`, `tests/unit/test_surface_boundaries.py`, `tests/integration/test_research_workspace_lifecycle.py`, `tests/integration/test_dual_surface_journey.py`, and `tests/integration/test_workspace_concurrency.py` (touches: listed test files; depends-on: none)
+- [x] T001 Add `.ignis/research/` to the repository ignore policy and document the local-first rule in `.gitignore` and `docs/decisions/2026-09-21-dual-surface-research-workspace.md` (touches: `.gitignore`, decision note; depends-on: none)
+- [x] T002 [P] Add feature test module placeholders and shared fixtures for temporary host workspaces in `tests/unit/test_research_workspace.py`, `tests/unit/test_surface_boundaries.py`, `tests/integration/test_research_workspace_lifecycle.py`, `tests/integration/test_dual_surface_journey.py`, and `tests/integration/test_workspace_concurrency.py` (touches: listed test files; depends-on: none)
 
 ---
 
@@ -32,12 +32,12 @@ an independently demonstrable increment.
 **Purpose**: Build the canonical workspace, surface, Brief, provenance, and writer boundaries
 that all user stories depend on.
 
-- [ ] T003 [P] Define workspace, surface, mission-lineage, and Brief value objects in `src/ignis/domain/research_workspace.py` with typed validation for `ATTENTION`, `MARKET`, and the seven required Brief fields (touches: `src/ignis/domain/research_workspace.py`; depends-on: T002)
-- [ ] T004 [P] Define workspace lifecycle and canonical-store ports in `src/ignis/application/ports/research_workspace_port.py`, including proposal, confirmation, reuse, adoption, and reopen operations (touches: `src/ignis/application/ports/research_workspace_port.py`; depends-on: T003)
-- [ ] T005 Add the workspace manifest, research metadata, Brief revision, surface lineage, and run-journal tables to the shared schema, extend the existing `research_missions` record with workspace/surface/lineage fields, and enforce equivalent SQLite/PostgreSQL constraints without duplicating source/observation/mission-evidence identity rules (touches: `sql/017_research_workspace.sql`, `src/ignis/resources.py`, `src/ignis/infrastructure/persistence/sqlite_repository.py`, `src/ignis/infrastructure/persistence/postgres_repository.py`, `src/ignis/domain/entities.py`; depends-on: T003)
-- [ ] T006 Implement workspace-scoped access against the configured shared database in `src/ignis/infrastructure/persistence/workspace_repository.py`, reusing the existing repository port and selecting SQLite-local by default or PostgreSQL from configuration (touches: `src/ignis/infrastructure/persistence/workspace_repository.py`, `src/ignis/infrastructure/persistence/sqlite_repository.py`, `src/ignis/infrastructure/persistence/postgres_repository.py`; depends-on: T004, T005)
-- [ ] T007 Implement path containment, slug validation, manifest compatibility, and non-destructive adoption guards in `src/ignis/application/use_cases/create_research_workspace.py` (touches: `src/ignis/application/use_cases/create_research_workspace.py`; depends-on: T004, T006)
-- [ ] T008 Implement per-mission single-writer coordination and transaction boundaries in `src/ignis/infrastructure/persistence/workspace_repository.py`, preserving the exclusive journal creation pattern from `scripts/t020_cutover.py` (touches: `src/ignis/infrastructure/persistence/workspace_repository.py`, `scripts/t020_cutover.py`; depends-on: T006)
+- [x] T003 [P] Define workspace, surface, mission-lineage, and Brief value objects in `src/ignis/domain/research_workspace.py` with typed validation for `ATTENTION`, `MARKET`, and the seven required Brief fields (touches: `src/ignis/domain/research_workspace.py`; depends-on: T002)
+- [x] T004 [P] Define workspace lifecycle and canonical-store ports in `src/ignis/application/ports/research_workspace_port.py`, including proposal, confirmation, reuse, adoption, and reopen operations (touches: `src/ignis/application/ports/research_workspace_port.py`; depends-on: T003)
+- [x] T005 Add the workspace manifest, research metadata, Brief revision, surface lineage, and run-journal tables to the shared schema, extend the existing `research_missions` record with workspace/surface/lineage fields, and enforce equivalent SQLite/PostgreSQL constraints without duplicating source/observation/mission-evidence identity rules (touches: `sql/017_research_workspace.sql`, `src/ignis/resources.py`, `src/ignis/infrastructure/persistence/sqlite_repository.py`, `src/ignis/infrastructure/persistence/postgres_repository.py`, `src/ignis/domain/entities.py`; depends-on: T003)
+- [x] T006 Implement workspace-scoped access against the configured shared database in `src/ignis/infrastructure/persistence/workspace_repository.py`, reusing the existing repository port and selecting SQLite-local by default or PostgreSQL from configuration (touches: `src/ignis/infrastructure/persistence/workspace_repository.py`, `src/ignis/infrastructure/persistence/sqlite_repository.py`, `src/ignis/infrastructure/persistence/postgres_repository.py`; depends-on: T004, T005)
+- [x] T007 Implement path containment, slug validation, manifest compatibility, and non-destructive adoption guards in `src/ignis/application/use_cases/create_research_workspace.py` (touches: `src/ignis/application/use_cases/create_research_workspace.py`; depends-on: T004, T006)
+- [x] T008 Implement per-mission single-writer coordination and transaction boundaries in `src/ignis/infrastructure/persistence/workspace_repository.py`, preserving the exclusive journal creation pattern from `scripts/t020_cutover.py` (touches: `src/ignis/infrastructure/persistence/workspace_repository.py`, `scripts/t020_cutover.py`; depends-on: T006)
 
 **Checkpoint**: The workspace can be proposed, confirmed, reopened, and guarded without any
 surface-specific analysis.
@@ -54,13 +54,13 @@ write before confirmation, matching-manifest reuse, and explicit adoption of a n
 
 ### Tests for User Story 1
 
-- [ ] T009 [P] [US1] Add unit tests for proposal-only behavior, path containment, slug validation, matching-manifest reuse, incompatible manifests, and non-empty-folder adoption in `tests/unit/test_research_workspace.py` (touches: `tests/unit/test_research_workspace.py`; depends-on: T007)
-- [ ] T010 [P] [US1] Add integration tests for create, reopen from a second host using the same shared database, cancel, and adopt flows in `tests/integration/test_research_workspace_lifecycle.py` (touches: `tests/integration/test_research_workspace_lifecycle.py`; depends-on: T007)
+- [x] T009 [P] [US1] Add unit tests for proposal-only behavior, path containment, slug validation, matching-manifest reuse, incompatible manifests, and non-empty-folder adoption in `tests/unit/test_research_workspace.py` (touches: `tests/unit/test_research_workspace.py`; depends-on: T007)
+- [x] T010 [P] [US1] Add integration tests for create, reopen from a second host using the same shared database, cancel, and adopt flows in `tests/integration/test_research_workspace_lifecycle.py` (touches: `tests/integration/test_research_workspace_lifecycle.py`; depends-on: T007)
 
 ### Implementation for User Story 1
 
-- [ ] T011 [US1] Expose workspace proposal, confirmation, reuse, and adoption results through typed handlers in `src/ignis/interfaces/mcp/server.py` using the contract in `specs/007-dual-surface-research-workspace/contracts/workspace-and-mission.md` (touches: `src/ignis/interfaces/mcp/server.py`; depends-on: T009, T010)
-- [ ] T012 [US1] Add manifest and workspace identity readback to the existing setup/diagnostic path in `src/ignis/interfaces/cli/setup_bundle.py` without creating a research workspace implicitly (touches: `src/ignis/interfaces/cli/setup_bundle.py`; depends-on: T011)
+- [x] T011 [US1] Expose workspace proposal, confirmation, reuse, and adoption results through typed handlers in `src/ignis/interfaces/mcp/server.py` using the contract in `specs/007-dual-surface-research-workspace/contracts/workspace-and-mission.md` (touches: `src/ignis/interfaces/mcp/server.py`; depends-on: T009, T010)
+- [x] T012 [US1] Add manifest and workspace identity readback to the existing setup/diagnostic path in `src/ignis/interfaces/cli/setup_bundle.py` without creating a research workspace implicitly (touches: `src/ignis/interfaces/cli/setup_bundle.py`; depends-on: T011)
 
 **Checkpoint**: US1 is independently demonstrable: the user can create and reopen a scoped
 research workspace through the shared Ignis database, and no unconfirmed folder is created.
@@ -77,14 +77,14 @@ Market Brief or Opportunity Index is required or emitted.
 
 ### Tests for User Story 2
 
-- [ ] T013 [P] [US2] Add unit tests for surface immutability, hypothesis-free Attention creation, and Opportunity Index exclusion in `tests/unit/test_surface_boundaries.py` (touches: `tests/unit/test_surface_boundaries.py`; depends-on: T003)
-- [ ] T014 [P] [US2] Add integration tests for ranked Attention output, observation-addressable citations, connector-surface states, and candidate handoff metadata in `tests/integration/test_dual_surface_journey.py` (touches: `tests/integration/test_dual_surface_journey.py`; depends-on: T011)
+- [x] T013 [P] [US2] Add unit tests for surface immutability, hypothesis-free Attention creation, and Opportunity Index exclusion in `tests/unit/test_surface_boundaries.py` (touches: `tests/unit/test_surface_boundaries.py`; depends-on: T003)
+- [x] T014 [P] [US2] Add integration tests for ranked Attention output, observation-addressable citations, connector-surface states, and candidate handoff metadata in `tests/integration/test_dual_surface_journey.py` (touches: `tests/integration/test_dual_surface_journey.py`; depends-on: T011)
 
 ### Implementation for User Story 2
 
-- [ ] T015 [US2] Add Attention mission creation and workspace binding in `src/ignis/application/use_cases/create_attention_mission.py`, reusing existing mission ingress ports instead of duplicating connector logic (touches: `src/ignis/application/use_cases/create_attention_mission.py`, `src/ignis/application/use_cases/create_mission.py`; depends-on: T006, T013)
-- [ ] T016 [US2] Make mission analysis surface-aware in `src/ignis/application/use_cases/get_mission_analysis.py` and `src/ignis/infrastructure/harness/strategic_reasoner.py`, keeping momentum/freshness/coverage visible and suppressing Opportunity Index for Attention (touches: `src/ignis/application/use_cases/get_mission_analysis.py`, `src/ignis/infrastructure/harness/strategic_reasoner.py`; depends-on: T015)
-- [ ] T017 [US2] Add Attention response serialization and connector-surface citation classification in `src/ignis/interfaces/mcp/server.py` and `src/ignis/infrastructure/templates/html/mission_report.html` without changing the existing deterministic builder contract (touches: `src/ignis/interfaces/mcp/server.py`, `src/ignis/infrastructure/templates/html/mission_report.html`; depends-on: T014, T016)
+- [x] T015 [US2] Add Attention mission creation and workspace binding in `src/ignis/application/use_cases/create_attention_mission.py`, reusing existing mission ingress ports instead of duplicating connector logic (touches: `src/ignis/application/use_cases/create_attention_mission.py`, `src/ignis/application/use_cases/create_mission.py`; depends-on: T006, T013)
+- [x] T016 [US2] Make mission analysis surface-aware in `src/ignis/application/use_cases/get_mission_analysis.py` and `src/ignis/infrastructure/harness/strategic_reasoner.py`, keeping momentum/freshness/coverage visible and suppressing Opportunity Index for Attention (touches: `src/ignis/application/use_cases/get_mission_analysis.py`, `src/ignis/infrastructure/harness/strategic_reasoner.py`; depends-on: T015)
+- [x] T017 [US2] Add Attention response serialization and connector-surface citation classification in `src/ignis/interfaces/mcp/server.py` and `src/ignis/infrastructure/templates/html/mission_report.html` without changing the existing deterministic builder contract (touches: `src/ignis/interfaces/mcp/server.py`, `src/ignis/infrastructure/templates/html/mission_report.html`; depends-on: T014, T016)
 
 **Checkpoint**: US2 is independently demonstrable: Attention can discover and rank topics while
 making no commercial claim.
@@ -100,15 +100,15 @@ blocked incomplete Brief and the confirmed run.
 
 ### Tests for User Story 3
 
-- [ ] T018 [P] [US3] Add unit tests for all seven required Brief fields, non-empty falsifiers, edit-before-confirmation, immutable confirmation metadata, and abandoned-Q&A non-persistence in `tests/unit/test_market_brief.py` (touches: `tests/unit/test_market_brief.py`; depends-on: T003, T005)
-- [ ] T019 [P] [US3] Add integration tests for direct Market gating, confirmed Brief persistence, and Market analysis output in `tests/integration/test_dual_surface_journey.py` (touches: `tests/integration/test_dual_surface_journey.py`; depends-on: T011, T018)
+- [x] T018 [P] [US3] Add unit tests for all seven required Brief fields, non-empty falsifiers, edit-before-confirmation, immutable confirmation metadata, and abandoned-Q&A non-persistence in `tests/unit/test_market_brief.py` (touches: `tests/unit/test_market_brief.py`; depends-on: T003, T005)
+- [x] T019 [P] [US3] Add integration tests for direct Market gating, confirmed Brief persistence, and Market analysis output in `tests/integration/test_dual_surface_journey.py` (touches: `tests/integration/test_dual_surface_journey.py`; depends-on: T011, T018)
 
 ### Implementation for User Story 3
 
-- [ ] T020 [US3] Implement Brief validation and confirmation in `src/ignis/application/use_cases/confirm_market_brief.py`, persisting only confirmed revisions and creating the authorized Market mission (touches: `src/ignis/application/use_cases/confirm_market_brief.py`; depends-on: T005, T018)
-- [ ] T021 [US3] Gate Market execution on a confirmed Brief in `src/ignis/application/use_cases/execute_mission.py` and `src/ignis/application/use_cases/create_mission.py`, returning explicit missing-field errors (touches: `src/ignis/application/use_cases/execute_mission.py`, `src/ignis/application/use_cases/create_mission.py`; depends-on: T020)
-- [ ] T022 [US3] Expose Brief confirmation and Market execution contracts through `src/ignis/interfaces/mcp/server.py`, keeping adaptive Q&A in Agent context rather than server persistence (touches: `src/ignis/interfaces/mcp/server.py`; depends-on: T019, T021)
-- [ ] T023 [US3] Ensure Market analysis and artifacts include Brief revision identity, falsifiers, connector-surface states, observation-addressable citations for opportunities and actionable takeaways, and Opportunity Index only for Market missions in `src/ignis/application/use_cases/get_mission_analysis.py`, `src/ignis/infrastructure/harness/strategic_reasoner.py`, and `src/ignis/infrastructure/templates/html/mission_report.html` (touches: listed files; depends-on: T016, T022; absorbs the P1 portion of `specs/004-fastmcp-server-and-artifacts/tasks.md` T009)
+- [x] T020 [US3] Implement Brief validation and confirmation in `src/ignis/application/use_cases/confirm_market_brief.py`, persisting only confirmed revisions and creating the authorized Market mission (touches: `src/ignis/application/use_cases/confirm_market_brief.py`; depends-on: T005, T018)
+- [x] T021 [US3] Gate Market execution on a confirmed Brief in `src/ignis/application/use_cases/execute_mission.py` and `src/ignis/application/use_cases/create_mission.py`, returning explicit missing-field errors (touches: `src/ignis/application/use_cases/execute_mission.py`, `src/ignis/application/use_cases/create_mission.py`; depends-on: T020)
+- [x] T022 [US3] Expose Brief confirmation and Market execution contracts through `src/ignis/interfaces/mcp/server.py`, keeping adaptive Q&A in Agent context rather than server persistence (touches: `src/ignis/interfaces/mcp/server.py`; depends-on: T019, T021)
+- [x] T023 [US3] Ensure Market analysis and artifacts include Brief revision identity, falsifiers, connector-surface states, observation-addressable citations for opportunities and actionable takeaways, and Opportunity Index only for Market missions in `src/ignis/application/use_cases/get_mission_analysis.py`, `src/ignis/infrastructure/harness/strategic_reasoner.py`, and `src/ignis/infrastructure/templates/html/mission_report.html` (touches: listed files; depends-on: T016, T022; absorbs the P1 portion of `specs/004-fastmcp-server-and-artifacts/tasks.md` T009)
 
 **Checkpoint**: US3 is independently demonstrable: incomplete Market framing cannot run, while a
 confirmed Brief produces a traceable Market mission and Market-only Opportunity Index.

@@ -97,3 +97,29 @@ def test_a_revision_confirms_without_a_requester_identity_being_optional():
     with pytest.raises(IncompleteMarketBriefError) as excinfo:
         MarketBriefRevision(confirmed_by="  ", **COMPLETE_PAYLOAD)
     assert excinfo.value.missing_fields == ["confirmed_by"]
+
+
+def test_the_workspace_store_offers_no_way_to_persist_a_draft():
+    """There is no draft operation, so an abandoned framing cannot leave a record behind.
+
+    This is a structural check rather than a behavioural one on purpose. The guarantee the
+    specification makes is about what fn-ignis is unable to store, and an absent operation is
+    the only form of that guarantee a later caller cannot work around.
+    """
+    from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
+
+    operations = {name for name in dir(IResearchWorkspaceStore) if not name.startswith("_")}
+    forbidden = [
+        name
+        for name in operations
+        if any(word in name for word in ("draft", "transcript", "question", "answer"))
+    ]
+    assert forbidden == []
+    assert "save_brief_revision" in operations
+
+
+def test_an_edit_before_confirmation_is_just_a_different_payload():
+    """Editing happens in the host Agent's context, so the domain sees only the final answer."""
+    edited = _revision(hypothesis="VN retailers will pay only when latency costs them a sale")
+    assert edited.hypothesis.endswith("costs them a sale")
+    assert edited.revision_number == 1
