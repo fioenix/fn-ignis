@@ -112,6 +112,19 @@ class ResearchMission:
     timeframe: str = "7d"
     status: str = "PENDING"  # PENDING, RUNNING, COMPLETED, FAILED
     summary: Optional[str] = None
+    # Which research owns this mission, and which question it is answering. Both are None for a
+    # mission created outside a research workspace -- every mission written before the workspace
+    # feature is in that state, and defaulting them to MARKET would claim they were
+    # hypothesis-driven investigations and gate them on a Brief nobody was ever asked for.
+    workspace_id: Optional[UUID] = None
+    surface: Optional[str] = None          # 'ATTENTION' or 'MARKET'
+    # Set only when a Market mission was opened from a selected Attention result. Context
+    # lineage: it records where the question came from, never that the earlier evidence supports
+    # the new hypothesis.
+    parent_attention_mission_id: Optional[UUID] = None
+    parent_cluster_id: Optional[UUID] = None
+    # The confirmed Brief that authorizes a Market run. Null for ATTENTION by definition.
+    brief_revision_id: Optional[UUID] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

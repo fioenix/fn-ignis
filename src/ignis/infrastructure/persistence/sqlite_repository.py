@@ -12,6 +12,17 @@ from ignis.application.ports.repository_port import ITrendRepository
 from ignis.resources import sql_seed_file
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.cross_platform_score import cross_platform_score
+from ignis.domain.research_workspace import (
+    MarketBriefRevision,
+    ResearchWorkspace,
+    WorkspaceScopeMismatchError,
+    WorkspaceStatus,
+)
+from ignis.application.ports.research_workspace_port import RunJournal
+from ignis.infrastructure.persistence.identifiers import (
+    uuid_or_none as _uuid_or_none,
+    uuid_text as _uuid_text,
+)
 from ignis.domain.source_identity import resolve_source_identity
 from ignis.domain.value_objects import (
     GeoCode,
@@ -235,9 +246,23 @@ class SqliteTrendRepository(ITrendRepository):
                 agent TEXT DEFAULT 'generic',
                 session_id TEXT,
                 summary TEXT,
+                -- Which research owns the mission and which question it answers. Nullable, and
+                -- that is the honest shape: a mission created outside a research workspace
+                -- belongs to none and declared no surface.
+                workspace_id TEXT REFERENCES research_workspaces(id) ON DELETE CASCADE,
+                surface TEXT CHECK (surface IS NULL OR surface IN ('ATTENTION', 'MARKET')),
+                parent_attention_mission_id TEXT REFERENCES research_missions(id) ON DELETE SET NULL,
+                parent_cluster_id TEXT REFERENCES topic_clusters(id) ON DELETE SET NULL,
+                brief_revision_id TEXT,
                 created_at TEXT NOT NULL,
-                updated_at TEXT
+                updated_at TEXT,
+                -- An Attention mission has no Brief, by definition. Stating it as a constraint
+                -- keeps a caller from binding one and then reading an Opportunity Index off the
+                -- result.
+                CHECK (surface <> 'ATTENTION' OR brief_revision_id IS NULL)
             );
+            CREATE INDEX IF NOT EXISTS idx_research_missions_workspace
+                ON research_missions (workspace_id, created_at DESC);
 
             CREATE TABLE IF NOT EXISTS platform_credentials (
                 id TEXT PRIMARY KEY,
@@ -286,6 +311,78 @@ class SqliteTrendRepository(ITrendRepository):
                 updated_by TEXT DEFAULT 'system',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+
+            -- The five entities sql/017_research_workspace.sql creates on Postgres. SQLite does
+            -- not read the sql/ files, so the same constraints are restated here; a backend that
+            -- only agrees on column names is not the same contract.
+            CREATE TABLE IF NOT EXISTS research_workspaces (
+                id TEXT PRIMARY KEY,
+                slug TEXT NOT NULL,
+                name TEXT,
+                -- Recorded, not derived. One shared database serves several host workspaces, and
+                -- two of them may legitimately hold a research with the same slug, so the slug
+                -- alone is not the identity.
+                root_path TEXT NOT NULL,
+                format_version INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'READY'
+                    CHECK (status IN ('READY', 'INCOMPATIBLE')),
+                created_at TEXT NOT NULL,
+                UNIQUE (root_path, slug)
+            );
+            CREATE INDEX IF NOT EXISTS idx_research_workspaces_slug ON research_workspaces (slug);
+
+            CREATE TABLE IF NOT EXISTS market_brief_revisions (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES research_workspaces(id) ON DELETE CASCADE,
+                mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                revision_number INTEGER NOT NULL,
+                decision TEXT NOT NULL,
+                target_user TEXT NOT NULL,
+                problem TEXT NOT NULL,
+                geo TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                hypothesis TEXT NOT NULL,
+                -- JSON list, and never empty: a Brief with no disconfirming condition is a
+                -- hypothesis that cannot lose, which is not a hypothesis.
+                falsifiers TEXT NOT NULL,
+                confirmed_by TEXT NOT NULL,
+                confirmed_at TEXT NOT NULL,
+                -- One confirmed revision per Market mission. Changing a confirmed Brief
+                -- therefore cannot update in place; it has to create a new revision under a new
+                -- mission, which is the whole point.
+                UNIQUE (mission_id),
+                UNIQUE (workspace_id, revision_number),
+                CHECK (falsifiers <> '[]')
+            );
+            CREATE INDEX IF NOT EXISTS idx_market_brief_revisions_workspace
+                ON market_brief_revisions (workspace_id, revision_number DESC);
+
+            CREATE TABLE IF NOT EXISTS mission_run_journals (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES research_workspaces(id) ON DELETE CASCADE,
+                mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                -- UNIQUE because the filesystem already granted this name exclusively. The row
+                -- records what was granted rather than reserving a name the filesystem has not
+                -- agreed to.
+                journal_path TEXT NOT NULL UNIQUE,
+                sequence INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'STARTED',
+                started_at TEXT NOT NULL,
+                -- Absent for an interrupted run. NULL says the run did not finish; a timestamp
+                -- would say it finished the moment someone asked.
+                completed_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_mission_run_journals_mission
+                ON mission_run_journals (mission_id, started_at DESC);
+
+            -- At most one active writer per mission. The primary key is what enforces it: a
+            -- second writer's INSERT conflicts, which is the clear failure the contract asks
+            -- for rather than a silently lost update.
+            CREATE TABLE IF NOT EXISTS mission_writer_claims (
+                mission_id TEXT PRIMARY KEY REFERENCES research_missions(id) ON DELETE CASCADE,
+                run_id TEXT NOT NULL,
+                claimed_at TEXT NOT NULL
             );
         """)
 
@@ -341,6 +438,23 @@ class SqliteTrendRepository(ITrendRepository):
                 "UPDATE research_missions SET platforms = ? WHERE platforms IS NULL",
                 (json.dumps(LEGACY_MISSION_PLATFORMS),),
             )
+
+        # Missions written before sql/017 belong to no workspace and declared no surface. The
+        # columns are added empty rather than defaulted: a NOT NULL DEFAULT 'MARKET' would claim
+        # every one of them was a hypothesis-driven investigation and gate it on a Brief nobody
+        # was ever asked to confirm.
+        existing_mission_columns = {
+            row[1] for row in cur.execute("PRAGMA table_info(research_missions)")
+        }
+        for column in (
+            "workspace_id",
+            "surface",
+            "parent_attention_mission_id",
+            "parent_cluster_id",
+            "brief_revision_id",
+        ):
+            if existing_mission_columns and column not in existing_mission_columns:
+                cur.execute(f"ALTER TABLE research_missions ADD COLUMN {column} TEXT")
 
         existing_signal_columns = {row[1] for row in cur.execute("PRAGMA table_info(trend_signals)")}
         if "published_at" not in existing_signal_columns:
@@ -809,11 +923,17 @@ class SqliteTrendRepository(ITrendRepository):
                 # An upsert, not INSERT OR REPLACE. REPLACE deletes the row first, and
                 # mission_evidence cascades on that delete: every status update would have
                 # thrown away the evidence the mission had just recorded.
+                #
+                # `surface` is not in the DO UPDATE list. A mission answers one question for its
+                # whole life, and letting a later save move it from ATTENTION to MARKET would
+                # re-label evidence that was collected to answer the other one.
                 cur.execute(
                     """
                     INSERT INTO research_missions
-                    (id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary,
+                     workspace_id, surface, parent_attention_mission_id, parent_cluster_id, brief_revision_id,
+                     created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (id) DO UPDATE SET
                         title = excluded.title,
                         keywords = excluded.keywords,
@@ -825,9 +945,22 @@ class SqliteTrendRepository(ITrendRepository):
                         agent = excluded.agent,
                         session_id = excluded.session_id,
                         summary = excluded.summary,
+                        workspace_id = excluded.workspace_id,
+                        parent_attention_mission_id = excluded.parent_attention_mission_id,
+                        parent_cluster_id = excluded.parent_cluster_id,
+                        brief_revision_id = excluded.brief_revision_id,
                         updated_at = excluded.updated_at
                     """,
-                    (m_id, mission.title, kw_json, plat_json, mission.shortcode, geo, tf, mission.status, mission.agent, mission.session_id, mission.summary, c_at, now_str)
+                    (
+                        m_id, mission.title, kw_json, plat_json, mission.shortcode, geo, tf,
+                        mission.status, mission.agent, mission.session_id, mission.summary,
+                        _uuid_text(mission.workspace_id),
+                        mission.surface,
+                        _uuid_text(mission.parent_attention_mission_id),
+                        _uuid_text(mission.parent_cluster_id),
+                        _uuid_text(mission.brief_revision_id),
+                        c_at, now_str,
+                    ),
                 )
                 conn.commit()
                 return mission
@@ -845,7 +978,7 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at FROM research_missions WHERE id = ? OR shortcode = ?",
+                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, workspace_id, surface, parent_attention_mission_id, parent_cluster_id, brief_revision_id, created_at, updated_at FROM research_missions WHERE id = ? OR shortcode = ?",
                     (str(mission_id), str(mission_id))
                 )
                 r = cur.fetchone()
@@ -867,6 +1000,11 @@ class SqliteTrendRepository(ITrendRepository):
                     agent=r["agent"],
                     session_id=r["session_id"],
                     summary=r["summary"],
+                    workspace_id=_uuid_or_none(r["workspace_id"]),
+                    surface=r["surface"],
+                    parent_attention_mission_id=_uuid_or_none(r["parent_attention_mission_id"]),
+                    parent_cluster_id=_uuid_or_none(r["parent_cluster_id"]),
+                    brief_revision_id=_uuid_or_none(r["brief_revision_id"]),
                     created_at=c_at,
                     updated_at=u_at,
                 )
@@ -887,7 +1025,7 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, created_at, updated_at FROM research_missions ORDER BY created_at DESC LIMIT ?",
+                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe, status, agent, session_id, summary, workspace_id, surface, parent_attention_mission_id, parent_cluster_id, brief_revision_id, created_at, updated_at FROM research_missions ORDER BY created_at DESC LIMIT ?",
                     (limit,)
                 )
                 rows = cur.fetchall()
@@ -908,6 +1046,13 @@ class SqliteTrendRepository(ITrendRepository):
                             agent=r["agent"],
                             session_id=r["session_id"],
                             summary=r["summary"],
+                            workspace_id=_uuid_or_none(r["workspace_id"]),
+                            surface=r["surface"],
+                            parent_attention_mission_id=_uuid_or_none(
+                                r["parent_attention_mission_id"]
+                            ),
+                            parent_cluster_id=_uuid_or_none(r["parent_cluster_id"]),
+                            brief_revision_id=_uuid_or_none(r["brief_revision_id"]),
                             created_at=c_at,
                         )
                     )
@@ -1456,3 +1601,370 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_del)
 
+
+    # ------------------------------------------------------------------
+    # Research workspace scope (sql/017)
+    # ------------------------------------------------------------------
+
+    async def save_research_workspace(self, workspace: ResearchWorkspace) -> ResearchWorkspace:
+        await self._ensure_schema()
+
+        def _sync_save():
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO research_workspaces
+                    (id, slug, name, root_path, format_version, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = excluded.name,
+                        status = excluded.status,
+                        format_version = excluded.format_version
+                    """,
+                    (
+                        str(workspace.workspace_id),
+                        workspace.slug,
+                        workspace.name or workspace.slug,
+                        str(workspace.root_path),
+                        workspace.format_version,
+                        workspace.status.value,
+                        workspace.created_at.isoformat(),
+                    ),
+                )
+                conn.commit()
+                return workspace
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_save)
+
+    @staticmethod
+    def _workspace_from_row(row: Any) -> ResearchWorkspace:
+        return ResearchWorkspace(
+            slug=row["slug"],
+            root_path=Path(row["root_path"]),
+            workspace_id=UUID(row["id"]),
+            name=row["name"],
+            format_version=int(row["format_version"]),
+            status=WorkspaceStatus(row["status"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    async def get_research_workspace(self, workspace_id: UUID) -> Optional[ResearchWorkspace]:
+        await self._ensure_schema()
+
+        def _sync_get():
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT id, slug, name, root_path, format_version, status, created_at"
+                    " FROM research_workspaces WHERE id = ?",
+                    (str(workspace_id),),
+                ).fetchone()
+                return self._workspace_from_row(row) if row else None
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_get)
+
+    async def find_research_workspace_by_slug(
+        self, slug: str, root_path: Optional[Path] = None
+    ) -> Optional[ResearchWorkspace]:
+        await self._ensure_schema()
+
+        def _sync_find():
+            conn = self._get_connection()
+            try:
+                base = (
+                    "SELECT id, slug, name, root_path, format_version, status, created_at"
+                    " FROM research_workspaces WHERE slug = ?"
+                )
+                if root_path is not None:
+                    row = conn.execute(
+                        base + " AND root_path = ?", (slug, str(root_path))
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        base + " ORDER BY created_at DESC LIMIT 1", (slug,)
+                    ).fetchone()
+                return self._workspace_from_row(row) if row else None
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_find)
+
+    async def list_research_workspaces(self, limit: int = 50) -> List[ResearchWorkspace]:
+        await self._ensure_schema()
+
+        def _sync_list():
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT id, slug, name, root_path, format_version, status, created_at"
+                    " FROM research_workspaces ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+                return [self._workspace_from_row(r) for r in rows]
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_list)
+
+    async def save_brief_revision(self, revision: MarketBriefRevision) -> MarketBriefRevision:
+        await self._ensure_schema()
+
+        def _sync_save():
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO market_brief_revisions
+                    (id, workspace_id, mission_id, revision_number, decision, target_user,
+                     problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(revision.brief_revision_id),
+                        str(revision.workspace_id),
+                        str(revision.mission_id),
+                        revision.revision_number,
+                        revision.decision,
+                        revision.target_user,
+                        revision.problem,
+                        revision.geo,
+                        revision.timeframe,
+                        revision.hypothesis,
+                        json.dumps(list(revision.falsifiers), ensure_ascii=False),
+                        revision.confirmed_by,
+                        revision.confirmed_at.isoformat(),
+                    ),
+                )
+                conn.commit()
+                return revision
+            except sqlite3.IntegrityError as exc:
+                # A plain INSERT, never an upsert. A confirmed Brief is immutable, so a second
+                # write against the same mission or revision number is a caller trying to edit
+                # history rather than a retry to absorb.
+                raise RepositoryException(
+                    "A confirmed Market Brief revision already exists for this mission. "
+                    "Create a new revision instead of rewriting the confirmed one."
+                ) from exc
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_save)
+
+    @staticmethod
+    def _brief_from_row(row: Any) -> MarketBriefRevision:
+        return MarketBriefRevision(
+            brief_revision_id=UUID(row["id"]),
+            workspace_id=UUID(row["workspace_id"]),
+            mission_id=UUID(row["mission_id"]),
+            revision_number=int(row["revision_number"]),
+            decision=row["decision"],
+            target_user=row["target_user"],
+            problem=row["problem"],
+            geo=row["geo"],
+            timeframe=row["timeframe"],
+            hypothesis=row["hypothesis"],
+            falsifiers=tuple(json.loads(row["falsifiers"])),
+            confirmed_by=row["confirmed_by"],
+            confirmed_at=datetime.fromisoformat(row["confirmed_at"]),
+        )
+
+    _BRIEF_COLUMNS = (
+        "SELECT id, workspace_id, mission_id, revision_number, decision, target_user, problem,"
+        " geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at"
+        " FROM market_brief_revisions"
+    )
+
+    async def get_brief_revision(
+        self, workspace_id: UUID, brief_revision_id: UUID
+    ) -> Optional[MarketBriefRevision]:
+        await self._ensure_schema()
+
+        def _sync_get():
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    self._BRIEF_COLUMNS + " WHERE id = ?", (str(brief_revision_id),)
+                ).fetchone()
+                if not row:
+                    return None
+                if row["workspace_id"] != str(workspace_id):
+                    # An error, not an empty result. An empty result reads as "this research has
+                    # no such Brief", which is a different and much quieter untruth.
+                    raise WorkspaceScopeMismatchError(
+                        f"Brief revision {brief_revision_id} belongs to workspace "
+                        f"{row['workspace_id']}, not to {workspace_id}."
+                    )
+                return self._brief_from_row(row)
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_get)
+
+    async def get_brief_revision_for_mission(
+        self, mission_id: UUID
+    ) -> Optional[MarketBriefRevision]:
+        await self._ensure_schema()
+
+        def _sync_get():
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    self._BRIEF_COLUMNS + " WHERE mission_id = ?", (str(mission_id),)
+                ).fetchone()
+                return self._brief_from_row(row) if row else None
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_get)
+
+    async def next_brief_revision_number(self, workspace_id: UUID) -> int:
+        await self._ensure_schema()
+
+        def _sync_next():
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT MAX(revision_number) FROM market_brief_revisions WHERE workspace_id = ?",
+                    (str(workspace_id),),
+                ).fetchone()
+                return int(row[0] or 0) + 1
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_next)
+
+    async def list_workspace_missions(
+        self, workspace_id: UUID, limit: int = 50
+    ) -> List[ResearchMission]:
+        await self._ensure_schema()
+
+        def _sync_list():
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT id, title, keywords, platforms, shortcode, geo_code, timeframe,"
+                    " status, agent, session_id, summary, workspace_id, surface,"
+                    " parent_attention_mission_id, parent_cluster_id, brief_revision_id,"
+                    " created_at, updated_at FROM research_missions"
+                    " WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?",
+                    (str(workspace_id), limit),
+                ).fetchall()
+                missions: List[ResearchMission] = []
+                for r in rows:
+                    missions.append(
+                        ResearchMission(
+                            id=UUID(r["id"]),
+                            title=r["title"],
+                            keywords=json.loads(r["keywords"]) if r["keywords"] else [],
+                            platforms=_platforms_of(r),
+                            shortcode=r["shortcode"],
+                            geo_code=resolve_geo(r["geo_code"]),
+                            timeframe=resolve_timeframe(r["timeframe"]),
+                            status=r["status"],
+                            agent=r["agent"],
+                            session_id=r["session_id"],
+                            summary=r["summary"],
+                            workspace_id=_uuid_or_none(r["workspace_id"]),
+                            surface=r["surface"],
+                            parent_attention_mission_id=_uuid_or_none(
+                                r["parent_attention_mission_id"]
+                            ),
+                            parent_cluster_id=_uuid_or_none(r["parent_cluster_id"]),
+                            brief_revision_id=_uuid_or_none(r["brief_revision_id"]),
+                            created_at=datetime.fromisoformat(r["created_at"]),
+                        )
+                    )
+                return missions
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_list)
+
+    async def claim_mission_writer(self, mission_id: UUID, run_id: UUID) -> bool:
+        await self._ensure_schema()
+
+        def _sync_claim():
+            conn = self._get_connection()
+            try:
+                # One statement, and the primary key is what decides. A SELECT followed by an
+                # INSERT would leave a window in which two runs both saw the slot free.
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO mission_writer_claims (mission_id, run_id, claimed_at)"
+                    " VALUES (?, ?, ?)",
+                    (str(mission_id), str(run_id), datetime.now(timezone.utc).isoformat()),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_claim)
+
+    async def release_mission_writer(self, mission_id: UUID, run_id: UUID) -> None:
+        await self._ensure_schema()
+
+        def _sync_release():
+            conn = self._get_connection()
+            try:
+                # Scoped to the run that holds it: a run that never claimed the slot must not be
+                # able to release another run's claim.
+                conn.execute(
+                    "DELETE FROM mission_writer_claims WHERE mission_id = ? AND run_id = ?",
+                    (str(mission_id), str(run_id)),
+                )
+                conn.commit()
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        await asyncio.to_thread(_sync_release)
+
+    async def record_run_journal(self, journal: RunJournal) -> RunJournal:
+        await self._ensure_schema()
+
+        def _sync_record():
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO mission_run_journals
+                    (id, workspace_id, mission_id, journal_path, sequence, status,
+                     started_at, completed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (journal_path) DO UPDATE SET
+                        status = excluded.status,
+                        completed_at = excluded.completed_at
+                    """,
+                    (
+                        str(journal.run_id),
+                        str(journal.workspace_id),
+                        str(journal.mission_id),
+                        str(journal.journal_path),
+                        journal.sequence,
+                        journal.status,
+                        journal.started_at.isoformat() if journal.started_at else None,
+                        journal.completed_at.isoformat() if journal.completed_at else None,
+                    ),
+                )
+                conn.commit()
+                return journal
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_record)

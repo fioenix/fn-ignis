@@ -55,6 +55,11 @@ venv.bak/
 docs/ephemeral/
 backlog.local.md
 
+# Research Workspaces -- local-first, never auto-committed or auto-published.
+# `.ignis/research/<slug>/` holds a workspace manifest, run journals and derived artifacts that
+# may contain raw source material. Exporting one is an explicit user action, not a side effect.
+.ignis/
+
 # Database & Local Storage
 *.sqlite
 *.sqlite3

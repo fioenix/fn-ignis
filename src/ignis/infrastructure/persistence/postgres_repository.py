@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 from uuid import UUID
 
@@ -10,6 +11,17 @@ from psycopg_pool import AsyncConnectionPool
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
+from ignis.domain.research_workspace import (
+    MarketBriefRevision,
+    ResearchWorkspace,
+    WorkspaceScopeMismatchError,
+    WorkspaceStatus,
+)
+from ignis.application.ports.research_workspace_port import RunJournal
+from ignis.infrastructure.persistence.identifiers import (
+    uuid_or_none as _uuid_or_none,
+    uuid_text as _uuid_text,
+)
 from ignis.infrastructure.persistence.migration_state import (
     UNBACKFILLED_CORPUS,
     is_unbackfilled,
@@ -571,9 +583,14 @@ class PostgresTimescaleRepository(ITrendRepository):
                 timeframe,
                 status,
                 summary,
+                workspace_id,
+                surface,
+                parent_attention_mission_id,
+                parent_cluster_id,
+                brief_revision_id,
                 created_at,
                 updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id;
         """
         platforms_str = [p.value if hasattr(p, "value") else str(p) for p in mission.platforms]
@@ -589,6 +606,11 @@ class PostgresTimescaleRepository(ITrendRepository):
             mission.timeframe,
             mission.status,
             mission.summary,
+            _uuid_text(mission.workspace_id),
+            mission.surface,
+            _uuid_text(mission.parent_attention_mission_id),
+            _uuid_text(mission.parent_cluster_id),
+            _uuid_text(mission.brief_revision_id),
             mission.created_at,
             mission.updated_at,
         )
@@ -627,6 +649,11 @@ class PostgresTimescaleRepository(ITrendRepository):
                 timeframe,
                 status,
                 summary,
+                workspace_id,
+                surface,
+                parent_attention_mission_id,
+                parent_cluster_id,
+                brief_revision_id,
                 created_at,
                 updated_at
             FROM research_missions
@@ -645,7 +672,8 @@ class PostgresTimescaleRepository(ITrendRepository):
             if not row:
                 return None
 
-            m_id, title, kws, sc, agent_val, sess_id, plats, geo, tf, status, summary, created, updated = row
+            (m_id, title, kws, sc, agent_val, sess_id, plats, geo, tf, status, summary,
+             ws_id, surface, parent_mission, parent_cluster, brief_id, created, updated) = row
             return ResearchMission(
                 id=UUID(str(m_id)),
                 title=title,
@@ -659,6 +687,11 @@ class PostgresTimescaleRepository(ITrendRepository):
 
                 status=status,
                 summary=summary,
+                workspace_id=_uuid_or_none(ws_id),
+                surface=surface,
+                parent_attention_mission_id=_uuid_or_none(parent_mission),
+                parent_cluster_id=_uuid_or_none(parent_cluster),
+                brief_revision_id=_uuid_or_none(brief_id),
                 created_at=created,
                 updated_at=updated,
             )
@@ -678,9 +711,16 @@ class PostgresTimescaleRepository(ITrendRepository):
                 timeframe = %s,
                 status = %s,
                 summary = %s,
+                workspace_id = %s,
+                parent_attention_mission_id = %s,
+                parent_cluster_id = %s,
+                brief_revision_id = %s,
                 updated_at = NOW()
             WHERE id = %s;
         """
+        # `surface` is deliberately absent. A mission answers one question for its whole life,
+        # and letting an update move it from ATTENTION to MARKET would re-label evidence that
+        # was collected to answer the other one.
         platforms_str = [p.value if hasattr(p, "value") else str(p) for p in mission.platforms]
         params = (
             mission.title,
@@ -690,6 +730,10 @@ class PostgresTimescaleRepository(ITrendRepository):
             mission.timeframe,
             mission.status,
             mission.summary,
+            _uuid_text(mission.workspace_id),
+            _uuid_text(mission.parent_attention_mission_id),
+            _uuid_text(mission.parent_cluster_id),
+            _uuid_text(mission.brief_revision_id),
             str(mission.id),
         )
         try:
@@ -715,6 +759,11 @@ class PostgresTimescaleRepository(ITrendRepository):
                 timeframe,
                 status,
                 summary,
+                workspace_id,
+                surface,
+                parent_attention_mission_id,
+                parent_cluster_id,
+                brief_revision_id,
                 created_at,
                 updated_at
             FROM research_missions
@@ -729,7 +778,8 @@ class PostgresTimescaleRepository(ITrendRepository):
 
             missions = []
             for row in rows:
-                m_id, title, kws, sc, agent_val, sess_id, plats, geo, tf, status, summary, created, updated = row
+                (m_id, title, kws, sc, agent_val, sess_id, plats, geo, tf, status, summary,
+                 ws_id, surface, parent_mission, parent_cluster, brief_id, created, updated) = row
                 mission = ResearchMission(
                     id=UUID(str(m_id)),
                     title=title,
@@ -743,6 +793,11 @@ class PostgresTimescaleRepository(ITrendRepository):
 
                     status=status,
                     summary=summary,
+                    workspace_id=_uuid_or_none(ws_id),
+                    surface=surface,
+                    parent_attention_mission_id=_uuid_or_none(parent_mission),
+                    parent_cluster_id=_uuid_or_none(parent_cluster),
+                    brief_revision_id=_uuid_or_none(brief_id),
                     created_at=created,
                     updated_at=updated,
                 )
@@ -1297,3 +1352,305 @@ class PostgresTimescaleRepository(ITrendRepository):
 
 
 
+
+    # ------------------------------------------------------------------
+    # Research workspace scope (sql/017)
+    # ------------------------------------------------------------------
+
+    _WORKSPACE_COLUMNS = (
+        "SELECT id, slug, name, root_path, format_version, status, created_at"
+        " FROM research_workspaces"
+    )
+
+    _BRIEF_COLUMNS = (
+        "SELECT id, workspace_id, mission_id, revision_number, decision, target_user, problem,"
+        " geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at"
+        " FROM market_brief_revisions"
+    )
+
+    @staticmethod
+    def _workspace_from_row(row) -> ResearchWorkspace:
+        ws_id, slug, name, root_path, format_version, status, created_at = row
+        return ResearchWorkspace(
+            slug=slug,
+            root_path=Path(root_path),
+            workspace_id=UUID(str(ws_id)),
+            name=name,
+            format_version=int(format_version),
+            status=WorkspaceStatus(status),
+            created_at=created_at,
+        )
+
+    @staticmethod
+    def _brief_from_row(row) -> MarketBriefRevision:
+        (
+            rev_id, ws_id, mission_id, revision_number, decision, target_user, problem,
+            geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at,
+        ) = row
+        return MarketBriefRevision(
+            brief_revision_id=UUID(str(rev_id)),
+            workspace_id=UUID(str(ws_id)),
+            mission_id=UUID(str(mission_id)),
+            revision_number=int(revision_number),
+            decision=decision,
+            target_user=target_user,
+            problem=problem,
+            geo=geo,
+            timeframe=timeframe,
+            hypothesis=hypothesis,
+            falsifiers=tuple(falsifiers or ()),
+            confirmed_by=confirmed_by,
+            confirmed_at=confirmed_at,
+        )
+
+    async def save_research_workspace(self, workspace: ResearchWorkspace) -> ResearchWorkspace:
+        pool = await self._get_pool()
+        query = """
+            INSERT INTO research_workspaces
+            (id, slug, name, root_path, format_version, status, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                status = EXCLUDED.status,
+                format_version = EXCLUDED.format_version;
+        """
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        query,
+                        (
+                            str(workspace.workspace_id),
+                            workspace.slug,
+                            workspace.name or workspace.slug,
+                            str(workspace.root_path),
+                            workspace.format_version,
+                            workspace.status.value,
+                            workspace.created_at,
+                        ),
+                    )
+            return workspace
+        except Exception as e:
+            logger.error(f"Error saving research workspace {workspace.slug}: {e}", exc_info=True)
+            raise RepositoryException(f"Failed to save research workspace: {e}") from e
+
+    async def get_research_workspace(self, workspace_id: UUID) -> Optional[ResearchWorkspace]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(self._WORKSPACE_COLUMNS + " WHERE id = %s;", (str(workspace_id),))
+                row = await cur.fetchone()
+        return self._workspace_from_row(row) if row else None
+
+    async def find_research_workspace_by_slug(
+        self, slug: str, root_path: Optional[Path] = None
+    ) -> Optional[ResearchWorkspace]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                if root_path is not None:
+                    await cur.execute(
+                        self._WORKSPACE_COLUMNS + " WHERE slug = %s AND root_path = %s;",
+                        (slug, str(root_path)),
+                    )
+                else:
+                    await cur.execute(
+                        self._WORKSPACE_COLUMNS
+                        + " WHERE slug = %s ORDER BY created_at DESC LIMIT 1;",
+                        (slug,),
+                    )
+                row = await cur.fetchone()
+        return self._workspace_from_row(row) if row else None
+
+    async def list_research_workspaces(self, limit: int = 50) -> List[ResearchWorkspace]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    self._WORKSPACE_COLUMNS + " ORDER BY created_at DESC LIMIT %s;", (limit,)
+                )
+                rows = await cur.fetchall()
+        return [self._workspace_from_row(r) for r in rows]
+
+    async def save_brief_revision(self, revision: MarketBriefRevision) -> MarketBriefRevision:
+        pool = await self._get_pool()
+        # A plain INSERT, never an upsert. A confirmed Brief is immutable, so a second write
+        # against the same mission or revision number is a caller trying to edit history rather
+        # than a retry to absorb.
+        query = """
+            INSERT INTO market_brief_revisions
+            (id, workspace_id, mission_id, revision_number, decision, target_user, problem,
+             geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+        """
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        query,
+                        (
+                            str(revision.brief_revision_id),
+                            str(revision.workspace_id),
+                            str(revision.mission_id),
+                            revision.revision_number,
+                            revision.decision,
+                            revision.target_user,
+                            revision.problem,
+                            revision.geo,
+                            revision.timeframe,
+                            revision.hypothesis,
+                            list(revision.falsifiers),
+                            revision.confirmed_by,
+                            revision.confirmed_at,
+                        ),
+                    )
+            return revision
+        except Exception as e:
+            logger.error(f"Error saving Market Brief revision: {e}", exc_info=True)
+            raise RepositoryException(
+                "A confirmed Market Brief revision already exists for this mission, or the "
+                f"revision could not be written: {e}"
+            ) from e
+
+    async def get_brief_revision(
+        self, workspace_id: UUID, brief_revision_id: UUID
+    ) -> Optional[MarketBriefRevision]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    self._BRIEF_COLUMNS + " WHERE id = %s;", (str(brief_revision_id),)
+                )
+                row = await cur.fetchone()
+        if not row:
+            return None
+        if str(row[1]) != str(workspace_id):
+            # An error, not an empty result. An empty result reads as "this research has no such
+            # Brief", which is a different and much quieter untruth.
+            raise WorkspaceScopeMismatchError(
+                f"Brief revision {brief_revision_id} belongs to workspace {row[1]}, "
+                f"not to {workspace_id}."
+            )
+        return self._brief_from_row(row)
+
+    async def get_brief_revision_for_mission(
+        self, mission_id: UUID
+    ) -> Optional[MarketBriefRevision]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    self._BRIEF_COLUMNS + " WHERE mission_id = %s;", (str(mission_id),)
+                )
+                row = await cur.fetchone()
+        return self._brief_from_row(row) if row else None
+
+    async def next_brief_revision_number(self, workspace_id: UUID) -> int:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    "SELECT MAX(revision_number) FROM market_brief_revisions WHERE workspace_id = %s;",
+                    (str(workspace_id),),
+                )
+                row = await cur.fetchone()
+        return int((row[0] if row else None) or 0) + 1
+
+    async def list_workspace_missions(
+        self, workspace_id: UUID, limit: int = 50
+    ) -> List[ResearchMission]:
+        pool = await self._get_pool()
+        query = """
+            SELECT id, title, keywords, shortcode, agent, session_id, platforms, geo_code,
+                   timeframe, status, summary, workspace_id, surface,
+                   parent_attention_mission_id, parent_cluster_id, brief_revision_id,
+                   created_at, updated_at
+            FROM research_missions
+            WHERE workspace_id = %s
+            ORDER BY created_at DESC
+            LIMIT %s;
+        """
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(query, (str(workspace_id), limit))
+                rows = await cur.fetchall()
+
+        missions: List[ResearchMission] = []
+        for row in rows:
+            (m_id, title, kws, sc, agent_val, sess_id, plats, geo, tf, status, summary,
+             ws_id, surface, parent_mission, parent_cluster, brief_id, created, updated) = row
+            missions.append(
+                ResearchMission(
+                    id=UUID(str(m_id)),
+                    title=title,
+                    keywords=list(kws or []),
+                    shortcode=sc or str(m_id)[:8].upper(),
+                    agent=agent_val or "claude",
+                    session_id=sess_id,
+                    platforms=[resolve_platform(p) for p in (plats or [])],
+                    geo_code=resolve_geo(geo),
+                    timeframe=tf,
+                    status=status,
+                    summary=summary,
+                    workspace_id=_uuid_or_none(ws_id),
+                    surface=surface,
+                    parent_attention_mission_id=_uuid_or_none(parent_mission),
+                    parent_cluster_id=_uuid_or_none(parent_cluster),
+                    brief_revision_id=_uuid_or_none(brief_id),
+                    created_at=created,
+                    updated_at=updated,
+                )
+            )
+        return missions
+
+    async def claim_mission_writer(self, mission_id: UUID, run_id: UUID) -> bool:
+        pool = await self._get_pool()
+        # One statement, and the primary key is what decides. A SELECT followed by an INSERT
+        # would leave a window in which two runs both saw the slot free.
+        query = """
+            INSERT INTO mission_writer_claims (mission_id, run_id)
+            VALUES (%s, %s)
+            ON CONFLICT (mission_id) DO NOTHING;
+        """
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(query, (str(mission_id), str(run_id)))
+                return cur.rowcount > 0
+
+    async def release_mission_writer(self, mission_id: UUID, run_id: UUID) -> None:
+        pool = await self._get_pool()
+        # Scoped to the run that holds it: a run that never claimed the slot must not be able to
+        # release another run's claim.
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "DELETE FROM mission_writer_claims WHERE mission_id = %s AND run_id = %s;",
+                    (str(mission_id), str(run_id)),
+                )
+
+    async def record_run_journal(self, journal: RunJournal) -> RunJournal:
+        pool = await self._get_pool()
+        query = """
+            INSERT INTO mission_run_journals
+            (id, workspace_id, mission_id, journal_path, sequence, status, started_at, completed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (journal_path) DO UPDATE SET
+                status = EXCLUDED.status,
+                completed_at = EXCLUDED.completed_at;
+        """
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    query,
+                    (
+                        str(journal.run_id),
+                        str(journal.workspace_id),
+                        str(journal.mission_id),
+                        str(journal.journal_path),
+                        journal.sequence,
+                        journal.status,
+                        journal.started_at,
+                        journal.completed_at,
+                    ),
+                )
+        return journal
