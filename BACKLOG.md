@@ -213,12 +213,21 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Kích hoạt runtime làm lộ một defect timeframe nằm ngoài phạm vi cutover; nó được sửa riêng trên
   PR #21 chứ không nhét vào PR #20.
 
-- [ ] **T023 — journal của cutover phải chống ghi đè (mở 21/09/2026).** T020 đã hoàn tất và không
-  cần chạy lại. Khoảng trống còn lại nằm ở công cụ: tên journal hiện chỉ chính xác đến giây, còn
-  `Journal.__init__()` ghi file bằng thao tác có thể thay thế nội dung cũ. Hai lần chạy dùng cùng
-  `run-dir` và bắt đầu trong cùng một giây có thể làm mất bằng chứng của lần chạy trước. Bản sửa
-  phải tạo đường dẫn duy nhất, mở file theo chế độ độc quyền và có test đóng băng đồng hồ để chứng
-  minh journal đầu tiên giữ nguyên byte khi lần chạy thứ hai bắt đầu.
+- [x] **T023 — journal của cutover không còn bị ghi đè (chốt 21/09/2026).** Đây là việc siết công
+  cụ, không phải chạy lại migration: T020 đã xong từ 20/09/2026 và không có bước nào của nó được
+  thực hiện lại. `Journal.create()` đặt tên theo `t020-run-<YYYYmmdd-HHMMSS>-<NNN>.json` và tăng
+  `NNN` khi tên đã có người giữ, còn `Journal.__init__()` mở file bằng chế độ độc quyền (`O_EXCL`)
+  trước khi ghi byte đầu tiên. Hai lần chạy cùng `run-dir` bắt đầu trong cùng một giây vì thế nhận
+  hai file khác nhau, và journal của lần chạy trước giữ nguyên từng byte. Nếu cả 999 số thứ tự
+  trong một giây đều đã bị chiếm, lần chạy mới dừng với exit code 2 chứ không thay thế file nào.
+
+  Bằng chứng: năm test mới trong `tests/unit/test_t020_cutover.py` đóng băng đồng hồ tại
+  `2026-09-21T10:11:12Z`, cả năm đều fail trên code trước khi sửa và pass sau khi sửa, trong đó có
+  một test đối chứng đặt sẵn file ở đúng tên ứng viên rồi kiểm tra file đó không bị đụng tới.
+  `.venv/bin/pytest tests/unit/test_t020_cutover.py`: 62 passed. `.venv/bin/pytest tests/`: 926
+  passed, 115 skipped trên máy local, toàn bộ phần skip là case Postgres cần
+  `IGNIS_TEST_POSTGRES_DSN` nên không tính là xanh. `ruff check` sạch trên cả hai file. Con số
+  trên banner vẫn là số của CI, không sửa theo lần chạy local này.
 
 - [x] **Xác nhận duplicate có hai cơ chế, không phải một lỗi duy nhất.** Trên Postgres, nhóm lớn
   nhất là một video YouTube bị lưu 275 lần bởi `save_signals` trước commit

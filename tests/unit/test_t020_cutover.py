@@ -14,6 +14,7 @@ double and an 844-entry pg_dump archive.
 import json
 import sys
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -818,3 +819,101 @@ def test_a_run_from_step_one_verifies_against_the_baseline_it_just_took(monkeypa
 
     assert t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"]) == 0
     assert applied.verified_against == [str(tmp_path / "source-observation-baseline.json")]
+
+
+# --- two runs in the same second may not share a journal --------------------------------------
+
+FROZEN = datetime(2026, 9, 21, 10, 11, 12, tzinfo=timezone.utc)
+FROZEN_STAMP = "20260921-101112"
+
+
+def _freeze_clock(monkeypatch):
+    """One wall-clock second for the whole test, which is where the collision lived.
+
+    The name was built from a second-precision timestamp, so the collision was not a rare race
+    to reproduce: any two runs started inside the same second produced the same path.
+    """
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return FROZEN if tz is None else FROZEN.astimezone(tz)
+
+    monkeypatch.setattr(t020_cutover, "datetime", FrozenDatetime)
+
+
+def test_two_journals_opened_in_the_same_second_are_two_files(monkeypatch, tmp_path):
+    """Same run dir, same second, through the path a run actually uses."""
+    _freeze_clock(monkeypatch)
+
+    first = t020_cutover.Journal.create(tmp_path, "db-b.example.com")
+    second = t020_cutover.Journal.create(tmp_path, "db-b.example.com")
+
+    assert first.path != second.path
+    assert first.path.exists() and second.path.exists()
+    assert sorted(path.name for path in tmp_path.glob(t020_cutover.JOURNAL_GLOB)) == [
+        f"t020-run-{FROZEN_STAMP}-001.json",
+        f"t020-run-{FROZEN_STAMP}-002.json",
+    ]
+
+
+def test_the_second_run_does_not_touch_the_first_run_s_evidence(monkeypatch, tmp_path):
+    """What the overwrite cost: a finished run's journal replaced by an empty one.
+
+    The bytes are compared rather than the parsed JSON -- a truncating rewrite that happened to
+    reproduce the same steps would still be a second run writing into the first one's file.
+    """
+    _freeze_clock(monkeypatch)
+
+    first = t020_cutover.Journal.create(tmp_path, "db-b.example.com")
+    first.record(6, "apply", exit_code=0)
+    written = first.path.read_bytes()
+
+    second = t020_cutover.Journal.create(tmp_path, "db-b.example.com")
+
+    assert second.path != first.path
+    assert first.path.read_bytes() == written
+    assert json.loads(second.path.read_text())["steps"] == []
+
+
+def test_a_candidate_name_already_on_disk_is_not_written_over(monkeypatch, tmp_path):
+    """The negative control: a taken name has to cost the new run the name, not the file.
+
+    Checking the path first and creating it afterwards would pass every test above and still
+    lose a file to a run that took the name in between, so the create itself is exclusive.
+    """
+    _freeze_clock(monkeypatch)
+    taken = tmp_path / f"t020-run-{FROZEN_STAMP}-001.json"
+    taken.write_text("evidence from a run this one knows nothing about\n")
+
+    journal = t020_cutover.Journal.create(tmp_path, "db-b.example.com")
+
+    assert journal.path == tmp_path / f"t020-run-{FROZEN_STAMP}-002.json"
+    assert taken.read_text() == "evidence from a run this one knows nothing about\n"
+
+
+def test_journal_refuses_a_path_another_run_holds(tmp_path):
+    """Directly, without the sequence loop: the class itself will not open an existing file."""
+    path = tmp_path / "journal.json"
+    path.write_text("not this run's\n")
+
+    with pytest.raises(FileExistsError):
+        t020_cutover.Journal(path, "db-b.example.com")
+
+    assert path.read_text() == "not this run's\n"
+
+
+def test_two_orchestrator_runs_in_the_same_second_both_leave_a_journal(monkeypatch, tmp_path):
+    """End to end, because main() is where the colliding name was built."""
+    _freeze_clock(monkeypatch)
+    _orchestrator_harness(monkeypatch, tmp_path, [_measurement()] * 3)
+    assert t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"]) == 0
+    first = tmp_path / f"t020-run-{FROZEN_STAMP}-001.json"
+    written = first.read_bytes()
+
+    _orchestrator_harness(monkeypatch, tmp_path, [_measurement()] * 3)
+    assert t020_cutover.main(["--dsn", DB_B, "--run-dir", str(tmp_path), "--assume-quiesced"]) == 0
+
+    journals = sorted(path.name for path in tmp_path.glob(t020_cutover.JOURNAL_GLOB))
+    assert journals == [f"t020-run-{FROZEN_STAMP}-001.json", f"t020-run-{FROZEN_STAMP}-002.json"]
+    assert first.read_bytes() == written
