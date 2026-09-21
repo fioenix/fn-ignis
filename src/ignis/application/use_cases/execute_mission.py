@@ -1,10 +1,17 @@
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.domain.entities import TrendSignal
+from ignis.domain.research_workspace import (
+    REQUIRED_BRIEF_FIELDS,
+    IncompleteMarketBriefError,
+    ResearchSurface,
+    resolve_surface,
+)
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 
 logger = logging.getLogger(__name__)
@@ -21,15 +28,48 @@ class ExecuteMissionUseCase:
         repository: ITrendRepository,
         registry: ConnectorPluginRegistry,
         clusterer: IClusteringEngine,
+        workspace_store: Optional[IResearchWorkspaceStore] = None,
     ):
         self._repo = repository
         self._registry = registry
         self._clusterer = clusterer
+        self._workspace_store = workspace_store
+
+    async def _require_confirmed_brief(self, mission) -> None:
+        """A Market mission does not probe until the requester has confirmed its Brief.
+
+        The gate is fail-closed: a MARKET mission whose Brief cannot be read is blocked rather
+        than run, because the alternative is collecting evidence against a hypothesis nobody
+        agreed to and then presenting it as an answer to a decision.
+
+        Missions on no surface -- everything created outside a research workspace -- are not
+        gated. They were never framed as hypothesis-driven investigations, so demanding a Brief
+        from them would be a rule applied backwards.
+        """
+        if resolve_surface(mission.surface) is not ResearchSurface.MARKET:
+            return
+
+        revision = None
+        if self._workspace_store is not None:
+            revision = await self._workspace_store.get_brief_revision_for_mission(mission.id)
+
+        if revision is not None:
+            return
+
+        mission.status = "BLOCKED"
+        mission.summary = (
+            "Blocked: Market probes are not authorized until the requester confirms a complete "
+            "Market Brief."
+        )
+        await self._repo.update_mission(mission)
+        raise IncompleteMarketBriefError(REQUIRED_BRIEF_FIELDS)
 
     async def execute(self, mission_id: UUID) -> Dict[str, Any]:
         mission = await self._repo.get_mission(mission_id)
         if not mission:
             raise ValueError(f"Research Mission {mission_id} does not exist.")
+
+        await self._require_confirmed_brief(mission)
 
         logger.info(f"Executing Research Mission '{mission.title}' [ID: {mission_id}] with keywords: {mission.keywords} (Timeframe: {mission.timeframe})...")
         mission.status = "RUNNING"

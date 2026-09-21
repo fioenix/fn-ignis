@@ -989,5 +989,316 @@
         "type": "object"
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "propose_research_workspace",
+      "description": "Propose where a new research would live: `<host-workspace>/.ignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "host_workspace": {
+            "type": "string"
+          },
+          "research_name": {
+            "type": "string"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "host_workspace",
+          "research_name"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "confirm_research_workspace",
+      "description": "Create, reuse or adopt the proposed research workspace after the requester confirms it. Reuses an existing matching manifest without rewriting it; adopting a non-empty folder without a manifest needs adopt=true and never deletes or overwrites unrelated files.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "proposed_path": {
+            "type": "string"
+          },
+          "confirmation": {
+            "default": false,
+            "type": "boolean"
+          },
+          "adopt": {
+            "default": false,
+            "type": "boolean"
+          },
+          "research_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "proposed_path"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_research_workspaces",
+      "description": "List the research workspaces held in the configured shared Ignis database, so a research can be reopened from any supported Agent host independently of the chat that created it.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "default": 20,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_attention_mission",
+      "description": "Start an ATTENTION mission inside a confirmed research workspace: exploratory discovery of what is gaining attention. Needs no hypothesis and no Market Brief, and never returns an Opportunity Index.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          },
+          "timeframe": {
+            "default": "7d",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "keywords": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "platforms": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "agent": {
+            "default": "claude",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "workspace_id",
+          "title"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "confirm_market_brief",
+      "description": "Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, one question at a time, show the draft for editing, and call this only with the complete confirmed payload -- drafts and abandoned Q&A are never sent or stored. Requires decision, target_user, problem, geo, timeframe, hypothesis and at least one falsifier.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "target_user": {
+            "type": "string"
+          },
+          "problem": {
+            "type": "string"
+          },
+          "geo": {
+            "type": "string"
+          },
+          "timeframe": {
+            "type": "string"
+          },
+          "hypothesis": {
+            "type": "string"
+          },
+          "falsifiers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "confirmed_by": {
+            "default": "",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "keywords": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "parent_attention_mission_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "parent_cluster_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "platforms": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "agent": {
+            "default": "claude",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "workspace_id",
+          "decision",
+          "target_user",
+          "problem",
+          "geo",
+          "timeframe",
+          "hypothesis"
+        ],
+        "type": "object"
+      }
+    }
   }
 ]

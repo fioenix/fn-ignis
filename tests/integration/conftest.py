@@ -39,6 +39,10 @@ SCHEMA_MIGRATIONS = (
     "008_deduplicate_signal_metrics.sql",
     "015_split_published_at.sql",
     "016_source_observation_model.sql",
+    # The workspace scope, the two surfaces, the Brief revisions and the run journals. SQLite
+    # restates this schema in _ensure_schema, so a contract that only one backend satisfies is
+    # exactly what listing it here catches.
+    "017_research_workspace.sql",
 )
 
 

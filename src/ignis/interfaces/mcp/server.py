@@ -16,7 +16,12 @@ if not hasattr(mcp.shared.exceptions, "McpError") and hasattr(mcp.shared.excepti
 
 from fastmcp import FastMCP
 
+from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
+from ignis.application.use_cases.create_attention_mission import CreateAttentionMissionUseCase
 from ignis.application.use_cases.create_mission import CreateMissionUseCase
+from ignis.application.use_cases.create_research_workspace import (
+    CreateResearchWorkspaceUseCase,
+)
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
@@ -25,6 +30,16 @@ from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS, Ingest
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster
+from ignis.domain.exceptions import IgnisDomainException
+from ignis.domain.research_workspace import (
+    RESEARCH_ROOT_SEGMENTS,
+    IncompleteMarketBriefError,
+    MissionLineage,
+    ResearchSurface,
+    opportunity_index_is_allowed,
+    resolve_surface,
+)
+from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
 
 from ignis.config import reveal_secret, settings
 
@@ -167,11 +182,23 @@ def _init_components():
         strategic_reasoner=strategic_reasoner,
     )
 
+    workspace_store = WorkspaceRepository(repository=repository)
+
     create_mission_use_case = CreateMissionUseCase(repository=repository)
     execute_mission_use_case = ExecuteMissionUseCase(
         repository=repository,
         registry=registry,
         clusterer=clusterer,
+        workspace_store=workspace_store,
+    )
+    create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store)
+    create_attention_mission_use_case = CreateAttentionMissionUseCase(
+        repository=repository,
+        store=workspace_store,
+    )
+    confirm_market_brief_use_case = ConfirmMarketBriefUseCase(
+        repository=repository,
+        store=workspace_store,
     )
     get_mission_analysis_use_case = GetMissionAnalysisUseCase(repository=repository)
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
@@ -202,6 +229,10 @@ def _init_components():
         "quality_evaluator": quality_evaluator,
         "strategic_reasoner": strategic_reasoner,
         "harness_orchestrator": harness_orchestrator,
+        "workspace_store": workspace_store,
+        "create_research_workspace_use_case": create_research_workspace_use_case,
+        "create_attention_mission_use_case": create_attention_mission_use_case,
+        "confirm_market_brief_use_case": confirm_market_brief_use_case,
         "create_mission_use_case": create_mission_use_case,
         "execute_mission_use_case": execute_mission_use_case,
         "get_mission_analysis_use_case": get_mission_analysis_use_case,
@@ -863,6 +894,281 @@ async def handle_clear_instagram_auth() -> str:
     )
 
 
+# --- Handlers for the Dual-Surface Research Workspace ---
+
+def _host_workspace_of(proposed_path: Path) -> Path:
+    """Recover the host workspace from a proposed research path.
+
+    The layout is fixed -- `<host>/.ignis/research/<slug>` -- so the host workspace is the path
+    with those three segments removed. Recovering it rather than asking for it again keeps the
+    confirmation carrying exactly the path the requester was shown.
+    """
+    parts = proposed_path.parts
+    tail = (*RESEARCH_ROOT_SEGMENTS, proposed_path.name)
+    if len(parts) <= len(tail) or parts[-len(tail):] != tail:
+        raise ValueError(
+            f"'{proposed_path}' is not a research workspace path. Expected a path ending in "
+            f"{'/'.join(RESEARCH_ROOT_SEGMENTS)}/<research-slug>."
+        )
+    return Path(*parts[: -len(tail)])
+
+
+def _workspace_payload(workspace: Any) -> Dict[str, Any]:
+    return {
+        "workspace_id": str(workspace.workspace_id),
+        "slug": workspace.slug,
+        "name": workspace.name,
+        "root_path": str(workspace.root_path),
+        "manifest_path": str(workspace.manifest_path),
+        "format_version": workspace.format_version,
+        "status": workspace.status.value,
+        "created_at": workspace.created_at.isoformat(),
+    }
+
+
+async def handle_propose_research_workspace(
+    host_workspace: str,
+    research_name: str,
+    slug: Optional[str] = None,
+) -> str:
+    comp = get_components()
+    try:
+        proposal = await comp["create_research_workspace_use_case"].propose(
+            Path(host_workspace), research_name, slug=slug
+        )
+    except IgnisDomainException as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2)
+
+    payload = proposal.to_payload()
+    payload["next_step"] = (
+        "Show the proposed path to the requester. Nothing has been written. Call "
+        "confirm_research_workspace with confirmation=true only after they agree"
+        + (", and adopt=true to reuse the folder already there." if proposal.requires_adoption
+           else ".")
+    )
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+async def handle_confirm_research_workspace(
+    proposed_path: str,
+    confirmation: bool = False,
+    adopt: bool = False,
+    research_name: Optional[str] = None,
+) -> str:
+    comp = get_components()
+    target = Path(proposed_path)
+    try:
+        host_workspace = _host_workspace_of(target)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2)
+
+    use_case = comp["create_research_workspace_use_case"]
+    try:
+        # Re-proposed rather than carried across the call: the proposal is read-only, and
+        # re-reading the folder is what makes the confirmation act on the filesystem as it is
+        # now instead of as it was when the requester was first shown the path.
+        proposal = await use_case.propose(
+            host_workspace, research_name or target.name, slug=target.name
+        )
+        workspace = await use_case.confirm(proposal, confirmation=confirmation, adopt=adopt)
+    except IgnisDomainException as exc:
+        return json.dumps(
+            {
+                "status": "ADOPTION_REQUIRED" if not adopt else "REFUSED",
+                "proposed_path": str(target),
+                "error": str(exc),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    if workspace is None:
+        return json.dumps(
+            {
+                "status": "DECLINED",
+                "proposed_path": str(target),
+                "note": "No directory, manifest, database record or journal was created.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    payload = _workspace_payload(workspace)
+    payload["status"] = "REUSED" if proposal.existing_workspace is not None else "CREATED"
+    payload["note"] = (
+        "The configured shared Ignis database is the canonical record store; this folder holds "
+        "the manifest, run journals and derived artifacts. It is local-first and is not "
+        "committed or published automatically."
+    )
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+async def handle_list_research_workspaces(limit: int = 20) -> str:
+    comp = get_components()
+    workspaces = await comp["workspace_store"].list_research_workspaces(limit=max(1, min(limit, 100)))
+    return json.dumps(
+        {
+            "count": len(workspaces),
+            "workspaces": [_workspace_payload(w) for w in workspaces],
+            "note": (
+                "Any supported Agent host connected to this Ignis database can reopen these by "
+                "workspace_id, independently of the chat that created them."
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def handle_create_attention_mission(
+    workspace_id: str,
+    title: str,
+    geo: str = "VN",
+    timeframe: str = "7d",
+    seed: Optional[str] = None,
+    keywords: Optional[List[str]] = None,
+    platforms: Optional[List[str]] = None,
+    agent: str = "claude",
+    session_id: Optional[str] = None,
+) -> str:
+    comp = get_components()
+    try:
+        mission = await comp["create_attention_mission_use_case"].execute(
+            workspace_id=UUID(workspace_id),
+            title=title,
+            keywords=keywords,
+            seed=seed,
+            agent=agent,
+            session_id=session_id,
+            platforms=[resolve_platform(p) for p in platforms] if platforms else None,
+            geo=resolve_geo(geo),
+            timeframe=timeframe,
+        )
+    except ValueError:
+        return _invalid_timeframe(timeframe)
+    except IgnisDomainException as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2)
+
+    return json.dumps(
+        {
+            "status": "CREATED",
+            "surface": ResearchSurface.ATTENTION.value,
+            "workspace_id": workspace_id,
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "title": mission.title,
+            "keywords": mission.keywords,
+            "geo": mission.geo_code.value,
+            "timeframe": mission.timeframe,
+            "requires_market_brief": False,
+            "emits_opportunity_index": False,
+            "note": (
+                "ATTENTION describes what is gaining attention. Its ranked topics are candidates "
+                "for investigation, not commercial verdicts, and it never returns an Opportunity "
+                "Index."
+            ),
+            "next_step": f"Call execute_mission_ingress(mission_id='{mission.shortcode}').",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def handle_confirm_market_brief(
+    workspace_id: str,
+    decision: str,
+    target_user: str,
+    problem: str,
+    geo: str,
+    timeframe: str,
+    hypothesis: str,
+    falsifiers: Optional[List[str]] = None,
+    confirmed_by: str = "",
+    title: Optional[str] = None,
+    keywords: Optional[List[str]] = None,
+    parent_attention_mission_id: Optional[str] = None,
+    parent_cluster_id: Optional[str] = None,
+    platforms: Optional[List[str]] = None,
+    agent: str = "claude",
+    session_id: Optional[str] = None,
+) -> str:
+    comp = get_components()
+    try:
+        mission, revision = await comp["confirm_market_brief_use_case"].execute(
+            workspace_id=UUID(workspace_id),
+            decision=decision,
+            target_user=target_user,
+            problem=problem,
+            geo=geo,
+            timeframe=timeframe,
+            hypothesis=hypothesis,
+            falsifiers=falsifiers or [],
+            confirmed_by=confirmed_by,
+            title=title,
+            keywords=keywords,
+            lineage=MissionLineage(
+                parent_attention_mission_id=(
+                    UUID(parent_attention_mission_id) if parent_attention_mission_id else None
+                ),
+                parent_cluster_id=UUID(parent_cluster_id) if parent_cluster_id else None,
+            ),
+            agent=agent,
+            session_id=session_id,
+            platforms=[resolve_platform(p) for p in platforms] if platforms else None,
+        )
+    except IncompleteMarketBriefError as exc:
+        return json.dumps(
+            {
+                "status": "BLOCKED",
+                "surface": ResearchSurface.MARKET.value,
+                "missing_fields": exc.missing_fields,
+                "error": str(exc),
+                "note": (
+                    "Nothing was written. Collect the missing fields with the requester, show "
+                    "them the complete draft, and call this tool again once they confirm it."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except ValueError:
+        return _invalid_timeframe(timeframe)
+    except IgnisDomainException as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2)
+
+    return json.dumps(
+        {
+            "status": "CONFIRMED",
+            "surface": ResearchSurface.MARKET.value,
+            "workspace_id": workspace_id,
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "brief_revision_id": str(revision.brief_revision_id),
+            "revision_number": revision.revision_number,
+            "confirmed_by": revision.confirmed_by,
+            "confirmed_at": revision.confirmed_at.isoformat(),
+            "falsifiers": list(revision.falsifiers),
+            "lineage": {
+                "parent_attention_mission_id": (
+                    str(mission.parent_attention_mission_id)
+                    if mission.parent_attention_mission_id else None
+                ),
+                "parent_cluster_id": (
+                    str(mission.parent_cluster_id) if mission.parent_cluster_id else None
+                ),
+            },
+            "note": (
+                "This revision is immutable. Changing any required field creates a new revision "
+                "and a new Market mission rather than rewriting this one. Attention lineage is "
+                "context; it is not counted as support for this hypothesis."
+            ),
+            "next_step": f"Call execute_mission_ingress(mission_id='{mission.shortcode}').",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 # --- Handlers for Research Missions ---
 
 async def handle_create_research_mission(
@@ -1412,6 +1718,31 @@ async def evaluate_mission_quality(mission_id: str) -> str:
 @mcp.tool(name="discover_market_opportunities", description="Identify high-demand, low-supply market white spaces and provide actionable strategic recommendations.")
 async def discover_market_opportunities(mission_id: str) -> str:
     return await handle_discover_market_opportunities(mission_id)
+
+
+@mcp.tool(name="propose_research_workspace", description="Propose where a new research would live: `<host-workspace>/.ignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.")
+async def propose_research_workspace(host_workspace: str, research_name: str, slug: Optional[str] = None) -> str:
+    return await handle_propose_research_workspace(host_workspace, research_name, slug)
+
+
+@mcp.tool(name="confirm_research_workspace", description="Create, reuse or adopt the proposed research workspace after the requester confirms it. Reuses an existing matching manifest without rewriting it; adopting a non-empty folder without a manifest needs adopt=true and never deletes or overwrites unrelated files.")
+async def confirm_research_workspace(proposed_path: str, confirmation: bool = False, adopt: bool = False, research_name: Optional[str] = None) -> str:
+    return await handle_confirm_research_workspace(proposed_path, confirmation, adopt, research_name)
+
+
+@mcp.tool(name="list_research_workspaces", description="List the research workspaces held in the configured shared Ignis database, so a research can be reopened from any supported Agent host independently of the chat that created it.")
+async def list_research_workspaces(limit: int = 20) -> str:
+    return await handle_list_research_workspaces(limit)
+
+
+@mcp.tool(name="create_attention_mission", description="Start an ATTENTION mission inside a confirmed research workspace: exploratory discovery of what is gaining attention. Needs no hypothesis and no Market Brief, and never returns an Opportunity Index.")
+async def create_attention_mission(workspace_id: str, title: str, geo: str = "VN", timeframe: str = "7d", seed: Optional[str] = None, keywords: Optional[list[str]] = None, platforms: Optional[list[str]] = None, agent: str = "claude", session_id: Optional[str] = None) -> str:
+    return await handle_create_attention_mission(workspace_id, title, geo, timeframe, seed, keywords, platforms, agent, session_id)
+
+
+@mcp.tool(name="confirm_market_brief", description="Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, one question at a time, show the draft for editing, and call this only with the complete confirmed payload -- drafts and abandoned Q&A are never sent or stored. Requires decision, target_user, problem, geo, timeframe, hypothesis and at least one falsifier.")
+async def confirm_market_brief(workspace_id: str, decision: str, target_user: str, problem: str, geo: str, timeframe: str, hypothesis: str, falsifiers: Optional[list[str]] = None, confirmed_by: str = "", title: Optional[str] = None, keywords: Optional[list[str]] = None, parent_attention_mission_id: Optional[str] = None, parent_cluster_id: Optional[str] = None, platforms: Optional[list[str]] = None, agent: str = "claude", session_id: Optional[str] = None) -> str:
+    return await handle_confirm_market_brief(workspace_id, decision, target_user, problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, title, keywords, parent_attention_mission_id, parent_cluster_id, platforms, agent, session_id)
 
 
 @mcp.tool(name="create_research_mission", description="Create a targeted cross-platform trend research mission with specified keywords, platforms, geo, and timeframe.")

@@ -261,8 +261,6 @@ class SqliteTrendRepository(ITrendRepository):
                 -- result.
                 CHECK (surface <> 'ATTENTION' OR brief_revision_id IS NULL)
             );
-            CREATE INDEX IF NOT EXISTS idx_research_missions_workspace
-                ON research_missions (workspace_id, created_at DESC);
 
             CREATE TABLE IF NOT EXISTS platform_credentials (
                 id TEXT PRIMARY KEY,
@@ -455,6 +453,12 @@ class SqliteTrendRepository(ITrendRepository):
         ):
             if existing_mission_columns and column not in existing_mission_columns:
                 cur.execute(f"ALTER TABLE research_missions ADD COLUMN {column} TEXT")
+        # After the columns exist, never inside the schema script: an index over a column a
+        # user's existing database has not been migrated to yet fails the whole script.
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_research_missions_workspace"
+            " ON research_missions (workspace_id, created_at DESC)"
+        )
 
         existing_signal_columns = {row[1] for row in cur.execute("PRAGMA table_info(trend_signals)")}
         if "published_at" not in existing_signal_columns:
