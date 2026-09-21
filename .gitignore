@@ -34,6 +34,10 @@ venv.bak/
 
 # Environment Variables & Secrets
 .env
+# Any copy of it is the same secret. A timestamped backup sat untracked and
+# committable during the 20/09/2026 cutover.
+.env.*
+!.env.example
 .env.local
 .env.*.local
 .mcp.json

@@ -68,12 +68,9 @@
 - [x] T018 [US1] Make mission evidence replacement failure-safe by writing new claims before
   pruning old claims
 - [x] T019 [US1] Add pre-backfill repository refusal and legacy-aware pruner protection
-- [ ] T020 [US1] Execute the production cutover runbook against the existing PostgreSQL corpus.
-  The code half is done and released as `v0.4.0`, so what remains is the data migration itself --
-  a baseline generated from the
-  quiesced production snapshot, the backfill, and verifier status `VERIFIED` before the new runtime
-  is pointed at that corpus. This blocks activation on an existing corpus; it does not block a
-  fresh SQLite install, which has nothing to migrate.
+- [x] T020 [US1] Execute the production cutover runbook against the existing PostgreSQL corpus.
+  The run completed on 20/09/2026 from a quiesced production snapshot. All four digests matched,
+  the verifier returned `VERIFIED`, the new runtime started, and scheduled ingress reopened.
 
 ---
 
@@ -85,3 +82,11 @@
   the threshold in CI; the 2026-09-13 SQLite-only run measured 73% overall and 71% across
   persistence/connectors, while the latest Timescale-backed CI run measured 75% overall without
   `--cov-fail-under`
+
+---
+
+## Phase 8: Production Cutover Tooling Hardening (2026-09-21)
+
+- [ ] T023 [US1] Make journal creation in `scripts/t020_cutover.py` collision-safe per FR-011:
+  generate a unique path, create it exclusively, and add a clock-frozen test proving that two runs
+  started in the same second cannot overwrite the first journal.

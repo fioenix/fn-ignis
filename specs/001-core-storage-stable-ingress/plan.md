@@ -99,3 +99,6 @@ canonical operating sequence lives in
 [`docs/migrations/2026-09-10-source-observation-baseline.md`](../../docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
 merge, quiesce, snapshot, generate a fresh baseline from that snapshot, apply `sql/016`, dry-run and
 apply the deterministic backfill, obtain `VERIFIED`, then start the new runtime and reopen ingress.
+That sequence completed on the existing PostgreSQL corpus on 20/09/2026. The runbook remains the
+recovery and repeat-execution contract. Each invocation must create its journal atomically at a
+unique path so that a second process can never replace evidence from an earlier run.

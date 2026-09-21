@@ -5,33 +5,24 @@ It states what the system is, what has actually been measured, what has not, and
 reasoning is thin. It is in English because it describes `src/` and is read alongside
 `AGENTS.md`; regional documentation lives in the `*.vi.md` files.
 
-## Current review target — updated 16/09/2026
+## Current review target — updated 21/09/2026
 
 The runtime storage model that produced the mission-evidence defect documented below has been
-replaced, and the replacement is now on `main` at `v0.4.0`. That version is **not released**: no
-tag exists and no GitHub Release is published. `python scripts/check_release_state.py` reads that
-off Git and GitHub, which is where the answer lives; no document in this repository can settle it.
-What remains outstanding is separate from the release state, and the items below are
-separate from each other:
-
-- **The existing PostgreSQL corpus has not been migrated.** It has received neither `sql/016` nor
-  the backfill, and the new runtime has not been activated against it. This blocks activation on
-  that corpus; it does not block publishing a release that a new user installs on a fresh SQLite
-  database, because such an install has no legacy corpus to migrate.
-- **The repository is public as of 17/09/2026, and `v0.4.0` is released.** Every condition the
-  public-visibility decision below set was satisfied first. The conditions and the evidence for
-  each are written once, in that decision; this summary points at them rather than restating or
-  counting them.
+replaced, and the replacement is on `main` in the public `v0.4.0` release. The existing PostgreSQL
+corpus completed the source/observation cutover on 20/09/2026: all four digests matched, the
+verifier returned `VERIFIED`, the new runtime started, and scheduled ingress reopened. The
+remaining storage-tooling gap is narrower: journal creation must become collision-safe so that two
+invocations starting in the same second cannot overwrite one another's evidence. This hardening
+does not reopen the completed production cutover or require another migration.
 
 The branch state independently verified before this documentation refresh:
 
 | Gate | Result |
 |---|---|
-| Full suite | 866 passed, 2 skipped on the current tree (831 when the storage model was first reviewed) |
-| Ruff, package build, clean-install smoke test | passed in GitHub Actions |
+| Full suite | 1,032 passed, 4 skipped on the current branch in GitHub Actions |
+| Ruff, package build, clean-install smoke test | passed in GitHub Actions at `fd1577e` |
 | Dual backend | SQLite plus a real disposable TimescaleDB service; no silent Postgres skip |
-| PR | not draft, mergeable, merge state clean |
-| Migration rehearsal | `VERIFIED` on a disposable copy of the real corpus; not rerun for the final pool/version-only commits |
+| Production cutover | `VERIFIED` on 20/09/2026; runtime and scheduled ingress activated afterward |
 
 The branch has one runtime source of truth:
 
@@ -45,6 +36,10 @@ legacy migration inputs and receive no runtime writes. The canonical production 
 [`docs/migrations/2026-09-10-source-observation-baseline.md`](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
 The tracked JSON is a policy/rehearsal artifact; production must generate a baseline from the exact
 snapshot taken after ingress is quiesced.
+
+**That sequence has run.** The cutover completed on 20/09/2026: the verifier returned `VERIFIED`
+with all four digests identical to a baseline taken from the snapshot, the new runtime started,
+and scheduled ingress reopened. `BACKLOG.md` holds the digests and the per-step evidence.
 
 Everything below this block describes the **historical 10/09 snapshot** unless explicitly amended.
 It is retained because the failed measurements and reversals explain the contracts now present in
@@ -532,11 +527,12 @@ only a non-empty string. `synthetic_probe` still duck-types the same way (§6).
 
 ## 9. Suggested review angles
 
-1. **Treat production cutover as the remaining data-model activation blocker, not automatically as
-   the only release blocker.** Review the fresh snapshot baseline, four digests and `VERIFIED`
-   result; do not accept the tracked rehearsal JSON as the production reference. Separately decide
-   whether the inherited but unmet SC-001 latency benchmark and SC-004 coverage threshold block
-   merge or are explicitly re-scoped; a mergeable PR and green CI do not settle either criterion.
+1. **The production cutover is no longer a blocker; review what it produced.** It ran on
+   20/09/2026. Review the baseline generated from that run's own snapshot, the four digests and
+   the `VERIFIED` result recorded in `BACKLOG.md`; do not accept the tracked rehearsal JSON as the
+   production reference. Separately decide whether the inherited but unmet SC-001 latency
+   benchmark and SC-004 coverage threshold block merge or are explicitly re-scoped; a mergeable PR
+   and green CI do not settle either criterion.
 2. **Review citation identity next.** Storage now knows the exact mission observation, but
    `CitationEvidence` has no `observation_id` and the citation registry keys on platform plus
    URL-or-title. That is a second source-identity policy and can disagree with the canonical

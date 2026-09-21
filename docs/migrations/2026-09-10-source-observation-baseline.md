@@ -31,14 +31,47 @@ python scripts/migration_reconciliation_audit.py \
 
 ## Production cutover runbook
 
+**Đã chạy 20/09/2026.** Cutover hoàn tất, verifier trả `VERIFIED` với bốn digest khớp tuyệt đối,
+runtime mới đã khởi động và ingress theo lịch đã mở lại. Mục này vẫn là thứ tự canonical cho lần
+sau; bằng chứng của lần chạy nằm trong `BACKLOG.md`.
+
 Đây là thứ tự canonical. Gate runtime và guard của pruner chỉ làm hệ thống fail closed nếu ai đó
 vi phạm thứ tự; chúng không phải giấy phép đổi thứ tự.
+
+`scripts/t020_cutover.py` chạy các bước 2–8 dưới đây theo đúng thứ tự này và dừng ở gate đầu tiên
+không đạt. Nó tồn tại vì một gate trong danh sách này không có ai gác: `backfill_observations.py
+--dry-run` exit 0 dù bốn member count khớp baseline, lệch baseline, hay không tìm thấy schema đích,
+nên gate ở bước 6 chỉ nằm trong sự chú ý của người đọc. Script so bốn con số bằng giá trị, đọc lại
+snapshot bằng `pg_restore --list` thay vì tin exit code của `pg_dump`, hash toàn bộ legacy
+projection ba lần — trước snapshot, sau snapshot và ngay trước khi ghi — rồi dừng nếu có bất kỳ
+khác biệt nào, buộc một lần chạy `--start-at` phải khớp journal của lần chạy trước, và ghi journal
+JSON cho mọi bước.
+
+**Khoảng trống công cụ còn mở:** journal hiện lấy tên theo giây rồi ghi bằng thao tác có thể ghi đè.
+Cho đến khi T023 hoàn tất, không được bắt đầu hai lần chạy trong cùng `run-dir` ở cùng một giây.
+T023 phải chuyển sang đường dẫn duy nhất và tạo file theo chế độ độc quyền; nếu đã có file trùng tên
+thì lần chạy mới phải dừng, không được thay thế bằng chứng của lần chạy trước.
+
+Không kết nối nào bị từ chối vì tên host. Preflight đo đúng thứ nó cần: một double 17 chữ số có
+nghĩa về tới nơi còn nguyên. Dùng một DSN duy nhất cho audit, backfill và verification, vì hai lần
+đọc cùng một corpus qua hai đường có thể cho hai digest khác nhau.
+
+```bash
+export PRODUCTION_DSN='<DSN nào qua được preflight>'
+python scripts/t020_cutover.py --dsn "$PRODUCTION_DSN"
+```
+
+Trên macOS, `psql`/`pg_dump`/`pg_restore` đến từ `libpq` keg-only, nên không có trên PATH mặc định:
+`brew install libpq` rồi thêm `/opt/homebrew/opt/libpq/bin` vào PATH. Script tự tìm ở đó nếu PATH
+thiếu, và từ chối chạy khi `pg_dump` cũ hơn server.
 
 1. Merge PR chứa runtime mới. Có thể stage/build artifact trước, nhưng **không khởi động runtime
    mới**.
 2. Quiesce toàn bộ ingress và runtime cũ đang có khả năng ghi.
-3. Lấy snapshot. Qua Supabase pooler, `pg_dump` đã bị từ chối bởi startup protocol trong lần diễn
-   tập; dùng direct connection/provider snapshot, hoặc binary `COPY` đã được chứng minh chạy được.
+3. Lấy snapshot. Lần cutover 20/09/2026 chạy `pg_dump` qua chính pooler session mode và nhận về
+   archive 844 entry. Ghi chép từ lần diễn tập nói rằng pooler từ chối ở startup protocol, và điều
+   đó không đúng với lần chạy này. Nếu endpoint đang dùng thật sự từ chối thì lấy snapshot bằng
+   đường khác, rồi truyền `--snapshot` để script chỉ kiểm tra rằng nó đọc lại được.
 4. Sinh baseline từ bản snapshot vừa lấy, tốt nhất trên một restore read-only disposable. Nếu audit
    chạy trên database production đang quiesce, phải chứng minh nó vẫn byte-equivalent với snapshot.
    Baseline production và row-level report đều ở `.handoff/` hoặc đi cùng backup, không commit:
@@ -51,8 +84,8 @@ vi phạm thứ tự; chúng không phải giấy phép đổi thứ tự.
    ```
 
    Chỉ tiếp tục khi audit trả `BALANCED` và exit `0`.
-5. Apply `sql/016_source_observation_model.sql` bằng direct Postgres connection. Migration này chỉ
-   tạo schema, không di chuyển dữ liệu.
+5. Apply `sql/016_source_observation_model.sql`. Migration này chỉ tạo schema, không di chuyển
+   dữ liệu.
 6. Chạy dry run trên production đang quiesce; bốn member count phải bằng baseline vừa sinh:
 
    ```bash
