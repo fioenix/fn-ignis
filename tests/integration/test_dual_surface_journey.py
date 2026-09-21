@@ -924,6 +924,121 @@ async def test_the_brief_tool_revises_a_confirmed_brief_into_a_new_mission(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("with_cluster", [True, False])
+async def test_the_brief_tool_revises_a_handoff_mission_without_restating_its_origin(
+    repository_case, host_workspace, monkeypatch, with_cluster
+):
+    """Omitting the parent fields asks to inherit the origin, not to clear it.
+
+    A requester revising a Market mission that came from an Attention handoff names the mission
+    they are revising and the field they are changing. They have no reason to repeat an origin
+    they never chose, and being made to repeat it is how a caller ends up retyping a lineage --
+    the one operation that can point a hypothesis at evidence collected for another question.
+    """
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    components = _mcp_components(repository, store, ProbeCountingRegistry(_probe_signals()))
+    components["create_market_revision_use_case"] = _revision_use_case(repository, store)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    attention = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        title="VN customer service attention",
+        seed="ai customer service",
+    )
+    await _executor(repository, store).execute(attention.id)
+    attention_signals = await repository.get_mission_signals(attention.id)
+    assert attention_signals, "the handoff needs an Attention run with observations behind it"
+    cluster_id = None
+    if with_cluster:
+        cluster_id = next(s.cluster_id for s in attention_signals if s.cluster_id is not None)
+
+    handoff = json.loads(
+        await mcp_server.handle_confirm_market_brief(
+            workspace_id=str(workspace.workspace_id),
+            confirmed_by="requester",
+            parent_attention_mission_id=str(attention.id),
+            parent_cluster_id=str(cluster_id) if cluster_id else None,
+            **COMPLETE_BRIEF,
+        )
+    )
+    assert handoff["status"] == "CONFIRMED"
+    assert handoff["lineage"]["parent_attention_mission_id"] == str(attention.id)
+
+    # The revision names the mission it revises and the field that changed, nothing else.
+    revised = json.loads(
+        await mcp_server.handle_confirm_market_brief(
+            workspace_id=str(workspace.workspace_id),
+            confirmed_by="requester",
+            previous_mission_id=handoff["mission_id"],
+            **{**COMPLETE_BRIEF, "hypothesis": "Only retailers above 500 orders a month will pay"},
+        )
+    )
+    assert revised["status"] == "CONFIRMED", revised
+    assert revised["lineage"]["parent_attention_mission_id"] == str(attention.id)
+    assert revised["lineage"]["parent_cluster_id"] == (str(cluster_id) if cluster_id else None)
+    assert revised["lineage"]["revises_mission_id"] == handoff["mission_id"]
+
+    # Durable, and readable by a host that only has the database.
+    stored = await repository.get_mission(UUID(revised["mission_id"]))
+    assert stored.parent_attention_mission_id == attention.id
+    assert stored.parent_cluster_id == cluster_id
+    assert stored.revises_mission_id == UUID(handoff["mission_id"])
+    assert str(stored.brief_revision_id) == revised["brief_revision_id"]
+    assert stored.brief_revision_id != UUID(handoff["brief_revision_id"])
+
+    # The revised mission keeps the Brief it was confirmed with.
+    previous_brief = await store.get_brief_revision_for_mission(UUID(handoff["mission_id"]))
+    assert previous_brief.hypothesis == COMPLETE_BRIEF["hypothesis"]
+
+    # Workspace-local storage stays workspace-local.
+    assert [
+        p.name
+        for p in workspace.root_path.rglob("*")
+        if p.suffix.lower() in {".db", ".sqlite", ".sqlite3"}
+    ] == []
+
+
+@pytest.mark.asyncio
+async def test_the_brief_tool_accepts_a_revision_that_restates_the_inherited_origin(
+    repository_case, host_workspace, monkeypatch
+):
+    """Echoing back the origin the host Agent just read is the same request, not a new claim."""
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    components = _mcp_components(repository, store, ProbeCountingRegistry(_probe_signals()))
+    components["create_market_revision_use_case"] = _revision_use_case(repository, store)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    attention = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id, title="Origin", seed="ai customer service"
+    )
+    handoff, _revision = await _revision_use_case(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        lineage=MissionLineage(parent_attention_mission_id=attention.id),
+        **COMPLETE_BRIEF,
+    )
+
+    revised = json.loads(
+        await mcp_server.handle_confirm_market_brief(
+            workspace_id=str(workspace.workspace_id),
+            confirmed_by="requester",
+            previous_mission_id=str(handoff.id),
+            parent_attention_mission_id=str(attention.id),
+            **{**COMPLETE_BRIEF, "hypothesis": "A narrower hypothesis about repeat buyers"},
+        )
+    )
+    assert revised["status"] == "CONFIRMED"
+    assert revised["lineage"]["parent_attention_mission_id"] == str(attention.id)
+    assert revised["lineage"]["revises_mission_id"] == str(handoff.id)
+
+
+@pytest.mark.asyncio
 async def test_the_brief_tool_refuses_a_revision_that_re_points_the_attention_origin(
     repository_case, host_workspace, monkeypatch
 ):

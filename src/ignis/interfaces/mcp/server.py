@@ -1261,11 +1261,19 @@ async def handle_confirm_market_brief(
             confirmed_by=confirmed_by,
             title=title,
             keywords=keywords,
-            lineage=MissionLineage(
-                parent_attention_mission_id=(
-                    UUID(parent_attention_mission_id) if parent_attention_mission_id else None
-                ),
-                parent_cluster_id=UUID(parent_cluster_id) if parent_cluster_id else None,
+            # None when the caller named no parent, which is not the same request as a lineage
+            # saying there is none: a revision of a mission that came from a handoff inherits
+            # that origin, and an empty lineage object would read as the caller clearing it.
+            lineage=(
+                MissionLineage(
+                    parent_attention_mission_id=(
+                        UUID(parent_attention_mission_id)
+                        if parent_attention_mission_id else None
+                    ),
+                    parent_cluster_id=UUID(parent_cluster_id) if parent_cluster_id else None,
+                )
+                if (parent_attention_mission_id or parent_cluster_id)
+                else None
             ),
             previous_mission_id=UUID(previous_mission_id) if previous_mission_id else None,
             agent=agent,
