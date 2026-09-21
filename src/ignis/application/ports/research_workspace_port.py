@@ -118,6 +118,10 @@ class IResearchWorkspaceStore(ABC):
         with no confirmed Brief cannot run -- the execution gate refuses it -- so a half-write
         leaves an unusable mission that nothing would ever clean up. Implementations must put
         both writes inside one transaction on both backends.
+
+        The revision number is allocated here rather than by the caller, inside the same
+        transaction: a number read before the write is a number two concurrent confirmations can
+        both see. The returned revision carries the number that was actually taken.
         """
 
     @abstractmethod
@@ -134,7 +138,12 @@ class IResearchWorkspaceStore(ABC):
 
     @abstractmethod
     async def next_brief_revision_number(self, workspace_id: UUID) -> int:
-        """The next monotonic revision number in this research line. Numbers are never reused."""
+        """The next monotonic revision number in this research line. Numbers are never reused.
+
+        A read, for reporting what the next revision would be. The number a confirmation
+        actually takes is allocated by `create_market_mission_with_brief` inside its own
+        transaction.
+        """
 
     @abstractmethod
     async def list_workspace_missions(

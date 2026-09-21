@@ -81,7 +81,10 @@ class ConfirmMarketBriefUseCase:
             brief_revision_id=uuid4(),
             workspace_id=workspace_id,
             mission_id=mission_id,
-            revision_number=await self._store.next_brief_revision_number(workspace_id),
+            # Provisional. The store allocates the authoritative number inside the transaction
+            # that writes the row, because a number read here and used there is a number two
+            # concurrent confirmations can both see.
+            revision_number=1,
             decision=decision,
             target_user=target_user,
             problem=problem,
@@ -119,7 +122,7 @@ class ConfirmMarketBriefUseCase:
         # the mission, so the mission has to be written first -- and writing it first on its own
         # is exactly what left an orphan MARKET mission behind when the revision write failed: a
         # mission the execution gate refuses to run, with no Brief anyone could confirm for it.
-        await self._store.create_market_mission_with_brief(mission, revision)
+        mission, revision = await self._store.create_market_mission_with_brief(mission, revision)
 
         logger.info(
             "Confirmed Market Brief revision %s (#%s) authorizing mission %s in workspace %s.",

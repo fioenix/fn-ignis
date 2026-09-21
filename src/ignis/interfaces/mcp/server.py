@@ -17,6 +17,7 @@ if not hasattr(mcp.shared.exceptions, "McpError") and hasattr(mcp.shared.excepti
 from fastmcp import FastMCP
 
 from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
+from ignis.application.use_cases.create_market_revision import CreateMarketRevisionUseCase
 from ignis.application.use_cases.create_attention_mission import CreateAttentionMissionUseCase
 from ignis.application.use_cases.create_mission import CreateMissionUseCase
 from ignis.application.use_cases.create_research_workspace import (
@@ -201,6 +202,14 @@ def _init_components():
         repository=repository,
         store=workspace_store,
     )
+    # Every Brief confirmation goes through the lineage-aware door, including one that names no
+    # parent: a handoff that points at another research's Attention mission has to be refused
+    # before a mission is written, not discovered afterwards in the lineage column.
+    create_market_revision_use_case = CreateMarketRevisionUseCase(
+        repository=repository,
+        store=workspace_store,
+        confirm_use_case=confirm_market_brief_use_case,
+    )
     get_mission_analysis_use_case = GetMissionAnalysisUseCase(repository=repository)
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
     ingest_use_case = IngestTrendsUseCase(registry=registry, repository=repository)
@@ -234,6 +243,7 @@ def _init_components():
         "create_research_workspace_use_case": create_research_workspace_use_case,
         "create_attention_mission_use_case": create_attention_mission_use_case,
         "confirm_market_brief_use_case": confirm_market_brief_use_case,
+        "create_market_revision_use_case": create_market_revision_use_case,
         "create_mission_use_case": create_mission_use_case,
         "execute_mission_use_case": execute_mission_use_case,
         "get_mission_analysis_use_case": get_mission_analysis_use_case,
@@ -330,6 +340,9 @@ def _serialize_citation(cit: Any) -> Dict[str, Any]:
         "citation_id": getattr(cit, "citation_id", None),
         "platform": platform.value if hasattr(platform, "value") else str(platform),
         "connector_surface": getattr(cit, "connector_surface", None),
+        # Whether the reader is looking at evidence collected for this Brief or at the Attention
+        # context the question came from. Without it the two read identically.
+        "evidence_role": getattr(cit, "evidence_role", None),
         "title_or_query": getattr(cit, "title_or_query", None),
         "metric_highlight": getattr(cit, "metric_highlight", None),
         "author_or_channel": getattr(cit, "author_or_channel", None),
@@ -435,7 +448,32 @@ def _surface_payload(report: Any, mission: Any) -> Dict[str, Any]:
         )
     if getattr(report, "market_brief", None):
         payload["market_brief"] = report.market_brief
+    lineage = getattr(report, "lineage", None)
+    if lineage:
+        payload["lineage"] = lineage
+    context = getattr(report, "attention_context", None)
+    if context:
+        # Reported under its own key, never merged into the citation lists a conclusion is
+        # traced through: a context observation beside an opportunity reads as support for it.
+        payload["attention_context"] = [_serialize_citation(c) for c in context]
+        payload["attention_context_note"] = (
+            "Observations carried from the parent Attention mission. They record where this "
+            "question came from and are not counted as support for this Brief."
+        )
     return payload
+
+
+async def _attention_context_signals(comp: Dict[str, Any], mission: Any) -> List[Any]:
+    """The observations of the Attention mission this one was handed off from.
+
+    Read only when lineage names a parent, and never merged into the mission's own evidence:
+    they are carried so a reader can see the origin of the question, and the analysis keeps them
+    out of everything it concludes.
+    """
+    parent_id = getattr(mission, "parent_attention_mission_id", None)
+    if not parent_id:
+        return []
+    return await comp["repository"].get_mission_signals(parent_id)
 
 
 def _serialize_insights(insights: Any) -> List[Dict[str, Any]]:
@@ -1202,13 +1240,14 @@ async def handle_confirm_market_brief(
     keywords: Optional[List[str]] = None,
     parent_attention_mission_id: Optional[str] = None,
     parent_cluster_id: Optional[str] = None,
+    previous_mission_id: Optional[str] = None,
     platforms: Optional[List[str]] = None,
     agent: str = "claude",
     session_id: Optional[str] = None,
 ) -> str:
     comp = get_components()
     try:
-        mission, revision = await comp["confirm_market_brief_use_case"].execute(
+        mission, revision = await comp["create_market_revision_use_case"].execute(
             workspace_id=UUID(workspace_id),
             decision=decision,
             target_user=target_user,
@@ -1226,6 +1265,7 @@ async def handle_confirm_market_brief(
                 ),
                 parent_cluster_id=UUID(parent_cluster_id) if parent_cluster_id else None,
             ),
+            previous_mission_id=UUID(previous_mission_id) if previous_mission_id else None,
             agent=agent,
             session_id=session_id,
             platforms=[resolve_platform(p) for p in platforms] if platforms else None,
@@ -1270,6 +1310,7 @@ async def handle_confirm_market_brief(
                 "parent_cluster_id": (
                     str(mission.parent_cluster_id) if mission.parent_cluster_id else None
                 ),
+                "revises_mission_id": previous_mission_id,
             },
             "note": (
                 "This revision is immutable. Changing any required field creates a new revision "
@@ -1395,6 +1436,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         auth_status=auth_status,
         connector_health=connector_health,
         market_brief=brief,
+        attention_context_signals=await _attention_context_signals(comp, mission),
     )
 
     analysis["quality_scorecard"] = {
@@ -1876,9 +1918,9 @@ async def create_attention_mission(workspace_id: str, title: str, geo: str = "VN
     return await handle_create_attention_mission(workspace_id, title, geo, timeframe, seed, keywords, platforms, agent, session_id)
 
 
-@mcp.tool(name="confirm_market_brief", description="Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, one question at a time, show the draft for editing, and call this only with the complete confirmed payload -- drafts and abandoned Q&A are never sent or stored. Requires decision, target_user, problem, geo, timeframe, hypothesis and at least one falsifier.")
-async def confirm_market_brief(workspace_id: str, decision: str, target_user: str, problem: str, geo: str, timeframe: str, hypothesis: str, falsifiers: Optional[list[str]] = None, confirmed_by: str = "", title: Optional[str] = None, keywords: Optional[list[str]] = None, parent_attention_mission_id: Optional[str] = None, parent_cluster_id: Optional[str] = None, platforms: Optional[list[str]] = None, agent: str = "claude", session_id: Optional[str] = None) -> str:
-    return await handle_confirm_market_brief(workspace_id, decision, target_user, problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, title, keywords, parent_attention_mission_id, parent_cluster_id, platforms, agent, session_id)
+@mcp.tool(name="confirm_market_brief", description="Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, one question at a time, show the draft for editing, and call this only with the complete confirmed payload -- drafts and abandoned Q&A are never sent or stored. Requires decision, target_user, problem, geo, timeframe, hypothesis and at least one falsifier. Pass parent_attention_mission_id (and optionally parent_cluster_id) to record the Attention result the question came from, or previous_mission_id to revise a confirmed Brief -- a revision opens a new immutable revision and a new mission instead of editing the earlier one.")
+async def confirm_market_brief(workspace_id: str, decision: str, target_user: str, problem: str, geo: str, timeframe: str, hypothesis: str, falsifiers: Optional[list[str]] = None, confirmed_by: str = "", title: Optional[str] = None, keywords: Optional[list[str]] = None, parent_attention_mission_id: Optional[str] = None, parent_cluster_id: Optional[str] = None, previous_mission_id: Optional[str] = None, platforms: Optional[list[str]] = None, agent: str = "claude", session_id: Optional[str] = None) -> str:
+    return await handle_confirm_market_brief(workspace_id, decision, target_user, problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, title, keywords, parent_attention_mission_id, parent_cluster_id, previous_mission_id, platforms, agent, session_id)
 
 
 @mcp.tool(name="create_research_mission", description="Create a targeted cross-platform trend research mission with specified keywords, platforms, geo, and timeframe.")

@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import json
 import logging
 import re
@@ -1735,6 +1736,15 @@ class SqliteTrendRepository(ITrendRepository):
         return await asyncio.to_thread(_sync_list)
 
     @staticmethod
+    def _next_revision_number(cur, workspace_id: UUID) -> int:
+        """The next number in this research line, read inside the writing transaction."""
+        row = cur.execute(
+            "SELECT MAX(revision_number) FROM market_brief_revisions WHERE workspace_id = ?",
+            (str(workspace_id),),
+        ).fetchone()
+        return int((row[0] if row else None) or 0) + 1
+
+    @staticmethod
     def _write_brief_revision_row(cur, revision: MarketBriefRevision) -> None:
         """A plain INSERT, never an upsert.
 
@@ -1800,11 +1810,21 @@ class SqliteTrendRepository(ITrendRepository):
         def _sync_create():
             conn = self._get_connection()
             try:
+                # The write lock is taken before the maximum is read. Reading it first and
+                # inserting afterwards left a window in which two confirmations saw the same
+                # number, and the loser failed on the unique constraint reporting the Brief as
+                # already confirmed -- which is not what had happened.
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
                 cur = conn.cursor()
+                numbered = dataclasses.replace(
+                    revision,
+                    revision_number=self._next_revision_number(cur, revision.workspace_id),
+                )
                 self._write_mission_row(cur, mission)
-                self._write_brief_revision_row(cur, revision)
+                self._write_brief_revision_row(cur, numbered)
                 conn.commit()
-                return mission, revision
+                return mission, numbered
             except sqlite3.IntegrityError as exc:
                 conn.rollback()
                 raise RepositoryException(BRIEF_ALREADY_CONFIRMED) from exc

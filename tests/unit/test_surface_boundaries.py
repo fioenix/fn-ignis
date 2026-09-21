@@ -123,3 +123,164 @@ async def test_a_saved_mission_cannot_change_the_question_it_answers():
         assert stored.status == "RUNNING"
     finally:
         await repository.close()
+
+
+# --- User Story 4: Attention context versus Market evidence ------------------
+
+def _market_signal(title="ai customer service", observation_id=None):
+    from uuid import uuid4
+
+    from ignis.domain.entities import TrendSignal
+    from ignis.domain.value_objects import GeoCode, PlatformType
+
+    return TrendSignal(
+        platform=PlatformType.GOOGLE_TRENDS,
+        raw_title=title,
+        metric_value=90.0,
+        geo_code=GeoCode.VN,
+        observation_id=observation_id or uuid4(),
+        metadata={"keyword": title, "connector_surface": "google_rss"},
+    )
+
+
+def test_the_two_evidence_roles_are_the_only_ones_that_exist():
+    from ignis.domain.research_workspace import EvidenceRole
+
+    assert {r.value for r in EvidenceRole} == {"MARKET_EVIDENCE", "ATTENTION_CONTEXT"}
+
+
+def test_a_market_report_labels_its_own_observations_as_market_evidence():
+    from ignis.domain.entities import ResearchMission
+    from ignis.domain.harness_models import QualityScorecard
+    from ignis.domain.research_workspace import EvidenceRole
+    from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+
+    mission = ResearchMission(
+        title="AI customer service",
+        keywords=["ai customer service"],
+        surface=ResearchSurface.MARKET.value,
+    )
+    report = StrategicMarketReasoner().analyze_mission(
+        mission, [_market_signal()], [], QualityScorecard()
+    )
+    cited = [c for opp in report.market_opportunities for c in opp.citations]
+    assert cited
+    assert all(c.evidence_role == EvidenceRole.MARKET_EVIDENCE.value for c in cited)
+
+
+def test_carried_attention_observations_are_labelled_context_and_never_become_support():
+    """Lineage explains where the question came from; it does not answer it.
+
+    The carried observations are reported so a reader can see the origin, and they are kept out
+    of the opportunity matrix entirely -- an Attention sighting counted as Market support is the
+    exact promotion this story exists to prevent.
+    """
+    from ignis.domain.entities import ResearchMission
+    from ignis.domain.harness_models import QualityScorecard
+    from ignis.domain.research_workspace import EvidenceRole
+    from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+
+    market_signal = _market_signal()
+    context_signal = _market_signal(title="earlier attention sighting")
+
+    mission = ResearchMission(
+        title="AI customer service",
+        keywords=["ai customer service"],
+        surface=ResearchSurface.MARKET.value,
+    )
+    report = StrategicMarketReasoner().analyze_mission(
+        mission,
+        [market_signal],
+        [],
+        QualityScorecard(),
+        attention_context_signals=[context_signal],
+    )
+
+    context_ids = {c.observation_id for c in report.attention_context}
+    assert context_ids == {str(context_signal.observation_id)}
+    assert all(
+        c.evidence_role == EvidenceRole.ATTENTION_CONTEXT.value for c in report.attention_context
+    )
+
+    supporting = [
+        c
+        for item in list(report.market_opportunities)
+        + list(report.strategic_insights)
+        + list(report.actionable_takeaways)
+        for c in item.citations
+    ]
+    assert supporting
+    assert not any(c.observation_id in context_ids for c in supporting)
+
+
+def test_an_attention_report_labels_its_observations_as_context_rather_than_evidence():
+    from ignis.domain.entities import ResearchMission
+    from ignis.domain.harness_models import QualityScorecard
+    from ignis.domain.research_workspace import EvidenceRole
+    from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+
+    mission = ResearchMission(
+        title="AI customer service attention",
+        keywords=["ai customer service"],
+        surface=ResearchSurface.ATTENTION.value,
+    )
+    report = StrategicMarketReasoner().analyze_mission(
+        mission, [_market_signal()], [], QualityScorecard()
+    )
+    cited = [ch.top_citation for ch in report.channel_summaries if ch.top_citation]
+    assert cited
+    assert all(c.evidence_role == EvidenceRole.ATTENTION_CONTEXT.value for c in cited)
+
+
+def test_a_legacy_mission_without_a_surface_labels_no_evidence_role():
+    from ignis.domain.entities import ResearchMission
+    from ignis.domain.harness_models import QualityScorecard
+    from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+
+    mission = ResearchMission(title="Legacy", keywords=["ai customer service"])
+    report = StrategicMarketReasoner().analyze_mission(
+        mission, [_market_signal()], [], QualityScorecard()
+    )
+    cited = [c for opp in report.market_opportunities for c in opp.citations]
+    assert cited
+    assert all(c.evidence_role is None for c in cited)
+
+
+def test_a_context_citation_is_dropped_from_anything_a_conclusion_rests_on():
+    """The filter is the enforcement point, so it is asserted directly.
+
+    Context observations are never fed into the analysis in the first place, but the boundary
+    has to hold for a caller that assembles a report some other way.
+    """
+    from ignis.domain.harness_models import CitationEvidence, MarketOpportunity, StrategicInsight
+    from ignis.domain.research_workspace import EvidenceRole
+    from ignis.domain.value_objects import PlatformType
+    from ignis.infrastructure.harness.strategic_reasoner import strip_context_citations
+
+    def _cit(role, observation_id):
+        return CitationEvidence(
+            citation_id="CIT-01",
+            platform=PlatformType.GOOGLE_TRENDS,
+            title_or_query="ai customer service",
+            metric_highlight="search index 90/100",
+            observation_id=observation_id,
+            evidence_role=role,
+        )
+
+    support = _cit(EvidenceRole.MARKET_EVIDENCE.value, "kept")
+    context = _cit(EvidenceRole.ATTENTION_CONTEXT.value, "dropped")
+
+    opportunity = MarketOpportunity(
+        topic="ai customer service",
+        opportunity_type="HIGH_DEMAND_LOW_SUPPLY",
+        search_interest_score=90.0,
+        content_supply_score=10.0,
+        opportunity_index=80.0,
+        strategic_recommendation="Test it",
+        citations=[support, context],
+    )
+    insight = StrategicInsight(statement="Demand outruns supply", citations=[context, support])
+
+    strip_context_citations([opportunity, insight])
+    assert [c.observation_id for c in opportunity.citations] == ["kept"]
+    assert [c.observation_id for c in insight.citations] == ["kept"]

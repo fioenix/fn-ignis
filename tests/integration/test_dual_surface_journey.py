@@ -8,7 +8,7 @@ citation reaches a canonical observation -- are claims about what those paths ac
 
 import json
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -603,3 +603,309 @@ async def test_a_confirmation_that_failed_can_simply_be_retried(
     assert revision.revision_number == 1
     missions = await store.list_workspace_missions(workspace.workspace_id)
     assert [m.id for m in missions] == [mission.id]
+
+
+# --- User Story 4: handoff and revision without rewriting history ------------
+
+def _revision_use_case(repository, store):
+    from ignis.application.use_cases.create_market_revision import CreateMarketRevisionUseCase
+
+    return CreateMarketRevisionUseCase(repository=repository, store=store)
+
+
+@pytest.mark.asyncio
+async def test_an_attention_topic_hands_off_to_a_market_mission_with_its_lineage(
+    repository_case, host_workspace
+):
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+
+    attention = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        title="VN customer service attention",
+        seed="ai customer service",
+    )
+    await _executor(repository, store).execute(attention.id)
+    attention_signals = await repository.get_mission_signals(attention.id)
+    assert attention_signals
+
+    cluster_id = next(
+        (s.cluster_id for s in attention_signals if s.cluster_id is not None), None
+    )
+    market, revision = await _revision_use_case(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        keywords=["ai customer service"],
+        lineage=MissionLineage(
+            parent_attention_mission_id=attention.id, parent_cluster_id=cluster_id
+        ),
+        **COMPLETE_BRIEF,
+    )
+
+    stored = await repository.get_mission(market.id)
+    assert stored.surface == ResearchSurface.MARKET.value
+    assert stored.parent_attention_mission_id == attention.id
+    assert stored.parent_cluster_id == cluster_id
+    assert stored.brief_revision_id == revision.brief_revision_id
+    # A separate mission, not a re-labelled Attention one.
+    assert stored.id != attention.id
+    assert await repository.get_mission_signals(market.id) == []
+
+
+@pytest.mark.asyncio
+async def test_a_revised_brief_opens_a_new_evidence_line_and_leaves_the_old_one_untouched(
+    repository_case, host_workspace
+):
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    use_case = _revision_use_case(repository, store)
+
+    first_mission, first_revision = await use_case.execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        keywords=["ai customer service"],
+        **COMPLETE_BRIEF,
+    )
+    await _executor(repository, store).execute(first_mission.id)
+    first_evidence = {
+        str(s.observation_id) for s in await repository.get_mission_signals(first_mission.id)
+    }
+    assert first_evidence
+
+    revised_brief = {
+        **COMPLETE_BRIEF,
+        "hypothesis": "Only VN retailers above 500 orders a month will pay for sub-minute replies",
+    }
+    second_mission, second_revision = await use_case.execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        keywords=["ai customer service"],
+        previous_mission_id=first_mission.id,
+        **revised_brief,
+    )
+
+    # Two identities, two revisions, one monotonic line.
+    assert second_mission.id != first_mission.id
+    assert second_revision.brief_revision_id != first_revision.brief_revision_id
+    assert second_revision.revision_number == first_revision.revision_number + 1
+
+    # The earlier Brief and its evidence are exactly as they were.
+    stored_first = await store.get_brief_revision_for_mission(first_mission.id)
+    assert stored_first.hypothesis == COMPLETE_BRIEF["hypothesis"]
+    assert stored_first.revision_number == first_revision.revision_number
+    assert {
+        str(s.observation_id) for s in await repository.get_mission_signals(first_mission.id)
+    } == first_evidence
+
+    # The new mission is authorized by its own Brief and owns no evidence yet.
+    stored_second = await repository.get_mission(second_mission.id)
+    assert stored_second.brief_revision_id == second_revision.brief_revision_id
+    assert await repository.get_mission_signals(second_mission.id) == []
+
+    # Its own probe run produces its own evidence line.
+    assert (await _executor(repository, store).execute(second_mission.id))["status"] == "COMPLETED"
+    second_evidence = await repository.get_mission_signals(second_mission.id)
+    assert second_evidence and all(s.observation_id for s in second_evidence)
+
+
+@pytest.mark.asyncio
+async def test_a_market_conclusion_cites_only_the_evidence_of_its_own_brief(
+    repository_case, host_workspace
+):
+    """Attention lineage travels with the mission; Attention observations do not become proof."""
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+
+    attention = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        title="VN customer service attention",
+        seed="ai customer service",
+    )
+    await _executor(repository, store).execute(attention.id)
+    attention_ids = {
+        str(s.observation_id) for s in await repository.get_mission_signals(attention.id)
+    }
+
+    market, revision = await _revision_use_case(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        keywords=["ai customer service"],
+        lineage=MissionLineage(parent_attention_mission_id=attention.id),
+        **COMPLETE_BRIEF,
+    )
+    await _executor(repository, store).execute(market.id)
+
+    market_signals = await repository.get_mission_signals(market.id)
+    market_ids = {str(s.observation_id) for s in market_signals}
+    context_only = attention_ids - market_ids
+    assert context_only, "The Attention run must hold at least one observation of its own."
+
+    stored = await repository.get_mission(market.id)
+    report = StrategicMarketReasoner().analyze_mission(
+        mission=stored,
+        signals=market_signals,
+        clusters=[],
+        scorecard=QualityScorecard(),
+        market_brief=revision.to_payload(),
+        attention_context_signals=await repository.get_mission_signals(attention.id),
+    )
+
+    supporting = [
+        c
+        for item in list(report.market_opportunities)
+        + list(report.strategic_insights)
+        + list(report.actionable_takeaways)
+        for c in item.citations
+    ]
+    assert supporting
+    assert all(c.observation_id in market_ids for c in supporting)
+    assert all(c.evidence_role == "MARKET_EVIDENCE" for c in supporting)
+    # The carried observations are reported, and reported as context.
+    carried = {c.observation_id for c in report.attention_context}
+    assert context_only <= carried
+    assert all(c.evidence_role == "ATTENTION_CONTEXT" for c in report.attention_context)
+
+
+@pytest.mark.asyncio
+async def test_the_analysis_response_separates_attention_context_from_market_evidence(
+    repository_case, host_workspace, monkeypatch
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    registry = ProbeCountingRegistry(_probe_signals())
+    components = _mcp_components(repository, store, registry)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    attention = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        title="VN customer service attention",
+        seed="ai customer service",
+    )
+    await _executor(repository, store).execute(attention.id)
+
+    market, _revision = await _revision_use_case(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        confirmed_by="requester",
+        keywords=["ai customer service"],
+        lineage=MissionLineage(parent_attention_mission_id=attention.id),
+        **COMPLETE_BRIEF,
+    )
+    await _executor(repository, store).execute(market.id)
+
+    payload = json.loads(await mcp_server.handle_get_mission_analysis(str(market.id)))
+
+    assert payload["surface"] == "MARKET"
+    assert payload["lineage"]["parent_attention_mission_id"] == str(attention.id)
+    market_ids = {
+        str(s.observation_id) for s in await repository.get_mission_signals(market.id)
+    }
+    for opportunity in payload["market_opportunities"]:
+        for citation in opportunity["citations"]:
+            assert citation["evidence_role"] == "MARKET_EVIDENCE"
+            assert citation["observation_id"] in market_ids
+    assert payload["attention_context"]
+    assert all(c["evidence_role"] == "ATTENTION_CONTEXT" for c in payload["attention_context"])
+
+
+@pytest.mark.asyncio
+async def test_a_handoff_from_another_workspace_is_refused_and_writes_nothing(
+    repository_case, host_workspace, tmp_path
+):
+    from ignis.domain.research_workspace import WorkspaceScopeMismatchError
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    other_host = tmp_path / "other-project"
+    other_host.mkdir()
+    _other_store, other = await _workspace(repository, other_host, name="Other research")
+
+    foreign = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=other.workspace_id, title="Foreign attention", seed="something else"
+    )
+
+    with pytest.raises(WorkspaceScopeMismatchError):
+        await _revision_use_case(repository, store).execute(
+            workspace_id=workspace.workspace_id,
+            confirmed_by="requester",
+            lineage=MissionLineage(parent_attention_mission_id=foreign.id),
+            **COMPLETE_BRIEF,
+        )
+
+    assert await store.list_workspace_missions(workspace.workspace_id) == []
+    assert await store.next_brief_revision_number(workspace.workspace_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_brief_tool_refuses_a_parent_that_is_not_an_attention_result(
+    repository_case, host_workspace, monkeypatch
+):
+    """The lineage check runs at the tool boundary, before a mission is written."""
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    components = _mcp_components(repository, store, ProbeCountingRegistry(_probe_signals()))
+    components["confirm_market_brief_use_case"] = ConfirmMarketBriefUseCase(repository, store)
+    components["create_market_revision_use_case"] = _revision_use_case(repository, store)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    market, _revision = await _revision_use_case(repository, store).execute(
+        workspace_id=workspace.workspace_id, confirmed_by="requester", **COMPLETE_BRIEF
+    )
+
+    payload = json.loads(
+        await mcp_server.handle_confirm_market_brief(
+            workspace_id=str(workspace.workspace_id),
+            confirmed_by="requester",
+            parent_attention_mission_id=str(market.id),
+            **COMPLETE_BRIEF,
+        )
+    )
+    assert "error" in payload
+    assert "surface" in payload["error"]
+    # One mission, the one that was legitimately confirmed.
+    assert [m.id for m in await store.list_workspace_missions(workspace.workspace_id)] == [
+        market.id
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_brief_tool_revises_a_confirmed_brief_into_a_new_mission(
+    repository_case, host_workspace, monkeypatch
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    components = _mcp_components(repository, store, ProbeCountingRegistry(_probe_signals()))
+    components["create_market_revision_use_case"] = _revision_use_case(repository, store)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    first = json.loads(
+        await mcp_server.handle_confirm_market_brief(
+            workspace_id=str(workspace.workspace_id),
+            confirmed_by="requester",
+            **COMPLETE_BRIEF,
+        )
+    )
+    assert first["status"] == "CONFIRMED"
+    assert first["revision_number"] == 1
+
+    second = json.loads(
+        await mcp_server.handle_confirm_market_brief(
+            workspace_id=str(workspace.workspace_id),
+            confirmed_by="requester",
+            previous_mission_id=first["mission_id"],
+            **{**COMPLETE_BRIEF, "hypothesis": "A narrower hypothesis about repeat buyers"},
+        )
+    )
+    assert second["revision_number"] == 2
+    assert second["mission_id"] != first["mission_id"]
+    assert second["brief_revision_id"] != first["brief_revision_id"]
+    assert second["lineage"]["revises_mission_id"] == first["mission_id"]
+
+    # The first Brief still reads exactly as it was confirmed.
+    stored_first = await store.get_brief_revision_for_mission(UUID(first["mission_id"]))
+    assert stored_first.hypothesis == COMPLETE_BRIEF["hypothesis"]

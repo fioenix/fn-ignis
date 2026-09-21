@@ -1168,7 +1168,7 @@
     "type": "function",
     "function": {
       "name": "confirm_market_brief",
-      "description": "Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, one question at a time, show the draft for editing, and call this only with the complete confirmed payload -- drafts and abandoned Q&A are never sent or stored. Requires decision, target_user, problem, geo, timeframe, hypothesis and at least one falsifier.",
+      "description": "Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, one question at a time, show the draft for editing, and call this only with the complete confirmed payload -- drafts and abandoned Q&A are never sent or stored. Requires decision, target_user, problem, geo, timeframe, hypothesis and at least one falsifier. Pass parent_attention_mission_id (and optionally parent_cluster_id) to record the Attention result the question came from, or previous_mission_id to revise a confirmed Brief -- a revision opens a new immutable revision and a new mission instead of editing the earlier one.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -1248,6 +1248,17 @@
             "default": null
           },
           "parent_cluster_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "previous_mission_id": {
             "anyOf": [
               {
                 "type": "string"

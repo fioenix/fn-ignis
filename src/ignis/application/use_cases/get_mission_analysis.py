@@ -4,6 +4,12 @@ from uuid import UUID
 from collections import defaultdict
 
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.domain.research_workspace import (
+    EvidenceRole,
+    MissionLineage,
+    ResearchSurface,
+    resolve_surface,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,18 @@ class GetMissionAnalysisUseCase:
             raise ValueError(f"Research Mission {mission_id} does not exist.")
 
         signals = await self._repo.get_mission_signals(mission_id)
+
+        # Which question these observations were collected to answer. A Market mission's own
+        # evidence is what its Brief is judged against; an Attention mission's is context for a
+        # question nobody has framed yet. A mission with no recorded surface gets no label,
+        # because labelling it would claim a framing it never had.
+        surface = resolve_surface(mission.surface)
+        evidence_role = None
+        if surface is ResearchSurface.MARKET:
+            evidence_role = EvidenceRole.MARKET_EVIDENCE.value
+        elif surface is ResearchSurface.ATTENTION:
+            evidence_role = EvidenceRole.ATTENTION_CONTEXT.value
+        lineage = MissionLineage.of_mission(mission)
 
         # Apply optional platform filter
         if platform_filter:
@@ -73,6 +91,10 @@ class GetMissionAnalysisUseCase:
                 clean_meta["keyword"] = s.metadata["keyword"]
 
             compact_signals.append({
+                # The canonical evidence identity, so a reader can address the observation
+                # rather than matching on a title or a URL.
+                "observation_id": str(s.observation_id) if s.observation_id else None,
+                "evidence_role": evidence_role,
                 "platform": p_str,
                 "title": s.raw_title,
                 "metric_value": s.metric_value,
@@ -93,6 +115,9 @@ class GetMissionAnalysisUseCase:
                 "timeframe": mission.timeframe,
                 "status": mission.status,
                 "summary": mission.summary,
+                "surface": surface.value if surface else None,
+                "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+                "lineage": None if lineage.is_empty else lineage.to_payload(),
             },
             "stats": {
                 "total_signals_collected": len(signals),

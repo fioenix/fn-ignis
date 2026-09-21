@@ -48,6 +48,10 @@ class CitationEvidence:
     observation_id: Optional[str] = None  # Canonical evidence identity
     source_id: Optional[str] = None       # The external object, for display
     connector_surface: Optional[str] = None  # Which probe returned it (e.g. 'tiktok_creative_center')
+    # 'MARKET_EVIDENCE', 'ATTENTION_CONTEXT', or None for a mission that declared no surface.
+    # A context citation explains where the question came from and can never stand as support
+    # for the hypothesis the question became.
+    evidence_role: Optional[str] = None
 
 
 @dataclass
@@ -125,5 +129,10 @@ class HarnessResearchReport:
     surface: Optional[str] = None
     # The confirmed Brief revision that authorized a MARKET mission, as display payload.
     market_brief: Optional[Dict[str, Any]] = None
+    # Where the question came from, when this Market mission was opened from an Attention result.
+    lineage: Optional[Dict[str, Any]] = None
+    # Observations carried over from the Attention mission named in `lineage`. Reported so the
+    # origin stays readable, and kept out of every list a conclusion is drawn from.
+    attention_context: List[CitationEvidence] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

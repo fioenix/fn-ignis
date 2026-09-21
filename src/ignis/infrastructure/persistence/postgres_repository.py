@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import logging
 from datetime import datetime, timezone
@@ -1481,6 +1482,16 @@ class PostgresTimescaleRepository(ITrendRepository):
         return [self._workspace_from_row(r) for r in rows]
 
     @staticmethod
+    async def _next_revision_number(cur, workspace_id: UUID) -> int:
+        """The next number in this research line, read inside the writing transaction."""
+        await cur.execute(
+            "SELECT MAX(revision_number) FROM market_brief_revisions WHERE workspace_id = %s;",
+            (str(workspace_id),),
+        )
+        row = await cur.fetchone()
+        return int((row[0] if row else None) or 0) + 1
+
+    @staticmethod
     async def _write_brief_revision_row(cur, revision: MarketBriefRevision) -> None:
         """A plain INSERT, never an upsert.
 
@@ -1543,9 +1554,25 @@ class PostgresTimescaleRepository(ITrendRepository):
             # the two statements land together or not at all.
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
+                    # The owning workspace row is locked first, so the maximum is read inside
+                    # the transaction that writes the next number. Reading it beforehand left a
+                    # window in which two confirmations saw the same number, and the loser
+                    # failed on the unique constraint reporting the Brief as already confirmed
+                    # -- which is not what had happened. The workspace row is the lock even when
+                    # the research has no revision yet, which is exactly the racing first write.
+                    await cur.execute(
+                        "SELECT id FROM research_workspaces WHERE id = %s FOR UPDATE;",
+                        (str(revision.workspace_id),),
+                    )
+                    numbered = dataclasses.replace(
+                        revision,
+                        revision_number=await self._next_revision_number(
+                            cur, revision.workspace_id
+                        ),
+                    )
                     await self._write_mission_row(cur, mission)
-                    await self._write_brief_revision_row(cur, revision)
-            return mission, revision
+                    await self._write_brief_revision_row(cur, numbered)
+            return mission, numbered
         except Exception as e:
             logger.error(
                 f"Error confirming Market Brief for mission {mission.id}: {e}", exc_info=True

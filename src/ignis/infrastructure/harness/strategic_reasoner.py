@@ -21,6 +21,8 @@ from ignis.domain.harness_models import (
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.domain.research_workspace import (
+    EvidenceRole,
+    MissionLineage,
     ResearchSurface,
     opportunity_index_is_allowed,
     resolve_surface,
@@ -31,6 +33,26 @@ logger = logging.getLogger(__name__)
 
 # Longest token still treated as an acronym that identifies a topic by itself (ai, seo, crm...)
 ACRONYM_MAX_LEN = 3
+
+
+def strip_context_citations(items: List[Any]) -> List[Any]:
+    """Remove every Attention-context citation from things a conclusion rests on.
+
+    Context observations never enter the analysis inputs, so in the normal path this removes
+    nothing. It is applied anyway because "an Attention sighting cannot support a Market
+    hypothesis" has to hold for a report assembled by any caller, not only for the one path
+    that happens to keep the two lists apart today.
+    """
+    for item in items:
+        citations = getattr(item, "citations", None)
+        if not citations:
+            continue
+        item.citations = [
+            c
+            for c in citations
+            if getattr(c, "evidence_role", None) != EvidenceRole.ATTENTION_CONTEXT.value
+        ]
+    return items
 
 
 class StrategicMarketReasoner:
@@ -95,6 +117,7 @@ class StrategicMarketReasoner:
         auth_status: Optional[Dict[str, bool]] = None,
         connector_health: Optional[Dict[str, Any]] = None,
         market_brief: Optional[Dict[str, Any]] = None,
+        attention_context_signals: Optional[List[TrendSignal]] = None,
     ) -> HarnessResearchReport:
         maturity_stage, maturity_reasons = self._assess_maturity(signals, clusters, geo=mission.geo_code)
         verified_trends = self._extract_verified_trends(signals, clusters, geo=mission.geo_code)
@@ -136,6 +159,19 @@ class StrategicMarketReasoner:
             citation_registry=citation_registry,
         )
 
+        # Everything minted so far was collected for this mission's own question, so it is
+        # stamped before any carried observation reaches the registry.
+        own_role = self._own_evidence_role(surface)
+        for citation in citation_registry.values():
+            citation.evidence_role = own_role
+        attention_context = self._carry_attention_context(
+            attention_context_signals, citation_registry, geo=mission.geo_code
+        )
+        if surface is ResearchSurface.MARKET:
+            strip_context_citations(list(opportunities) + list(insights) + list(actionables))
+
+        lineage = MissionLineage.of_mission(mission)
+
         return HarnessResearchReport(
             mission_id=str(mission.id),
             title=mission.title,
@@ -148,6 +184,8 @@ class StrategicMarketReasoner:
             actionable_takeaways=actionables,
             surface=surface.value if surface else None,
             market_brief=market_brief if surface is ResearchSurface.MARKET else None,
+            lineage=None if lineage.is_empty else lineage.to_payload(),
+            attention_context=attention_context,
         )
 
     # ------------------------------------------------------------------
@@ -252,6 +290,41 @@ class StrategicMarketReasoner:
         citation = self._build_citation(signal, len(registry) + 1, geo=geo)
         registry[key] = citation
         return citation
+
+    @staticmethod
+    def _own_evidence_role(surface: Optional[ResearchSurface]) -> Optional[str]:
+        """What this mission's own observations are, given the question it answers.
+
+        A mission with no recorded surface gets no role at all: labelling a pre-workspace
+        mission's evidence would claim it was collected against a Brief nobody confirmed.
+        """
+        if surface is ResearchSurface.MARKET:
+            return EvidenceRole.MARKET_EVIDENCE.value
+        if surface is ResearchSurface.ATTENTION:
+            return EvidenceRole.ATTENTION_CONTEXT.value
+        return None
+
+    def _carry_attention_context(
+        self,
+        signals: Optional[List[TrendSignal]],
+        registry: Dict[str, CitationEvidence],
+        geo: GeoCode = GeoCode.VN,
+    ) -> List[CitationEvidence]:
+        """Cite the observations the parent Attention mission held, as context.
+
+        Minted after the analysis, so nothing a conclusion was drawn from can be one of these.
+        An observation that this mission also collected keeps the role it already earned: it is
+        this mission's own evidence, and the fact that the Attention run saw it too does not
+        demote it.
+        """
+        carried: List[CitationEvidence] = []
+        for signal in signals or []:
+            already_known = self._citation_key(signal) in registry
+            citation = self._mint_citation(signal, registry, geo=geo)
+            if not already_known:
+                citation.evidence_role = EvidenceRole.ATTENTION_CONTEXT.value
+                carried.append(citation)
+        return carried
 
     @staticmethod
     def _engagement_rank(signal: TrendSignal) -> tuple:

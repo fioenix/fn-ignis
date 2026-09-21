@@ -97,6 +97,15 @@ class MissionWriterConflictError(IgnisDomainException):
     """A mission already has an active writer, so this run has nothing of its own to write into."""
 
 
+class InvalidMissionLineageError(IgnisDomainException):
+    """The selected Attention origin does not describe a handoff this workspace can make.
+
+    Raised rather than silently dropped. Lineage that cannot be resolved is a requester pointing
+    at a topic nobody can find again, and recording the Market mission without it would leave a
+    hypothesis whose origin is unrecoverable.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Surface
 # ---------------------------------------------------------------------------
@@ -273,6 +282,25 @@ class MissionLineage:
     @property
     def is_empty(self) -> bool:
         return self.parent_attention_mission_id is None and self.parent_cluster_id is None
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "parent_attention_mission_id": (
+                str(self.parent_attention_mission_id)
+                if self.parent_attention_mission_id else None
+            ),
+            "parent_cluster_id": (
+                str(self.parent_cluster_id) if self.parent_cluster_id else None
+            ),
+        }
+
+    @classmethod
+    def of_mission(cls, mission: Any) -> "MissionLineage":
+        """Read the lineage a stored mission carries."""
+        return cls(
+            parent_attention_mission_id=getattr(mission, "parent_attention_mission_id", None),
+            parent_cluster_id=getattr(mission, "parent_cluster_id", None),
+        )
 
 
 # ---------------------------------------------------------------------------
