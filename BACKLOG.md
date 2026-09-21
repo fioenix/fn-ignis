@@ -4,7 +4,8 @@
 > - **Phiên bản:** `v0.4.1`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (39 Handlers & Tools)
-> - **Trạng thái:** Đọc trạng thái phát hành thật bằng `python scripts/check_release_state.py` chứ
+> - **Trạng thái:** Release chỉ hoàn tất khi đã tag và đã publish; trước mốc đó, bản phát hành
+>   chưa tag và chưa publish. Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`;
 >   đừng tin dòng này — nó là tài liệu, còn
 >   tag với release nằm trên Git và GitHub. Cutover T020 trên corpus PostgreSQL hiện hữu đã chạy
 >   xong 20/09/2026: verifier trả `VERIFIED`, runtime mới đã khởi động, ingress theo lịch đã mở lại.
