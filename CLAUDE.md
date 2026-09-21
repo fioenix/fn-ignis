@@ -127,7 +127,7 @@ Before completing changes or cutting a release, verify these three checklist gat
 
 ### Checklist B: Harness Autonomy & Decoupling
 - [ ] FastMCP server instructions and tool definitions do NOT dictate mandatory agent workflows.
-- [ ] All 39 tools are callable independently for ad-hoc queries.
+- [ ] All 45 tools are callable independently for ad-hoc queries.
 - [ ] Output formatting is adapted to conversational context, not forced into rigid report templates.
 
 ### Checklist C: Pre-Release & Version Bump Gate

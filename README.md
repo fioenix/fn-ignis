@@ -26,6 +26,7 @@
   diversity, and one source can support multiple missions and clusters without being copied.
 - **🗣️ Voice of Customer Ingress**: Scrapes and synthesizes real customer pain points, pricing inquiries, and unmet objections directly from public video comment sections.
 - **🧠 Autonomous Dynamic Lexicon Engine**: Persistent PostgreSQL registry allowing agents to dynamically register niche slang, brand names, and vernacular on-the-fly without modifying source code.
+- **🗂️ Dual-Surface Research Workspaces**: A research outlives the chat that started it. It lives in a confirmed folder under `.ignis/research/<slug>/`, is addressable from any Agent host through the one configured database, and answers one of two questions: `ATTENTION` (what is gaining attention) or `MARKET` (is this worth building), which never share a verdict.
 - **🤖 Universal Agent Ecosystem**: Native out-of-the-box support for Claude (Desktop & Code), Antigravity, Codex, OpenClaw, Hermes, and Pi Agent.
 
 ---
@@ -88,13 +89,86 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 ---
 
+## 🗂️ Research Workspaces: Attention and Market
+
+A chat session belongs to whichever Agent host opened it. A research has to outlive that, so it is
+a durable thing with an identity of its own.
+
+### Where a research lives
+
+A research is proposed at `<host-workspace>/.ignis/research/<research-slug>/` and nothing is
+created until the requester says yes. `propose_research_workspace` is read-only: it reports the
+path it would use and whether anything is already there, and it writes no directory, no manifest,
+no database record and no journal. `confirm_research_workspace` is the only call that creates
+anything. Reopening a research with a matching manifest reuses it without rewriting it, and
+adopting a non-empty folder that has no manifest needs a separate explicit `adopt=true` and leaves
+every unrelated file in place.
+
+The folder holds the manifest that lets a second Agent host find the research, plus one journal
+per run and any exported artifacts. **It does not hold a database.** All research workspaces share
+the one configured Ignis database — SQLite-local by default, PostgreSQL when `DATABASE_URL` points
+at one — so `list_research_workspaces` finds a research from any host on the same database,
+independently of the chat that created it.
+
+### Two surfaces, two different claims
+
+| | `ATTENTION` | `MARKET` |
+|---|---|---|
+| Question | What is gaining attention? | Is this a market opportunity? |
+| Needs a hypothesis | No | Yes, a confirmed Brief |
+| Returns | Ranked topics, momentum, freshness, source coverage, citations | The same, plus the Opportunity Index and the white-space matrix |
+| Opportunity Index | Never | Only here |
+
+`create_attention_mission` starts an exploratory pass for a requester who does not yet know which
+topic is worth investigating. It asks for no hypothesis, and it never emits an Opportunity Index:
+attention is what people are looking at, and presenting a commercial verdict beside it would be a
+claim the evidence does not support.
+
+`MARKET` runs only after the requester confirms a Brief with all seven fields — `decision`,
+`target_user`, `problem`, `geo`, `timeframe`, `hypothesis`, and at least one falsifier. A Brief
+missing any of them is refused before any probe runs, and the refusal names the missing fields.
+The framing conversation belongs to the host Agent, which asks one question at a time and shows
+the draft for editing; **fn-ignis receives no transcript and has no operation for saving a draft**,
+so a requester who abandons the framing leaves nothing behind.
+
+### Handing an Attention topic to Market, and changing your mind
+
+Selecting an Attention topic for investigation creates a *new* Market mission through
+`confirm_market_brief`, carrying `parent_attention_mission_id` and optionally `parent_cluster_id`
+as lineage. Lineage is context: it records where the question came from. The Attention
+observations it points at are reported as `ATTENTION_CONTEXT` and are never counted as
+`MARKET_EVIDENCE` for the new hypothesis, which the new mission has to collect for itself.
+
+Changing a confirmed Brief does not edit it. Passing `previous_mission_id` creates a new immutable
+Brief revision under a new Market mission, with the next revision number in that research line and
+`revises_mission_id` pointing back. The earlier mission, its Brief and its evidence stay exactly as
+they were, and a revision inherits the Attention origin of the mission it revises rather than being
+given a different one.
+
+### One writer per mission, one journal per run
+
+Two missions of one research run concurrently without waiting for each other. One mission has at
+most one active writer: a second run against the same mission is refused with a `CONFLICT` result
+naming the run that holds it and since when, and it collects nothing and overwrites nothing. Every
+run takes its own journal under `.ignis/research/<slug>/journals/`, created exclusively, so two
+runs starting inside the same second still get distinct names and neither can overwrite the
+other's record.
+
+A claim is released only by the run that took it. There is deliberately **no expiry and no force
+release** — handing the slot to a second writer on a timer while the first may still be running is
+the exact failure the slot prevents. When a run is known to have died holding a mission,
+`release_mission_writer(mission_id, run_id)` recovers it, and it requires the exact `run_id` the
+conflict result reported.
+
+---
+
 ## 🤖 Universal Multi-Agent Compatibility
 
 `fn-ignis` is built from the ground up to integrate seamlessly with any modern AI agent orchestrator:
 
 | AI Agent / Client | Configuration & Standards | Capabilities Supported |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 39 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 45 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
 | **Claude Code** | [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Agent Skills Standard, Native In-Chat Artifacts |
 | **Antigravity / Gemini Code** | [`AGENTS.md`](AGENTS.md) + Agent Skills | Dual-Track Continuous Radar & Dynamic Lexicon Ingress |
 | **OpenAI Codex** | [`.codex/instructions.md`](.codex/instructions.md), [`.codexrules`](.codexrules) | Thread Session Continuity (`codex://threads/...`), Structured Tools |
@@ -118,22 +192,30 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 
 ---
 
-## 🛠️ FastMCP Tool & Resource Catalog (39 Tools)
+## 🛠️ FastMCP Tool & Resource Catalog (45 Tools)
 
-### 1. Market Research & Strategic Synthesis
+### 1. Research Workspaces & the Two Surfaces
+- **`propose_research_workspace(host_workspace, research_name, slug?)`**: Report where a research would live. Read-only — it creates no directory, manifest, database record or journal.
+- **`confirm_research_workspace(proposed_path, confirmation?, adopt?, research_name?)`**: Create, reuse or adopt the proposed workspace after the requester agrees. Adopting a non-empty folder without a manifest needs `adopt=true` and preserves unrelated files.
+- **`list_research_workspaces(limit?)`**: List the research workspaces held in the configured database, so a research can be reopened from any supported Agent host.
+- **`create_attention_mission(workspace_id, title, geo?, timeframe?, seed?, keywords?, platforms?, agent?, session_id?)`**: Start an `ATTENTION` mission. No hypothesis, no Brief, no Opportunity Index.
+- **`confirm_market_brief(workspace_id, decision, target_user, problem, geo, timeframe, hypothesis, falsifiers?, confirmed_by?, title?, keywords?, parent_attention_mission_id?, parent_cluster_id?, previous_mission_id?, platforms?, agent?, session_id?)`**: Persist a requester-confirmed Brief and open the `MARKET` mission it authorizes. Pass `parent_attention_mission_id` for an Attention handoff, or `previous_mission_id` to open a new revision of a confirmed Brief.
+- **`release_mission_writer(mission_id, run_id)`**: Recover a mission whose run died holding its single writer slot. Requires the exact `run_id` the conflict result reported; there is no expiry and no force release.
+
+### 2. Market Research & Strategic Synthesis
 - **`run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)`**: End-to-end mission creation, multi-platform refinement loop, and white space synthesis.
-- **`create_research_mission(title, keywords, geo, timeframe, hypothesis)`**: Initialize a new targeted research campaign.
+- **`create_research_mission(topic, keywords, platforms?, geo?, timeframe?)`**: Initialize a targeted research campaign outside a research workspace. It declares no surface and is never gated on a Brief.
 - **`execute_mission_ingress(mission_id)`**: Execute deep multi-platform data collection with automated quality gate evaluation.
 - **`evaluate_mission_quality(mission_id)`**: Re-evaluate multi-dimensional quality scorecard.
 - **`discover_market_opportunities(mission_id)`**: Discover unserved content and product white spaces.
-- **`get_mission_analysis(mission_id)`**: Retrieve full synthesized strategic analysis (Opportunity Index, white spaces, action plan).
+- **`get_mission_analysis(mission_id, limit?, platform?)`**: Retrieve the full synthesized analysis for the mission's surface: ranked evidence, quality scorecard, lineage, and — for `MARKET` only — the Opportunity Index and white spaces.
 - **`generate_mission_artifact(mission_id)`**: Export a standalone, high-contrast interactive Infographic HTML Dashboard to `reports/`.
 - **`list_research_missions(limit)`**: List all historical research campaigns.
 - **`get_current_session_mission(session_id)`**: Restore active mission linked to current chat thread.
 - **`trigger_autonomous_discovery(geo)`**: Trigger an on-demand full autonomous discovery cycle.
 - **`get_latest_daily_discovery(geo)`**: Retrieve the latest automated daily discovery digest.
 
-### 2. Social Listening, Threads & Voice of Customer
+### 3. Social Listening, Threads & Voice of Customer
 - **`get_threads_trending_topics(geo, limit)`**: Fetch real-time Trending Topics from Threads search surface (`threads.net/search`).
 - **`get_threads_search_suggestions(keyword, geo, limit)`**: Fetch search autocomplete suggestions and derivative queries from Threads search.
 - **`get_tiktok_creative_center_trends(geo, period, limit, industry)`**: Fetch official nationwide industry ranking benchmarks with optional vertical filtering.
@@ -141,7 +223,7 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **`get_tiktok_video_comments(video_url, limit)`**: Scrape raw public comments for a specific video.
 - **`extract_customer_pain_points(keywords, geo, max_videos, inquiry_patterns)`**: Extract customer objections, pricing inquiries, and unmet needs from comments.
 
-### 3. Dynamic Lexicon, Runtime Config & Infrastructure Diagnostics
+### 4. Dynamic Lexicon, Runtime Config & Infrastructure Diagnostics
 - **`get_runtime_config(key, category)`**: Inspect dynamic runtime parameters (`threads_web_client_id`, `threads_graphql_endpoint`, `doc_id`) from DB and RAM cache.
 - **`update_runtime_config(key, value, category, description)`**: Allow AI Agents to dynamically update protocol parameters when web clients rotate builds.
 - **`refresh_runtime_config_cache()`**: Force invalidate and reload all dynamic runtime configurations from database into active memory cache (~0.01ms).
@@ -149,15 +231,15 @@ Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan 
 - **`register_noise_blacklist(terms)`**: Register unwanted viral spam words into the blacklist.
 - **`list_domain_lexicons(domain)`**: Query active domain vocabularies and industry mappings.
 - **`diagnose_system_health()`**: Query full platform telemetry, circuit breakers, and component status.
-- **`get_system_logs(limit, level)`**: Inspect audit event trails.
+- **`get_system_logs(level?, component?, limit?)`**: Inspect audit event trails.
 - **`verify_connectors_health()`**: Run real-time synthetic diagnostics on YouTube quota, Google RSS, TikTok Playwright contexts, database pool, and proxy connectivity.
 - **`authenticate_tiktok()`**, **`get_platform_auth_status()`**, **`clear_platform_auth()`**: Managed browser credential lifecycle.
 - **`authenticate_threads(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**: Dual-UX Meta connect (Tier 1 browser session or Tier 2 Graph API OAuth 2.0).
 - **`get_threads_auth_status()`**, **`clear_threads_auth()`**: Inspect stored Threads credentials, or delete them and the browser session from local encrypted storage. Deleting locally does not revoke the token at Meta — remove the app's access in Meta account security settings when that is also required.
 - **`authenticate_instagram(auth_code?, client_id?, client_secret?, redirect_uri?, browser_login?)`**, **`get_instagram_auth_status()`**, **`clear_instagram_auth()`**: Managed Instagram credentials lifecycle.
-- **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo, format)`**, **`trigger_ingress_refresh(geo, scope)`**: Real-time trend exploration.
+- **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo, format)`**, **`trigger_ingress_refresh(geo?, scope?, timeframe?)`**: Real-time trend exploration.
 
-### 4. FastMCP Native Resources & Prompts
+### 5. FastMCP Native Resources & Prompts
 - **Resources**: `fn-ignis://sop/market-research`, `fn-ignis://methodology/opportunity-index`
 - **Prompts**: `market_research_pipeline`, `voice_of_customer_audit`
 
