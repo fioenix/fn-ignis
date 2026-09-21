@@ -309,6 +309,7 @@ def heading(step: int, title: str) -> None:
 
 JOURNAL_PREFIX = "t020-run-"
 JOURNAL_GLOB = f"{JOURNAL_PREFIX}*.json"
+# One more would be four digits wide, and a name of a different width sorts out of order.
 JOURNAL_SEQUENCE_LIMIT = 1000
 
 
@@ -322,14 +323,15 @@ class Journal:
             "dsn_host": dsn_host,
             "steps": [],
         }
-        # Created exclusively, before anything is written into it. The flush below rewrites the
-        # whole file every time, so a path another run already owns would be silently replaced --
-        # the earlier run's evidence gone while both processes believe they are journalling. The
-        # filesystem is what decides here: a name that is free at the moment of the check can be
-        # taken before the write, and only O_EXCL closes that window.
-        with open(self.path, "x", encoding="utf-8"):
-            pass
-        self._flush()
+        # Created exclusively, and the first entry goes through that same handle. _flush rewrites
+        # the whole file every time, so a path another run already owns would be silently replaced
+        # -- the earlier run's evidence gone while both processes believe they are journalling.
+        # The filesystem is what decides here: a name that is free at the moment of a check can be
+        # taken before the write, and only O_EXCL closes that window. Writing through the handle
+        # rather than creating an empty file and flushing after leaves no moment at which the
+        # journal exists but holds nothing a resume could read.
+        with open(self.path, "x", encoding="utf-8") as opened:
+            opened.write(self._rendered())
 
     @classmethod
     def create(cls, run_dir: Path, dsn_host: str) -> "Journal":
@@ -342,14 +344,14 @@ class Journal:
         a sorted listing, which is how `previous_journal` finds the run a resume continues.
         """
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-        for sequence in range(1, JOURNAL_SEQUENCE_LIMIT + 1):
+        for sequence in range(1, JOURNAL_SEQUENCE_LIMIT):
             candidate = run_dir / f"{JOURNAL_PREFIX}{stamp}-{sequence:03d}.json"
             try:
                 return cls(candidate, dsn_host)
             except FileExistsError:
                 continue
         raise Unrunnable(
-            f"{shown(run_dir)} already holds {JOURNAL_SEQUENCE_LIMIT} journals stamped {stamp}, "
+            f"{shown(run_dir)} already holds {JOURNAL_SEQUENCE_LIMIT - 1} journals stamped {stamp}, "
             "so this run has no name of its own to write into. Nothing was overwritten. Use a "
             "different --run-dir, or move the finished runs out of this one."
         )
@@ -368,8 +370,11 @@ class Journal:
         self.data["steps"].append({"step": step, "title": title, "at": now(), "state": "done", **evidence})
         self._flush()
 
+    def _rendered(self) -> str:
+        return json.dumps(self.data, indent=2, sort_keys=True) + "\n"
+
     def _flush(self) -> None:
-        self.path.write_text(json.dumps(self.data, indent=2, sort_keys=True) + "\n")
+        self.path.write_text(self._rendered())
 
 
 DIRECT_CONNECTION_KEY = "DATABASE_DIRECT_CONNECTION"

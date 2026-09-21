@@ -218,7 +218,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   thực hiện lại. `Journal.create()` đặt tên theo `t020-run-<YYYYmmdd-HHMMSS>-<NNN>.json` và tăng
   `NNN` khi tên đã có người giữ, còn `Journal.__init__()` mở file bằng chế độ độc quyền (`O_EXCL`)
   trước khi ghi byte đầu tiên. Hai lần chạy cùng `run-dir` bắt đầu trong cùng một giây vì thế nhận
-  hai file khác nhau, và journal của lần chạy trước giữ nguyên từng byte. Nếu cả 1000 số thứ tự
+  hai file khác nhau, và journal của lần chạy trước giữ nguyên từng byte. Nếu cả 999 số thứ tự
   trong một giây đều đã bị chiếm, lần chạy mới dừng với exit code 2 chứ không thay thế file nào.
 
   Bằng chứng: năm test mới trong `tests/unit/test_t020_cutover.py` đóng băng đồng hồ tại

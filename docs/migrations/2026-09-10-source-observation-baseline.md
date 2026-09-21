@@ -51,7 +51,7 @@ JSON cho mọi bước.
 `t020-run-<YYYYmmdd-HHMMSS>-<NNN>.json`, trong đó `NNN` tăng lên khi tên đã có người giữ, và file
 được mở theo chế độ độc quyền (`O_EXCL`) trước khi ghi byte đầu tiên. Hai lần chạy cùng `run-dir`
 bắt đầu trong cùng một giây vì thế nhận hai file khác nhau; bằng chứng của lần chạy trước giữ
-nguyên từng byte. Nếu cả 1000 số thứ tự trong một giây đều đã bị chiếm, lần chạy mới dừng với exit
+nguyên từng byte. Nếu cả 999 số thứ tự trong một giây đều đã bị chiếm, lần chạy mới dừng với exit
 code 2 và không thay thế file nào.
 
 Không kết nối nào bị từ chối vì tên host. Preflight đo đúng thứ nó cần: một double 17 chữ số có
