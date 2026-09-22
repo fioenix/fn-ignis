@@ -125,14 +125,14 @@ unchanged earlier evidence.
 
 ### Tests for User Story 4
 
-- [ ] T024 [P] [US4] Add unit tests for Attention parent/cluster lineage, immutable Brief revision numbers, and context-versus-support evidence roles in `tests/unit/test_market_brief.py` and `tests/unit/test_surface_boundaries.py` (touches: listed test files; depends-on: T020, T023)
-- [ ] T025 [P] [US4] Add integration tests for Attention handoff, Market revision, fresh probe authorization, and old-evidence immutability in `tests/integration/test_dual_surface_journey.py` (touches: `tests/integration/test_dual_surface_journey.py`; depends-on: T020, T023)
+- [x] T024 [P] [US4] Add unit tests for Attention parent/cluster lineage, immutable Brief revision numbers, and context-versus-support evidence roles in `tests/unit/test_market_brief.py` and `tests/unit/test_surface_boundaries.py` (touches: listed test files; depends-on: T020, T023)
+- [x] T025 [P] [US4] Add integration tests for Attention handoff, Market revision, fresh probe authorization, and old-evidence immutability in `tests/integration/test_dual_surface_journey.py` (touches: `tests/integration/test_dual_surface_journey.py`; depends-on: T020, T023)
 
 ### Implementation for User Story 4
 
-- [ ] T026 [US4] Implement explicit Attention-topic handoff in `src/ignis/application/use_cases/create_market_revision.py`, recording parent mission and cluster as context lineage (touches: `src/ignis/application/use_cases/create_market_revision.py`; depends-on: T015, T024)
-- [ ] T027 [US4] Implement immutable Market Brief revision creation and fresh-probe binding in `src/ignis/application/use_cases/create_market_revision.py` and `src/ignis/infrastructure/persistence/workspace_repository.py` (touches: listed files; depends-on: T020, T026)
-- [ ] T028 [US4] Classify Attention context versus Market evidence in `src/ignis/application/use_cases/get_mission_analysis.py`, `src/ignis/infrastructure/harness/strategic_reasoner.py`, and `src/ignis/interfaces/mcp/server.py` (touches: listed files; depends-on: T025, T027)
+- [x] T026 [US4] Implement explicit Attention-topic handoff in `src/ignis/application/use_cases/create_market_revision.py`, recording parent mission and cluster as context lineage (touches: `src/ignis/application/use_cases/create_market_revision.py`; depends-on: T015, T024)
+- [x] T027 [US4] Implement immutable Market Brief revision creation and fresh-probe binding in `src/ignis/application/use_cases/create_market_revision.py` and `src/ignis/infrastructure/persistence/workspace_repository.py` (touches: listed files; depends-on: T020, T026)
+- [x] T028 [US4] Classify Attention context versus Market evidence in `src/ignis/application/use_cases/get_mission_analysis.py`, `src/ignis/infrastructure/harness/strategic_reasoner.py`, and `src/ignis/interfaces/mcp/server.py` (touches: listed files; depends-on: T025, T027)
 
 **Checkpoint**: US4 is independently demonstrable: changing a Market Brief creates a new
 evidence line and never rewrites the earlier one.
@@ -149,14 +149,14 @@ mission conflict, and a frozen same-second clock.
 
 ### Tests for User Story 5
 
-- [ ] T029 [P] [US5] Add unit tests for one-writer mission claims, transactional state transitions, and clear conflict errors in `tests/unit/test_research_workspace.py` and `tests/unit/test_surface_boundaries.py` (touches: listed test files; depends-on: T008)
-- [ ] T030 [P] [US5] Add integration tests for concurrent distinct missions, same-mission conflict, and same-second journal allocation in `tests/integration/test_workspace_concurrency.py` (touches: `tests/integration/test_workspace_concurrency.py`; depends-on: T008)
+- [x] T029 [P] [US5] Add unit tests for one-writer mission claims, transactional state transitions, and clear conflict errors in `tests/unit/test_research_workspace.py` and `tests/unit/test_surface_boundaries.py` (touches: listed test files; depends-on: T008)
+- [x] T030 [P] [US5] Add integration tests for concurrent distinct missions, same-mission conflict, and same-second journal allocation in `tests/integration/test_workspace_concurrency.py` (touches: `tests/integration/test_workspace_concurrency.py`; depends-on: T008)
 
 ### Implementation for User Story 5
 
-- [ ] T031 [US5] Complete transactional mission state updates and workspace read/write coordination in `src/ignis/infrastructure/persistence/workspace_repository.py` without serializing unrelated missions (touches: `src/ignis/infrastructure/persistence/workspace_repository.py`; depends-on: T029, T030)
-- [ ] T032 [US5] Integrate collision-safe journal creation and recovery readback into the mission execution path in `src/ignis/application/use_cases/execute_mission.py` and `src/ignis/infrastructure/persistence/workspace_repository.py` (touches: listed files; depends-on: T031)
-- [ ] T033 [US5] Verify multi-host reopen and concurrent mission behavior through the MCP contract and the shared configured database in `src/ignis/interfaces/mcp/server.py` and `tests/integration/test_workspace_concurrency.py` (touches: listed files; depends-on: T032)
+- [x] T031 [US5] Complete transactional mission state updates and workspace read/write coordination in `src/ignis/infrastructure/persistence/workspace_repository.py` without serializing unrelated missions (touches: `src/ignis/infrastructure/persistence/workspace_repository.py`; depends-on: T029, T030)
+- [x] T032 [US5] Integrate collision-safe journal creation and recovery readback into the mission execution path in `src/ignis/application/use_cases/execute_mission.py` and `src/ignis/infrastructure/persistence/workspace_repository.py` (touches: listed files; depends-on: T031)
+- [x] T033 [US5] Verify multi-host reopen and concurrent mission behavior through the MCP contract and the shared configured database in `src/ignis/interfaces/mcp/server.py` and `tests/integration/test_workspace_concurrency.py` (touches: listed files; depends-on: T032)
 
 **Checkpoint**: US5 is independently demonstrable: no concurrent run loses state or overwrites a
 journal, and unrelated missions are not globally blocked.
@@ -167,10 +167,10 @@ journal, and unrelated missions are not globally blocked.
 
 **Purpose**: Close documentation, quality, and regression gates after all required stories pass.
 
-- [ ] T034 [P] Update the permanent user/developer documentation for workspace lifecycle and surface boundaries in `docs/USER_GUIDE.md`, `docs/USER_GUIDE.vi.md`, and `README.md` (touches: listed files; depends-on: T012, T017, T023, T028)
-- [ ] T035 [P] Add repository convention and provenance assertions for workspace-local data, no transcript persistence, and Attention/Market separation in `tests/unit/test_repo_conventions.py` and `tests/unit/test_data_provenance.py` (touches: listed test files; depends-on: T028, T033)
-- [ ] T036 Run the feature quickstart and both-backend verification gates, record skipped PostgreSQL coverage honestly when `IGNIS_TEST_POSTGRES_DSN` is absent, and inspect the final diff in `.handoff/` only if a temporary handoff artifact is needed (touches: `specs/007-dual-surface-research-workspace/quickstart.md`; depends-on: T034, T035)
-- [ ] T037 Prepare the evidence-gated production migration rehearsal and verification record for the new shared schema, including projection/count/invariant/digest outputs and an explicit no-apply-without-authorization boundary (touches: `.handoff/`, `scripts/`, `specs/007-dual-surface-research-workspace/quickstart.md`; depends-on: T036)
+- [x] T034 [P] Update the permanent user/developer documentation for workspace lifecycle and surface boundaries in `docs/USER_GUIDE.md`, `docs/USER_GUIDE.vi.md`, and `README.md` (touches: listed files; depends-on: T012, T017, T023, T028)
+- [x] T035 [P] Add repository convention and provenance assertions for workspace-local data, no transcript persistence, and Attention/Market separation in `tests/unit/test_repo_conventions.py` and `tests/unit/test_data_provenance.py` (touches: listed test files; depends-on: T028, T033)
+- [x] T036 Run the feature quickstart and both-backend verification gates, including the handoff-revision regression and honest reporting of any unavailable PostgreSQL coverage (touches: `specs/007-dual-surface-research-workspace/quickstart.md`; depends-on: T034, T035)
+- [x] T037 Prepare the evidence-gated production migration rehearsal and verification record for the new shared schema, including projection/count/invariant/digest outputs and an explicit no-apply-without-authorization boundary (touches: `.handoff/`, `scripts/`, `specs/007-dual-surface-research-workspace/quickstart.md`; depends-on: T036)
 
 ---
 

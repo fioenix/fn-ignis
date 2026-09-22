@@ -1,16 +1,16 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> - **Cập nhật lần cuối:** 21/09/2026
+> - **Cập nhật lần cuối:** 22/09/2026
 > - **Phiên bản:** `v0.4.1`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
->   + FastMCP Server (39 Handlers & Tools)
+>   + FastMCP Server (45 Handlers & Tools)
 > - **Trạng thái:** Bản live hiện hành `v0.4.1` đã tag và publish.
 >   Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`; đừng tin dòng này — nó
 >   là tài liệu, còn
 >   tag với release nằm trên Git và GitHub. Cutover T020 trên corpus PostgreSQL hiện hữu đã chạy
 >   xong 20/09/2026: verifier trả `VERIFIED`, runtime mới đã khởi động, ingress theo lịch đã mở lại.
-> - **Trạng thái Tests:** 1.032 passed, 4 skipped trên CI tại `fd1577e` (SQLite + Timescale dùng
->   một lần) | Ruff clean
+> - **Trạng thái Tests:** Latest dual-surface verification: 923 unit passed, 148 SQLite integration
+>   passed, and 302 PostgreSQL integration passed with 2 intentional SQLite skips | Ruff clean
 
 ---
 
@@ -826,7 +826,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 - [x] **Deterministic Artifact Builder:** Single-file HTML Report (Tailwind CSS) trực quan hóa Scorecard, Ma trận Cung-Cầu và Bằng chứng đa kênh.
 
 ### D. Tối Ưu Hóa Giao Tiếp & FastMCP Catalog
-- [x] **Danh mục 39 FastMCP Tools:** Hoàn thiện và đồng bộ đối xứng giữa `server.py`, `openclaw.json`, `hermes_manifest.json`, `.hermes/tools.json` và `setup_bundle.py`.
+- [x] **Danh mục 45 FastMCP Tools:** Hoàn thiện và đồng bộ đối xứng giữa `server.py`, `openclaw.json`, `hermes_manifest.json`, `.hermes/tools.json` và `setup_bundle.py`.
 - [x] **Cross-Agent Session Tracing:** Lưu trữ trường `agent` và `session_id`. Tool `get_current_session_mission` tự động khôi phục ngữ cảnh làm việc mà không cần nhập lại ID.
 - [x] **Tài liệu Tích hợp Meta Dedicated:** [docs/META_INTEGRATION_GUIDE.md](docs/META_INTEGRATION_GUIDE.md) định nghĩa toàn diện mô hình Dual-UX và kịch bản tự động hóa cho AI Agent.
 
@@ -844,28 +844,15 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 - [x] **Insights TTL Caching (2 giờ):** Caching in-memory cho post metrics của Threads/Reels để giải quyết triệt để bài toán N+1 request và bảo vệ hạn mức 200 reqs/user/hour của Meta Graph API.
 - [x] **Registry Multi-Plugin Coexistence (Tech Debt):** Đảm bảo `TikTokPlugin` (Search Video Grid & Comments) và `TikTokCreativeCenterPlugin` (Macro Trends Radar) cùng tồn tại song song trong `ConnectorPluginRegistry` mà không bị ghi đè.
 
-### 🎯 Epic 2: Data Provenance, Ingress Health Audit & Citation Attribution Engine (Partial)
+### 🎯 Epic 2: Data Provenance, Ingress Health Audit & Citation Attribution Engine
 *Mục tiêu: Xóa bỏ nhận định mơ hồ và ảo giác; minh bạch hóa nguồn gốc dữ liệu (Data Provenance) và phát hiện kênh ingress bị rỗng/lỗi.*
-- [ ] **Channel health còn thiếu surface-level identity:** `ChannelDataSummary` đã có đủ năm status
-  và báo năm platform mà mission nhắm tới, kèm count và top citation. Nó chưa tách TikTok Video Grid
-  khỏi TikTok Comments; cả hai đang cùng là `PlatformType.TIKTOK`, nên một surface khỏe có thể che
-  surface kia hỏng. Quyết trước xem health contract là platform hay connector surface rồi mới đổi
-  schema/payload.
-- [ ] **Citation Attribution còn thiếu hai consumer:** `StrategicInsight` và top citation của
-  channel đã dùng `CitationEvidence`; `get_mission_analysis` serialize được chúng. Nhưng
-  `MarketOpportunity.supporting_signals` và `actionable_takeaways` vẫn là `List[str]`, nên chưa có
-  typed citation gắn trực tiếp vào cơ hội và hành động như spec hứa. Quan trọng hơn,
-  `CitationEvidence` chưa mang `observation_id`, còn `_citation_key()` tự định danh bằng
-  `platform | source_url-or-title` thay vì dùng observation/source identity đã được repository
-  giải quyết. Đây là bản source identity thứ hai: URL variant có thể tách một source thành hai
-  citation, còn URL dùng chung hoặc title trùng có thể gộp sai. Contract cần trỏ citation tới đúng
-  observation trong `mission_evidence`; display URL/title chỉ là payload.
-  - **HTML consequence:** dashboard đã render Data Ingress audit và citation pills dưới strategic
-    insights; opportunity và actionable chưa thể có pill cho tới khi model mang typed citation.
-  - **FastMCP consequence:** payload đã có `channel_summaries` và citations cho
-    `strategic_insights`; phần còn lại là serialize đúng typed citation mới, không phải một backlog
-    item độc lập. Xem
-    [docs/DATA_PROVENANCE_AND_CITATION_SPEC.md](docs/DATA_PROVENANCE_AND_CITATION_SPEC.md).
+- [x] **Channel health theo connector surface:** `ChannelDataSummary` phân biệt các surface dưới
+  cùng một platform, gồm TikTok Video Grid và TikTok Comments, với status và count riêng; contract
+  này đã được kiểm bằng serializer MCP và integration journey.
+- [x] **Citation Attribution theo observation:** opportunity và actionable takeaway dùng typed
+  citation gắn với canonical `observation_id` và `evidence_role`; Attention context được tách
+  khỏi Market evidence. Serializer MCP và provenance tests giữ contract này, còn URL/title chỉ là
+  dữ liệu hiển thị.
 
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 
