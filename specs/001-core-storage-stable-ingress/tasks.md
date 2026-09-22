@@ -99,10 +99,37 @@
   backends and between runs. Behaviour is otherwise pinned by
   `tests/integration/test_top_clusters_characterization.py`, written before the rewrite, 24 cases
   per backend. Full evidence: `.handoff/T021-reader-optimization.handoff.md`
-- [ ] T022 [US1] Define the coverage scope promised by SC-004, raise it to at least 85%, and enforce
-  the threshold in CI; the 2026-09-13 SQLite-only run measured 73% overall and 71% across
-  persistence/connectors, while the latest Timescale-backed CI run measured 75% overall without
-  `--cov-fail-under`
+- [x] T022 [US1] Define the coverage scope promised by SC-004, raise it to at least 85%, and enforce
+  the threshold in CI. **Met on 22/09/2026 at 89.09%.** The scope had never been written down, so
+  the earlier readings answered a different question than the criterion asks: the 2026-09-13
+  SQLite-only run measured 73% overall and 71% across persistence/connectors, and the latest
+  Timescale-backed CI run measured 75% overall, none of them scoped and none enforced.
+  The scope is now `.coveragerc.sc004`, one entry per name in SC-004 -- Repository
+  (`infrastructure/persistence/*`), Registry (`connectors/registry.py`), RSS Plugin
+  (`connectors/google_trends/*`) and YouTube Plugin (`connectors/youtube/*`). Everything else under
+  `src/ignis` is outside the criterion and is absent from the scope rather than excluded from it;
+  there is no omit pattern, no `exclude_lines` and no `# pragma: no cover` anywhere inside it.
+  Measured over `pytest tests/` against a throwaway `timescale/timescaledb-ha:pg16` reached only
+  through `IGNIS_TEST_POSTGRES_DSN`: 2,364 statements, 258 missed, **89.09%** (overall package
+  coverage 80%). Per module: RSS Plugin 100.00%, YouTube Plugin 96.45%, SQLite repository 93.73%,
+  workspace repository 89.55%, Registry 89.27%, identifiers 84.62%, PostgreSQL repository 79.27%.
+  The rise came from behaviour tests through the public interfaces, not from line exercises: the
+  whole `search_signals` half of the RSS plugin (Suggest probing, the demand index and its band,
+  timeframe translation) and of the YouTube plugin (the `search.list` -> `videos.list` pair, the
+  publishedAfter cutoff, quota and transport failures) were untested, and
+  `tests/integration/test_t022_operational_surface_parity.py` now drives audit logging and platform
+  credentials on both backends.
+  CI enforces it: `coverage report --rcfile=.coveragerc.sc004` runs after the suite in
+  `.github/workflows/ci.yml` and exits 2 below the floor. Verified both ways on 22/09/2026 -- the
+  real gate exits 0 at 89.09%, and the same data against a floor of 99 exits 2. Without
+  `IGNIS_TEST_POSTGRES_DSN` the PostgreSQL adapter's tests skip and the scope measures 76.31%, so
+  the gate fails; that is correct, and it means the gate requires the database service CI already
+  provides. The SC-001 performance workflow is untouched and stays out of the PR matrix.
+  Two backend divergences that this work surfaced are **not** fixed here, because correcting
+  repository behaviour is outside a coverage task: `log_event`/`get_recent_logs` normalize `level`
+  on PostgreSQL and not on SQLite, and `save_platform_credentials` lower-cases `platform` on
+  PostgreSQL and not on SQLite. Both are recorded, with reproductions, in
+  `.handoff/T022-coverage-gate.handoff.md`
 
 ---
 

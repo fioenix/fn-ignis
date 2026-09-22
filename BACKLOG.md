@@ -142,14 +142,13 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   sanitize không chứa DSN, Supabase, token, API key hay password. Lượt này đóng khoảng trống mà
   `claude mcp list` và JSON-RPC trực tiếp không chứng minh được: model trong client thật đã gọi
   tool Ignis và đọc kết quả.
-- [ ] **Benchmark P95 đã đóng. Ngưỡng coverage 85% vẫn là khoảng trống đã đo, không chặn beta.**
+- [x] **Benchmark P95 và ngưỡng coverage 85% đều đã đóng.**
   Ngày 22/09/2026, SC-001 đã đạt: hai mươi lần chạy `scripts/t021_read_path_benchmark.py` trên
   10.000 observation, mười lần mỗi backend, không lần nào trượt. SQLite cho P95 từ 23,662 đến
   29,496 ms; PostgreSQL từ 8,320 đến 26,980 ms, đều dưới ngưỡng 50 ms. Hợp đồng benchmark giữ
   nguyên, không nới một tham số nào. Hai thay đổi đưa tới kết quả đó: index `sql/019` cho thứ tự
   latest-per-source, và cả hai reader xếp hạng cluster từ aggregate rồi chỉ đọc payload của những
-  cluster mà `limit` giữ lại. SC-004 vẫn chưa đạt: mục tiêu 85% nhưng CI đo 75% và không bật
-  `--cov-fail-under`, nên T022 còn mở và không được mô tả như đã đạt. Chạy lại số đo bằng
+  cluster mà `limit` giữ lại. Chạy lại số đo bằng
   `.venv/bin/python scripts/t021_read_path_benchmark.py --backend sqlite --enforce`.
   Từ 22/09/2026, SC-001 có gate CI riêng. `.github/workflows/performance.yml` chạy lại chính
   benchmark đó với `--enforce` trên cả hai backend, kích hoạt khi push vào `main`, `release/*`,
@@ -162,6 +161,24 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   đặt job đó thành required status trên `main` là thao tác trong GitHub settings và chưa ai đọc
   lại cấu hình để xác nhận. Chừng nào chưa xác nhận được, workflow chỉ báo cáo chứ không chặn
   merge.
+  Ngày 22/09/2026, SC-004 đã đạt 89,09%. Trước đó phạm vi chưa từng được viết ra, nên các con số
+  cũ trả lời một câu hỏi khác với câu hỏi mà tiêu chí đặt ra: 73% rồi 75% đều là coverage toàn
+  package, không giới hạn theo phạm vi nào và không chặn build. Phạm vi giờ nằm ở
+  `.coveragerc.sc004`, mỗi mục ứng với một tên trong SC-004: Repository
+  (`infrastructure/persistence/*`), Registry (`connectors/registry.py`), RSS Plugin
+  (`connectors/google_trends/*`), YouTube Plugin (`connectors/youtube/*`). Phần còn lại của
+  `src/ignis` nằm ngoài tiêu chí nên vắng mặt trong scope, chứ không phải bị loại trừ khỏi scope:
+  không có omit, không có `exclude_lines`, không có `# pragma: no cover` nào bên trong. Đo trên
+  `pytest tests/` với container `timescale/timescaledb-ha:pg16` dùng một lần, chỉ tới được qua
+  `IGNIS_TEST_POSTGRES_DSN`: 2.364 statement, 258 statement chưa được phủ; coverage toàn package
+  là 80%. Mức tăng đến từ test hành vi qua giao diện công khai chứ không phải test chạy cho đủ
+  dòng: trước đây toàn bộ nhánh `search_signals` của hai plugin chưa có test nào, phần audit log
+  và platform credentials cũng chưa được kiểm trên cả hai backend. CI giờ chặn thật:
+  `coverage report --rcfile=.coveragerc.sc004` chạy sau suite và thoát mã 2 khi dưới ngưỡng. Đã
+  kiểm hai chiều: cổng thật thoát 0 ở 89,09%, cùng dữ liệu đó với ngưỡng 99 thì thoát 2. Không có
+  `IGNIS_TEST_POSTGRES_DSN` thì test của adapter PostgreSQL bị skip, scope đo còn 76,31% và cổng
+  fail; điều đó đúng và có nghĩa là cổng này cần service database mà CI vốn đã có. Workflow
+  performance của SC-001 giữ nguyên.
 
 
 - [x] **Đã xong (14/09/2026): hai client local chạy Ignis cùng lúc được.** Startup của MCP server

@@ -84,6 +84,24 @@ jobs:
         run: |
           uv run pytest tests/ -v --cov=ignis --cov-report=term-missing
 
+      # SC-004 promises at least 85% coverage for the Repository, the RSS Plugin, the YouTube
+      # Plugin and the Registry. The step above measures the whole package and prints it; this one
+      # reads that same .coverage data restricted to the four things the criterion names, and exits
+      # non-zero below the floor. Until 22/09/2026 the threshold was printed and never enforced, so
+      # coverage could fall without any build going red.
+      #
+      # The scope lives in .coveragerc.sc004, which is the single reviewable statement of what
+      # SC-004 covers; tests/unit/test_t022_coverage_gate.py pins it, pins the floor at 85, and
+      # refuses an omit pattern that would hide production code inside the scope.
+      #
+      # This runs on the PostgreSQL service configured above, reached only through
+      # IGNIS_TEST_POSTGRES_DSN. Without it the PostgreSQL adapter's tests skip, roughly a quarter
+      # of the scope goes unexercised, and the gate fails -- correctly, because the promise is not
+      # met by a run that never touched half the repository.
+      - name: Enforce the SC-004 Coverage Floor
+        run: |
+          uv run coverage report --rcfile=.coveragerc.sc004
+
       - name: Verify Clean Packaging (uv build)
         run: |
           uv build
