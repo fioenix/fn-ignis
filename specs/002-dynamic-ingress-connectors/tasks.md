@@ -19,8 +19,14 @@
 
 - [x] T008 Route connector sightings through the shared platform-object identity resolver
 - [x] T009 Converge TikTok tag/video and Google keyword identities across metadata and URL routes
-- [ ] T010 Reconcile Threads/Reels numeric primary keys with permalink shortcodes after connectors
-  expose both values or an explicit alias ledger is designed
+- [x] T010 Reconcile Threads/Reels numeric primary keys with permalink shortcodes through a
+  persisted alias ledger. Every Threads and Reels emission path already carries both values on one
+  record, so `resolve_identity_alias` registers the relationship that record witnesses, and a later
+  permalink-only sighting resolves through `source_identity_aliases` (sql/018) instead of filing a
+  second row. String equality between the two namespaces still proves nothing, a conflicting claim
+  on one shortcode is logged rather than merged, and `observations.identity_source` is unchanged.
+  Verified on SQLite; the PostgreSQL half of the dual-backend contract is implemented but was not
+  executed -- `IGNIS_TEST_POSTGRES_DSN` was unset, so those 12 cases skipped.
 
 ## Phase 6: Credential Lifecycle Contract (2026-09-14)
 

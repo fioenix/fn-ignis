@@ -118,15 +118,23 @@ def test_the_record_states_that_nothing_production_was_migrated(sqlite_record):
 
 
 def test_the_rehearsal_applies_the_repository_schema_contract_order():
-    """One order, or the rehearsal is measuring a schema the integration suite never builds."""
+    """One order, or the rehearsal is measuring a schema the integration suite never builds.
+
+    A prefix rather than the whole list, because this rehearsal has a subject: it applies 017
+    onto everything that came before it and measures what that did. A migration added after its
+    subject is not part of the state it rehearses, so the contract is allowed to grow past the
+    end of this list -- but never to reorder, rename or drop anything inside it, which is what
+    the prefix comparison still pins.
+    """
     import re
     from pathlib import Path
 
     conftest = (Path(__file__).resolve().parents[1] / "integration" / "conftest.py").read_text()
     block = re.search(r"SCHEMA_MIGRATIONS = \((.*?)\)", conftest, re.DOTALL).group(1)
     contract = tuple(re.findall(r'"([^"]+\.sql)"', block))
-    assert rehearsal.SCHEMA_MIGRATIONS == contract
-    assert rehearsal.SCHEMA_MIGRATIONS[-1] == rehearsal.MIGRATION_UNDER_REHEARSAL
+    rehearsed = rehearsal.SCHEMA_MIGRATIONS
+    assert contract[: len(rehearsed)] == rehearsed
+    assert rehearsed[-1] == rehearsal.MIGRATION_UNDER_REHEARSAL
 
 
 def test_the_rehearsal_is_deterministic_and_leaves_nothing_behind(sqlite_record):

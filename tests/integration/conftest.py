@@ -44,6 +44,9 @@ SCHEMA_MIGRATIONS = (
     # restates this schema in _ensure_schema, so a contract that only one backend satisfies is
     # exactly what listing it here catches.
     "017_research_workspace.sql",
+    # The alias ledger. Threads and Reels reconcile a permalink shortcode to a numeric primary
+    # key through it, so a backend missing this table silently keeps filing two rows per post.
+    "018_source_identity_aliases.sql",
 )
 
 
@@ -163,6 +166,56 @@ class RepositoryCase:
                 (platform, external_id),
             ).fetchone()
         return str(row[0])
+
+    def source_external_ids(self) -> list:
+        """Every canonical object the corpus holds, in insertion order where one exists."""
+        query = "SELECT external_id FROM sources ORDER BY external_id"
+        if self.name == "sqlite":
+            with sqlite3.connect(self.repository._db_path) as conn:
+                return [row[0] for row in conn.execute(query).fetchall()]
+        with psycopg.connect(self.dsn) as conn:
+            return [row[0] for row in conn.execute(query).fetchall()]
+
+    def identity_aliases(self) -> list:
+        """Every alias row, as dicts, so a test names the column it is asserting on."""
+        columns = ("platform", "alias_external_id", "canonical_external_id", "witnessed_by")
+        query = (
+            f"SELECT {', '.join(columns)}, recorded_at FROM source_identity_aliases"
+            " ORDER BY alias_external_id"
+        )
+        if self.name == "sqlite":
+            with sqlite3.connect(self.repository._db_path) as conn:
+                rows = conn.execute(query).fetchall()
+        else:
+            with psycopg.connect(self.dsn) as conn:
+                rows = conn.execute(query).fetchall()
+        return [
+            {**dict(zip(columns, row)), "recorded_at": str(row[len(columns)])} for row in rows
+        ]
+
+    def insert_identity_alias(self, platform: str, alias: str, canonical: str) -> None:
+        """Write one alias row directly, to exercise the constraint rather than the guard."""
+        columns = "platform, alias_external_id, canonical_external_id, witnessed_by"
+        if self.name == "sqlite":
+            with sqlite3.connect(self.repository._db_path) as conn:
+                conn.execute(
+                    f"INSERT INTO source_identity_aliases (id, {columns}, recorded_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid4()),
+                        platform,
+                        alias,
+                        canonical,
+                        "test_fixture",
+                        "2026-09-15T00:00:00+00:00",
+                    ),
+                )
+            return
+        with psycopg.connect(self.dsn, autocommit=True) as conn:
+            conn.execute(
+                f"INSERT INTO source_identity_aliases ({columns}) VALUES (%s, %s, %s, %s)",
+                (platform, alias, canonical, "test_fixture"),
+            )
 
     def attach_evidence(self, mission_id, observation_id: str) -> None:
         if self.name == "sqlite":

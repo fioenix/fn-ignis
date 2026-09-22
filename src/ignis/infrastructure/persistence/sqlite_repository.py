@@ -27,7 +27,11 @@ from ignis.infrastructure.persistence.identifiers import (
     uuid_or_none as _uuid_or_none,
     uuid_text as _uuid_text,
 )
-from ignis.domain.source_identity import resolve_source_identity
+from ignis.domain.source_identity import (
+    alias_namespace_prefix,
+    resolve_identity_alias,
+    resolve_source_identity,
+)
 from ignis.domain.value_objects import (
     GeoCode,
     PlatformType,
@@ -228,6 +232,24 @@ class SqliteTrendRepository(ITrendRepository):
                 UNIQUE (mission_id, observation_id)
             );
             CREATE INDEX IF NOT EXISTS idx_mission_evidence_observation ON mission_evidence (observation_id);
+
+            -- The alias ledger from sql/018_source_identity_aliases.sql. Restated here for the
+            -- same reason as the three tables above: SQLite does not read the sql/ files, and a
+            -- backend missing this table would keep filing two rows per Threads or Reels post
+            -- while the other one reconciled them.
+            CREATE TABLE IF NOT EXISTS source_identity_aliases (
+                id TEXT PRIMARY KEY,
+                platform TEXT NOT NULL,
+                -- Both carry their namespace, "<kind>:<value>", as sources.external_id does.
+                alias_external_id TEXT NOT NULL,
+                canonical_external_id TEXT NOT NULL,
+                witnessed_by TEXT NOT NULL,
+                recorded_at TEXT NOT NULL,
+                -- One canonical per alias, forever. See the migration header for why a second
+                -- claim is kept out rather than allowed to overwrite.
+                UNIQUE (platform, alias_external_id),
+                CHECK (alias_external_id <> canonical_external_id)
+            );
 
             CREATE TABLE IF NOT EXISTS topic_clusters (
                 id TEXT PRIMARY KEY,
@@ -659,6 +681,76 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_prune)
 
+    def _reconcile_through_aliases(self, cur, platform, signal, identity):
+        """The canonical identity for this sighting once the alias ledger has had its say.
+
+        Two cases, and only two. A record that carries both the platform's primary key and a
+        permalink shortcode witnesses their relationship, so the alias is registered and the
+        record keeps the primary-key identity it already resolved to. A record that resolved into
+        the shortcode namespace and witnessed nothing is looked up, and follows the ledger when
+        an earlier record proved where it belongs.
+
+        Everything else is left exactly as the resolver returned it -- which is the pre-ledger
+        behavior, and the behavior any platform that declares no alias pair keeps forever.
+        """
+        alias = resolve_identity_alias(platform, signal.source_url, signal.metadata)
+        if alias is not None:
+            self._register_identity_alias(cur, alias)
+            return identity
+
+        prefix = alias_namespace_prefix(platform)
+        if prefix is None or not identity.external_id.startswith(prefix):
+            return identity
+
+        row = cur.execute(
+            "SELECT canonical_external_id FROM source_identity_aliases"
+            " WHERE platform = ? AND alias_external_id = ?;",
+            (platform, identity.external_id),
+        ).fetchone()
+        if row is None:
+            return identity
+        canonical = row["canonical_external_id"] if hasattr(row, "keys") else row[0]
+        return dataclasses.replace(identity, external_id=canonical)
+
+    def _register_identity_alias(self, cur, alias) -> None:
+        """Record the alias unless one is already recorded for this shortcode.
+
+        DO NOTHING, then read back what is actually stored. A second record claiming the same
+        shortcode for a different primary key cannot be reconciled -- the ledger has no way to
+        tell which claim is wrong -- so the stored one stands and the divergence is logged rather
+        than resolved. The conflicting record is still written, under its own primary key, which
+        leaves two rows where two objects were asserted instead of one wrong merge.
+        """
+        cur.execute(
+            "INSERT INTO source_identity_aliases"
+            " (id, platform, alias_external_id, canonical_external_id, witnessed_by, recorded_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT (platform, alias_external_id) DO NOTHING;",
+            (
+                str(uuid4()),
+                alias.platform,
+                alias.alias_external_id,
+                alias.canonical_external_id,
+                alias.witnessed_by,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        row = cur.execute(
+            "SELECT canonical_external_id FROM source_identity_aliases"
+            " WHERE platform = ? AND alias_external_id = ?;",
+            (alias.platform, alias.alias_external_id),
+        ).fetchone()
+        stored = row["canonical_external_id"] if hasattr(row, "keys") else row[0]
+        if stored != alias.canonical_external_id:
+            logger.warning(
+                "Conflicting alias claim on %s %s: ledger holds %s, this record claims %s."
+                " Keeping the recorded alias and storing this record under its own identifier.",
+                alias.platform,
+                alias.alias_external_id,
+                stored,
+                alias.canonical_external_id,
+            )
+
     def _record_observations(self, cur, signals: List[TrendSignal]) -> int:
         """Write each signal as one observation of one canonical source.
 
@@ -675,6 +767,8 @@ class SqliteTrendRepository(ITrendRepository):
             if identity is None:
                 logger.warning("Signal has no resolvable external identity, skipped: %s", platform)
                 continue
+
+            identity = self._reconcile_through_aliases(cur, platform, signal, identity)
 
             # One statement, not a SELECT then an INSERT: two passes racing on one video would
             # both find nothing and both insert.

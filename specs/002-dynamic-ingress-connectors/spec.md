@@ -2,7 +2,7 @@
 
 **Feature Directory**: `specs/002-dynamic-ingress-connectors`
 **Created**: 2026-08-31
-**Status**: Implemented; cross-route alias reconciliation remains open, and upstream credential revocation is explicitly out of scope
+**Status**: Implemented; cross-route alias reconciliation closed by the alias ledger (T010), and upstream credential revocation is explicitly out of scope
 **Input**: Pha 2 (Dynamic & Headless Scraping Ingress Feeds) - Triển khai TikTok Plugin, Threads Plugin, và Instagram Reels Plugin.
 **As-built amendment**: 2026-09-13 — dual HTTP/browser runtimes and canonical source identity
 **As-built amendment**: 2026-09-14 — credential storage lifecycle and the revocation boundary
@@ -70,8 +70,16 @@ Là hệ thống đo lường xu hướng thị giác và lối sống, tôi c�
   `src/ignis/domain/source_identity.py`, not by title or raw URL equality.
 - **FR-007**: TikTok hashtag/video and Google keyword routes MUST converge on their object
   namespaces. Threads and Reels numeric primary keys MUST remain separate from permalink
-  shortcodes until a connector supplies both values or an explicit alias ledger can reconcile
-  them; merging those namespaces by string equality can silently join different objects.
+  shortcodes except where a persisted alias ledger records the relationship; merging those
+  namespaces by string equality can silently join different objects and is never permitted.
+- **FR-012**: An alias between a permalink shortcode and a numeric primary key MAY be recorded
+  only from a single connector record that carries both values. The ledger MUST be directed
+  (shortcode to primary key) and single-hop, MUST hold at most one canonical object per shortcode
+  per platform, and MUST NOT redirect an identifier that is already canonical. A second record
+  claiming one shortcode for a different primary key MUST leave the recorded alias untouched and
+  MUST be stored under its own primary key, because the ledger cannot tell which claim is wrong
+  and two measurable rows are preferable to one silent merge. Every alias row MUST carry what
+  witnessed it and when.
 
 ### Credential lifecycle
 

@@ -31,7 +31,11 @@ from ignis.infrastructure.persistence.migration_state import (
     is_unbackfilled,
 )
 from ignis.domain.cross_platform_score import cross_platform_score
-from ignis.domain.source_identity import resolve_source_identity
+from ignis.domain.source_identity import (
+    alias_namespace_prefix,
+    resolve_identity_alias,
+    resolve_source_identity,
+)
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_platform, timeframe_to_days
 
 from ignis.infrastructure.auth.crypto import encrypt_credentials, decrypt_credentials
@@ -150,6 +154,8 @@ class PostgresTimescaleRepository(ITrendRepository):
                 logger.warning("Signal has no resolvable external identity, skipped: %s", platform)
                 continue
 
+            identity = await self._reconcile_through_aliases(cur, platform, signal, identity)
+
             await cur.execute(
                 "INSERT INTO sources (platform, external_id) VALUES (%s, %s)"
                 " ON CONFLICT (platform, external_id) DO UPDATE SET platform = EXCLUDED.platform"
@@ -198,6 +204,68 @@ class PostgresTimescaleRepository(ITrendRepository):
                     (str(signal.mission_id), str(observation_id)),
                 )
         return written
+
+    async def _reconcile_through_aliases(self, cur, platform, signal, identity):
+        """The canonical identity for this sighting once the alias ledger has had its say.
+
+        The same two cases as the SQLite path, restated here because the two backends speak
+        different SQL. What is shared is the part that must never diverge: both decide an alias
+        through ignis.domain.source_identity, and both treat a recorded alias as final.
+        """
+        alias = resolve_identity_alias(platform, signal.source_url, signal.metadata)
+        if alias is not None:
+            await self._register_identity_alias(cur, alias)
+            return identity
+
+        prefix = alias_namespace_prefix(platform)
+        if prefix is None or not identity.external_id.startswith(prefix):
+            return identity
+
+        await cur.execute(
+            "SELECT canonical_external_id FROM source_identity_aliases"
+            " WHERE platform = %s AND alias_external_id = %s;",
+            (platform, identity.external_id),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            return identity
+        return dataclasses.replace(identity, external_id=row[0])
+
+    async def _register_identity_alias(self, cur, alias) -> None:
+        """Record the alias unless one is already recorded for this shortcode.
+
+        DO NOTHING, then read back what is stored. A second record claiming one shortcode for a
+        different primary key cannot be reconciled, so the stored claim stands, the divergence is
+        logged, and the conflicting record is written under its own primary key -- two rows the
+        audit can measure rather than one merge nobody can undo.
+        """
+        await cur.execute(
+            "INSERT INTO source_identity_aliases"
+            " (platform, alias_external_id, canonical_external_id, witnessed_by)"
+            " VALUES (%s, %s, %s, %s)"
+            " ON CONFLICT (platform, alias_external_id) DO NOTHING;",
+            (
+                alias.platform,
+                alias.alias_external_id,
+                alias.canonical_external_id,
+                alias.witnessed_by,
+            ),
+        )
+        await cur.execute(
+            "SELECT canonical_external_id FROM source_identity_aliases"
+            " WHERE platform = %s AND alias_external_id = %s;",
+            (alias.platform, alias.alias_external_id),
+        )
+        stored = (await cur.fetchone())[0]
+        if stored != alias.canonical_external_id:
+            logger.warning(
+                "Conflicting alias claim on %s %s: ledger holds %s, this record claims %s."
+                " Keeping the recorded alias and storing this record under its own identifier.",
+                alias.platform,
+                alias.alias_external_id,
+                stored,
+                alias.canonical_external_id,
+            )
 
     async def prune_empty_clusters(self) -> int:
         """Remove clusters holding no observation at all.
