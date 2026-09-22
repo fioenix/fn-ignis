@@ -30,7 +30,7 @@ from ignis.infrastructure.persistence.migration_state import (
     UNBACKFILLED_CORPUS,
     is_unbackfilled,
 )
-from ignis.domain.cross_platform_score import cross_platform_score
+from ignis.domain.cross_platform_score import cluster_rank_key, cross_platform_score
 from ignis.domain.source_identity import (
     alias_namespace_prefix,
     resolve_identity_alias,
@@ -453,7 +453,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             o.geo_code, o.source_url, o.metadata, s.platform
         FROM observations o
         JOIN sources s ON s.id = o.source_id
-        WHERE o.cluster_id IS NOT NULL AND {window}
+        WHERE o.cluster_id IS NOT NULL AND {window} {cluster_filter}
         ORDER BY o.cluster_id, o.source_id, {latest_first}
     """
 
@@ -463,27 +463,92 @@ class PostgresTimescaleRepository(ITrendRepository):
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 10,
     ) -> List[TopicCluster]:
-        """Rank clusters by what was observed in the window, from the new model only."""
+        """Rank clusters by what was observed in the window, from the new model only.
+
+        Two statements for the same reason as the SQLite reader, restated here because the two
+        backends speak different SQL: ranking needs one aggregate row per cluster in the window,
+        the caller asked for `limit` of them, and JSON_AGG building the payload of every cluster
+        only to discard all but ten is work nobody reads. What must never diverge is shared --
+        the score is `cross_platform_score` and the order is `cluster_rank_key`, neither of them
+        restated in SQL.
+        """
         pool = await self._get_pool()
         # Built from the canonical day count rather than a local map. Four such maps existed,
         # each covering three of the five Timeframe members, each with a different silent
         # default -- which is how a ninety-day request came to be served a twenty-four hour
         # window with a successful status.
         interval = f"{timeframe_to_days(timeframe)} days"
-        latest = self._LATEST_PER_SOURCE.format(
-            window=self._WINDOW_PREDICATE.format(interval=interval),
-            latest_first=self._LATEST_FIRST,
-        )
+        window = self._WINDOW_PREDICATE.format(interval=interval)
 
-        query = f"""
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    ranked = await self._rank_clusters(cur, window, limit)
+                    if not ranked:
+                        return []
+                    return await self._read_cluster_payloads(cur, window, ranked)
+        except Exception as e:
+            logger.error(f"Error fetching top clusters: {e}", exc_info=True)
+            raise RepositoryException(f"Failed to fetch top clusters: {e}") from e
+
+    async def _rank_clusters(self, cur, window: str, limit: int):
+        """The cluster ids the caller asked for, strongest first, with their aggregates.
+
+        The join to topic_clusters decides which clusters exist, so it belongs in the ranking as
+        well as in the payload read: ranking without it could spend a slot on a cluster the
+        payload read then drops, leaving the caller with fewer results than it asked for.
+        """
+        latest = self._LATEST_PER_SOURCE.format(
+            window=window, latest_first=self._LATEST_FIRST, cluster_filter=""
+        )
+        await cur.execute(
+            f"""
+            WITH latest AS ({latest})
+            SELECT
+                l.cluster_id,
+                COUNT(*) AS source_count,
+                COUNT(DISTINCT l.platform) AS platform_count,
+                COALESCE(SUM(l.metric_value), 0.0) AS total_metric,
+                COALESCE(AVG(l.growth_velocity), 0.0) AS avg_velocity
+            FROM latest l
+            JOIN topic_clusters tc ON tc.id = l.cluster_id
+            GROUP BY l.cluster_id
+            """
+        )
+        scored = [
+            (
+                str(cluster_id),
+                cross_platform_score(
+                    distinct_platforms=int(platform_count or 0),
+                    total_metric=float(total_metric or 0.0),
+                    average_velocity=float(avg_velocity or 0.0),
+                ),
+                int(source_count or 0),
+            )
+            for cluster_id, source_count, platform_count, total_metric, avg_velocity
+            in await cur.fetchall()
+        ]
+        scored.sort(key=lambda item: cluster_rank_key(item[1], item[2], item[0]), reverse=True)
+        return scored[:limit]
+
+    async def _read_cluster_payloads(self, cur, window: str, ranked):
+        """Every signal of the ranked clusters, in the order ranking already decided."""
+        cluster_ids = [cluster_id for cluster_id, _score, _count in ranked]
+        # Pushed into the CTE, not applied to its output: with the ordering index leading on
+        # cluster_id this becomes one range per chosen cluster instead of a scan of the window.
+        latest = self._LATEST_PER_SOURCE.format(
+            window=window,
+            latest_first=self._LATEST_FIRST,
+            cluster_filter="AND o.cluster_id = ANY(%s::uuid[])",
+        )
+        await cur.execute(
+            f"""
             WITH latest AS ({latest})
             SELECT
                 tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category,
                 tc.first_seen_at, tc.last_updated_at,
                 COUNT(*) AS source_count,
                 COUNT(DISTINCT l.platform) AS platform_count,
-                COALESCE(SUM(l.metric_value), 0.0) AS total_metric,
-                COALESCE(AVG(l.growth_velocity), 0.0) AS avg_velocity,
                 JSON_AGG(JSON_BUILD_OBJECT(
                     'platform', l.platform,
                     'raw_title', l.observed_title,
@@ -502,50 +567,47 @@ class PostgresTimescaleRepository(ITrendRepository):
             JOIN topic_clusters tc ON tc.id = l.cluster_id
             GROUP BY tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category,
                      tc.first_seen_at, tc.last_updated_at
-        """
+            """,
+            (cluster_ids,),
+        )
+        payloads = {}
+        for row in await cur.fetchall():
+            (
+                c_id, name, label, summary, category, first_seen, last_updated,
+                source_count, platform_count, sigs_raw,
+            ) = row
+            payloads[str(c_id)] = (
+                name, label, summary, category, first_seen, last_updated,
+                source_count, platform_count, sigs_raw,
+            )
 
-        try:
-            async with pool.connection() as conn:
-                async with conn.cursor(row_factory=tuple_row) as cur:
-                    await cur.execute(query)
-                    rows = await cur.fetchall()
-
-            clusters = []
-            for row in rows:
-                (
-                    c_id, name, label, summary, category, first_seen, last_updated,
-                    source_count, platform_count, total_metric, avg_velocity, sigs_raw,
-                ) = row
-                # Scored here, by the same function the clusterer uses. The arithmetic used to
-                # live in this query as well, and the two had already drifted apart.
-                score = cross_platform_score(
-                    distinct_platforms=int(platform_count or 0),
-                    total_metric=float(total_metric or 0.0),
-                    average_velocity=float(avg_velocity or 0.0),
-                )
-                sigs_data = sigs_raw if isinstance(sigs_raw, list) else json.loads(sigs_raw or "[]")
-                signals_list = [
-                    self._signal_from_observation(s_dict, UUID(str(c_id))) for s_dict in sigs_data
-                ]
-                cluster = TopicCluster(
-                    id=UUID(str(c_id)),
-                    canonical_name=name,
-                    summary_text=summary
-                    or f"{source_count} sources across {platform_count} platforms.",
-                    category=category or "general",
-                    cross_platform_score=score,
-                    signals=signals_list,
-                    first_seen_at=first_seen,
-                    last_updated_at=last_updated,
-                )
-                cluster.topic_label = label
-                clusters.append(cluster)
-
-            clusters.sort(key=lambda c: (c.cross_platform_score, len(c.signals)), reverse=True)
-            return clusters[:limit]
-        except Exception as e:
-            logger.error(f"Error fetching top clusters: {e}", exc_info=True)
-            raise RepositoryException(f"Failed to fetch top clusters: {e}") from e
+        clusters = []
+        for cluster_id, score, _source_count in ranked:
+            payload = payloads.get(cluster_id)
+            if payload is None:
+                continue
+            (
+                name, label, summary, category, first_seen, last_updated,
+                source_count, platform_count, sigs_raw,
+            ) = payload
+            sigs_data = sigs_raw if isinstance(sigs_raw, list) else json.loads(sigs_raw or "[]")
+            signals_list = [
+                self._signal_from_observation(s_dict, UUID(cluster_id)) for s_dict in sigs_data
+            ]
+            cluster = TopicCluster(
+                id=UUID(cluster_id),
+                canonical_name=name,
+                summary_text=summary
+                or f"{source_count} sources across {platform_count} platforms.",
+                category=category or "general",
+                cross_platform_score=score,
+                signals=signals_list,
+                first_seen_at=first_seen,
+                last_updated_at=last_updated,
+            )
+            cluster.topic_label = label
+            clusters.append(cluster)
+        return clusters
 
     @staticmethod
     def _signal_from_observation(data: Dict[str, Any], cluster_id: UUID) -> TrendSignal:

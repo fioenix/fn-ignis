@@ -110,6 +110,7 @@ SCHEMA_MIGRATIONS = (
     "016_source_observation_model.sql",
     "017_research_workspace.sql",
     "018_source_identity_aliases.sql",
+    "019_observations_latest_per_source_index.sql",
 )
 
 # The platforms a sighting can come from, cycled so that a cluster spans several of them. The

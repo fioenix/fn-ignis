@@ -142,16 +142,14 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   sanitize không chứa DSN, Supabase, token, API key hay password. Lượt này đóng khoảng trống mà
   `claude mcp list` và JSON-RPC trực tiếp không chứng minh được: model trong client thật đã gọi
   tool Ignis và đọc kết quả.
-- [ ] **P95 benchmark và ngưỡng coverage 85% là khoảng trống đã đo, không chặn beta.** SC-001 đã
-  có benchmark tái lập được (`scripts/t021_read_path_benchmark.py`, 10.000 observation, ghi bằng
-  chính writer của repository, đo đúng `get_top_clusters`), nhưng **ngưỡng vẫn chưa đạt**. Ngày
-  22/09/2026, chín lần chạy trên SQLite cho P95 từ 39,349 đến 55,202 ms, trong đó **2 trên 9 lần
-  vượt 50 ms**; median P95 là 42,679 ms. Phía PostgreSQL **chưa có số đo nào** vì không có
-  `IGNIS_TEST_POSTGRES_DSN`. Nguyên nhân nằm ở reader chứ không phải ở benchmark: `ROW_NUMBER()`
-  partition theo `(cluster_id, source_id)` không khớp index nào đang có nên 10.000 dòng phải đi
-  qua temp B-tree, và không backend nào đẩy `LIMIT` xuống SQL. SC-004 đặt mục tiêu 85% nhưng CI
-  đo 75% và không bật `--cov-fail-under`. Cả hai vẫn là mục tiêu chưa đạt (T021, T022), không phải
-  điều kiện phát hành bản beta. Không được mô tả hai mục này như đã đạt. Chạy lại số đo bằng
+- [ ] **Benchmark P95 đã đóng. Ngưỡng coverage 85% vẫn là khoảng trống đã đo, không chặn beta.**
+  Ngày 22/09/2026, SC-001 đã đạt: hai mươi lần chạy `scripts/t021_read_path_benchmark.py` trên
+  10.000 observation, mười lần mỗi backend, không lần nào trượt. SQLite cho P95 từ 23,662 đến
+  29,496 ms; PostgreSQL từ 8,320 đến 26,980 ms, đều dưới ngưỡng 50 ms. Hợp đồng benchmark giữ
+  nguyên, không nới một tham số nào. Hai thay đổi đưa tới kết quả đó: index `sql/019` cho thứ tự
+  latest-per-source, và cả hai reader xếp hạng cluster từ aggregate rồi chỉ đọc payload của những
+  cluster mà `limit` giữ lại. SC-004 vẫn chưa đạt: mục tiêu 85% nhưng CI đo 75% và không bật
+  `--cov-fail-under`, nên T022 còn mở và không được mô tả như đã đạt. Chạy lại số đo bằng
   `.venv/bin/python scripts/t021_read_path_benchmark.py --backend sqlite --enforce`.
 
 

@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.resources import sql_seed_file
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
-from ignis.domain.cross_platform_score import cross_platform_score
+from ignis.domain.cross_platform_score import cluster_rank_key, cross_platform_score
 from ignis.domain.research_workspace import (
     MarketBriefRevision,
     ResearchWorkspace,
@@ -223,6 +223,22 @@ class SqliteTrendRepository(ITrendRepository):
             );
             CREATE INDEX IF NOT EXISTS idx_observations_source ON observations (source_id, observed_at DESC);
             CREATE INDEX IF NOT EXISTS idx_observations_cluster ON observations (cluster_id, observed_at DESC);
+
+            -- The ordering index from sql/019_observations_latest_per_source_index.sql. Its
+            -- column list is get_top_clusters' ORDER BY term for term, including the two
+            -- COALESCE expressions, because an index that merely resembles the ordering leaves
+            -- the temp B-tree in place. Partial on the two predicates the reader always applies,
+            -- which excludes every legacy observation this path can never read.
+            CREATE INDEX IF NOT EXISTS idx_observations_latest_per_source
+                ON observations (
+                    cluster_id,
+                    source_id,
+                    observed_at DESC,
+                    COALESCE(metric_value, 0) DESC,
+                    COALESCE(growth_velocity, 0) DESC,
+                    id DESC
+                )
+                WHERE cluster_id IS NOT NULL AND time_provenance = 'exact_ingestion';
 
             CREATE TABLE IF NOT EXISTS mission_evidence (
                 id TEXT PRIMARY KEY,
@@ -644,6 +660,7 @@ class SqliteTrendRepository(ITrendRepository):
               AND o.time_provenance = 'exact_ingestion'
               AND o.observed_at IS NOT NULL
               AND o.observed_at >= datetime('now', '{modifier}')
+              {cluster_filter}
         )
     """
 
@@ -884,7 +901,20 @@ class SqliteTrendRepository(ITrendRepository):
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 10,
     ) -> List[TopicCluster]:
-        """Rank clusters by what was observed in the window, from the new model only."""
+        """Rank clusters by what was observed in the window, from the new model only.
+
+        Two statements, not one, and the reason is the limit. Ranking needs an aggregate from
+        every cluster in the window, but the caller asked for ten of them -- so the first
+        statement reads only what ranking needs (four numbers per cluster) and the second reads
+        the payload for the ten that survived. Building all of it and slicing afterwards meant
+        constructing a thousand signal objects to return fifty, which was measured as roughly a
+        quarter of the read at 10,000 observations.
+
+        Nothing about the answer changes. The aggregates are the same aggregates, computed over
+        the same one-observation-per-source set, and the score is still `cross_platform_score`
+        rather than arithmetic restated in SQL -- which is the drift this codebase has already
+        paid for once.
+        """
         await self._ensure_schema()
 
         # Built from the canonical day count rather than a local map. Four such maps existed,
@@ -897,64 +927,114 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                rows = cur.execute(
-                    f"""
-                    {self._LATEST_PER_SOURCE.format(modifier=interval_modifier)}
-                    SELECT
-                        tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category,
-                        tc.first_seen_at, tc.last_updated_at,
-                        l.platform, l.observed_title, l.metric_value, l.growth_velocity,
-                        l.source_url, l.geo_code, l.metadata, l.observed_at, l.published_at,
-                        l.observation_id, l.identity_source, l.time_provenance
-                    FROM latest l
-                    JOIN topic_clusters tc ON tc.id = l.cluster_id
-                    WHERE l.rank = 1
-                    """
-                ).fetchall()
+                ranked = self._rank_clusters(cur, interval_modifier, limit)
+                if not ranked:
+                    return []
+                return self._read_cluster_payloads(cur, interval_modifier, ranked)
             finally:
                 if self._mem_conn is None:
                     conn.close()
 
-            grouped: Dict[str, List[Any]] = {}
-            for row in rows:
-                grouped.setdefault(row["id"], []).append(row)
-
-            clusters: List[TopicCluster] = []
-            for cluster_id, cluster_rows in grouped.items():
-                head = cluster_rows[0]
-                signals = [
-                    self._signal_from_observation(row, UUID(cluster_id)) for row in cluster_rows
-                ]
-                # Scored by the same function the clusterer uses, from one observation per
-                # source. The arithmetic used to be restated in this query.
-                score = cross_platform_score(
-                    distinct_platforms=len({s.platform for s in signals}),
-                    total_metric=sum(s.metric_value for s in signals),
-                    average_velocity=sum(s.growth_velocity for s in signals) / len(signals),
-                )
-                cluster = TopicCluster(
-                    id=UUID(cluster_id),
-                    canonical_name=head["canonical_name"],
-                    summary_text=head["summary_text"]
-                    or f"{len(signals)} sources across"
-                    f" {len({s.platform for s in signals})} platforms.",
-                    category=head["category"] or "general",
-                    cross_platform_score=score,
-                    signals=signals,
-                    first_seen_at=datetime.fromisoformat(head["first_seen_at"])
-                    if head["first_seen_at"]
-                    else None,
-                    last_updated_at=datetime.fromisoformat(head["last_updated_at"])
-                    if head["last_updated_at"]
-                    else datetime.now(timezone.utc),
-                )
-                cluster.topic_label = head["topic_label"]
-                clusters.append(cluster)
-
-            clusters.sort(key=lambda c: (c.cross_platform_score, len(c.signals)), reverse=True)
-            return clusters[:limit]
-
         return await asyncio.to_thread(_sync_get)
+
+    def _rank_clusters(self, cur, interval_modifier: str, limit: int):
+        """The cluster ids the caller asked for, strongest first, with their aggregates.
+
+        The join to topic_clusters is here as well as in the payload read, and deliberately so:
+        it decides which clusters exist at all. Ranking without it could hand a slot to a cluster
+        the payload read then drops, and the caller would get fewer than `limit` results for a
+        reason nothing in the query says out loud.
+        """
+        rows = cur.execute(
+            f"""
+            {self._LATEST_PER_SOURCE.format(modifier=interval_modifier, cluster_filter='')}
+            SELECT
+                l.cluster_id,
+                COUNT(*) AS source_count,
+                COUNT(DISTINCT l.platform) AS platform_count,
+                COALESCE(SUM(l.metric_value), 0.0) AS total_metric,
+                COALESCE(AVG(l.growth_velocity), 0.0) AS avg_velocity
+            FROM latest l
+            JOIN topic_clusters tc ON tc.id = l.cluster_id
+            WHERE l.rank = 1
+            GROUP BY l.cluster_id
+            """
+        ).fetchall()
+
+        scored = [
+            (
+                row["cluster_id"],
+                cross_platform_score(
+                    distinct_platforms=int(row["platform_count"] or 0),
+                    total_metric=float(row["total_metric"] or 0.0),
+                    average_velocity=float(row["avg_velocity"] or 0.0),
+                ),
+                int(row["source_count"] or 0),
+            )
+            for row in rows
+        ]
+        scored.sort(
+            key=lambda item: cluster_rank_key(item[1], item[2], item[0]), reverse=True
+        )
+        return scored[:limit]
+
+    def _read_cluster_payloads(self, cur, interval_modifier: str, ranked):
+        """Every signal of the ranked clusters, in the order ranking already decided."""
+        cluster_ids = [cluster_id for cluster_id, _score, _count in ranked]
+        placeholders = ", ".join("?" for _ in cluster_ids)
+        # Pushed into the CTE rather than applied to its output: with the ordering index leading
+        # on cluster_id this turns a scan of the whole window into one range per chosen cluster.
+        cluster_filter = f"AND o.cluster_id IN ({placeholders})"
+        rows = cur.execute(
+            f"""
+            {self._LATEST_PER_SOURCE.format(
+                modifier=interval_modifier, cluster_filter=cluster_filter
+            )}
+            SELECT
+                tc.id, tc.canonical_name, tc.topic_label, tc.summary_text, tc.category,
+                tc.first_seen_at, tc.last_updated_at,
+                l.platform, l.observed_title, l.metric_value, l.growth_velocity,
+                l.source_url, l.geo_code, l.metadata, l.observed_at, l.published_at,
+                l.observation_id, l.identity_source, l.time_provenance
+            FROM latest l
+            JOIN topic_clusters tc ON tc.id = l.cluster_id
+            WHERE l.rank = 1
+            """,
+            cluster_ids,
+        ).fetchall()
+
+        grouped: Dict[str, List[Any]] = {}
+        for row in rows:
+            grouped.setdefault(row["id"], []).append(row)
+
+        clusters: List[TopicCluster] = []
+        for cluster_id, score, _source_count in ranked:
+            cluster_rows = grouped.get(cluster_id)
+            if not cluster_rows:
+                continue
+            head = cluster_rows[0]
+            signals = [
+                self._signal_from_observation(row, UUID(cluster_id)) for row in cluster_rows
+            ]
+            cluster = TopicCluster(
+                id=UUID(cluster_id),
+                canonical_name=head["canonical_name"],
+                summary_text=head["summary_text"]
+                or f"{len(signals)} sources across"
+                f" {len({s.platform for s in signals})} platforms.",
+                category=head["category"] or "general",
+                cross_platform_score=score,
+                signals=signals,
+                first_seen_at=datetime.fromisoformat(head["first_seen_at"])
+                if head["first_seen_at"]
+                else None,
+                last_updated_at=datetime.fromisoformat(head["last_updated_at"])
+                if head["last_updated_at"]
+                else datetime.now(timezone.utc),
+            )
+            cluster.topic_label = head["topic_label"]
+            clusters.append(cluster)
+        return clusters
 
     @staticmethod
     def _signal_from_observation(row, cluster_id: UUID) -> TrendSignal:
@@ -1004,7 +1084,7 @@ class SqliteTrendRepository(ITrendRepository):
                 cur = conn.cursor()
                 rows = cur.execute(
                     f"""
-                    {self._LATEST_PER_SOURCE.format(modifier=interval_modifier)}
+                    {self._LATEST_PER_SOURCE.format(modifier=interval_modifier, cluster_filter='')}
                     SELECT * FROM latest WHERE rank = 1 AND cluster_id = ?
                     ORDER BY observed_at ASC
                     """,

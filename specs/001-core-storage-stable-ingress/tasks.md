@@ -76,20 +76,29 @@
 
 ## Phase 7: Convergence Gaps (2026-09-13)
 
-- [ ] T021 [US1] Add a reproducible dual-backend benchmark with at least 10,000 observations and
-  enforce `get_top_clusters` P95 < 50 ms; SC-001 currently has no benchmark evidence.
-  **Benchmark built, threshold NOT met -- left open deliberately.**
-  `scripts/t021_read_path_benchmark.py` seeds 10,000 observations (200 clusters x 5 sources x 10)
-  through `save_clusters`/`save_signals` and times the real `get_top_clusters`, with 5 discarded
-  warm-up calls, 50 measured iterations and a nearest-rank P95; `--enforce` exits 1 on a
-  violation. Over 9 SQLite runs on 22/09/2026 the per-run P95 ranged 39.349-55.202 ms and **2 of 9
-  exceeded 50 ms** (median P95 42.679 ms, median 35.123 ms). PostgreSQL is **unverified** --
-  `IGNIS_TEST_POSTGRES_DSN` was unset and the run refuses any fallback. Cause is in the reader,
-  not the benchmark: the `ROW_NUMBER()` partition by `(cluster_id, source_id)` matches neither
-  existing index so 10,000 rows pass through a temp B-tree (~77% of the time), and neither backend
-  pushes `LIMIT` into SQL, so all 200 clusters and 1,000 signals are built to return 10. Closing
-  T021 needs that reader change plus a PostgreSQL run, not a change to the benchmark. Measurements
-  and the full decision record: `.handoff/T021-read-path-benchmark.handoff.md`
+- [x] T021 [US1] Add a reproducible dual-backend benchmark with at least 10,000 observations and
+  enforce `get_top_clusters` P95 < 50 ms. **Met on both backends on 22/09/2026.** Twenty enforced
+  runs of `scripts/t021_read_path_benchmark.py` over 10,000 observations, ten per backend, zero
+  failures: SQLite P95 23.662-29.496 ms (median run 27.066, median latency 20.541 ms), PostgreSQL
+  P95 8.320-26.980 ms (median run 11.825, median latency 8.229 ms). The benchmark contract is
+  unchanged -- same corpus floor, threshold, warm-up, iteration count, nearest-rank percentile and
+  `--enforce` gate -- and every run returned 10 clusters / 50 signals. PostgreSQL evidence comes
+  from a throwaway `timescale/timescaledb-ha:pg16` container reached only through
+  `IGNIS_TEST_POSTGRES_DSN`.
+  Two changes got it there, each measured on its own. `sql/019_observations_latest_per_source_index.sql`
+  gives the latest-per-source ordering an index whose column list is the reader's ORDER BY term for
+  term, partial on the two predicates the reader always applies; `EXPLAIN QUERY PLAN` no longer
+  reports `USE TEMP B-TREE FOR LAST 5 TERMS OF ORDER BY` (SQLite median 39 -> 30 ms). Both readers
+  then rank clusters from aggregates and read the payload only for the ones `limit` keeps, instead
+  of building every cluster and slicing (SQLite median 30 -> 20.5 ms, PostgreSQL ~28 -> ~8 ms).
+  `LIMIT` was deliberately **not** pushed below the aggregation and the score was **not** restated
+  in SQL: `cross_platform_score` rounds half to even where both backends round half away from zero,
+  and a SQL copy of that formula is the defect the scorer was consolidated to remove.
+  One behaviour was deliberately changed: `cluster_rank_key` makes ties total by falling back to
+  the cluster id, replacing an order that was previously undefined and could differ between
+  backends and between runs. Behaviour is otherwise pinned by
+  `tests/integration/test_top_clusters_characterization.py`, written before the rewrite, 24 cases
+  per backend. Full evidence: `.handoff/T021-reader-optimization.handoff.md`
 - [ ] T022 [US1] Define the coverage scope promised by SC-004, raise it to at least 85%, and enforce
   the threshold in CI; the 2026-09-13 SQLite-only run measured 73% overall and 71% across
   persistence/connectors, while the latest Timescale-backed CI run measured 75% overall without

@@ -47,6 +47,7 @@ SCHEMA_MIGRATIONS = (
     # The alias ledger. Threads and Reels reconcile a permalink shortcode to a numeric primary
     # key through it, so a backend missing this table silently keeps filing two rows per post.
     "018_source_identity_aliases.sql",
+    "019_observations_latest_per_source_index.sql",
 )
 
 
