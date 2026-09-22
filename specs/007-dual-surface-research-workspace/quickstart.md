@@ -71,6 +71,42 @@ evidenced.
 Expected result: no mission state or run journal is lost through a collision or whole-file
 overwrite.
 
+## 6. Schema rehearsal
+
+The workspace schema is rehearsed on a database nothing depends on, and the run publishes what it
+measured. T037 is a rehearsal: it is not authorization to migrate a configured database, and no
+command below applies `sql/017_research_workspace.sql` to one.
+
+```bash
+# Read a configured database and report whether it already holds the workspace schema.
+# Read-only: it applies nothing and writes no row.
+.venv/bin/python scripts/t037_schema_rehearsal.py --mode inspect --dsn sqlite:///ignis.db
+
+# Rehearse into a throwaway database the script creates for itself.
+.venv/bin/python scripts/t037_schema_rehearsal.py --mode rehearse --confirm-scratch \
+    --json-out .handoff/t037-rehearsal.json
+```
+
+`rehearse` takes no `--dsn`. It mints its own scratch database, applies the migrations into that,
+and drops it, so there is no flag that points the writing mode at a database an operator names.
+Passing `--dsn` to it, or omitting `--confirm-scratch`, exits 2 without touching anything.
+
+The evidence record holds the target described without its credentials, the SHA-256 of every
+migration file and the order they were applied in, the four conserved legacy digests measured
+before and after `sql/017`, the row counts of `sources`, `observations` and `mission_evidence` on
+both sides, every table, column, foreign key, `ON DELETE` action, unique constraint and index the
+migration introduces, each workspace rule probed by attempting the write it forbids, a research
+created through the real use case, and the cleanup readback. No DSN appears anywhere in it.
+
+`--backend postgres` executes `sql/017` as a file and needs `IGNIS_TEST_POSTGRES_DSN`, which is
+used only to create and drop `ignis_rehearsal_<uuid>`. `DATABASE_URL` is never read. When the
+variable is unset, the PostgreSQL rehearsal is missing coverage and is reported as such rather
+than as a passing result. The default SQLite rehearsal measures the repository's own schema
+restatement, which is what a SQLite-local install runs; SQLite has no migration file to execute.
+
+Expected result: the migration adds the workspace boundary without moving a single legacy row,
+and the rehearsal says so with numbers rather than with a claim.
+
 ## Automated checks
 
 The implementation should provide targeted tests for the scenarios above, then run:
