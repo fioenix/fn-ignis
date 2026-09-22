@@ -8,6 +8,7 @@ an empty answer for them.
 """
 
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -136,3 +137,111 @@ async def test_adopting_a_non_empty_folder_preserves_the_files_already_in_it(
     assert (target / MANIFEST_FILENAME).is_file()
     assert (target / "interview-notes.md").read_text() == "what three retailers actually said\n"
     assert await store.get_research_workspace(workspace.workspace_id) is not None
+
+
+def _write_brief_revision(case, workspace_id, mission_id, revision_number, falsifiers):
+    """Insert one Brief revision directly, so the schema is what answers, not the use case.
+
+    The application already refuses an empty falsifier list. That is the layer a later caller
+    can bypass -- a backfill, a repair script, another service on the same database -- so the
+    question here is whether the schema refuses it too.
+    """
+    import json
+
+    columns = (
+        "id, workspace_id, mission_id, revision_number, decision, target_user, problem,"
+        " geo, timeframe, hypothesis, falsifiers, confirmed_by"
+    )
+    values = (
+        str(uuid4()), str(workspace_id), str(mission_id), revision_number,
+        "decision", "target user", "problem", "VN", "30d", "hypothesis",
+    )
+    if case.name == "sqlite":
+        import sqlite3
+
+        with sqlite3.connect(case.repository._db_path) as conn:
+            conn.execute(
+                f"INSERT INTO market_brief_revisions ({columns}, confirmed_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                values + (json.dumps(falsifiers), "requester", "2026-01-01T00:00:00+00:00"),
+            )
+        return
+
+    import psycopg
+
+    with psycopg.connect(case.dsn) as conn:
+        conn.execute(
+            f"INSERT INTO market_brief_revisions ({columns})"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            values + (list(falsifiers), "requester"),
+        )
+
+
+def _integrity_errors(case):
+    if case.name == "sqlite":
+        import sqlite3
+
+        return (sqlite3.IntegrityError,)
+    import psycopg
+
+    return (psycopg.errors.IntegrityError,)
+
+
+async def _market_mission_in_a_confirmed_research(repository_case, host_workspace):
+    store = WorkspaceRepository(repository=repository_case.repository)
+    use_case = CreateResearchWorkspaceUseCase(store=store)
+    proposal = await use_case.propose(host_workspace, "AI customer service")
+    workspace = await use_case.confirm(proposal, confirmation=True)
+    mission = ResearchMission(
+        title="Market investigation",
+        keywords=["ai customer service"],
+        workspace_id=workspace.workspace_id,
+        surface=ResearchSurface.MARKET.value,
+    )
+    await repository_case.repository.save_mission(mission)
+    return store, workspace, mission
+
+
+@pytest.mark.asyncio
+async def test_the_schema_refuses_a_brief_with_no_falsifier_on_both_backends(
+    repository_case, host_workspace
+):
+    """A hypothesis that cannot lose is not a hypothesis, and the database has to say so.
+
+    PostgreSQL used to accept it: `array_length('{}', 1)` is NULL, and a CHECK that evaluates
+    to NULL is not a violation. SQLite refused the same write, so the two backends disagreed
+    about the one rule that makes a Brief falsifiable.
+    """
+    store, workspace, mission = await _market_mission_in_a_confirmed_research(
+        repository_case, host_workspace
+    )
+
+    with pytest.raises(_integrity_errors(repository_case)) as raised:
+        _write_brief_revision(
+            repository_case, workspace.workspace_id, mission.id, 1, falsifiers=[]
+        )
+
+    # Refused by the falsifier rule itself, not by a foreign key or a unique index.
+    assert "falsifiers" in str(raised.value).lower()
+    assert await store.get_brief_revision_for_mission(mission.id) is None
+
+
+@pytest.mark.asyncio
+async def test_the_schema_accepts_a_brief_that_names_one_falsifier(
+    repository_case, host_workspace
+):
+    """The positive control: the constraint refuses emptiness, not every Brief."""
+    store, workspace, mission = await _market_mission_in_a_confirmed_research(
+        repository_case, host_workspace
+    )
+
+    _write_brief_revision(
+        repository_case, workspace.workspace_id, mission.id, 1,
+        falsifiers=["No retailer names reply latency among their top three costs"],
+    )
+
+    stored = await store.get_brief_revision_for_mission(mission.id)
+    assert stored is not None
+    assert list(stored.falsifiers) == [
+        "No retailer names reply latency among their top three costs"
+    ]

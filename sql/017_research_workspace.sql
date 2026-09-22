@@ -132,7 +132,12 @@ CREATE TABLE IF NOT EXISTS market_brief_revisions (
     confirmed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT market_brief_revisions_mission_key UNIQUE (mission_id),
     CONSTRAINT market_brief_revisions_workspace_number_key UNIQUE (workspace_id, revision_number),
-    CONSTRAINT market_brief_revisions_falsifiers_check CHECK (array_length(falsifiers, 1) >= 1)
+    -- cardinality, not array_length: array_length('{}', 1) is NULL, and a CHECK that
+    -- evaluates to NULL is not a violation, so the empty array this exists to refuse was
+    -- the one value that got through. The IS NOT NULL arm keeps the test total rather than
+    -- leaning on the column constraint to cover the NULL case.
+    CONSTRAINT market_brief_revisions_falsifiers_check
+        CHECK (falsifiers IS NOT NULL AND cardinality(falsifiers) >= 1)
 );
 
 CREATE INDEX IF NOT EXISTS idx_market_brief_revisions_workspace
