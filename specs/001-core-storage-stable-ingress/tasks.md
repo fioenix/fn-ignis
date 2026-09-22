@@ -77,7 +77,19 @@
 ## Phase 7: Convergence Gaps (2026-09-13)
 
 - [ ] T021 [US1] Add a reproducible dual-backend benchmark with at least 10,000 observations and
-  enforce `get_top_clusters` P95 < 50 ms; SC-001 currently has no benchmark evidence
+  enforce `get_top_clusters` P95 < 50 ms; SC-001 currently has no benchmark evidence.
+  **Benchmark built, threshold NOT met -- left open deliberately.**
+  `scripts/t021_read_path_benchmark.py` seeds 10,000 observations (200 clusters x 5 sources x 10)
+  through `save_clusters`/`save_signals` and times the real `get_top_clusters`, with 5 discarded
+  warm-up calls, 50 measured iterations and a nearest-rank P95; `--enforce` exits 1 on a
+  violation. Over 9 SQLite runs on 22/09/2026 the per-run P95 ranged 39.349-55.202 ms and **2 of 9
+  exceeded 50 ms** (median P95 42.679 ms, median 35.123 ms). PostgreSQL is **unverified** --
+  `IGNIS_TEST_POSTGRES_DSN` was unset and the run refuses any fallback. Cause is in the reader,
+  not the benchmark: the `ROW_NUMBER()` partition by `(cluster_id, source_id)` matches neither
+  existing index so 10,000 rows pass through a temp B-tree (~77% of the time), and neither backend
+  pushes `LIMIT` into SQL, so all 200 clusters and 1,000 signals are built to return 10. Closing
+  T021 needs that reader change plus a PostgreSQL run, not a change to the benchmark. Measurements
+  and the full decision record: `.handoff/T021-read-path-benchmark.handoff.md`
 - [ ] T022 [US1] Define the coverage scope promised by SC-004, raise it to at least 85%, and enforce
   the threshold in CI; the 2026-09-13 SQLite-only run measured 73% overall and 71% across
   persistence/connectors, while the latest Timescale-backed CI run measured 75% overall without

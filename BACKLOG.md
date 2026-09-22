@@ -142,10 +142,17 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   sanitize không chứa DSN, Supabase, token, API key hay password. Lượt này đóng khoảng trống mà
   `claude mcp list` và JSON-RPC trực tiếp không chứng minh được: model trong client thật đã gọi
   tool Ignis và đọc kết quả.
-- [ ] **P95 benchmark và ngưỡng coverage 85% là khoảng trống đã đo, không chặn beta.** SC-001 chưa
-  có benchmark tái lập được nào trên 10.000 dòng cho `get_top_clusters` P95 < 50 ms. SC-004 đặt mục
-  tiêu 85% nhưng CI đo 75% và không bật `--cov-fail-under`. Cả hai đã ghi rõ là mục tiêu chưa đạt
-  (T021, T022), không phải điều kiện phát hành bản beta. Không được mô tả hai mục này như đã đạt.
+- [ ] **P95 benchmark và ngưỡng coverage 85% là khoảng trống đã đo, không chặn beta.** SC-001 đã
+  có benchmark tái lập được (`scripts/t021_read_path_benchmark.py`, 10.000 observation, ghi bằng
+  chính writer của repository, đo đúng `get_top_clusters`), nhưng **ngưỡng vẫn chưa đạt**. Ngày
+  22/09/2026, chín lần chạy trên SQLite cho P95 từ 39,349 đến 55,202 ms, trong đó **2 trên 9 lần
+  vượt 50 ms**; median P95 là 42,679 ms. Phía PostgreSQL **chưa có số đo nào** vì không có
+  `IGNIS_TEST_POSTGRES_DSN`. Nguyên nhân nằm ở reader chứ không phải ở benchmark: `ROW_NUMBER()`
+  partition theo `(cluster_id, source_id)` không khớp index nào đang có nên 10.000 dòng phải đi
+  qua temp B-tree, và không backend nào đẩy `LIMIT` xuống SQL. SC-004 đặt mục tiêu 85% nhưng CI
+  đo 75% và không bật `--cov-fail-under`. Cả hai vẫn là mục tiêu chưa đạt (T021, T022), không phải
+  điều kiện phát hành bản beta. Không được mô tả hai mục này như đã đạt. Chạy lại số đo bằng
+  `.venv/bin/python scripts/t021_read_path_benchmark.py --backend sqlite --enforce`.
 
 
 - [x] **Đã xong (14/09/2026): hai client local chạy Ignis cùng lúc được.** Startup của MCP server
