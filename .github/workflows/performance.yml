@@ -1,0 +1,124 @@
+name: Performance
+
+# SC-001 -- `get_top_clusters` over 10,000 observations at P95 under 50 ms, on SQLite and on
+# PostgreSQL. T021 measured it and met it on 22/09/2026; this workflow is what keeps that true
+# afterwards, by re-running the same benchmark with `--enforce` so a regression turns the build red
+# instead of sitting in a handoff note nobody re-reads.
+#
+# Separate from ci.yml on purpose. The benchmark seeds 10,000 observations per backend through the
+# repository's own writer, which is minutes of work; charging every pull request for that would
+# catch on a feature branch a regression that only matters once it reaches a protected branch. So
+# this runs where the consequence is -- pushes to main and to the release and hotfix lines -- plus
+# a weekly run and a manual one. Ordinary PR CI is untouched and stays fast.
+#
+# The benchmark contract is not restated here. Corpus floor, threshold, warm-up count, iteration
+# count, nearest-rank percentile and the result-shape checks all live in
+# scripts/t021_read_path_benchmark.py, pinned by tests/unit/test_t021_read_path_benchmark.py. This
+# workflow supplies a machine and a throwaway database and passes two flags.
+
+on:
+  push:
+    branches: [ main, "release/*", "hotfix/*" ]
+  # Weekly, early Monday UTC. A push-only gate measures the code and never the floor it runs on:
+  # the hosted image, the service container and the interpreter all move underneath a latency
+  # threshold, and a quiet week would hide that until the next release push.
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+# Read-only. The job seeds its own throwaway database and publishes a JSON record; it has no reason
+# to write to the repository, and a scheduled job is exactly where a wider token is least watched.
+permissions:
+  contents: read
+
+# Latency is measured, so two of these must not share a runner's CPU. Queue rather than cancel:
+# each protected-branch push is a data point, and cancelling the earlier one drops it.
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # The job id and `name` below are the status string a branch-protection rule selects. Renaming
+  # either retires the gate silently -- protection keeps requiring a check that no longer reports --
+  # so tests/unit/test_t024_performance_workflow.py pins both. Making this job *required* is a
+  # GitHub settings operation, not something this file can do; see
+  # .handoff/T024-sc001-ci-gate.handoff.md.
+  sc001-read-path-p95:
+    name: SC-001 get_top_clusters P95
+    # Pinned, not `ubuntu-latest`. A latency threshold cannot sit on a label that re-points to new
+    # hardware on GitHub's migration schedule. This is a standard GitHub-hosted image available to
+    # every repository -- shared infrastructure, so absolute numbers vary run to run. That is
+    # tolerable here because the gate is a 50 ms threshold with measured headroom (T021's worst
+    # SQLite P95 was 29.496 ms), not a regression detector reading small deltas. A tighter gate
+    # would need a dedicated runner, and no such runner label exists for this repository.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # The only way the PostgreSQL run reaches a database. The script refuses to run without it
+      # and has no fallback -- in particular it never reads the runtime connection variable, which
+      # would point a 10,000-row synthetic seed at a configured corpus.
+      IGNIS_TEST_POSTGRES_DSN: postgresql://postgres:ignis_test@localhost:5432/postgres
+    services:
+      postgres:
+        # Same image family as the ci.yml contract: the benchmark measures a query plan, and a
+        # different engine plans it differently.
+        image: timescale/timescaledb-ha:pg16
+        env:
+          POSTGRES_PASSWORD: ignis_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      # One interpreter, pinned. ci.yml spans 3.11 to 3.14 because compatibility is what it tests;
+      # here a moving interpreter would make a latency change and a runtime change indistinguishable
+      # in the record.
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      # --locked installs exactly the solution in the committed uv.lock. Re-resolving from the
+      # version ranges would publish a number measured against a dependency set no checkout
+      # reproduces. No extras: the benchmark needs only the runtime dependencies, psycopg included.
+      - name: Install locked dependencies
+        run: |
+          uv venv --python 3.13
+          uv sync --locked
+
+      - name: Benchmark get_top_clusters on SQLite
+        run: |
+          mkdir -p benchmark-results
+          .venv/bin/python scripts/t021_read_path_benchmark.py --backend sqlite --enforce \
+            --json-out benchmark-results/sqlite.json
+
+      # Runs even when SQLite failed, so a red build still says whether one backend regressed or
+      # both did. `!cancelled()` rather than `always()`: a cancelled run has nothing to measure.
+      - name: Benchmark get_top_clusters on PostgreSQL
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p benchmark-results
+          .venv/bin/python scripts/t021_read_path_benchmark.py --backend postgres --enforce \
+            --json-out benchmark-results/postgres.json
+
+      # The record holds timings, corpus counts, the query parameters and the verdict, and is built
+      # by summarize() in the benchmark -- no DSN, no environment, no connection string. Kept so
+      # that drift across scheduled runs can be read as a series rather than re-derived from logs.
+      - name: Publish the benchmark records
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sc001-benchmark-${{ github.run_id }}
+          path: benchmark-results/
+          retention-days: 90
+          if-no-files-found: warn

@@ -151,6 +151,17 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   cluster mà `limit` giữ lại. SC-004 vẫn chưa đạt: mục tiêu 85% nhưng CI đo 75% và không bật
   `--cov-fail-under`, nên T022 còn mở và không được mô tả như đã đạt. Chạy lại số đo bằng
   `.venv/bin/python scripts/t021_read_path_benchmark.py --backend sqlite --enforce`.
+  Từ 22/09/2026, SC-001 có gate CI riêng. `.github/workflows/performance.yml` chạy lại chính
+  benchmark đó với `--enforce` trên cả hai backend, kích hoạt khi push vào `main`, `release/*`,
+  `hotfix/*`, theo lịch hằng tuần và khi dispatch tay. Workflow cố ý không gắn vào `pull_request`:
+  benchmark seed 10.000 observation mỗi backend, bắt mọi PR trả chi phí đó chỉ để chặn một
+  regression vốn chỉ gây hậu quả khi đã lên nhánh được bảo vệ. Hợp đồng benchmark không đổi một
+  tham số nào; 19 contract trong `tests/unit/test_t024_performance_workflow.py` từ chối workflow
+  nào bỏ `--enforce`, nuốt exit code, hoặc đi tới PostgreSQL bằng đường nào khác ngoài
+  `IGNIS_TEST_POSTGRES_DSN`. Còn một giới hạn chưa đóng: repo publish được tên job ổn định, nhưng
+  đặt job đó thành required status trên `main` là thao tác trong GitHub settings và chưa ai đọc
+  lại cấu hình để xác nhận. Chừng nào chưa xác nhận được, workflow chỉ báo cáo chứ không chặn
+  merge.
 
 
 - [x] **Đã xong (14/09/2026): hai client local chạy Ignis cùng lúc được.** Startup của MCP server

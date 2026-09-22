@@ -115,3 +115,28 @@
   with `O_EXCL`; five clock-frozen tests in `tests/unit/test_t020_cutover.py`, including a
   negative control for a candidate path already on disk. `pytest tests/` 926 passed, 115 skipped
   (Postgres cases, `IGNIS_TEST_POSTGRES_DSN` absent).
+
+---
+
+## Phase 9: SC-001 CI Enforcement (2026-09-22)
+
+- [x] T024 [US1] Publish the T021 benchmark as a CI gate for SC-001. This is enforcement, not new
+  benchmark evidence: T021 measured the criterion and met it, and the number it produced describes
+  22/09/2026 and nothing after it. `.github/workflows/performance.yml` re-runs
+  `scripts/t021_read_path_benchmark.py --enforce` on both backends, so a regression turns a build
+  red instead of going unnoticed until somebody re-reads a handoff.
+  Deliberately not attached to `pull_request`: the benchmark seeds 10,000 observations per backend,
+  and charging every contributor for that would catch on a feature branch a regression that only
+  matters once it reaches a protected branch. It runs on pushes to `main`, `release/*` and
+  `hotfix/*`, weekly on a schedule, and on manual dispatch. Ordinary PR CI is unchanged.
+  The benchmark contract is untouched -- same corpus floor, threshold, warm-up count, iteration
+  count, nearest-rank percentile, real repository reader and result-shape checks. The workflow
+  passes two flags and nothing else; `tests/unit/test_t024_performance_workflow.py` (19 contracts)
+  refuses a workflow that restates any of them, that drops `--enforce`, that swallows the exit
+  code, that reaches PostgreSQL by any route other than `IGNIS_TEST_POSTGRES_DSN` against a
+  throwaway `timescale/timescaledb-ha:pg16` service, that reads a repository secret, or that
+  renames the job that a branch-protection rule would select.
+  Known limit: this repository can publish a stable status name, but *requiring* it on `main` is a
+  GitHub settings operation that no file here performs, and it has not been read back. Until it is,
+  the workflow reports and does not block. Evidence and the remaining step:
+  `.handoff/T024-sc001-ci-gate.handoff.md`
