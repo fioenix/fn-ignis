@@ -783,18 +783,30 @@ async def test_a_malformed_stored_timestamp_reads_as_none_and_the_row_is_left_al
 
     The port promises a UTC ISO-8601 string or None, so text that names no instant must not
     reach the caller as if it were one. Reading is not a repair: the row keeps what was stored.
+
+    The malformed value is arbitrary text, and a corrupt import or a hand edit can put a secret
+    in that column as easily as anything else, so the warning reports the condition and never
+    the content -- not the value, not a prefix of it. The fixture's timestamp is shaped like a
+    credential for exactly that reason.
     """
+    leaked_expiry = "sk-live-expiry-column-credential-that-must-never-be-logged"
+    leaked_updated = "sessionid=updated-column-cookie-that-must-never-be-logged"
+    payload_secret = "malformed-payload-secret"
     repository = SqliteTrendRepository(str(tmp_path / "malformed.sqlite"))
     await repository._ensure_schema()
-    payload = json.dumps(encrypt_credentials({"access_token": "malformed-secret"}))
+    payload = json.dumps(encrypt_credentials({"access_token": payload_secret}))
+    stored_bytes = (
+        "SELECT hex(platform), hex(updated_at), hex(expires_at), hex(encrypted_data)"
+        " FROM platform_credentials"
+    )
     with sqlite3.connect(repository._db_path) as conn:
         conn.execute(
             "INSERT INTO platform_credentials"
             " (id, platform, auth_type, encrypted_data, is_active, created_at, updated_at,"
-            " expires_at) VALUES ('legacy', 'Threads', 'oauth', ?, 1, 'x', 'also-not-a-time',"
-            " 'not-a-timestamp')",
-            (payload,),
+            " expires_at) VALUES ('legacy', 'Threads', 'oauth', ?, 1, 'x', ?, ?)",
+            (payload, leaked_updated, leaked_expiry),
         )
+        before = conn.execute(stored_bytes).fetchone()
     try:
         with caplog.at_level("WARNING"):
             record = await repository.get_platform_credentials("threads")
@@ -804,13 +816,16 @@ async def test_a_malformed_stored_timestamp_reads_as_none_and_the_row_is_left_al
 
     assert set(record) == DETAIL_KEYS
     assert (record["expires_at"], record["updated_at"]) == (None, None)
-    assert record["credentials_data"] == {"access_token": "malformed-secret"}
+    assert record["credentials_data"] == {"access_token": payload_secret}
     assert [set(r) for r in listed] == [LIST_KEYS]
     assert (listed[0]["expires_at"], listed[0]["updated_at"]) == (None, None)
-    assert "not-a-timestamp" in caplog.text, "an unreadable stored timestamp was dropped silently"
-    assert "malformed-secret" not in caplog.text
+
+    warnings = [
+        r for r in caplog.records
+        if r.name == "ignis.infrastructure.persistence.identifiers" and r.levelname == "WARNING"
+    ]
+    assert warnings, "an unreadable stored timestamp was dropped silently"
+    for secret in (leaked_expiry, leaked_updated, payload_secret, "sk-live", "sessionid="):
+        assert secret not in caplog.text, f"stored content reached the log: {secret[:7]}..."
     with sqlite3.connect(tmp_path / "malformed.sqlite") as conn:
-        stored = conn.execute(
-            "SELECT platform, updated_at, expires_at FROM platform_credentials"
-        ).fetchone()
-    assert stored == ("Threads", "also-not-a-time", "not-a-timestamp"), "a read rewrote the row"
+        assert conn.execute(stored_bytes).fetchone() == before, "a read rewrote the row"

@@ -89,6 +89,10 @@ def utc_iso(value: Any) -> Optional[str]:
     managers already read one. Text that names no instant -- which only a SQLite row can hold --
     reads as None and is logged, because passing it on would break the contract and guessing an
     instant would invent one. The row itself is left as stored.
+
+    The warning carries only the value's type and length. Malformed text is arbitrary, so a
+    corrupt import or a hand edit can leave a token or cookie in the column, and a prefix, hash
+    or repr of it in a durable log would be a leak the read path created.
     """
     if value is None or value == "":
         return None
@@ -98,6 +102,10 @@ def utc_iso(value: Any) -> Optional[str]:
         try:
             parsed = datetime.fromisoformat(str(value))
         except ValueError:
-            logger.warning(f"Ignoring a stored timestamp that is not ISO-8601: {str(value)[:64]!r}")
+            logger.warning(
+                "Ignoring a stored timestamp that is not ISO-8601 (%s, %d characters)",
+                type(value).__name__,
+                len(str(value)),
+            )
             return None
     return utc_datetime(parsed).isoformat()
