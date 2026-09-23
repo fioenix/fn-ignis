@@ -280,23 +280,13 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   concurrent writer có thể đua. Đã thay: `sources` mang `UNIQUE (platform, external_id)` trên cả
   hai backend, và writer dùng **một câu** upsert `ON CONFLICT` chứ không còn `SELECT`-rồi-`INSERT`.
   Bảng legacy giữ nguyên trạng thái cũ vì nó đã thành read-only.
-- [ ] **Threads và Reels còn khoảng trống alias — mở, chốt 13/09/2026.** "Một object, một
-  identity dù đến bằng route nào" đã đóng cho TikTok và Google: hashtag hội tụ dù metadata ghi
-  `#aothun` còn URL ghi `/tag/aothun`, keyword hội tụ dù explore URL percent-encode nó. Hai
-  platform kia thì chưa, và cố ý chưa. Graph API trả primary key dạng số, permalink mang
-  shortcode, và build hiện tại không có đường tra từ giá trị này sang giá trị kia:
-
-  ```
-  threads  post:123456789  ≠  post_shortcode:123456789
-  reels    reel:17912      ≠  reel_shortcode:17912
-  ```
-
-  Để chung một namespace `post:` thì một shortcode toàn chữ số sẽ **va vào primary key của bài
-  khác** — base64 có chứa chữ số — và merge sai thì im lặng, vĩnh viễn. Split thì đo được và sửa
-  được bằng alias sau. **Giới hạn thật, ghi đúng như nó là:** corpus hiện tại có **0** cặp như
-  vậy, nhưng ingress tương lai vẫn có thể tạo hai dòng cho cùng một bài, vào đúng lúc một bài
-  được thấy bằng cả hai route. Đóng nó cần một trong hai: connector ghi cả hai giá trị vào
-  metadata, hoặc một bảng alias giữa hai namespace cộng một lượt reconcile corpus.
+- [x] **Threads và Reels đã đóng khoảng trống alias (23/09/2026).** Bốn đường phát signal đều
+  mang primary key và permalink shortcode trên cùng record, nên `resolve_identity_alias` chỉ ghi
+  quan hệ khi chính record đó làm chứng. Migration `sql/018_source_identity_aliases.sql` giữ ledger
+  alias theo platform; permalink-only sighting về sau tra ledger để hội tụ về primary key. Claim
+  xung đột không bị merge đoán: writer giữ hai source đo được và ghi log. Contract
+  `tests/integration/test_source_identity_alias_ledger.py` chạy trên cả SQLite và PostgreSQL trong
+  full parity suite; không còn case PostgreSQL nào bị skip trong bằng chứng tích hợp gần nhất.
 - [x] **Migration `sql/008_deduplicate_signal_metrics.sql` không thực hiện điều header tuyên bố.**
   File ghi "Deduplicate trend_signals", "keeps earliest row as canonical" và tự gọi mình là
   "Migration 004", nhưng chỉ tạo `signal_metrics` rồi copy metric; không delete duplicate, không
@@ -788,7 +778,8 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Đo trên 15.771 tiêu đề thật: substring loại 47, biên từ loại 46. Bỏ được `olive oil review`
   và `livestream review`; sinh thêm `Studio 2.0 is live.` vì substring cần `"live "` có dấu cách
   nên bỏ lỡ `live.`
-- [ ] **NHƯNG: từ vựng của guard này đang gây hại hơn là bảo vệ.** Đo cùng lúc, qua chính plugin:
+- [ ] **Từ vựng của guard này đang gây hại hơn là bảo vệ — đã chốt hướng sửa, giao T016.** Đo cùng
+  lúc, qua chính plugin:
   trong 46 tiêu đề bị loại, **gần như toàn bộ là post công khai thật**, không phải thông báo:
   - `The new Gmail app icon is live on Google Play`
   - `KHÁT VỌNG VINH QUANG | Tùng Dương - Live at ASEAN Huyndai Cup 2026`
@@ -806,9 +797,10 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   đó — nó cào explore và search grid. Lời hứa về quyền riêng tư được bảo đảm bằng **cấu trúc**
   (không bao giờ vào surface đó), còn bộ lọc text này là lớp phụ và đang đắt.
 
-  **Đề nghị:** bỏ ba term `live`, `thông báo`, `tin nhắn` khỏi domain `tiktok_ui_noise`, giữ
-  `đang phát trực tiếp` cho badge live tiếng Việt. Chưa tự thay vì đây là từ vựng của một
-  privacy guard, và guard đang fail-closed — bỏ term là quyết định của người vận hành.
+  **Quyết định ngày 24/09/2026:** bỏ ba term `live`, `thông báo`, `tin nhắn` khỏi domain
+  `tiktok_ui_noise`, giữ `đang phát trực tiếp` cho badge live tiếng Việt và giữ các cụm UI còn
+  lại. T016 thực hiện bằng migration dữ liệu để database đã tồn tại cũng nhận thay đổi; không chỉ
+  sửa seed cho cài đặt mới.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)

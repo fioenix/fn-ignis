@@ -14,5 +14,7 @@
 
 - [x] T007 Keep the 39-tool catalog independently callable and synchronized across manifests
 - [x] T008 Serialize channel summaries and typed `StrategicInsight` citations from mission analysis
-- [ ] T009 Add observation-addressable typed citations to `MarketOpportunity` and actionable
-  takeaways, then expose them consistently in FastMCP and HTML artifacts
+- [x] T009 Add observation-addressable typed citations to `MarketOpportunity` and actionable
+  takeaways, then expose them consistently in FastMCP and HTML artifacts. Completed by
+  `specs/007-dual-surface-research-workspace/tasks.md` T023 and locked at the serializer boundary
+  by T035.

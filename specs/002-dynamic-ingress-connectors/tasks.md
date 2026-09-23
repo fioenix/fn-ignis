@@ -40,5 +40,17 @@
   the provider's security settings instead
 - [x] T014 Gate the wording with contracts that permit a denial and an instruction to revoke at the
   provider, and fail only an affirmative claim that Ignis revoked something
-- [ ] T015 Implement an actual provider-side revocation request, behaviourally tested, before any
-  surface is allowed to claim revocation
+- [ ] T015 [FUTURE — OUT OF CURRENT SPEC SCOPE] Implement an actual provider-side revocation
+  request, behaviourally tested, before any surface is allowed to claim revocation. FR-010
+  currently defines local deletion plus provider instructions as the supported contract.
+
+## Phase 7: Corpus Correctness Follow-up (2026-09-24)
+
+- [ ] T016 Remove the ambiguous `live`, `thông báo`, and `tin nhắn` rows from the
+  `tiktok_ui_noise` runtime vocabulary through an idempotent versioned SQL migration so both fresh
+  and existing SQLite/PostgreSQL installations preserve public TikTok posts containing those
+  ordinary words; keep `đang phát trực tiếp` and the remaining notification/inbox phrases, prove
+  the three removed rows do not return after restart or migration re-apply, and keep vocabulary in
+  SQL rather than Python (touches: `sql/`, SQLite schema/seed registration, PostgreSQL migration
+  registration, `tests/unit/test_vocabulary_loader.py`, repository migration-contract tests;
+  depends-on: T014)
