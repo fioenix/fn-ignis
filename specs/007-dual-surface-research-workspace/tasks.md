@@ -246,3 +246,22 @@ must not be called shipped until integrated and verified.
 - No task adds a connector, changes the Opportunity Index formula, or publishes research artifacts
   automatically. The shared schema task requires the existing production migration gate before
   any production activation.
+
+---
+
+## Phase 9: Convergence Follow-up
+
+**Purpose**: Close the remaining observable SQLite/PostgreSQL repository-contract drift found
+while accepting T038.
+
+- [ ] T039 Define and enforce one canonical public record shape for
+  `get_platform_credentials()` and `list_platform_credentials()` across SQLite and PostgreSQL:
+  detail reads expose exactly `platform`, `auth_type`, `credentials_data`, `is_active`,
+  `expires_at`, and `updated_at`; list reads expose the same metadata without
+  `credentials_data`. Remove SQLite-only storage fields and the legacy `credentials` alias from
+  repository output, update in-repository consumers to use `credentials_data`, and add exact-key,
+  value-type, secret-redaction, inactive-row, and legacy-row parity tests on both backends
+  (touches: `src/ignis/application/ports/repository_port.py`,
+  `src/ignis/infrastructure/persistence/sqlite_repository.py`,
+  `src/ignis/infrastructure/persistence/postgres_repository.py`, relevant auth consumers,
+  `tests/integration/test_t022_operational_surface_parity.py`; depends-on: T038)
