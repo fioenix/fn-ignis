@@ -377,20 +377,24 @@ async def test_deleting_under_another_casing_erases_the_credential(repository_ca
 LEGACY_CREDENTIAL_SQLITE = (
     "INSERT INTO platform_credentials"
     " (id, platform, auth_type, encrypted_data, is_active, created_at, updated_at)"
-    " VALUES (lower(hex(randomblob(16))), ?, ?, ?, 1, datetime('now'), datetime('now'))"
+    " VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, datetime('now'), datetime('now'))"
     " RETURNING platform"
 )
 LEGACY_CREDENTIAL_POSTGRES = (
-    "INSERT INTO platform_credentials (platform, auth_type, credentials_data)"
-    " VALUES (%s, %s, %s) RETURNING platform"
+    "INSERT INTO platform_credentials (platform, auth_type, credentials_data, is_active)"
+    " VALUES (%s, %s, %s, %s) RETURNING platform"
 )
 STORED_PLATFORM_KEYS = "SELECT platform FROM platform_credentials"
 
 
-def _insert_legacy_credential(repository_case, platform: str, token: str) -> None:
+def _insert_legacy_credential(
+    repository_case, platform: str, token: str, is_active: bool = True
+) -> None:
     payload = json.dumps(encrypt_credentials({"access_token": token}))
     repository_case.query_one(
-        LEGACY_CREDENTIAL_SQLITE, LEGACY_CREDENTIAL_POSTGRES, (platform, "oauth", payload)
+        LEGACY_CREDENTIAL_SQLITE,
+        LEGACY_CREDENTIAL_POSTGRES,
+        (platform, "oauth", payload, is_active),
     )
 
 
@@ -463,3 +467,52 @@ async def test_two_legacy_rows_for_one_platform_are_refused_rather_than_merged(r
     assert await repository.delete_platform_credentials("threads") is True
     assert _stored_platform_keys(repository_case) == []
     assert await repository.get_platform_credentials("threads") is None
+
+
+def _stored_credential_rows(repository_case) -> list:
+    """Every stored row as (platform, active, payload), to prove a refusal changed nothing."""
+    if repository_case.name == "sqlite":
+        with sqlite3.connect(repository_case.repository._db_path) as conn:
+            rows = conn.execute(
+                "SELECT platform, is_active, encrypted_data FROM platform_credentials"
+            ).fetchall()
+    else:
+        with psycopg.connect(repository_case.dsn) as conn:
+            rows = conn.execute(
+                "SELECT platform, is_active, credentials_data::text FROM platform_credentials"
+            ).fetchall()
+    return sorted((platform, bool(active), payload) for platform, active, payload in rows)
+
+
+@pytest.mark.asyncio
+async def test_an_inactive_second_row_still_makes_the_platform_ambiguous(repository_case):
+    """Activity is a property of one credential, not a tie-breaker between two of them.
+
+    Filtering by `is_active` before counting let `get` return the active row while `save`
+    refused the same pair, so the two calls disagreed about whether the platform was ambiguous.
+    """
+    repository = repository_case.repository
+    _insert_legacy_credential(repository_case, "Threads", "active")
+    _insert_legacy_credential(repository_case, "THREADS", "inactive", is_active=False)
+    before = _stored_credential_rows(repository_case)
+
+    with pytest.raises(RepositoryException, match="threads"):
+        await repository.get_platform_credentials("threads")
+    with pytest.raises(RepositoryException, match="threads"):
+        await repository.save_platform_credentials(
+            platform="threads", auth_type="oauth", credentials_data={"access_token": "new"}
+        )
+    assert _stored_credential_rows(repository_case) == before, "a refusal changed a stored row"
+
+    assert await repository.delete_platform_credentials("threads") is True
+    assert _stored_platform_keys(repository_case) == []
+
+
+@pytest.mark.asyncio
+async def test_a_single_inactive_row_reads_as_not_connected_rather_than_ambiguous(
+    repository_case,
+):
+    _insert_legacy_credential(repository_case, "Threads", "inactive", is_active=False)
+
+    assert await repository_case.repository.get_platform_credentials("threads") is None
+    assert _stored_platform_keys(repository_case) == ["Threads"]

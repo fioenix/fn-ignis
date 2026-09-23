@@ -1282,7 +1282,7 @@ class PostgresTimescaleRepository(ITrendRepository):
         query = """
             SELECT platform, auth_type, credentials_data, is_active, expires_at, updated_at
             FROM platform_credentials
-            WHERE lower(trim(platform)) = %s AND is_active = TRUE;
+            WHERE lower(trim(platform)) = %s;
         """
         key = _platform_key(platform)
         try:
@@ -1294,7 +1294,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                 raise RepositoryException(
                     _ambiguous_platform_message(key, [r[0] for r in rows])
                 )
-            if not rows:
+            # Counted before the active filter: an inactive second row still means two
+            # credentials for one platform, and save refuses the same pair.
+            if not rows or rows[0][3] is not True:
                 return None
             row = rows[0]
 

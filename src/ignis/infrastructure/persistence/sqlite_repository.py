@@ -1576,7 +1576,7 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, platform, auth_type, encrypted_data, is_active, created_at, updated_at, expires_at FROM platform_credentials WHERE lower(trim(platform)) = ? AND is_active = 1",
+                    "SELECT id, platform, auth_type, encrypted_data, is_active, created_at, updated_at, expires_at FROM platform_credentials WHERE lower(trim(platform)) = ?",
                     (key,),
                 )
                 rows = cur.fetchall()
@@ -1584,7 +1584,9 @@ class SqliteTrendRepository(ITrendRepository):
                     raise RepositoryException(
                         _ambiguous_platform_message(key, [row["platform"] for row in rows])
                     )
-                if not rows:
+                # Counted before the active filter: an inactive second row still means two
+                # credentials for one platform, and save refuses the same pair.
+                if not rows or rows[0]["is_active"] != 1:
                     return None
                 r = rows[0]
                 enc_data = json.loads(r["encrypted_data"]) if r["encrypted_data"] else {}
