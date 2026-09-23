@@ -6,9 +6,12 @@ read? Keeping the answer in one place is what stops the two backends from disagr
 mission that belongs to no workspace.
 """
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 
 def uuid_text(value: Optional[UUID]) -> Optional[str]:
@@ -64,13 +67,28 @@ def ambiguous_platform_message(key: str, stored: list) -> str:
     )
 
 
+def utc_datetime(value: Optional[datetime]) -> Optional[datetime]:
+    """An instant to persist, in UTC: aware values are converted, naive values are UTC.
+
+    Normalizing before the write is what keeps the backends agreeing. PostgreSQL's TIMESTAMPTZ
+    would otherwise read a naive value in the session's zone, while SQLite stores the wall clock
+    that `utc_iso` later reads as UTC.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def utc_iso(value: Any) -> Optional[str]:
     """A stored timestamp as the UTC ISO-8601 string the port promises, or None.
 
     PostgreSQL hands back a datetime and SQLite hands back whatever text was written, including
     `datetime('now')`'s space-separated form. A naive value is read as UTC, the same way the auth
-    managers already read one. Text that is not a timestamp at all is returned unchanged rather
-    than replaced by a guess or dropped.
+    managers already read one. Text that names no instant -- which only a SQLite row can hold --
+    reads as None and is logged, because passing it on would break the contract and guessing an
+    instant would invent one. The row itself is left as stored.
     """
     if value is None or value == "":
         return None
@@ -80,7 +98,6 @@ def utc_iso(value: Any) -> Optional[str]:
         try:
             parsed = datetime.fromisoformat(str(value))
         except ValueError:
-            return str(value)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).isoformat()
+            logger.warning(f"Ignoring a stored timestamp that is not ISO-8601: {str(value)[:64]!r}")
+            return None
+    return utc_datetime(parsed).isoformat()

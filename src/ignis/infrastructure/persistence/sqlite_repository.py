@@ -31,6 +31,7 @@ from ignis.infrastructure.persistence.identifiers import (
     ambiguous_platform_message as _ambiguous_platform_message,
     log_level as _log_level,
     platform_key as _platform_key,
+    utc_datetime as _utc_datetime,
     utc_iso as _utc_iso,
     uuid_or_none as _uuid_or_none,
     uuid_text as _uuid_text,
@@ -1550,7 +1551,8 @@ class SqliteTrendRepository(ITrendRepository):
                 encrypted_str = json.dumps(encrypted, ensure_ascii=False)
                 cred_id = str(uuid4())
                 now_str = datetime.now(timezone.utc).isoformat()
-                exp_str = expires_at.isoformat() if expires_at else None
+                exp_utc = _utc_datetime(expires_at)
+                exp_str = exp_utc.isoformat() if exp_utc else None
 
                 cur.execute(
                     """

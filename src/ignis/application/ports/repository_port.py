@@ -10,7 +10,9 @@ class PlatformCredentialSummary(TypedDict):
     """What `list_platform_credentials` answers: which platforms are connected, never the secret.
 
     Both backends return exactly these keys. Timestamps are UTC ISO-8601 strings or None, so a
-    caller never has to know which backend produced them.
+    caller never has to know which backend produced them. A stored value that names no instant
+    reads as None and is logged; it is never passed on as text. A naive `expires_at` given to
+    `save_platform_credentials` is UTC, and an aware one is converted to UTC before it is stored.
     """
 
     platform: str

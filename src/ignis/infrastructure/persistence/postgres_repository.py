@@ -30,6 +30,7 @@ from ignis.infrastructure.persistence.identifiers import (
     ambiguous_platform_message as _ambiguous_platform_message,
     log_level as _log_level,
     platform_key as _platform_key,
+    utc_datetime as _utc_datetime,
     utc_iso as _utc_iso,
     uuid_or_none as _uuid_or_none,
     uuid_text as _uuid_text,
@@ -1254,7 +1255,8 @@ class PostgresTimescaleRepository(ITrendRepository):
             auth_type,
             json.dumps(payload_to_store),
             is_active,
-            expires_at,
+            # Aware and UTC before it is sent, so TIMESTAMPTZ never reads it in the session zone.
+            _utc_datetime(expires_at),
         )
         try:
             async with pool.connection() as conn:

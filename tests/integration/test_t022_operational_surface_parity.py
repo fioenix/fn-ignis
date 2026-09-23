@@ -32,9 +32,12 @@ from datetime import datetime, timedelta, timezone
 
 import psycopg
 import pytest
+from psycopg.conninfo import make_conninfo
 
 from ignis.domain.exceptions import RepositoryException
 from ignis.infrastructure.auth.crypto import encrypt_credentials
+from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
 
 # --- audit logging ------------------------------------------------------------------------------
@@ -700,3 +703,114 @@ async def test_the_tiktok_manager_reads_its_state_from_the_public_record(reposit
 
     assert await manager.is_authenticated() is True
     assert await manager.get_storage_state() == state
+
+
+# --- timestamps name one instant, whatever the backend or session zone --------------------------
+
+UTC_PLUS_7 = timezone(timedelta(hours=7))
+STORED_EXPIRY_SQLITE = "SELECT expires_at FROM platform_credentials WHERE platform = ?"
+# Rendered in UTC by the query itself, so the readback does not depend on this session's zone.
+STORED_EXPIRY_POSTGRES = (
+    "SELECT to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS')"
+    " FROM platform_credentials WHERE platform = %s"
+)
+
+
+def _stored_expiry_instant(repository_case, platform: str) -> datetime:
+    text = repository_case.query_one(
+        STORED_EXPIRY_SQLITE, STORED_EXPIRY_POSTGRES, (platform,)
+    )[0]
+    parsed = datetime.fromisoformat(text)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_an_expiry_names_the_same_utc_instant_whatever_the_session_timezone(
+    repository_case,
+):
+    """A naive expiry is UTC by contract, not by whichever zone the database session runs in.
+
+    PostgreSQL used to receive the naive value as-is, and TIMESTAMPTZ read it in the session
+    zone, so a non-UTC session stored a different instant than SQLite for the same call.
+    """
+    repository = repository_case.repository
+    zoned = None
+    if repository_case.name == "postgres":
+        dsn = make_conninfo(repository_case.dsn, options="-c timezone=Asia/Ho_Chi_Minh")
+        with psycopg.connect(dsn) as conn:
+            assert conn.execute("SHOW timezone").fetchone()[0] == "Asia/Ho_Chi_Minh"
+        zoned = PostgresTimescaleRepository(dsn=dsn, min_pool_size=1, max_pool_size=2)
+        repository = zoned
+    try:
+        await repository.save_platform_credentials(
+            platform="threads",
+            auth_type="oauth",
+            credentials_data={"access_token": "naive"},
+            expires_at=datetime(2026, 10, 1, 12, 0),
+        )
+        await repository.save_platform_credentials(
+            platform="instagram",
+            auth_type="oauth",
+            credentials_data={"access_token": "aware"},
+            expires_at=datetime(2026, 10, 1, 19, 0, tzinfo=UTC_PLUS_7),
+        )
+
+        details = [
+            await repository.get_platform_credentials(platform)
+            for platform in ("threads", "instagram")
+        ]
+        listed = await repository.list_platform_credentials()
+    finally:
+        if zoned is not None:
+            await zoned.close()
+
+    expected = "2026-10-01T12:00:00+00:00"
+    assert [record["expires_at"] for record in details] == [expected, expected]
+    assert {record["platform"]: record["expires_at"] for record in listed} == {
+        "threads": expected,
+        "instagram": expected,
+    }
+    instant = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
+    assert _stored_expiry_instant(repository_case, "threads") == instant
+    assert _stored_expiry_instant(repository_case, "instagram") == instant
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_stored_timestamp_reads_as_none_and_the_row_is_left_alone(
+    tmp_path, caplog
+):
+    """SQLite-only: TIMESTAMPTZ cannot hold this text, so only a SQLite row can carry it.
+
+    The port promises a UTC ISO-8601 string or None, so text that names no instant must not
+    reach the caller as if it were one. Reading is not a repair: the row keeps what was stored.
+    """
+    repository = SqliteTrendRepository(str(tmp_path / "malformed.sqlite"))
+    await repository._ensure_schema()
+    payload = json.dumps(encrypt_credentials({"access_token": "malformed-secret"}))
+    with sqlite3.connect(repository._db_path) as conn:
+        conn.execute(
+            "INSERT INTO platform_credentials"
+            " (id, platform, auth_type, encrypted_data, is_active, created_at, updated_at,"
+            " expires_at) VALUES ('legacy', 'Threads', 'oauth', ?, 1, 'x', 'also-not-a-time',"
+            " 'not-a-timestamp')",
+            (payload,),
+        )
+    try:
+        with caplog.at_level("WARNING"):
+            record = await repository.get_platform_credentials("threads")
+            listed = await repository.list_platform_credentials()
+    finally:
+        await repository.close()
+
+    assert set(record) == DETAIL_KEYS
+    assert (record["expires_at"], record["updated_at"]) == (None, None)
+    assert record["credentials_data"] == {"access_token": "malformed-secret"}
+    assert [set(r) for r in listed] == [LIST_KEYS]
+    assert (listed[0]["expires_at"], listed[0]["updated_at"]) == (None, None)
+    assert "not-a-timestamp" in caplog.text, "an unreadable stored timestamp was dropped silently"
+    assert "malformed-secret" not in caplog.text
+    with sqlite3.connect(tmp_path / "malformed.sqlite") as conn:
+        stored = conn.execute(
+            "SELECT platform, updated_at, expires_at FROM platform_credentials"
+        ).fetchone()
+    assert stored == ("Threads", "also-not-a-time", "not-a-timestamp"), "a read rewrote the row"
