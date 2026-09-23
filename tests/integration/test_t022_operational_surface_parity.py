@@ -28,7 +28,7 @@ cannot be reached without widening the fixture's schema -- a change that touches
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import psycopg
 import pytest
@@ -516,3 +516,187 @@ async def test_a_single_inactive_row_reads_as_not_connected_rather_than_ambiguou
 
     assert await repository_case.repository.get_platform_credentials("threads") is None
     assert _stored_platform_keys(repository_case) == ["Threads"]
+
+
+# --- the public credential record (T039) --------------------------------------------------------
+
+# The record a caller reads is the port's contract, not whatever columns a backend happens to
+# select. Exact key sets, because an extra storage field on one backend is exactly the drift a
+# "contains these keys" check lets through.
+DETAIL_KEYS = {"platform", "auth_type", "credentials_data", "is_active", "expires_at", "updated_at"}
+LIST_KEYS = DETAIL_KEYS - {"credentials_data"}
+EXPIRY = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
+
+
+def _assert_utc_iso(value) -> None:
+    assert isinstance(value, str), f"a timestamp must be an ISO-8601 string, got {type(value)}"
+    parsed = datetime.fromisoformat(value)
+    assert "T" in value, f"{value!r} is not in ISO-8601 form"
+    assert parsed.utcoffset() == timedelta(0), f"{value!r} is not an explicit UTC timestamp"
+
+
+def _assert_public_record(record: dict, keys: set) -> None:
+    assert set(record) == keys
+    assert record["platform"] == record["platform"].strip().lower()
+    assert isinstance(record["auth_type"], str)
+    assert type(record["is_active"]) is bool
+    _assert_utc_iso(record["updated_at"])
+    if record["expires_at"] is not None:
+        _assert_utc_iso(record["expires_at"])
+
+
+@pytest.mark.asyncio
+async def test_a_credential_detail_read_has_exactly_the_public_keys_and_types(repository_case):
+    repository = repository_case.repository
+    await repository.save_platform_credentials(
+        platform="Threads",
+        auth_type="oauth",
+        credentials_data={"access_token": "detail-secret"},
+        expires_at=EXPIRY,
+    )
+
+    record = await repository.get_platform_credentials("threads")
+
+    _assert_public_record(record, DETAIL_KEYS)
+    assert record["platform"] == "threads"
+    assert record["credentials_data"] == {"access_token": "detail-secret"}
+    assert record["is_active"] is True
+    assert record["expires_at"] == "2026-10-01T12:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_a_credential_listing_has_exactly_the_public_keys_and_never_a_secret(repository_case):
+    repository = repository_case.repository
+    await repository.save_platform_credentials(
+        platform="threads",
+        auth_type="oauth",
+        credentials_data={"access_token": "list-secret"},
+        expires_at=EXPIRY,
+    )
+    await repository.save_platform_credentials(
+        platform="tiktok",
+        auth_type="session_cookies",
+        credentials_data={"cookies": [{"name": "sid", "value": "list-cookie"}]},
+        is_active=False,
+    )
+
+    listed = sorted(await repository.list_platform_credentials(), key=lambda r: r["platform"])
+
+    for record in listed:
+        _assert_public_record(record, LIST_KEYS)
+    assert [(r["platform"], r["is_active"], r["expires_at"]) for r in listed] == [
+        ("threads", True, "2026-10-01T12:00:00+00:00"),
+        ("tiktok", False, None),
+    ]
+    assert "list-secret" not in str(listed) and "list-cookie" not in str(listed)
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_row_reads_in_the_public_shape_without_being_rewritten(repository_case):
+    """A row an older build wrote keeps its stored timestamp text; only the read is canonical."""
+    repository = repository_case.repository
+    _insert_legacy_credential(repository_case, "Threads", "legacy")
+    before = _stored_credential_rows(repository_case)
+    stored_updated = repository_case.query_one(
+        "SELECT updated_at FROM platform_credentials",
+        "SELECT updated_at::text FROM platform_credentials",
+    )[0]
+
+    record = await repository.get_platform_credentials("THREADS")
+    listed = await repository.list_platform_credentials()
+
+    _assert_public_record(record, DETAIL_KEYS)
+    assert record["credentials_data"] == {"access_token": "legacy"}
+    assert [set(r) for r in listed] == [LIST_KEYS]
+    _assert_public_record(listed[0], LIST_KEYS)
+    assert _stored_credential_rows(repository_case) == before
+    assert repository_case.query_one(
+        "SELECT updated_at FROM platform_credentials",
+        "SELECT updated_at::text FROM platform_credentials",
+    )[0] == stored_updated, "reading a legacy row rewrote its timestamp"
+
+
+@pytest.mark.asyncio
+async def test_an_inactive_row_lists_as_inactive_and_reads_as_not_connected(repository_case):
+    repository = repository_case.repository
+    _insert_legacy_credential(repository_case, "Threads", "inactive", is_active=False)
+
+    listed = await repository.list_platform_credentials()
+
+    assert await repository.get_platform_credentials("threads") is None
+    assert len(listed) == 1
+    _assert_public_record(listed[0], LIST_KEYS)
+    assert listed[0]["is_active"] is False
+
+
+# --- auth consumers read `credentials_data` only ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_oauth_manager_reads_its_token_from_the_public_record(repository_case):
+    from ignis.infrastructure.auth.meta_oauth import ThreadsAuthManager
+
+    repository = repository_case.repository
+    future = datetime.now(timezone.utc) + timedelta(days=30)
+    await repository.save_platform_credentials(
+        platform="threads",
+        auth_type="oauth2",
+        credentials_data={"access_token": "oauth-token", "expires_at": future.isoformat()},
+        expires_at=future,
+    )
+
+    manager = ThreadsAuthManager(repository)
+
+    assert await manager.is_authenticated() is True
+    assert await manager.get_access_token(auto_refresh=False) == "oauth-token"
+
+
+@pytest.mark.asyncio
+async def test_the_browser_session_manager_reads_its_state_from_the_public_record(repository_case):
+    from ignis.infrastructure.auth.meta_browser_auth import ThreadsBrowserAuthManager
+
+    repository = repository_case.repository
+    state = {"cookies": [{"name": "sessionid", "value": "browser-cookie"}], "origins": []}
+    await repository.save_platform_credentials(
+        platform="threads_browser",
+        auth_type="session_cookies",
+        credentials_data=state,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+    )
+
+    manager = ThreadsBrowserAuthManager(repository)
+
+    assert await manager.get_storage_state() == state
+    assert (await manager.get_auth_status())["authenticated"] is True
+
+
+@pytest.mark.asyncio
+async def test_self_identity_reads_the_account_from_the_public_record(repository_case):
+    from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
+
+    repository = repository_case.repository
+    await repository.save_platform_credentials(
+        platform="threads",
+        auth_type="oauth2",
+        credentials_data={"access_token": "t", "user_id": "178414"},
+    )
+
+    identities = await SelfIdentityRegistry(repository).load(["threads"])
+
+    assert "178414" in {identity.account_id for identity in identities}
+
+
+@pytest.mark.asyncio
+async def test_the_tiktok_manager_reads_its_state_from_the_public_record(repository_case):
+    from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
+
+    repository = repository_case.repository
+    state = {"cookies": [{"name": "sessionid", "value": "tiktok-cookie"}]}
+    await repository.save_platform_credentials(
+        platform="tiktok", auth_type="session_cookies", credentials_data=state
+    )
+
+    manager = TikTokAuthManager(repository)
+
+    assert await manager.is_authenticated() is True
+    assert await manager.get_storage_state() == state

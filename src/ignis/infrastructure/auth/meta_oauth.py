@@ -518,7 +518,7 @@ class ThreadsAuthManager:
         creds = await self._repository.get_platform_credentials(self.PLATFORM_NAME)
         if not creds or not creds.get("is_active"):
             return None
-        data = creds.get("credentials_data") or creds.get("credentials")
+        data = creds.get("credentials_data")
         if not isinstance(data, dict) or not data.get("access_token"):
             return None
         return data

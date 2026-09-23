@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID, uuid4
 
-from ignis.application.ports.repository_port import ITrendRepository
+from ignis.application.ports.repository_port import (
+    ITrendRepository,
+    PlatformCredentialRecord,
+    PlatformCredentialSummary,
+)
 from ignis.resources import sql_seed_file
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.cross_platform_score import cluster_rank_key, cross_platform_score
@@ -27,6 +31,7 @@ from ignis.infrastructure.persistence.identifiers import (
     ambiguous_platform_message as _ambiguous_platform_message,
     log_level as _log_level,
     platform_key as _platform_key,
+    utc_iso as _utc_iso,
     uuid_or_none as _uuid_or_none,
     uuid_text as _uuid_text,
 )
@@ -1567,7 +1572,7 @@ class SqliteTrendRepository(ITrendRepository):
 
         await asyncio.to_thread(_sync_save)
 
-    async def get_platform_credentials(self, platform: str) -> Optional[Dict[str, Any]]:
+    async def get_platform_credentials(self, platform: str) -> Optional[PlatformCredentialRecord]:
         await self._ensure_schema()
         key = _platform_key(platform)
 
@@ -1592,15 +1597,12 @@ class SqliteTrendRepository(ITrendRepository):
                 enc_data = json.loads(r["encrypted_data"]) if r["encrypted_data"] else {}
                 decrypted = decrypt_credentials(enc_data)
                 return {
-                    "id": r["id"],
                     "platform": key,
                     "auth_type": r["auth_type"],
                     "credentials_data": decrypted,
-                    "credentials": decrypted,
-                    "is_active": bool(r["is_active"]),
-                    "created_at": r["created_at"],
-                    "updated_at": r["updated_at"],
-                    "expires_at": r["expires_at"],
+                    "is_active": True,
+                    "expires_at": _utc_iso(r["expires_at"]),
+                    "updated_at": _utc_iso(r["updated_at"]),
                 }
 
 
@@ -1610,7 +1612,7 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_get)
 
-    async def list_platform_credentials(self) -> List[Dict[str, Any]]:
+    async def list_platform_credentials(self) -> List[PlatformCredentialSummary]:
         await self._ensure_schema()
 
         def _sync_list():
@@ -1622,13 +1624,13 @@ class SqliteTrendRepository(ITrendRepository):
                 creds = []
                 for r in rows:
                     creds.append({
-                        "id": r["id"],
                         "platform": _platform_key(r["platform"]),
                         "auth_type": r["auth_type"],
-                        "is_active": bool(r["is_active"]),
-                        "created_at": r["created_at"],
-                        "updated_at": r["updated_at"],
-                        "expires_at": r["expires_at"],
+                        # The same test get applies, so a row lists as active only when it
+                        # would also read as connected.
+                        "is_active": r["is_active"] == 1,
+                        "expires_at": _utc_iso(r["expires_at"]),
+                        "updated_at": _utc_iso(r["updated_at"]),
                     })
                 return creds
             finally:

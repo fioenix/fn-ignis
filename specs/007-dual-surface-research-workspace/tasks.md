@@ -254,7 +254,7 @@ must not be called shipped until integrated and verified.
 **Purpose**: Close the remaining observable SQLite/PostgreSQL repository-contract drift found
 while accepting T038.
 
-- [ ] T039 Define and enforce one canonical public record shape for
+- [x] T039 Define and enforce one canonical public record shape for
   `get_platform_credentials()` and `list_platform_credentials()` across SQLite and PostgreSQL:
   detail reads expose exactly `platform`, `auth_type`, `credentials_data`, `is_active`,
   `expires_at`, and `updated_at`; list reads expose the same metadata without

@@ -6,6 +6,7 @@ read? Keeping the answer in one place is what stops the two backends from disagr
 mission that belongs to no workspace.
 """
 
+from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -61,3 +62,25 @@ def ambiguous_platform_message(key: str, stored: list) -> str:
         f"Platform credentials for '{key}' are ambiguous: rows {sorted(stored)} all normalize to "
         f"'{key}'. Delete the platform's credentials and authenticate again."
     )
+
+
+def utc_iso(value: Any) -> Optional[str]:
+    """A stored timestamp as the UTC ISO-8601 string the port promises, or None.
+
+    PostgreSQL hands back a datetime and SQLite hands back whatever text was written, including
+    `datetime('now')`'s space-separated form. A naive value is read as UTC, the same way the auth
+    managers already read one. Text that is not a timestamp at all is returned unchanged rather
+    than replaced by a guess or dropped.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value))
+        except ValueError:
+            return str(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()

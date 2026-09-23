@@ -9,7 +9,11 @@ from uuid import UUID
 from psycopg.rows import tuple_row
 from psycopg_pool import AsyncConnectionPool
 
-from ignis.application.ports.repository_port import ITrendRepository
+from ignis.application.ports.repository_port import (
+    ITrendRepository,
+    PlatformCredentialRecord,
+    PlatformCredentialSummary,
+)
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
 from ignis.domain.research_workspace import (
@@ -26,6 +30,7 @@ from ignis.infrastructure.persistence.identifiers import (
     ambiguous_platform_message as _ambiguous_platform_message,
     log_level as _log_level,
     platform_key as _platform_key,
+    utc_iso as _utc_iso,
     uuid_or_none as _uuid_or_none,
     uuid_text as _uuid_text,
 )
@@ -1277,7 +1282,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             logger.error(f"Error saving credentials for {platform}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to save credentials for {platform}: {e}") from e
 
-    async def get_platform_credentials(self, platform: str) -> Optional[Dict[str, Any]]:
+    async def get_platform_credentials(self, platform: str) -> Optional[PlatformCredentialRecord]:
         pool = await self._get_pool()
         query = """
             SELECT platform, auth_type, credentials_data, is_active, expires_at, updated_at
@@ -1308,9 +1313,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                 "platform": key,
                 "auth_type": auth_type,
                 "credentials_data": decrypted_creds,
-                "is_active": active,
-                "expires_at": expires.isoformat() if expires else None,
-                "updated_at": updated.isoformat() if updated else None,
+                "is_active": True,
+                "expires_at": _utc_iso(expires),
+                "updated_at": _utc_iso(updated),
             }
         except RepositoryException:
             raise
@@ -1318,7 +1323,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             logger.error(f"Error retrieving credentials for {platform}: {e}", exc_info=True)
             return None
 
-    async def list_platform_credentials(self) -> List[Dict[str, Any]]:
+    async def list_platform_credentials(self) -> List[PlatformCredentialSummary]:
         pool = await self._get_pool()
         query = """
             SELECT platform, auth_type, is_active, expires_at, updated_at
@@ -1336,9 +1341,11 @@ class PostgresTimescaleRepository(ITrendRepository):
                 result.append({
                     "platform": _platform_key(plat),
                     "auth_type": auth_type,
-                    "is_active": active,
-                    "expires_at": expires.isoformat() if expires else None,
-                    "updated_at": updated.isoformat() if updated else None,
+                    # The same test get applies, so a row lists as active only when it would
+                    # also read as connected.
+                    "is_active": active is True,
+                    "expires_at": _utc_iso(expires),
+                    "updated_at": _utc_iso(updated),
                 })
             return result
         except Exception as e:

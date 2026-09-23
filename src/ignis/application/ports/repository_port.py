@@ -1,9 +1,29 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TypedDict
 from uuid import UUID
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
 from ignis.domain.value_objects import GeoCode, Timeframe
+
+
+class PlatformCredentialSummary(TypedDict):
+    """What `list_platform_credentials` answers: which platforms are connected, never the secret.
+
+    Both backends return exactly these keys. Timestamps are UTC ISO-8601 strings or None, so a
+    caller never has to know which backend produced them.
+    """
+
+    platform: str
+    auth_type: str
+    is_active: bool
+    expires_at: Optional[str]
+    updated_at: Optional[str]
+
+
+class PlatformCredentialRecord(PlatformCredentialSummary):
+    """What `get_platform_credentials` answers: the summary plus the decrypted credential."""
+
+    credentials_data: Dict[str, Any]
 
 
 class ITrendRepository(ABC):
@@ -151,12 +171,12 @@ class ITrendRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_platform_credentials(self, platform: str) -> Optional[Dict[str, Any]]:
+    async def get_platform_credentials(self, platform: str) -> Optional[PlatformCredentialRecord]:
         """Retrieve active authentication credentials for a given platform."""
         pass
 
     @abstractmethod
-    async def list_platform_credentials(self) -> List[Dict[str, Any]]:
+    async def list_platform_credentials(self) -> List[PlatformCredentialSummary]:
         """List connected authentication sessions across all platforms."""
         pass
 
