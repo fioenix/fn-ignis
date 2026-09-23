@@ -24,6 +24,9 @@ from ignis.application.ports.research_workspace_port import (
     RunJournal,
 )
 from ignis.infrastructure.persistence.identifiers import (
+    ambiguous_platform_message as _ambiguous_platform_message,
+    log_level as _log_level,
+    platform_key as _platform_key,
     uuid_or_none as _uuid_or_none,
     uuid_text as _uuid_text,
 )
@@ -1454,7 +1457,7 @@ class SqliteTrendRepository(ITrendRepository):
 
                 cur.execute(
                     "INSERT INTO system_audit_logs (id, component, event_type, message, level, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (log_id, component, event_type, clean_msg, level, details_json, now_str),
+                    (log_id, component, event_type, clean_msg, _log_level(level), details_json, now_str),
                 )
                 conn.commit()
             finally:
@@ -1478,8 +1481,10 @@ class SqliteTrendRepository(ITrendRepository):
                 query = "SELECT id, component, event_type, message, level, details, created_at FROM system_audit_logs WHERE 1=1"
                 params = []
                 if level:
-                    query += " AND level = ?"
-                    params.append(level)
+                    # upper() on the column as well: rows written before the level was
+                    # canonical are still stored verbatim, and must stay findable by it.
+                    query += " AND upper(level) = ?"
+                    params.append(_log_level(level))
                 if component:
                     query += " AND component = ?"
                     params.append(component)
@@ -1496,7 +1501,7 @@ class SqliteTrendRepository(ITrendRepository):
                         "component": r["component"],
                         "event_type": r["event_type"],
                         "message": r["message"],
-                        "level": r["level"],
+                        "level": _log_level(r["level"]),
                         "details": details,
                         "created_at": r["created_at"],
                     })
@@ -1516,11 +1521,26 @@ class SqliteTrendRepository(ITrendRepository):
         expires_at: Optional[datetime] = None,
     ) -> None:
         await self._ensure_schema()
+        key = _platform_key(platform)
 
         def _sync_save():
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
+                # A row stored under another casing is this platform's credential, so saving
+                # replaces it under the canonical key instead of adding a second row beside it.
+                cur.execute(
+                    "SELECT platform FROM platform_credentials WHERE lower(trim(platform)) = ?",
+                    (key,),
+                )
+                stored = [r["platform"] for r in cur.fetchall()]
+                if len(stored) > 1:
+                    raise RepositoryException(_ambiguous_platform_message(key, stored))
+                if stored and stored[0] != key:
+                    cur.execute(
+                        "UPDATE platform_credentials SET platform = ? WHERE platform = ?",
+                        (key, stored[0]),
+                    )
                 encrypted = encrypt_credentials(credentials_data)
                 encrypted_str = json.dumps(encrypted, ensure_ascii=False)
                 cred_id = str(uuid4())
@@ -1538,7 +1558,7 @@ class SqliteTrendRepository(ITrendRepository):
                         updated_at = excluded.updated_at,
                         expires_at = excluded.expires_at
                     """,
-                    (cred_id, platform, auth_type, encrypted_str, 1 if is_active else 0, now_str, now_str, exp_str),
+                    (cred_id, key, auth_type, encrypted_str, 1 if is_active else 0, now_str, now_str, exp_str),
                 )
                 conn.commit()
             finally:
@@ -1549,23 +1569,29 @@ class SqliteTrendRepository(ITrendRepository):
 
     async def get_platform_credentials(self, platform: str) -> Optional[Dict[str, Any]]:
         await self._ensure_schema()
+        key = _platform_key(platform)
 
         def _sync_get():
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT id, platform, auth_type, encrypted_data, is_active, created_at, updated_at, expires_at FROM platform_credentials WHERE platform = ? AND is_active = 1",
-                    (platform,),
+                    "SELECT id, platform, auth_type, encrypted_data, is_active, created_at, updated_at, expires_at FROM platform_credentials WHERE lower(trim(platform)) = ? AND is_active = 1",
+                    (key,),
                 )
-                r = cur.fetchone()
-                if not r:
+                rows = cur.fetchall()
+                if len(rows) > 1:
+                    raise RepositoryException(
+                        _ambiguous_platform_message(key, [row["platform"] for row in rows])
+                    )
+                if not rows:
                     return None
+                r = rows[0]
                 enc_data = json.loads(r["encrypted_data"]) if r["encrypted_data"] else {}
                 decrypted = decrypt_credentials(enc_data)
                 return {
                     "id": r["id"],
-                    "platform": r["platform"],
+                    "platform": key,
                     "auth_type": r["auth_type"],
                     "credentials_data": decrypted,
                     "credentials": decrypted,
@@ -1595,7 +1621,7 @@ class SqliteTrendRepository(ITrendRepository):
                 for r in rows:
                     creds.append({
                         "id": r["id"],
-                        "platform": r["platform"],
+                        "platform": _platform_key(r["platform"]),
                         "auth_type": r["auth_type"],
                         "is_active": bool(r["is_active"]),
                         "created_at": r["created_at"],
@@ -1616,7 +1642,12 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 cur = conn.cursor()
-                cur.execute("DELETE FROM platform_credentials WHERE platform = ?", (platform,))
+                # Every row that normalizes to the platform, so erasure never leaves a legacy
+                # spelling of the same secret behind.
+                cur.execute(
+                    "DELETE FROM platform_credentials WHERE lower(trim(platform)) = ?",
+                    (_platform_key(platform),),
+                )
                 deleted = cur.rowcount > 0
                 conn.commit()
                 return deleted

@@ -34,3 +34,30 @@ def uuid_or_none(value: Any) -> Optional[UUID]:
         return UUID(str(value))
     except (ValueError, AttributeError, TypeError):
         return None
+
+
+def platform_key(platform: str) -> str:
+    """The canonical key a credential row is stored and found under: trimmed, lower case.
+
+    Callers spell a platform however they were handed it ("Threads", "threads "), and the
+    repository port is the boundary that makes those one platform on both backends.
+    """
+    return str(platform or "").strip().lower()
+
+
+def log_level(level: Optional[str]) -> Optional[str]:
+    """The canonical spelling of an audit-log level: upper case, or None when absent."""
+    return level.upper() if level else level
+
+
+def ambiguous_platform_message(key: str, stored: list) -> str:
+    """Why two stored rows for one platform are refused instead of one being picked.
+
+    A row written under another casing before the key was canonical is still that platform's
+    credential, so two of them mean two secrets for one platform. Choosing one, or folding them
+    together, would be a guess made on the operator's behalf; deleting the platform clears both.
+    """
+    return (
+        f"Platform credentials for '{key}' are ambiguous: rows {sorted(stored)} all normalize to "
+        f"'{key}'. Delete the platform's credentials and authenticate again."
+    )

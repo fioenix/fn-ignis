@@ -9,18 +9,16 @@ different answer from the same call.
 These are contract tests through the port, not line exercises: each one states an answer both
 implementations owe the caller, and would fail on either backend alone if that backend drifted.
 
-Two known divergences are deliberately *not* asserted here, because asserting current behaviour
-would pin a defect rather than a contract, and correcting the behaviour is a repository change
-outside a coverage task. Both are recorded in `.handoff/T022-coverage-gate.handoff.md`:
+Caller casing is part of the contract, not a convention the caller is trusted to keep (T038). The
+repository port is the boundary, so it normalizes equivalent input the same way on both backends:
 
-- `log_event` normalizes `level` to upper case on PostgreSQL and stores it verbatim on SQLite, and
-  `get_recent_logs` filters the same way, so a level written in one case is unfindable in the other
-  on SQLite alone.
-- `save_platform_credentials` lower-cases `platform` on PostgreSQL and stores it verbatim on
-  SQLite, so `save("Threads")` then `get("threads")` succeeds on one backend and returns None on
-  the other.
+- an audit-log `level` is stored upper case, filtered without regard to the caller's casing, and
+  read back upper case even from a row written before the rule existed; and
+- a credential `platform` is the trimmed lower-case key on save, get, list and delete, and a row
+  stored under another casing is still found by it rather than orphaned.
 
-Every call below therefore uses one consistent casing, which is what production callers do.
+Until T038, PostgreSQL applied both rules and SQLite applied neither, so `save("Threads")` then
+`get("threads")` succeeded on one backend and returned None on the other.
 
 Not covered here: `runtime_configs` and `market_lexicons`. The integration fixture applies the
 source/observation migration set, which does not create those tables, so their PostgreSQL paths
@@ -28,9 +26,15 @@ cannot be reached without widening the fixture's schema -- a change that touches
 `repository_case`.
 """
 
+import json
+import sqlite3
 from datetime import datetime, timezone
 
+import psycopg
 import pytest
+
+from ignis.domain.exceptions import RepositoryException
+from ignis.infrastructure.auth.crypto import encrypt_credentials
 
 
 # --- audit logging ------------------------------------------------------------------------------
@@ -130,6 +134,77 @@ async def test_an_audit_log_never_stores_the_personal_data_it_was_handed(reposit
 @pytest.mark.asyncio
 async def test_reading_logs_from_an_empty_store_returns_an_empty_list(repository_case):
     assert await repository_case.repository.get_recent_logs(limit=10) == []
+
+
+# Each schema generates its own key and timestamp, so a raw legacy row is written by per-backend
+# SQL that binds the same four values.
+LEGACY_LOG_SQLITE = (
+    "INSERT INTO system_audit_logs (id, component, event_type, message, level, details, created_at)"
+    " VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, '{}',"
+    " strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')) RETURNING level"
+)
+LEGACY_LOG_POSTGRES = (
+    "INSERT INTO system_audit_logs (component, event_type, message, level)"
+    " VALUES (%s, %s, %s, %s) RETURNING level"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_level_written_in_lower_case_is_stored_and_returned_upper_case(repository_case):
+    repository = repository_case.repository
+
+    await repository.log_event(
+        component="youtube", event_type="quota", message="quota low", level="warning"
+    )
+
+    entry = (await repository.get_recent_logs(limit=1))[0]
+    stored = repository_case.query_one(
+        "SELECT level FROM system_audit_logs", "SELECT level FROM system_audit_logs"
+    )
+
+    assert entry["level"] == "WARNING"
+    assert stored[0] == "WARNING", "the level was not stored in its canonical form"
+
+
+@pytest.mark.asyncio
+async def test_filtering_by_level_does_not_depend_on_the_callers_casing(repository_case):
+    """An operator typing `warning` during an incident must see the same rows as `WARNING`."""
+    repository = repository_case.repository
+    await repository.log_event(
+        component="youtube", event_type="quota", message="quota low", level="Warning"
+    )
+    await repository.log_event(
+        component="youtube", event_type="fetch", message="pass ok", level="INFO"
+    )
+
+    lower = await repository.get_recent_logs(level="warning")
+    upper = await repository.get_recent_logs(level="WARNING")
+
+    assert [entry["message"] for entry in lower] == ["quota low"]
+    assert [entry["id"] for entry in lower] == [entry["id"] for entry in upper]
+
+
+@pytest.mark.asyncio
+async def test_a_row_stored_before_the_rule_reads_upper_case_and_is_found_by_its_level(
+    repository_case,
+):
+    """Rows written verbatim by an older build stay in the store; they are read, not rewritten."""
+    repository = repository_case.repository
+    repository_case.query_one(
+        LEGACY_LOG_SQLITE,
+        LEGACY_LOG_POSTGRES,
+        ("scheduler", "tick", "legacy tick", "error"),
+    )
+
+    listed = await repository.get_recent_logs(limit=10)
+    filtered = await repository.get_recent_logs(level="ERROR")
+    stored = repository_case.query_one(
+        "SELECT level FROM system_audit_logs", "SELECT level FROM system_audit_logs"
+    )
+
+    assert [entry["level"] for entry in listed] == ["ERROR"]
+    assert [entry["message"] for entry in filtered] == ["legacy tick"]
+    assert stored[0] == "error", "reading a legacy row must not rewrite it"
 
 
 # --- platform credentials -----------------------------------------------------------------------
@@ -240,3 +315,151 @@ async def test_credentials_for_an_unconnected_platform_read_as_none(repository_c
 @pytest.mark.asyncio
 async def test_listing_credentials_with_nothing_connected_returns_an_empty_list(repository_case):
     assert await repository_case.repository.list_platform_credentials() == []
+
+
+@pytest.mark.asyncio
+async def test_a_platform_saved_in_any_casing_is_one_canonical_key_everywhere(repository_case):
+    """`save("Threads")` then `get("threads")` used to succeed on PostgreSQL only."""
+    repository = repository_case.repository
+
+    await repository.save_platform_credentials(
+        platform=" Threads ", auth_type="oauth", credentials_data={"access_token": "t"}
+    )
+
+    for spelling in ("threads", "THREADS", "Threads"):
+        stored = await repository.get_platform_credentials(spelling)
+        assert stored is not None, f"get({spelling!r}) missed the saved credential"
+        assert stored["platform"] == "threads"
+        assert stored["credentials_data"]["access_token"] == "t"
+
+    listed = await repository.list_platform_credentials()
+    row = repository_case.query_one(
+        "SELECT platform FROM platform_credentials", "SELECT platform FROM platform_credentials"
+    )
+    assert [entry["platform"] for entry in listed] == ["threads"]
+    assert row[0] == "threads", "the platform key was not stored in its canonical form"
+
+
+@pytest.mark.asyncio
+async def test_saving_again_under_another_casing_replaces_rather_than_adds(repository_case):
+    repository = repository_case.repository
+
+    await repository.save_platform_credentials(
+        platform="threads", auth_type="oauth", credentials_data={"access_token": "first"}
+    )
+    await repository.save_platform_credentials(
+        platform="THREADS", auth_type="oauth", credentials_data={"access_token": "second"}
+    )
+
+    listed = await repository.list_platform_credentials()
+    stored = await repository.get_platform_credentials("Threads")
+
+    assert len(listed) == 1
+    assert stored["credentials_data"]["access_token"] == "second"
+
+
+@pytest.mark.asyncio
+async def test_deleting_under_another_casing_erases_the_credential(repository_case):
+    """Erasure after a leak must not depend on the operator remembering the stored casing."""
+    repository = repository_case.repository
+    await repository.save_platform_credentials(
+        platform="Threads", auth_type="oauth", credentials_data={"access_token": "x"}
+    )
+
+    assert await repository.delete_platform_credentials("ThReAdS") is True
+    assert await repository.get_platform_credentials("threads") is None
+    assert await repository.delete_platform_credentials("threads") is False
+    assert await repository.list_platform_credentials() == []
+
+
+# A credential row written verbatim by an older SQLite build, or by hand, under a non-canonical
+# key. The payload is encrypted the way the port would have encrypted it.
+LEGACY_CREDENTIAL_SQLITE = (
+    "INSERT INTO platform_credentials"
+    " (id, platform, auth_type, encrypted_data, is_active, created_at, updated_at)"
+    " VALUES (lower(hex(randomblob(16))), ?, ?, ?, 1, datetime('now'), datetime('now'))"
+    " RETURNING platform"
+)
+LEGACY_CREDENTIAL_POSTGRES = (
+    "INSERT INTO platform_credentials (platform, auth_type, credentials_data)"
+    " VALUES (%s, %s, %s) RETURNING platform"
+)
+STORED_PLATFORM_KEYS = "SELECT platform FROM platform_credentials"
+
+
+def _insert_legacy_credential(repository_case, platform: str, token: str) -> None:
+    payload = json.dumps(encrypt_credentials({"access_token": token}))
+    repository_case.query_one(
+        LEGACY_CREDENTIAL_SQLITE, LEGACY_CREDENTIAL_POSTGRES, (platform, "oauth", payload)
+    )
+
+
+def _stored_platform_keys(repository_case) -> list:
+    """Stored keys sorted in Python, since the two backends collate mixed case differently."""
+    if repository_case.name == "sqlite":
+        with sqlite3.connect(repository_case.repository._db_path) as conn:
+            rows = conn.execute(STORED_PLATFORM_KEYS).fetchall()
+    else:
+        with psycopg.connect(repository_case.dsn) as conn:
+            rows = conn.execute(STORED_PLATFORM_KEYS).fetchall()
+    return sorted(row[0] for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_mixed_case_credential_is_readable_listable_and_erasable(repository_case):
+    repository = repository_case.repository
+    _insert_legacy_credential(repository_case, "Threads", "legacy")
+
+    stored = await repository.get_platform_credentials("threads")
+    listed = await repository.list_platform_credentials()
+
+    assert stored is not None, "a legacy row was orphaned by the canonical key"
+    assert stored["platform"] == "threads"
+    assert stored["credentials_data"]["access_token"] == "legacy"
+    assert [entry["platform"] for entry in listed] == ["threads"]
+    assert "legacy" not in str(listed)
+    assert _stored_platform_keys(repository_case) == ["Threads"], "a read rewrote the row"
+
+    assert await repository.delete_platform_credentials("threads") is True
+    assert _stored_platform_keys(repository_case) == []
+
+
+@pytest.mark.asyncio
+async def test_re_authenticating_over_a_legacy_row_replaces_it_instead_of_duplicating(
+    repository_case,
+):
+    """A second row beside the legacy one would make the platform ambiguous on the next read."""
+    repository = repository_case.repository
+    _insert_legacy_credential(repository_case, "Threads", "legacy")
+
+    await repository.save_platform_credentials(
+        platform="threads", auth_type="oauth", credentials_data={"access_token": "fresh"}
+    )
+
+    stored = await repository.get_platform_credentials("threads")
+    assert stored["credentials_data"]["access_token"] == "fresh"
+    assert _stored_platform_keys(repository_case) == ["threads"]
+
+
+@pytest.mark.asyncio
+async def test_two_legacy_rows_for_one_platform_are_refused_rather_than_merged(repository_case):
+    """Picking one of two secrets, or folding them together, would be a guess made for the operator.
+
+    Both reads and writes refuse and name the ambiguity; both rows survive untouched, and delete
+    -- the one call whose intent covers every row -- is how the operator resolves it.
+    """
+    repository = repository_case.repository
+    _insert_legacy_credential(repository_case, "Threads", "one")
+    _insert_legacy_credential(repository_case, "THREADS", "two")
+
+    with pytest.raises(RepositoryException, match="threads"):
+        await repository.get_platform_credentials("threads")
+    with pytest.raises(RepositoryException, match="threads"):
+        await repository.save_platform_credentials(
+            platform="threads", auth_type="oauth", credentials_data={"access_token": "three"}
+        )
+    assert _stored_platform_keys(repository_case) == ["THREADS", "Threads"]
+
+    assert await repository.delete_platform_credentials("threads") is True
+    assert _stored_platform_keys(repository_case) == []
+    assert await repository.get_platform_credentials("threads") is None

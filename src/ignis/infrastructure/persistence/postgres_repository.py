@@ -23,6 +23,9 @@ from ignis.application.ports.research_workspace_port import (
     RunJournal,
 )
 from ignis.infrastructure.persistence.identifiers import (
+    ambiguous_platform_message as _ambiguous_platform_message,
+    log_level as _log_level,
+    platform_key as _platform_key,
     uuid_or_none as _uuid_or_none,
     uuid_text as _uuid_text,
 )
@@ -1145,7 +1148,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             VALUES (%s, %s, %s, %s, %s, %s);
         """
         params = (
-            level.upper(),
+            _log_level(level),
             component,
             event_type,
             sanitize_pii_text(message),
@@ -1170,8 +1173,10 @@ class PostgresTimescaleRepository(ITrendRepository):
         params = []
 
         if level:
-            conditions.append("level = %s")
-            params.append(level.upper())
+            # upper() on the column as well: rows written before the level was canonical are
+            # still stored verbatim, and must stay findable by it.
+            conditions.append("upper(level) = %s")
+            params.append(_log_level(level))
         if component:
             conditions.append("component = %s")
             params.append(component)
@@ -1198,7 +1203,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 dtl = dtl_json if isinstance(dtl_json, dict) else json.loads(dtl_json or "{}")
                 logs.append({
                     "id": l_id,
-                    "level": lvl,
+                    "level": _log_level(lvl),
                     "component": comp,
                     "event_type": evt,
                     "message": msg,
@@ -1238,8 +1243,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                 expires_at = EXCLUDED.expires_at,
                 updated_at = NOW();
         """
+        key = _platform_key(platform)
         params = (
-            platform.lower(),
+            key,
             auth_type,
             json.dumps(payload_to_store),
             is_active,
@@ -1247,9 +1253,26 @@ class PostgresTimescaleRepository(ITrendRepository):
         )
         try:
             async with pool.connection() as conn:
-                async with conn.cursor() as cur:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    # A row stored under another casing is this platform's credential, so saving
+                    # replaces it under the canonical key instead of adding a second row beside it.
+                    await cur.execute(
+                        "SELECT platform FROM platform_credentials"
+                        " WHERE lower(trim(platform)) = %s;",
+                        (key,),
+                    )
+                    stored = [r[0] for r in await cur.fetchall()]
+                    if len(stored) > 1:
+                        raise RepositoryException(_ambiguous_platform_message(key, stored))
+                    if stored and stored[0] != key:
+                        await cur.execute(
+                            "UPDATE platform_credentials SET platform = %s WHERE platform = %s;",
+                            (key, stored[0]),
+                        )
                     await cur.execute(query, params)
             logger.info(f"Successfully saved encrypted credentials for platform [{platform}].")
+        except RepositoryException:
+            raise
         except Exception as e:
             logger.error(f"Error saving credentials for {platform}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to save credentials for {platform}: {e}") from e
@@ -1259,29 +1282,36 @@ class PostgresTimescaleRepository(ITrendRepository):
         query = """
             SELECT platform, auth_type, credentials_data, is_active, expires_at, updated_at
             FROM platform_credentials
-            WHERE platform = %s AND is_active = TRUE
-            LIMIT 1;
+            WHERE lower(trim(platform)) = %s AND is_active = TRUE;
         """
+        key = _platform_key(platform)
         try:
             async with pool.connection() as conn:
                 async with conn.cursor(row_factory=tuple_row) as cur:
-                    await cur.execute(query, (platform.lower(),))
-                    row = await cur.fetchone()
-            if not row:
+                    await cur.execute(query, (key,))
+                    rows = await cur.fetchall()
+            if len(rows) > 1:
+                raise RepositoryException(
+                    _ambiguous_platform_message(key, [r[0] for r in rows])
+                )
+            if not rows:
                 return None
+            row = rows[0]
 
             plat, auth_type, creds_json, active, expires, updated = row
             raw_creds = creds_json if isinstance(creds_json, dict) else json.loads(creds_json or "{}")
             # Automatically decrypt ciphertext back to plaintext dictionary
             decrypted_creds = decrypt_credentials(raw_creds)
             return {
-                "platform": plat,
+                "platform": key,
                 "auth_type": auth_type,
                 "credentials_data": decrypted_creds,
                 "is_active": active,
                 "expires_at": expires.isoformat() if expires else None,
                 "updated_at": updated.isoformat() if updated else None,
             }
+        except RepositoryException:
+            raise
         except Exception as e:
             logger.error(f"Error retrieving credentials for {platform}: {e}", exc_info=True)
             return None
@@ -1302,7 +1332,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             for r in rows:
                 plat, auth_type, active, expires, updated = r
                 result.append({
-                    "platform": plat,
+                    "platform": _platform_key(plat),
                     "auth_type": auth_type,
                     "is_active": active,
                     "expires_at": expires.isoformat() if expires else None,
@@ -1327,11 +1357,13 @@ class PostgresTimescaleRepository(ITrendRepository):
         three assume the material is gone.
         """
         pool = await self._get_pool()
-        query = "DELETE FROM platform_credentials WHERE platform = %s;"
+        # Every row that normalizes to the platform, so erasure never leaves a legacy spelling of
+        # the same secret behind.
+        query = "DELETE FROM platform_credentials WHERE lower(trim(platform)) = %s;"
         try:
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
-                    await cur.execute(query, (platform.lower(),))
+                    await cur.execute(query, (_platform_key(platform),))
                     return cur.rowcount > 0
         except Exception as e:
             logger.error(f"Error deleting credentials for {platform}: {e}", exc_info=True)

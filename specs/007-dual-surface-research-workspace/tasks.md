@@ -171,6 +171,7 @@ journal, and unrelated missions are not globally blocked.
 - [x] T035 [P] Add repository convention and provenance assertions for workspace-local data, no transcript persistence, and Attention/Market separation in `tests/unit/test_repo_conventions.py` and `tests/unit/test_data_provenance.py` (touches: listed test files; depends-on: T028, T033)
 - [x] T036 Run the feature quickstart and both-backend verification gates, including the handoff-revision regression and honest reporting of any unavailable PostgreSQL coverage (touches: `specs/007-dual-surface-research-workspace/quickstart.md`; depends-on: T034, T035)
 - [x] T037 Prepare the evidence-gated production migration rehearsal and verification record for the new shared schema, including projection/count/invariant/digest outputs and an explicit no-apply-without-authorization boundary (touches: `.handoff/`, `scripts/`, `specs/007-dual-surface-research-workspace/quickstart.md`; depends-on: T036)
+- [x] T038 Normalize audit-log levels (upper case) and platform credential keys (trimmed lower case) identically on the SQLite and PostgreSQL repositories, including mixed-case caller input and pre-existing non-canonical rows, closing the parity follow-up T022 left open; refuse rather than merge two stored rows for one platform (touches: `src/ignis/infrastructure/persistence/identifiers.py`, `src/ignis/infrastructure/persistence/sqlite_repository.py`, `src/ignis/infrastructure/persistence/postgres_repository.py`, `tests/integration/test_t022_operational_surface_parity.py`; depends-on: T036)
 
 ---
 

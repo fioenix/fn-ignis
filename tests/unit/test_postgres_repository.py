@@ -175,7 +175,8 @@ async def test_platform_credentials_crud():
     assert params_arg[0] == "tiktok"
 
     # 2. Test get_platform_credentials
-    mock_cursor.fetchone = AsyncMock(return_value=("tiktok", "session_cookies", '{"cookies": []}', True, None, None))
+    # All matching rows are fetched, so two stored spellings of one platform can be refused.
+    mock_cursor.fetchall = AsyncMock(return_value=[("tiktok", "session_cookies", '{"cookies": []}', True, None, None)])
     creds = await repo.get_platform_credentials("tiktok")
     assert creds is not None
     assert creds["platform"] == "tiktok"

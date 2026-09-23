@@ -129,7 +129,8 @@
   repository behaviour is outside a coverage task: `log_event`/`get_recent_logs` normalize `level`
   on PostgreSQL and not on SQLite, and `save_platform_credentials` lower-cases `platform` on
   PostgreSQL and not on SQLite. Both are recorded, with reproductions, in
-  `.handoff/T022-coverage-gate.handoff.md`
+  `.handoff/T022-coverage-gate.handoff.md`. **Both closed by `specs/007-dual-surface-research-workspace/tasks.md`
+  T038**, which makes the two backends normalize them identically and asserts it in the same file.
 
 ---
 
