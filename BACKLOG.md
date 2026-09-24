@@ -4,7 +4,7 @@
 > - **Phiên bản:** `v0.5.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (45 Handlers & Tools)
-> - **Trạng thái:** Bản live gần nhất `v0.4.1` đã tag và publish; `v0.5.0` đang được chuẩn bị.
+> - **Trạng thái:** Bản live hiện hành `v0.5.0` đã tag và publish.
 >   Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`; đừng tin dòng này — nó
 >   là tài liệu, còn
 >   tag với release nằm trên Git và GitHub. Cutover T020 trên corpus PostgreSQL hiện hữu đã chạy
