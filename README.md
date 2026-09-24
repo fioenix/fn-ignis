@@ -301,8 +301,10 @@ Every table the chain creates in `public` has row-level security on. When the Su
 and `authenticated` already exist, `006` gives them read-only policies on `market_lexicons` and
 `industry_taxonomies`, and `021` revokes every other privilege they hold on the chain's tables;
 neither migration creates a role. PostgreSQL init scripts do not run again for an existing data
-volume, so a database initialised before `021` must apply `sql/021_public_schema_rls_coverage.sql`
-once, connected as the table owner; running it again changes nothing.
+volume. Apply every missing migration in filename order, connected as the table owner: a database
+initialised before `021` needs `sql/021_public_schema_rls_coverage.sql`, and any database
+initialised before `022` needs `sql/022_builtin_uuid_defaults.sql`. Running either file again
+changes nothing.
 
 > Existing PostgreSQL installations with a legacy `trend_signals` corpus require the reviewed
 > [source/observation production cutover](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).

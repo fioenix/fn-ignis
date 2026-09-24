@@ -4,9 +4,9 @@
 --
 -- 001 installs uuid-ossp into public, and 001, 016, 017 and 018 default nine primary keys to its
 -- uuid_generate_v4(). 006 then revokes EXECUTE on every public function from PUBLIC, which is the
--- right posture for application RPCs and the wrong dependency for a column default: a runtime
--- that owns the tables without being a superuser -- the Supabase `postgres` role, or any
--- least-privilege owner -- cannot insert a row unless it supplies the id itself.
+-- right posture for application RPCs and the wrong dependency for a column default: on an
+-- installation where uuid-ossp is in public, a runtime that owns the tables without being a
+-- superuser cannot insert a row unless it supplies the id itself.
 --
 -- gen_random_uuid() is built into PostgreSQL 13 and later, lives in pg_catalog, and is executable
 -- by PUBLIC, so the defaults stop depending on a grant the 006 posture withholds. 003 already
