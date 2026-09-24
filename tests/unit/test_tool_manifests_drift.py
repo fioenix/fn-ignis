@@ -1,4 +1,7 @@
 import json
+import re
+from pathlib import Path
+
 import pytest
 from ignis.interfaces.mcp.server import mcp
 
@@ -31,3 +34,13 @@ async def test_all_tool_manifests_are_synchronized():
         f".hermes/tools.json drift: {server_tool_names ^ hermes_tools_names}"
     )
     assert openclaw.get("protocols", {}).get("tools_count") == 45
+
+
+def test_wheel_smoke_uses_the_manifest_tool_count():
+    """Keep the built-wheel MCP smoke gate aligned with the public tool manifest."""
+    openclaw = json.loads(Path("openclaw.json").read_text(encoding="utf-8"))
+    smoke_source = Path("scripts/wheel_mcp_smoke.py").read_text(encoding="utf-8")
+    declared = re.search(r"^EXPECTED_TOOL_COUNT = (\d+)$", smoke_source, re.MULTILINE)
+
+    assert declared is not None, "wheel smoke no longer declares its expected tool count"
+    assert int(declared.group(1)) == openclaw["protocols"]["tools_count"]
