@@ -3,8 +3,8 @@
 The other migration contracts apply sql/ over a client connection. This one runs the real thing:
 the `db` service from docker-compose.prod.yml, its exact image, environment and full-directory
 `/docker-entrypoint-initdb.d` mount, under a throwaway Compose project. The override changes only
-what isolation needs: the container name, no published port, and no restart policy, so a failing
-init shows as an exited container instead of a restart loop.
+what isolation needs: the container name, no published port, no restart policy, and no unrelated
+worker env file, so a clean checkout can tear the database down after the test.
 
 Opt-in with IGNIS_TEST_COMPOSE_INIT=1, because it needs Docker and the TimescaleDB image, and each
 run initialises a database from nothing. Credentials are generated per run and never printed; the
@@ -111,7 +111,9 @@ def _fresh_init(tmp_path: Path) -> dict:
         "  db:\n"
         f"    container_name: {container}\n"
         "    ports: !reset []\n"
-        '    restart: "no"\n',
+        '    restart: "no"\n'
+        "  worker:\n"
+        "    env_file: !reset []\n",
         encoding="utf-8",
     )
     env_file = run_dir / "compose.env"
