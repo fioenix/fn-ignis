@@ -36,6 +36,9 @@ OPT_IN = "IGNIS_TEST_COMPOSE_INIT"
 WORKFLOW_NAME = "Compose Init"
 JOB_ID = "compose-fresh-init"
 JOB_NAME = "Fresh Compose database init"
+CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+SETUP_UV_ACTION = "astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39"
+UV_VERSION = "0.12.17"
 
 PROTECTED_BRANCH_PATTERNS = {"main", "release/*", "hotfix/*"}
 
@@ -75,6 +78,12 @@ def _job() -> dict:
 
 def _steps() -> list:
     return _job()["steps"]
+
+
+def _step(name: str) -> dict:
+    matches = [step for step in _steps() if step.get("name") == name]
+    assert len(matches) == 1, f"expected one step named {name!r}; found {len(matches)}"
+    return matches[0]
 
 
 def _steps_text() -> str:
@@ -176,12 +185,8 @@ def test_the_gate_runs_on_protected_branch_pushes_and_on_demand():
 
 def test_the_runner_image_is_pinned():
     runner = _job()["runs-on"]
-    assert runner != "ubuntu-latest", (
-        "`ubuntu-latest` re-points on GitHub's schedule, changing the Docker and Compose versions"
-        " under the gate on a date nobody here chose"
-    )
-    assert re.fullmatch(r"ubuntu-\d\d\.\d\d", str(runner)), (
-        f"{runner!r} is not a pinned GitHub-hosted image label"
+    assert runner == "ubuntu-24.04", (
+        f"the gate must stay on 'ubuntu-24.04' until a reviewed change moves it; found {runner!r}"
     )
 
 
@@ -210,8 +215,8 @@ def test_duplicate_runs_on_one_ref_cannot_pile_up():
     assert "compose-init" in group, (
         f"the concurrency group {group!r} could collide with another workflow's group"
     )
-    assert "cancel-in-progress" in concurrency, (
-        "cancel-in-progress is not declared, so superseded pull-request runs keep their runners"
+    assert concurrency.get("cancel-in-progress") == "${{ github.event_name == 'pull_request' }}", (
+        "only superseded pull-request runs may be cancelled; protected-branch pushes must queue"
     )
 
 
@@ -225,6 +230,20 @@ def test_dependencies_are_installed_from_the_committed_lockfile():
     )
     for forbidden in ("uv lock", "uv pip install", "pip install"):
         assert forbidden not in steps, f"the workflow runs {forbidden!r} instead of the locked set"
+
+
+def test_bootstrap_actions_and_uv_are_immutable():
+    checkout = _step("Checkout repository")
+    setup_uv = _step("Install uv")
+    assert checkout.get("uses") == CHECKOUT_ACTION, (
+        "checkout must use the reviewed commit SHA, not a movable release tag"
+    )
+    assert setup_uv.get("uses") == SETUP_UV_ACTION, (
+        "setup-uv must use the reviewed commit SHA, not a movable release tag"
+    )
+    assert str((setup_uv.get("with") or {}).get("version")) == UV_VERSION, (
+        f"the gate must install the reviewed uv version {UV_VERSION}, not a moving latest release"
+    )
 
 
 def test_the_opt_in_is_set_only_on_the_contract_step():

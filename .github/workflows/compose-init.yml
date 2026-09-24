@@ -49,12 +49,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
         with:
-          version: "latest"
+          version: "0.12.17"
 
       # One interpreter: this job tests the database init, not Python compatibility, which the
       # ci.yml matrix already covers.
