@@ -85,7 +85,19 @@
   or gains a client grant. Tables are listed rather than discovered, so another application's
   tables in a shared database are left as they are; a database initialised before `021` must
   apply it once as the table owner.
-- [ ] T019 Run `tests/integration/test_compose_init.py` as a dedicated Docker CI job with
+- [x] T019 Run `tests/integration/test_compose_init.py` as a dedicated Docker CI job with
   `IGNIS_TEST_COMPOSE_INIT=1`, keeping the exact production image and full `sql/` mount. Require the
   stable job on protected branches so a later migration cannot break fresh initialization while
-  the ordinary integration suite remains green (depends-on: T017).
+  the ordinary integration suite remains green (depends-on: T017). `.github/workflows/compose-init.yml`
+  (workflow `Compose Init`, job `compose-fresh-init`, check name `Fresh Compose database init`)
+  runs on every unfiltered pull request, on pushes to `main`, `release/*` and `hotfix/*`, and on
+  manual dispatch, on `ubuntu-24.04` with read-only permissions, a 30-minute timeout and one run
+  per ref. It installs `uv.lock` with `--locked`, sets the opt-in on the contract step only, and
+  fails a run whose JUnit report shows no executed test or any skip, because pytest exits 0 when
+  Docker is missing and the test skips itself. The workflow restates no image, mount, DSN or
+  migration list. `tests/unit/test_t019_compose_init_workflow.py` pins all of this in 21 contracts;
+  renaming the job, removing the opt-in, or removing the skip check each fails them. Verified
+  locally by the real two-init contract and, in a clean worktree without `.env`, by the workflow's
+  own install, contract and skip-check commands. Branch protection is not part of this commit:
+  the check becomes required only once Codex applies the GitHub setting after the first remote
+  run and reads it back.
