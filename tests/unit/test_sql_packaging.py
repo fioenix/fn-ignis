@@ -18,6 +18,9 @@ SEED_FILES = (
     # UI-noise terms would silently come back on every installed SQLite database.
     "020_retire_ambiguous_tiktok_ui_noise.sql",
 )
+# Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
+# sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
+NEWEST_POSTGRES_MIGRATION = "022_builtin_uuid_defaults.sql"
 
 
 def test_seed_directory_is_found_in_this_layout():
@@ -68,3 +71,16 @@ def test_wheel_ships_the_seeds_alongside_the_package():
     content = pyproject.read_text(encoding="utf-8")
     assert "[tool.hatch.build.targets.wheel.force-include]" in content
     assert '"sql" = "ignis/sql"' in content
+
+
+def test_the_whole_postgres_migration_chain_ships_not_only_the_seeds():
+    """The wheel copies the directory and the sdist keeps it, so no migration is left behind."""
+    directory = sql_seed_dir()
+    assert directory is not None and (directory / NEWEST_POSTGRES_MIGRATION).is_file(), (
+        f"{NEWEST_POSTGRES_MIGRATION} is missing from the SQL directory the package ships"
+    )
+    assert NEWEST_POSTGRES_MIGRATION not in SEED_FILES, "a PostgreSQL-only migration is not a seed"
+    pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    sdist = pyproject.read_text(encoding="utf-8").split("[tool.hatch.build.targets.sdist]", 1)[1]
+    excluded = sdist.split("]", 1)[0]
+    assert '"sql"' not in excluded and '"/sql"' not in excluded, "the sdist excludes sql/"

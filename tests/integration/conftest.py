@@ -9,6 +9,7 @@ divergence these tests exist to catch.
 import os
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -485,6 +486,59 @@ def supabase_like_dsn():
         with psycopg.connect(admin_dsn, autocommit=True) as conn:
             for role in created:
                 conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+
+
+# The role the runtime connects as in the owner contracts: it owns the tables and nothing else.
+RUNTIME_ROLE = "ignis_test_runtime_owner"
+
+
+@contextmanager
+def runtime_owner(dsn: str):
+    """Hand every public table in an already-migrated database to a plain role, and connect as it.
+
+    The contract server's login is a superuser, and a superuser bypasses RLS and every function
+    privilege whatever the schema says, so a repository connected as it would prove nothing. On
+    Supabase the runtime's `postgres` is not a superuser; it owns the tables, which is what exempts
+    it from RLS without a policy. This role stands for it, and it is given nothing beyond that
+    ownership and schema USAGE -- in particular no EXECUTE on public functions, because 006 revoked
+    that from PUBLIC and the runtime has to work inside that posture, not beside it.
+
+    The yielded DSN sets the role for every session, so each statement is checked as the owner.
+    """
+    admin_dsn = make_conninfo(**{**conninfo_to_dict(dsn), "dbname": "postgres"})
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        if not conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (RUNTIME_ROLE,)).fetchone():
+            conn.execute(
+                sql.SQL("CREATE ROLE {} NOLOGIN NOSUPERUSER NOBYPASSRLS").format(
+                    sql.Identifier(RUNTIME_ROLE)
+                )
+            )
+    try:
+        with psycopg.connect(dsn) as conn:
+            tables = conn.execute(
+                "SELECT relname FROM pg_class"
+                " WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p')"
+            ).fetchall()
+            for (table,) in tables:
+                conn.execute(
+                    sql.SQL("ALTER TABLE public.{} OWNER TO {}").format(
+                        sql.Identifier(table), sql.Identifier(RUNTIME_ROLE)
+                    )
+                )
+            conn.execute(
+                sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(RUNTIME_ROLE))
+            )
+        yield RedactedDsn(make_conninfo(dsn, options=f"-c role={RUNTIME_ROLE}"))
+    finally:
+        # The database fixture drops the database afterwards; the role's grants go with it, but
+        # the role is cluster-wide, so it is removed here once it owns nothing in this database.
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                sql.SQL("REASSIGN OWNED BY {} TO CURRENT_USER").format(sql.Identifier(RUNTIME_ROLE))
+            )
+            conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(RUNTIME_ROLE)))
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(RUNTIME_ROLE)))
 
 
 @dataclass

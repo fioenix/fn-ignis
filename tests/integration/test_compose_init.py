@@ -54,7 +54,21 @@ READBACK = {
         " AND relkind IN ('r', 'p') AND NOT relrowsecurity"
     ),
     "supabase_roles": "SELECT count(*) FROM pg_roles WHERE rolname IN ('anon', 'authenticated')",
+    # 022: every UUID key defaults to the built-in generator, and no default still calls uuid-ossp,
+    # whose EXECUTE 006 withholds from a runtime owner that is not a superuser.
+    "builtin_uuid_defaults": (
+        "SELECT count(*) FROM pg_attrdef d JOIN pg_class c ON c.oid = d.adrelid"
+        " WHERE c.relnamespace = 'public'::regnamespace"
+        " AND pg_get_expr(d.adbin, d.adrelid) = 'gen_random_uuid()'"
+    ),
+    "uuid_ossp_defaults": (
+        "SELECT count(*) FROM pg_attrdef d JOIN pg_class c ON c.oid = d.adrelid"
+        " WHERE c.relnamespace = 'public'::regnamespace"
+        " AND pg_get_expr(d.adbin, d.adrelid) LIKE '%uuid_generate_v%'"
+    ),
 }
+# The newest migration a fresh container has to reach; the full list is read from sql/ itself.
+NEWEST_MIGRATION = "022_builtin_uuid_defaults.sql"
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("IGNIS_TEST_COMPOSE_INIT") != "1" or shutil.which("docker") is None,
@@ -189,6 +203,7 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
             f" last file run {run['ran'][-1:]}, errors {run['errors'][:3]}"
         )
         assert run["ran"] == list(all_postgres_migrations()), "init skipped or reordered a file"
+        assert NEWEST_MIGRATION in run["ran"], f"init never reached {NEWEST_MIGRATION}"
         assert run["errors"] == []
         assert run["readback"] == {
             "later_objects": "7",
@@ -199,6 +214,8 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
             "public_tables": "17",
             "public_tables_without_rls": "0",
             "supabase_roles": "0",
+            "builtin_uuid_defaults": "11",
+            "uuid_ossp_defaults": "0",
         }
         assert run["cleanup"]["returncode"] == 0, run["cleanup"]
         assert run["leftovers"] == {"container": 0, "volume": 0, "network": 0}, (
