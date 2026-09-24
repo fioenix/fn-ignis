@@ -881,6 +881,22 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   nào bị skip. Compose init chạy đủ 22 file, 0 dòng `ERROR:`, dọn sạch container, volume và network.
   Chưa áp dụng lên database dev hay production; database khởi tạo trước `022` phải chạy file này
   một lần bằng quyền owner.
+
+- [x] **Ghim runner và bản `setup-uv` trong CI — T021 của spec 002, ngày 25/09/2026.** Các lượt
+  chạy GitHub Actions của release v0.5.0 in hai cảnh báo: `astral-sh/setup-uv@v3` chạy trên Node.js
+  20, phiên bản GitHub đã deprecated, còn `ubuntu-latest` là nhãn GitHub sẽ tự chuyển sang Ubuntu 26.
+  Lượt Docker Publish của v0.5.0 vẫn thành công, nên đây là bảo trì phòng ngừa chứ không phải xử lý
+  sự cố. `Secret scan`, ma trận test Python trong CI và job Docker Publish giờ chạy trên
+  `ubuntu-24.04`, giống Performance và Compose Init. CI và Performance cài uv qua
+  `astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7` (v10.2.0) với uv `0.12.17`, đúng cấu
+  hình đã review của Compose Init, thay cho `@v3` kèm `version: "latest"`. Tên workflow, tên job,
+  trigger, permissions, ma trận Python 3.11–3.14, service PostgreSQL, lệnh benchmark và quy tắc tag
+  Docker không đổi. 13 contract trong `tests/unit/test_t021_ci_runtime_pinning.py` fail nếu
+  `ubuntu-latest`, `@v3` hay `latest` quay lại. Trước khi sửa có 7 contract fail, sau khi sửa cả 13
+  pass; ba negative control (trả lại một runner, một tag `@v3`, một `latest`) đều fail đúng assert.
+  Unit suite 1071 passed, 2 skipped; actionlint 1.7.7 không báo gì mới, chỉ còn một info SC2012 có
+  sẵn ở `ci.yml:119`. Chưa xác nhận trên GitHub vì task này không push; Codex sẽ đọc lượt chạy remote
+  sau khi mở PR.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)

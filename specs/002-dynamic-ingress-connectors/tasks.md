@@ -142,3 +142,24 @@
   opt-in and two SQLite legs of Postgres-only tests); fresh Compose init ran all 22 files. Not
   applied to any dev or production database; an installation initialised before `022` applies it
   once as the table owner.
+
+## Phase 10: CI Runtime Pinning (2026-09-25)
+
+- [x] T021 Pin the GitHub-hosted runners used by CI and Docker Publish to `ubuntu-24.04`, and
+  replace every remaining `astral-sh/setup-uv@v3` use with the reviewed immutable action SHA and uv
+  binary version already used by Compose Init. Preserve workflow names, job names, triggers,
+  permissions, Python matrix entries, PostgreSQL services, benchmark arguments, Docker image/tag
+  semantics, and required-check identities. Add static workflow contracts that fail if the
+  deprecated action tag or moving runner returns. Verify locally; remote execution remains
+  unverified until Codex opens the PR (touches: `.github/workflows/ci.yml`,
+  `.github/workflows/performance.yml`, `.github/workflows/docker-publish.yml`,
+  `tests/unit/test_t021_ci_runtime_pinning.py`, `BACKLOG.md`; source: GitHub Actions warnings on
+  the v0.5.0 release runs). `Secret scan`, the Python test matrix and Docker Publish moved from
+  `ubuntu-latest` to `ubuntu-24.04`; CI and Performance moved from `astral-sh/setup-uv@v3` with
+  `version: "latest"` to `astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0`
+  with uv `0.12.17`, the Compose Init pin, which is unchanged. The diff is those seven lines.
+  `tests/unit/test_t021_ci_runtime_pinning.py` holds 13 contracts: 7 failed before the change and
+  all 13 pass after it; restoring one `ubuntu-latest` runner, one `@v3` tag, or one `latest` uv
+  version each fails the intended assertions. Unit suite 1071 passed, 2 skipped; actionlint 1.7.7
+  reports only the pre-existing SC2012 info at `ci.yml:119`. Remote GitHub execution is not
+  verified because this task does not push.
