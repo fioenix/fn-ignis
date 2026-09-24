@@ -439,6 +439,54 @@ def empty_postgres_dsn():
         _drop_test_database(admin_dsn, database_name)
 
 
+SUPABASE_ROLES = ("anon", "authenticated")
+
+
+def existing_supabase_roles(dsn: str) -> list:
+    with psycopg.connect(dsn) as conn:
+        rows = conn.execute(
+            "SELECT rolname FROM pg_roles WHERE rolname = ANY(%s)", (list(SUPABASE_ROLES),)
+        ).fetchall()
+    return sorted(row[0] for row in rows)
+
+
+@pytest.fixture
+def supabase_like_dsn():
+    """A database on a server where `anon` and `authenticated` exist, as Supabase creates them.
+
+    Roles are cluster-wide, so they are created before the database and dropped after it, and only
+    if this fixture created them. Supabase's default privileges are reproduced too: every new
+    table, sequence and function is granted to both roles, which is what makes RLS and the
+    migrations' revokes the thing standing between them and the data.
+    """
+    admin_dsn, test_dsn, database_name = _postgres_dsns()
+    created = [role for role in SUPABASE_ROLES if role not in existing_supabase_roles(admin_dsn)]
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        for role in created:
+            conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+    try:
+        with psycopg.connect(test_dsn) as conn:
+            conn.execute(
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public"
+                " GRANT ALL ON TABLES TO anon, authenticated"
+            )
+            conn.execute(
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public"
+                " GRANT ALL ON SEQUENCES TO anon, authenticated"
+            )
+            conn.execute(
+                "ALTER DEFAULT PRIVILEGES IN SCHEMA public"
+                " GRANT EXECUTE ON FUNCTIONS TO anon, authenticated"
+            )
+        yield RedactedDsn(test_dsn)
+    finally:
+        _drop_test_database(admin_dsn, database_name)
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            for role in created:
+                conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+
+
 @dataclass
 class LexiconCase:
     """A database for the market_lexicons contracts, before any schema has been put in it."""
