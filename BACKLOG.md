@@ -841,9 +841,29 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   không dò catalog, nên bảng của ứng dụng khác trong database dùng chung không bị đụng tới. Database
   khởi tạo trước khi có `021` phải tự chạy file này một lần bằng quyền owner.
 
-- [ ] **Đưa phép thử Compose init vào CI — T019.** `test_compose_init.py` hiện là gate chủ động,
-  chỉ chạy khi có `IGNIS_TEST_COMPOSE_INIT=1`. Thêm job Docker riêng và đặt status ổn định thành
-  required trên protected branches; không thay bằng gate do operator nhớ chạy trước release.
+- [x] **Đưa phép thử Compose init vào CI — T019, ngày 24/09/2026.** Workflow
+  `.github/workflows/compose-init.yml` (tên `Compose Init`) chỉ có một job `compose-fresh-init`, báo
+  status dưới tên cố định `Fresh Compose database init`. Job chạy cho mọi pull request (không lọc
+  nhánh hay đường dẫn), cho mỗi lần push vào `main`, `release/*`, `hotfix/*` và khi operator bấm
+  chạy tay. Runner cố định `ubuntu-24.04`, token chỉ có quyền đọc, timeout 30 phút, mỗi ref chỉ một
+  lượt chạy. Dependency cài từ `uv.lock` bằng `--locked`; biến `IGNIS_TEST_COMPOSE_INIT=1` chỉ gắn
+  vào bước chạy contract. Workflow không khai báo lại image, mount, DSN hay danh sách migration: tất
+  cả vẫn lấy từ `docker-compose.prod.yml` và thư mục `sql/` thông qua test tích hợp. pytest trả exit
+  0 khi test tự skip vì thiếu Docker, nên bước sau đọc báo cáo JUnit và làm fail lượt chạy nào không
+  có test thực thi hoặc có test bị skip. 21 contract trong
+  `tests/unit/test_t019_compose_init_workflow.py` ghim các điều trên; đổi tên job, bỏ biến opt-in hay
+  bỏ bước chặn skip đều làm contract fail. Chạy thật trên máy local, kể cả trong worktree sạch không
+  có `.env`: hai lần init đều healthy, chạy đủ 21 file từ `001` tới `021`, 0 dòng `ERROR:`, kết thúc
+  với 0 container, 0 volume, 0 network và không còn file credential tạm. Status này **chưa** phải
+  required: Codex sẽ bật branch protection sau lượt chạy đầu tiên trên GitHub và đọc lại cấu hình để
+  xác nhận.
+
+- [ ] **Rà quyền EXECUTE của `uuid_generate_v4()` — hardening trước release, tách khỏi T019.** Yêu
+  cầu T019 nêu đây là một posture có sẵn cần xem lại. `001` tạo extension `uuid-ossp` trong schema
+  `public`, các bảng từ `001` tới `018` dùng `uuid_generate_v4()` làm default cho khóa chính, còn
+  `006` thu hồi EXECUTE trên mọi function trong `public` lúc nó chạy. T019 chưa đo lại quyền thực tế
+  của `anon`, `authenticated` và runtime owner trên function này, nên cần kiểm chứng trước khi quyết
+  định sửa.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)

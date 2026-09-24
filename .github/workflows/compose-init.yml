@@ -1,0 +1,103 @@
+name: Compose Init
+
+# T019 -- a brand-new install must still initialize. tests/integration/test_compose_init.py drives
+# the production Compose `db` service, with its own image and the whole sql/ directory mounted as
+# init scripts, from an empty volume to a healthy database, twice, and reads the result back. It is
+# opt-in, so the ordinary suite skips it; without this workflow a later migration could break fresh
+# initialization while every build stayed green.
+#
+# Separate from ci.yml on purpose: a Python matrix failure and a fresh-init failure are different
+# problems, and a separate check name tells them apart at a glance. Separate from performance.yml
+# too, which measures latency on protected branches only; this gate runs on every pull request.
+#
+# The database under test is not restated here. Image, environment, mount and the migration list
+# all come from the Compose file and sql/ through the integration test; this workflow supplies a
+# machine with Docker, the locked dependencies and the opt-in, nothing else. The test generates its
+# own throwaway credentials and removes every container, volume and network it created.
+
+on:
+  push:
+    branches: [ main, "release/*", "hotfix/*" ]
+  # Every pull request, unfiltered. A required check that a branch or path filter skips never
+  # reports, so the pull request would wait on it forever; and stacked pull requests need it too.
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per ref at a time. A newer push to a pull request supersedes the run in progress, since
+# only the head commit can merge. Protected-branch pushes queue instead: each one is a commit that
+# landed, and cancelling it would leave that commit without a fresh-init verdict.
+concurrency:
+  group: compose-init-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The job id and `name` are the status string a branch-protection rule selects. Renaming either
+  # retires the gate silently -- protection keeps waiting on a check that never reports -- so
+  # tests/unit/test_t019_compose_init_workflow.py pins both. Making the check *required* is a
+  # GitHub settings operation, not something this file can do.
+  compose-fresh-init:
+    name: Fresh Compose database init
+    # Pinned, not `ubuntu-latest`, so the Docker Engine and Compose versions under the gate change
+    # when this line changes rather than on GitHub's migration schedule.
+    runs-on: ubuntu-24.04
+    # Two fresh inits plus the image pull take a few minutes; the test's own health wait is bounded
+    # at three minutes per init. This caps a hung Docker daemon well below the six-hour default.
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.17"
+
+      # One interpreter: this job tests the database init, not Python compatibility, which the
+      # ci.yml matrix already covers.
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      # --locked installs exactly the committed uv.lock and fails if it disagrees with
+      # pyproject.toml. `dev` brings pytest; no browser extra, nothing here drives a browser.
+      - name: Install locked dependencies
+        run: |
+          uv venv --python 3.13
+          uv sync --locked --extra dev
+
+      # Printed so a red run can be read against the exact engine and Compose plugin it ran on.
+      - name: Report Docker and Compose versions
+        run: |
+          docker version --format 'Docker Engine {{.Server.Version}}'
+          docker compose version
+
+      # The opt-in is set on this step only. The JUnit report is what the next step reads, because
+      # pytest exits 0 when every test is skipped.
+      - name: Run the fresh Compose init contract
+        env:
+          IGNIS_TEST_COMPOSE_INIT: "1"
+        run: |
+          .venv/bin/pytest tests/integration/test_compose_init.py -v -rs --junitxml=compose-init-results/junit.xml
+
+      # The test skips itself when Docker is missing or the opt-in did not arrive, and a skip is a
+      # green pytest run. A gate that can pass without running is no gate, so require at least one
+      # executed test and zero skips, failures and errors.
+      - name: Refuse a skipped or empty contract run
+        run: |
+          .venv/bin/python - compose-init-results/junit.xml <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          totals = {
+              counter: sum(int(suite.get(counter, 0)) for suite in suites)
+              for counter in ("tests", "skipped", "failures", "errors")
+          }
+          print(f"Compose init contract: {totals}")
+          if totals["tests"] < 1 or totals["skipped"] or totals["failures"] or totals["errors"]:
+              sys.exit("the fresh Compose init contract did not run to a pass")
+          PY
