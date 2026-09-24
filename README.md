@@ -295,6 +295,12 @@ Deploy the full enterprise self-hosted stack (TimescaleDB + Autonomous Worker Da
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+With an empty data volume, the `db` container runs every file in `sql/` in filename order before
+it reports healthy. This path is verified through `020` on `timescale/timescaledb-ha:pg16`.
+Migration `006` enables row-level security on the tables it explicitly governs and adds its
+read-only policies only when the Supabase roles `anon` and `authenticated` already exist; it never
+creates those roles. PostgreSQL init scripts do not run again for an existing data volume.
+
 > Existing PostgreSQL installations with a legacy `trend_signals` corpus require the reviewed
 > [source/observation production cutover](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
 > Do not start the new runtime after applying `sql/016` until the snapshot-specific baseline,

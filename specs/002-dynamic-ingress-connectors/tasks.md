@@ -55,10 +55,25 @@
   registration, `tests/unit/test_vocabulary_loader.py`, repository migration-contract tests;
   depends-on: T014). Verified through the SQLite bootstrap and a fresh portable PostgreSQL
   migration contract; the documented full-directory Docker init path remains T017.
-- [ ] T017 Make a fresh `docker-compose.prod.yml` database execute the complete mounted `sql/`
+- [x] T017 Make a fresh `docker-compose.prod.yml` database execute the complete mounted `sql/`
   sequence through `020` on `timescale/timescaledb-ha:pg16`: preserve the Supabase RLS policies
   when roles `authenticated` and `anon` exist, avoid failing on plain TimescaleDB when they do not,
   prove the actual container init exits cleanly with the final schema and retired vocabulary, and
   keep the public Docker instructions aligned with that verified path (touches:
   `sql/006_supabase_security_hardening.sql`, Docker init contract tests, `README.md`,
-  `README.vi.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE.vi.md`; depends-on: T016)
+  `README.vi.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE.vi.md`; depends-on: T016). Verified with
+  two fresh Compose initializations, the complete filename-ordered `001`-`020` sequence, and
+  separate plain-TimescaleDB and Supabase-role contracts.
+
+## Phase 8: PostgreSQL Security and Init Regression Gates (2026-09-24)
+
+- [ ] T018 [RELEASE BLOCKER] Add a versioned migration that enables RLS on every current table in
+  the exposed `public` schema, including tables created after `006`, and define the intended policy
+  for each table. Prove with `anon` and `authenticated` that source, observation, workspace,
+  configuration, evidence, credential, and journal data cannot be read or mutated unless an
+  explicit policy permits it; preserve owner/runtime access and plain TimescaleDB portability
+  (depends-on: T017).
+- [ ] T019 Run `tests/integration/test_compose_init.py` as a dedicated Docker CI job with
+  `IGNIS_TEST_COMPOSE_INIT=1`, keeping the exact production image and full `sql/` mount. Require the
+  stable job on protected branches so a later migration cannot break fresh initialization while
+  the ordinary integration suite remains green (depends-on: T017).

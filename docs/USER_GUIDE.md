@@ -129,8 +129,13 @@ Services started:
 - `fn-ignis-worker`: Always-On continuous radar ingestion daemon.
 - `fn-ignis-nginx`: Static HTML report server on port 8080.
 
-For a fresh database, the stack starts with the current schema. For an existing PostgreSQL corpus,
-do not start the new worker immediately after deploying its artifact. Follow the canonical
+For a fresh database, the `db` container runs every file in `sql/` in filename order on its first
+start and only then reports healthy; this is verified through `020` on
+`timescale/timescaledb-ha:pg16`. `006` enables row-level security on the tables it explicitly
+governs, adds the read-only Supabase policies only on a server that has the `anon` and
+`authenticated` roles, and creates no roles itself. The init scripts run only while the data
+volume is empty. For an existing PostgreSQL corpus, do not start the new worker immediately after
+deploying its artifact. Follow the canonical
 [source/observation production cutover](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
 quiesce the old runtime, snapshot, generate a baseline from that exact snapshot, apply `sql/016`,
 backfill, require `VERIFIED`, then start the new runtime and reopen ingress.

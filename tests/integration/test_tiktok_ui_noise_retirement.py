@@ -18,7 +18,7 @@ import pytest
 from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 
-from conftest import REPO_SQL, portable_postgres_migrations
+from conftest import REPO_SQL, all_postgres_migrations
 
 DOMAIN = "tiktok_ui_noise"
 RETIREMENT = "020_retire_ambiguous_tiktok_ui_noise.sql"
@@ -46,7 +46,7 @@ def _terms(rows) -> set:
 async def _open_fresh(case):
     """A fresh SQLite bootstrap or a fresh portable PostgreSQL migration contract."""
     if case.name == "postgres":
-        case.apply(*portable_postgres_migrations())
+        case.apply(*all_postgres_migrations())
     repository = case.repository()
     await load_market_vocabulary(repository)
     return repository
@@ -72,7 +72,7 @@ async def test_a_fresh_repository_schema_ends_with_only_the_kept_rows(lexicon_ca
 async def test_an_existing_database_loses_exactly_the_three_rows(lexicon_case):
     """Only the three rows go: no other domain and no other tiktok_ui_noise term is touched."""
     if lexicon_case.name == "postgres":
-        lexicon_case.apply(*(m for m in portable_postgres_migrations() if m != RETIREMENT))
+        lexicon_case.apply(*(m for m in all_postgres_migrations() if m != RETIREMENT))
         before = lexicon_case.rows()
         lexicon_case.apply(RETIREMENT)
     else:

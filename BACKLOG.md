@@ -814,13 +814,28 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   `tin nhắn` khỏi 020 làm 6 ca fail trên hai backend; cho SQLite chạy 020 trước bước replay làm
   4 ca fail.
 
-- [ ] **Docker Compose không khởi tạo được PostgreSQL mới — giao T017.** Kiểm ngày 24/09/2026 bằng
-  đúng image `timescale/timescaledb-ha:pg16` và mount `./sql:/docker-entrypoint-initdb.d` như
-  `docker-compose.prod.yml`: container exit 3 tại `sql/006_supabase_security_hardening.sql` vì
-  PostgreSQL thuần không có role `authenticated`; chuỗi init dừng trước `020`. T016 không gây ra
-  lỗi này, nhưng test migration của T016 phải bỏ qua `006`, nên không được dùng nó làm bằng chứng
-  rằng toàn bộ chuỗi Docker init đã chạy. T017 giữ chính sách RLS trên Supabase, làm `006` chạy an
-  toàn khi hai role Supabase không tồn tại, rồi chứng minh container thật chạy hết chuỗi đến `020`.
+- [x] **Docker Compose khởi tạo PostgreSQL mới qua toàn bộ chuỗi SQL — T017, ngày 24/09/2026.**
+  `sql/006_supabase_security_hardening.sql` chỉ nêu tên role `anon`, `authenticated` khi role đó đã
+  tồn tại; migration không tự tạo role. Hai lần khởi tạo mới bằng
+  `timescale/timescaledb-ha:pg16` và đúng mount `./sql:/docker-entrypoint-initdb.d` đều chuyển sang
+  healthy sau khi chạy đủ 20 file theo thứ tự tên, không có dòng `ERROR:`. Readback xác nhận đủ
+  đối tượng của 016-019, còn 10 term `tiktok_ui_noise`, không còn ba term T016 đã bỏ, RLS bật trên
+  các bảng do `006` quản lý và không có policy hay role Supabase trên PostgreSQL thuần. Contract
+  PostgreSQL riêng có 8 ca pass: chạy lại `006` và toàn bộ chuỗi không đổi trạng thái, runtime owner
+  vẫn đọc/ghi được; khi hai role Supabase tồn tại thì chỉ có hai policy vocabulary chỉ đọc và cả
+  hai role đều mất quyền EXECUTE trên function RPC mẫu. Mỗi lượt kiểm tra kết thúc với 0 container,
+  0 volume, 0 network và không còn file credential tạm.
+
+- [ ] **Bật RLS cho mọi bảng trong schema `public` — T018, chặn release.** `006` chỉ có thể bật RLS
+  trên những bảng đã tồn tại khi nó chạy. Mười bảng được migration sau đó tạo ra vẫn không có RLS;
+  trong môi trường mô phỏng default privileges của Supabase, `anon` đọc được `sources` và có quyền
+  INSERT vào `observations`. Cần migration mới bật RLS cho toàn bộ bảng hiện tại, khai báo policy
+  theo từng loại dữ liệu và kiểm chứng quyền của cả `anon`, `authenticated` mà không chặn runtime
+  owner.
+
+- [ ] **Đưa phép thử Compose init vào CI — T019.** `test_compose_init.py` hiện là gate chủ động,
+  chỉ chạy khi có `IGNIS_TEST_COMPOSE_INIT=1`. Thêm job Docker riêng và đặt status ổn định thành
+  required trên protected branches; không thay bằng gate do operator nhớ chạy trước release.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)

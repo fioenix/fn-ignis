@@ -253,6 +253,13 @@ Triển khai toàn bộ cụm doanh nghiệp (TimescaleDB + Worker Daemon Chạy
 docker compose -f docker-compose.prod.yml up -d
 ```
 
+Khi volume dữ liệu còn trống, container `db` chạy mọi file trong `sql/` theo thứ tự tên file rồi
+mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `020` trên
+`timescale/timescaledb-ha:pg16`. Migration `006` bật row-level security trên những bảng mà nó quản
+lý trực tiếp và chỉ thêm policy chỉ đọc khi hai role Supabase là `anon` và `authenticated` đã tồn
+tại; migration này không tự tạo role. PostgreSQL không chạy lại các script init với volume đã có
+dữ liệu.
+
 > Installation PostgreSQL đã có corpus legacy trong `trend_signals` phải chạy
 > [production cutover source/observation](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
 > Sau khi apply `sql/016`, không khởi động runtime mới cho tới khi baseline sinh từ đúng snapshot,

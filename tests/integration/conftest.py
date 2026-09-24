@@ -405,22 +405,38 @@ async def repository_case(request, tmp_path):
 # --- the vocabulary migrations --------------------------------------------------------------------
 
 REPO_SQL = Path(__file__).resolve().parents[2] / "sql"
-# 006 grants RLS policies to `anon` and `authenticated`, roles only a Supabase cluster has, so it
-# cannot run on the plain PostgreSQL a contract database lives on. It touches no vocabulary row.
-SUPABASE_ONLY_MIGRATIONS = frozenset({"006_supabase_security_hardening.sql"})
 
 
-def portable_postgres_migrations() -> tuple:
-    """Repository SQL files that run on plain PostgreSQL, in filename order.
+def all_postgres_migrations() -> tuple:
+    """Every file in sql/, in filename order: exactly what a fresh Docker init runs.
 
-    The documented Docker Compose init path mounts the whole directory and is a separate contract:
-    sql/006 currently requires Supabase roles and blocks that path before later migrations run.
+    Read from the directory rather than listed, so no file can be left out by a list that
+    nobody updated. The Compose `db` service mounts the same directory as its initdb scripts.
     """
-    return tuple(
-        path.name
-        for path in sorted(REPO_SQL.glob("*.sql"))
-        if path.name not in SUPABASE_ONLY_MIGRATIONS
-    )
+    return tuple(path.name for path in sorted(REPO_SQL.glob("*.sql")))
+
+
+class RedactedDsn(str):
+    """A DSN whose repr hides it.
+
+    pytest prints the arguments of any call inside a failing assert, so a helper called with a
+    plain DSN string would write the database password into the test output.
+    """
+
+    def __repr__(self) -> str:
+        return "'<redacted dsn>'"
+
+
+@pytest.fixture
+def empty_postgres_dsn():
+    """A new, empty PostgreSQL database on the throwaway contract server, dropped afterwards."""
+    admin_dsn, test_dsn, database_name = _postgres_dsns()
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+    try:
+        yield RedactedDsn(test_dsn)
+    finally:
+        _drop_test_database(admin_dsn, database_name)
 
 
 @dataclass
@@ -470,10 +486,4 @@ def lexicon_case(request, tmp_path):
         yield LexiconCase(name="sqlite", db_path=str(tmp_path / "lexicons.sqlite"))
         return
 
-    admin_dsn, test_dsn, database_name = _postgres_dsns()
-    with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
-    try:
-        yield LexiconCase(name="postgres", dsn=test_dsn)
-    finally:
-        _drop_test_database(admin_dsn, database_name)
+    yield LexiconCase(name="postgres", dsn=request.getfixturevalue("empty_postgres_dsn"))
