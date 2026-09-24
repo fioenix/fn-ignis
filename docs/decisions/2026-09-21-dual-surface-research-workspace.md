@@ -151,3 +151,14 @@ The next implementation work should translate this decision into a feature speci
 dependency-ordered tasks. The specification must preserve the distinction between Agent chat
 metadata, research workspace identity, Attention evidence, Market evidence, and immutable
 Brief revisions.
+
+## Local-first ignore policy (implementation record)
+
+`.ignis/` is listed in the repository `.gitignore`. A research workspace holds its manifest, run
+journals and derived artifacts under `.ignis/research/<research-slug>/`, and those files may
+contain raw source material collected from public surfaces. They are never staged, committed or
+published as a side effect of running a research; exporting one is an explicit user action.
+
+The configured shared Ignis database -- SQLite-local by default, PostgreSQL when configured --
+remains the canonical record store. The files under `.ignis/` are the filesystem discovery entry
+point plus projections, so deleting them never destroys the canonical research record.

@@ -237,17 +237,62 @@ def setup_all_mcp_clients(project_root: Path, python_bin: str) -> List[Dict[str,
     return results
 
 
+async def _read_back_research_workspaces(repository) -> List[Dict[str, Any]]:
+    """Report the research workspaces the configured database already holds.
+
+    Each entry pairs the canonical record with whether its manifest is still on disk, because
+    those are two different facts: a missing manifest means this host cannot discover the
+    research through the filesystem, not that the research is gone.
+    """
+    from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+
+    store = WorkspaceRepository(repository=repository)
+    workspaces = await store.list_research_workspaces(limit=25)
+    return [
+        {
+            "workspace_id": str(w.workspace_id),
+            "slug": w.slug,
+            "root_path": str(w.root_path),
+            "status": w.status.value,
+            "manifest_present": w.manifest_path.is_file(),
+        }
+        for w in workspaces
+    ]
+
+
 async def run_synthetic_diagnostics() -> Dict[str, Any]:
     """Run real-time diagnostics to ensure server readiness."""
     from ignis.infrastructure.persistence import create_repository
     from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
     
-    diag: Dict[str, Any] = {"database": "unknown", "google_rss": "unknown", "lexicon_count": 0}
+    diag: Dict[str, Any] = {
+        "database": "unknown",
+        "google_rss": "unknown",
+        "lexicon_count": 0,
+        "research_workspaces": [],
+    }
     try:
         repo = create_repository()
         lexicons = await repo.get_domain_lexicons()
         diag["database"] = "ready"
         diag["lexicon_count"] = len(lexicons)
+        # A readback, never a create. Provisioning must not bring a research workspace into
+        # existence: a workspace is something the requester confirms, and one that appeared
+        # because the installer ran is a folder nobody agreed to.
+        #
+        # Reported separately from the database itself, because a PostgreSQL install that has
+        # not yet had sql/017 applied is a working database with no workspace scope -- not a
+        # broken one, and saying otherwise would send an operator looking for the wrong fault.
+        try:
+            diag["research_workspaces"] = await _read_back_research_workspaces(repo)
+        except Exception as workspace_error:
+            diag["research_workspaces"] = []
+            diag["research_workspace_scope"] = (
+                f"unavailable: {workspace_error}. Apply sql/017_research_workspace.sql through "
+                "the existing migration gate to enable research workspaces."
+            )
+        else:
+            diag["research_workspace_scope"] = "ready"
         await repo.close()
     except Exception as e:
         diag["database"] = f"error: {e}"

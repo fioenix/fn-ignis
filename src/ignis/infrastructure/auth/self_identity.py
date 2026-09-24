@@ -125,7 +125,7 @@ class SelfIdentityRegistry:
         if not record:
             return []
 
-        data = record.get("credentials_data") or record.get("credentials") or {}
+        data = record.get("credentials_data") or {}
         if not isinstance(data, dict):
             return []
 

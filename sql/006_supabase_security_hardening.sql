@@ -39,20 +39,48 @@ ALTER TABLE IF EXISTS public.industry_taxonomies ENABLE ROW LEVEL SECURITY;
 -- ====================================================================
 
 -- 3.1 Allow Read-Only access for public taxonomies & lexicons (safe for client queries)
+--
+-- `authenticated` and `anon` are Supabase's PostgREST roles. A plain PostgreSQL or TimescaleDB
+-- server does not have them, and a policy naming a missing role fails the whole script -- which
+-- on the Compose initdb path stopped every later migration. The policies therefore name only the
+-- roles that exist, through dynamic SQL, because a static CREATE POLICY resolves its role list
+-- before any IF could protect it. Where neither role exists no policy is created: RLS stays on,
+-- and only the table owner can read. No role is ever created here.
 DO $$
+DECLARE
+    supabase_roles text;
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_policies WHERE tablename = 'market_lexicons' AND policyname = 'allow_read_market_lexicons'
-    ) THEN
-        CREATE POLICY allow_read_market_lexicons ON public.market_lexicons
-            FOR SELECT TO authenticated, anon USING (true);
+    SELECT string_agg(quote_ident(rolname), ', ' ORDER BY rolname)
+      INTO supabase_roles
+      FROM pg_roles
+     WHERE rolname IN ('authenticated', 'anon');
+
+    IF supabase_roles IS NULL THEN
+        RETURN;
     END IF;
 
     IF NOT EXISTS (
-        SELECT 1 FROM pg_policies WHERE tablename = 'industry_taxonomies' AND policyname = 'allow_read_industry_taxonomies'
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'market_lexicons'
+          AND policyname = 'allow_read_market_lexicons'
     ) THEN
-        CREATE POLICY allow_read_industry_taxonomies ON public.industry_taxonomies
-            FOR SELECT TO authenticated, anon USING (true);
+        EXECUTE format(
+            'CREATE POLICY allow_read_market_lexicons ON public.market_lexicons'
+            ' FOR SELECT TO %s USING (true)',
+            supabase_roles
+        );
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'industry_taxonomies'
+          AND policyname = 'allow_read_industry_taxonomies'
+    ) THEN
+        EXECUTE format(
+            'CREATE POLICY allow_read_industry_taxonomies ON public.industry_taxonomies'
+            ' FOR SELECT TO %s USING (true)',
+            supabase_roles
+        );
     END IF;
 END $$;
 
@@ -75,10 +103,22 @@ END $$;
 -- 5. HARDEN SECURITY DEFINER RPC FUNCTION (match_memories)
 -- ====================================================================
 DO $$
+DECLARE
+    client_role text;
 BEGIN
-    -- Thu hồi quyền execute từ public/anon/authenticated qua PostgREST API
-    EXECUTE 'REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM anon, PUBLIC';
-    
-    -- Nếu muốn match_memories tuân thủ RLS theo người gọi (SECURITY INVOKER):
+    -- Revoke EXECUTE from PUBLIC everywhere, so no client role reaches a public-schema function
+    -- through the PostgREST API by default.
+    EXECUTE 'REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC';
+
+    -- Supabase also grants EXECUTE to its client roles directly, which the PUBLIC revoke does not
+    -- remove. Both are revoked, signed-in users included: an RPC exception for `authenticated`
+    -- would be a decision to record, not a line to leave out. Only roles that exist are named.
+    FOR client_role IN
+        SELECT rolname FROM pg_roles WHERE rolname IN ('anon', 'authenticated') ORDER BY rolname
+    LOOP
+        EXECUTE format('REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM %I', client_role);
+    END LOOP;
+
+    -- To make match_memories apply RLS as the calling user (SECURITY INVOKER):
     -- ALTER FUNCTION public.match_memories SECURITY INVOKER;
 END $$;

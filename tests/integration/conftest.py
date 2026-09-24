@@ -8,6 +8,7 @@ divergence these tests exist to catch.
 
 import os
 import sqlite3
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +40,14 @@ SCHEMA_MIGRATIONS = (
     "008_deduplicate_signal_metrics.sql",
     "015_split_published_at.sql",
     "016_source_observation_model.sql",
+    # The workspace scope, the two surfaces, the Brief revisions and the run journals. SQLite
+    # restates this schema in _ensure_schema, so a contract that only one backend satisfies is
+    # exactly what listing it here catches.
+    "017_research_workspace.sql",
+    # The alias ledger. Threads and Reels reconcile a permalink shortcode to a numeric primary
+    # key through it, so a backend missing this table silently keeps filing two rows per post.
+    "018_source_identity_aliases.sql",
+    "019_observations_latest_per_source_index.sql",
 )
 
 
@@ -159,6 +168,56 @@ class RepositoryCase:
             ).fetchone()
         return str(row[0])
 
+    def source_external_ids(self) -> list:
+        """Every canonical object the corpus holds, in insertion order where one exists."""
+        query = "SELECT external_id FROM sources ORDER BY external_id"
+        if self.name == "sqlite":
+            with sqlite3.connect(self.repository._db_path) as conn:
+                return [row[0] for row in conn.execute(query).fetchall()]
+        with psycopg.connect(self.dsn) as conn:
+            return [row[0] for row in conn.execute(query).fetchall()]
+
+    def identity_aliases(self) -> list:
+        """Every alias row, as dicts, so a test names the column it is asserting on."""
+        columns = ("platform", "alias_external_id", "canonical_external_id", "witnessed_by")
+        query = (
+            f"SELECT {', '.join(columns)}, recorded_at FROM source_identity_aliases"
+            " ORDER BY alias_external_id"
+        )
+        if self.name == "sqlite":
+            with sqlite3.connect(self.repository._db_path) as conn:
+                rows = conn.execute(query).fetchall()
+        else:
+            with psycopg.connect(self.dsn) as conn:
+                rows = conn.execute(query).fetchall()
+        return [
+            {**dict(zip(columns, row)), "recorded_at": str(row[len(columns)])} for row in rows
+        ]
+
+    def insert_identity_alias(self, platform: str, alias: str, canonical: str) -> None:
+        """Write one alias row directly, to exercise the constraint rather than the guard."""
+        columns = "platform, alias_external_id, canonical_external_id, witnessed_by"
+        if self.name == "sqlite":
+            with sqlite3.connect(self.repository._db_path) as conn:
+                conn.execute(
+                    f"INSERT INTO source_identity_aliases (id, {columns}, recorded_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid4()),
+                        platform,
+                        alias,
+                        canonical,
+                        "test_fixture",
+                        "2026-09-15T00:00:00+00:00",
+                    ),
+                )
+            return
+        with psycopg.connect(self.dsn, autocommit=True) as conn:
+            conn.execute(
+                f"INSERT INTO source_identity_aliases ({columns}) VALUES (%s, %s, %s, %s)",
+                (platform, alias, canonical, "test_fixture"),
+            )
+
     def attach_evidence(self, mission_id, observation_id: str) -> None:
         if self.name == "sqlite":
             with sqlite3.connect(self.repository._db_path) as conn:
@@ -258,6 +317,65 @@ def _apply_postgres_schema(dsn: str) -> None:
             conn.execute((repo_root / "sql" / migration).read_text(encoding="utf-8"))
 
 
+def _drop_test_database(admin_dsn: str, database_name: str, attempts: int = 5) -> None:
+    """Drop the throwaway contract database, even behind a pooler and without SUPERUSER.
+
+    Two things get in the way on a hosted instance, and neither is a reason to leave a scratch
+    database behind:
+
+    - a pooler answers a client disconnect by keeping its own server session alive, and may
+      reopen one between a terminate and the DROP; and
+    - `pg_terminate_backend` refuses outright when one of those sessions belongs to a SUPERUSER
+      role. Supabase's own background workers connect as one, and the project's `postgres` role
+      is not superuser, so that refusal is routine rather than exceptional.
+
+    So the terminate is best-effort and its failure is swallowed: `DROP DATABASE ... WITH (FORCE)`
+    terminates inside the same statement anyway, and the retry covers the pooler reconnecting.
+    The plain DROP is the fallback for a server older than 13, which is where WITH (FORCE)
+    arrived.
+    """
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                conn.execute(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+                    " WHERE datname = %s AND pid <> pg_backend_pid()",
+                    (database_name,),
+                )
+        except psycopg.Error:
+            # Nothing to do about a session this role may not signal. WITH (FORCE) is the
+            # answer, and if that cannot close it either the retry and the final assertion will
+            # say so rather than this line hiding it.
+            pass
+
+        try:
+            with psycopg.connect(admin_dsn, autocommit=True) as conn:
+                try:
+                    conn.execute(
+                        sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                            sql.Identifier(database_name)
+                        )
+                    )
+                except psycopg.errors.SyntaxError:
+                    conn.execute(
+                        sql.SQL("DROP DATABASE IF EXISTS {}").format(
+                            sql.Identifier(database_name)
+                        )
+                    )
+            return
+        except psycopg.Error as exc:
+            last_error = exc
+            time.sleep(0.5 * (attempt + 1))
+
+    # Raised rather than swallowed: a database left behind on a shared server is litter the next
+    # run has no way to notice, and silence here would hide a real leak of open connections.
+    raise AssertionError(
+        f"Could not drop the contract database {database_name} after {attempts} attempts. "
+        f"Something is still holding a session open: {last_error}"
+    )
+
+
 @pytest_asyncio.fixture(params=("sqlite", "postgres"))
 async def repository_case(request, tmp_path):
     if request.param == "sqlite":
@@ -281,9 +399,91 @@ async def repository_case(request, tmp_path):
         finally:
             await repository.close()
     finally:
-        with psycopg.connect(admin_dsn, autocommit=True) as conn:
-            conn.execute(
-                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s",
-                (database_name,),
-            )
-            conn.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(database_name)))
+        _drop_test_database(admin_dsn, database_name)
+
+
+# --- the vocabulary migrations --------------------------------------------------------------------
+
+REPO_SQL = Path(__file__).resolve().parents[2] / "sql"
+
+
+def all_postgres_migrations() -> tuple:
+    """Every file in sql/, in filename order: exactly what a fresh Docker init runs.
+
+    Read from the directory rather than listed, so no file can be left out by a list that
+    nobody updated. The Compose `db` service mounts the same directory as its initdb scripts.
+    """
+    return tuple(path.name for path in sorted(REPO_SQL.glob("*.sql")))
+
+
+class RedactedDsn(str):
+    """A DSN whose repr hides it.
+
+    pytest prints the arguments of any call inside a failing assert, so a helper called with a
+    plain DSN string would write the database password into the test output.
+    """
+
+    def __repr__(self) -> str:
+        return "'<redacted dsn>'"
+
+
+@pytest.fixture
+def empty_postgres_dsn():
+    """A new, empty PostgreSQL database on the throwaway contract server, dropped afterwards."""
+    admin_dsn, test_dsn, database_name = _postgres_dsns()
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+    try:
+        yield RedactedDsn(test_dsn)
+    finally:
+        _drop_test_database(admin_dsn, database_name)
+
+
+@dataclass
+class LexiconCase:
+    """A database for the market_lexicons contracts, before any schema has been put in it."""
+
+    name: str
+    db_path: str | None = None
+    dsn: str | None = field(default=None, repr=False)
+
+    def apply(self, *migrations: str) -> None:
+        """Run migration files exactly as shipped. PostgreSQL only: SQLite runs its bootstrap."""
+        assert self.name == "postgres", "SQLite applies migrations through _ensure_schema"
+        with psycopg.connect(self.dsn) as conn:
+            for migration in migrations:
+                conn.execute((REPO_SQL / migration).read_text(encoding="utf-8"))
+
+    def execute(self, sqlite_text: str, postgres_text: str, params: tuple = ()) -> None:
+        if self.name == "sqlite":
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(sqlite_text, params)
+            return
+        with psycopg.connect(self.dsn) as conn:
+            conn.execute(postgres_text, params)
+
+    def rows(self, domain: str | None = None) -> list:
+        """Every stored lexicon row as (domain, term, category, created_by), sorted in Python."""
+        query = "SELECT domain, term, category, created_by FROM market_lexicons"
+        if self.name == "sqlite":
+            with sqlite3.connect(self.db_path) as conn:
+                found = conn.execute(query).fetchall()
+        else:
+            with psycopg.connect(self.dsn) as conn:
+                found = conn.execute(query).fetchall()
+        return sorted(tuple(row) for row in found if domain is None or row[0] == domain)
+
+    def repository(self):
+        """A new repository instance. On SQLite, opening one is a restart: it re-runs bootstrap."""
+        if self.name == "sqlite":
+            return SqliteTrendRepository(self.db_path)
+        return PostgresTimescaleRepository(dsn=self.dsn, min_pool_size=1, max_pool_size=2)
+
+
+@pytest.fixture(params=("sqlite", "postgres"))
+def lexicon_case(request, tmp_path):
+    if request.param == "sqlite":
+        yield LexiconCase(name="sqlite", db_path=str(tmp_path / "lexicons.sqlite"))
+        return
+
+    yield LexiconCase(name="postgres", dsn=request.getfixturevalue("empty_postgres_dsn"))

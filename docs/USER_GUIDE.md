@@ -16,7 +16,8 @@ This document provides a comprehensive, step-by-step guide for developers, data 
 5. [Manual Usage via Python Scripting](#5-manual-usage-via-python-scripting)
 6. [Report Management & Nginx Report Portal](#6-report-management--nginx-report-portal)
 7. [Troubleshooting & Common Issues](#7-troubleshooting--common-issues)
-8. [Catalog of 39 FastMCP Tools & Comprehensive Research Capabilities](#8-catalog-of-39-fastmcp-tools--comprehensive-research-capabilities)
+8. [Research Workspaces & the Two Surfaces](#8-research-workspaces--the-two-surfaces)
+9. [Catalog of 45 FastMCP Tools & Comprehensive Research Capabilities](#9-catalog-of-45-fastmcp-tools--comprehensive-research-capabilities)
 
 ---
 
@@ -30,6 +31,11 @@ The persistence box contains three distinct records on both backends:
 - `observations`: one immutable collection event, including the observed payload, cluster
   membership, identity-resolution route, and clock provenance.
 - `mission_evidence`: the exact observations a mission used.
+
+A research workspace adds scope around those three records rather than a store of its own. The
+workspace identity, the Market Brief revisions, the writer claims and the run journals are rows in
+the same configured database; `.ignis/research/<slug>/` holds the manifest, the run journals and
+exported artifacts, and no database of its own. Section 8 describes that boundary.
 
 Repeated polling therefore creates another observation, not another source. A source can support
 multiple missions and can appear in multiple clusters through different observations. Runtime code
@@ -123,8 +129,13 @@ Services started:
 - `fn-ignis-worker`: Always-On continuous radar ingestion daemon.
 - `fn-ignis-nginx`: Static HTML report server on port 8080.
 
-For a fresh database, the stack starts with the current schema. For an existing PostgreSQL corpus,
-do not start the new worker immediately after deploying its artifact. Follow the canonical
+For a fresh database, the `db` container runs every file in `sql/` in filename order on its first
+start and only then reports healthy; this is verified through `020` on
+`timescale/timescaledb-ha:pg16`. `006` enables row-level security on the tables it explicitly
+governs, adds the read-only Supabase policies only on a server that has the `anon` and
+`authenticated` roles, and creates no roles itself. The init scripts run only while the data
+volume is empty. For an existing PostgreSQL corpus, do not start the new worker immediately after
+deploying its artifact. Follow the canonical
 [source/observation production cutover](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
 quiesce the old runtime, snapshot, generate a baseline from that exact snapshot, apply `sql/016`,
 backfill, require `VERIFIED`, then start the new runtime and reopen ingress.
@@ -281,9 +292,142 @@ When running in Docker mode, generated artifacts are saved in `reports/` and ser
 
 ---
 
-## 8. Catalog of 39 FastMCP Tools & Comprehensive Research Capabilities
+## 8. Research Workspaces & the Two Surfaces
 
-The `fn-ignis` FastMCP server exposes **39 atomic and strategic tools**:
+### 8.1 Where a research lives
+
+A research is proposed at `<host-workspace>/.ignis/research/<research-slug>/`:
+
+```text
+<host-workspace>/
+└── .ignis/
+    └── research/
+        └── ai-customer-service/
+            ├── workspace.json        # manifest: research identity and format version
+            └── journals/             # one exclusive record per run
+                └── run-20260921-103000-001.json
+```
+
+The proposal is read-only. `propose_research_workspace(host_workspace, research_name)` reports the
+path it would use, whether the folder exists, whether it already holds a manifest, and whether
+adoption would be needed — and creates no directory, no manifest, no database record and no
+journal. Only `confirm_research_workspace(proposed_path, confirmation=true)` creates anything.
+
+Three outcomes follow from what is already at the path:
+
+| State of the folder | Result |
+|---|---|
+| Absent or empty | Created, with a fresh manifest |
+| Holds a matching manifest | Reused as-is; the manifest is not rewritten |
+| Non-empty, no manifest | Refused until `adopt=true`; adoption preserves every unrelated file |
+| Manifest from a newer format | Reported `INCOMPATIBLE` rather than half-read |
+
+**A research folder contains no database.** All research workspaces share the one configured Ignis
+database, selected by `DATABASE_URL`: SQLite-local by default, PostgreSQL as an optional equivalent
+backend. That is what makes a research reopenable — `list_research_workspaces()` returns the
+research held in that database, so a second Agent host on the same database finds it without the
+chat that created it.
+
+### 8.2 `ATTENTION` and `MARKET`
+
+A mission answers one of two questions and keeps that surface for its whole life.
+
+| | `ATTENTION` | `MARKET` |
+|---|---|---|
+| Question | What is gaining attention? | Is this a market opportunity? |
+| Entry point | `create_attention_mission` | `confirm_market_brief` |
+| Hypothesis required | No | Yes |
+| Opportunity Index | Never emitted | Emitted |
+| Evidence role in analysis | `ATTENTION_CONTEXT` | `MARKET_EVIDENCE` |
+
+`ATTENTION` is for a requester who does not yet know which topic is worth investigating. It returns
+ranked topics with momentum, freshness, source coverage and observation-addressable citations, and
+it makes no commercial claim.
+
+`MARKET` requires a requester-confirmed Brief. All seven fields are mandatory:
+
+| Field | Meaning |
+|---|---|
+| `decision` | The decision this research has to inform |
+| `target_user` | The user or customer under investigation |
+| `problem` | The pain or job being investigated |
+| `geo` | Geographic scope |
+| `timeframe` | Evidence window |
+| `hypothesis` | The falsifiable proposition |
+| `falsifiers` | At least one condition that would disconfirm it |
+
+An incomplete Brief is refused before any probe runs, and the refusal names the missing fields. A
+`MARKET` mission whose Brief cannot be read is blocked rather than run — execution, analysis and
+artifact export all return the same `BLOCKED` result, because an Opportunity Index derived from
+evidence nobody framed a question for is a quieter failure than refusing to probe.
+
+The framing conversation belongs to the host Agent: it asks at most seven questions, one at a time,
+skips what is already answered, shows the draft for editing, and asks for an explicit confirmation.
+**fn-ignis receives no transcript and has no draft-persistence operation.** A requester who
+abandons the framing leaves nothing behind, because nothing was ever sent.
+
+### 8.3 Handoff and revision
+
+Selecting an Attention topic for a Market investigation creates a new mission, not a relabelled
+one:
+
+```text
+confirm_market_brief(
+    workspace_id=...,
+    parent_attention_mission_id=<attention mission>,   # optional lineage
+    parent_cluster_id=<selected cluster>,              # optional, must be one that mission saw
+    decision=..., target_user=..., problem=...,
+    geo=..., timeframe=..., hypothesis=..., falsifiers=[...],
+    confirmed_by=...,
+)
+```
+
+Lineage is context. The Attention observations it points at are reported under
+`attention_context` with the role `ATTENTION_CONTEXT`, and they cannot satisfy a Market
+opportunity or a supporting citation — the new mission collects its own `MARKET_EVIDENCE`.
+
+Changing a confirmed Brief creates a new revision rather than editing the old one. Passing
+`previous_mission_id` opens a new Market mission bound to a new immutable `MarketBriefRevision`,
+numbered with the next revision number in that research line, with `revises_mission_id` pointing
+back at the mission it revises. The earlier mission, its Brief and its evidence are unchanged, and
+a revision inherits the Attention origin of the mission it revises: a payload naming a different
+origin is refused rather than silently applied.
+
+### 8.4 Concurrent runs, journals, and recovery
+
+Two missions of one research run at the same time; the writer claim is per mission and never
+serializes a whole research.
+
+- **One active writer per mission.** A second run against the same mission returns a `CONFLICT`
+  result naming the run holding the slot and since when. It reaches no connector and writes
+  nothing.
+- **One exclusive journal per run.** Each run takes its own file under `journals/`, created
+  exclusively, so two runs starting inside the same second still get distinct names. A run that
+  finished reports `COMPLETED` or `FAILED` with a completion time; a run that never reported back
+  keeps `STARTED` with no completion time, because "this run ended" and "nobody ever heard from it
+  again" are different facts.
+- **Recovery is explicit.** A claim is released only by the run that holds it. There is no expiry
+  and no force release: handing the slot to a second writer on a timer while the first may still
+  be running is the failure the slot exists to prevent. When a run is known to have died,
+  `release_mission_writer(mission_id, run_id)` recovers the mission and requires exactly the
+  `run_id` the conflict result reported. A wrong `run_id` refuses and changes nothing.
+
+Missions created outside a research workspace — every mission written before this feature — take
+no writer claim and write no journal, and run exactly as they did before.
+
+---
+
+## 9. Catalog of 45 FastMCP Tools & Comprehensive Research Capabilities
+
+The `fn-ignis` FastMCP server exposes **45 atomic and strategic tools**:
+
+### 0. Research Workspaces & Dual-Surface Missions (6 Tools)
+- `propose_research_workspace`: Report where a research would live. Read-only; creates nothing.
+- `confirm_research_workspace`: Create, reuse or adopt the proposed workspace after confirmation.
+- `list_research_workspaces`: List the research workspaces held in the configured database.
+- `create_attention_mission`: Start an `ATTENTION` mission — no hypothesis, no Opportunity Index.
+- `confirm_market_brief`: Persist a confirmed Brief and open the `MARKET` mission it authorizes; also the Attention handoff and the Brief revision entry point.
+- `release_mission_writer`: Recover a mission whose run died holding its single writer slot, by naming that exact run.
 
 ### 1. Research Mission Orchestration & Analysis (8 Tools)
 - `create_research_mission`: Initialize a new targeted research campaign.

@@ -77,25 +77,45 @@ async def test_get_top_clusters():
     
     cluster_id = uuid4()
     now = datetime.now(timezone.utc)
-    # The query returns aggregates now, not a score: the arithmetic lives in one place and both
-    # the clusterer and this reader call it.
-    mock_rows = [
+    # Two statements: the first ranks clusters from aggregates, the second reads the payload of
+    # the ones that survived. Neither returns a score -- the arithmetic lives in one place and
+    # both the clusterer and this reader call it.
+    ranking_rows = [
+        (
+            str(cluster_id),
+            3,            # sources in the window
+            3,            # distinct platforms
+            1_000_000.0,  # total metric
+            5.0,          # average velocity
+        )
+    ]
+    payload_rows = [
         (
             str(cluster_id), "AI Agent Trends", "AI agents", "Summary of AI agents", "technology",
             now, now,
-            3,          # sources in the window
-            3,          # distinct platforms
-            1_000_000.0,  # total metric
-            5.0,        # average velocity
-            [],         # the observations themselves
+            3,   # sources in the window
+            3,   # distinct platforms
+            [],  # the observations themselves
         )
     ]
 
     mock_cursor = AsyncMock()
-    mock_cursor.fetchall = AsyncMock(return_value=mock_rows)
+    mock_cursor.fetchall = AsyncMock(side_effect=[ranking_rows, payload_rows])
     repo._pool = _create_mock_pool(mock_cursor)
 
     clusters = await repo.get_top_clusters(geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=5)
+
+    assert mock_cursor.execute.await_count == 2, "the reader no longer ranks before it reads"
+    ranking_query = mock_cursor.execute.await_args_list[0][0][0]
+    payload_query = mock_cursor.execute.await_args_list[1][0][0]
+    assert "JSON_AGG" not in ranking_query, (
+        "ranking must not build the payload of clusters it is about to discard"
+    )
+    assert "JSON_AGG" in payload_query
+    assert "ANY(%s::uuid[])" in payload_query, (
+        "the payload read must be restricted to the ranked clusters, not the whole window"
+    )
+    assert mock_cursor.execute.await_args_list[1][0][1] == ([str(cluster_id)],)
 
     assert len(clusters) == 1
     assert clusters[0].id == cluster_id
@@ -155,7 +175,8 @@ async def test_platform_credentials_crud():
     assert params_arg[0] == "tiktok"
 
     # 2. Test get_platform_credentials
-    mock_cursor.fetchone = AsyncMock(return_value=("tiktok", "session_cookies", '{"cookies": []}', True, None, None))
+    # All matching rows are fetched, so two stored spellings of one platform can be refused.
+    mock_cursor.fetchall = AsyncMock(return_value=[("tiktok", "session_cookies", '{"cookies": []}', True, None, None)])
     creds = await repo.get_platform_credentials("tiktok")
     assert creds is not None
     assert creds["platform"] == "tiktok"

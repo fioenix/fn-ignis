@@ -32,13 +32,32 @@ KIND_KEYWORD = "keyword"
 KIND_URL = "url"
 
 # Threads and Instagram address one object by two values that are not translations of each other:
-# the Graph API reports a numeric primary key, a permalink carries a shortcode, and this build has
-# no lookup from one to the other. They get their own namespaces rather than being filed together,
-# because "post:<value>" would assert the values are comparable -- and an all-digit shortcode would
-# then collide with somebody else's primary key. Two rows for one object is a gap we can measure
-# and later close with an alias; a wrong merge is silent and unrecoverable.
+# the Graph API reports a numeric primary key, a permalink carries a shortcode, and there is no
+# arithmetic from one to the other. They get their own namespaces rather than being filed
+# together, because "post:<value>" would assert the values are comparable -- and an all-digit
+# shortcode would then collide with somebody else's primary key. Two rows for one object is a gap
+# we can measure; a wrong merge is silent and unrecoverable.
 KIND_POST_SHORTCODE = "post_shortcode"
 KIND_REEL_SHORTCODE = "reel_shortcode"
+
+# What closes that gap, and the only thing that may: one connector record carrying both values.
+# Every Threads and Reels emission path does -- the Graph responses ask for `id` and `permalink`
+# together, and the browser payloads carry `pk` beside `code` -- so the record itself witnesses
+# that one primary key and one shortcode are one object. String equality between the two spaces
+# is still not evidence, and never becomes evidence.
+#
+# The pair is ordered: the platform's own primary key is canonical and the shortcode points at
+# it. Only the alias side is ever redirected, so a ledger row can never make one canonical object
+# resolve to another, and there are no chains to keep consistent.
+ALIASABLE_NAMESPACES: Dict[str, Tuple[str, str]] = {
+    "threads": (KIND_POST, KIND_POST_SHORTCODE),
+    "reels": (KIND_REEL, KIND_REEL_SHORTCODE),
+}
+
+# How an alias came to be believed. Recorded on the ledger row rather than on the observation:
+# the route that resolved a sighting is still the URL, and which object that URL belongs to is
+# the ledger's fact about two identifiers, not the sighting's fact about itself.
+ALIAS_FROM_CO_WITNESS = "connector_record_co_witness"
 
 # Metadata fields, in the order they are tried. The connector recorded the platform's identifier
 # here, so it is preferred over anything parsed back out of a URL.
@@ -134,10 +153,8 @@ class SourceIdentity:
         return f"{self.platform}:{self.external_id}"
 
 
-def resolve_source_identity(
-    platform: str, source_url: Optional[str], metadata: Any
-) -> Optional[SourceIdentity]:
-    """The canonical source a sighting belongs to, or None when nothing identifies it."""
+def _from_metadata(platform: str, metadata: Any) -> Optional[SourceIdentity]:
+    """The identity the connector's own identifier gives, if it wrote one."""
     meta = metadata if isinstance(metadata, dict) else {}
     for key, kind in METADATA_KEYS.get(platform, ()):
         value = meta.get(key)
@@ -149,7 +166,11 @@ def resolve_source_identity(
                     external_id=f"{kind}:{canonical}",
                     identity_source=IDENTITY_FROM_METADATA,
                 )
+    return None
 
+
+def _from_url(platform: str, source_url: Optional[str]) -> Optional[SourceIdentity]:
+    """The identity recoverable from the URL shape alone, ignoring metadata entirely."""
     for pattern, kind in URL_PATTERNS.get(platform, ()):
         match = re.search(pattern, source_url or "")
         if match:
@@ -160,6 +181,20 @@ def resolve_source_identity(
                     external_id=f"{kind}:{canonical}",
                     identity_source=IDENTITY_FROM_URL,
                 )
+    return None
+
+
+def resolve_source_identity(
+    platform: str, source_url: Optional[str], metadata: Any
+) -> Optional[SourceIdentity]:
+    """The canonical source a sighting belongs to, or None when nothing identifies it."""
+    from_metadata = _from_metadata(platform, metadata)
+    if from_metadata is not None:
+        return from_metadata
+
+    from_url = _from_url(platform, source_url)
+    if from_url is not None:
+        return from_url
 
     normalized = normalize_url(source_url)
     if normalized:
@@ -170,3 +205,60 @@ def resolve_source_identity(
         )
 
     return None
+
+
+@dataclass(frozen=True)
+class IdentityAlias:
+    """One shortcode proven to name one primary key, and what proved it.
+
+    Directed and single-hop by construction: alias_external_id always sits in the platform's
+    shortcode namespace and canonical_external_id in its primary-key namespace, so a ledger built
+    only from these can never point a canonical object at another canonical object.
+    """
+
+    platform: str
+    alias_external_id: str
+    canonical_external_id: str
+    witnessed_by: str
+
+
+def alias_namespace_prefix(platform: str) -> Optional[str]:
+    """The external_id prefix a ledger lookup is allowed to redirect, or None for that platform.
+
+    The write path gates on this so that only a shortcode is ever resolved through the ledger. A
+    primary key is canonical and stays canonical, whatever rows the table happens to contain.
+    """
+    pair = ALIASABLE_NAMESPACES.get(platform)
+    return None if pair is None else f"{pair[1]}:"
+
+
+def resolve_identity_alias(
+    platform: str, source_url: Optional[str], metadata: Any
+) -> Optional[IdentityAlias]:
+    """The alias one connector record proves, or None when the record proves nothing.
+
+    Both halves have to come from the same record, and each has to land in the namespace the
+    platform declared for it. Half the evidence is not evidence: a metadata-only record links its
+    primary key to no shortcode, and a permalink whose path yields no shortcode -- an explore
+    page, a profile -- is not a shortcode that happens to be missing.
+    """
+    pair = ALIASABLE_NAMESPACES.get(platform)
+    if pair is None:
+        return None
+    canonical_kind, alias_kind = pair
+
+    from_metadata = _from_metadata(platform, metadata)
+    from_url = _from_url(platform, source_url)
+    if from_metadata is None or from_url is None:
+        return None
+    if not from_metadata.external_id.startswith(f"{canonical_kind}:"):
+        return None
+    if not from_url.external_id.startswith(f"{alias_kind}:"):
+        return None
+
+    return IdentityAlias(
+        platform=platform,
+        alias_external_id=from_url.external_id,
+        canonical_external_id=from_metadata.external_id,
+        witnessed_by=ALIAS_FROM_CO_WITNESS,
+    )

@@ -54,7 +54,7 @@ class MetaBrowserAuthManager:
         if self._is_expired(creds.get("expires_at")):
             logger.info(f"{self.PLATFORM_NAME} browser session has expired; treating as not authenticated.")
             return None
-        state = creds.get("credentials_data") or creds.get("credentials")
+        state = creds.get("credentials_data")
         if not isinstance(state, dict) or not state.get("cookies"):
             return None
         return state

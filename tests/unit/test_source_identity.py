@@ -5,9 +5,12 @@ twice; two namespaces on one platform have to stay apart, or two objects are sto
 """
 
 from ignis.domain.source_identity import (
+    ALIAS_FROM_CO_WITNESS,
     IDENTITY_FROM_METADATA,
     IDENTITY_FROM_NORMALIZED_URL,
     IDENTITY_FROM_URL,
+    alias_namespace_prefix,
+    resolve_identity_alias,
     resolve_source_identity,
 )
 
@@ -172,3 +175,97 @@ def test_the_two_instagram_url_shapes_still_agree_with_each_other():
     assert identity_of("reels", "https://www.instagram.com/reel/XYZ") == identity_of(
         "reels", "https://www.instagram.com/p/XYZ"
     )
+
+
+# --- what one connector record is allowed to prove about those two spaces --------------------
+
+
+def test_a_threads_record_carrying_both_values_proves_one_alias():
+    """Every Threads emission path puts the numeric pk in metadata and the permalink in the URL.
+
+    That single record is the evidence the namespaces were waiting for: the same connector, the
+    same pass, the same object. The alias it proves is directed -- the platform's own primary
+    key is canonical and the shortcode points at it, never the reverse.
+    """
+    alias = resolve_identity_alias(
+        "threads",
+        "https://www.threads.net/@author/post/C2xYzAbCdEf",
+        {"post_id": "17912345678901234", "username": "author"},
+    )
+
+    assert alias is not None, "a record carrying both identifiers proved nothing"
+    assert alias.platform == "threads"
+    assert alias.alias_external_id == "post_shortcode:C2xYzAbCdEf"
+    assert alias.canonical_external_id == "post:17912345678901234"
+    assert alias.witnessed_by == ALIAS_FROM_CO_WITNESS
+
+
+def test_an_instagram_record_carrying_both_values_proves_one_alias():
+    alias = resolve_identity_alias(
+        "reels",
+        "https://www.instagram.com/reel/CzQwErTyUiO/",
+        {"reel_id": "17998877665544332"},
+    )
+
+    assert alias is not None
+    assert alias.alias_external_id == "reel_shortcode:CzQwErTyUiO"
+    assert alias.canonical_external_id == "reel:17998877665544332"
+
+
+def test_the_record_that_proves_an_alias_still_resolves_to_the_primary_key():
+    """Registering the alias must not change which object the record itself is filed under."""
+    assert identity_of(
+        "threads", "https://www.threads.net/@a/post/C2xYzAbCdEf", {"post_id": "17912345678901234"}
+    ) == "threads:post:17912345678901234"
+
+
+def test_a_metadata_only_record_proves_no_alias():
+    """Half the evidence is not evidence. Nothing links this pk to any shortcode."""
+    assert resolve_identity_alias("threads", None, {"post_id": "17912345678901234"}) is None
+
+
+def test_a_url_only_record_proves_no_alias():
+    assert resolve_identity_alias("threads", "https://www.threads.net/@a/post/C2xYzAbCdEf", {}) is None
+
+
+def test_a_url_with_no_shortcode_in_it_proves_no_alias():
+    """The normalized-URL fallback is not a shortcode, and must not be filed as one."""
+    assert (
+        resolve_identity_alias(
+            "threads", "https://www.threads.net/explore", {"post_id": "17912345678901234"}
+        )
+        is None
+    )
+
+
+def test_platforms_that_declare_no_alias_pair_prove_no_alias():
+    """A YouTube video id and its URL are already one namespace; there is nothing to reconcile.
+
+    Asserted rather than assumed, because a resolver that aliased every platform would quietly
+    fuse a TikTok hashtag onto a TikTok item id the first time one record carried both.
+    """
+    assert (
+        resolve_identity_alias(
+            "youtube", "https://www.youtube.com/watch?v=dQw4w9WgXcQ", {"video_id": "dQw4w9WgXcQ"}
+        )
+        is None
+    )
+    assert (
+        resolve_identity_alias(
+            "tiktok", "https://www.tiktok.com/tag/aothun", {"item_id": "12345"}
+        )
+        is None
+    )
+    assert resolve_identity_alias("google", None, {"keyword": "ao thun"}) is None
+
+
+def test_only_the_shortcode_namespace_is_aliasable_on_each_platform():
+    """The lookup the write path gates on, stated directly.
+
+    A Threads shortcode may be redirected by the ledger; a Threads primary key never is, or a
+    ledger row could point one canonical object at another.
+    """
+    assert alias_namespace_prefix("threads") == "post_shortcode:"
+    assert alias_namespace_prefix("reels") == "reel_shortcode:"
+    assert alias_namespace_prefix("youtube") is None
+    assert alias_namespace_prefix("tiktok") is None

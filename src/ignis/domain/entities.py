@@ -34,6 +34,10 @@ class TrendSignal:
     # difference matters because re-submitting a stored observation through the writer records a
     # second collection event for a sighting that happened once.
     observation_id: Optional[UUID] = None
+    # The external object this sighting is of. Display payload for a citation, never its
+    # identity: two observations of one source are two pieces of evidence, and collapsing them
+    # onto the source would count one sighting twice or lose the other.
+    source_id: Optional[UUID] = None
     # How the source was resolved for this sighting, and which clock observed_at came from.
     # Both are written per observation, so both come back on one.
     identity_source: Optional[str] = None
@@ -112,6 +116,23 @@ class ResearchMission:
     timeframe: str = "7d"
     status: str = "PENDING"  # PENDING, RUNNING, COMPLETED, FAILED
     summary: Optional[str] = None
+    # Which research owns this mission, and which question it is answering. Both are None for a
+    # mission created outside a research workspace -- every mission written before the workspace
+    # feature is in that state, and defaulting them to MARKET would claim they were
+    # hypothesis-driven investigations and gate them on a Brief nobody was ever asked for.
+    workspace_id: Optional[UUID] = None
+    surface: Optional[str] = None          # 'ATTENTION' or 'MARKET'
+    # Set only when a Market mission was opened from a selected Attention result. Context
+    # lineage: it records where the question came from, never that the earlier evidence supports
+    # the new hypothesis.
+    parent_attention_mission_id: Optional[UUID] = None
+    parent_cluster_id: Optional[UUID] = None
+    # The confirmed Brief that authorizes a Market run. Null for ATTENTION by definition.
+    brief_revision_id: Optional[UUID] = None
+    # The Market mission whose confirmed Brief was changed to produce this one. The canonical
+    # name for that relation, recorded on the newer mission: the revised mission is immutable
+    # once its Brief is confirmed, so the pointer belongs to the side that came second.
+    revises_mission_id: Optional[UUID] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

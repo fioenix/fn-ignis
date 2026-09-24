@@ -1,10 +1,18 @@
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.domain.entities import TrendSignal
+from ignis.domain.research_workspace import (
+    REQUIRED_BRIEF_FIELDS,
+    IncompleteMarketBriefError,
+    ResearchSurface,
+    WorkspaceScopeMismatchError,
+    resolve_surface,
+)
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 
 logger = logging.getLogger(__name__)
@@ -21,16 +29,87 @@ class ExecuteMissionUseCase:
         repository: ITrendRepository,
         registry: ConnectorPluginRegistry,
         clusterer: IClusteringEngine,
+        workspace_store: Optional[IResearchWorkspaceStore] = None,
     ):
         self._repo = repository
         self._registry = registry
         self._clusterer = clusterer
+        self._workspace_store = workspace_store
+
+    async def _require_confirmed_brief(self, mission) -> None:
+        """A Market mission does not probe until the requester has confirmed its Brief.
+
+        The gate is fail-closed: a MARKET mission whose Brief cannot be read is blocked rather
+        than run, because the alternative is collecting evidence against a hypothesis nobody
+        agreed to and then presenting it as an answer to a decision.
+
+        Missions on no surface -- everything created outside a research workspace -- are not
+        gated. They were never framed as hypothesis-driven investigations, so demanding a Brief
+        from them would be a rule applied backwards.
+        """
+        if resolve_surface(mission.surface) is not ResearchSurface.MARKET:
+            return
+
+        revision = None
+        if self._workspace_store is not None:
+            revision = await self._workspace_store.get_brief_revision_for_mission(mission.id)
+
+        if revision is not None:
+            return
+
+        mission.status = "BLOCKED"
+        mission.summary = (
+            "Blocked: Market probes are not authorized until the requester confirms a complete "
+            "Market Brief."
+        )
+        await self._repo.update_mission(mission)
+        raise IncompleteMarketBriefError(REQUIRED_BRIEF_FIELDS)
+
+    async def _run_workspace(self, mission):
+        """The research this run writes into, or None when the mission belongs to none.
+
+        Every mission created before the workspace feature is in that second state, so a run
+        path that required a workspace would stop all of them. Those runs take no writer claim
+        and write no journal, exactly as they did before.
+        """
+        if self._workspace_store is None or mission.workspace_id is None:
+            return None
+        workspace = await self._workspace_store.get_research_workspace(mission.workspace_id)
+        if workspace is None:
+            # The mission names a research the configured database does not hold. Running it
+            # anyway would write evidence into a scope nothing can address afterwards.
+            raise WorkspaceScopeMismatchError(
+                f"Mission {mission.id} belongs to research workspace {mission.workspace_id}, "
+                "which does not exist in the configured Ignis database."
+            )
+        return workspace
 
     async def execute(self, mission_id: UUID) -> Dict[str, Any]:
         mission = await self._repo.get_mission(mission_id)
         if not mission:
             raise ValueError(f"Research Mission {mission_id} does not exist.")
 
+        await self._require_confirmed_brief(mission)
+
+        workspace = await self._run_workspace(mission)
+        if workspace is None:
+            return await self._execute_pass(mission)
+
+        # The claim is taken before the mission is moved to RUNNING, so a refused second run
+        # never touches the state of the run that holds the mission. Both the claim and the
+        # journal are given back by the context manager, including when the pass raises.
+        async with self._workspace_store.mission_run(workspace, mission.id) as journal:
+            result = await self._execute_pass(mission)
+            result["run"] = {
+                "run_id": str(journal.run_id),
+                "workspace_id": str(journal.workspace_id),
+                "journal_path": str(journal.journal_path),
+                "journal_status": "COMPLETED",
+            }
+            return result
+
+    async def _execute_pass(self, mission) -> Dict[str, Any]:
+        mission_id = mission.id
         logger.info(f"Executing Research Mission '{mission.title}' [ID: {mission_id}] with keywords: {mission.keywords} (Timeframe: {mission.timeframe})...")
         mission.status = "RUNNING"
         await self._repo.update_mission(mission)

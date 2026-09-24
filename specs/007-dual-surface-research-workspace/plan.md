@@ -14,6 +14,30 @@ SQLite by default or PostgreSQL when explicitly configured. Research records are
 `workspace_id`, preserve the existing source/observation/mission-evidence provenance model, and
 prevent Attention signals from being presented as Market evidence.
 
+## Delivery Scope and Ownership
+
+The first implementation slice is the P1 user outcome, not the entire feature backlog:
+
+1. **US1 — Workspace boundary**: propose, confirm, reuse, adopt, and reopen a research under
+   `.ignis/research/<slug>/`.
+2. **US2 — ATTENTION**: run exploratory discovery without a hypothesis and without an
+   Opportunity Index.
+3. **US3 — MARKET**: collect the Brief in the host Agent, persist only the confirmed revision,
+   block incomplete execution, and return observation-addressable Market evidence.
+
+Codex owns the product contract, acceptance review, P2 promotion, and release decision. Claude
+Code owns the implementation and tests for T001-T023 in `tasks.md`. US4/US5 (T024-T033) are
+post-MVP hardening and must not be pulled into the first Engineering handoff.
+
+The P1 plan explicitly closes four integration gaps before implementation:
+
+- extend the existing `research_missions` record and repository hydration with `workspace_id`,
+  `surface`, lineage, and Market Brief revision identity; do not create a parallel mission store;
+- keep adaptive Q&A in the host Agent and expose only a confirmed Brief contract to fn-ignis;
+- make citations canonical by `observation_id` for opportunities and actionable takeaways, with
+  URL/title retained only as display data;
+- key channel health by connector surface, including separate TikTok video and comment surfaces.
+
 ## Technical Context
 
 **Language/Version**: Python >= 3.11
@@ -24,6 +48,9 @@ SQLite, and the existing connector/repository ports
 **Storage**: One configured database shared by the Ignis installation: SQLite-local by default or
 PostgreSQL when explicitly configured. Research-owned tables are scoped by `workspace_id`; the
 manifest, journals, and derived artifacts remain under `.ignis/research/<research-slug>/`
+
+The migration must extend the existing mission record rather than introduce a second mission
+identity. SQLite and PostgreSQL must expose the same workspace/surface/Brief/citation semantics.
 
 **Testing**: pytest and pytest-asyncio unit/integration tests; repository parity tests remain
 required for the existing SQLite/PostgreSQL storage contract
@@ -43,6 +70,9 @@ or state
 **Scale/Scope**: One shared Ignis database with multiple research scopes, each containing multiple
 missions and concurrent distinct mission readers/writers; one active writer per mission; no new
 connectors or Opportunity Index formula changes
+
+**Health contract**: P1 reports connector-surface health, not only platform health, so a healthy
+TikTok video grid cannot hide a failed TikTok comments surface.
 
 ## Constitution Check
 
@@ -66,6 +96,7 @@ specs/007-dual-surface-research-workspace/
 ├── plan.md              # This file
 ├── research.md          # Phase 0 decisions and alternatives
 ├── data-model.md        # Phase 1 entities and state transitions
+├── ownership.md         # Product-vs-Engineering ownership and handoff boundary
 ├── quickstart.md        # Phase 1 validation guide
 ├── contracts/           # Phase 1 host/Agent interface contracts
 └── tasks.md             # Phase 2 dependency-ordered implementation tasks
@@ -131,7 +162,12 @@ constitution check above. The design must still show that:
   record is scoped by `workspace_id`;
 - no Market claim can be supported only by Attention context;
 - no abandoned Q&A transcript reaches canonical storage; and
+- every Market citation reaches the canonical `observation_id`, while display URLs/titles remain
+  non-authoritative;
+- channel health distinguishes connector surfaces that share a top-level platform;
 - concurrent runs use exclusive journals and transactional state updates.
 
-No connector addition or release/version bump is part of this feature plan. Any shared-schema
-migration must pass the existing production migration gate before activation.
+No connector addition or release/version bump is part of the P1 implementation plan. Any
+shared-schema migration must pass the existing production migration gate before activation; the
+release gate is a separate final task and is not permission to touch production during feature
+implementation.

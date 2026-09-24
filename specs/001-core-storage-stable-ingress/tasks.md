@@ -76,12 +76,61 @@
 
 ## Phase 7: Convergence Gaps (2026-09-13)
 
-- [ ] T021 [US1] Add a reproducible dual-backend benchmark with at least 10,000 observations and
-  enforce `get_top_clusters` P95 < 50 ms; SC-001 currently has no benchmark evidence
-- [ ] T022 [US1] Define the coverage scope promised by SC-004, raise it to at least 85%, and enforce
-  the threshold in CI; the 2026-09-13 SQLite-only run measured 73% overall and 71% across
-  persistence/connectors, while the latest Timescale-backed CI run measured 75% overall without
-  `--cov-fail-under`
+- [x] T021 [US1] Add a reproducible dual-backend benchmark with at least 10,000 observations and
+  enforce `get_top_clusters` P95 < 50 ms. **Met on both backends on 22/09/2026.** Twenty enforced
+  runs of `scripts/t021_read_path_benchmark.py` over 10,000 observations, ten per backend, zero
+  failures: SQLite P95 23.662-29.496 ms (median run 27.066, median latency 20.541 ms), PostgreSQL
+  P95 8.320-26.980 ms (median run 11.825, median latency 8.229 ms). The benchmark contract is
+  unchanged -- same corpus floor, threshold, warm-up, iteration count, nearest-rank percentile and
+  `--enforce` gate -- and every run returned 10 clusters / 50 signals. PostgreSQL evidence comes
+  from a throwaway `timescale/timescaledb-ha:pg16` container reached only through
+  `IGNIS_TEST_POSTGRES_DSN`.
+  Two changes got it there, each measured on its own. `sql/019_observations_latest_per_source_index.sql`
+  gives the latest-per-source ordering an index whose column list is the reader's ORDER BY term for
+  term, partial on the two predicates the reader always applies; `EXPLAIN QUERY PLAN` no longer
+  reports `USE TEMP B-TREE FOR LAST 5 TERMS OF ORDER BY` (SQLite median 39 -> 30 ms). Both readers
+  then rank clusters from aggregates and read the payload only for the ones `limit` keeps, instead
+  of building every cluster and slicing (SQLite median 30 -> 20.5 ms, PostgreSQL ~28 -> ~8 ms).
+  `LIMIT` was deliberately **not** pushed below the aggregation and the score was **not** restated
+  in SQL: `cross_platform_score` rounds half to even where both backends round half away from zero,
+  and a SQL copy of that formula is the defect the scorer was consolidated to remove.
+  One behaviour was deliberately changed: `cluster_rank_key` makes ties total by falling back to
+  the cluster id, replacing an order that was previously undefined and could differ between
+  backends and between runs. Behaviour is otherwise pinned by
+  `tests/integration/test_top_clusters_characterization.py`, written before the rewrite, 24 cases
+  per backend. Full evidence: `.handoff/T021-reader-optimization.handoff.md`
+- [x] T022 [US1] Define the coverage scope promised by SC-004, raise it to at least 85%, and enforce
+  the threshold in CI. **Met on 22/09/2026 at 89.09%.** The scope had never been written down, so
+  the earlier readings answered a different question than the criterion asks: the 2026-09-13
+  SQLite-only run measured 73% overall and 71% across persistence/connectors, and the latest
+  Timescale-backed CI run measured 75% overall, none of them scoped and none enforced.
+  The scope is now `.coveragerc.sc004`, one entry per name in SC-004 -- Repository
+  (`infrastructure/persistence/*`), Registry (`connectors/registry.py`), RSS Plugin
+  (`connectors/google_trends/*`) and YouTube Plugin (`connectors/youtube/*`). Everything else under
+  `src/ignis` is outside the criterion and is absent from the scope rather than excluded from it;
+  there is no omit pattern, no `exclude_lines` and no `# pragma: no cover` anywhere inside it.
+  Measured over `pytest tests/` against a throwaway `timescale/timescaledb-ha:pg16` reached only
+  through `IGNIS_TEST_POSTGRES_DSN`: 2,364 statements, 258 missed, **89.09%** (overall package
+  coverage 80%). Per module: RSS Plugin 100.00%, YouTube Plugin 96.45%, SQLite repository 93.73%,
+  workspace repository 89.55%, Registry 89.27%, identifiers 84.62%, PostgreSQL repository 79.27%.
+  The rise came from behaviour tests through the public interfaces, not from line exercises: the
+  whole `search_signals` half of the RSS plugin (Suggest probing, the demand index and its band,
+  timeframe translation) and of the YouTube plugin (the `search.list` -> `videos.list` pair, the
+  publishedAfter cutoff, quota and transport failures) were untested, and
+  `tests/integration/test_t022_operational_surface_parity.py` now drives audit logging and platform
+  credentials on both backends.
+  CI enforces it: `coverage report --rcfile=.coveragerc.sc004` runs after the suite in
+  `.github/workflows/ci.yml` and exits 2 below the floor. Verified both ways on 22/09/2026 -- the
+  real gate exits 0 at 89.09%, and the same data against a floor of 99 exits 2. Without
+  `IGNIS_TEST_POSTGRES_DSN` the PostgreSQL adapter's tests skip and the scope measures 76.31%, so
+  the gate fails; that is correct, and it means the gate requires the database service CI already
+  provides. The SC-001 performance workflow is untouched and stays out of the PR matrix.
+  Two backend divergences that this work surfaced are **not** fixed here, because correcting
+  repository behaviour is outside a coverage task: `log_event`/`get_recent_logs` normalize `level`
+  on PostgreSQL and not on SQLite, and `save_platform_credentials` lower-cases `platform` on
+  PostgreSQL and not on SQLite. Both are recorded, with reproductions, in
+  `.handoff/T022-coverage-gate.handoff.md`. **Both closed by `specs/007-dual-surface-research-workspace/tasks.md`
+  T038**, which makes the two backends normalize them identically and asserts it in the same file.
 
 ---
 
@@ -94,3 +143,28 @@
   with `O_EXCL`; five clock-frozen tests in `tests/unit/test_t020_cutover.py`, including a
   negative control for a candidate path already on disk. `pytest tests/` 926 passed, 115 skipped
   (Postgres cases, `IGNIS_TEST_POSTGRES_DSN` absent).
+
+---
+
+## Phase 9: SC-001 CI Enforcement (2026-09-22)
+
+- [x] T024 [US1] Publish the T021 benchmark as a CI gate for SC-001. This is enforcement, not new
+  benchmark evidence: T021 measured the criterion and met it, and the number it produced describes
+  22/09/2026 and nothing after it. `.github/workflows/performance.yml` re-runs
+  `scripts/t021_read_path_benchmark.py --enforce` on both backends, so a regression turns a build
+  red instead of going unnoticed until somebody re-reads a handoff.
+  Deliberately not attached to `pull_request`: the benchmark seeds 10,000 observations per backend,
+  and charging every contributor for that would catch on a feature branch a regression that only
+  matters once it reaches a protected branch. It runs on pushes to `main`, `release/*` and
+  `hotfix/*`, weekly on a schedule, and on manual dispatch. Ordinary PR CI is unchanged.
+  The benchmark contract is untouched -- same corpus floor, threshold, warm-up count, iteration
+  count, nearest-rank percentile, real repository reader and result-shape checks. The workflow
+  passes two flags and nothing else; `tests/unit/test_t024_performance_workflow.py` (19 contracts)
+  refuses a workflow that restates any of them, that drops `--enforce`, that swallows the exit
+  code, that reaches PostgreSQL by any route other than `IGNIS_TEST_POSTGRES_DSN` against a
+  throwaway `timescale/timescaledb-ha:pg16` service, that reads a repository secret, or that
+  renames the job that a branch-protection rule would select.
+  Known limit: this repository can publish a stable status name, but *requiring* it on `main` is a
+  GitHub settings operation that no file here performs, and it has not been read back. Until it is,
+  the workflow reports and does not block. Evidence and the remaining step:
+  `.handoff/T024-sc001-ci-gate.handoff.md`

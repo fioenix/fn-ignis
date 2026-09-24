@@ -27,7 +27,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-EXPECTED_TOOL_COUNT = 39
+EXPECTED_TOOL_COUNT = 45
 PROTOCOL_VERSION = "2024-11-05"
 
 # Bootstrap builds a virtual environment and installs 155 locked packages. Warm uv cache makes

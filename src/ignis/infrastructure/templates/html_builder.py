@@ -267,10 +267,12 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             "Multi-platform verified market signals collected.",
             "Analyzing search demand velocity and content engagement distribution in target market."
         ])
-        actionables = report.actionable_takeaways if report else [
+        # Normalised the same way insights are, so a dossier stored before takeaways carried
+        # their evidence still renders instead of printing a dataclass into the page.
+        actionables = _normalize_insights(report.actionable_takeaways if report else [
             "Capitalize on high-demand, low-supply content white spaces.",
             "Establish recurring ingress monitoring to capture emerging trend momentum."
-        ]
+        ])
 
         return template.render(
             mission=mission,
@@ -282,6 +284,8 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             strategic_insights=insights,
             channel_summaries=channel_summaries,
             actionable_takeaways=actionables,
+            surface=getattr(report, "surface", None) if report else None,
+            market_brief=getattr(report, "market_brief", None) if report else None,
             customer_inquiries=customer_inquiries or [],
             search_suggestions=search_suggestions or [],
             macro_trends=macro_trends or [],

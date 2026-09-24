@@ -16,7 +16,13 @@ if not hasattr(mcp.shared.exceptions, "McpError") and hasattr(mcp.shared.excepti
 
 from fastmcp import FastMCP
 
+from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
+from ignis.application.use_cases.create_market_revision import CreateMarketRevisionUseCase
+from ignis.application.use_cases.create_attention_mission import CreateAttentionMissionUseCase
 from ignis.application.use_cases.create_mission import CreateMissionUseCase
+from ignis.application.use_cases.create_research_workspace import (
+    CreateResearchWorkspaceUseCase,
+)
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
@@ -25,6 +31,19 @@ from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS, Ingest
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster
+from ignis.domain.exceptions import IgnisDomainException
+from ignis.domain.research_workspace import (
+    RESEARCH_ROOT_SEGMENTS,
+    REQUIRED_BRIEF_FIELDS,
+    IncompleteMarketBriefError,
+    MissionLineage,
+    MissionWriterConflictError,
+    ResearchSurface,
+    WorkspaceScopeMismatchError,
+    opportunity_index_is_allowed,
+    resolve_surface,
+)
+from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
 
 from ignis.config import reveal_secret, settings
 
@@ -167,11 +186,31 @@ def _init_components():
         strategic_reasoner=strategic_reasoner,
     )
 
+    workspace_store = WorkspaceRepository(repository=repository)
+
     create_mission_use_case = CreateMissionUseCase(repository=repository)
     execute_mission_use_case = ExecuteMissionUseCase(
         repository=repository,
         registry=registry,
         clusterer=clusterer,
+        workspace_store=workspace_store,
+    )
+    create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store)
+    create_attention_mission_use_case = CreateAttentionMissionUseCase(
+        repository=repository,
+        store=workspace_store,
+    )
+    confirm_market_brief_use_case = ConfirmMarketBriefUseCase(
+        repository=repository,
+        store=workspace_store,
+    )
+    # Every Brief confirmation goes through the lineage-aware door, including one that names no
+    # parent: a handoff that points at another research's Attention mission has to be refused
+    # before a mission is written, not discovered afterwards in the lineage column.
+    create_market_revision_use_case = CreateMarketRevisionUseCase(
+        repository=repository,
+        store=workspace_store,
+        confirm_use_case=confirm_market_brief_use_case,
     )
     get_mission_analysis_use_case = GetMissionAnalysisUseCase(repository=repository)
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
@@ -202,6 +241,11 @@ def _init_components():
         "quality_evaluator": quality_evaluator,
         "strategic_reasoner": strategic_reasoner,
         "harness_orchestrator": harness_orchestrator,
+        "workspace_store": workspace_store,
+        "create_research_workspace_use_case": create_research_workspace_use_case,
+        "create_attention_mission_use_case": create_attention_mission_use_case,
+        "confirm_market_brief_use_case": confirm_market_brief_use_case,
+        "create_market_revision_use_case": create_market_revision_use_case,
         "create_mission_use_case": create_mission_use_case,
         "execute_mission_use_case": execute_mission_use_case,
         "get_mission_analysis_use_case": get_mission_analysis_use_case,
@@ -285,16 +329,153 @@ def _describe_proxy(proxy_uri: str) -> str:
 
 
 def _serialize_citation(cit: Any) -> Dict[str, Any]:
+    """`observation_id` first, because that is the citation's identity.
+
+    The URL and the title are display payload. A reader that keys on either can merge two
+    observations of one source or split one in half, so they are never the thing a conclusion is
+    traced through.
+    """
     platform = getattr(cit, "platform", None)
     return {
+        "observation_id": getattr(cit, "observation_id", None),
+        "source_id": getattr(cit, "source_id", None),
         "citation_id": getattr(cit, "citation_id", None),
         "platform": platform.value if hasattr(platform, "value") else str(platform),
+        "connector_surface": getattr(cit, "connector_surface", None),
+        # Whether the reader is looking at evidence collected for this Brief or at the Attention
+        # context the question came from. Without it the two read identically.
+        "evidence_role": getattr(cit, "evidence_role", None),
         "title_or_query": getattr(cit, "title_or_query", None),
         "metric_highlight": getattr(cit, "metric_highlight", None),
         "author_or_channel": getattr(cit, "author_or_channel", None),
         "url": getattr(cit, "url", None),
         "excerpt": getattr(cit, "excerpt", None),
     }
+
+
+async def _market_brief_payload(comp: Dict[str, Any], mission: Any) -> Optional[Dict[str, Any]]:
+    """The confirmed Brief a Market analysis was authorized by, or None.
+
+    Carried into the report so a reader can see which hypothesis the evidence was collected
+    against, and which conditions would disconfirm it. A Market conclusion presented without its
+    falsifiers is a claim the reader has no way to argue with.
+    """
+    if resolve_surface(getattr(mission, "surface", None)) is not ResearchSurface.MARKET:
+        return None
+    revision = await comp["workspace_store"].get_brief_revision_for_mission(mission.id)
+    return revision.to_payload() if revision else None
+
+
+def _market_brief_blocked(
+    mission: Any,
+    operation: str,
+    missing_fields: Optional[List[str]] = None,
+    detail: Optional[str] = None,
+) -> str:
+    """The one refusal every Market boundary returns when no confirmed Brief authorizes it.
+
+    Execution, analysis and export all speak the same contract on purpose. An unauthorized
+    Market mission that could still be read would hand back an Opportunity Index derived from
+    evidence nobody framed a question for, which is the failure the Brief gate exists to
+    prevent -- and it would be a quieter failure than refusing to probe.
+    """
+    return json.dumps(
+        {
+            "status": "BLOCKED",
+            "surface": ResearchSurface.MARKET.value,
+            "operation": operation,
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+            "missing_fields": list(missing_fields or REQUIRED_BRIEF_FIELDS),
+            "opportunity_index_applies": False,
+            "error": detail
+            or (
+                "Market execution is not authorized until the requester confirms every required "
+                "Brief field."
+            ),
+            "note": (
+                "No probe ran, no analysis was derived and no artifact was written. Collect the "
+                "missing fields with the requester, show them the complete draft, and call "
+                "confirm_market_brief once they confirm it."
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def _refuse_unauthorized_market(comp: Dict[str, Any], mission: Any, operation: str):
+    """Return (brief_payload, refusal). Exactly one of the two is ever set.
+
+    A mission on no surface, or on ATTENTION, is not a Market read and passes through with no
+    Brief -- which is what keeps every pre-workspace mission working unchanged.
+    """
+    if resolve_surface(getattr(mission, "surface", None)) is not ResearchSurface.MARKET:
+        return None, None
+    brief = await _market_brief_payload(comp, mission)
+    if brief is None:
+        return None, _market_brief_blocked(mission, operation)
+    return brief, None
+
+
+def _serialize_opportunity(opp: Any, include_supporting: int = 0) -> Dict[str, Any]:
+    payload = {
+        "topic": opp.topic,
+        "type": opp.opportunity_type,
+        "demand_score": opp.search_interest_score,
+        "supply_score": opp.content_supply_score,
+        "opportunity_index": opp.opportunity_index,
+        "recommendation": opp.strategic_recommendation,
+        "citations": [_serialize_citation(c) for c in getattr(opp, "citations", []) or []],
+    }
+    if include_supporting:
+        payload["supporting_signals"] = opp.supporting_signals[:include_supporting]
+    return payload
+
+
+def _surface_payload(report: Any, mission: Any) -> Dict[str, Any]:
+    """What surface this analysis speaks for, and what that surface is allowed to say."""
+    surface = resolve_surface(getattr(mission, "surface", None))
+    payload: Dict[str, Any] = {
+        "surface": surface.value if surface else None,
+        "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+        "opportunity_index_applies": opportunity_index_is_allowed(surface),
+    }
+    if surface is ResearchSurface.ATTENTION:
+        payload["note"] = (
+            "ATTENTION context. Ranked topics, momentum, freshness and source coverage are "
+            "reported as candidates for investigation; no Opportunity Index and no commercial "
+            "verdict are derived from them."
+        )
+    if getattr(report, "market_brief", None):
+        payload["market_brief"] = report.market_brief
+    lineage = getattr(report, "lineage", None)
+    if lineage:
+        payload["lineage"] = lineage
+    context = getattr(report, "attention_context", None)
+    if context:
+        # Reported under its own key, never merged into the citation lists a conclusion is
+        # traced through: a context observation beside an opportunity reads as support for it.
+        payload["attention_context"] = [_serialize_citation(c) for c in context]
+        payload["attention_context_note"] = (
+            "Observations carried from the parent Attention mission. They record where this "
+            "question came from and are not counted as support for this Brief."
+        )
+    return payload
+
+
+async def _attention_context_signals(comp: Dict[str, Any], mission: Any) -> List[Any]:
+    """The observations of the Attention mission this one was handed off from.
+
+    Read only when lineage names a parent, and never merged into the mission's own evidence:
+    they are carried so a reader can see the origin of the question, and the analysis keeps them
+    out of everything it concludes.
+    """
+    parent_id = getattr(mission, "parent_attention_mission_id", None)
+    if not parent_id:
+        return []
+    return await comp["repository"].get_mission_signals(parent_id)
 
 
 def _serialize_insights(insights: Any) -> List[Dict[str, Any]]:
@@ -319,6 +500,10 @@ def _serialize_channel_summaries(summaries: Any) -> List[Dict[str, Any]]:
         top = getattr(ch, "top_citation", None)
         out.append({
             "platform": platform.value if hasattr(platform, "value") else str(platform),
+            # The probe, not just the platform: a healthy TikTok video grid must not be able to
+            # answer on behalf of a TikTok comments surface that never ran.
+            "connector_surface": getattr(ch, "connector_surface", None)
+            or (platform.value if hasattr(platform, "value") else str(platform)),
             "status": status.value if hasattr(status, "value") else str(status),
             "signals_count": getattr(ch, "signals_count", 0),
             "timeframe_used": getattr(ch, "timeframe_used", None),
@@ -477,7 +662,7 @@ async def handle_run_autonomous_research_mission(
             ],
             "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
             "strategic_insights": _serialize_insights(report.strategic_insights),
-            "actionable_takeaways": report.actionable_takeaways,
+            "actionable_takeaways": _serialize_insights(report.actionable_takeaways),
             "next_step": f"Call generate_mission_artifact(mission_id='{mission.id}') to render the full interactive HTML dossier."
         },
         ensure_ascii=False,
@@ -523,6 +708,12 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
     m_id = mission.id
 
 
+    brief, refusal = await _refuse_unauthorized_market(
+        comp, mission, operation="discover_market_opportunities"
+    )
+    if refusal:
+        return refusal
+
     signals = await comp["repository"].get_mission_signals(m_id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
     tf_days = timeframe_to_days(mission.timeframe)
@@ -536,26 +727,20 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
         scorecard=scorecard,
         auth_status=auth_status,
         connector_health=connector_health,
+        market_brief=brief,
     )
 
     return json.dumps(
         {
             "mission_id": str(mission.id),
             "maturity_stage": report.maturity_stage.value,
+            **_surface_payload(report, mission),
             "market_opportunities": [
-                {
-                    "topic": opp.topic,
-                    "type": opp.opportunity_type,
-                    "demand_score": opp.search_interest_score,
-                    "supply_score": opp.content_supply_score,
-                    "opportunity_index": opp.opportunity_index,
-                    "recommendation": opp.strategic_recommendation,
-                }
-                for opp in report.market_opportunities
+                _serialize_opportunity(opp) for opp in report.market_opportunities
             ],
             "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
             "strategic_insights": _serialize_insights(report.strategic_insights),
-            "actionables": report.actionable_takeaways,
+            "actionables": _serialize_insights(report.actionable_takeaways),
         },
         ensure_ascii=False,
         indent=2
@@ -863,6 +1048,286 @@ async def handle_clear_instagram_auth() -> str:
     )
 
 
+# --- Handlers for the Dual-Surface Research Workspace ---
+
+def _host_workspace_of(proposed_path: Path) -> Path:
+    """Recover the host workspace from a proposed research path.
+
+    The layout is fixed -- `<host>/.ignis/research/<slug>` -- so the host workspace is the path
+    with those three segments removed. Recovering it rather than asking for it again keeps the
+    confirmation carrying exactly the path the requester was shown.
+    """
+    parts = proposed_path.parts
+    tail = (*RESEARCH_ROOT_SEGMENTS, proposed_path.name)
+    if len(parts) <= len(tail) or parts[-len(tail):] != tail:
+        raise ValueError(
+            f"'{proposed_path}' is not a research workspace path. Expected a path ending in "
+            f"{'/'.join(RESEARCH_ROOT_SEGMENTS)}/<research-slug>."
+        )
+    return Path(*parts[: -len(tail)])
+
+
+def _workspace_payload(workspace: Any) -> Dict[str, Any]:
+    return {
+        "workspace_id": str(workspace.workspace_id),
+        "slug": workspace.slug,
+        "name": workspace.name,
+        "root_path": str(workspace.root_path),
+        "manifest_path": str(workspace.manifest_path),
+        "format_version": workspace.format_version,
+        "status": workspace.status.value,
+        "created_at": workspace.created_at.isoformat(),
+    }
+
+
+async def handle_propose_research_workspace(
+    host_workspace: str,
+    research_name: str,
+    slug: Optional[str] = None,
+) -> str:
+    comp = get_components()
+    try:
+        proposal = await comp["create_research_workspace_use_case"].propose(
+            Path(host_workspace), research_name, slug=slug
+        )
+    except IgnisDomainException as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2)
+
+    payload = proposal.to_payload()
+    payload["next_step"] = (
+        "Show the proposed path to the requester. Nothing has been written. Call "
+        "confirm_research_workspace with confirmation=true only after they agree"
+        + (", and adopt=true to reuse the folder already there." if proposal.requires_adoption
+           else ".")
+    )
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+async def handle_confirm_research_workspace(
+    proposed_path: str,
+    confirmation: bool = False,
+    adopt: bool = False,
+    research_name: Optional[str] = None,
+) -> str:
+    comp = get_components()
+    target = Path(proposed_path)
+    try:
+        host_workspace = _host_workspace_of(target)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2)
+
+    use_case = comp["create_research_workspace_use_case"]
+    try:
+        # Re-proposed rather than carried across the call: the proposal is read-only, and
+        # re-reading the folder is what makes the confirmation act on the filesystem as it is
+        # now instead of as it was when the requester was first shown the path.
+        proposal = await use_case.propose(
+            host_workspace, research_name or target.name, slug=target.name
+        )
+        workspace = await use_case.confirm(proposal, confirmation=confirmation, adopt=adopt)
+    except IgnisDomainException as exc:
+        return json.dumps(
+            {
+                "status": "ADOPTION_REQUIRED" if not adopt else "REFUSED",
+                "proposed_path": str(target),
+                "error": str(exc),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    if workspace is None:
+        return json.dumps(
+            {
+                "status": "DECLINED",
+                "proposed_path": str(target),
+                "note": "No directory, manifest, database record or journal was created.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    payload = _workspace_payload(workspace)
+    payload["status"] = "REUSED" if proposal.existing_workspace is not None else "CREATED"
+    payload["note"] = (
+        "The configured shared Ignis database is the canonical record store; this folder holds "
+        "the manifest, run journals and derived artifacts. It is local-first and is not "
+        "committed or published automatically."
+    )
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+async def handle_list_research_workspaces(limit: int = 20) -> str:
+    comp = get_components()
+    workspaces = await comp["workspace_store"].list_research_workspaces(limit=max(1, min(limit, 100)))
+    return json.dumps(
+        {
+            "count": len(workspaces),
+            "workspaces": [_workspace_payload(w) for w in workspaces],
+            "note": (
+                "Any supported Agent host connected to this Ignis database can reopen these by "
+                "workspace_id, independently of the chat that created them."
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def handle_create_attention_mission(
+    workspace_id: str,
+    title: str,
+    geo: str = "VN",
+    timeframe: str = "7d",
+    seed: Optional[str] = None,
+    keywords: Optional[List[str]] = None,
+    platforms: Optional[List[str]] = None,
+    agent: str = "claude",
+    session_id: Optional[str] = None,
+) -> str:
+    comp = get_components()
+    try:
+        mission = await comp["create_attention_mission_use_case"].execute(
+            workspace_id=UUID(workspace_id),
+            title=title,
+            keywords=keywords,
+            seed=seed,
+            agent=agent,
+            session_id=session_id,
+            platforms=[resolve_platform(p) for p in platforms] if platforms else None,
+            geo=resolve_geo(geo),
+            timeframe=timeframe,
+        )
+    except ValueError:
+        return _invalid_timeframe(timeframe)
+    except IgnisDomainException as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2)
+
+    return json.dumps(
+        {
+            "status": "CREATED",
+            "surface": ResearchSurface.ATTENTION.value,
+            "workspace_id": workspace_id,
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "title": mission.title,
+            "keywords": mission.keywords,
+            "geo": mission.geo_code.value,
+            "timeframe": mission.timeframe,
+            "requires_market_brief": False,
+            "emits_opportunity_index": False,
+            "note": (
+                "ATTENTION describes what is gaining attention. Its ranked topics are candidates "
+                "for investigation, not commercial verdicts, and it never returns an Opportunity "
+                "Index."
+            ),
+            "next_step": f"Call execute_mission_ingress(mission_id='{mission.shortcode}').",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def handle_confirm_market_brief(
+    workspace_id: str,
+    decision: str,
+    target_user: str,
+    problem: str,
+    geo: str,
+    timeframe: str,
+    hypothesis: str,
+    falsifiers: Optional[List[str]] = None,
+    confirmed_by: str = "",
+    title: Optional[str] = None,
+    keywords: Optional[List[str]] = None,
+    parent_attention_mission_id: Optional[str] = None,
+    parent_cluster_id: Optional[str] = None,
+    previous_mission_id: Optional[str] = None,
+    platforms: Optional[List[str]] = None,
+    agent: str = "claude",
+    session_id: Optional[str] = None,
+) -> str:
+    comp = get_components()
+    try:
+        mission, revision = await comp["create_market_revision_use_case"].execute(
+            workspace_id=UUID(workspace_id),
+            decision=decision,
+            target_user=target_user,
+            problem=problem,
+            geo=geo,
+            timeframe=timeframe,
+            hypothesis=hypothesis,
+            falsifiers=falsifiers or [],
+            confirmed_by=confirmed_by,
+            title=title,
+            keywords=keywords,
+            # None when the caller named no parent, which is not the same request as a lineage
+            # saying there is none: a revision of a mission that came from a handoff inherits
+            # that origin, and an empty lineage object would read as the caller clearing it.
+            lineage=(
+                MissionLineage(
+                    parent_attention_mission_id=(
+                        UUID(parent_attention_mission_id)
+                        if parent_attention_mission_id else None
+                    ),
+                    parent_cluster_id=UUID(parent_cluster_id) if parent_cluster_id else None,
+                )
+                if (parent_attention_mission_id or parent_cluster_id)
+                else None
+            ),
+            previous_mission_id=UUID(previous_mission_id) if previous_mission_id else None,
+            agent=agent,
+            session_id=session_id,
+            platforms=[resolve_platform(p) for p in platforms] if platforms else None,
+        )
+    except IncompleteMarketBriefError as exc:
+        return json.dumps(
+            {
+                "status": "BLOCKED",
+                "surface": ResearchSurface.MARKET.value,
+                "missing_fields": exc.missing_fields,
+                "error": str(exc),
+                "note": (
+                    "Nothing was written. Collect the missing fields with the requester, show "
+                    "them the complete draft, and call this tool again once they confirm it."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except ValueError:
+        return _invalid_timeframe(timeframe)
+    except IgnisDomainException as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2)
+
+    return json.dumps(
+        {
+            "status": "CONFIRMED",
+            "surface": ResearchSurface.MARKET.value,
+            "workspace_id": workspace_id,
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "brief_revision_id": str(revision.brief_revision_id),
+            "revision_number": revision.revision_number,
+            "confirmed_by": revision.confirmed_by,
+            "confirmed_at": revision.confirmed_at.isoformat(),
+            "falsifiers": list(revision.falsifiers),
+            # Read back off the stored mission, not echoed from the request: what the next
+            # Agent host will find in the database is the only lineage worth reporting.
+            "lineage": MissionLineage.of_mission(mission).to_payload(),
+            "note": (
+                "This revision is immutable. Changing any required field creates a new revision "
+                "and a new Market mission rather than rewriting this one, and the new mission "
+                "records this one in revises_mission_id. Attention lineage is context; it is "
+                "not counted as support for this hypothesis."
+            ),
+            "next_step": f"Call execute_mission_ingress(mission_id='{mission.shortcode}').",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 # --- Handlers for Research Missions ---
 
 async def handle_create_research_mission(
@@ -915,13 +1380,190 @@ async def handle_create_research_mission(
     )
 
 
+async def _mission_writer_conflict(comp: Dict[str, Any], mission: Any, detail: str) -> str:
+    """The one refusal a second writer gets, naming the run it is waiting for.
+
+    The active run is read back rather than guessed at, because "someone else is writing" is
+    not actionable on its own: the run id and the time it took the mission are what let an
+    operator tell an active run from one that died holding the slot.
+    """
+    claim = None
+    store = comp.get("workspace_store")
+    if store is not None:
+        claim = await store.get_mission_writer_claim(mission.id)
+    return json.dumps(
+        {
+            "status": "CONFLICT",
+            "operation": "execute_mission_ingress",
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+            "active_run_id": str(claim.run_id) if claim else None,
+            "active_since": claim.claimed_at.isoformat()
+            if claim and hasattr(claim.claimed_at, "isoformat")
+            else None,
+            "error": detail,
+            "note": (
+                "No probe ran and nothing was written, so the active run keeps its evidence "
+                "and its journal. Wait for it to finish and read the result, or -- only if "
+                "that run is known to have died -- recover the mission with "
+                "release_mission_writer(mission_id, run_id) using exactly the active_run_id "
+                "above. Other missions in this research are unaffected."
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+def _workspace_scope_blocked(mission: Any, detail: str) -> str:
+    """A mission whose research the database does not hold cannot be run anywhere.
+
+    Refused as a result rather than an exception for the same reason as the Brief gate: the
+    Agent needs to read which research is missing, not that the server raised. And refused
+    before anything runs -- evidence written under a workspace nothing can address again is
+    evidence lost in place.
+    """
+    return json.dumps(
+        {
+            "status": "BLOCKED",
+            "operation": "execute_mission_ingress",
+            "mission_id": str(mission.id),
+            "shortcode": mission.shortcode,
+            "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+            "error": detail,
+            "note": (
+                "No probe ran, no writer was claimed and no journal was written. Reopen or "
+                "confirm the research workspace this mission belongs to, then run it again."
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+async def handle_release_mission_writer(mission_id: str, run_id: str) -> str:
+    """Give a mission back after the run holding it died, by naming that exact run.
+
+    Both identifiers are required and both must match the claim on record. There is no expiry
+    and no force: a claim released without naming its holder is a claim taken from a run that
+    may still be writing, which is the failure the single writer slot exists to prevent. The
+    run id is the one the CONFLICT payload reported.
+    """
+    comp = get_components()
+    mission = await comp["repository"].get_mission(mission_id)
+    if not mission:
+        return json.dumps(
+            {"error": f"No research mission found with ID or shortcode: '{mission_id}'"},
+            ensure_ascii=False,
+        )
+
+    try:
+        requested_run = UUID(run_id)
+    except (TypeError, ValueError):
+        return json.dumps(
+            {
+                "status": "CONFLICT",
+                "operation": "release_mission_writer",
+                "mission_id": str(mission.id),
+                "error": (
+                    f"'{run_id}' is not a run identifier. Pass the active_run_id exactly as the "
+                    "conflict result reported it."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    store = comp["workspace_store"]
+    claim = await store.get_mission_writer_claim(mission.id)
+    payload: Dict[str, Any] = {
+        "operation": "release_mission_writer",
+        "mission_id": str(mission.id),
+        "shortcode": mission.shortcode,
+        "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+        "run_id": run_id,
+        "active_run_id": str(claim.run_id) if claim else None,
+    }
+
+    if claim is None:
+        payload["status"] = "NOT_FOUND"
+        payload["note"] = (
+            "This mission has no active writer, so there was nothing to release and nothing "
+            "was changed. It can be run again as it is."
+        )
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    if claim.run_id != requested_run:
+        payload["status"] = "CONFLICT"
+        payload["active_since"] = (
+            claim.claimed_at.isoformat()
+            if hasattr(claim.claimed_at, "isoformat") else str(claim.claimed_at)
+        )
+        payload["error"] = (
+            f"Mission {mission.id} is held by run {claim.run_id}, not by {requested_run}. "
+            "The claim was not released."
+        )
+        payload["note"] = (
+            "A claim is only ever released by naming the run that holds it. If that run is "
+            "known to have died, call this again with active_run_id."
+        )
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    await store.release_mission_writer(mission.id, requested_run)
+    remaining = await store.get_mission_writer_claim(mission.id)
+    if remaining is not None:
+        payload["status"] = "CONFLICT"
+        payload["active_run_id"] = str(remaining.run_id)
+        payload["error"] = (
+            f"Mission {mission.id} is still held by run {remaining.run_id} after the release. "
+            "Another run claimed it in the meantime."
+        )
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    payload["status"] = "RELEASED"
+    payload["active_run_id"] = None
+    payload["note"] = (
+        "The writer slot is free and the mission can be run again. Nothing else was touched: "
+        "the released run keeps whatever journal and evidence it had already written."
+    )
+    logger.warning(
+        "Released the writer claim of run %s on mission %s at an operator's request.",
+        requested_run,
+        mission.id,
+    )
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 async def handle_execute_mission_ingress(mission_id: str) -> str:
     comp = get_components()
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
         return json.dumps({"error": f"No research mission found with ID or shortcode: '{mission_id}'"}, ensure_ascii=False)
 
-    result = await comp["execute_mission_use_case"].execute(mission_id=mission.id)
+    try:
+        result = await comp["execute_mission_use_case"].execute(mission_id=mission.id)
+    except WorkspaceScopeMismatchError as exc:
+        # Raised before the writer claim and before any connector call, so there is nothing to
+        # undo -- only something to tell the Agent.
+        return _workspace_scope_blocked(mission, detail=str(exc))
+    except MissionWriterConflictError as exc:
+        # A refusal, not a breakage. The run that holds the mission is still writing, and
+        # raising past the tool boundary would reach the Agent as a transport error -- which
+        # reads as "the server fell over" rather than "wait for the run that is already going".
+        return await _mission_writer_conflict(comp, mission, detail=str(exc))
+    except IncompleteMarketBriefError as exc:
+        # The use case has already set the mission BLOCKED and refused before any connector was
+        # called. Re-raising past the tool boundary would have surfaced as a transport error,
+        # which tells the Agent that something broke rather than that the requester still owes
+        # the Brief.
+        return _market_brief_blocked(
+            mission,
+            operation="execute_mission_ingress",
+            missing_fields=exc.missing_fields,
+            detail=str(exc),
+        )
+
     result["shortcode"] = mission.shortcode
     result["display_label"] = f"[{mission.shortcode}] {mission.title}" 
     return json.dumps(result, ensure_ascii=False, indent=2)
@@ -933,6 +1575,12 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
         return json.dumps({"error": f"No research mission found with ID or shortcode: '{mission_id}'"}, ensure_ascii=False)
+
+    brief, refusal = await _refuse_unauthorized_market(
+        comp, mission, operation="get_mission_analysis"
+    )
+    if refusal:
+        return refusal
 
     analysis = await comp["get_mission_analysis_use_case"].execute(
         mission_id=mission.id, 
@@ -955,6 +1603,8 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         scorecard=scorecard,
         auth_status=auth_status,
         connector_health=connector_health,
+        market_brief=brief,
+        attention_context_signals=await _attention_context_signals(comp, mission),
     )
 
     analysis["quality_scorecard"] = {
@@ -968,21 +1618,13 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         "flaws": scorecard.flaws_detected,
     }
     analysis["maturity_stage"] = report.maturity_stage.value
+    analysis.update(_surface_payload(report, mission))
     analysis["market_opportunities"] = [
-        {
-            "topic": opp.topic,
-            "type": opp.opportunity_type,
-            "demand_score": opp.search_interest_score,
-            "supply_score": opp.content_supply_score,
-            "opportunity_index": opp.opportunity_index,
-            "recommendation": opp.strategic_recommendation,
-            "supporting_signals": opp.supporting_signals[:2],
-        }
-        for opp in report.market_opportunities
+        _serialize_opportunity(opp, include_supporting=2) for opp in report.market_opportunities
     ]
     analysis["channel_summaries"] = _serialize_channel_summaries(report.channel_summaries)
     analysis["strategic_insights"] = _serialize_insights(report.strategic_insights)
-    analysis["actionable_takeaways"] = report.actionable_takeaways
+    analysis["actionable_takeaways"] = _serialize_insights(report.actionable_takeaways)
     analysis["native_artifact_guideline"] = "Render these strategic insights directly as a visual, high-contrast Claude Native Artifact in the chat window. Only export a local HTML file when the user explicitly requests it."
 
     return json.dumps(analysis, ensure_ascii=False, indent=2)
@@ -1024,6 +1666,15 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         return json.dumps({"error": f"Mission with ID/shortcode '{mission_id}' not found."}, ensure_ascii=False)
     m_id = mission.id
 
+    brief, refusal = await _refuse_unauthorized_market(
+        comp, mission, operation="generate_mission_artifact"
+    )
+    if refusal:
+        # Returned before the builder runs and before anything reaches disk: an exported dossier
+        # is the copy that outlives the chat, so an unauthorized one is the worst place for a
+        # Market conclusion to end up.
+        return refusal
+
     signals = await comp["repository"].get_mission_signals(m_id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
     tf_days = timeframe_to_days(mission.timeframe)
@@ -1038,6 +1689,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         scorecard=scorecard,
         auth_status=auth_status,
         connector_health=connector_health,
+        market_brief=brief,
     )
     
     platform_breakdown = {}
@@ -1107,7 +1759,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
             ],
             "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
             "strategic_insights": _serialize_insights(report.strategic_insights)[:3],
-            "actionable_takeaways": report.actionable_takeaways[:3],
+            "actionable_takeaways": _serialize_insights(report.actionable_takeaways[:3]),
             "instructions_for_user": f"Interactive HTML dossier ({len(signals)} signals) exported successfully. Open file://{abs_path} directly in your browser.",
         },
         ensure_ascii=False,
@@ -1414,6 +2066,31 @@ async def discover_market_opportunities(mission_id: str) -> str:
     return await handle_discover_market_opportunities(mission_id)
 
 
+@mcp.tool(name="propose_research_workspace", description="Propose where a new research would live: `<host-workspace>/.ignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.")
+async def propose_research_workspace(host_workspace: str, research_name: str, slug: Optional[str] = None) -> str:
+    return await handle_propose_research_workspace(host_workspace, research_name, slug)
+
+
+@mcp.tool(name="confirm_research_workspace", description="Create, reuse or adopt the proposed research workspace after the requester confirms it. Reuses an existing matching manifest without rewriting it; adopting a non-empty folder without a manifest needs adopt=true and never deletes or overwrites unrelated files.")
+async def confirm_research_workspace(proposed_path: str, confirmation: bool = False, adopt: bool = False, research_name: Optional[str] = None) -> str:
+    return await handle_confirm_research_workspace(proposed_path, confirmation, adopt, research_name)
+
+
+@mcp.tool(name="list_research_workspaces", description="List the research workspaces held in the configured shared Ignis database, so a research can be reopened from any supported Agent host independently of the chat that created it.")
+async def list_research_workspaces(limit: int = 20) -> str:
+    return await handle_list_research_workspaces(limit)
+
+
+@mcp.tool(name="create_attention_mission", description="Start an ATTENTION mission inside a confirmed research workspace: exploratory discovery of what is gaining attention. Needs no hypothesis and no Market Brief, and never returns an Opportunity Index.")
+async def create_attention_mission(workspace_id: str, title: str, geo: str = "VN", timeframe: str = "7d", seed: Optional[str] = None, keywords: Optional[list[str]] = None, platforms: Optional[list[str]] = None, agent: str = "claude", session_id: Optional[str] = None) -> str:
+    return await handle_create_attention_mission(workspace_id, title, geo, timeframe, seed, keywords, platforms, agent, session_id)
+
+
+@mcp.tool(name="confirm_market_brief", description="Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, one question at a time, show the draft for editing, and call this only with the complete confirmed payload -- drafts and abandoned Q&A are never sent or stored. Requires decision, target_user, problem, geo, timeframe, hypothesis and at least one falsifier. Pass parent_attention_mission_id (and optionally parent_cluster_id) to record the Attention result the question came from, or previous_mission_id to revise a confirmed Brief -- a revision opens a new immutable revision and a new mission instead of editing the earlier one.")
+async def confirm_market_brief(workspace_id: str, decision: str, target_user: str, problem: str, geo: str, timeframe: str, hypothesis: str, falsifiers: Optional[list[str]] = None, confirmed_by: str = "", title: Optional[str] = None, keywords: Optional[list[str]] = None, parent_attention_mission_id: Optional[str] = None, parent_cluster_id: Optional[str] = None, previous_mission_id: Optional[str] = None, platforms: Optional[list[str]] = None, agent: str = "claude", session_id: Optional[str] = None) -> str:
+    return await handle_confirm_market_brief(workspace_id, decision, target_user, problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, title, keywords, parent_attention_mission_id, parent_cluster_id, previous_mission_id, platforms, agent, session_id)
+
+
 @mcp.tool(name="create_research_mission", description="Create a targeted cross-platform trend research mission with specified keywords, platforms, geo, and timeframe.")
 async def create_research_mission(
     topic: str,
@@ -1428,6 +2105,11 @@ async def create_research_mission(
 @mcp.tool(name="execute_mission_ingress", description="Trigger deep multi-platform data collection and clustering for a research mission (idempotent replace mode).")
 async def execute_mission_ingress(mission_id: str) -> str:
     return await handle_execute_mission_ingress(mission_id)
+
+
+@mcp.tool(name="release_mission_writer", description="Recover a mission whose run died while holding its single writer slot. Pass the mission and exactly the active_run_id that the CONFLICT result reported: the claim is released only when both match, a wrong run_id refuses and changes nothing, and there is no expiry and no force release -- a claim taken from a run that is still writing is the failure the slot exists to prevent. Use it only when that run is known to have died; otherwise wait for it to finish.")
+async def release_mission_writer(mission_id: str, run_id: str) -> str:
+    return await handle_release_mission_writer(mission_id, run_id)
 
 
 @mcp.tool(name="get_mission_analysis", description="Retrieve full strategic analysis payload (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) for in-chat Native Artifact rendering.")

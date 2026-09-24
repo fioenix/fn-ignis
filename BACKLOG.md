@@ -1,16 +1,16 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> - **Cập nhật lần cuối:** 21/09/2026
+> - **Cập nhật lần cuối:** 22/09/2026
 > - **Phiên bản:** `v0.4.1`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
->   + FastMCP Server (39 Handlers & Tools)
+>   + FastMCP Server (45 Handlers & Tools)
 > - **Trạng thái:** Bản live hiện hành `v0.4.1` đã tag và publish.
 >   Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`; đừng tin dòng này — nó
 >   là tài liệu, còn
 >   tag với release nằm trên Git và GitHub. Cutover T020 trên corpus PostgreSQL hiện hữu đã chạy
 >   xong 20/09/2026: verifier trả `VERIFIED`, runtime mới đã khởi động, ingress theo lịch đã mở lại.
-> - **Trạng thái Tests:** 1.032 passed, 4 skipped trên CI tại `fd1577e` (SQLite + Timescale dùng
->   một lần) | Ruff clean
+> - **Trạng thái Tests:** Latest dual-surface verification: 923 unit passed, 148 SQLite integration
+>   passed, and 302 PostgreSQL integration passed with 2 intentional SQLite skips | Ruff clean
 
 ---
 
@@ -142,10 +142,43 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   sanitize không chứa DSN, Supabase, token, API key hay password. Lượt này đóng khoảng trống mà
   `claude mcp list` và JSON-RPC trực tiếp không chứng minh được: model trong client thật đã gọi
   tool Ignis và đọc kết quả.
-- [ ] **P95 benchmark và ngưỡng coverage 85% là khoảng trống đã đo, không chặn beta.** SC-001 chưa
-  có benchmark tái lập được nào trên 10.000 dòng cho `get_top_clusters` P95 < 50 ms. SC-004 đặt mục
-  tiêu 85% nhưng CI đo 75% và không bật `--cov-fail-under`. Cả hai đã ghi rõ là mục tiêu chưa đạt
-  (T021, T022), không phải điều kiện phát hành bản beta. Không được mô tả hai mục này như đã đạt.
+- [x] **Benchmark P95 và ngưỡng coverage 85% đều đã đóng.**
+  Ngày 22/09/2026, SC-001 đã đạt: hai mươi lần chạy `scripts/t021_read_path_benchmark.py` trên
+  10.000 observation, mười lần mỗi backend, không lần nào trượt. SQLite cho P95 từ 23,662 đến
+  29,496 ms; PostgreSQL từ 8,320 đến 26,980 ms, đều dưới ngưỡng 50 ms. Hợp đồng benchmark giữ
+  nguyên, không nới một tham số nào. Hai thay đổi đưa tới kết quả đó: index `sql/019` cho thứ tự
+  latest-per-source, và cả hai reader xếp hạng cluster từ aggregate rồi chỉ đọc payload của những
+  cluster mà `limit` giữ lại. Chạy lại số đo bằng
+  `.venv/bin/python scripts/t021_read_path_benchmark.py --backend sqlite --enforce`.
+  Từ 22/09/2026, SC-001 có gate CI riêng. `.github/workflows/performance.yml` chạy lại chính
+  benchmark đó với `--enforce` trên cả hai backend, kích hoạt khi push vào `main`, `release/*`,
+  `hotfix/*`, theo lịch hằng tuần và khi dispatch tay. Workflow cố ý không gắn vào `pull_request`:
+  benchmark seed 10.000 observation mỗi backend, bắt mọi PR trả chi phí đó chỉ để chặn một
+  regression vốn chỉ gây hậu quả khi đã lên nhánh được bảo vệ. Hợp đồng benchmark không đổi một
+  tham số nào; 19 contract trong `tests/unit/test_t024_performance_workflow.py` từ chối workflow
+  nào bỏ `--enforce`, nuốt exit code, hoặc đi tới PostgreSQL bằng đường nào khác ngoài
+  `IGNIS_TEST_POSTGRES_DSN`. Còn một giới hạn chưa đóng: repo publish được tên job ổn định, nhưng
+  đặt job đó thành required status trên `main` là thao tác trong GitHub settings và chưa ai đọc
+  lại cấu hình để xác nhận. Chừng nào chưa xác nhận được, workflow chỉ báo cáo chứ không chặn
+  merge.
+  Ngày 22/09/2026, SC-004 đã đạt 89,09%. Trước đó phạm vi chưa từng được viết ra, nên các con số
+  cũ trả lời một câu hỏi khác với câu hỏi mà tiêu chí đặt ra: 73% rồi 75% đều là coverage toàn
+  package, không giới hạn theo phạm vi nào và không chặn build. Phạm vi giờ nằm ở
+  `.coveragerc.sc004`, mỗi mục ứng với một tên trong SC-004: Repository
+  (`infrastructure/persistence/*`), Registry (`connectors/registry.py`), RSS Plugin
+  (`connectors/google_trends/*`), YouTube Plugin (`connectors/youtube/*`). Phần còn lại của
+  `src/ignis` nằm ngoài tiêu chí nên vắng mặt trong scope, chứ không phải bị loại trừ khỏi scope:
+  không có omit, không có `exclude_lines`, không có `# pragma: no cover` nào bên trong. Đo trên
+  `pytest tests/` với container `timescale/timescaledb-ha:pg16` dùng một lần, chỉ tới được qua
+  `IGNIS_TEST_POSTGRES_DSN`: 2.364 statement, 258 statement chưa được phủ; coverage toàn package
+  là 80%. Mức tăng đến từ test hành vi qua giao diện công khai chứ không phải test chạy cho đủ
+  dòng: trước đây toàn bộ nhánh `search_signals` của hai plugin chưa có test nào, phần audit log
+  và platform credentials cũng chưa được kiểm trên cả hai backend. CI giờ chặn thật:
+  `coverage report --rcfile=.coveragerc.sc004` chạy sau suite và thoát mã 2 khi dưới ngưỡng. Đã
+  kiểm hai chiều: cổng thật thoát 0 ở 89,09%, cùng dữ liệu đó với ngưỡng 99 thì thoát 2. Không có
+  `IGNIS_TEST_POSTGRES_DSN` thì test của adapter PostgreSQL bị skip, scope đo còn 76,31% và cổng
+  fail; điều đó đúng và có nghĩa là cổng này cần service database mà CI vốn đã có. Workflow
+  performance của SC-001 giữ nguyên.
 
 
 - [x] **Đã xong (14/09/2026): hai client local chạy Ignis cùng lúc được.** Startup của MCP server
@@ -247,23 +280,13 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   concurrent writer có thể đua. Đã thay: `sources` mang `UNIQUE (platform, external_id)` trên cả
   hai backend, và writer dùng **một câu** upsert `ON CONFLICT` chứ không còn `SELECT`-rồi-`INSERT`.
   Bảng legacy giữ nguyên trạng thái cũ vì nó đã thành read-only.
-- [ ] **Threads và Reels còn khoảng trống alias — mở, chốt 13/09/2026.** "Một object, một
-  identity dù đến bằng route nào" đã đóng cho TikTok và Google: hashtag hội tụ dù metadata ghi
-  `#aothun` còn URL ghi `/tag/aothun`, keyword hội tụ dù explore URL percent-encode nó. Hai
-  platform kia thì chưa, và cố ý chưa. Graph API trả primary key dạng số, permalink mang
-  shortcode, và build hiện tại không có đường tra từ giá trị này sang giá trị kia:
-
-  ```
-  threads  post:123456789  ≠  post_shortcode:123456789
-  reels    reel:17912      ≠  reel_shortcode:17912
-  ```
-
-  Để chung một namespace `post:` thì một shortcode toàn chữ số sẽ **va vào primary key của bài
-  khác** — base64 có chứa chữ số — và merge sai thì im lặng, vĩnh viễn. Split thì đo được và sửa
-  được bằng alias sau. **Giới hạn thật, ghi đúng như nó là:** corpus hiện tại có **0** cặp như
-  vậy, nhưng ingress tương lai vẫn có thể tạo hai dòng cho cùng một bài, vào đúng lúc một bài
-  được thấy bằng cả hai route. Đóng nó cần một trong hai: connector ghi cả hai giá trị vào
-  metadata, hoặc một bảng alias giữa hai namespace cộng một lượt reconcile corpus.
+- [x] **Threads và Reels đã đóng khoảng trống alias (23/09/2026).** Bốn đường phát signal đều
+  mang primary key và permalink shortcode trên cùng record, nên `resolve_identity_alias` chỉ ghi
+  quan hệ khi chính record đó làm chứng. Migration `sql/018_source_identity_aliases.sql` giữ ledger
+  alias theo platform; permalink-only sighting về sau tra ledger để hội tụ về primary key. Claim
+  xung đột không bị merge đoán: writer giữ hai source đo được và ghi log. Contract
+  `tests/integration/test_source_identity_alias_ledger.py` chạy trên cả SQLite và PostgreSQL trong
+  full parity suite; không còn case PostgreSQL nào bị skip trong bằng chứng tích hợp gần nhất.
 - [x] **Migration `sql/008_deduplicate_signal_metrics.sql` không thực hiện điều header tuyên bố.**
   File ghi "Deduplicate trend_signals", "keeps earliest row as canonical" và tự gọi mình là
   "Migration 004", nhưng chỉ tạo `signal_metrics` rồi copy metric; không delete duplicate, không
@@ -755,7 +778,8 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Đo trên 15.771 tiêu đề thật: substring loại 47, biên từ loại 46. Bỏ được `olive oil review`
   và `livestream review`; sinh thêm `Studio 2.0 is live.` vì substring cần `"live "` có dấu cách
   nên bỏ lỡ `live.`
-- [ ] **NHƯNG: từ vựng của guard này đang gây hại hơn là bảo vệ.** Đo cùng lúc, qua chính plugin:
+- [x] **Đã xong (24/09/2026): bỏ `live`, `thông báo`, `tin nhắn` khỏi guard UI của TikTok (T016).** Đo cùng
+  lúc, qua chính plugin:
   trong 46 tiêu đề bị loại, **gần như toàn bộ là post công khai thật**, không phải thông báo:
   - `The new Gmail app icon is live on Google Play`
   - `KHÁT VỌNG VINH QUANG | Tùng Dương - Live at ASEAN Huyndai Cup 2026`
@@ -773,9 +797,45 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   đó — nó cào explore và search grid. Lời hứa về quyền riêng tư được bảo đảm bằng **cấu trúc**
   (không bao giờ vào surface đó), còn bộ lọc text này là lớp phụ và đang đắt.
 
-  **Đề nghị:** bỏ ba term `live`, `thông báo`, `tin nhắn` khỏi domain `tiktok_ui_noise`, giữ
-  `đang phát trực tiếp` cho badge live tiếng Việt. Chưa tự thay vì đây là từ vựng của một
-  privacy guard, và guard đang fail-closed — bỏ term là quyết định của người vận hành.
+  **Quyết định ngày 24/09/2026:** bỏ ba term `live`, `thông báo`, `tin nhắn` khỏi domain
+  `tiktok_ui_noise`, giữ `đang phát trực tiếp` cho badge live tiếng Việt và giữ các cụm UI còn
+  lại. T016 thực hiện bằng migration dữ liệu để database đã tồn tại cũng nhận thay đổi; không chỉ
+  sửa seed cho cài đặt mới.
+
+  **Kết quả T016:** `sql/020_retire_ambiguous_tiktok_ui_noise.sql` xoá ba dòng `system` đó, so
+  khớp theo `trim(term)` vì `live ` được seed kèm dấu cách. `013` giữ nguyên. SQLite chạy 020 ngay
+  sau bước replay 013 trong `_ensure_schema`, nên khởi động lại không đưa ba dòng trở lại. Kiểm
+  trên cả SQLite và PostgreSQL thật (`tests/integration/test_tiktok_ui_noise_retirement.py`, 5 ca
+  mỗi backend, 0 skip): SQLite bootstrap mới và PostgreSQL contract database áp dụng toàn bộ
+  migration tương thích với PostgreSQL thuần đều chỉ còn 10 term; database cũ mất đúng ba dòng;
+  chạy lại 020, chạy lại 013 rồi 020, hay khởi động lại đều không đổi gì. Qua loader và
+  `TikTokPlugin` thật, post công khai có ba từ này được giữ, còn `đang phát trực tiếp` và các cụm
+  thông báo/hộp thư còn lại vẫn bị loại; domain rỗng vẫn fail closed. Negative control: bỏ
+  `tin nhắn` khỏi 020 làm 6 ca fail trên hai backend; cho SQLite chạy 020 trước bước replay làm
+  4 ca fail.
+
+- [x] **Docker Compose khởi tạo PostgreSQL mới qua toàn bộ chuỗi SQL — T017, ngày 24/09/2026.**
+  `sql/006_supabase_security_hardening.sql` chỉ nêu tên role `anon`, `authenticated` khi role đó đã
+  tồn tại; migration không tự tạo role. Hai lần khởi tạo mới bằng
+  `timescale/timescaledb-ha:pg16` và đúng mount `./sql:/docker-entrypoint-initdb.d` đều chuyển sang
+  healthy sau khi chạy đủ 20 file theo thứ tự tên, không có dòng `ERROR:`. Readback xác nhận đủ
+  đối tượng của 016-019, còn 10 term `tiktok_ui_noise`, không còn ba term T016 đã bỏ, RLS bật trên
+  các bảng do `006` quản lý và không có policy hay role Supabase trên PostgreSQL thuần. Contract
+  PostgreSQL riêng có 8 ca pass: chạy lại `006` và toàn bộ chuỗi không đổi trạng thái, runtime owner
+  vẫn đọc/ghi được; khi hai role Supabase tồn tại thì chỉ có hai policy vocabulary chỉ đọc và cả
+  hai role đều mất quyền EXECUTE trên function RPC mẫu. Mỗi lượt kiểm tra kết thúc với 0 container,
+  0 volume, 0 network và không còn file credential tạm.
+
+- [ ] **Bật RLS cho mọi bảng trong schema `public` — T018, chặn release.** `006` chỉ có thể bật RLS
+  trên những bảng đã tồn tại khi nó chạy. Mười bảng được migration sau đó tạo ra vẫn không có RLS;
+  trong môi trường mô phỏng default privileges của Supabase, `anon` đọc được `sources` và có quyền
+  INSERT vào `observations`. Cần migration mới bật RLS cho toàn bộ bảng hiện tại, khai báo policy
+  theo từng loại dữ liệu và kiểm chứng quyền của cả `anon`, `authenticated` mà không chặn runtime
+  owner.
+
+- [ ] **Đưa phép thử Compose init vào CI — T019.** `test_compose_init.py` hiện là gate chủ động,
+  chỉ chạy khi có `IGNIS_TEST_COMPOSE_INIT=1`. Thêm job Docker riêng và đặt status ổn định thành
+  required trên protected branches; không thay bằng gate do operator nhớ chạy trước release.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)
@@ -826,7 +886,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 - [x] **Deterministic Artifact Builder:** Single-file HTML Report (Tailwind CSS) trực quan hóa Scorecard, Ma trận Cung-Cầu và Bằng chứng đa kênh.
 
 ### D. Tối Ưu Hóa Giao Tiếp & FastMCP Catalog
-- [x] **Danh mục 39 FastMCP Tools:** Hoàn thiện và đồng bộ đối xứng giữa `server.py`, `openclaw.json`, `hermes_manifest.json`, `.hermes/tools.json` và `setup_bundle.py`.
+- [x] **Danh mục 45 FastMCP Tools:** Hoàn thiện và đồng bộ đối xứng giữa `server.py`, `openclaw.json`, `hermes_manifest.json`, `.hermes/tools.json` và `setup_bundle.py`.
 - [x] **Cross-Agent Session Tracing:** Lưu trữ trường `agent` và `session_id`. Tool `get_current_session_mission` tự động khôi phục ngữ cảnh làm việc mà không cần nhập lại ID.
 - [x] **Tài liệu Tích hợp Meta Dedicated:** [docs/META_INTEGRATION_GUIDE.md](docs/META_INTEGRATION_GUIDE.md) định nghĩa toàn diện mô hình Dual-UX và kịch bản tự động hóa cho AI Agent.
 
@@ -844,28 +904,15 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 - [x] **Insights TTL Caching (2 giờ):** Caching in-memory cho post metrics của Threads/Reels để giải quyết triệt để bài toán N+1 request và bảo vệ hạn mức 200 reqs/user/hour của Meta Graph API.
 - [x] **Registry Multi-Plugin Coexistence (Tech Debt):** Đảm bảo `TikTokPlugin` (Search Video Grid & Comments) và `TikTokCreativeCenterPlugin` (Macro Trends Radar) cùng tồn tại song song trong `ConnectorPluginRegistry` mà không bị ghi đè.
 
-### 🎯 Epic 2: Data Provenance, Ingress Health Audit & Citation Attribution Engine (Partial)
+### 🎯 Epic 2: Data Provenance, Ingress Health Audit & Citation Attribution Engine
 *Mục tiêu: Xóa bỏ nhận định mơ hồ và ảo giác; minh bạch hóa nguồn gốc dữ liệu (Data Provenance) và phát hiện kênh ingress bị rỗng/lỗi.*
-- [ ] **Channel health còn thiếu surface-level identity:** `ChannelDataSummary` đã có đủ năm status
-  và báo năm platform mà mission nhắm tới, kèm count và top citation. Nó chưa tách TikTok Video Grid
-  khỏi TikTok Comments; cả hai đang cùng là `PlatformType.TIKTOK`, nên một surface khỏe có thể che
-  surface kia hỏng. Quyết trước xem health contract là platform hay connector surface rồi mới đổi
-  schema/payload.
-- [ ] **Citation Attribution còn thiếu hai consumer:** `StrategicInsight` và top citation của
-  channel đã dùng `CitationEvidence`; `get_mission_analysis` serialize được chúng. Nhưng
-  `MarketOpportunity.supporting_signals` và `actionable_takeaways` vẫn là `List[str]`, nên chưa có
-  typed citation gắn trực tiếp vào cơ hội và hành động như spec hứa. Quan trọng hơn,
-  `CitationEvidence` chưa mang `observation_id`, còn `_citation_key()` tự định danh bằng
-  `platform | source_url-or-title` thay vì dùng observation/source identity đã được repository
-  giải quyết. Đây là bản source identity thứ hai: URL variant có thể tách một source thành hai
-  citation, còn URL dùng chung hoặc title trùng có thể gộp sai. Contract cần trỏ citation tới đúng
-  observation trong `mission_evidence`; display URL/title chỉ là payload.
-  - **HTML consequence:** dashboard đã render Data Ingress audit và citation pills dưới strategic
-    insights; opportunity và actionable chưa thể có pill cho tới khi model mang typed citation.
-  - **FastMCP consequence:** payload đã có `channel_summaries` và citations cho
-    `strategic_insights`; phần còn lại là serialize đúng typed citation mới, không phải một backlog
-    item độc lập. Xem
-    [docs/DATA_PROVENANCE_AND_CITATION_SPEC.md](docs/DATA_PROVENANCE_AND_CITATION_SPEC.md).
+- [x] **Channel health theo connector surface:** `ChannelDataSummary` phân biệt các surface dưới
+  cùng một platform, gồm TikTok Video Grid và TikTok Comments, với status và count riêng; contract
+  này đã được kiểm bằng serializer MCP và integration journey.
+- [x] **Citation Attribution theo observation:** opportunity và actionable takeaway dùng typed
+  citation gắn với canonical `observation_id` và `evidence_role`; Attention context được tách
+  khỏi Market evidence. Serializer MCP và provenance tests giữ contract này, còn URL/title chỉ là
+  dữ liệu hiển thị.
 
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 

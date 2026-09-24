@@ -16,7 +16,8 @@ Tài liệu này cung cấp hướng dẫn đầy đủ, chi tiết từng bư�
 5. [Sử dụng Thủ công qua Python Scripting](#5-sử-dụng-thủ-công-qua-python-scripting)
 6. [Quản lý Báo cáo & Nginx Report Portal](#6-quản-lý-báo-cáo--nginx-report-portal)
 7. [Xử lý Sự cố Thường gặp (Troubleshooting)](#7-xử-lý-sự-cố-thường-gặp-troubleshooting)
-8. [Danh mục 39 FastMCP Tools & Khả năng Nghiên cứu Toàn diện](#8-danh-mục-39-fastmcp-tools--khả-năng-nghiên-cứu-toàn-diện)
+8. [Research Workspace & Hai bề mặt Nghiên cứu](#8-research-workspace--hai-bề-mặt-nghiên-cứu)
+9. [Danh mục 45 FastMCP Tools & Khả năng Nghiên cứu Toàn diện](#9-danh-mục-45-fastmcp-tools--khả-năng-nghiên-cứu-toàn-diện)
 
 ---
 
@@ -36,6 +37,11 @@ Hai backend cùng dùng ba entity persistence:
 - `observations`: một collection event bất biến, giữ payload quan sát, cluster membership,
   identity-resolution route và clock provenance.
 - `mission_evidence`: đúng observation mà một mission đã dùng.
+
+Research workspace thêm một lớp phạm vi quanh ba entity đó chứ không mở thêm kho lưu trữ riêng.
+Identity của workspace, các Market Brief revision, writer claim và run journal đều là dòng dữ liệu
+trong cùng database đã cấu hình; `.ignis/research/<slug>/` giữ manifest, các run journal và artifact
+đã xuất, không giữ database nào. Mục 8 mô tả ranh giới này.
 
 Poll lặp tạo observation mới, không tạo source mới. Một source có thể phục vụ nhiều mission và nằm
 trong nhiều cluster qua các observation khác nhau. Runtime không bao giờ ghi vào hai bảng legacy
@@ -136,8 +142,12 @@ docker compose -f docker-compose.prod.yml ps
 
 Sau khi khởi chạy, bạn có thể mở trình duyệt truy cập `http://localhost:53080/` để xem danh sách các báo cáo HTML đã xuất bản.
 
-Với database mới, stack dùng schema hiện tại ngay. Với PostgreSQL đã có corpus legacy, không khởi
-động worker mới ngay sau khi đưa artifact lên. Chạy đúng
+Với database mới, container `db` chạy mọi file trong `sql/` theo thứ tự tên file ở lần khởi động
+đầu tiên rồi mới chuyển sang healthy; điều này đã được kiểm chứng tới `020` trên
+`timescale/timescaledb-ha:pg16`. `006` bật row-level security trên những bảng mà nó quản lý trực
+tiếp, chỉ thêm policy chỉ đọc cho Supabase khi server có hai role `anon` và `authenticated`, đồng
+thời không tự tạo role nào. Các script init chỉ chạy khi volume dữ liệu còn trống. Với PostgreSQL
+đã có corpus legacy, không khởi động worker mới ngay sau khi đưa artifact lên. Chạy đúng
 [production cutover source/observation](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
 quiesce runtime cũ, snapshot, sinh baseline từ chính snapshot đó, apply `sql/016`, backfill, bắt
 buộc verifier trả `VERIFIED`, rồi mới khởi động runtime mới và mở lại ingress.
@@ -392,19 +402,152 @@ uv run pytest
 
 ---
 
-## 8. Danh mục 39 FastMCP Tools & Khả năng Nghiên cứu Toàn diện
+## 8. Research Workspace & Hai bề mặt Nghiên cứu
 
-Khi FastMCP Server khởi chạy (`ignis-mcp`), 39 tools, 2 prompts và 2 resources sau đây luôn sẵn sàng cho AI Agents hoặc MCP clients:
+### 8.1 Nghiên cứu nằm ở đâu
+
+Một nghiên cứu được đề xuất tại `<host-workspace>/.ignis/research/<research-slug>/`:
+
+```text
+<host-workspace>/
+└── .ignis/
+    └── research/
+        └── ai-customer-service/
+            ├── workspace.json        # manifest: identity nghiên cứu và format version
+            └── journals/             # một bản ghi độc quyền cho mỗi lần chạy
+                └── run-20260921-103000-001.json
+```
+
+Bước đề xuất chỉ đọc. `propose_research_workspace(host_workspace, research_name)` báo đường dẫn sẽ
+dùng, thư mục đã tồn tại chưa, đã có manifest chưa và có cần bước nhận thư mục hay không; nó không
+tạo thư mục, manifest, bản ghi database hay journal nào. Chỉ
+`confirm_research_workspace(proposed_path, confirmation=true)` mới tạo ra thứ gì đó.
+
+Tình trạng sẵn có của thư mục quyết định kết quả:
+
+| Tình trạng thư mục | Kết quả |
+|---|---|
+| Chưa có hoặc rỗng | Tạo mới kèm manifest mới |
+| Đã có manifest khớp | Tái sử dụng nguyên trạng, không ghi đè manifest |
+| Có nội dung, chưa có manifest | Từ chối cho tới khi truyền `adopt=true`; bước nhận giữ nguyên mọi file không liên quan |
+| Manifest thuộc format mới hơn | Báo `INCOMPATIBLE` thay vì đọc một nửa |
+
+**Thư mục nghiên cứu không chứa database.** Mọi research workspace dùng chung một database Ignis
+đã cấu hình qua `DATABASE_URL`: mặc định là SQLite cục bộ, PostgreSQL là backend tương đương tuỳ
+chọn. Đó là điều kiện để mở lại một nghiên cứu: `list_research_workspaces()` trả về các nghiên cứu
+nằm trong database đó, nên một Agent host thứ hai trên cùng database tìm ra nghiên cứu mà không cần
+phiên chat đã tạo ra nó.
+
+### 8.2 `ATTENTION` và `MARKET`
+
+Mỗi mission trả lời một trong hai câu hỏi và giữ nguyên bề mặt đó suốt vòng đời.
+
+| | `ATTENTION` | `MARKET` |
+|---|---|---|
+| Câu hỏi | Cái gì đang được chú ý? | Đây có phải cơ hội thị trường không? |
+| Điểm vào | `create_attention_mission` | `confirm_market_brief` |
+| Bắt buộc có giả thuyết | Không | Có |
+| Opportunity Index | Không bao giờ phát ra | Có phát ra |
+| Vai trò bằng chứng khi phân tích | `ATTENTION_CONTEXT` | `MARKET_EVIDENCE` |
+
+`ATTENTION` dành cho người yêu cầu chưa biết chủ đề nào đáng điều tra. Nó trả về chủ đề đã xếp
+hạng kèm momentum, độ tươi dữ liệu, độ phủ nguồn và citation tra được tới từng observation, và nó
+không đưa ra khẳng định thương mại nào.
+
+`MARKET` đòi một Brief đã được người yêu cầu xác nhận. Cả bảy trường đều bắt buộc:
+
+| Trường | Ý nghĩa |
+|---|---|
+| `decision` | Quyết định mà nghiên cứu này phải phục vụ |
+| `target_user` | Nhóm người dùng hoặc khách hàng đang được điều tra |
+| `problem` | Nỗi đau hoặc công việc cần tìm hiểu |
+| `geo` | Phạm vi địa lý |
+| `timeframe` | Cửa sổ thời gian của bằng chứng |
+| `hypothesis` | Mệnh đề có thể bị bác bỏ |
+| `falsifiers` | Ít nhất một điều kiện đủ sức bác bỏ giả thuyết |
+
+Brief thiếu trường sẽ bị từ chối trước khi có probe nào chạy, và câu từ chối nêu đúng các trường
+còn thiếu. Mission `MARKET` không đọc được Brief thì bị chặn chứ không chạy: thực thi, phân tích và
+xuất artifact đều trả về cùng một kết quả `BLOCKED`, vì một Opportunity Index rút ra từ bằng chứng
+không ai đặt câu hỏi cho nó là kiểu hỏng âm thầm hơn hẳn việc từ chối probe.
+
+Phần hỏi đáp dựng Brief thuộc về host Agent: hỏi tối đa bảy câu, mỗi lần một câu, bỏ qua trường đã
+có câu trả lời, đưa bản nháp cho người yêu cầu sửa rồi xin xác nhận rõ ràng. **fn-ignis không nhận
+transcript và không có thao tác lưu bản nháp.** Người yêu cầu bỏ dở giữa chừng thì không để lại gì,
+bởi chưa có gì được gửi đi.
+
+### 8.3 Handoff và revision
+
+Chọn một chủ đề Attention để điều tra thương mại sẽ tạo mission mới, không phải dán nhãn lại mission cũ:
+
+```text
+confirm_market_brief(
+    workspace_id=...,
+    parent_attention_mission_id=<mission Attention>,   # lineage, tuỳ chọn
+    parent_cluster_id=<cluster đã chọn>,               # tuỳ chọn, phải là cluster mission đó từng thấy
+    decision=..., target_user=..., problem=...,
+    geo=..., timeframe=..., hypothesis=..., falsifiers=[...],
+    confirmed_by=...,
+)
+```
+
+Lineage là ngữ cảnh. Những observation Attention mà nó trỏ tới nằm trong khối `attention_context`
+với vai trò `ATTENTION_CONTEXT`, và chúng không thoả mãn được một cơ hội Market hay một citation
+chống lưng cho kết luận; mission mới tự thu thập `MARKET_EVIDENCE` của nó.
+
+Sửa một Brief đã xác nhận sẽ tạo revision mới thay vì sửa bản cũ. Truyền `previous_mission_id` để
+mở một mission Market mới gắn với một `MarketBriefRevision` bất biến, đánh số revision kế tiếp
+trong nhánh nghiên cứu đó, kèm `revises_mission_id` trỏ ngược về mission mà nó sửa. Mission cũ,
+Brief và evidence của nó giữ nguyên; revision kế thừa đúng nguồn gốc Attention của mission mà nó
+sửa, còn payload khai một nguồn khác sẽ bị từ chối chứ không bị lặng lẽ bỏ qua.
+
+### 8.4 Chạy song song, journal và khôi phục
+
+Hai mission của cùng một nghiên cứu chạy cùng lúc; writer claim tính theo từng mission và không bao
+giờ xếp hàng cả một nghiên cứu.
+
+- **Mỗi mission một writer đang hoạt động.** Lần chạy thứ hai trên cùng mission nhận kết quả
+  `CONFLICT` nêu run nào đang giữ slot và giữ từ lúc nào. Nó không chạm tới connector nào và không
+  ghi gì.
+- **Mỗi lần chạy một journal độc quyền.** Mỗi run lấy file riêng dưới `journals/`, tạo theo cơ chế
+  độc quyền, nên hai run khởi động trong cùng một giây vẫn nhận tên khác nhau. Run đã kết thúc báo
+  `COMPLETED` hoặc `FAILED` kèm thời điểm kết thúc; run không bao giờ báo về giữ nguyên `STARTED`
+  và không có thời điểm kết thúc, vì "run này đã kết thúc" và "không ai nghe tin gì từ nó nữa" là
+  hai dữ kiện khác nhau.
+- **Khôi phục phải nói rõ.** Chỉ chính run đang giữ claim mới nhả được claim đó. Ở đây không có cơ
+  chế hết hạn và không có force release: trao slot cho writer thứ hai theo đồng hồ trong khi writer
+  thứ nhất có thể vẫn đang chạy chính là sự cố mà slot này sinh ra để chặn. Khi một run chắc chắn
+  đã chết, `release_mission_writer(mission_id, run_id)` khôi phục mission và đòi đúng `run_id` mà
+  kết quả CONFLICT đã báo. Sai `run_id` thì lệnh từ chối và không thay đổi gì.
+
+Mission tạo bên ngoài research workspace, tức mọi mission có trước tính năng này, không lấy writer
+claim và không ghi journal; chúng chạy y như trước.
+
+---
+
+## 9. Danh mục 45 FastMCP Tools & Khả năng Nghiên cứu Toàn diện
+
+Khi FastMCP Server khởi chạy (`ignis-mcp`), 45 tools, 2 prompts và 2 resources sau đây luôn sẵn sàng cho AI Agents hoặc MCP clients:
+
+### 0. Nhóm Research Workspace & Hai bề mặt Nghiên cứu
+| Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
+|---|---|---|
+| `propose_research_workspace` | `host_workspace, research_name, slug` | Báo nghiên cứu sẽ nằm ở đâu. Chỉ đọc, không tạo thư mục, manifest, bản ghi database hay journal. |
+| `confirm_research_workspace` | `proposed_path, confirmation, adopt, research_name` | Tạo, tái sử dụng hoặc nhận workspace đã đề xuất sau khi người yêu cầu đồng ý. |
+| `list_research_workspaces` | `limit` | Liệt kê các research workspace trong database đã cấu hình để mở lại từ bất kỳ Agent host nào. |
+| `create_attention_mission` | `workspace_id, title, geo, timeframe, seed, keywords, platforms` | Mở mission `ATTENTION`: không cần giả thuyết, không phát ra Opportunity Index. |
+| `confirm_market_brief` | `workspace_id`, bảy trường Brief, `parent_attention_mission_id`, `parent_cluster_id`, `previous_mission_id` | Lưu Brief đã xác nhận và mở mission `MARKET` tương ứng; cũng là điểm vào của handoff từ Attention và của revision. |
+| `release_mission_writer` | `mission_id, run_id` | Khôi phục mission có run đã chết trong lúc giữ writer slot, bằng cách nêu đúng run đó. |
 
 ### 1. Nhóm Chiến dịch & Nghiên cứu Chiến lược (Research & White Space)
 | Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
 |---|---|---|
 | `run_autonomous_research_mission` | `topic, keywords, geo, timeframe, min_signals` | Tạo mission, chạy ingress đa nền tảng, tính Opportunity Index và xuất dashboard trong 1 bước. |
-| `create_research_mission` | `title, keywords, geo, timeframe, hypothesis` | Khởi tạo chiến dịch nghiên cứu mới với giả thuyết kiểm chứng. |
+| `create_research_mission` | `topic, keywords, platforms, geo, timeframe` | Khởi tạo chiến dịch nghiên cứu nhắm đích bên ngoài research workspace; mission không khai báo bề mặt nên không bị chặn bởi Brief. |
 | `execute_mission_ingress` | `mission_id` | Thực thi cào dữ liệu đa nguồn và đánh giá Quality Scorecard (Confidence $\ge 70\%$). |
 | `evaluate_mission_quality` | `mission_id` | Đánh giá lại 4 chiều chất lượng dữ liệu (Coverage, Language, Freshness, Diversity). |
 | `discover_market_opportunities` | `mission_id` | Khám phá các khoảng trống thị trường (Unserved White Spaces) và xếp hạng tiềm năng. |
-| `get_mission_analysis` | `mission_id` | Trích xuất phân tích chiến lược tổng hợp (cung/cầu, Opportunity Index, rào cản gia nhập, kế hoạch MVP). |
+| `get_mission_analysis` | `mission_id, limit, platform` | Trích xuất phân tích tổng hợp theo bề mặt của mission: bằng chứng xếp hạng, scorecard chất lượng, lineage, và riêng `MARKET` mới có Opportunity Index cùng white space. |
 | `generate_mission_artifact` | `mission_id` | Xuất bản file HTML Dashboard Infographic tương tác trực quan vào thư mục `reports/`. |
 | `list_research_missions` | `limit` | Liệt kê lịch sử các chiến dịch nghiên cứu đã thực hiện. |
 | `get_current_session_mission` | `session_id` | Khôi phục ngữ cảnh chiến dịch gắn với phiên chat của agent. |

@@ -27,7 +27,7 @@
   },
   "protocols": {
     "sop": "6_step_market_research",
-    "tools_count": 39,
+    "tools_count": 45,
     "prompts": [
       "market_research_pipeline",
       "voice_of_customer_audit"

@@ -127,7 +127,8 @@ async def test_sqlite_platform_credentials(sqlite_repo):
     cred = await sqlite_repo.get_platform_credentials("tiktok")
     assert cred is not None
     assert cred["platform"] == "tiktok"
-    assert cred["credentials"]["sessionid"] == "mock_cookie_123"
+    assert cred["credentials_data"]["sessionid"] == "mock_cookie_123"
+    assert "credentials" not in cred, "the SQLite-only alias is not part of the public record"
 
     # List
     creds_list = await sqlite_repo.list_platform_credentials()

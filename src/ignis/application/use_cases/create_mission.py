@@ -9,7 +9,14 @@ logger = logging.getLogger(__name__)
 
 
 class CreateMissionUseCase:
-    """Use Case for creating a new targeted Research Mission with Agent and Session mapping."""
+    """Use Case for creating a new targeted Research Mission with Agent and Session mapping.
+
+    This is the unscoped path: the mission it creates belongs to no research workspace and
+    declares no surface, so it is never gated on a Market Brief. A `MARKET` mission cannot be
+    opened here at all -- the only door to one is `ConfirmMarketBriefUseCase`, which will not
+    open it without the seven requester-confirmed Brief fields. Keeping the two apart is what
+    stops a caller from reaching a Market mission without passing the gate.
+    """
 
     def __init__(self, repository: ITrendRepository):
         self._repo = repository

@@ -72,3 +72,21 @@ def cross_platform_score(
         ),
         1,
     )
+
+
+def cluster_rank_key(score: float, source_count: int, cluster_id: str) -> tuple:
+    """How two clusters are ordered against each other, highest first under `reverse=True`.
+
+    Score decides, then the number of sources behind it: between two topics scoring the same, the
+    one observed across more sources is the better answer. Both readers sort by this, and the
+    clusterer's own ordering has to agree with it, so it lives beside the score rather than being
+    written out twice.
+
+    The cluster id is the last term and exists only to make the order total. Before it, two
+    clusters tied on both real keys came back in whatever order the database produced -- which
+    could differ between the two backends, between two runs on one backend, and between a reader
+    that ranks every cluster and one that ranks them to pick a top N. That is not a property
+    anything should depend on, but leaving it undefined means `limit` could silently return a
+    different set each time it lands on such a tie.
+    """
+    return (score, source_count, cluster_id)

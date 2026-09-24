@@ -25,6 +25,7 @@
   giả source diversity; một source có thể tham gia nhiều mission và cluster mà không bị copy.
 - **🗣️ Lắng nghe Khách hàng Thực tế (Voice of Customer)**: Cào và tổng hợp các rào cản mua hàng, thắc mắc về giá và nhu cầu chưa được đáp ứng trực tiếp từ phần bình luận video công khai.
 - **🧠 Cơ chế Từ điển Động Tự trị (Dynamic Lexicon)**: Bảng từ vựng lưu trữ bền vững trên SQLite/PostgreSQL cho phép agent đăng ký tiếng lóng ngành, tên thương hiệu mới ngay trong quá trình chạy mà không cần sửa code.
+- **🗂️ Research Workspace hai bề mặt**: Một nghiên cứu sống lâu hơn phiên chat đã mở nó. Nghiên cứu nằm trong thư mục đã được xác nhận ở `.ignis/research/<slug>/`, tra cứu được từ bất kỳ Agent host nào qua một database chung, và trả lời một trong hai câu hỏi: `ATTENTION` (cái gì đang được chú ý) hoặc `MARKET` (thứ này có đáng làm không). Hai bề mặt không dùng chung một kết luận.
 - **🤖 Tương thích Toàn diện Hệ sinh thái Agent**: Hỗ trợ sẵn sàng out-of-the-box cho Claude (Desktop & Code), Antigravity, Codex, OpenClaw, Hermes và Pi Agent.
 
 ---
@@ -85,13 +86,50 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 
 ---
 
+## 🗂️ Research Workspace: hai bề mặt Attention và Market
+
+Phiên chat thuộc về Agent host đã mở nó. Một nghiên cứu thì phải sống lâu hơn thế, nên nó mang identity riêng.
+
+### Nghiên cứu nằm ở đâu
+
+Nghiên cứu được đề xuất tại `<host-workspace>/.ignis/research/<research-slug>/`, và không có gì được tạo ra trước khi người yêu cầu đồng ý. `propose_research_workspace` chỉ đọc: nó báo đường dẫn sẽ dùng cùng tình trạng hiện tại của thư mục đó, không tạo thư mục, manifest, bản ghi database hay journal nào. `confirm_research_workspace` là lệnh duy nhất tạo ra thứ gì đó. Mở lại một nghiên cứu có manifest khớp thì tái sử dụng chứ không ghi đè lên manifest cũ; nhận một thư mục đã có nội dung nhưng chưa có manifest cần `adopt=true` riêng và giữ nguyên mọi file không liên quan.
+
+Thư mục này chứa manifest để một Agent host khác tìm ra nghiên cứu, kèm một journal cho mỗi lần chạy và các artifact đã xuất. **Nó không chứa database.** Mọi research workspace dùng chung một database Ignis đã cấu hình: mặc định là SQLite cục bộ, hoặc PostgreSQL khi `DATABASE_URL` trỏ tới PostgreSQL. Nhờ vậy `list_research_workspaces` tìm ra nghiên cứu từ bất kỳ host nào trên cùng database, độc lập với phiên chat đã tạo ra nó.
+
+### Hai bề mặt, hai loại khẳng định khác nhau
+
+| | `ATTENTION` | `MARKET` |
+|---|---|---|
+| Câu hỏi | Cái gì đang được chú ý? | Đây có phải cơ hội thị trường không? |
+| Cần giả thuyết | Không | Có, kèm Brief đã xác nhận |
+| Trả về | Chủ đề xếp hạng, momentum, độ tươi, độ phủ nguồn, citation | Những thứ đó, cộng Opportunity Index và ma trận white space |
+| Opportunity Index | Không bao giờ | Chỉ ở đây |
+
+`create_attention_mission` mở một đợt khảo sát cho người yêu cầu chưa biết chủ đề nào đáng điều tra. Nó không đòi giả thuyết và không bao giờ phát ra Opportunity Index: attention là thứ người ta đang nhìn, còn đặt một phán quyết thương mại cạnh đó là khẳng định mà bằng chứng chưa đỡ nổi.
+
+`MARKET` chỉ chạy sau khi người yêu cầu xác nhận Brief đủ bảy trường: `decision`, `target_user`, `problem`, `geo`, `timeframe`, `hypothesis` và ít nhất một falsifier. Brief thiếu bất kỳ trường nào sẽ bị từ chối trước khi có probe nào chạy, và câu từ chối nêu đúng những trường còn thiếu. Phần hỏi đáp dựng Brief thuộc về host Agent: nó hỏi từng câu một rồi đưa bản nháp cho người yêu cầu sửa. **fn-ignis không nhận transcript và không có thao tác nào để lưu bản nháp**, nên người yêu cầu bỏ dở giữa chừng thì không để lại gì.
+
+### Chuyển một chủ đề Attention sang Market, rồi đổi ý sau đó
+
+Chọn một chủ đề Attention để điều tra sẽ tạo ra một mission Market *mới* qua `confirm_market_brief`, mang theo `parent_attention_mission_id` và tuỳ chọn `parent_cluster_id` làm lineage. Lineage là ngữ cảnh: nó ghi lại câu hỏi đến từ đâu. Những observation Attention mà nó trỏ tới mang vai trò `ATTENTION_CONTEXT`, không bao giờ được tính thành `MARKET_EVIDENCE` cho giả thuyết mới; mission mới phải tự thu thập bằng chứng của nó.
+
+Sửa một Brief đã xác nhận thì không phải sửa tại chỗ. Truyền `previous_mission_id` sẽ tạo một Brief revision bất biến mới dưới một mission Market mới, mang số revision kế tiếp trong nhánh nghiên cứu đó, kèm `revises_mission_id` trỏ ngược lại. Mission cũ, Brief và evidence của nó giữ nguyên; revision kế thừa đúng nguồn gốc Attention của mission mà nó sửa chứ không nhận một nguồn khác.
+
+### Mỗi mission một writer, mỗi lần chạy một journal
+
+Hai mission của cùng một nghiên cứu chạy song song, không chờ nhau. Mỗi mission chỉ có tối đa một writer đang hoạt động: lần chạy thứ hai trên cùng mission nhận kết quả `CONFLICT` nêu rõ run nào đang giữ và giữ từ lúc nào, nó không chạm tới connector nào và không ghi đè thứ gì. Mỗi lần chạy lấy journal riêng dưới `.ignis/research/<slug>/journals/`, tạo theo cơ chế độc quyền, nên hai lần chạy khởi động trong cùng một giây vẫn nhận tên khác nhau.
+
+Chỉ chính run đã lấy claim mới nhả được claim đó. Ở đây cố ý **không có cơ chế hết hạn và không có force release**: trao slot cho writer thứ hai theo đồng hồ trong khi writer thứ nhất có thể vẫn đang chạy chính là sự cố mà slot này sinh ra để chặn. Khi một run chắc chắn đã chết lúc đang giữ mission, `release_mission_writer(mission_id, run_id)` khôi phục mission đó, và lệnh này đòi đúng `run_id` mà kết quả CONFLICT đã báo.
+
+---
+
 ## 🤖 Tương thích Đa Nền tảng AI Agent
 
 `fn-ignis` được thiết kế để tích hợp liền mạch với mọi nền tảng AI agent hiện đại:
 
 | AI Agent / IDE | Cấu hình & Tiêu chuẩn | Khả năng Hỗ trợ |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 39 FastMCP Tools, Prompts, Resources, tự động nạp 6 bước SOP |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 45 FastMCP Tools, Prompts, Resources, tự động nạp 6 bước SOP |
 | **Claude Code** | [`CLAUDE.md`](CLAUDE.md), [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Chuẩn Agent Skills, xuất Artifact HTML trực quan |
 | **Antigravity / Gemini Code** | [`AGENTS.md`](AGENTS.md) + Agent Skills | Radar liên tục Dual-Track & nạp từ điển động |
 | **OpenAI Codex** | [`.codex/instructions.md`](.codex/instructions.md), [`.codexrules`](.codexrules) | Duy trì ngữ cảnh phiên chat (`codex://threads/...`), Structured Tools |
@@ -113,11 +151,19 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 
 ---
 
-## 🛠️ Danh mục 39 FastMCP Tools, Prompts & Resources
+## 🛠️ Danh mục 45 FastMCP Tools, Prompts & Resources
 
-### 1. Nghiên cứu Thị trường & Tổng hợp Chiến lược
+### 1. Research Workspace & Hai bề mặt Nghiên cứu
+- **`propose_research_workspace(host_workspace, research_name, slug?)`**: Báo nghiên cứu sẽ nằm ở đâu. Chỉ đọc, không tạo thư mục, manifest, bản ghi database hay journal.
+- **`confirm_research_workspace(proposed_path, confirmation?, adopt?, research_name?)`**: Tạo, tái sử dụng hoặc nhận workspace đã đề xuất sau khi người yêu cầu đồng ý. Nhận một thư mục đã có nội dung nhưng chưa có manifest cần `adopt=true` và giữ nguyên các file không liên quan.
+- **`list_research_workspaces(limit?)`**: Liệt kê các research workspace trong database đã cấu hình, để mở lại một nghiên cứu từ bất kỳ Agent host nào.
+- **`create_attention_mission(workspace_id, title, geo?, timeframe?, seed?, keywords?, platforms?, agent?, session_id?)`**: Mở mission `ATTENTION`. Không cần giả thuyết, không cần Brief, không phát ra Opportunity Index.
+- **`confirm_market_brief(workspace_id, decision, target_user, problem, geo, timeframe, hypothesis, falsifiers?, confirmed_by?, title?, keywords?, parent_attention_mission_id?, parent_cluster_id?, previous_mission_id?, platforms?, agent?, session_id?)`**: Lưu Brief đã được người yêu cầu xác nhận và mở mission `MARKET` tương ứng. Truyền `parent_attention_mission_id` cho một handoff từ Attention, hoặc `previous_mission_id` để mở revision mới của một Brief đã xác nhận.
+- **`release_mission_writer(mission_id, run_id)`**: Khôi phục mission có run đã chết trong lúc giữ writer slot. Lệnh đòi đúng `run_id` mà kết quả CONFLICT đã báo; không có cơ chế hết hạn và không có force release.
+
+### 2. Nghiên cứu Thị trường & Tổng hợp Chiến lược
 - **`run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)`**: Khởi tạo chiến dịch, thu thập dữ liệu đa nguồn, tính toán Opportunity Index và xuất báo cáo trong 1 bước.
-- **`create_research_mission(title, keywords, geo, timeframe, hypothesis)`**: Tạo chiến dịch nghiên cứu mới kèm giả thuyết cần kiểm chứng.
+- **`create_research_mission(topic, keywords, platforms?, geo?, timeframe?)`**: Tạo chiến dịch nghiên cứu nhắm đích bên ngoài research workspace. Mission này không khai báo bề mặt nào nên không bị chặn bởi Brief.
 - **`execute_mission_ingress(mission_id)`**: Thực thi cào dữ liệu chuyên sâu và chấm điểm Quality Scorecard.
 - **`evaluate_mission_quality(mission_id)`**: Đánh giá lại chất lượng dữ liệu (Coverage, Precision, Freshness, Diversity).
 - **`discover_market_opportunities(mission_id)`**: Phát hiện các khoảng trống thị trường tiềm năng cao.
@@ -128,7 +174,7 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 - **`trigger_autonomous_discovery(geo)`**: Kích hoạt chu kỳ tự động quét xu hướng toàn quốc.
 - **`get_latest_daily_discovery(geo)`**: Lấy bản tin tổng hợp cơ hội thị trường hàng ngày mới nhất.
 
-### 2. Lắng nghe Xã hội, Threads & Tiếng nói Khách hàng (Voice of Customer)
+### 3. Lắng nghe Xã hội, Threads & Tiếng nói Khách hàng (Voice of Customer)
 - **`get_threads_trending_topics(geo, limit)`**: Lấy danh sách các chủ đề thịnh hành thời gian thực từ trang tìm kiếm Threads (`threads.net/search`).
 - **`get_threads_search_suggestions(keyword, geo, limit)`**: Lấy từ khóa gợi ý tìm kiếm (autocomplete) và các truy vấn phát sinh từ Threads.
 - **`get_tiktok_creative_center_trends(geo, period, limit, industry)`**: Lấy xếp hạng xu hướng chính thức từ TikTok Creative Center có lọc theo ngành hàng.
@@ -136,7 +182,7 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 - **`get_tiktok_video_comments(video_url, limit)`**: Cào bình luận công khai từ một video TikTok cụ thể.
 - **`extract_customer_pain_points(keywords, geo, max_videos, inquiry_patterns)`**: Bóc tách phản đối mua hàng, câu hỏi về giá và nhu cầu chưa được đáp ứng từ bình luận.
 
-### 3. Từ điển Động, Cấu hình Runtime & Chẩn đoán Hạ tầng
+### 4. Từ điển Động, Cấu hình Runtime & Chẩn đoán Hạ tầng
 - **`get_runtime_config(key, category)`**: Tra cứu tham số cấu hình động (`threads_web_client_id`, `threads_graphql_endpoint`, `doc_id`) từ DB và RAM cache.
 - **`update_runtime_config(key, value, category, description)`**: Cho phép AI Agent tự động cập nhật tham số giao thức khi client thay đổi build version.
 - **`refresh_runtime_config_cache()`**: Xóa và nạp lại toàn bộ cấu hình động từ database vào in-memory cache siêu tốc (~0.01ms).
@@ -155,7 +201,7 @@ Bước 6: Kết luận Chiến lược, Rào cản Gia nhập & Kế hoạch Ki
 - **`clear_instagram_auth()`**: Xóa credentials OAuth và phiên trình duyệt của Instagram khỏi bộ lưu trữ cục bộ. Không thu hồi token ở phía Meta; thao tác đó phải làm riêng trong phần bảo mật tài khoản Meta.
 - **`get_trending_topics(geo, timeframe, limit)`**, **`get_topic_detail(topic_id)`**, **`generate_trend_artifact(topic_id, geo, format)`**, **`trigger_ingress_refresh(geo, scope)`**: Khám phá xu hướng thời gian thực.
 
-### 4. FastMCP Native Resources & Prompts
+### 5. FastMCP Native Resources & Prompts
 - **Resources**: `fn-ignis://sop/market-research`, `fn-ignis://methodology/opportunity-index`
 - **Prompts**: `market_research_pipeline`, `voice_of_customer_audit`
 
@@ -206,6 +252,13 @@ Triển khai toàn bộ cụm doanh nghiệp (TimescaleDB + Worker Daemon Chạy
 # Khởi chạy full stack
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+Khi volume dữ liệu còn trống, container `db` chạy mọi file trong `sql/` theo thứ tự tên file rồi
+mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `020` trên
+`timescale/timescaledb-ha:pg16`. Migration `006` bật row-level security trên những bảng mà nó quản
+lý trực tiếp và chỉ thêm policy chỉ đọc khi hai role Supabase là `anon` và `authenticated` đã tồn
+tại; migration này không tự tạo role. PostgreSQL không chạy lại các script init với volume đã có
+dữ liệu.
 
 > Installation PostgreSQL đã có corpus legacy trong `trend_signals` phải chạy
 > [production cutover source/observation](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
