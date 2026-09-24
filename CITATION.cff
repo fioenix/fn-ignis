@@ -5,7 +5,7 @@ authors:
     given-names: "Fioenix"
     alias: "fioenix"
 title: "fn-ignis: Unified Autonomous Trend Intelligence & Market Opportunity Platform"
-version: 0.4.1
-date-released: 2026-09-21
+version: 0.5.0
+date-released: 2026-09-25
 url: "https://github.com/fioenix/fn-ignis"
 license: MIT

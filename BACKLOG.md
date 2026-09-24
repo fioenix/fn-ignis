@@ -1,16 +1,17 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> - **Cập nhật lần cuối:** 22/09/2026
-> - **Phiên bản:** `v0.4.1`
+> - **Cập nhật lần cuối:** 25/09/2026
+> - **Phiên bản:** `v0.5.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (45 Handlers & Tools)
-> - **Trạng thái:** Bản live hiện hành `v0.4.1` đã tag và publish.
+> - **Trạng thái:** Bản live gần nhất `v0.4.1` đã tag và publish; `v0.5.0` đang được chuẩn bị.
 >   Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`; đừng tin dòng này — nó
 >   là tài liệu, còn
 >   tag với release nằm trên Git và GitHub. Cutover T020 trên corpus PostgreSQL hiện hữu đã chạy
 >   xong 20/09/2026: verifier trả `VERIFIED`, runtime mới đã khởi động, ingress theo lịch đã mở lại.
-> - **Trạng thái Tests:** Latest dual-surface verification: 923 unit passed, 148 SQLite integration
->   passed, and 302 PostgreSQL integration passed with 2 intentional SQLite skips | Ruff clean
+> - **Trạng thái Tests:** Release verification: 1.058 unit test passed, 2 skipped khi không có DSN;
+>   487 integration test passed, 3 skipped với PostgreSQL dùng một lần; Fresh Compose được chạy
+>   riêng và đã qua; Ruff clean
 
 ---
 
