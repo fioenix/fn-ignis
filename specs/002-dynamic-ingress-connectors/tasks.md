@@ -101,3 +101,26 @@
   own install, contract and skip-check commands. Branch protection is not part of this commit:
   the check becomes required only once Codex applies the GitHub setting after the first remote
   run and reads it back.
+
+## Phase 9: Convergence (2026-09-24)
+
+- [ ] T020 [RELEASE BLOCKER] Remove Ignis' runtime dependency on EXECUTE for
+  `public.uuid_generate_v4()` without weakening the function posture established by `006`. First
+  add a PostgreSQL RED contract proving that a non-superuser, non-`BYPASSRLS` runtime role which
+  owns the Ignis tables cannot insert a row whose id is omitted after the current full migration
+  chain unless the test grants function execution out of band. Then add an idempotent versioned
+  migration that changes every Ignis UUID primary-key default still using `uuid_generate_v4()` to
+  PostgreSQL's built-in `gen_random_uuid()`; do not grant EXECUTE on all functions, move or drop
+  `uuid-ossp`, create roles, or alter SQLite behavior. Prove both a fresh `001`-through-newest
+  install and an upgrade from `021`: all affected defaults are canonical, re-application is a
+  no-op, the real repository can write every affected table class as that runtime owner with no
+  fixture-only function grant, and `PUBLIC`, `anon`, and `authenticated` still cannot execute the
+  protected public RPC probe or mutate owner-only tables. Extend the Compose/init and package
+  contracts so the new migration cannot be skipped, but do not apply it to a dev or production
+  database in this task. Record the measured RED/GREEN evidence and close the matching backlog
+  item only after PostgreSQL and fresh-Compose gates pass (touches: `sql/`,
+  `tests/integration/test_postgres_migration_contract.py`,
+  `tests/integration/test_postgres_rls_coverage.py`, `tests/integration/test_compose_init.py`,
+  migration packaging/convention tests, `BACKLOG.md`; depends-on: T018, T019; source:
+  Constitution VI, the T018 runtime-owner fixture, and the open pre-release hardening item in
+  `BACKLOG.md`).
