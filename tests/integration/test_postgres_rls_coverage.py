@@ -24,14 +24,14 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 from psycopg import errors, sql
-from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from conftest import (
     REPO_SQL,
+    RUNTIME_ROLE,
     SUPABASE_ROLES,
-    RedactedDsn,
     all_postgres_migrations,
     existing_supabase_roles,
+    runtime_owner,
 )
 from ignis.application.ports.research_workspace_port import RunJournal
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
@@ -109,8 +109,8 @@ OWNER_ROWS = (
     "INSERT INTO signal_metrics (signal_id) VALUES (1)",
 )
 # A valid row a client could write to each table, so an INSERT that is allowed actually lands.
-# Ids are supplied rather than defaulted: the defaults call uuid_generate_v4(), whose EXECUTE 006
-# revoked from client roles, and a client that wants to write simply sends its own id.
+# Ids are supplied rather than defaulted, so the outcome turns only on the table privilege and RLS
+# under test; a client that wants to write can always send its own id.
 CLIENT_ROWS = {
     "industry_taxonomies": "(industry_code, industry_name) VALUES ('t018-client', 'client')",
     "market_brief_revisions": "(id, workspace_id, mission_id, revision_number, decision,"
@@ -423,61 +423,19 @@ def test_the_check_reports_a_client_grant_on_a_post_006_table(supabase_like_dsn)
 
 # --- E. the runtime owner, as a role that is neither superuser nor BYPASSRLS -------------------
 
-RUNTIME_ROLE = "ignis_t018_runtime"
-
-
 @pytest.fixture
 def runtime_owner_dsn(supabase_like_dsn):
     """The full chain, then every public table handed to a plain role the runtime connects as.
 
-    The contract server's login is a superuser, and a superuser bypasses RLS whatever the tables
-    say, so a repository connected as it would prove nothing. On Supabase the runtime's `postgres`
-    is not a superuser; it owns the tables, which is what exempts it from RLS without a policy.
-    This role stands for it. It is granted EXECUTE on the public functions because the column
-    defaults call uuid-ossp there, and 006 revoked EXECUTE from PUBLIC -- on Supabase those
-    functions live in the `extensions` schema instead.
+    The role gets ownership and schema USAGE only. Until 022 it also needed EXECUTE on the public
+    functions, because the id defaults called uuid-ossp's uuid_generate_v4() there and 006 had
+    revoked EXECUTE from PUBLIC; that grant is gone, so this contract now fails if any default or
+    repository path still depends on a function the posture withholds.
     """
     dsn = supabase_like_dsn
     _apply(dsn, *all_postgres_migrations())
-    admin_dsn = make_conninfo(**{**conninfo_to_dict(dsn), "dbname": "postgres"})
-    with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        if not conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (RUNTIME_ROLE,)).fetchone():
-            conn.execute(
-                sql.SQL("CREATE ROLE {} NOLOGIN NOSUPERUSER NOBYPASSRLS").format(
-                    sql.Identifier(RUNTIME_ROLE)
-                )
-            )
-    try:
-        with psycopg.connect(dsn) as conn:
-            tables = conn.execute(
-                "SELECT relname FROM pg_class"
-                " WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p')"
-            ).fetchall()
-            for (table,) in tables:
-                conn.execute(
-                    sql.SQL("ALTER TABLE public.{} OWNER TO {}").format(
-                        sql.Identifier(table), sql.Identifier(RUNTIME_ROLE)
-                    )
-                )
-            conn.execute(
-                sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(RUNTIME_ROLE))
-            )
-            conn.execute(
-                sql.SQL("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO {}").format(
-                    sql.Identifier(RUNTIME_ROLE)
-                )
-            )
-        yield RedactedDsn(make_conninfo(dsn, options=f"-c role={RUNTIME_ROLE}"))
-    finally:
-        # The database fixture drops the database afterwards; the role's grants go with it, but
-        # the role is cluster-wide, so it is removed here once it owns nothing in this database.
-        with psycopg.connect(dsn) as conn:
-            conn.execute(
-                sql.SQL("REASSIGN OWNED BY {} TO CURRENT_USER").format(sql.Identifier(RUNTIME_ROLE))
-            )
-            conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(RUNTIME_ROLE)))
-        with psycopg.connect(admin_dsn, autocommit=True) as conn:
-            conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(RUNTIME_ROLE)))
+    with runtime_owner(dsn) as owner_dsn:
+        yield owner_dsn
 
 
 @pytest.mark.asyncio

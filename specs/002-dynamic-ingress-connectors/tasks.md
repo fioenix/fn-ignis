@@ -101,3 +101,44 @@
   own install, contract and skip-check commands. Branch protection is not part of this commit:
   the check becomes required only once Codex applies the GitHub setting after the first remote
   run and reads it back.
+
+## Phase 9: Convergence (2026-09-24)
+
+- [x] T020 [RELEASE BLOCKER] Remove Ignis' runtime dependency on EXECUTE for
+  `public.uuid_generate_v4()` without weakening the function posture established by `006`. First
+  add a PostgreSQL RED contract proving that a non-superuser, non-`BYPASSRLS` runtime role which
+  owns the Ignis tables cannot insert a row whose id is omitted after the current full migration
+  chain unless the test grants function execution out of band. Then add an idempotent versioned
+  migration that changes every Ignis UUID primary-key default still using `uuid_generate_v4()` to
+  PostgreSQL's built-in `gen_random_uuid()`; do not grant EXECUTE on all functions, move or drop
+  `uuid-ossp`, create roles, or alter SQLite behavior. Prove both a fresh `001`-through-newest
+  install and an upgrade from `021`: all affected defaults are canonical, re-application is a
+  no-op, the real repository can write every affected table class as that runtime owner with no
+  fixture-only function grant, and `PUBLIC`, `anon`, and `authenticated` still cannot execute the
+  protected public RPC probe or mutate owner-only tables. Extend the Compose/init and package
+  contracts so the new migration cannot be skipped, but do not apply it to a dev or production
+  database in this task. Record the measured RED/GREEN evidence and close the matching backlog
+  item only after PostgreSQL and fresh-Compose gates pass (touches: `sql/`,
+  `tests/integration/test_postgres_migration_contract.py`,
+  `tests/integration/test_postgres_rls_coverage.py`, `tests/integration/test_compose_init.py`,
+  migration packaging/convention tests, `BACKLOG.md`; depends-on: T018, T019; source:
+  Constitution VI, the T018 runtime-owner fixture, and the open pre-release hardening item in
+  `BACKLOG.md`). `sql/022_builtin_uuid_defaults.sql` sets the id default of the nine tables a `021`
+  catalog shows calling `uuid_generate_v4()` -- `research_missions`, `topic_clusters`, `sources`,
+  `observations`, `mission_evidence`, `research_workspaces`, `market_brief_revisions`,
+  `mission_run_journals`, `source_identity_aliases` -- to `gen_random_uuid()` through explicit
+  `ALTER TABLE` statements; it grants nothing and leaves `uuid-ossp` installed in `public`. The
+  runtime-owner fixture no longer grants EXECUTE on public functions. RED, before `022`: as a
+  non-superuser, non-`BYPASSRLS` owner, all nine defaulted inserts failed with `permission denied
+  for function uuid_generate_v4`, and the real repository failed recording observations for the
+  same reason. GREEN on PostgreSQL 16.14 (`timescale/timescaledb-ha:pg16`, TimescaleDB 2.29.2):
+  a fresh `001`-`022` install defaults all 11 UUID keys to `gen_random_uuid()` with no default
+  depending on `uuid-ossp`; a `021` install denies all nine inserts until `022` is applied as the
+  table owner, then accepts them while the owner still cannot execute `uuid_generate_v4()`;
+  re-applying `022` and the whole chain leaves defaults, `uuid-ossp` ACLs and the `006` state
+  unchanged; `PUBLIC`, `anon` and `authenticated` still cannot execute the RPC probe or write
+  owner-only tables. Omitting the `mission_run_journals` statement fails the catalog, fresh-insert
+  and upgrade contracts. Full integration suite with PostgreSQL: 487 passed, 3 skipped (the Compose
+  opt-in and two SQLite legs of Postgres-only tests); fresh Compose init ran all 22 files. Not
+  applied to any dev or production database; an installation initialised before `022` applies it
+  once as the table owner.

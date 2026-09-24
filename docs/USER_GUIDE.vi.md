@@ -143,14 +143,15 @@ docker compose -f docker-compose.prod.yml ps
 Sau khi khởi chạy, bạn có thể mở trình duyệt truy cập `http://localhost:53080/` để xem danh sách các báo cáo HTML đã xuất bản.
 
 Với database mới, container `db` chạy mọi file trong `sql/` theo thứ tự tên file ở lần khởi động
-đầu tiên rồi mới chuyển sang healthy; điều này đã được kiểm chứng tới `021` trên
+đầu tiên rồi mới chuyển sang healthy; điều này đã được kiểm chứng tới `022` trên
 `timescale/timescaledb-ha:pg16`. Mọi bảng mà chuỗi migration tạo trong `public` đều bật
 row-level security. Trên server có hai role Supabase `anon` và `authenticated`, `006` thêm policy
 chỉ đọc cho hai role này trên `market_lexicons` và `industry_taxonomies`, còn `021` thu hồi mọi
 quyền khác của chúng trên các bảng của chuỗi. Không migration nào tự tạo role. Các script init chỉ
-chạy khi volume dữ liệu còn trống, nên database khởi tạo trước khi có `021` phải chạy
-`sql/021_public_schema_rls_coverage.sql` một lần bằng kết nối của chủ sở hữu bảng; chạy lại cũng
-không làm thay đổi gì. Với PostgreSQL
+chạy khi volume dữ liệu còn trống. Hãy dùng kết nối của chủ sở hữu bảng để chạy các migration còn
+thiếu theo thứ tự tên file: database khởi tạo trước `021` cần chạy
+`sql/021_public_schema_rls_coverage.sql`, còn database khởi tạo trước `022` cần chạy
+`sql/022_builtin_uuid_defaults.sql`. Chạy lại từng file không làm thay đổi gì. Với PostgreSQL
 đã có corpus legacy, không khởi động worker mới ngay sau khi đưa artifact lên. Chạy đúng
 [production cutover source/observation](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
 quiesce runtime cũ, snapshot, sinh baseline từ chính snapshot đó, apply `sql/016`, backfill, bắt

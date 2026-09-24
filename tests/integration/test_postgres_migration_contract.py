@@ -21,9 +21,11 @@ from psycopg import errors, sql
 
 from conftest import (
     REPO_SQL,
+    RUNTIME_ROLE,
     SUPABASE_ROLES,
     all_postgres_migrations,
     existing_supabase_roles,
+    runtime_owner,
 )
 from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
 
@@ -292,3 +294,245 @@ def test_a_second_application_neither_duplicates_nor_weakens_supabase_security(
     assert len(settled["policies"]) == 2
     for role in SUPABASE_ROLES:
         assert _can_execute(dsn, role) is False
+
+
+# --- C. UUID primary-key defaults, and the runtime owner that depends on them -------------------
+#
+# 001 installs uuid-ossp into public, and 001, 016, 017 and 018 default nine primary keys to its
+# uuid_generate_v4(). 006 then revokes EXECUTE on every public function from PUBLIC, which is right
+# for application RPCs and wrong for a column default: a runtime that owns the tables but is not a
+# superuser cannot insert a row without supplying the id. 022 repoints those defaults at
+# PostgreSQL's built-in gen_random_uuid(), which lives in pg_catalog and needs no grant, and leaves
+# the 006 posture and uuid-ossp exactly as they were.
+
+UUID_MIGRATION = "022_builtin_uuid_defaults.sql"
+# The last migration an installation could have run before T020; 022 onwards is the upgrade.
+LAST_BEFORE_T020 = 21
+# The primary keys whose default called uuid_generate_v4() through 021, read back from the catalog
+# by test_the_affected_uuid_defaults_are_discovered_from_the_schema_at_021.
+UUID_DEFAULT_TABLES = (
+    "market_brief_revisions",
+    "mission_evidence",
+    "mission_run_journals",
+    "observations",
+    "research_missions",
+    "research_workspaces",
+    "source_identity_aliases",
+    "sources",
+    "topic_clusters",
+)
+# 003 already used the built-in generator for these two.
+BUILTIN_SINCE_003 = ("industry_taxonomies", "market_lexicons")
+UUID_DEFAULTS = (
+    "SELECT c.relname, a.attname, pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d"
+    " JOIN pg_class c ON c.oid = d.adrelid"
+    " JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum"
+    " WHERE c.relnamespace = 'public'::regnamespace AND a.atttypid = 'uuid'::regtype"
+    " ORDER BY c.relname, a.attname"
+)
+# Column defaults anywhere in the database that depend on a function uuid-ossp provides.
+UUID_OSSP_DEPENDENT_DEFAULTS = (
+    "SELECT count(*) FROM pg_depend dep"
+    " WHERE dep.classid = 'pg_attrdef'::regclass AND dep.refclassid = 'pg_proc'::regclass"
+    " AND dep.refobjid IN ("
+    "   SELECT ext.objid FROM pg_depend ext"
+    "   WHERE ext.classid = 'pg_proc'::regclass AND ext.refclassid = 'pg_extension'::regclass"
+    "   AND ext.refobjid = (SELECT oid FROM pg_extension WHERE extname = 'uuid-ossp'))"
+)
+V4_FUNCTION = "public.uuid_generate_v4()"
+V4_DENIED = "permission denied for function uuid_generate_v4"
+
+# Test data: the parents a defaulted child row needs, written by the migration login with ids.
+T020_WORKSPACE = "00000000-0000-4000-8000-000000000201"
+T020_MISSION = "00000000-0000-4000-8000-000000000202"
+T020_SOURCE = "00000000-0000-4000-8000-000000000203"
+T020_OBSERVATION = "00000000-0000-4000-8000-000000000204"
+T020_PARENTS = (
+    f"INSERT INTO research_workspaces (id, slug, root_path) VALUES ('{T020_WORKSPACE}', 't020', '/t020')",
+    f"INSERT INTO research_missions (id, title, workspace_id) VALUES"
+    f" ('{T020_MISSION}', 't020 mission', '{T020_WORKSPACE}')",
+    f"INSERT INTO sources (id, platform, external_id) VALUES ('{T020_SOURCE}', 'threads', 'post:t020')",
+    "INSERT INTO observations (id, source_id, observed_at, time_provenance, identity_source)"
+    f" VALUES ('{T020_OBSERVATION}', '{T020_SOURCE}', now(), 'exact_ingestion', 'metadata_external_id')",
+)
+# One valid row per affected table with the id left out, so only the column default can supply it.
+DEFAULTED_ID_ROWS = {
+    "market_brief_revisions": "(workspace_id, mission_id, revision_number, decision, target_user,"
+    " problem, geo, timeframe, hypothesis, falsifiers, confirmed_by) VALUES"
+    f" ('{T020_WORKSPACE}', '{T020_MISSION}', 1, 'd', 'u', 'p', 'VN', '7d', 'h', ARRAY['f'], 'owner')",
+    "mission_evidence": f"(mission_id, observation_id) VALUES ('{T020_MISSION}', '{T020_OBSERVATION}')",
+    "mission_run_journals": "(workspace_id, mission_id, journal_path, sequence) VALUES"
+    f" ('{T020_WORKSPACE}', '{T020_MISSION}', '/t020/journal-1', 1)",
+    "observations": "(source_id, observed_at, time_provenance, identity_source) VALUES"
+    f" ('{T020_SOURCE}', now(), 'exact_ingestion', 'metadata_external_id')",
+    "research_missions": f"(title, workspace_id) VALUES ('t020 defaulted', '{T020_WORKSPACE}')",
+    "research_workspaces": "(slug, root_path) VALUES ('t020-defaulted', '/t020-defaulted')",
+    "source_identity_aliases": "(platform, alias_external_id, canonical_external_id, witnessed_by)"
+    " VALUES ('threads', 'post_shortcode:t020', 'post:t020', 'owner')",
+    "sources": "(platform, external_id) VALUES ('threads', 'post:t020-defaulted')",
+    "topic_clusters": "(canonical_name) VALUES ('t020 defaulted cluster')",
+}
+
+
+def _through(last: int) -> tuple:
+    return tuple(name for name in all_postgres_migrations() if int(name[:3]) <= last)
+
+
+def _executes(dsn: str, function: str, role: str | None = None) -> bool:
+    """Whether `role` -- or, without one, the session's current role -- may execute `function`."""
+    if role is None:
+        return _one(dsn, "SELECT has_function_privilege(%s, 'EXECUTE')", (function,))[0]
+    return _one(dsn, "SELECT has_function_privilege(%s, %s, 'EXECUTE')", (role, function))[0]
+
+
+def _seed_t020_parents(dsn: str) -> None:
+    with psycopg.connect(dsn) as conn:
+        for statement in T020_PARENTS:
+            conn.execute(statement)
+
+
+def _defaulted_insert(dsn: str, table: str) -> str:
+    """Insert one row with the id omitted, always rolled back; say what happened.
+
+    `inserted` only when the default produced a version-4 UUID. A function-privilege refusal is
+    reported by its message, because that is the outcome under test. Anything else -- a constraint,
+    a table privilege, a missing relation -- is a fixture fault and is raised, so a broken probe
+    cannot pass for the failure it is meant to measure.
+    """
+    with psycopg.connect(dsn) as conn:
+        try:
+            (new_id,) = conn.execute(
+                f"INSERT INTO public.{table} {DEFAULTED_ID_ROWS[table]} RETURNING id"
+            ).fetchone()
+            return "inserted" if new_id.version == 4 else f"id {new_id} is not version 4"
+        except errors.InsufficientPrivilege as exc:
+            message = str(exc).splitlines()[0]
+            if message.startswith("permission denied for function"):
+                return message
+            raise AssertionError(f"{table}: {message}") from None
+        finally:
+            conn.rollback()
+
+
+def _defaulted_inserts(dsn: str) -> dict:
+    return {table: _defaulted_insert(dsn, table) for table in UUID_DEFAULT_TABLES}
+
+
+def _uuid_state(dsn: str) -> dict:
+    """What 022 governs, and what it must leave alone, for the idempotence contract."""
+    return {
+        "defaults": _all(dsn, UUID_DEFAULTS),
+        "uuid_ossp": _all(
+            dsn,
+            "SELECT e.extversion, n.nspname FROM pg_extension e"
+            " JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = 'uuid-ossp'",
+        ),
+        "uuid_ossp_acl": _all(
+            dsn,
+            "SELECT p.oid::regprocedure::text, p.proacl::text FROM pg_proc p"
+            " JOIN pg_depend d ON d.classid = 'pg_proc'::regclass AND d.objid = p.oid"
+            " WHERE d.refclassid = 'pg_extension'::regclass"
+            " AND d.refobjid = (SELECT oid FROM pg_extension WHERE extname = 'uuid-ossp')"
+            " ORDER BY 1",
+        ),
+    }
+
+
+def test_the_affected_uuid_defaults_are_discovered_from_the_schema_at_021(empty_postgres_dsn):
+    """The set 022 repairs is read from the catalog of a 021 install, not assumed."""
+    dsn = empty_postgres_dsn
+    _apply(dsn, *_through(LAST_BEFORE_T020))
+
+    calling_v4 = sorted(
+        table for table, column, expression in _all(dsn, UUID_DEFAULTS)
+        if "uuid_generate_v4" in expression and column == "id"
+    )
+    assert calling_v4 == list(UUID_DEFAULT_TABLES)
+    other_uuid_ossp_defaults = [
+        (table, column) for table, column, expression in _all(dsn, UUID_DEFAULTS)
+        if "uuid_generate" in expression and column != "id"
+    ]
+    assert other_uuid_ossp_defaults == [], "a non-key column also defaults to uuid-ossp"
+
+
+def test_a_fresh_install_defaults_every_uuid_key_to_the_builtin_generator(empty_postgres_dsn):
+    dsn = empty_postgres_dsn
+    _apply(dsn, *all_postgres_migrations())
+
+    assert _all(dsn, UUID_DEFAULTS) == [
+        (table, "id", "gen_random_uuid()")
+        for table in sorted(UUID_DEFAULT_TABLES + BUILTIN_SINCE_003)
+    ]
+    assert _one(dsn, UUID_OSSP_DEPENDENT_DEFAULTS)[0] == 0, "a default still calls uuid-ossp"
+    # Left installed, in place, for anything outside Ignis that calls it.
+    assert _uuid_state(dsn)["uuid_ossp"] == [("1.1", "public")]
+    # Still withheld from PUBLIC: the fix is a different default, not a wider grant.
+    assert _executes(dsn, V4_FUNCTION, "public") is False
+    assert existing_supabase_roles(dsn) == [], "a migration created a Supabase role"
+
+
+def test_a_non_superuser_owner_inserts_every_defaulted_id_after_the_full_chain(empty_postgres_dsn):
+    dsn = empty_postgres_dsn
+    _apply(dsn, *all_postgres_migrations())
+    _seed_t020_parents(dsn)
+
+    with runtime_owner(dsn) as owner_dsn:
+        who = _one(
+            owner_dsn,
+            "SELECT current_user, rolsuper, rolbypassrls FROM pg_roles"
+            " WHERE rolname = current_user",
+        )
+        assert who == (RUNTIME_ROLE, False, False), "the owner must hold no bypass to prove this"
+        assert _executes(owner_dsn, V4_FUNCTION) is False, (
+            "the owner was granted uuid_generate_v4(), so this contract would pass without 022"
+        )
+        outcomes = _defaulted_inserts(owner_dsn)
+
+    assert outcomes == {table: "inserted" for table in UUID_DEFAULT_TABLES}
+
+
+def test_an_install_at_021_is_repaired_by_applying_022_as_the_table_owner(supabase_like_dsn):
+    """The upgrade: the failure reproduced on a 021 install, then 022 and nothing else fixes it."""
+    dsn = supabase_like_dsn
+    names = _through(LAST_BEFORE_T020)
+    split = names.index(SECURITY_MIGRATION)
+    _apply(dsn, *names[:split])
+    with psycopg.connect(dsn) as conn:
+        conn.execute(
+            "CREATE FUNCTION public.t017_rpc_probe() RETURNS integer LANGUAGE sql AS 'SELECT 1'"
+        )
+    _apply(dsn, *names[split:])
+    _seed_t020_parents(dsn)
+
+    with runtime_owner(dsn) as owner_dsn:
+        assert _defaulted_inserts(owner_dsn) == {table: V4_DENIED for table in UUID_DEFAULT_TABLES}
+
+        # Applied as the owner the runtime connects as, which is what a Supabase upgrade has.
+        _apply(owner_dsn, UUID_MIGRATION)
+
+        assert _defaulted_inserts(owner_dsn) == {table: "inserted" for table in UUID_DEFAULT_TABLES}
+        assert _executes(owner_dsn, V4_FUNCTION) is False, "022 must not work by granting v4"
+
+    # The 006 and 021 boundary is unchanged by the upgrade.
+    for role in ("public", *SUPABASE_ROLES):
+        assert _executes(dsn, RPC_PROBE, role) is False, f"{role} can execute the RPC probe"
+    for role in SUPABASE_ROLES:
+        for statement in (
+            f"INSERT INTO sources (id, platform, external_id)"
+            f" VALUES (gen_random_uuid(), 'threads', 'post:{role}')",
+            "UPDATE observations SET time_provenance = time_provenance",
+            "DELETE FROM research_missions",
+        ):
+            with pytest.raises(errors.InsufficientPrivilege):
+                _as_role(dsn, role, statement)
+
+
+def test_re_applying_022_and_the_whole_chain_changes_no_uuid_or_function_state(supabase_like_dsn):
+    dsn = supabase_like_dsn
+    _apply_with_rpc_probe(dsn)
+    settled = (_uuid_state(dsn), _security_state(dsn))
+
+    _apply(dsn, UUID_MIGRATION)
+    assert (_uuid_state(dsn), _security_state(dsn)) == settled
+    _apply(dsn, *all_postgres_migrations())
+    assert (_uuid_state(dsn), _security_state(dsn)) == settled

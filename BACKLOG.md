@@ -858,12 +858,28 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   required: Codex sẽ bật branch protection sau lượt chạy đầu tiên trên GitHub và đọc lại cấu hình để
   xác nhận.
 
-- [ ] **Rà quyền EXECUTE của `uuid_generate_v4()` — hardening trước release, tách khỏi T019.** Yêu
-  cầu T019 nêu đây là một posture có sẵn cần xem lại. `001` tạo extension `uuid-ossp` trong schema
-  `public`, các bảng từ `001` tới `018` dùng `uuid_generate_v4()` làm default cho khóa chính, còn
-  `006` thu hồi EXECUTE trên mọi function trong `public` lúc nó chạy. T019 chưa đo lại quyền thực tế
-  của `anon`, `authenticated` và runtime owner trên function này, nên cần kiểm chứng trước khi quyết
-  định sửa.
+- [x] **Default khóa UUID bằng `gen_random_uuid()` thay cho `uuid_generate_v4()` — T020 của spec
+  002, hardening trước release, ngày 24/09/2026.** `001` cài `uuid-ossp` vào `public` và chín khóa
+  chính lấy `uuid_generate_v4()` làm default, còn `006` thu hồi EXECUTE trên mọi function trong
+  `public` khỏi PUBLIC. Vì vậy runtime sở hữu bảng mà không phải superuser không insert được dòng
+  nào nếu không tự gửi id. Fixture runtime owner của T018 che lỗi này bằng cách cấp EXECUTE trên
+  toàn bộ function `public`. `sql/022_builtin_uuid_defaults.sql` dùng chín lệnh `ALTER TABLE` tường
+  minh để chuyển default của `research_missions`, `topic_clusters`, `sources`, `observations`,
+  `mission_evidence`, `research_workspaces`, `market_brief_revisions`, `mission_run_journals` và
+  `source_identity_aliases` sang `gen_random_uuid()` có sẵn trong PostgreSQL. Migration không cấp
+  quyền nào, không sửa `006` và để nguyên `uuid-ossp`. Fixture giờ chỉ cho runtime owner quyền sở
+  hữu bảng và USAGE trên schema. Trước khi có `022`, cả chín lệnh insert bỏ trống id đều báo
+  `permission denied for function uuid_generate_v4`, repository thật cũng hỏng ở bước ghi
+  observation. Sau `022`, trên PostgreSQL 16.14 (`timescale/timescaledb-ha:pg16`): bản cài mới
+  `001`–`022` có 11 khóa UUID dùng `gen_random_uuid()` và không default nào còn phụ thuộc
+  `uuid-ossp`; database đang ở `021` từ chối cả chín lệnh cho tới khi chủ sở hữu bảng chạy `022`,
+  sau đó nhận hết, trong khi owner vẫn không có quyền EXECUTE trên `uuid_generate_v4()`; chạy lại
+  `022` và toàn bộ chuỗi không đổi gì; `PUBLIC`, `anon`, `authenticated` vẫn không gọi được RPC
+  probe và không ghi được bảng chỉ dành cho owner. Bỏ lệnh của `mission_run_journals` làm ba
+  contract fail. Integration suite chạy với PostgreSQL: 487 passed, 3 skipped, không case PostgreSQL
+  nào bị skip. Compose init chạy đủ 22 file, 0 dòng `ERROR:`, dọn sạch container, volume và network.
+  Chưa áp dụng lên database dev hay production; database khởi tạo trước `022` phải chạy file này
+  một lần bằng quyền owner.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)

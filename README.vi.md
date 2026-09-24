@@ -254,14 +254,15 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 Khi volume dữ liệu còn trống, container `db` chạy mọi file trong `sql/` theo thứ tự tên file rồi
-mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `021` trên
+mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `022` trên
 `timescale/timescaledb-ha:pg16`. Mọi bảng mà chuỗi migration tạo trong `public` đều bật
 row-level security. Nếu server đã có hai role Supabase là `anon` và `authenticated`, `006` cho hai
 role này policy chỉ đọc trên `market_lexicons` và `industry_taxonomies`, còn `021` thu hồi mọi quyền
 khác của chúng trên các bảng của chuỗi. Không migration nào tự tạo role. PostgreSQL không chạy lại
-script init khi volume đã có dữ liệu, nên database khởi tạo trước khi có `021` phải chạy
-`sql/021_public_schema_rls_coverage.sql` một lần bằng kết nối của chủ sở hữu bảng. Chạy lại file này
-không làm thay đổi gì.
+script init khi volume đã có dữ liệu. Hãy dùng kết nối của chủ sở hữu bảng để chạy các migration còn
+thiếu theo thứ tự tên file: database khởi tạo trước `021` cần chạy
+`sql/021_public_schema_rls_coverage.sql`, còn database khởi tạo trước `022` cần chạy
+`sql/022_builtin_uuid_defaults.sql`. Chạy lại từng file không làm thay đổi gì.
 
 > Installation PostgreSQL đã có corpus legacy trong `trend_signals` phải chạy
 > [production cutover source/observation](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
