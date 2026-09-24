@@ -296,10 +296,13 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 With an empty data volume, the `db` container runs every file in `sql/` in filename order before
-it reports healthy. This path is verified through `020` on `timescale/timescaledb-ha:pg16`.
-Migration `006` enables row-level security on the tables it explicitly governs and adds its
-read-only policies only when the Supabase roles `anon` and `authenticated` already exist; it never
-creates those roles. PostgreSQL init scripts do not run again for an existing data volume.
+it reports healthy. This path is verified through `021` on `timescale/timescaledb-ha:pg16`.
+Every table the chain creates in `public` has row-level security on. When the Supabase roles `anon`
+and `authenticated` already exist, `006` gives them read-only policies on `market_lexicons` and
+`industry_taxonomies`, and `021` revokes every other privilege they hold on the chain's tables;
+neither migration creates a role. PostgreSQL init scripts do not run again for an existing data
+volume, so a database initialised before `021` must apply `sql/021_public_schema_rls_coverage.sql`
+once, connected as the table owner; running it again changes nothing.
 
 > Existing PostgreSQL installations with a legacy `trend_signals` corpus require the reviewed
 > [source/observation production cutover](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).

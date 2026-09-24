@@ -67,12 +67,24 @@
 
 ## Phase 8: PostgreSQL Security and Init Regression Gates (2026-09-24)
 
-- [ ] T018 [RELEASE BLOCKER] Add a versioned migration that enables RLS on every current table in
+- [x] T018 [RELEASE BLOCKER] Add a versioned migration that enables RLS on every current table in
   the exposed `public` schema, including tables created after `006`, and define the intended policy
   for each table. Prove with `anon` and `authenticated` that source, observation, workspace,
   configuration, evidence, credential, and journal data cannot be read or mutated unless an
   explicit policy permits it; preserve owner/runtime access and plain TimescaleDB portability
-  (depends-on: T017).
+  (depends-on: T017). `sql/021_public_schema_rls_coverage.sql` enables RLS on all 17 public tables
+  the chain creates and declares two classes: `market_lexicons` and `industry_taxonomies` stay
+  client read-only through the `006` policies, and the other 15 tables are owner only, with every
+  `anon`/`authenticated` table and owned-sequence privilege revoked. The revoke is required, not
+  decorative: RLS does not govern TRUNCATE, which both roles held on all 17 tables, and TimescaleDB
+  chunks of `trend_signals` carry no RLS flag while inheriting the hypertable's grants. Verified on
+  a fresh Supabase-like database, on one migrated through `020` before `021` (152 client statements
+  succeeded before, none after), on plain TimescaleDB without the roles, by re-applying `021` and
+  the whole chain, as a non-superuser table owner through the real repository, and by two fresh
+  Compose inits running all 21 files. The catalog check fails when one post-`006` table loses RLS
+  or gains a client grant. Tables are listed rather than discovered, so another application's
+  tables in a shared database are left as they are; a database initialised before `021` must
+  apply it once as the table owner.
 - [ ] T019 Run `tests/integration/test_compose_init.py` as a dedicated Docker CI job with
   `IGNIS_TEST_COMPOSE_INIT=1`, keeping the exact production image and full `sql/` mount. Require the
   stable job on protected branches so a later migration cannot break fresh initialization while

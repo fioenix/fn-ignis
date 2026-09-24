@@ -44,6 +44,15 @@ READBACK = {
         "SELECT relrowsecurity FROM pg_class WHERE oid = 'public.market_lexicons'::regclass"
     ),
     "public_policies": "SELECT count(*) FROM pg_policies WHERE schemaname = 'public'",
+    # 021: every public table the chain creates has RLS on, not only the ones 006 knew about.
+    "public_tables": (
+        "SELECT count(*) FROM pg_class"
+        " WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p')"
+    ),
+    "public_tables_without_rls": (
+        "SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace"
+        " AND relkind IN ('r', 'p') AND NOT relrowsecurity"
+    ),
     "supabase_roles": "SELECT count(*) FROM pg_roles WHERE rolname IN ('anon', 'authenticated')",
 }
 
@@ -157,6 +166,8 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
             "retired_present": "0",
             "rls_market_lexicons": "t",
             "public_policies": "0",
+            "public_tables": "17",
+            "public_tables_without_rls": "0",
             "supabase_roles": "0",
         }
         assert run["leftovers"] == {"container": 0, "volume": 0, "network": 0}

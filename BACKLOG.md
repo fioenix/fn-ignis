@@ -826,12 +826,20 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   hai role đều mất quyền EXECUTE trên function RPC mẫu. Mỗi lượt kiểm tra kết thúc với 0 container,
   0 volume, 0 network và không còn file credential tạm.
 
-- [ ] **Bật RLS cho mọi bảng trong schema `public` — T018, chặn release.** `006` chỉ có thể bật RLS
-  trên những bảng đã tồn tại khi nó chạy. Mười bảng được migration sau đó tạo ra vẫn không có RLS;
-  trong môi trường mô phỏng default privileges của Supabase, `anon` đọc được `sources` và có quyền
-  INSERT vào `observations`. Cần migration mới bật RLS cho toàn bộ bảng hiện tại, khai báo policy
-  theo từng loại dữ liệu và kiểm chứng quyền của cả `anon`, `authenticated` mà không chặn runtime
-  owner.
+- [x] **Bật RLS cho mọi bảng trong schema `public` — T018, chặn release, ngày 24/09/2026.**
+  `sql/021_public_schema_rls_coverage.sql` bật RLS trên cả 17 bảng `public` mà chuỗi migration tạo
+  ra và chia chúng thành hai lớp. `market_lexicons`, `industry_taxonomies` vẫn cho client đọc qua hai
+  policy của `006`; 15 bảng còn lại chỉ owner được đụng tới, `anon` và `authenticated` bị thu hồi
+  mọi quyền trên bảng lẫn sequence đi kèm. Thu hồi quyền là bắt buộc chứ không phải cho chắc: RLS
+  không chặn TRUNCATE, trong khi trước `021` cả hai role đều TRUNCATE được toàn bộ 17 bảng, kể cả
+  `platform_credentials`; chunk TimescaleDB của `trend_signals` lại không mang cờ RLS nhưng vẫn thừa
+  hưởng grant của hypertable. Database đã chạy tới `020` có 152 câu lệnh client lọt qua trước `021`
+  và không còn câu nào sau đó. Contract riêng 9 ca pass trên database mô phỏng Supabase, trên
+  TimescaleDB thuần không có role, khi chạy lại `021` và toàn bộ chuỗi, và khi runtime kết nối bằng
+  owner không phải superuser. Hai lần Compose init chạy đủ 21 file, không có dòng `ERROR:`. Chỉ cần
+  bỏ RLS khỏi một bảng sau `006` là phép kiểm tra fail ngay. Danh sách bảng được liệt kê cứng chứ
+  không dò catalog, nên bảng của ứng dụng khác trong database dùng chung không bị đụng tới. Database
+  khởi tạo trước khi có `021` phải tự chạy file này một lần bằng quyền owner.
 
 - [ ] **Đưa phép thử Compose init vào CI — T019.** `test_compose_init.py` hiện là gate chủ động,
   chỉ chạy khi có `IGNIS_TEST_COMPOSE_INIT=1`. Thêm job Docker riêng và đặt status ổn định thành

@@ -21,14 +21,12 @@ from psycopg import errors, sql
 
 from conftest import (
     REPO_SQL,
-    RedactedDsn,
-    _drop_test_database,
-    _postgres_dsns,
+    SUPABASE_ROLES,
     all_postgres_migrations,
+    existing_supabase_roles,
 )
 from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
 
-SUPABASE_ROLES = ("anon", "authenticated")
 SECURITY_MIGRATION = "006_supabase_security_hardening.sql"
 RETIREMENT = "020_retire_ambiguous_tiktok_ui_noise.sql"
 # The objects later migrations add; if init stopped early, these are what is missing.
@@ -73,11 +71,6 @@ def _all(dsn: str, query: str, params: tuple = ()) -> list:
         return conn.execute(query, params).fetchall()
 
 
-def _existing_supabase_roles(dsn: str) -> list:
-    rows = _all(dsn, "SELECT rolname FROM pg_roles WHERE rolname = ANY(%s)", (list(SUPABASE_ROLES),))
-    return sorted(row[0] for row in rows)
-
-
 def _security_state(dsn: str) -> dict:
     """What 006 governs: policies, RLS flags, and who may execute the probe function."""
     rls = _all(
@@ -101,18 +94,18 @@ def _security_state(dsn: str) -> dict:
 # --- A. plain PostgreSQL, the Compose init path -------------------------------------------------
 
 
-def test_the_sql_directory_is_one_continuous_filename_ordered_sequence_through_020():
+def test_the_sql_directory_is_one_continuous_filename_ordered_sequence():
     names = all_postgres_migrations()
     prefixes = [int(re.match(r"(\d{3})_", name).group(1)) for name in names]
 
     assert prefixes == list(range(1, len(names) + 1)), "a gap or duplicate breaks initdb order"
     assert SECURITY_MIGRATION in names, "006 must run in the init path, not be special-cased"
-    assert RETIREMENT in names and names.index(RETIREMENT) == len(names) - 1
+    assert RETIREMENT in names, "020 must run in the init path"
 
 
 def test_every_migration_runs_on_plain_postgres_and_leaves_the_final_schema(empty_postgres_dsn):
     dsn = empty_postgres_dsn
-    assert _existing_supabase_roles(dsn) == [], (
+    assert existing_supabase_roles(dsn) == [], (
         "this contract needs a server without Supabase roles; run it on plain PostgreSQL"
     )
 
@@ -187,39 +180,6 @@ async def test_the_runtime_owner_reads_and_writes_after_rls_is_enabled(empty_pos
 # --- B. a Supabase-like server, where the roles exist -------------------------------------------
 
 
-@pytest.fixture
-def supabase_like_dsn():
-    """A database on a server where `anon` and `authenticated` exist, as Supabase creates them.
-
-    Roles are cluster-wide, so they are created before the database and dropped after it, and only
-    if this fixture created them. Supabase's default privileges are reproduced too: every new table
-    and function is granted to both roles, which is what makes RLS the thing standing between
-    them and the data.
-    """
-    admin_dsn, test_dsn, database_name = _postgres_dsns()
-    created = [role for role in SUPABASE_ROLES if role not in _existing_supabase_roles(admin_dsn)]
-    with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        for role in created:
-            conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
-        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
-    try:
-        with psycopg.connect(test_dsn) as conn:
-            conn.execute(
-                "ALTER DEFAULT PRIVILEGES IN SCHEMA public"
-                " GRANT ALL ON TABLES TO anon, authenticated"
-            )
-            conn.execute(
-                "ALTER DEFAULT PRIVILEGES IN SCHEMA public"
-                " GRANT EXECUTE ON FUNCTIONS TO anon, authenticated"
-            )
-        yield RedactedDsn(test_dsn)
-    finally:
-        _drop_test_database(admin_dsn, database_name)
-        with psycopg.connect(admin_dsn, autocommit=True) as conn:
-            for role in created:
-                conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
-
-
 def _apply_with_rpc_probe(dsn: str) -> None:
     """The real sequence, with an RPC function present before 006 as it is on Supabase."""
     names = all_postgres_migrations()
@@ -277,22 +237,20 @@ def test_supabase_roles_can_read_the_vocabulary_and_nothing_else(supabase_like_d
             " VALUES ('threads', 'oauth', '{}')"
         )
 
+    # Since 021 the client roles hold no privilege on these tables at all, so a read is refused
+    # outright rather than answered with the empty result RLS alone would give.
+    refused = (
+        "SELECT count(*) FROM platform_credentials",
+        "SELECT count(*) FROM research_missions",
+        "UPDATE market_lexicons SET term = term",
+        "INSERT INTO market_lexicons (domain, term) VALUES ('t017', 'written by a client')",
+    )
     for role in SUPABASE_ROLES:
         assert _as_role(dsn, role, "SELECT count(*) FROM market_lexicons")[0] > 0
         assert _as_role(dsn, role, "SELECT count(*) FROM industry_taxonomies")[0] > 0
-        assert _as_role(dsn, role, "SELECT count(*) FROM platform_credentials")[0] == 0, (
-            f"{role} can read stored credentials"
-        )
-        assert _as_role(dsn, role, "SELECT count(*) FROM research_missions")[0] == 0
-        assert _as_role(dsn, role, "UPDATE market_lexicons SET term = term") == 0, (
-            f"{role} can update the vocabulary"
-        )
-        with pytest.raises(errors.InsufficientPrivilege):
-            _as_role(
-                dsn,
-                role,
-                "INSERT INTO market_lexicons (domain, term) VALUES ('t017', 'written by a client')",
-            )
+        for statement in refused:
+            with pytest.raises(errors.InsufficientPrivilege):
+                _as_role(dsn, role, statement)
 
 
 def _can_execute(dsn: str, role: str) -> bool:

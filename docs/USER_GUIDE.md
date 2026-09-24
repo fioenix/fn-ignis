@@ -130,11 +130,14 @@ Services started:
 - `fn-ignis-nginx`: Static HTML report server on port 8080.
 
 For a fresh database, the `db` container runs every file in `sql/` in filename order on its first
-start and only then reports healthy; this is verified through `020` on
-`timescale/timescaledb-ha:pg16`. `006` enables row-level security on the tables it explicitly
-governs, adds the read-only Supabase policies only on a server that has the `anon` and
-`authenticated` roles, and creates no roles itself. The init scripts run only while the data
-volume is empty. For an existing PostgreSQL corpus, do not start the new worker immediately after
+start and only then reports healthy; this is verified through `021` on
+`timescale/timescaledb-ha:pg16`. Every table the chain creates in `public` has row-level security
+on. On a server that has the Supabase roles `anon` and `authenticated`, `006` adds their read-only
+policies on `market_lexicons` and `industry_taxonomies`, and `021` revokes every other privilege
+they hold on the chain's tables; no migration creates a role. The init scripts run only while the
+data volume is empty, so a database initialised before `021` must apply
+`sql/021_public_schema_rls_coverage.sql` once, connected as the table owner; running it again
+changes nothing. For an existing PostgreSQL corpus, do not start the new worker immediately after
 deploying its artifact. Follow the canonical
 [source/observation production cutover](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
 quiesce the old runtime, snapshot, generate a baseline from that exact snapshot, apply `sql/016`,
