@@ -46,7 +46,7 @@
 
 ## Phase 7: Corpus Correctness Follow-up (2026-09-24)
 
-- [ ] T016 Remove the ambiguous `live`, `thông báo`, and `tin nhắn` rows from the
+- [x] T016 Remove the ambiguous `live`, `thông báo`, and `tin nhắn` rows from the
   `tiktok_ui_noise` runtime vocabulary through an idempotent versioned SQL migration so both fresh
   and existing SQLite/PostgreSQL installations preserve public TikTok posts containing those
   ordinary words; keep `đang phát trực tiếp` and the remaining notification/inbox phrases, prove

@@ -588,5 +588,6 @@ SQLite is the zero-config default and needs no Docker. `DATABASE_URL=postgresql:
 the Postgres/Timescale repository; `sql/001` enables the Timescale extension when present and
 falls back to native Postgres indexes when not. The vocabulary seeds `sql/012`–`sql/014` are re-applied
 on every SQLite bootstrap, because the domains they seed are system-owned and no tool writes
-them; on Postgres they are run once by hand. `sql/015` adds a column instead of seeding rows, so
+them; on Postgres they are run once by hand. `sql/020` retires three of those rows and runs on
+SQLite right after that replay, so a restart cannot re-insert them. `sql/015` adds a column instead of seeding rows, so
 SQLite applies it through an `ALTER TABLE` in `_ensure_schema`.

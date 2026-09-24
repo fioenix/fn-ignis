@@ -10,7 +10,14 @@ from pathlib import Path
 import ignis.resources as resources
 from ignis.resources import sql_seed_dir, sql_seed_file
 
-SEED_FILES = ("003_market_lexicons.sql", "004_global_lexicons.sql", "007_runtime_configs.sql")
+SEED_FILES = (
+    "003_market_lexicons.sql",
+    "004_global_lexicons.sql",
+    "007_runtime_configs.sql",
+    # Run by the SQLite bootstrap after the vocabulary replay; missing from a wheel, the retired
+    # UI-noise terms would silently come back on every installed SQLite database.
+    "020_retire_ambiguous_tiktok_ui_noise.sql",
+)
 
 
 def test_seed_directory_is_found_in_this_layout():

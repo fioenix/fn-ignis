@@ -144,22 +144,22 @@ def test_an_empty_registration_is_refused_rather_than_armed():
 
 
 @pytest.mark.asyncio
-async def test_load_bearing_whitespace_survives_the_database_round_trip(tmp_path):
-    """The TikTok live badge is seeded as "live " so it cannot match inside "livestream".
+async def test_the_retired_live_term_does_not_come_back_through_the_database(tmp_path):
+    """T016 retired "live" from the grid guard: it rejected 40 real public titles.
 
-    An earlier version of the loader stripped every term, which passed the plugin's own unit
-    test -- that one registers the list by hand -- and only showed up when the vocabulary came
-    from a real database. So this assertion goes through the repository, not around it.
+    013 still seeds it as "live " and the SQLite bootstrap replays 013 on every start, so the
+    retirement in 020 has to run after that replay. A hand-registered list would not notice if it
+    ran first; this goes through the repository, which is where the ordering lives.
     """
-    repo = SqliteTrendRepository(db_path=str(tmp_path / "whitespace.db"))
+    repo = SqliteTrendRepository(db_path=str(tmp_path / "retired.db"))
     vocabulary = await load_market_vocabulary(repo)
 
-    assert "live " in vocabulary.tiktok_ui_noise
+    assert "live" not in {term.strip() for term in vocabulary.tiktok_ui_noise}
 
     plugin = TikTokPlugin()
     plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
 
-    assert plugin._is_private_or_notification("live  ngay bay gio") is True
+    assert plugin._is_private_or_notification("Studio 2.0 is live.") is False
     assert plugin._is_private_or_notification("livestream review") is False
 
 

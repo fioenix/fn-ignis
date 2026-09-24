@@ -400,3 +400,80 @@ async def repository_case(request, tmp_path):
             await repository.close()
     finally:
         _drop_test_database(admin_dsn, database_name)
+
+
+# --- the vocabulary migrations --------------------------------------------------------------------
+
+REPO_SQL = Path(__file__).resolve().parents[2] / "sql"
+# 006 grants RLS policies to `anon` and `authenticated`, roles only a Supabase cluster has, so it
+# cannot run on the plain PostgreSQL a contract database lives on. It touches no vocabulary row.
+SUPABASE_ONLY_MIGRATIONS = frozenset({"006_supabase_security_hardening.sql"})
+
+
+def all_postgres_migrations() -> tuple:
+    """Every migration in the order a fresh PostgreSQL applies them from sql/ (initdb order).
+
+    Read from the directory rather than listed, so a migration added later is covered without
+    anyone remembering to add it here.
+    """
+    return tuple(
+        path.name
+        for path in sorted(REPO_SQL.glob("*.sql"))
+        if path.name not in SUPABASE_ONLY_MIGRATIONS
+    )
+
+
+@dataclass
+class LexiconCase:
+    """A database for the market_lexicons contracts, before any schema has been put in it."""
+
+    name: str
+    db_path: str | None = None
+    dsn: str | None = field(default=None, repr=False)
+
+    def apply(self, *migrations: str) -> None:
+        """Run migration files exactly as shipped. PostgreSQL only: SQLite runs its bootstrap."""
+        assert self.name == "postgres", "SQLite applies migrations through _ensure_schema"
+        with psycopg.connect(self.dsn) as conn:
+            for migration in migrations:
+                conn.execute((REPO_SQL / migration).read_text(encoding="utf-8"))
+
+    def execute(self, sqlite_text: str, postgres_text: str, params: tuple = ()) -> None:
+        if self.name == "sqlite":
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute(sqlite_text, params)
+            return
+        with psycopg.connect(self.dsn) as conn:
+            conn.execute(postgres_text, params)
+
+    def rows(self, domain: str | None = None) -> list:
+        """Every stored lexicon row as (domain, term, category, created_by), sorted in Python."""
+        query = "SELECT domain, term, category, created_by FROM market_lexicons"
+        if self.name == "sqlite":
+            with sqlite3.connect(self.db_path) as conn:
+                found = conn.execute(query).fetchall()
+        else:
+            with psycopg.connect(self.dsn) as conn:
+                found = conn.execute(query).fetchall()
+        return sorted(tuple(row) for row in found if domain is None or row[0] == domain)
+
+    def repository(self):
+        """A new repository instance. On SQLite, opening one is a restart: it re-runs bootstrap."""
+        if self.name == "sqlite":
+            return SqliteTrendRepository(self.db_path)
+        return PostgresTimescaleRepository(dsn=self.dsn, min_pool_size=1, max_pool_size=2)
+
+
+@pytest.fixture(params=("sqlite", "postgres"))
+def lexicon_case(request, tmp_path):
+    if request.param == "sqlite":
+        yield LexiconCase(name="sqlite", db_path=str(tmp_path / "lexicons.sqlite"))
+        return
+
+    admin_dsn, test_dsn, database_name = _postgres_dsns()
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+    try:
+        yield LexiconCase(name="postgres", dsn=test_dsn)
+    finally:
+        _drop_test_database(admin_dsn, database_name)

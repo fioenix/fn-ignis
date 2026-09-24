@@ -778,7 +778,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Đo trên 15.771 tiêu đề thật: substring loại 47, biên từ loại 46. Bỏ được `olive oil review`
   và `livestream review`; sinh thêm `Studio 2.0 is live.` vì substring cần `"live "` có dấu cách
   nên bỏ lỡ `live.`
-- [ ] **Từ vựng của guard này đang gây hại hơn là bảo vệ — đã chốt hướng sửa, giao T016.** Đo cùng
+- [x] **Đã xong (24/09/2026): bỏ `live`, `thông báo`, `tin nhắn` khỏi guard UI của TikTok (T016).** Đo cùng
   lúc, qua chính plugin:
   trong 46 tiêu đề bị loại, **gần như toàn bộ là post công khai thật**, không phải thông báo:
   - `The new Gmail app icon is live on Google Play`
@@ -801,6 +801,16 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   `tiktok_ui_noise`, giữ `đang phát trực tiếp` cho badge live tiếng Việt và giữ các cụm UI còn
   lại. T016 thực hiện bằng migration dữ liệu để database đã tồn tại cũng nhận thay đổi; không chỉ
   sửa seed cho cài đặt mới.
+
+  **Kết quả T016:** `sql/020_retire_ambiguous_tiktok_ui_noise.sql` xoá ba dòng `system` đó, so
+  khớp theo `trim(term)` vì `live ` được seed kèm dấu cách. `013` giữ nguyên. SQLite chạy 020 ngay
+  sau bước replay 013 trong `_ensure_schema`, nên khởi động lại không đưa ba dòng trở lại. Kiểm
+  trên cả SQLite và PostgreSQL thật (`tests/integration/test_tiktok_ui_noise_retirement.py`, 5 ca
+  mỗi backend, 0 skip): cài đặt mới chỉ còn 10 term; database cũ mất đúng ba dòng; chạy lại 020,
+  chạy lại 013 rồi 020, hay khởi động lại đều không đổi gì; qua loader và `TikTokPlugin` thật, post
+  công khai có ba từ này được giữ, còn `đang phát trực tiếp` và các cụm thông báo/hộp thư còn lại
+  vẫn bị loại; domain rỗng vẫn fail closed. Negative control: bỏ `tin nhắn` khỏi 020 làm 6 ca fail
+  trên hai backend; cho SQLite chạy 020 trước bước replay làm 4 ca fail.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)
