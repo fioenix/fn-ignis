@@ -37,7 +37,7 @@ WORKFLOW_NAME = "Compose Init"
 JOB_ID = "compose-fresh-init"
 JOB_NAME = "Fresh Compose database init"
 CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
-SETUP_UV_ACTION = "astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39"
+SETUP_UV_ACTION = "astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7"
 UV_VERSION = "0.12.17"
 
 PROTECTED_BRANCH_PATTERNS = {"main", "release/*", "hotfix/*"}
