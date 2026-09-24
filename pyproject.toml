@@ -1,6 +1,6 @@
 [project]
 name = "fn-ignis"
-version = "0.4.1"
+version = "0.5.0"
 description = "fnIgnis — Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform with FastMCP Server"
 readme = "README.md"
 license = { text = "MIT" }
@@ -116,5 +116,4 @@ exclude = [".venv", "dist", "build"]
 [tool.ruff.lint]
 select = ["E", "F", "W"]
 ignore = ["E501", "W293", "W291", "W292", "E741"]
-
 
