@@ -104,7 +104,7 @@
 
 ## Phase 9: Convergence (2026-09-24)
 
-- [ ] T020 [RELEASE BLOCKER] Remove Ignis' runtime dependency on EXECUTE for
+- [x] T020 [RELEASE BLOCKER] Remove Ignis' runtime dependency on EXECUTE for
   `public.uuid_generate_v4()` without weakening the function posture established by `006`. First
   add a PostgreSQL RED contract proving that a non-superuser, non-`BYPASSRLS` runtime role which
   owns the Ignis tables cannot insert a row whose id is omitted after the current full migration
@@ -123,4 +123,22 @@
   `tests/integration/test_postgres_rls_coverage.py`, `tests/integration/test_compose_init.py`,
   migration packaging/convention tests, `BACKLOG.md`; depends-on: T018, T019; source:
   Constitution VI, the T018 runtime-owner fixture, and the open pre-release hardening item in
-  `BACKLOG.md`).
+  `BACKLOG.md`). `sql/022_builtin_uuid_defaults.sql` sets the id default of the nine tables a `021`
+  catalog shows calling `uuid_generate_v4()` -- `research_missions`, `topic_clusters`, `sources`,
+  `observations`, `mission_evidence`, `research_workspaces`, `market_brief_revisions`,
+  `mission_run_journals`, `source_identity_aliases` -- to `gen_random_uuid()` through explicit
+  `ALTER TABLE` statements; it grants nothing and leaves `uuid-ossp` installed in `public`. The
+  runtime-owner fixture no longer grants EXECUTE on public functions. RED, before `022`: as a
+  non-superuser, non-`BYPASSRLS` owner, all nine defaulted inserts failed with `permission denied
+  for function uuid_generate_v4`, and the real repository failed recording observations for the
+  same reason. GREEN on PostgreSQL 16.14 (`timescale/timescaledb-ha:pg16`, TimescaleDB 2.29.2):
+  a fresh `001`-`022` install defaults all 11 UUID keys to `gen_random_uuid()` with no default
+  depending on `uuid-ossp`; a `021` install denies all nine inserts until `022` is applied as the
+  table owner, then accepts them while the owner still cannot execute `uuid_generate_v4()`;
+  re-applying `022` and the whole chain leaves defaults, `uuid-ossp` ACLs and the `006` state
+  unchanged; `PUBLIC`, `anon` and `authenticated` still cannot execute the RPC probe or write
+  owner-only tables. Omitting the `mission_run_journals` statement fails the catalog, fresh-insert
+  and upgrade contracts. Full integration suite with PostgreSQL: 487 passed, 3 skipped (the Compose
+  opt-in and two SQLite legs of Postgres-only tests); fresh Compose init ran all 22 files. Not
+  applied to any dev or production database; an installation initialised before `022` applies it
+  once as the table owner.

@@ -296,7 +296,7 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 With an empty data volume, the `db` container runs every file in `sql/` in filename order before
-it reports healthy. This path is verified through `021` on `timescale/timescaledb-ha:pg16`.
+it reports healthy. This path is verified through `022` on `timescale/timescaledb-ha:pg16`.
 Every table the chain creates in `public` has row-level security on. When the Supabase roles `anon`
 and `authenticated` already exist, `006` gives them read-only policies on `market_lexicons` and
 `industry_taxonomies`, and `021` revokes every other privilege they hold on the chain's tables;

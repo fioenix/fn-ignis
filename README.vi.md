@@ -254,7 +254,7 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 Khi volume dữ liệu còn trống, container `db` chạy mọi file trong `sql/` theo thứ tự tên file rồi
-mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `021` trên
+mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `022` trên
 `timescale/timescaledb-ha:pg16`. Mọi bảng mà chuỗi migration tạo trong `public` đều bật
 row-level security. Nếu server đã có hai role Supabase là `anon` và `authenticated`, `006` cho hai
 role này policy chỉ đọc trên `market_lexicons` và `industry_taxonomies`, còn `021` thu hồi mọi quyền
