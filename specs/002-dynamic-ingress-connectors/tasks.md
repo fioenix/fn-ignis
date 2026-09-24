@@ -53,4 +53,12 @@
   the three removed rows do not return after restart or migration re-apply, and keep vocabulary in
   SQL rather than Python (touches: `sql/`, SQLite schema/seed registration, PostgreSQL migration
   registration, `tests/unit/test_vocabulary_loader.py`, repository migration-contract tests;
-  depends-on: T014)
+  depends-on: T014). Verified through the SQLite bootstrap and a fresh portable PostgreSQL
+  migration contract; the documented full-directory Docker init path remains T017.
+- [ ] T017 Make a fresh `docker-compose.prod.yml` database execute the complete mounted `sql/`
+  sequence through `020` on `timescale/timescaledb-ha:pg16`: preserve the Supabase RLS policies
+  when roles `authenticated` and `anon` exist, avoid failing on plain TimescaleDB when they do not,
+  prove the actual container init exits cleanly with the final schema and retired vocabulary, and
+  keep the public Docker instructions aligned with that verified path (touches:
+  `sql/006_supabase_security_hardening.sql`, Docker init contract tests, `README.md`,
+  `README.vi.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE.vi.md`; depends-on: T016)

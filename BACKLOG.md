@@ -806,11 +806,21 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   khớp theo `trim(term)` vì `live ` được seed kèm dấu cách. `013` giữ nguyên. SQLite chạy 020 ngay
   sau bước replay 013 trong `_ensure_schema`, nên khởi động lại không đưa ba dòng trở lại. Kiểm
   trên cả SQLite và PostgreSQL thật (`tests/integration/test_tiktok_ui_noise_retirement.py`, 5 ca
-  mỗi backend, 0 skip): cài đặt mới chỉ còn 10 term; database cũ mất đúng ba dòng; chạy lại 020,
-  chạy lại 013 rồi 020, hay khởi động lại đều không đổi gì; qua loader và `TikTokPlugin` thật, post
-  công khai có ba từ này được giữ, còn `đang phát trực tiếp` và các cụm thông báo/hộp thư còn lại
-  vẫn bị loại; domain rỗng vẫn fail closed. Negative control: bỏ `tin nhắn` khỏi 020 làm 6 ca fail
-  trên hai backend; cho SQLite chạy 020 trước bước replay làm 4 ca fail.
+  mỗi backend, 0 skip): SQLite bootstrap mới và PostgreSQL contract database áp dụng toàn bộ
+  migration tương thích với PostgreSQL thuần đều chỉ còn 10 term; database cũ mất đúng ba dòng;
+  chạy lại 020, chạy lại 013 rồi 020, hay khởi động lại đều không đổi gì. Qua loader và
+  `TikTokPlugin` thật, post công khai có ba từ này được giữ, còn `đang phát trực tiếp` và các cụm
+  thông báo/hộp thư còn lại vẫn bị loại; domain rỗng vẫn fail closed. Negative control: bỏ
+  `tin nhắn` khỏi 020 làm 6 ca fail trên hai backend; cho SQLite chạy 020 trước bước replay làm
+  4 ca fail.
+
+- [ ] **Docker Compose không khởi tạo được PostgreSQL mới — giao T017.** Kiểm ngày 24/09/2026 bằng
+  đúng image `timescale/timescaledb-ha:pg16` và mount `./sql:/docker-entrypoint-initdb.d` như
+  `docker-compose.prod.yml`: container exit 3 tại `sql/006_supabase_security_hardening.sql` vì
+  PostgreSQL thuần không có role `authenticated`; chuỗi init dừng trước `020`. T016 không gây ra
+  lỗi này, nhưng test migration của T016 phải bỏ qua `006`, nên không được dùng nó làm bằng chứng
+  rằng toàn bộ chuỗi Docker init đã chạy. T017 giữ chính sách RLS trên Supabase, làm `006` chạy an
+  toàn khi hai role Supabase không tồn tại, rồi chứng minh container thật chạy hết chuỗi đến `020`.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)

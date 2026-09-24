@@ -1,4 +1,4 @@
-"""T016: three ordinary words leave the TikTok UI-noise vocabulary, on every install.
+"""T016: three ordinary words leave the TikTok UI-noise vocabulary on both repositories.
 
 The grid guard rejected 46 real titles in a 15,771-title sample, and three rows did nearly all of
 it: the English "live" (40) and the Vietnamese words for "notification" (3) and "message" (2).
@@ -18,7 +18,7 @@ import pytest
 from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 
-from conftest import REPO_SQL, all_postgres_migrations
+from conftest import REPO_SQL, portable_postgres_migrations
 
 DOMAIN = "tiktok_ui_noise"
 RETIREMENT = "020_retire_ambiguous_tiktok_ui_noise.sql"
@@ -44,9 +44,9 @@ def _terms(rows) -> set:
 
 
 async def _open_fresh(case):
-    """A database built from nothing: every migration on PostgreSQL, first bootstrap on SQLite."""
+    """A fresh SQLite bootstrap or a fresh portable PostgreSQL migration contract."""
     if case.name == "postgres":
-        case.apply(*all_postgres_migrations())
+        case.apply(*portable_postgres_migrations())
     repository = case.repository()
     await load_market_vocabulary(repository)
     return repository
@@ -59,7 +59,7 @@ def test_the_seed_still_carries_the_retired_rows_so_the_premise_is_real():
 
 
 @pytest.mark.asyncio
-async def test_a_fresh_install_ends_without_the_three_rows_and_with_every_other_one(lexicon_case):
+async def test_a_fresh_repository_schema_ends_with_only_the_kept_rows(lexicon_case):
     repository = await _open_fresh(lexicon_case)
     await repository.close()
 
@@ -72,7 +72,7 @@ async def test_a_fresh_install_ends_without_the_three_rows_and_with_every_other_
 async def test_an_existing_database_loses_exactly_the_three_rows(lexicon_case):
     """Only the three rows go: no other domain and no other tiktok_ui_noise term is touched."""
     if lexicon_case.name == "postgres":
-        lexicon_case.apply(*(m for m in all_postgres_migrations() if m != RETIREMENT))
+        lexicon_case.apply(*(m for m in portable_postgres_migrations() if m != RETIREMENT))
         before = lexicon_case.rows()
         lexicon_case.apply(RETIREMENT)
     else:

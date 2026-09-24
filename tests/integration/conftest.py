@@ -410,11 +410,11 @@ REPO_SQL = Path(__file__).resolve().parents[2] / "sql"
 SUPABASE_ONLY_MIGRATIONS = frozenset({"006_supabase_security_hardening.sql"})
 
 
-def all_postgres_migrations() -> tuple:
-    """Every migration in the order a fresh PostgreSQL applies them from sql/ (initdb order).
+def portable_postgres_migrations() -> tuple:
+    """Repository SQL files that run on plain PostgreSQL, in filename order.
 
-    Read from the directory rather than listed, so a migration added later is covered without
-    anyone remembering to add it here.
+    The documented Docker Compose init path mounts the whole directory and is a separate contract:
+    sql/006 currently requires Supabase roles and blocks that path before later migrations run.
     """
     return tuple(
         path.name

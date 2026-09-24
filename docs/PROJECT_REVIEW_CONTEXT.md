@@ -589,5 +589,9 @@ the Postgres/Timescale repository; `sql/001` enables the Timescale extension whe
 falls back to native Postgres indexes when not. The vocabulary seeds `sql/012`–`sql/014` are re-applied
 on every SQLite bootstrap, because the domains they seed are system-owned and no tool writes
 them; on Postgres they are run once by hand. `sql/020` retires three of those rows and runs on
-SQLite right after that replay, so a restart cannot re-insert them. `sql/015` adds a column instead of seeding rows, so
-SQLite applies it through an `ALTER TABLE` in `_ensure_schema`.
+SQLite right after that replay, so a restart cannot re-insert them. Its PostgreSQL contract runs
+the repository SQL files that are portable to plain PostgreSQL. That is not evidence for the
+documented Docker Compose init path: mounting the full `sql/` directory currently stops at
+`sql/006` when the plain TimescaleDB image lacks Supabase roles, before `020` can run. T017 owns
+that deployment defect. `sql/015` adds a column instead of seeding rows, so SQLite applies it
+through an `ALTER TABLE` in `_ensure_schema`.
