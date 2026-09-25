@@ -1004,6 +1004,27 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   khỏi Market evidence. Serializer MCP và provenance tests giữ contract này, còn URL/title chỉ là
   dữ liệu hiển thị.
 
+### Hậu kiểm v0.5: Chất lượng bằng chứng cho quyết định thị trường
+
+- [x] **Kiểm tra ba hành trình sản phẩm trên dữ liệu dev thật, ngày 25/09/2026.** Đã chạy
+  Attention-only, Market trực tiếp và handoff Attention sang Market cho bài toán AI hỗ trợ vận hành
+  cửa hàng bán lẻ nhỏ tại Việt Nam. Contract vận hành đạt yêu cầu: workspace dùng database chung,
+  Brief và lineage đọc lại được, ba journal đều hoàn tất, Attention không phát Opportunity Index,
+  citation có `observation_id` và vai trò evidence đúng. Tuy nhiên, chất lượng quyết định chưa đạt:
+  chỉ 2/50 signal của Market trực tiếp và 0/50 signal của handoff đủ liên quan ở ngưỡng kiểm tra;
+  0/21 kết luận Market đạt xác suất được citation hỗ trợ từ 0,70 trở lên. Scorecard vẫn báo
+  `MEDIUM` ở mức 71,5 và 79,9, nên điểm confidence hiện tại chưa phản ánh độ liên quan với Market
+  Brief. Chi tiết và giới hạn của phép đo nằm trong
+  [decision note](docs/decisions/2026-09-25-decision-grade-evidence-qualification.md).
+
+- [ ] **Ưu tiên kế tiếp được đề xuất: Decision-Grade Evidence Qualification.** Chưa mở spec hay
+  plan cho tới khi PO duyệt hướng. Phạm vi đề xuất gồm đồng bộ vocabulary trước ingress kể cả cold
+  start, chấm question relevance ở downstream, hạ trần confidence khi thiếu bằng chứng phù hợp,
+  không phát Opportunity Index khi evidence chưa đủ, trả rõ "không có handoff candidate đạt chuẩn"
+  và thêm negative control cho nội dung có keyword nhưng sai ngữ nghĩa. Chưa ưu tiên Live Alerts,
+  mở rộng taxonomy hay thêm connector, vì các hướng đó chỉ khuếch đại hoặc tăng số lượng evidence
+  chưa đủ tin cậy.
+
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 
 Các mục dưới đây chưa có measurement, decision hay release target. Chúng được giữ để không mất ý
