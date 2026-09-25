@@ -197,3 +197,16 @@
   `uv lock --check` clean. actionlint 1.7.7 exits 1 on all four workflows because of the
   pre-existing SC2012 info at `ci.yml:119`, with output byte-identical to `bfa6004`. GitHub Actions
   has not run this workflow on a pull request, and branch protection is unchanged.
+
+## Phase 12: Upload Artifact Node.js 24 Runtime (2026-09-25)
+
+- [ ] T023 Replace the Performance workflow's only `actions/upload-artifact@v4` consumer, which
+  GitHub runs under a deprecated Node.js 20 compatibility path, with the immutable commit for
+  `actions/upload-artifact` v7.0.1 (`043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`), whose action
+  runtime is Node.js 24. Preserve the artifact name, path, retention, missing-file policy,
+  conditions, job identity, triggers and benchmark contract. Add source-level contracts that pin
+  both the full commit and its release comment; prove they fail on `@v4` and the moving `@v7` tag.
+  Complete the task only after a GitHub-hosted pull-request run succeeds, uploads the benchmark
+  artifact, and contains no Node.js 20 warning attributed to `actions/upload-artifact` (touches:
+  `.github/workflows/performance.yml`, `tests/unit/test_t021_ci_runtime_pinning.py`, `BACKLOG.md`,
+  this file; depends-on: T021, T022).

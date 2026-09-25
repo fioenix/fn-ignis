@@ -29,6 +29,10 @@ DOCKER_PUBLISH = WORKFLOWS / "docker-publish.yml"
 
 PINNED_RUNNER = "ubuntu-24.04"
 SETUP_UV = "astral-sh/setup-uv"
+UPLOAD_ARTIFACT = "actions/upload-artifact"
+PINNED_UPLOAD_ARTIFACT = (
+    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+)
 # Compose Init holds the reviewed pin; the other workflows are compared with it, not with a copy.
 UV_WORKFLOWS = (CI, PERFORMANCE, COMPOSE_INIT)
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
@@ -84,6 +88,24 @@ def _setup_uv_lines(path: Path) -> list:
         line.strip()
         for line in path.read_text(encoding="utf-8").splitlines()
         if re.match(rf"\s*(-\s+)?uses:\s*{re.escape(SETUP_UV)}@", line)
+    ]
+
+
+def _upload_artifact_steps(path: Path) -> list:
+    return [
+        step
+        for job in _jobs(path).values()
+        for step in job.get("steps", [])
+        if str(step.get("uses", "")).startswith(f"{UPLOAD_ARTIFACT}@")
+    ]
+
+
+def _upload_artifact_lines(path: Path) -> list:
+    """The raw `uses:` lines, because the release comment beside the SHA is lost in parsing."""
+    return [
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if re.match(rf"\s*(-\s+)?uses:\s*{re.escape(UPLOAD_ARTIFACT)}@", line)
     ]
 
 
@@ -186,6 +208,36 @@ def test_no_workflow_installs_the_latest_uv_binary():
         if str((step.get("with") or {}).get("version", "latest")) == "latest"
     ]
     assert latest == [], f"these workflows install `latest` uv instead of a reviewed version: {latest}"
+
+
+# --- upload-artifact -----------------------------------------------------------------------------
+
+
+def test_upload_artifact_uses_the_reviewed_node24_release_commit():
+    steps = _upload_artifact_steps(PERFORMANCE)
+    assert len(steps) == 1, f"Performance must hold exactly one upload-artifact step; found {len(steps)}"
+    assert steps[0]["uses"] == PINNED_UPLOAD_ARTIFACT, (
+        f"Performance uses {steps[0]['uses']!r}; the reviewed Node.js 24 release is "
+        f"{PINNED_UPLOAD_ARTIFACT!r}"
+    )
+
+
+def test_upload_artifact_pin_carries_its_release_comment():
+    lines = _upload_artifact_lines(PERFORMANCE)
+    assert lines == [f"uses: {PINNED_UPLOAD_ARTIFACT} # v7.0.1"], (
+        "the upload-artifact SHA must carry its reviewed release beside it"
+    )
+
+
+def test_upload_artifact_keeps_the_benchmark_record_contract():
+    step = _upload_artifact_steps(PERFORMANCE)[0]
+    assert step.get("if") == "${{ !cancelled() }}"
+    assert step.get("with") == {
+        "name": "sc001-benchmark-${{ github.run_id }}",
+        "path": "benchmark-results/",
+        "retention-days": 90,
+        "if-no-files-found": "warn",
+    }
 
 
 # --- identities that must not move with the runtime ----------------------------------------------
