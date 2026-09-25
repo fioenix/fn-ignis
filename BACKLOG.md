@@ -917,6 +917,15 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   bạch: phía repository đã xong; việc chạy trên GitHub chưa được chứng minh cho tới khi PR cấp plan
   đầu tiên được mở; check chưa phải required cho tới khi Codex đổi branch protection trong GitHub
   settings và đọc lại cấu hình.
+
+- [x] **Chuyển bước tải artifact của benchmark sang Node.js 24 — T023 của spec 002, ngày
+  25/09/2026.** Performance workflow đã thay `actions/upload-artifact@v4` bằng full commit SHA của
+  v7.0.1, phiên bản dùng Node.js 24. Tên artifact, đường dẫn, thời hạn lưu và cách xử lý khi thiếu
+  file giữ nguyên. Hai contract mới từ chối cả `@v4` lẫn moving tag `@v7`; một contract khác ghim
+  nguyên cấu hình artifact. Lượt chạy pull request `36086256496` thành công trên GitHub-hosted
+  `ubuntu-24.04`, không có annotation hay cảnh báo Node.js 20. Artifact
+  `sc001-benchmark-36086256496` (ID `10844150733`, 886 byte) chứa đủ hai record đạt ngưỡng: SQLite
+  P95 25,550 ms và PostgreSQL P95 18,526 ms, cùng dưới ngưỡng 50 ms.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)
