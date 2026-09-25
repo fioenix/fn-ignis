@@ -200,7 +200,7 @@
 
 ## Phase 12: Upload Artifact Node.js 24 Runtime (2026-09-25)
 
-- [ ] T023 Replace the Performance workflow's only `actions/upload-artifact@v4` consumer, which
+- [x] T023 Replace the Performance workflow's only `actions/upload-artifact@v4` consumer, which
   GitHub runs under a deprecated Node.js 20 compatibility path, with the immutable commit for
   `actions/upload-artifact` v7.0.1 (`043fb46d1a93c77aae656e7c1c64a875d1fc6a0a`), whose action
   runtime is Node.js 24. Preserve the artifact name, path, retention, missing-file policy,
@@ -209,4 +209,13 @@
   Complete the task only after a GitHub-hosted pull-request run succeeds, uploads the benchmark
   artifact, and contains no Node.js 20 warning attributed to `actions/upload-artifact` (touches:
   `.github/workflows/performance.yml`, `tests/unit/test_t021_ci_runtime_pinning.py`, `BACKLOG.md`,
-  this file; depends-on: T021, T022).
+  this file; depends-on: T021, T022). The pull-request Performance run `36086256496` succeeded on
+  GitHub-hosted `ubuntu-24.04`, downloaded the exact pinned commit, and completed the upload step.
+  Artifact `sc001-benchmark-36086256496` (ID `10844150733`, 886 bytes) contained passing SQLite
+  and PostgreSQL records at P95 25.550 ms and 18.526 ms against the unchanged 50 ms threshold.
+  The check emitted no annotations, and its complete log contained no Node.js 20 deprecation or
+  compatibility warning. Local RED on `@v4`: 2 failed and 13 passed; GREEN on the pin: 16 passed;
+  moving-tag negative control on `@v7`: 2 failed and 13 passed. Unit suite: 1086 passed and 2
+  skipped with the shell's `YOUTUBE_API_KEY` removed from the test process; Ruff, `uv lock
+  --check`, and `git diff --check` passed. actionlint 1.7.7 still reports only the pre-existing
+  SC2012 info at `ci.yml:119`.
