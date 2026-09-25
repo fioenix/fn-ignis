@@ -153,9 +153,9 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   `.venv/bin/python scripts/t021_read_path_benchmark.py --backend sqlite --enforce`.
   Từ 22/09/2026, SC-001 có gate CI riêng. `.github/workflows/performance.yml` chạy lại chính
   benchmark đó với `--enforce` trên cả hai backend, kích hoạt khi push vào `main`, `release/*`,
-  `hotfix/*`, theo lịch hằng tuần và khi dispatch tay. Workflow cố ý không gắn vào `pull_request`:
-  benchmark seed 10.000 observation mỗi backend, bắt mọi PR trả chi phí đó chỉ để chặn một
-  regression vốn chỉ gây hậu quả khi đã lên nhánh được bảo vệ. Hợp đồng benchmark không đổi một
+  `hotfix/*`, theo lịch hằng tuần và khi dispatch tay. Ban đầu workflow cố ý không gắn vào
+  `pull_request`, vì benchmark seed 10.000 observation mỗi backend. Từ 25/09/2026, T022 của spec
+  002 thêm trigger cho mọi pull request, xem mục T022 bên dưới. Hợp đồng benchmark không đổi một
   tham số nào; 19 contract trong `tests/unit/test_t024_performance_workflow.py` từ chối workflow
   nào bỏ `--enforce`, nuốt exit code, hoặc đi tới PostgreSQL bằng đường nào khác ngoài
   `IGNIS_TEST_POSTGRES_DSN`. Còn một giới hạn chưa đóng: repo publish được tên job ổn định, nhưng
@@ -881,6 +881,42 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   nào bị skip. Compose init chạy đủ 22 file, 0 dòng `ERROR:`, dọn sạch container, volume và network.
   Chưa áp dụng lên database dev hay production; database khởi tạo trước `022` phải chạy file này
   một lần bằng quyền owner.
+
+- [x] **Ghim runner và bản `setup-uv` trong CI — T021 của spec 002, ngày 25/09/2026.** Các lượt
+  chạy GitHub Actions của release v0.5.0 in hai cảnh báo: `astral-sh/setup-uv@v3` chạy trên Node.js
+  20, phiên bản GitHub đã deprecated, còn `ubuntu-latest` là nhãn GitHub sẽ tự chuyển sang Ubuntu 26.
+  Lượt Docker Publish của v0.5.0 vẫn thành công, nên đây là bảo trì phòng ngừa chứ không phải xử lý
+  sự cố. `Secret scan`, ma trận test Python trong CI và job Docker Publish giờ chạy trên
+  `ubuntu-24.04`, giống Performance và Compose Init. CI và Performance cài uv qua
+  `astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7` (v10.2.0) với uv `0.12.17`, đúng cấu
+  hình đã review của Compose Init, thay cho `@v3` kèm `version: "latest"`. Tên workflow, tên job,
+  trigger, permissions, ma trận Python 3.11–3.14, service PostgreSQL, lệnh benchmark và quy tắc tag
+  Docker không đổi. 13 contract trong `tests/unit/test_t021_ci_runtime_pinning.py` fail nếu
+  `ubuntu-latest`, `@v3` hay `latest` quay lại. Trước khi sửa có 7 contract fail, sau khi sửa cả 13
+  pass; ba negative control (trả lại một runner, một tag `@v3`, một `latest`) đều fail đúng assert.
+  Unit suite 1071 passed, 2 skipped; actionlint 1.7.7 không báo gì mới, chỉ còn một info SC2012 có
+  sẵn ở `ci.yml:119`. Chưa xác nhận trên GitHub vì task này không push; Codex sẽ đọc lượt chạy remote
+  sau khi mở PR.
+
+- [x] **Chạy benchmark SC-001 trên pull request — T022 của spec 002, phần repository, ngày
+  25/09/2026.** Repo chỉ mở PR khi kết thúc một plan chứ không mở cho từng task, nên chi phí seed
+  10.000 observation mỗi backend chỉ phát sinh một lần ở ranh giới tích hợp plan. Mức chi phí này đã
+  được chấp nhận. Trước T022, check `SC-001 get_top_clusters P95` không bao giờ báo trên PR nên không
+  thể chọn làm required check. `.github/workflows/performance.yml` giờ có trigger `pull_request` cho
+  mọi PR, không lọc theo nhánh, đường dẫn hay loại sự kiện, vì một required check bị filter bỏ qua sẽ
+  không bao giờ báo và PR phải chờ mãi. Các trigger cũ giữ nguyên: push vào `main`, `release/*`,
+  `hotfix/*`, lịch hằng tuần và dispatch tay. Job id, tên job, hợp đồng benchmark, hai lệnh
+  `--enforce`, service PostgreSQL, `IGNIS_TEST_POSTGRES_DSN`, runner `ubuntu-24.04`, SHA `setup-uv`
+  và uv `0.12.17` của T021, permissions, concurrency và timeout 30 phút cũng không đổi.
+  `tests/unit/test_t024_performance_workflow.py` bỏ contract cấm `pull_request` của T024, thay bằng
+  các contract bắt buộc trigger này phải có và không kèm filter; file giờ có 31 contract. Trước khi
+  sửa workflow, 5 contract fail, cả 5 đều vì thiếu `pull_request`; sau khi sửa, cả 31 pass. Bỏ
+  `pull_request`, thêm `paths`, `paths-ignore`, `branches`, `branches-ignore` hoặc `types`, hay đổi
+  tên job đều làm ít nhất một contract fail. Unit suite 1083 passed, 2 skipped; actionlint 1.7.7 thoát
+  mã 1 vì info SC2012 có sẵn ở `ci.yml:119`, output giống hệt bản trước T022. Ba trạng thái cần tách
+  bạch: phía repository đã xong; việc chạy trên GitHub chưa được chứng minh cho tới khi PR cấp plan
+  đầu tiên được mở; check chưa phải required cho tới khi Codex đổi branch protection trong GitHub
+  settings và đọc lại cấu hình.
 ---
 
 ## 🚀 1. Hiện Trạng Hệ Thống Đã Hoàn Thành (Current Accomplishments)

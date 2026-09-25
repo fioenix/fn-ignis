@@ -125,6 +125,8 @@
   `IGNIS_TEST_POSTGRES_DSN` the PostgreSQL adapter's tests skip and the scope measures 76.31%, so
   the gate fails; that is correct, and it means the gate requires the database service CI already
   provides. The SC-001 performance workflow is untouched and stays out of the PR matrix.
+  (It is still a separate workflow outside the `ci.yml` matrix; since spec 002 T022 it also
+  runs on pull requests.)
   Two backend divergences that this work surfaced are **not** fixed here, because correcting
   repository behaviour is outside a coverage task: `log_event`/`get_recent_logs` normalize `level`
   on PostgreSQL and not on SQLite, and `save_platform_credentials` lower-cases `platform` on
@@ -168,3 +170,9 @@
   GitHub settings operation that no file here performs, and it has not been read back. Until it is,
   the workflow reports and does not block. Evidence and the remaining step:
   `.handoff/T024-sc001-ci-gate.handoff.md`
+  **Superseded in part by `specs/002-dynamic-ingress-connectors/tasks.md` T022 (25/09/2026).**
+  Pull requests are opened once per plan, so the workflow now also runs on every unfiltered
+  `pull_request` and its check can report there; the contract that forbade `pull_request` was
+  replaced by contracts that require it. Branch protection is still unchanged: the check is not
+  required until Codex applies the setting after the first plan-level pull request runs it and
+  reads it back.
