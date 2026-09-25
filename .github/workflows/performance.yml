@@ -36,8 +36,9 @@ on:
 permissions:
   contents: read
 
-# Latency is measured, so two of these must not share a runner's CPU. Queue rather than cancel:
-# each protected-branch push is a data point, and cancelling the earlier one drops it.
+# Do not cancel a measurement already in progress when a newer event arrives. GitHub keeps at most
+# one pending run per concurrency group, so this protects the active measurement rather than
+# promising that every intermediate commit remains queued.
 concurrency:
   group: performance-${{ github.ref }}
   cancel-in-progress: false

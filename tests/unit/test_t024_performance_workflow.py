@@ -453,8 +453,8 @@ def test_the_workflow_grants_no_more_than_read_access():
     assert "permissions" not in _job(), "the job overrides the read-only workflow permissions"
 
 
-def test_runs_on_one_ref_queue_rather_than_cancel():
-    """Latency runs must not share a runner, and a cancelled run drops a data point."""
+def test_a_new_event_does_not_cancel_the_measurement_in_progress():
+    """The active run finishes; GitHub may still replace an older pending run with a newer one."""
     concurrency = _load(PERFORMANCE_WORKFLOW).get("concurrency")
     assert concurrency == EXPECTED_CONCURRENCY, (
         f"concurrency is {concurrency!r}; expected {EXPECTED_CONCURRENCY!r}"

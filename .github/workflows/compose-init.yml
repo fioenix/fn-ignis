@@ -8,7 +8,8 @@ name: Compose Init
 #
 # Separate from ci.yml on purpose: a Python matrix failure and a fresh-init failure are different
 # problems, and a separate check name tells them apart at a glance. Separate from performance.yml
-# too, which measures latency on protected branches only; this gate runs on every pull request.
+# too: both run on pull requests, but this gate proves fresh database initialization while that one
+# measures read-path latency.
 #
 # The database under test is not restated here. Image, environment, mount and the migration list
 # all come from the Compose file and sql/ through the integration test; this workflow supplies a
