@@ -163,3 +163,37 @@
   version each fails the intended assertions. Unit suite 1071 passed, 2 skipped; actionlint 1.7.7
   reports only the pre-existing SC2012 info at `ci.yml:119`. Remote GitHub execution is not
   verified because this task does not push.
+
+## Phase 11: SC-001 Gate on Plan-Level Pull Requests (2026-09-25)
+
+- [x] T022 Run the Performance workflow on every `pull_request`, so the `SC-001 get_top_clusters
+  P95` check reports on the plan-level pull request and can then be selected as a required status
+  check. Pull requests are opened only at the end of a plan, not per task, so the benchmark's cost
+  is paid once per plan integration and is accepted; no merge queue, manual-dispatch workaround or
+  relaxed threshold. The trigger carries no `branches`, `branches-ignore`, `paths` or
+  `paths-ignore` filter, because a required check that a filter skips never reports and the pull
+  request waits forever. Keep the existing push triggers for `main`, `release/*` and `hotfix/*`,
+  the weekly schedule and `workflow_dispatch`; keep job id `sc001-read-path-p95` and job name
+  `SC-001 get_top_clusters P95`; keep the benchmark contract, both `--enforce` invocations, the
+  PostgreSQL service and `IGNIS_TEST_POSTGRES_DSN`, `ubuntu-24.04`, the T021 setup-uv SHA and uv
+  `0.12.17`, read-only permissions, concurrency and the 30-minute timeout. Replace the T024
+  contract that forbade `pull_request` with contracts that require it unfiltered, and pin the rest
+  (touches: `.github/workflows/performance.yml`, `tests/unit/test_t024_performance_workflow.py`,
+  `BACKLOG.md`, `specs/001-core-storage-stable-ingress/tasks.md`, this file; depends-on: T021).
+  Repository-side work can complete in one commit. Remote execution is not proven until the first
+  plan-level pull request runs the check, and the check is not required until Codex changes branch
+  protection and reads the setting back; this commit claims neither.
+  Repository side complete: `performance.yml` gains a bare `pull_request:` trigger and two comment
+  updates; nothing else in the file changes. `test_the_gate_is_not_attached_to_every_pull_request`
+  is replaced, and the file now holds 31 contracts, up from 19: `pull_request` present, no branch
+  filter, no path filter, default activity types, no `pull_request_target`, exact push/schedule/
+  dispatch triggers, job id, literal T021 runner/setup-uv SHA/uv version, a single DSN reachable
+  only through `IGNIS_TEST_POSTGRES_DSN`, no job-level permissions override, exact concurrency and a
+  30-minute timeout. RED before the workflow edit: 5 failed, 26 passed, all 5 on the missing
+  `pull_request`. GREEN after: 31 passed. Negative controls, each restored to a matching SHA-256:
+  removing `pull_request` fails 5; adding `paths`, `paths-ignore`, `branches`, `branches-ignore` or
+  `types` fails the matching contract; renaming the job fails the T024 name contract and the T021
+  identity contract. Unit suite 1083 passed, 2 skipped; workflow contracts 82 passed; Ruff clean;
+  `uv lock --check` clean. actionlint 1.7.7 exits 1 on all four workflows because of the
+  pre-existing SC2012 info at `ci.yml:119`, with output byte-identical to `bfa6004`. GitHub Actions
+  has not run this workflow on a pull request, and branch protection is unchanged.

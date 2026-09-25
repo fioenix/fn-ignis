@@ -6,10 +6,12 @@ name: Performance
 # instead of sitting in a handoff note nobody re-reads.
 #
 # Separate from ci.yml on purpose. The benchmark seeds 10,000 observations per backend through the
-# repository's own writer, which is minutes of work; charging every pull request for that would
-# catch on a feature branch a regression that only matters once it reaches a protected branch. So
-# this runs where the consequence is -- pushes to main and to the release and hotfix lines -- plus
-# a weekly run and a manual one. Ordinary PR CI is untouched and stays fast.
+# repository's own writer, which is minutes of work, and a separate check name tells a latency
+# regression apart from a test failure. It runs on every pull request because pull requests here
+# are opened once per plan, not per task, so that cost is paid at the plan integration boundary
+# and nowhere else -- and because a check that never reports on a pull request can never be made
+# a required status check (spec 002 T022). It also runs on pushes to main and to the release and
+# hotfix lines, weekly, and on demand.
 #
 # The benchmark contract is not restated here. Corpus floor, threshold, warm-up count, iteration
 # count, nearest-rank percentile and the result-shape checks all live in
@@ -19,6 +21,9 @@ name: Performance
 on:
   push:
     branches: [ main, "release/*", "hotfix/*" ]
+  # Every pull request, unfiltered. A required check that a branch, path or type filter skips never
+  # reports, and the pull request then waits on it forever.
+  pull_request:
   # Weekly, early Monday UTC. A push-only gate measures the code and never the floor it runs on:
   # the hosted image, the service container and the interpreter all move underneath a latency
   # threshold, and a quiet week would hide that until the next release push.
@@ -41,8 +46,8 @@ jobs:
   # The job id and `name` below are the status string a branch-protection rule selects. Renaming
   # either retires the gate silently -- protection keeps requiring a check that no longer reports --
   # so tests/unit/test_t024_performance_workflow.py pins both. Making this job *required* is a
-  # GitHub settings operation, not something this file can do; see
-  # .handoff/T024-sc001-ci-gate.handoff.md.
+  # GitHub branch-protection setting, not something this file can do: it is applied after the
+  # check has reported on a pull request at least once, and it holds only once read back.
   sc001-read-path-p95:
     name: SC-001 get_top_clusters P95
     # Pinned, not `ubuntu-latest`. A latency threshold cannot sit on a label that re-points to new
