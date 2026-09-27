@@ -229,7 +229,7 @@ question relevance, the reason code and the `UNRELIABLE` cap on both backends.
 
 **Purpose**: Synchronize public contracts and prove migration, backend, artifact, and package gates.
 
-- [ ] T036 [P] Update the 47-tool catalog and Agent operating flow in `README.md`, `README.vi.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE.vi.md`, and `CLAUDE.md`
+- [X] T036 [P] Update the 47-tool catalog and Agent operating flow in `README.md`, `README.vi.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE.vi.md`, and `CLAUDE.md`
 - [ ] T037 [P] Add static convention gates for typed qualification tools, manifest count, migration inventory, no prompt transcript storage, and no hardcoded vocabulary in `tests/unit/test_tool_manifests_drift.py`, `tests/unit/test_repo_conventions.py`, and `tests/unit/test_sql_packaging.py`
 - [ ] T038 Run the complete `quickstart.md` scenarios with a scratch PostgreSQL server, including negative controls that remove one migration command and re-enable unsupported evidence; record exact results in `.handoff/008-decision-grade-evidence.handoff.md`
 - [ ] T039 Run unit, full dual-backend integration, ruff, `git diff --check`, `uv lock --check`, `uv build`, and fresh Compose init; verify no PostgreSQL case was skipped and no scratch resource or credential remains

@@ -168,7 +168,7 @@ conflict result reported.
 
 | AI Agent / Client | Configuration & Standards | Capabilities Supported |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 45 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 47 FastMCP Tools & Handlers, Prompts, Resources, Automatic SOP Injection |
 | **Claude Code** | [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Agent Skills Standard, Native In-Chat Artifacts |
 | **Antigravity / Gemini Code** | [`AGENTS.md`](AGENTS.md) + Agent Skills | Dual-Track Continuous Radar & Dynamic Lexicon Ingress |
 | **OpenAI Codex** | [`.codex/instructions.md`](.codex/instructions.md), [`.codexrules`](.codexrules) | Thread Session Continuity (`codex://threads/...`), Structured Tools |
@@ -192,7 +192,7 @@ conflict result reported.
 
 ---
 
-## 🛠️ FastMCP Tool & Resource Catalog (45 Tools)
+## 🛠️ FastMCP Tool & Resource Catalog (47 Tools)
 
 ### 1. Research Workspaces & the Two Surfaces
 - **`propose_research_workspace(host_workspace, research_name, slug?)`**: Report where a research would live. Read-only — it creates no directory, manifest, database record or journal.
@@ -205,10 +205,12 @@ conflict result reported.
 ### 2. Market Research & Strategic Synthesis
 - **`run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)`**: End-to-end mission creation, multi-platform refinement loop, and white space synthesis.
 - **`create_research_mission(topic, keywords, platforms?, geo?, timeframe?)`**: Initialize a targeted research campaign outside a research workspace. It declares no surface and is never gated on a Brief.
-- **`execute_mission_ingress(mission_id)`**: Execute deep multi-platform data collection with automated quality gate evaluation.
+- **`execute_mission_ingress(mission_id)`**: Execute deep multi-platform data collection with automated quality gate evaluation. The first mission after a server start loads the persisted vocabulary before any connector call, and a workspace run records what every connector surface did.
+- **`get_mission_evidence_qualification_batch(mission_id, cursor?, limit?)`**: Read a bounded batch (default 25, max 50) of a surfaced mission's evidence that still needs a semantic judgment, together with the immutable frame it is judged against — the confirmed Market Brief revision, or the Attention title and keywords.
+- **`submit_mission_evidence_qualifications(mission_id, frame_fingerprint, assessments)`**: Record the host Agent's typed judgments (relation, purpose, confidence, bounded reason code, evaluator identifier) atomically. A stale frame, a foreign or duplicate observation, or any invalid assessment refuses the whole batch; an identical replay is idempotent; a different judgment of an already judged observation is refused. No prompt, transcript or credential is stored.
 - **`evaluate_mission_quality(mission_id)`**: Re-evaluate multi-dimensional quality scorecard.
 - **`discover_market_opportunities(mission_id)`**: Discover unserved content and product white spaces.
-- **`get_mission_analysis(mission_id, limit?, platform?)`**: Retrieve the full synthesized analysis for the mission's surface: ranked evidence, quality scorecard, lineage, and — for `MARKET` only — the Opportunity Index and white spaces.
+- **`get_mission_analysis(mission_id, limit?, platform?)`**: Retrieve the full synthesized analysis for the mission's surface: ranked evidence, quality scorecard with a separate question-relevance dimension, lineage, the qualification counts, and — for `MARKET` only, and only for a topic whose qualified demand and supply meet the evidence minimum — the Opportunity Index and white spaces. Otherwise it returns `QUALIFICATION_REQUIRED`, `UNAVAILABLE` or `INSUFFICIENT_RELEVANT_EVIDENCE` with a machine-readable reason; an `ATTENTION` analysis reports `handoff_status` and never selects a fallback candidate.
 - **`generate_mission_artifact(mission_id)`**: Export a standalone, high-contrast interactive Infographic HTML Dashboard to `reports/`.
 - **`list_research_missions(limit)`**: List all historical research campaigns.
 - **`get_current_session_mission(session_id)`**: Restore active mission linked to current chat thread.
