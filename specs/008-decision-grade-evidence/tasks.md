@@ -202,17 +202,26 @@ qualification rows, and HTML output field for field.
 
 ### Tests for User Story 4
 
-- [ ] T031 [P] [US4] Add RED scorecard tests for question relevance, complete-but-insufficient `LOW` cap, pending/unavailable `UNRELIABLE` cap, and unaffected legacy missions in `tests/unit/test_evidence_qualification.py`
-- [ ] T032 [P] [US4] Add RED MCP serializer and citation-role tests for all four qualification counts and withheld-reason parity in `tests/unit/test_data_provenance.py`
-- [ ] T033 [P] [US4] Add RED deterministic HTML tests for hidden Opportunity Index UI, qualification summary, and no-qualified-candidate state in `tests/unit/test_html_builder.py`
+- [X] T031 [P] [US4] Add RED scorecard tests for question relevance, complete-but-insufficient `LOW` cap, pending/unavailable `UNRELIABLE` cap, and unaffected legacy missions in `tests/unit/test_evidence_qualification.py`
+- [X] T032 [P] [US4] Add RED MCP serializer and citation-role tests for all four qualification counts and withheld-reason parity in `tests/unit/test_data_provenance.py`
+- [X] T033 [P] [US4] Add RED deterministic HTML tests for hidden Opportunity Index UI, qualification summary, and no-qualified-candidate state in `tests/unit/test_html_builder.py`
 
 ### Implementation for User Story 4
 
-- [ ] T034 [US4] Calculate question relevance and confidence caps from persisted qualification summaries in `src/ignis/infrastructure/harness/quality_evaluator.py` and `src/ignis/domain/harness_models.py`
-- [ ] T035 [US4] Render qualification status and withheld-verdict states consistently in `src/ignis/infrastructure/templates/html_builder.py`, `src/ignis/infrastructure/templates/html/mission_report.html`, and `src/ignis/interfaces/mcp/server.py`
+- [X] T034 [US4] Calculate question relevance and confidence caps from persisted qualification summaries in `src/ignis/infrastructure/harness/quality_evaluator.py` and `src/ignis/domain/harness_models.py`
+- [X] T035 [US4] Render qualification status and withheld-verdict states consistently in `src/ignis/infrastructure/templates/html_builder.py`, `src/ignis/infrastructure/templates/html/mission_report.html`, and `src/ignis/interfaces/mcp/server.py`
 
 **Checkpoint**: US4 makes the decision boundary independently auditable in both machine and human
 outputs.
+
+**US4 evidence (27/09/2026):** RED before T034/T035: 13 failed (8 scorecard tests on the missing
+`apply_qualification`, 3 HTML tests on the missing qualification section, 2 serializer tests on a
+fixture whose supply carried no topic query -- a test fixture fault, corrected before any
+production change). Two serializer tests passed at RED because T025 had already shipped the shared
+`_surface_payload` block. Green: unit 1186 passed, 1 skipped; integration 552 passed, 3 skipped
+(same intentional skips), including the parity contract in which the MCP analysis, the artifact
+response, the canonical rows and the rendered HTML agree on every qualification count, the
+question relevance, the reason code and the `UNRELIABLE` cap on both backends.
 
 ---
 

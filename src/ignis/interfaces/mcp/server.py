@@ -735,6 +735,18 @@ async def handle_evaluate_mission_quality(mission_id: str) -> str:
     signals = await comp["repository"].get_mission_signals(m_id)
     tf_days = timeframe_to_days(mission.timeframe)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
+    qualification = await _qualification_for(comp, mission, signals)
+    extra: Dict[str, Any] = {}
+    if qualification is not None:
+        # Whether a conclusion is permitted decides the confidence cap, so the same analysis that
+        # every other boundary runs decides it here too.
+        clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
+        report = comp["strategic_reasoner"].analyze_mission(
+            mission=mission, signals=signals, clusters=clusters, scorecard=scorecard,
+            qualification=qualification,
+        )
+        comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
+        extra = _qualification_payload(report)
 
     return json.dumps(
         {
@@ -743,10 +755,13 @@ async def handle_evaluate_mission_quality(mission_id: str) -> str:
             "language_precision": scorecard.language_precision,
             "data_freshness_score": scorecard.data_freshness_score,
             "creator_diversity_score": scorecard.creator_diversity_score,
+            "question_relevance_score": scorecard.question_relevance_score,
+            "qualification_counts": scorecard.qualification_counts,
             "overall_confidence": scorecard.overall_confidence,
             "confidence_level": scorecard.confidence_level.value,
             "flaws_detected": scorecard.flaws_detected,
             "strengths_detected": scorecard.strengths_detected,
+            **extra,
         },
         ensure_ascii=False,
         indent=2
@@ -784,6 +799,7 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
         market_brief=brief,
         qualification=await _qualification_for(comp, mission, signals),
     )
+    comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
 
     return json.dumps(
         {
@@ -1683,6 +1699,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         attention_context_signals=await _attention_context_signals(comp, mission),
         qualification=qualification,
     )
+    comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
 
     if qualification is not None:
         # Every raw observation stays readable, labelled with what its judgment made of it.
@@ -1698,6 +1715,8 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         "language_precision": scorecard.language_precision,
         "data_freshness_score": scorecard.data_freshness_score,
         "creator_diversity_score": scorecard.creator_diversity_score,
+        "question_relevance_score": scorecard.question_relevance_score,
+        "qualification_counts": scorecard.qualification_counts,
         "strengths": scorecard.strengths_detected,
         "flaws": scorecard.flaws_detected,
     }
@@ -1776,6 +1795,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         market_brief=brief,
         qualification=await _qualification_for(comp, mission, signals),
     )
+    comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
     
     platform_breakdown = {}
     macro_trends = []
@@ -1828,6 +1848,8 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
                 "coverage_score": scorecard.coverage_score,
                 "data_freshness_score": scorecard.data_freshness_score,
                 "language_precision": scorecard.language_precision,
+                "question_relevance_score": scorecard.question_relevance_score,
+                "qualification_counts": scorecard.qualification_counts,
                 "strengths": scorecard.strengths_detected,
                 "flaws": scorecard.flaws_detected,
             },

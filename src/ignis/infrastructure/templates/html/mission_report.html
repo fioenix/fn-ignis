@@ -179,6 +179,65 @@
     </section>
     {% endif %}
 
+    <!-- EVIDENCE QUALIFICATION: WHAT WAS USED, WHAT WAS NOT, AND WHY -->
+    {% if qualification %}
+    <section class="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-4"
+      data-qualification-status="{{ qualification.status }}"{% if qualification.reason_code %} data-reason-code="{{ qualification.reason_code }}"{% endif %}>
+      <div class="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div>
+          <h2 class="text-lg md:text-xl font-black text-slate-900">Evidence Qualification</h2>
+          <p class="text-xs text-slate-500">Each observation was judged against this mission's question. Only qualified support can carry a conclusion; context stays visible and never counts.</p>
+        </div>
+        <span class="text-xs px-3 py-1 rounded-full font-black tracking-wide border {% if qualification.status == 'READY' %}bg-emerald-50 text-emerald-800 border-emerald-200{% else %}bg-amber-50 text-amber-800 border-amber-200{% endif %}">{{ qualification.status }}</span>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-center">
+        <div class="bg-slate-50 border border-slate-200 rounded-2xl p-3">
+          <div class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Question relevance</div>
+          <div class="text-2xl font-black text-slate-900" style="font-variant-numeric: tabular-nums;"><span data-dimension="question_relevance">{{ qualification.question_relevance_score }}</span>%</div>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-2xl p-3">
+          <div class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Qualified support</div>
+          <div class="text-2xl font-black text-emerald-700" style="font-variant-numeric: tabular-nums;"><span data-count="qualified_support">{{ qualification.qualified_support }}</span></div>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-2xl p-3">
+          <div class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Context only</div>
+          <div class="text-2xl font-black text-sky-700" style="font-variant-numeric: tabular-nums;"><span data-count="context_only">{{ qualification.context_only }}</span></div>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-2xl p-3">
+          <div class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Excluded</div>
+          <div class="text-2xl font-black text-slate-600" style="font-variant-numeric: tabular-nums;"><span data-count="excluded_irrelevant">{{ qualification.excluded_irrelevant }}</span></div>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-2xl p-3">
+          <div class="text-[10px] uppercase tracking-wider font-bold text-slate-500">Unassessed</div>
+          <div class="text-2xl font-black text-rose-700" style="font-variant-numeric: tabular-nums;"><span data-count="unassessed">{{ qualification.unassessed }}</span></div>
+        </div>
+      </div>
+      {% if qualification.status != 'READY' %}
+      <div class="withheld-verdict bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 space-y-1">
+        <div class="font-black uppercase tracking-wider text-[10px]">Conclusion withheld</div>
+        <p>{{ qualification.reason }}</p>
+        <p class="text-amber-800">Raw observations remain listed below for audit. An empty conclusion means "not permitted by the evidence", not "the market has no signal".</p>
+      </div>
+      {% endif %}
+      {% if handoff_status %}
+      <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs text-slate-700" data-handoff-status="{{ handoff_status }}">
+        {% if handoff_status == 'NO_QUALIFIED_CANDIDATE' %}
+        <div class="font-black text-slate-900">No qualified handoff candidate</div>
+        <p>No cluster is directly relevant to the declared scope and backed by two independent sources, so none is proposed as the next Market question. This describes the evidence, not the market.</p>
+        {% elif handoff_status == 'QUALIFIED_CANDIDATE_AVAILABLE' %}
+        <div class="font-black text-slate-900">Qualified handoff candidates</div>
+        <ul class="list-disc list-inside space-y-0.5">
+          {% for c in qualified_handoff_candidates %}<li>{{ c.topic_label or c.cluster_id }} &mdash; {{ c.reason }}</li>{% endfor %}
+        </ul>
+        {% else %}
+        <div class="font-black text-slate-900">Handoff not yet assessed</div>
+        <p>{{ qualification.reason }}</p>
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+    {% endif %}
+
     <!-- ACT 1.5: DATA INGRESS & PROVENANCE AUDIT -->
     {% if channel_summaries %}
     <section class="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-5">
@@ -298,7 +357,7 @@
     </section>
 
     <!-- ACT 3: WHITE SPACE OPPORTUNITY MATRIX (FULL 10 TOPICS CANVAS) -->
-    {% if market_opportunities %}
+    {% if market_opportunities and opportunity_index_applies %}
     <section class="bg-white border border-slate-200 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
       <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 border-b border-slate-100 pb-4">
         <div>

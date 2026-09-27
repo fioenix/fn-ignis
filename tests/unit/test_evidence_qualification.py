@@ -609,3 +609,92 @@ async def test_a_replay_is_idempotent_and_a_rewrite_is_a_conflict(research):
     assert stored[str(held[0].observation_id)].relation is QualificationRelation.QUALIFIED_SUPPORT
     assert stored[str(held[0].observation_id)].brief_revision_id == brief.brief_revision_id
     assert "get_mission_evidence_qualification_batch" in recorded["next_step"]
+
+
+# --- User Story 4: question relevance is its own dimension, and it caps confidence --------------
+
+from ignis.domain.harness_models import ConfidenceLevel, QualificationSummary  # noqa: E402
+from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator  # noqa: E402
+
+
+def _strong_scorecard() -> QualityScorecard:
+    """High freshness and diversity: everything but relevance says HIGH."""
+    return QualityScorecard(
+        coverage_score=100.0, language_precision=95.0, data_freshness_score=100.0,
+        creator_diversity_score=100.0, overall_confidence=92.0,
+        confidence_level=ConfidenceLevel.HIGH,
+    )
+
+
+def _summary(status, unassessed=0, qualified=0, context=0, excluded=40, relevance=0.0):
+    return QualificationSummary(
+        status=status, total_evidence=qualified + context + excluded + unassessed,
+        qualified_support=qualified, context_only=context, excluded_irrelevant=excluded,
+        unassessed=unassessed, question_relevance_score=relevance,
+        reason=None if status == "READY" else "withheld", reason_code=None,
+    )
+
+
+def test_question_relevance_is_reported_beside_the_other_dimensions_not_inside_them():
+    scorecard = _strong_scorecard()
+    QualityEvaluator().apply_qualification(scorecard, _summary("READY", qualified=8, context=12, relevance=13.3))
+
+    assert scorecard.question_relevance_score == 13.3
+    assert scorecard.qualification_counts == {
+        "qualified_support": 8, "context_only": 12, "excluded_irrelevant": 40, "unassessed": 0,
+    }
+    assert (scorecard.coverage_score, scorecard.data_freshness_score,
+            scorecard.creator_diversity_score, scorecard.language_precision) == (100.0, 100.0, 100.0, 95.0)
+
+
+def test_complete_but_insufficient_evidence_caps_confidence_at_low_whatever_else_is_high():
+    scorecard = _strong_scorecard()
+    QualityEvaluator().apply_qualification(scorecard, _summary("INSUFFICIENT_RELEVANT_EVIDENCE"))
+
+    assert scorecard.confidence_level is ConfidenceLevel.LOW
+    assert scorecard.overall_confidence < settings_medium_threshold()
+    assert any("relevant" in flaw.lower() for flaw in scorecard.flaws_detected)
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        _summary("QUALIFICATION_REQUIRED", unassessed=10),
+        _summary("UNAVAILABLE", unassessed=1),
+        # Complete but carrying an explicit UNASSESSED row: still not trustworthy.
+        _summary("INSUFFICIENT_RELEVANT_EVIDENCE", unassessed=2),
+        _summary("READY", qualified=5, unassessed=1, relevance=11.0),
+    ],
+)
+def test_pending_unavailable_or_unassessed_evidence_caps_confidence_at_unreliable(summary):
+    scorecard = _strong_scorecard()
+    QualityEvaluator().apply_qualification(scorecard, summary)
+
+    assert scorecard.confidence_level is ConfidenceLevel.UNRELIABLE
+    assert scorecard.overall_confidence < settings_low_threshold()
+
+
+def test_a_fully_assessed_sufficient_mission_keeps_its_confidence():
+    scorecard = _strong_scorecard()
+    QualityEvaluator().apply_qualification(scorecard, _summary("READY", qualified=30, excluded=10, relevance=75.0))
+
+    assert scorecard.confidence_level is ConfidenceLevel.HIGH and scorecard.overall_confidence == 92.0
+
+
+def test_a_legacy_mission_scorecard_is_untouched():
+    scorecard = _strong_scorecard()
+    QualityEvaluator().apply_qualification(scorecard, None)
+
+    assert scorecard == _strong_scorecard()
+
+
+def settings_medium_threshold():
+    from ignis.config import settings
+
+    return settings.CONFIDENCE_MEDIUM_THRESHOLD
+
+
+def settings_low_threshold():
+    from ignis.config import settings
+
+    return settings.CONFIDENCE_LOW_THRESHOLD

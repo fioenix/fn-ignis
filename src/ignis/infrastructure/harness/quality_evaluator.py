@@ -4,7 +4,7 @@ from typing import List, Optional, Set
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.config import settings
 from ignis.domain.entities import TrendSignal
-from ignis.domain.harness_models import ConfidenceLevel, QualityScorecard
+from ignis.domain.harness_models import ConfidenceLevel, QualificationSummary, QualityScorecard
 from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 
@@ -234,3 +234,59 @@ class QualityEvaluator:
             flaws_detected=flaws,
             strengths_detected=strengths,
         )
+
+    # Lowest first, so a cap is the minimum of the computed level and the ceiling.
+    _LEVEL_ORDER = (
+        ConfidenceLevel.UNRELIABLE,
+        ConfidenceLevel.LOW,
+        ConfidenceLevel.MEDIUM,
+        ConfidenceLevel.HIGH,
+    )
+
+    def apply_qualification(
+        self,
+        scorecard: QualityScorecard,
+        qualification: Optional[QualificationSummary],
+    ) -> QualityScorecard:
+        """Add question relevance to a scorecard and cap its confidence by the evidence minimum.
+
+        Relevance is reported as its own dimension; coverage, localization, freshness and
+        creator diversity are left exactly as measured, because low coverage and low relevance
+        are different failures. Confidence is capped: at UNRELIABLE while any judgment is missing,
+        failed or unassessed, and at LOW when assessment is complete but no conclusion met the
+        minimum -- however fresh and diverse the collected evidence is. A mission with no
+        declared surface is returned untouched.
+        """
+        if qualification is None:
+            return scorecard
+        scorecard.question_relevance_score = qualification.question_relevance_score
+        scorecard.qualification_counts = qualification.counts
+
+        ceiling: Optional[ConfidenceLevel] = None
+        if qualification.status in ("QUALIFICATION_REQUIRED", "UNAVAILABLE") or qualification.unassessed:
+            ceiling = ConfidenceLevel.UNRELIABLE
+            scorecard.flaws_detected.append(
+                f"{qualification.unassessed}/{qualification.total_evidence} observations carry no "
+                "usable semantic judgment, so confidence is capped at UNRELIABLE."
+            )
+        elif qualification.status == "INSUFFICIENT_RELEVANT_EVIDENCE":
+            ceiling = ConfidenceLevel.LOW
+            scorecard.flaws_detected.append(
+                "Qualified relevant evidence is insufficient for any conclusion "
+                f"(question relevance {qualification.question_relevance_score}%), so confidence is "
+                "capped at LOW."
+            )
+        if ceiling is None:
+            return scorecard
+
+        order = self._LEVEL_ORDER
+        if order.index(scorecard.confidence_level) > order.index(ceiling):
+            scorecard.confidence_level = ceiling
+        # The number follows the label, so a reader never sees 79.9 printed beside LOW.
+        upper = (
+            settings.CONFIDENCE_LOW_THRESHOLD
+            if ceiling is ConfidenceLevel.UNRELIABLE
+            else settings.CONFIDENCE_MEDIUM_THRESHOLD
+        )
+        scorecard.overall_confidence = min(scorecard.overall_confidence, round(upper - 0.1, 1))
+        return scorecard

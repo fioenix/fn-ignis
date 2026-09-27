@@ -857,6 +857,9 @@ async def test_keyword_noise_corpus_replay_emits_zero_unsupported_conclusion_uni
     assert analysis["opportunity_index_applies"] is False
     assert analysis["market_opportunities"] == []
     assert analysis["qualification"]["reason_code"] == "NO_SUFFICIENT_TOPIC"
+    scorecard = analysis["quality_scorecard"]
+    assert scorecard["confidence_level"] in ("LOW", "UNRELIABLE")
+    assert scorecard["question_relevance_score"] == analysis["qualification"]["question_relevance_score"]
 
 
 @pytest.mark.asyncio
@@ -1277,3 +1280,67 @@ async def test_attention_handoff_offers_only_the_directly_relevant_two_source_cl
     assert candidate["independent_sources"] == 2
     eligible = [row for row in analysis["cluster_qualification"] if row["handoff_eligible"]]
     assert [row["cluster_id"] for row in eligible] == [candidate["cluster_id"]]
+
+
+
+# --- User Story 4: the MCP payload, the stored rows and the artifact say the same thing ----------
+
+
+@pytest.mark.asyncio
+async def test_artifact_parity_mcp_payload_canonical_rows_and_html_agree_field_for_field(
+    repository_case, host_workspace, monkeypatch, tmp_path
+):
+    import re as regex
+
+    from ignis.domain.research_workspace import QualificationRelation
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    controls = CORPUS["semantic_controls"]
+    items = [*controls["positive"], *controls["negative"]]
+    mission, _revision, held = await _market_with(
+        repository, store, workspace, items, CONTROL_KEYWORDS,
+        outcomes=[("google", "google", "HEALTHY", 1), ("youtube", "youtube", "HEALTHY", 5)],
+    )
+    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    monkeypatch.setattr(mcp_server, "_get_secure_reports_dir", lambda: reports_dir)
+    judgments = _judgments_by_observation(held, items, "control_judgment")
+    # Leave one observation unjudged, so every count is non-trivial and the state is withheld.
+    pending = sorted(judgments)[-1]
+    await mcp_server.handle_submit_mission_evidence_qualifications(
+        str(mission.id),
+        json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id)))[
+            "frame_fingerprint"
+        ],
+        [{"observation_id": oid, "judged_by": "fixture-host", **j}
+         for oid, j in judgments.items() if oid != pending],
+    )
+
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
+    artifact = json.loads(await mcp_server.handle_generate_mission_artifact(str(mission.id)))
+    html = Path(artifact["artifact_file"]).read_text(encoding="utf-8")
+    rows = await store.list_evidence_qualifications(mission.id)
+
+    relations = [q.relation for q in rows]
+    canonical = {
+        "total_evidence": len(held),
+        "qualified_support": relations.count(QualificationRelation.QUALIFIED_SUPPORT),
+        "context_only": relations.count(QualificationRelation.CONTEXT_ONLY),
+        "excluded_irrelevant": relations.count(QualificationRelation.EXCLUDED_IRRELEVANT),
+        "unassessed": len(held) - len(rows) + relations.count(QualificationRelation.UNASSESSED),
+    }
+    block = analysis["qualification"]
+    assert {k: block[k] for k in canonical} == canonical
+    assert artifact["qualification"] == block
+    assert artifact["analysis_status"] == analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
+    assert artifact["opportunity_index_applies"] is analysis["opportunity_index_applies"] is False
+    assert artifact["quality_scorecard"]["confidence_level"] == analysis["quality_scorecard"]["confidence_level"] == "UNRELIABLE"
+    for name in ("qualified_support", "context_only", "excluded_irrelevant", "unassessed"):
+        assert f'data-count="{name}">{block[name]}<' in html
+    relevance = regex.search(r'data-dimension="question_relevance">([0-9.]+)<', html).group(1)
+    assert float(relevance) == block["question_relevance_score"]
+    assert f'data-reason-code="{block["reason_code"]}"' in html
+    assert 'id="demandSupplyBarChart"' not in html
