@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from itertools import zip_longest
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
-from ignis.application.ports.connector_port import IConnectorPlugin
+from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.exceptions import (
@@ -73,6 +73,8 @@ class SurfaceProbeResult:
     status: ChannelHealthStatus
     signals_collected: int
     note: Optional[str] = None
+    # The keywords the surface attested to having queried; a measured zero covers only these.
+    queried_keywords: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -441,14 +443,16 @@ class ConnectorPluginRegistry:
 
         Every eligible surface -- one whose platform was asked for and which has a keyword probe
         -- gets exactly one outcome, including one skipped by an open circuit. An empty answer is
-        EMPTY_NO_DATA only when the surface ran and had no reason to come back empty: a surface
-        that says in advance it cannot search without a session is AUTH_REQUIRED, because its
-        silence measured nothing.
+        EMPTY_NO_DATA only when the surface positively attests which queries it ran, through the
+        `SearchAttestation` handed to it; the outcome then names exactly those keywords. A surface
+        that attests nothing, says it cannot search without a session, or ran no query at all
+        measured nothing, and is recorded as DEGRADED or AUTH_REQUIRED.
         """
         tasks = []
         enabled_plugins = []
         outcomes: Dict[str, SurfaceProbeResult] = {}
         blocked_reasons: Dict[str, Optional[str]] = {}
+        attestations: Dict[str, Optional[SearchAttestation]] = {}
 
         for plugin_id, plugin in self._plugins.items():
             if target_platforms and plugin.platform not in target_platforms:
@@ -486,8 +490,14 @@ class ConnectorPluginRegistry:
                 continue
 
             blocked_reasons[plugin_id] = await self._keyword_search_blocked_reason(plugin)
+            attestations[plugin_id] = self._attestation_for(plugin)
             enabled_plugins.append(plugin)
-            tasks.append(self._safe_search(plugin, breaker, keywords, geo, timeframe, custom_timeframe, limit))
+            tasks.append(
+                self._safe_search(
+                    plugin, breaker, keywords, geo, timeframe, custom_timeframe, limit,
+                    attestation=attestations[plugin_id],
+                )
+            )
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         all_signals: List[TrendSignal] = []
@@ -511,19 +521,9 @@ class ConnectorPluginRegistry:
                         details={"keywords": keywords, "error": str(result)}
                     )
             elif isinstance(result, list):
-                blocked = blocked_reasons.get(plugin.plugin_id)
-                if result:
-                    status = ChannelHealthStatus.HEALTHY
-                elif blocked:
-                    status = ChannelHealthStatus.AUTH_REQUIRED
-                else:
-                    status = ChannelHealthStatus.EMPTY_NO_DATA
-                outcomes[plugin.plugin_id] = SurfaceProbeResult(
-                    platform=plugin.platform.value,
-                    connector_surface=plugin.plugin_id,
-                    status=status,
-                    signals_collected=len(result),
-                    note=blocked if status is ChannelHealthStatus.AUTH_REQUIRED else None,
+                outcomes[plugin.plugin_id] = self._search_outcome(
+                    plugin, result, blocked_reasons.get(plugin.plugin_id),
+                    attestations.get(plugin.plugin_id),
                 )
                 all_signals.extend(result)
                 logger.info(f"Plugin [{plugin.name}] retrieved {len(result)} signals for keywords {keywords}.")
@@ -538,6 +538,46 @@ class ConnectorPluginRegistry:
 
         kept = await self._apply_scope_guard(all_signals, scope, [])
         return SearchPassResult(signals=kept, outcomes=list(outcomes.values()))
+
+    @staticmethod
+    def _attestation_for(plugin: IConnectorPlugin) -> Optional[SearchAttestation]:
+        """A fresh attestation for a plugin that can report what it ran, else None."""
+        import inspect
+
+        if "attestation" in inspect.signature(plugin.search_signals).parameters:
+            return SearchAttestation()
+        return None
+
+    @staticmethod
+    def _search_outcome(
+        plugin: IConnectorPlugin,
+        result: List[TrendSignal],
+        blocked: Optional[str],
+        attestation: Optional[SearchAttestation],
+    ) -> SurfaceProbeResult:
+        """Classify one surface's returned list without trusting an unattested silence."""
+        queried = tuple(attestation.queried) if attestation else ()
+        if result:
+            status, note = ChannelHealthStatus.HEALTHY, None
+        elif blocked or (attestation and attestation.blocked_reason):
+            status, note = ChannelHealthStatus.AUTH_REQUIRED, blocked or attestation.blocked_reason
+        elif attestation is None:
+            status = ChannelHealthStatus.DEGRADED
+            note = "Returned nothing without attesting that it ran the query; nothing was measured."
+        elif not queried:
+            status = ChannelHealthStatus.DEGRADED
+            note = "; ".join(attestation.failures)[:200] or "No query was executed."
+        else:
+            status = ChannelHealthStatus.EMPTY_NO_DATA
+            note = ("Partial: " + "; ".join(attestation.failures))[:200] if attestation.failures else None
+        return SurfaceProbeResult(
+            platform=plugin.platform.value,
+            connector_surface=plugin.plugin_id,
+            status=status,
+            signals_collected=len(result),
+            note=note,
+            queried_keywords=queried,
+        )
 
     @staticmethod
     async def _keyword_search_blocked_reason(plugin: IConnectorPlugin) -> Optional[str]:
@@ -719,6 +759,7 @@ class ConnectorPluginRegistry:
         timeframe: Timeframe,
         custom_timeframe: Optional[str] = None,
         limit: Optional[int] = None,
+        attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
         try:
             import inspect
@@ -728,6 +769,8 @@ class ConnectorPluginRegistry:
                 kwargs["custom_timeframe"] = custom_timeframe
             if limit is not None and "limit" in sig.parameters:
                 kwargs["limit"] = limit
+            if attestation is not None:
+                kwargs["attestation"] = attestation
             signals = await plugin.search_signals(**kwargs)
             breaker.record_success()
             return self._stamp_connector_surface(plugin, signals)

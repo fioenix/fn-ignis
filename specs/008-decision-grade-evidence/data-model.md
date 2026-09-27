@@ -21,7 +21,8 @@ One factual result for one connector surface during one workspace mission run.
 | `connector_surface` | Exact probe surface | Required; unique within a run |
 | `status` | Observed run outcome | `HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`, `RATE_LIMITED`, or `DEGRADED` |
 | `signals_collected` | Number returned by this surface before mission-level preservation | Integer greater than or equal to zero |
-| `query_fingerprint` | Digest of keyword/geo/timeframe/scope sent to the surface | Required; never contains credentials |
+| `queried_keywords` | Keywords the surface attested to having queried during the run | Required non-empty for `EMPTY_NO_DATA`; a connector that probes ten keywords never lists an eleventh |
+| `query_fingerprint` | Digest of this surface's `queried_keywords`, geo and timeframe | Required; never contains credentials |
 | `completed_at` | When this surface finished or failed | Required UTC instant |
 
 **Uniqueness**: `(run_id, connector_surface)`.
@@ -31,7 +32,11 @@ would permit a probe outcome to name a mission different from the run that produ
 
 **Interpretation**:
 
-- `EMPTY_NO_DATA` is a measured zero only for the query identified by `query_fingerprint`.
+- `EMPTY_NO_DATA` is a measured zero only for the keywords in `queried_keywords`, and only when
+  `query_fingerprint` is the digest of exactly that query in the mission's geo and timeframe. A
+  connector records a keyword only after positively attesting that the query ran; an empty answer
+  it cannot attest (no browser runtime, unusable session, failed capture, swallowed HTTP error) is
+  `DEGRADED` or `AUTH_REQUIRED`, never `EMPTY_NO_DATA`.
 - Failure, missing auth, rate limiting, and circuit-open behavior map to non-zero-evidence statuses;
   they never count as zero supply.
 - A reopened mission uses outcomes from its latest completed run. A failed later run does not

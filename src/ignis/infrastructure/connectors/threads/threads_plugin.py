@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from ignis.application.ports.connector_port import IConnectorPlugin
+from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
 from ignis.config import settings
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import (
@@ -272,13 +272,20 @@ class ThreadsPlugin(IConnectorPlugin):
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 20,
+        attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
-        """Probe the Threads keyword search endpoint for each research keyword."""
+        """Probe the Threads keyword search endpoint for each research keyword.
+
+        `attestation`, when given, records a keyword only once its search answer was actually read:
+        a Graph response, or a captured browser payload. A browser run that captured nothing -- no
+        Playwright, an unusable session, a failed capture -- is recorded as a failure.
+        """
         if not await self._has_graph_token():
             storage_state = await self._browser_storage_state()
             if storage_state:
                 return await self._search_via_browser_session(
-                    keywords=keywords, storage_state=storage_state, geo=geo, limit=limit
+                    keywords=keywords, storage_state=storage_state, geo=geo, limit=limit,
+                    attestation=attestation,
                 )
             if not self._auth_manager:
                 return await self._fetch_legacy_public(geo=geo, limit=limit)
@@ -315,6 +322,8 @@ class ThreadsPlugin(IConnectorPlugin):
                     "access_token": token,
                 },
             )
+            if attestation is not None:
+                attestation.executed(keyword)
             items = [it for it in (payload.get("data") or []) if str(it.get("id")) not in seen_ids]
             for it in items:
                 seen_ids.add(str(it.get("id")))
@@ -738,6 +747,7 @@ class ThreadsPlugin(IConnectorPlugin):
         storage_state: Dict[str, Any],
         geo: GeoCode,
         limit: int,
+        attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
         """Run search per keyword using Direct GraphQL fast-path, falling back to Playwright."""
         all_signals: List[TrendSignal] = []
@@ -755,6 +765,8 @@ class ThreadsPlugin(IConnectorPlugin):
                     geo=geo,
                 )
                 if direct_payload:
+                    if attestation is not None:
+                        attestation.executed(keyword)
                     records = extract_records(
                         [direct_payload],
                         is_record=self._is_browser_post,
@@ -766,7 +778,8 @@ class ThreadsPlugin(IConnectorPlugin):
             if not keyword_signals:
                 url = f"{self.BROWSER_SEARCH_URL}?{urllib.parse.urlencode({'q': keyword, 'serp_type': 'default'})}"
                 keyword_signals = await self._fetch_via_browser_session(
-                    url=url, storage_state=storage_state, geo=geo, limit=limit, keyword=keyword
+                    url=url, storage_state=storage_state, geo=geo, limit=limit, keyword=keyword,
+                    attestation=attestation,
                 )
 
             for signal in keyword_signals:
@@ -785,6 +798,7 @@ class ThreadsPlugin(IConnectorPlugin):
         geo: GeoCode,
         limit: int,
         keyword: Optional[str] = None,
+        attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
         payloads = await collect_json_payloads(
             url=url,
@@ -792,6 +806,12 @@ class ThreadsPlugin(IConnectorPlugin):
             url_markers=self.BROWSER_API_MARKERS,
             geo=geo,
         )
+        if attestation is not None and keyword:
+            # A captured payload proves the search page answered; none proves nothing.
+            if payloads:
+                attestation.executed(keyword)
+            else:
+                attestation.failed(keyword, "no search payload was captured")
         records = extract_records(
             payloads,
             is_record=self._is_browser_post,

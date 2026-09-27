@@ -214,6 +214,7 @@ def _outcome(**overrides) -> MissionProbeOutcome:
         connector_surface="youtube",
         status=ChannelHealthStatus.EMPTY_NO_DATA,
         signals_collected=0,
+        queried_keywords=("ai cho cửa hàng",),
         query_fingerprint="b" * 64,
         completed_at=NOW,
     )
@@ -238,6 +239,8 @@ def test_only_a_completed_empty_surface_measures_zero():
         {"status": "FINE"},
         {"connector_surface": ""},
         {"query_fingerprint": ""},
+        # A measured zero has to name what it measured.
+        {"queried_keywords": ()},
     ],
 )
 def test_a_probe_outcome_that_contradicts_itself_is_refused(overrides):
@@ -698,3 +701,27 @@ def settings_low_threshold():
     from ignis.config import settings
 
     return settings.CONFIDENCE_LOW_THRESHOLD
+
+
+@pytest.mark.parametrize(
+    "reason, expected",
+    [
+        ("INSUFFICIENT_CONTENT", QualificationStatus.QUALIFICATION_REQUIRED),
+        ("EVALUATOR_UNAVAILABLE", QualificationStatus.UNAVAILABLE),
+    ],
+)
+def test_an_explicit_unassessed_row_never_opens_the_verdict_gate(reason, expected):
+    """Every row persisted is not every observation assessed: UNASSESSED is not an assessment."""
+    from ignis.domain.research_workspace import QualificationContext
+
+    mission_id, judged, thin = uuid4(), uuid4(), uuid4()
+    rows = [
+        _qualification(mission_id=mission_id, observation_id=judged),
+        _qualification(mission_id=mission_id, observation_id=thin, relation="UNASSESSED",
+                       purpose="CONTEXT", confidence=None, reason_code=reason),
+    ]
+
+    context = QualificationContext.build([judged, thin], rows, (), geo="VN", timeframe="7d")
+
+    assert context.progress.unjudged == 0 and context.progress.unassessed == 1
+    assert context.assessment_state is expected

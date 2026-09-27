@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from ignis.application.ports.connector_port import IConnectorPlugin
+from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
 from ignis.config import settings
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import (
@@ -233,12 +233,19 @@ class ReelsPlugin(IConnectorPlugin):
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 20,
+        attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
-        """Probe top Reels per keyword through the Instagram hashtag search endpoints."""
+        """Probe top Reels per keyword through the Instagram hashtag search endpoints.
+
+        `attestation`, when given, records a keyword only once its search answer was actually read:
+        a top-media response, or a captured browser payload. A browser run that captured nothing
+        is recorded as a failure rather than as an empty market.
+        """
         tier, credential = await self.resolve_auth_tier()
         if tier == "session_cookies" and credential:
             return await self._search_via_browser_session(
-                keywords=keywords, storage_state=credential, geo=geo, limit=limit
+                keywords=keywords, storage_state=credential, geo=geo, limit=limit,
+                attestation=attestation,
             )
 
         token = await self._require_token()
@@ -254,6 +261,8 @@ class ReelsPlugin(IConnectorPlugin):
             hashtag = self._to_hashtag(keyword)
             hashtag_id = await self._resolve_hashtag_id(hashtag, token)
             if not hashtag_id:
+                if attestation is not None:
+                    attestation.failed(keyword, "the hashtag could not be resolved")
                 continue
 
             payload = await self._graph_get(
@@ -265,6 +274,8 @@ class ReelsPlugin(IConnectorPlugin):
                     "access_token": token,
                 },
             )
+            if attestation is not None:
+                attestation.executed(keyword)
             items = [
                 it for it in (payload.get("data") or [])
                 if self._is_reel(it) and str(it.get("id")) not in seen_ids
@@ -491,6 +502,7 @@ class ReelsPlugin(IConnectorPlugin):
         storage_state: Dict[str, Any],
         geo: GeoCode,
         limit: int,
+        attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
         """Walk each keyword's public hashtag page using the captured browser session."""
         all_signals: List[TrendSignal] = []
@@ -506,6 +518,7 @@ class ReelsPlugin(IConnectorPlugin):
                 geo=geo,
                 limit=limit,
                 keyword=keyword,
+                attestation=attestation,
             )
             for signal in signals:
                 reel_id = str(signal.metadata.get("reel_id") or "")
@@ -523,6 +536,7 @@ class ReelsPlugin(IConnectorPlugin):
         geo: GeoCode,
         limit: int,
         keyword: Optional[str] = None,
+        attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
         payloads = await collect_json_payloads(
             url=url,
@@ -530,6 +544,12 @@ class ReelsPlugin(IConnectorPlugin):
             url_markers=self.BROWSER_API_MARKERS,
             geo=geo,
         )
+        if attestation is not None and keyword:
+            # A captured payload proves the hashtag page answered; none proves nothing.
+            if payloads:
+                attestation.executed(keyword)
+            else:
+                attestation.failed(keyword, "no search payload was captured")
         records = extract_records(
             payloads,
             is_record=self._is_browser_reel,

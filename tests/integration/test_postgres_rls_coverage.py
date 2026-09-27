@@ -125,8 +125,8 @@ OWNER_ROWS_SINCE_023 = (
     f" ('{MISSION}', '{OBSERVATION}', 'frame', 'EXCLUDED_IRRELEVANT', 'CONTEXT', 0.9,"
     " 'KEYWORD_ONLY', 'owner')",
     "INSERT INTO mission_probe_outcomes (run_id, platform, connector_surface, status,"
-    f" signals_collected, query_fingerprint, completed_at) VALUES ('{RUN}', 'youtube', 'youtube',"
-    " 'EMPTY_NO_DATA', 0, 'fp', now())",
+    f" signals_collected, queried_keywords, query_fingerprint, completed_at) VALUES ('{RUN}',"
+    " 'youtube', 'youtube', 'EMPTY_NO_DATA', 0, ARRAY['t018'], 'fp', now())",
 )
 # A valid row a client could write to each table, so an INSERT that is allowed actually lands.
 # Ids are supplied rather than defaulted, so the outcome turns only on the table privilege and RLS
@@ -144,8 +144,8 @@ CLIENT_ROWS = {
     f" ('{uuid4()}', '{SPARE_MISSION}', '{SPARE_OBSERVATION}', 'frame', 'CONTEXT_ONLY', 'CONTEXT', 0.5,"
     " 'ADJACENT_ONLY', 'client')",
     "mission_probe_outcomes": "(id, run_id, platform, connector_surface, status,"
-    f" signals_collected, query_fingerprint, completed_at) VALUES ('{uuid4()}', '{RUN}', 'tiktok',"
-    " 'tiktok', 'EMPTY_NO_DATA', 0, 'fp', now())",
+    " signals_collected, queried_keywords, query_fingerprint, completed_at) VALUES"
+    f" ('{uuid4()}', '{RUN}', 'tiktok', 'tiktok', 'EMPTY_NO_DATA', 0, ARRAY['t018'], 'fp', now())",
     "mission_run_journals": "(id, workspace_id, mission_id, journal_path, sequence) VALUES"
     f" ('{uuid4()}', '{WORKSPACE}', '{MISSION}', '/t018/journal-2', 2)",
     "mission_writer_claims": f"(mission_id, run_id) VALUES ('{SPARE_MISSION}', '{uuid4()}')",

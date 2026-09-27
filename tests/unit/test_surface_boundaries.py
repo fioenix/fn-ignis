@@ -434,9 +434,9 @@ from ignis.domain.research_workspace import (  # noqa: E402
     QualificationStatus,
     QualifiedObservation,
     assess_topic_sufficiency,
+    compute_query_fingerprint,
 )
 
-QUERY = "q" * 64
 RUN = uuid4()
 
 
@@ -449,20 +449,27 @@ def _qualified(purpose, source=None, platform="youtube"):
     )
 
 
-def _probe(surface, status="EMPTY_NO_DATA", platform=None, query=QUERY, count=0):
+TOPIC = "ai cho cửa hàng"
+GEO, TIMEFRAME = "VN", "7d"
+
+
+def _probe(surface, status="EMPTY_NO_DATA", platform=None, queried=(TOPIC,), fingerprint=None, count=0):
+    """One surface outcome naming the exact keywords it attested to having queried."""
     return MissionProbeOutcome(
         run_id=RUN, platform=platform or surface, connector_surface=surface, status=status,
-        signals_collected=count, query_fingerprint=query,
+        signals_collected=count, queried_keywords=tuple(queried),
+        query_fingerprint=fingerprint or compute_query_fingerprint(queried, GEO, TIMEFRAME),
         completed_at=datetime(2026, 9, 27, tzinfo=timezone.utc),
     )
 
 
-def _assess(qualified=(), outcomes=(), state=QualificationStatus.READY):
+def _assess(qualified=(), outcomes=(), state=QualificationStatus.READY, topic=TOPIC):
     return assess_topic_sufficiency(
-        topic="ai cho cửa hàng",
+        topic=topic,
         qualified=list(qualified),
         probe_outcomes=list(outcomes),
-        query_fingerprint=QUERY,
+        geo=GEO,
+        timeframe=TIMEFRAME,
         assessment_state=state,
     )
 
@@ -530,7 +537,7 @@ def test_a_surface_that_could_not_measure_is_never_zero_supply(failed):
 def test_an_empty_surface_measures_zero_only_for_its_own_query_and_only_as_supply():
     stale = _assess(
         [_qualified("DEMAND", platform="google")],
-        [_probe("youtube", query="z" * 64), _probe("tiktok_video_grid", platform="tiktok")],
+        [_probe("youtube", fingerprint="z" * 64), _probe("tiktok_video_grid", platform="tiktok")],
     )
     not_supply = _assess(
         [_qualified("DEMAND", platform="google")],
@@ -546,6 +553,31 @@ def test_an_empty_surface_measures_zero_only_for_its_own_query_and_only_as_suppl
     assert healthy_but_irrelevant.state is EvidenceSufficiency.MISSING_SUPPLY, (
         "a surface that returned only irrelevant items measured no absence"
     )
+
+
+def test_a_measured_zero_covers_only_the_keywords_each_surface_actually_queried():
+    """TikTok, Threads and Reels probe ten keywords; an eleventh was never asked of them."""
+    keywords = [f"topic-{index}" for index in range(1, 12)]
+    sent = tuple(keywords[:10])
+    outcomes = [_probe("tiktok_video_grid", platform="tiktok", queried=sent),
+                _probe("reels", queried=sent)]
+    demand = [_qualified("DEMAND", platform="google")]
+
+    first = _assess(demand, outcomes, topic="topic-1")
+    eleventh = _assess(demand, outcomes, topic="topic-11")
+
+    assert first.state is EvidenceSufficiency.SUFFICIENT_ZERO_SUPPLY
+    assert eleventh.state is EvidenceSufficiency.MISSING_SUPPLY
+    assert eleventh.measured_zero_surfaces == ()
+
+
+def test_an_outcome_whose_fingerprint_does_not_match_its_own_query_measures_nothing():
+    tampered = _probe("reels", fingerprint=compute_query_fingerprint(["other"], GEO, TIMEFRAME))
+
+    result = _assess([_qualified("DEMAND", platform="google")], [_probe("youtube"), tampered])
+
+    assert result.measured_zero_surfaces == ("youtube",)
+    assert result.state is EvidenceSufficiency.MISSING_SUPPLY
 
 
 def test_unfinished_or_failed_qualification_withholds_every_verdict():
@@ -623,7 +655,7 @@ def _judged(signal, relation, reason, purpose="SUPPLY", confidence=0.9):
 
 def _attention_report(signals, judgments):
     context = QualificationContext.build(
-        [s.observation_id for s in signals], judgments, probe_outcomes=(), query_fingerprint=None
+        [s.observation_id for s in signals], judgments, probe_outcomes=(), geo="VN", timeframe="7d"
     )
     return StrategicMarketReasoner().analyze_mission(
         mission=ATTENTION, signals=signals, clusters=[], scorecard=QualityScorecard(),

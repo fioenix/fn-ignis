@@ -242,6 +242,27 @@ class StrategicMarketReasoner:
         ),
     }
 
+    @classmethod
+    def _withheld(cls, qualification: QualificationContext) -> Tuple[str, str]:
+        """Why a pending or failed assessment withholds every conclusion, and what comes next.
+
+        Two different pending states: observations with no row yet, which the next batch read
+        hands out, and observations whose recorded judgment is UNASSESSED, which no batch will
+        ever hand out again because a recorded judgment is not rewritten.
+        """
+        state = qualification.assessment_state
+        if (
+            state is QualificationStatus.QUALIFICATION_REQUIRED
+            and not qualification.progress.unjudged
+        ):
+            return (
+                "Some observations carry an UNASSESSED judgment, and a recorded judgment is not "
+                "rewritten, so this frame cannot reach a conclusion. Assess the evidence again "
+                "under a new mission or a new Market Brief revision.",
+                "UNASSESSED_EVIDENCE",
+            )
+        return cls._WITHHELD[state]
+
     @staticmethod
     def _summary(
         qualification: QualificationContext,
@@ -321,7 +342,8 @@ class StrategicMarketReasoner:
                 topic=raw_kw,
                 qualified=[self._qualified_observation(s, qualification) for s in topic_signals],
                 probe_outcomes=qualification.probe_outcomes,
-                query_fingerprint=qualification.query_fingerprint,
+                geo=qualification.geo,
+                timeframe=qualification.timeframe,
                 assessment_state=state,
             )
             topics.append(sufficiency)
@@ -335,7 +357,7 @@ class StrategicMarketReasoner:
 
         if state in self._WITHHELD:
             status = state
-            reason, reason_code = self._WITHHELD[state]
+            reason, reason_code = self._withheld(qualification)
         elif opportunities:
             status, reason, reason_code = QualificationStatus.READY, None, None
         else:
@@ -486,7 +508,7 @@ class StrategicMarketReasoner:
                 if state is QualificationStatus.QUALIFICATION_REQUIRED
                 else HandoffStatus.UNAVAILABLE
             )
-            reason, reason_code = self._WITHHELD[state]
+            reason, reason_code = self._withheld(qualification)
         elif candidates:
             status, handoff_status = QualificationStatus.READY, HandoffStatus.QUALIFIED_CANDIDATE_AVAILABLE
             reason, reason_code = None, None

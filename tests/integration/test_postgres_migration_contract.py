@@ -578,8 +578,8 @@ Q_PARENTS = (
 )
 PROBE_OUTCOME = (
     "INSERT INTO mission_probe_outcomes (run_id, platform, connector_surface, status,"
-    " signals_collected, query_fingerprint, completed_at) VALUES"
-    " ('{run}', 'youtube', '{surface}', '{status}', {count}, 'fp', now())"
+    " signals_collected, queried_keywords, query_fingerprint, completed_at) VALUES"
+    " ('{run}', 'youtube', '{surface}', '{status}', {count}, {queried}, 'fp', now())"
 )
 QUALIFICATION = (
     "INSERT INTO mission_evidence_qualifications (mission_id, observation_id, brief_revision_id,"
@@ -706,11 +706,14 @@ def test_023_enforces_evidence_ownership_value_checks_and_cascades(empty_postgre
     assert _refused(dsn, qualification(reason="FREE_TEXT")) == "CheckViolation"
     assert _refused(dsn, qualification()) is None
 
-    probe = dict(run=Q_RUN, surface="youtube", status="EMPTY_NO_DATA", count=0)
+    probe = dict(run=Q_RUN, surface="youtube", status="EMPTY_NO_DATA", count=0, queried="ARRAY['t008']")
     assert _refused(dsn, PROBE_OUTCOME.format(**{**probe, "count": 3})) == "CheckViolation", (
         "an empty surface cannot report collected signals"
     )
     assert _refused(dsn, PROBE_OUTCOME.format(**{**probe, "status": "FINE"})) == "CheckViolation"
+    assert _refused(dsn, PROBE_OUTCOME.format(**{**probe, "queried": "ARRAY[]::text[]"})) == (
+        "CheckViolation"
+    ), "an empty answer must name the query it measured"
     assert _refused(dsn, PROBE_OUTCOME.format(**{**probe, "count": -1})) == "CheckViolation"
     assert _refused(
         dsn, PROBE_OUTCOME.format(**{**probe, "run": "00000000-0000-4000-8000-000000000399"})

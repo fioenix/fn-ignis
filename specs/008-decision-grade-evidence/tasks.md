@@ -152,11 +152,10 @@ retains an Opportunity Index with qualified citations only.
 - Full suites before staging: unit 1165 passed, 1 skipped; integration 544 passed, 3 skipped,
   2 failed -- the clean-user contracts copy `git ls-files`, which did not yet include the two new
   untracked modules; staged, they pass (8 passed). No PostgreSQL skip.
-- Interpretation recorded for review: an explicit `UNASSESSED`/`INSUFFICIENT_CONTENT` row counts
-  as unassessed and never as support, but does not block the mission once every observation
-  carries a row; `EVALUATOR_UNAVAILABLE` makes the mission `UNAVAILABLE`. A measured zero counts
-  only `EMPTY_NO_DATA` supply surfaces of the same query; a `HEALTHY` surface whose items were all
-  excluded is not a measured absence.
+- Superseded by the review of `0d70e9b` (see "Review corrections" below): an explicit
+  `UNASSESSED` row now keeps the frame `QUALIFICATION_REQUIRED`, as `data-model.md` states. A
+  measured zero still counts only `EMPTY_NO_DATA` supply surfaces; a `HEALTHY` surface whose items
+  were all excluded is not a measured absence.
 
 ---
 
@@ -258,6 +257,30 @@ question relevance, the reason code and the `UNRELIABLE` cap on both backends.
   container, volume or network remains; 12 report files the unit suite wrote into `reports/` during
   this work were removed (two fixed-name files the existing tests overwrite on every run were left).
 - Not done by design: no version bump, tag, push, merge, release or persistent-database migration.
+
+**Review corrections (independent review of `0d70e9b`, 27/09/2026):**
+
+- P1 explicit `UNASSESSED` opened the gate: `QualificationContext` now reports `UNAVAILABLE` for an
+  evaluator failure and `QUALIFICATION_REQUIRED` for any unassessed observation, including an
+  explicit `INSUFFICIENT_CONTENT` row (reason `UNASSESSED_EVIDENCE`, next step a new mission or
+  Brief revision). RED on the reviewed head: `READY` with `unassessed: 1`. Regression covers both
+  reasons end to end: no index, insight, takeaway, maturity or sufficient topic.
+- P1 mission-wide fingerprints: surfaces now attest, per call, the keywords they actually queried
+  (`SearchAttestation`); outcomes persist `queried_keywords` (migration 023 amended before release,
+  with a CHECK that `EMPTY_NO_DATA` names its query) and a fingerprint over exactly that query; a
+  measured zero covers only attested keywords. Regression with eleven keywords through the real
+  Reels and TikTok search loops: `topic11` is `MISSING_SUPPLY`. Negative control removing the
+  coverage check turns the unit and both integration cases red.
+- P1 vocabulary failure overwrote an active writer: synchronization now runs inside the writer
+  claim. RED on the reviewed head: `FAILED` instead of `CONFLICT`. Regression: an active holder, a
+  failing synchronizer, a `CONFLICT` answer and unchanged mission, evidence, journal and claim.
+- P1 unattested empty browser surfaces: an empty list is `EMPTY_NO_DATA` only with a positive
+  attestation. Reels and Threads attest a keyword only when a search payload was captured, TikTok
+  only when a search response or card was read, YouTube only on a 200 search answer (its swallowed
+  errors were a second false-empty path the review did not name). RED on the reviewed head: real
+  Reels and Threads browser paths with no payload returned `EMPTY_NO_DATA`.
+- P2 `git diff --check "$(git merge-base main HEAD)..HEAD"`: two trailing-space line breaks in the
+  2026-09-25 decision note replaced by backslash breaks.
 
 ## Dependencies & Execution Order
 

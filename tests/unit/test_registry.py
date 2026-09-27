@@ -292,8 +292,23 @@ from ignis.domain.harness_models import ChannelHealthStatus  # noqa: E402
 
 
 class EmptyYouTubePlugin(_BasePlugin):
+    """Ran every query and found nothing, and says so."""
+
     _platform = PlatformType.YOUTUBE
     _name = "YouTube Empty"
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20,
+                             attestation=None):
+        for keyword in keywords:
+            attestation.executed(keyword)
+        return []
+
+
+class SilentYouTubePlugin(_BasePlugin):
+    """Returns nothing and attests nothing: its silence measured nothing."""
+
+    _platform = PlatformType.YOUTUBE
+    _name = "YouTube Silent"
 
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
         return []
@@ -416,8 +431,10 @@ async def test_two_concurrent_searches_each_keep_their_own_outcomes():
     import asyncio
 
     class SlowGoogle(GooglePlugin):
-        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20,
+                                 attestation=None):
             await asyncio.sleep(0.01)
+            attestation.executed(keywords[0])
             return [] if keywords == ["nothing"] else await super().search_signals(keywords, geo)
 
     registry = _registry(SlowGoogle())
@@ -429,6 +446,8 @@ async def test_two_concurrent_searches_each_keep_their_own_outcomes():
 
     assert _by_surface(found) == {"google": (ChannelHealthStatus.HEALTHY, 1)}
     assert _by_surface(empty) == {"google": (ChannelHealthStatus.EMPTY_NO_DATA, 0)}
+    assert [o.queried_keywords for o in empty.outcomes] == [("nothing",)]
+    assert [o.queried_keywords for o in found.outcomes] == [("ai agent",)]
 
 
 @pytest.mark.asyncio
@@ -439,3 +458,74 @@ async def test_the_list_only_search_keeps_its_contract():
 
     assert isinstance(signals, list)
     assert [s.raw_title for s in signals] == ["google: ai agent"]
+
+
+# --- Review 0d70e9b: an empty answer is a measured zero only when the surface attests it ran ------
+
+from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin  # noqa: E402
+from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin  # noqa: E402
+
+BROWSER_STATE = {"cookies": [{"name": "sessionid", "value": "unit-test"}]}
+# A search page that answered with its API envelope but no matching item: the query ran.
+EMPTY_SEARCH_PAYLOAD = {"data": {"recent": {"sections": []}, "searchResults": {"edges": []}}}
+
+
+def _session_plugin(plugin_class):
+    oauth, browser = AsyncMock(), AsyncMock()
+    oauth.get_access_token.return_value = None
+    browser.get_storage_state.return_value = BROWSER_STATE
+    return plugin_class(auth_manager=oauth, browser_auth_manager=browser)
+
+
+@pytest.mark.parametrize(
+    "plugin_class, module",
+    [
+        (ReelsPlugin, "ignis.infrastructure.connectors.reels.reels_plugin"),
+        (ThreadsPlugin, "ignis.infrastructure.connectors.threads.threads_plugin"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_browser_surface_that_captured_nothing_is_not_a_measured_empty(plugin_class, module):
+    """No Playwright, an unusable session and a failed capture all return [] from collect."""
+    from unittest.mock import patch
+
+    registry = _registry(_session_plugin(plugin_class))
+    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[])), \
+            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
+        result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"])
+
+    [outcome] = result.outcomes
+    assert outcome.status is not ChannelHealthStatus.EMPTY_NO_DATA
+    assert outcome.status in (ChannelHealthStatus.DEGRADED, ChannelHealthStatus.AUTH_REQUIRED)
+
+
+
+@pytest.mark.asyncio
+async def test_an_empty_answer_without_an_attestation_is_degraded_not_measured():
+    result = await _registry(SilentYouTubePlugin()).search_with_outcomes(keywords=["ai agent"])
+
+    [outcome] = result.outcomes
+    assert outcome.status is ChannelHealthStatus.DEGRADED and outcome.queried_keywords == ()
+
+
+@pytest.mark.parametrize(
+    "plugin_class, module",
+    [
+        (ReelsPlugin, "ignis.infrastructure.connectors.reels.reels_plugin"),
+        (ThreadsPlugin, "ignis.infrastructure.connectors.threads.threads_plugin"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_browser_surface_attests_only_the_ten_keywords_it_actually_queried(plugin_class, module):
+    """The page answered with an empty envelope for each query it ran; the eleventh never ran."""
+    from unittest.mock import patch
+
+    keywords = [f"topic{index}" for index in range(1, 12)]
+    registry = _registry(_session_plugin(plugin_class))
+    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[EMPTY_SEARCH_PAYLOAD])), \
+            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
+        result = await registry.search_with_outcomes(keywords=keywords)
+
+    [outcome] = result.outcomes
+    assert outcome.status is ChannelHealthStatus.EMPTY_NO_DATA
+    assert outcome.queried_keywords == tuple(keywords[:10])

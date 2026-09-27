@@ -1,7 +1,36 @@
 from abc import ABC, abstractmethod
-from typing import List
+from dataclasses import dataclass, field
+from typing import List, Optional
 from ignis.domain.entities import TrendSignal
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe
+
+
+@dataclass
+class SearchAttestation:
+    """What one keyword search call can prove it actually did.
+
+    Handed to a plugin's `search_signals` as `attestation` when the plugin declares that
+    parameter, one object per call so concurrent searches never share it. An empty result is a
+    measured zero only for the keywords recorded in `queried`: a query the plugin skipped, cut off
+    or could not run -- no browser runtime, an unusable session, a capture that returned nothing,
+    a swallowed HTTP error -- measured nothing and must not be recorded as if it had.
+    """
+
+    queried: List[str] = field(default_factory=list)
+    failures: List[str] = field(default_factory=list)
+    blocked_reason: Optional[str] = None
+
+    def executed(self, keyword: str) -> None:
+        """The query for `keyword` reached the platform and its answer was read."""
+        if keyword not in self.queried:
+            self.queried.append(keyword)
+
+    def failed(self, keyword: str, reason: str) -> None:
+        self.failures.append(f"{keyword}: {reason}")
+
+    def blocked(self, reason: str) -> None:
+        """The surface could not search at all without a credential or session it lacks."""
+        self.blocked_reason = reason
 
 
 class IConnectorPlugin(ABC):

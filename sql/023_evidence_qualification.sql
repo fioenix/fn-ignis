@@ -36,7 +36,10 @@ CREATE TABLE IF NOT EXISTS mission_probe_outcomes (
     connector_surface VARCHAR(100) NOT NULL,
     status VARCHAR(20) NOT NULL,
     signals_collected INTEGER NOT NULL,
-    -- A digest of the keywords, geo and timeframe sent to the surface. Never a credential.
+    -- The keywords the surface attested to having queried. A connector that probes only ten
+    -- keywords never measured the eleventh, so a measured zero covers exactly this list.
+    queried_keywords TEXT[] NOT NULL DEFAULT '{}',
+    -- A digest of this surface's queried keywords, geo and timeframe. Never a credential.
     query_fingerprint VARCHAR(128) NOT NULL,
     completed_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT mission_probe_outcomes_run_surface_key UNIQUE (run_id, connector_surface),
@@ -48,6 +51,10 @@ CREATE TABLE IF NOT EXISTS mission_probe_outcomes (
     CONSTRAINT mission_probe_outcomes_count_check CHECK (
         signals_collected >= 0
         AND (status = 'HEALTHY') = (signals_collected > 0)
+    ),
+    -- An empty answer to no known query measured nothing.
+    CONSTRAINT mission_probe_outcomes_measured_query_check CHECK (
+        status <> 'EMPTY_NO_DATA' OR cardinality(queried_keywords) >= 1
     )
 );
 

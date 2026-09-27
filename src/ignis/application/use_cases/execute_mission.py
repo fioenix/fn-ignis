@@ -97,7 +97,8 @@ class ExecuteMissionUseCase:
         The first mission after a process starts used to run with none of it: only an analysis
         call had ever registered the TikTok UI noise and the probe templates, so the grid
         rejected every card and demand was measured from the bare keyword. A failure here stops
-        the mission before it claims a writer, starts a run or calls anything.
+        the mission before it is marked RUNNING and before any connector is called; for a
+        workspace mission it runs inside the writer claim, so only the claim holder records it.
         """
         if self._vocabulary_sync is None:
             return
@@ -120,14 +121,17 @@ class ExecuteMissionUseCase:
         await self._require_confirmed_brief(mission)
 
         workspace = await self._run_workspace(mission)
-        await self._synchronize_vocabulary(mission)
         if workspace is None:
+            await self._synchronize_vocabulary(mission)
             return await self._execute_pass(mission)
 
-        # The claim is taken before the mission is moved to RUNNING, so a refused second run
-        # never touches the state of the run that holds the mission. Both the claim and the
-        # journal are given back by the context manager, including when the pass raises.
+        # The claim is taken before anything else writes, so a refused second run never touches
+        # the state of the run that holds the mission -- not even to record that its own
+        # vocabulary read failed. Synchronization follows the claim and still precedes RUNNING
+        # and every connector call. The claim and the journal are given back by the context
+        # manager, including when synchronization or the pass raises.
         async with self._workspace_store.mission_run(workspace, mission.id) as journal:
+            await self._synchronize_vocabulary(mission)
             result = await self._execute_pass(mission, journal=journal)
             result["run"] = {
                 "run_id": str(journal.run_id),
@@ -144,9 +148,6 @@ class ExecuteMissionUseCase:
         having measured nothing in particular, and a measured zero is only honest when the run
         that measured it is known.
         """
-        query_fingerprint = compute_query_fingerprint(
-            mission.keywords, mission.geo_code, mission.timeframe
-        )
         completed_at = datetime.now(timezone.utc)
         await self._workspace_store.record_probe_outcomes(
             journal.run_id,
@@ -157,7 +158,12 @@ class ExecuteMissionUseCase:
                     connector_surface=outcome.connector_surface,
                     status=outcome.status,
                     signals_collected=outcome.signals_collected,
-                    query_fingerprint=query_fingerprint,
+                    # Each surface's own query: the keywords it attested to running, not the
+                    # mission's full list, which a connector capped at ten never saw in full.
+                    queried_keywords=outcome.queried_keywords,
+                    query_fingerprint=compute_query_fingerprint(
+                        outcome.queried_keywords, mission.geo_code, mission.timeframe
+                    ),
                     completed_at=completed_at,
                 )
                 for outcome in outcomes

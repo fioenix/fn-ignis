@@ -141,6 +141,7 @@ def _outcome(run_id, surface, status="EMPTY_NO_DATA", count=0, platform="youtube
         connector_surface=surface,
         status=status,
         signals_collected=count,
+        queried_keywords=("ai cho cửa hàng",),
         query_fingerprint="q" * 64,
         completed_at=T0,
     )
@@ -353,12 +354,12 @@ class OutcomeRegistry:
         )
 
 
-def _surface(surface, status, count=0, platform=None):
+def _surface(surface, status, count=0, platform=None, queried=("ai cho cửa hàng",)):
     from ignis.infrastructure.connectors.registry import SurfaceProbeResult
 
     return SurfaceProbeResult(
         platform=platform or surface, connector_surface=surface, status=status,
-        signals_collected=count,
+        signals_collected=count, queried_keywords=tuple(queried),
     )
 
 
@@ -400,9 +401,11 @@ async def test_a_workspace_run_records_every_surface_outcome_before_it_completes
         ("google", "HEALTHY", 1), ("tiktok", "AUTH_REQUIRED", 0), ("youtube", "EMPTY_NO_DATA", 0),
     ]
     assert {str(o.run_id) for o in outcomes} == {result["run"]["run_id"]}
-    assert {o.query_fingerprint for o in outcomes} == {
-        compute_query_fingerprint(mission.keywords, mission.geo_code, mission.timeframe)
-    }
+    for outcome in outcomes:
+        assert outcome.queried_keywords == ("ai cho cửa hàng",)
+        assert outcome.query_fingerprint == compute_query_fingerprint(
+            outcome.queried_keywords, mission.geo_code, mission.timeframe
+        ), "each surface is fingerprinted over the query it ran"
 
 
 @pytest.mark.asyncio
@@ -609,7 +612,10 @@ async def test_cold_start_vocabulary_failure_calls_no_connector_and_fails_clearl
     assert CountingRegistry.calls == 0
     stored = await repository.get_mission(mission.id)
     assert stored.status == "FAILED" and "vocabulary" in stored.summary.lower()
-    assert await store.list_run_journals(mission.id) == [], "no run was started"
+    # Synchronization runs inside the writer claim, so the claim holder's run records the failure.
+    assert [j.status for j in await store.list_run_journals(mission.id)] == ["FAILED"]
+    assert await store.get_mission_writer_claim(mission.id) is None
+    assert await store.get_latest_completed_probe_outcomes(mission.id) == []
     assert await repository.get_mission_signals(mission.id) == []
 
 
@@ -737,11 +743,14 @@ async def _market_with(repository, store, workspace, items, keywords, brief=None
     for s in held:
         by_url[s.source_url].append(s)
     run = await _journal(store, workspace, mission, "COMPLETED", T0, 1)
-    fingerprint = compute_query_fingerprint(mission.keywords, mission.geo_code, mission.timeframe)
+    # Every surface here attests the whole keyword list, which is within its ten-keyword cap.
+    queried = tuple(mission.keywords[:10])
+    fingerprint = compute_query_fingerprint(queried, mission.geo_code, mission.timeframe)
     await store.record_probe_outcomes(run.run_id, [
         MissionProbeOutcome(
             run_id=run.run_id, platform=platform, connector_surface=surface, status=status,
-            signals_collected=count, query_fingerprint=fingerprint, completed_at=T0,
+            signals_collected=count, queried_keywords=queried, query_fingerprint=fingerprint,
+            completed_at=T0,
         )
         for surface, platform, status, count in outcomes
     ])
@@ -853,10 +862,19 @@ async def test_keyword_noise_corpus_replay_emits_zero_unsupported_conclusion_uni
     recorded_baseline = [u for u in CORPUS["conclusion_units"] if u["journey"] == journey]
     assert recorded_baseline and all(u["support_probability"] < 0.70 for u in recorded_baseline)
     assert analysis["qualification"]["total_evidence"] == len(held) == ready["progress"]["total_evidence"]
-    assert analysis["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
+    # The replayed review left low-confidence and ambiguous items UNASSESSED; a recorded
+    # UNASSESSED judgment keeps the whole frame withheld rather than letting the rest conclude.
+    unassessed = sum(o["judgment"]["relation"] == "UNASSESSED" for o in record["observations"])
+    assert analysis["qualification"]["unassessed"] == unassessed
+    if unassessed:
+        assert analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
+        assert analysis["qualification"]["reason_code"] == "UNASSESSED_EVIDENCE"
+        assert "new Market Brief revision" in analysis["next_step"]
+    else:
+        assert analysis["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
+        assert analysis["qualification"]["reason_code"] == "NO_SUFFICIENT_TOPIC"
     assert analysis["opportunity_index_applies"] is False
     assert analysis["market_opportunities"] == []
-    assert analysis["qualification"]["reason_code"] == "NO_SUFFICIENT_TOPIC"
     scorecard = analysis["quality_scorecard"]
     assert scorecard["confidence_level"] in ("LOW", "UNRELIABLE")
     assert scorecard["question_relevance_score"] == analysis["qualification"]["question_relevance_score"]
@@ -1240,9 +1258,11 @@ async def test_attention_handoff_corpus_offers_no_candidate_and_selects_no_fallb
     assert analysis["surface"] == "ATTENTION"
     assert analysis["opportunity_index_applies"] is False
     assert analysis["market_opportunities"] == []
-    assert analysis["handoff_status"] == "NO_QUALIFIED_CANDIDATE"
+    # Three replayed items are UNASSESSED, so the handoff answer stays pending -- and still no
+    # cluster is offered as a fallback.
+    assert analysis["handoff_status"] == "QUALIFICATION_REQUIRED"
     assert analysis["qualified_handoff_candidates"] == []
-    assert analysis["qualification"]["reason_code"] == "NO_QUALIFIED_CLUSTER"
+    assert analysis["qualification"]["reason_code"] == "UNASSESSED_EVIDENCE"
     assert len(analysis["cluster_qualification"]) == len(groups)
     assert not any(row["handoff_eligible"] for row in analysis["cluster_qualification"])
 
@@ -1344,3 +1364,174 @@ async def test_artifact_parity_mcp_payload_canonical_rows_and_html_agree_field_f
     assert float(relevance) == block["question_relevance_score"]
     assert f'data-reason-code="{block["reason_code"]}"' in html
     assert 'id="demandSupplyBarChart"' not in html
+
+
+# --- Review 0d70e9b: regressions for the four blocking findings -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "reason, expected_status",
+    [("INSUFFICIENT_CONTENT", "QUALIFICATION_REQUIRED"), ("EVALUATOR_UNAVAILABLE", "UNAVAILABLE")],
+)
+@pytest.mark.asyncio
+async def test_explicit_unassessed_evidence_keeps_every_market_verdict_withheld(
+    repository_case, host_workspace, monkeypatch, reason, expected_status
+):
+    """A sufficient control plus one explicitly UNASSESSED observation: no verdict of any kind."""
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    positives = CORPUS["semantic_controls"]["positive"]
+    thin = dict(positives[1], case_id="ctl-thin", source_key="0123456789abcdef",
+                title="AI cho cửa hàng bán lẻ ???")
+    items = [*positives, thin]
+    mission, _revision, held = await _market_with(
+        repository, store, workspace, items, CONTROL_KEYWORDS,
+        outcomes=[("google", "google", "HEALTHY", 1), ("youtube", "youtube", "HEALTHY", 3)],
+    )
+    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
+    judgments = _judgments_by_observation(held, positives, "control_judgment") if False else {}
+    by_url = {_corpus_signal(i).source_url: i for i in items}
+    for signal in held:
+        item = by_url[signal.source_url]
+        judgments[str(signal.observation_id)] = (
+            {"relation": "UNASSESSED", "purpose": "CONTEXT", "confidence": None, "reason_code": reason}
+            if item is thin else item["control_judgment"]
+        )
+    ready, _ = await _qualify_through_handlers(mcp_server, mission, judgments)
+
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
+
+    assert ready["status"] == "READY", "every observation carries a persisted row"
+    assert analysis["qualification"]["unassessed"] == 1
+    assert analysis["analysis_status"] == expected_status
+    assert analysis["opportunity_index_applies"] is False
+    assert analysis["market_opportunities"] == []
+    assert analysis["strategic_insights"] == [] and analysis["actionable_takeaways"] == []
+    assert analysis["maturity_stage"] is None
+    assert all(t["evidence_sufficiency"] != "SUFFICIENT_POSITIVE_SUPPLY" for t in analysis["topic_sufficiency"])
+    assert analysis["quality_scorecard"]["confidence_level"] == "UNRELIABLE"
+
+
+@pytest.mark.asyncio
+async def test_a_vocabulary_failure_behind_an_active_writer_is_a_conflict_that_changes_nothing(
+    repository_case, host_workspace, monkeypatch
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    mission = await _attention_mission(repository, store, workspace)
+    held = await _hold(repository, mission, [_signal("AI quản lý bán hàng")])
+    holder = await _journal(store, workspace, mission, "STARTED", T0, 1)
+    assert await store.claim_mission_writer(mission.id, holder.run_id)
+    before = await repository.get_mission(mission.id)
+
+    class FailingSynchronizer:
+        calls = 0
+
+        async def synchronize(self):
+            FailingSynchronizer.calls += 1
+            from ignis.domain.exceptions import VocabularySynchronizationError
+
+            raise VocabularySynchronizationError("market_lexicons is unreadable")
+
+    class NoConnector:
+        async def search_with_outcomes(self, **_kwargs):
+            raise AssertionError("a connector was called behind an active writer")
+
+    components = {
+        "repository": repository,
+        "workspace_store": store,
+        "execute_mission_use_case": _executor(repository, store, NoConnector(), FailingSynchronizer()),
+    }
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    payload = json.loads(await mcp_server.handle_execute_mission_ingress(str(mission.id)))
+
+    assert payload["status"] == "CONFLICT"
+    assert payload["active_run_id"] == str(holder.run_id)
+    after = await repository.get_mission(mission.id)
+    assert (after.status, after.summary) == (before.status, before.summary)
+    assert [str(s.observation_id) for s in await repository.get_mission_signals(mission.id)] == [
+        str(held[0].observation_id)
+    ]
+    assert [(j.run_id, j.status) for j in await store.list_run_journals(mission.id)] == [
+        (holder.run_id, "STARTED")
+    ]
+    assert (await store.get_mission_writer_claim(mission.id)).run_id == holder.run_id
+
+
+
+@pytest.mark.asyncio
+async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query(
+    repository_case, host_workspace, monkeypatch
+):
+    """Eleven mission keywords; the real Reels and TikTok search loops probe only the first ten."""
+    from unittest.mock import AsyncMock, patch
+
+    from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
+    from ignis.interfaces.mcp import server as mcp_server
+
+    keywords = [f"topic{index}" for index in range(1, 12)]
+
+    class DemandFor:
+        """Google demand for the first and the eleventh keyword only."""
+
+        platform, name, plugin_id, supports_search = PlatformType.GOOGLE_TRENDS, "Google", "google", True
+
+        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
+            return [
+                _signal(f"Google Search Trends: {k}", PlatformType.GOOGLE_TRENDS, external=f"g-{k}", keyword=k,
+                        connector_surface="google")
+                for k in (keywords[0], keywords[10])
+            ]
+
+    class AnsweredEmptyTikTok(TikTokPlugin):
+        """The real keyword loop; each page it reaches answers with an empty search response."""
+
+        async def keyword_search_blocked_reason(self):
+            return None
+
+        async def _fetch_via_playwright(self, url, storage_state, geo, limit=30, keyword=None,
+                                        seen_urls=None, attestation=None):
+            attestation.executed(keyword)
+            return []
+
+    oauth, browser = AsyncMock(), AsyncMock()
+    oauth.get_access_token.return_value = None
+    browser.get_storage_state.return_value = {"cookies": [{"name": "sessionid", "value": "test"}]}
+    registry = ConnectorPluginRegistry(repository=repository_case.repository)
+    registry.register(DemandFor())
+    registry.register(AnsweredEmptyTikTok())
+    registry.register(ReelsPlugin(auth_manager=oauth, browser_auth_manager=browser))
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    mission, _brief = await _market_mission(repository, store, workspace, keywords=keywords)
+    empty_page = {"data": {"recent": {"sections": []}}}
+    with patch("ignis.infrastructure.connectors.reels.reels_plugin.collect_json_payloads",
+               AsyncMock(return_value=[empty_page])):
+        await _executor(repository, store, registry).execute(mission.id)
+
+    outcomes = {o.connector_surface: o for o in await store.get_latest_completed_probe_outcomes(mission.id)}
+    assert outcomes["reels"].status.value == outcomes["tiktok_video_grid"].status.value == "EMPTY_NO_DATA"
+    assert outcomes["reels"].queried_keywords == tuple(keywords[:10])
+    assert outcomes["tiktok_video_grid"].queried_keywords == tuple(keywords[:10])
+
+    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
+    held = await repository.get_mission_signals(mission.id)
+    judgments = {
+        str(s.observation_id): {"relation": "QUALIFIED_SUPPORT", "purpose": "DEMAND", "confidence": 0.9,
+                                "reason_code": "DIRECT_TO_FRAME"}
+        for s in held
+    }
+    await _qualify_through_handlers(mcp_server, mission, judgments)
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
+
+    topics = {t["topic"]: t for t in analysis["topic_sufficiency"]}
+    assert topics["topic1"]["evidence_sufficiency"] == "SUFFICIENT_ZERO_SUPPLY"
+    assert topics["topic11"]["evidence_sufficiency"] == "MISSING_SUPPLY"
+    assert topics["topic11"]["measured_zero_surfaces"] == []
+    assert [o["topic"] for o in analysis["market_opportunities"]] == ["topic1"]

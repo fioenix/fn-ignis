@@ -519,8 +519,13 @@ def _qualification_payload(report: Any) -> Dict[str, Any]:
         "analysis_status": qualification.status,
         "qualification": qualification.to_payload(),
     }
-    if qualification.status == QualificationStatus.QUALIFICATION_REQUIRED.value:
+    if qualification.reason_code == "QUALIFICATION_INCOMPLETE":
         payload["next_step"] = "Call get_mission_evidence_qualification_batch."
+    elif qualification.reason_code == "UNASSESSED_EVIDENCE":
+        payload["next_step"] = (
+            "Confirm a new Market Brief revision or start a new mission to assess the evidence "
+            "again; this mission's recorded judgments are final."
+        )
     if getattr(report, "topic_sufficiency", None):
         payload["topic_sufficiency"] = report.topic_sufficiency
     if getattr(report, "handoff_status", None):

@@ -706,9 +706,15 @@ class MissionProbeOutcome:
     signals_collected: int
     query_fingerprint: str
     completed_at: datetime
+    # The keywords this surface attested to having queried during the run. A measured zero
+    # covers only these: a connector that probes ten keywords never measured the eleventh.
+    queried_keywords: Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _coerce_uuid(self.run_id, "run_id"))
+        object.__setattr__(
+            self, "queried_keywords", tuple(str(k) for k in (self.queried_keywords or ()))
+        )
         status = _coerce_enum(ChannelHealthStatus, self.status, "probe status")
         object.__setattr__(self, "status", status)
         for name in ("platform", "connector_surface"):
@@ -728,10 +734,34 @@ class MissionProbeOutcome:
                 f"A {status.value} surface cannot report {count} collected signals: HEALTHY means "
                 "signals came back, and every other outcome collected none."
             )
+        if status is ChannelHealthStatus.EMPTY_NO_DATA and not self.queried_keywords:
+            raise InvalidEvidenceQualificationError(
+                "An EMPTY_NO_DATA outcome must name the keywords the surface attested to querying; "
+                "an empty answer to no known query measured nothing."
+            )
 
     @property
     def measures_zero(self) -> bool:
         return self.status is ChannelHealthStatus.EMPTY_NO_DATA
+
+    def measured_zero_for(self, topic: str, geo: Any, timeframe: Any) -> bool:
+        """Whether this outcome is a measured zero for `topic` in the given frame.
+
+        True only for an EMPTY_NO_DATA surface that attested querying the topic, and whose stored
+        fingerprint is the digest of exactly the query it recorded -- so a keyword the surface
+        never sent, or a row describing some other geo, timeframe or query, measures nothing.
+        """
+        if not self.measures_zero:
+            return False
+        if _normalized_keyword(topic) not in {_normalized_keyword(k) for k in self.queried_keywords}:
+            return False
+        return self.query_fingerprint == compute_query_fingerprint(
+            self.queried_keywords, geo, timeframe
+        )
+
+
+def _normalized_keyword(keyword: str) -> str:
+    return " ".join(str(keyword).split()).casefold()
 
 
 def _digest(payload: Mapping[str, Any]) -> str:
@@ -746,7 +776,7 @@ def _plain(value: Any) -> str:
 
 
 def compute_query_fingerprint(keywords: Sequence[str], geo: Any, timeframe: str) -> str:
-    """A digest of what one run asked every surface, so a measured zero names its query."""
+    """A digest of the exact query one surface ran, so a measured zero names what it measured."""
     return _digest(
         {
             "keywords": sorted(" ".join(str(k).split()) for k in keywords or []),
@@ -896,14 +926,16 @@ def assess_topic_sufficiency(
     topic: str,
     qualified: Sequence[QualifiedObservation],
     probe_outcomes: Sequence[MissionProbeOutcome],
-    query_fingerprint: Optional[str],
+    geo: Any,
+    timeframe: Any,
     assessment_state: QualificationStatus,
 ) -> TopicSufficiency:
     """Apply the evidence minimum to one topic.
 
     `qualified` is the topic's QUALIFIED_SUPPORT evidence only; context-only, excluded and
     unassessed observations never reach this function. A measured zero is read from the persisted
-    outcomes of the latest completed run, and only for the query that run actually sent.
+    outcomes of the latest completed run, and only from surfaces that attested querying this
+    topic in this geo and timeframe.
     """
     if assessment_state is QualificationStatus.QUALIFICATION_REQUIRED:
         return TopicSufficiency(
@@ -924,10 +956,7 @@ def assess_topic_sufficiency(
     zero_surfaces = tuple(sorted({
         o.connector_surface
         for o in probe_outcomes
-        if o.measures_zero
-        and o.platform in SUPPLY_SURFACE_PLATFORMS
-        and query_fingerprint is not None
-        and o.query_fingerprint == query_fingerprint
+        if o.platform in SUPPLY_SURFACE_PLATFORMS and o.measured_zero_for(topic, geo, timeframe)
     }))
     counts = dict(
         qualified_demand_count=len(demand),
@@ -1002,17 +1031,19 @@ def select_handoff_candidates(
 class QualificationContext:
     """Everything the analysis needs to know about a surfaced mission's evidence qualification.
 
-    Read from persisted rows only. `assessment_state` is QUALIFICATION_REQUIRED while any current
-    observation has no row, UNAVAILABLE when an evaluator failure was recorded, and READY once
-    every observation carries a judgment -- READY here means "assessed"; whether a conclusion is
-    permitted is decided afterwards by the sufficiency policy.
+    Read from persisted rows only. `assessment_state` is UNAVAILABLE when an evaluator failure was
+    recorded, QUALIFICATION_REQUIRED while any current observation has no row or carries an
+    explicit UNASSESSED row, and READY only when every observation carries an actual assessment --
+    READY here means "assessed"; whether a conclusion is permitted is decided afterwards by the
+    sufficiency policy. A persisted row is not an assessment: UNASSESSED says none was made.
     """
 
     assessment_state: QualificationStatus
     progress: QualificationProgress
     qualifications: Mapping[str, EvidenceQualification] = field(default_factory=dict)
     probe_outcomes: Tuple[MissionProbeOutcome, ...] = ()
-    query_fingerprint: Optional[str] = None
+    geo: Optional[str] = None
+    timeframe: Optional[str] = None
 
     @classmethod
     def build(
@@ -1020,17 +1051,18 @@ class QualificationContext:
         observation_ids: Sequence[Any],
         qualifications: Sequence[EvidenceQualification],
         probe_outcomes: Sequence[MissionProbeOutcome],
-        query_fingerprint: Optional[str],
+        geo: Any = None,
+        timeframe: Any = None,
     ) -> "QualificationContext":
         current = {str(observation_id) for observation_id in observation_ids}
         by_observation = {
             str(q.observation_id): q for q in qualifications if str(q.observation_id) in current
         }
         progress = QualificationProgress.from_evidence(list(current), list(by_observation.values()))
-        if progress.unjudged:
-            state = QualificationStatus.QUALIFICATION_REQUIRED
-        elif progress.evaluator_unavailable:
+        if progress.evaluator_unavailable:
             state = QualificationStatus.UNAVAILABLE
+        elif progress.unassessed:
+            state = QualificationStatus.QUALIFICATION_REQUIRED
         else:
             state = QualificationStatus.READY
         return cls(
@@ -1038,7 +1070,8 @@ class QualificationContext:
             progress=progress,
             qualifications=by_observation,
             probe_outcomes=tuple(probe_outcomes),
-            query_fingerprint=query_fingerprint,
+            geo=_plain(geo) if geo is not None else None,
+            timeframe=_plain(timeframe) if timeframe is not None else None,
         )
 
     def judgment_of(self, observation_id: Any) -> Optional[EvidenceQualification]:

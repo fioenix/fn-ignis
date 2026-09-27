@@ -798,7 +798,6 @@ from ignis.domain.research_workspace import (  # noqa: E402
     EvidenceQualification,
     MissionProbeOutcome,
     QualificationContext,
-    compute_query_fingerprint,
 )
 
 
@@ -832,7 +831,8 @@ def _qualified_market(assess_all=True):
         _judge(mission, excluded, "EXCLUDED_IRRELEVANT", "SUPPLY", "FICTION_NEWS_OR_ENTERTAINMENT"),
     ]
     if assess_all:
-        judgments.append(_judge(mission, pending, "UNASSESSED", "CONTEXT", "INSUFFICIENT_CONTENT"))
+        # Every observation assessed. An UNASSESSED row would keep the verdict withheld.
+        judgments.append(_judge(mission, pending, "EXCLUDED_IRRELEVANT", "SUPPLY", "KEYWORD_ONLY"))
     run = uuid4()
     outcomes = [
         MissionProbeOutcome(run_id=run, platform="google", connector_surface="google", status="HEALTHY",
@@ -842,7 +842,7 @@ def _qualified_market(assess_all=True):
     ]
     qualification = QualificationContext.build(
         [s.observation_id for s in signals], judgments, outcomes,
-        compute_query_fingerprint(mission.keywords, mission.geo_code, mission.timeframe),
+        geo=mission.geo_code, timeframe=mission.timeframe,
     )
     report = StrategicMarketReasoner().analyze_mission(
         mission, signals, [], QualityEvaluator().evaluate_quality(signals, geo=GeoCode.VN),
@@ -860,7 +860,7 @@ def test_the_qualification_block_carries_all_four_counts_and_relevance():
     assert payload["analysis_status"] == "READY"
     assert payload["qualification"] == {
         "status": "READY", "total_evidence": 6, "qualified_support": 3, "context_only": 1,
-        "excluded_irrelevant": 1, "unassessed": 1, "question_relevance_score": 60.0,
+        "excluded_irrelevant": 2, "unassessed": 0, "question_relevance_score": 50.0,
         "reason": None, "reason_code": None,
     }
     assert payload["opportunity_index_applies"] is True

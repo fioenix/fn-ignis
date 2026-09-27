@@ -10,7 +10,6 @@ from ignis.domain.research_workspace import (
     MissionLineage,
     QualificationContext,
     ResearchSurface,
-    compute_query_fingerprint,
     resolve_surface,
 )
 
@@ -31,9 +30,8 @@ async def load_qualification_context(
         observation_ids=[s.observation_id for s in signals if s.observation_id],
         qualifications=await store.list_evidence_qualifications(mission.id),
         probe_outcomes=await store.get_latest_completed_probe_outcomes(mission.id),
-        query_fingerprint=compute_query_fingerprint(
-            mission.keywords, mission.geo_code, mission.timeframe
-        ),
+        geo=mission.geo_code,
+        timeframe=mission.timeframe,
     )
 
 

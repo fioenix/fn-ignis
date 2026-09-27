@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Tuple
 import httpx
 
-from ignis.application.ports.connector_port import IConnectorPlugin
+from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import (
     ConnectorExecutionException,
@@ -234,12 +234,18 @@ class YouTubeDataPlugin(IConnectorPlugin):
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 20,
         custom_timeframe: Optional[str] = None,
+        attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
         """
         Search verified YouTube videos by keyword and retrieve actual engagement metrics.
         Enforces strict publishedAfter filtering and non-domain garbage rejection.
+
+        `attestation`, when given, records each keyword whose search call answered 200; a keyword
+        whose call failed and was logged below measured nothing and is recorded as a failure.
         """
         if not self._api_key:
+            if attestation is not None:
+                attestation.blocked("No YouTube API key is configured.")
             return []
 
         signals: List[TrendSignal] = []
@@ -256,6 +262,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
             if cached_sigs is not None:
 
                 logger.info(f"Returning {len(cached_sigs)} cached YouTube signals for '{raw_kw}' (Quota preserved).")
+                if attestation is not None:
+                    attestation.executed(raw_kw)
                 for cs in cached_sigs:
                     v_id = cs.metadata.get("video_id")
                     if v_id and v_id not in seen_video_ids:
@@ -304,6 +312,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
                             raise ConnectorQuotaExceededException("YouTube API search quota limit exceeded.")
                     elif resp.status_code == 200:
                         search_data = resp.json()
+                        if attestation is not None:
+                            attestation.executed(raw_kw)
                         for item in search_data.get("items", []):
                             v_id = item.get("id", {}).get("videoId")
                             if v_id and v_id not in seen_video_ids:
@@ -384,6 +394,10 @@ class YouTubeDataPlugin(IConnectorPlugin):
                 raise
             except Exception as e:
                 logger.warning(f"YouTube search error for keyword '{raw_kw}': {e}", exc_info=True)
+                if attestation is not None:
+                    attestation.failed(raw_kw, type(e).__name__)
+                    if raw_kw in attestation.queried:
+                        attestation.queried.remove(raw_kw)
 
 
 

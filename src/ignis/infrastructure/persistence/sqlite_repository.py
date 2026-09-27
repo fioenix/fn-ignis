@@ -467,11 +467,14 @@ class SqliteTrendRepository(ITrendRepository):
                                'DEGRADED')
                 ),
                 signals_collected INTEGER NOT NULL,
+                -- JSON list of the keywords the surface attested to querying.
+                queried_keywords TEXT NOT NULL DEFAULT '[]',
                 query_fingerprint TEXT NOT NULL,
                 completed_at TEXT NOT NULL,
                 UNIQUE (run_id, connector_surface),
                 CHECK (signals_collected >= 0
-                       AND (status = 'HEALTHY') = (signals_collected > 0))
+                       AND (status = 'HEALTHY') = (signals_collected > 0)),
+                CHECK (status <> 'EMPTY_NO_DATA' OR queried_keywords <> '[]')
             );
 
             -- Keyed to the mission_evidence pair, so a mission cannot judge an observation it
@@ -2436,8 +2439,8 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.execute("BEGIN IMMEDIATE")
                 conn.executemany(
                     "INSERT INTO mission_probe_outcomes (id, run_id, platform, connector_surface,"
-                    " status, signals_collected, query_fingerprint, completed_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    " status, signals_collected, queried_keywords, query_fingerprint, completed_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [
                         (
                             str(uuid4()),
@@ -2446,6 +2449,7 @@ class SqliteTrendRepository(ITrendRepository):
                             o.connector_surface,
                             o.status.value,
                             o.signals_collected,
+                            json.dumps(list(o.queried_keywords), ensure_ascii=False),
                             o.query_fingerprint,
                             o.completed_at.isoformat(),
                         )
@@ -2478,7 +2482,8 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 rows = conn.execute(
                     "SELECT o.run_id, o.platform, o.connector_surface, o.status,"
-                    " o.signals_collected, o.query_fingerprint, o.completed_at"
+                    " o.signals_collected, o.query_fingerprint, o.completed_at,"
+                    " o.queried_keywords"
                     " FROM mission_probe_outcomes o"
                     " WHERE o.run_id = ("
                     "   SELECT j.id FROM mission_run_journals j"
@@ -2496,6 +2501,7 @@ class SqliteTrendRepository(ITrendRepository):
                         signals_collected=int(r["signals_collected"]),
                         query_fingerprint=r["query_fingerprint"],
                         completed_at=datetime.fromisoformat(r["completed_at"]),
+                        queried_keywords=tuple(json.loads(r["queried_keywords"] or "[]")),
                     )
                     for r in rows
                 ]
