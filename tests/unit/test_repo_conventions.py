@@ -261,3 +261,79 @@ def test_the_schema_holds_no_table_for_an_unconfirmed_framing():
         "The schema names storage for an unconfirmed framing. The host Agent owns the Q&A and "
         "sends only the confirmed Brief:\n" + "\n".join(offenders)
     )
+
+
+# Columns that would store what a model was told or thought. The qualification record keeps a
+# bounded reason code and an evaluator identifier; nothing that could hold a prompt, a transcript
+# or chain-of-thought.
+MODEL_TRANSCRIPT_WORDS = (
+    "prompt",
+    "transcript",
+    "reasoning",
+    "chain_of_thought",
+    "thought",
+    "completion",
+    "raw_response",
+    "rationale",
+)
+QUALIFICATION_TABLES = ("mission_probe_outcomes", "mission_evidence_qualifications")
+
+
+def _qualification_table_definitions() -> list:
+    definitions = []
+    migration = _strip_sql_comments((SQL / "023_evidence_qualification.sql").read_text(encoding="utf-8"))
+    sqlite_source = (SRC / "ignis/infrastructure/persistence/sqlite_repository.py").read_text(
+        encoding="utf-8"
+    )
+    restated = _strip_sql_comments(sqlite_source)
+    for origin, body in (("sql/023", migration), ("sqlite restatement", restated)):
+        for block in _CREATE_TABLE.findall(body):
+            if block.split("(", 1)[0].strip() in QUALIFICATION_TABLES:
+                definitions.append((origin, block))
+    return definitions
+
+
+def test_no_qualification_table_can_store_a_prompt_transcript_or_model_reasoning():
+    definitions = _qualification_table_definitions()
+    names = sorted({(origin, block.split("(", 1)[0].strip()) for origin, block in definitions})
+    assert names == sorted(
+        (origin, table) for origin in ("sql/023", "sqlite restatement") for table in QUALIFICATION_TABLES
+    ), f"both backends must declare both tables; found {names}"
+
+    offenders = [
+        f"{origin}: {word}"
+        for origin, block in definitions
+        for word in MODEL_TRANSCRIPT_WORDS
+        if re.search(rf"\b{word}\w*\s+(TEXT|VARCHAR|JSONB?|DOUBLE)", block, re.IGNORECASE)
+    ]
+    assert not offenders, (
+        "A qualification table names storage for model input or reasoning. Judgments are bounded "
+        "enums plus an evaluator identifier:\n" + "\n".join(offenders)
+    )
+
+
+def test_the_decision_grade_modules_hold_no_domain_vocabulary():
+    """Relevance is judged by the host Agent, never by a keyword list shipped in the policy code."""
+    modules = (
+        "ignis/application/use_cases/get_evidence_qualification_batch.py",
+        "ignis/application/use_cases/submit_evidence_qualifications.py",
+        "ignis/domain/research_workspace.py",
+        "ignis/infrastructure/config/vocabulary_loader.py",
+    )
+    offenders = []
+    for rel in modules:
+        tree = ast.parse((SRC / rel).read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+                continue
+            value = node.value
+            if isinstance(value, ast.Call) and getattr(value.func, "id", "") == "frozenset":
+                value = value.args[0] if value.args else value
+            if isinstance(value, (ast.List, ast.Set, ast.Tuple)):
+                strings = [
+                    e.value for e in value.elts
+                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                ]
+                if any(_non_ascii_letters(s) or " " in s.strip() for s in strings):
+                    offenders.append(f"{rel}:{node.lineno}")
+    assert not offenders, "Natural-language terms in qualification code:\n" + "\n".join(offenders)

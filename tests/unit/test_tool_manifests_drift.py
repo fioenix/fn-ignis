@@ -44,3 +44,40 @@ def test_wheel_smoke_uses_the_manifest_tool_count():
 
     assert declared is not None, "wheel smoke no longer declares its expected tool count"
     assert int(declared.group(1)) == openclaw["protocols"]["tools_count"]
+
+
+def _manifest_function(path: str, name: str) -> dict:
+    entries = json.loads(Path(path).read_text(encoding="utf-8"))
+    return next(e["function"] for e in entries if e["function"]["name"] == name)
+
+
+@pytest.mark.asyncio
+async def test_the_two_qualification_tools_carry_their_typed_contract_everywhere():
+    """The host Agent can only submit a typed judgment it can read the shape of."""
+    from ignis.domain.research_workspace import (
+        EvidencePurpose,
+        QualificationReason,
+        QualificationRelation,
+    )
+
+    tools = {t.name: t for t in await mcp.list_tools()}
+    expected_required = {
+        "get_mission_evidence_qualification_batch": ["mission_id"],
+        "submit_mission_evidence_qualifications": ["mission_id", "frame_fingerprint", "assessments"],
+    }
+    for name, required in expected_required.items():
+        schema = tools[name].parameters
+        assert schema["required"] == required, name
+        for manifest in ("hermes_manifest.json", ".hermes/tools.json"):
+            function = _manifest_function(manifest, name)
+            assert function["parameters"] == schema, f"{manifest} drifted from the server for {name}"
+            assert function["description"] == tools[name].description, f"{manifest}: {name}"
+
+    batch = tools["get_mission_evidence_qualification_batch"].parameters["properties"]
+    assert batch["limit"] == {"default": 25, "type": "integer"}
+    assessments = tools["submit_mission_evidence_qualifications"].parameters["properties"]["assessments"]
+    assert assessments["type"] == "array" and assessments["items"]["type"] == "object"
+    description = tools["submit_mission_evidence_qualifications"].description
+    for enum in (QualificationRelation, EvidencePurpose, QualificationReason):
+        missing = [member.value for member in enum if member.value not in description]
+        assert not missing, f"the submit tool does not tell the Agent about {missing}"
