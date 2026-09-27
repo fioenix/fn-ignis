@@ -302,6 +302,14 @@ question relevance, the reason code and the `UNRELIABLE` cap on both backends.
   `24h` for a `30d` mission. Browser Reels/Threads and TikTok filter by no window, so they record
   `queried_window: null` and can no longer contribute a measured zero -- a deliberate fail-closed
   consequence (see limitations). Negative control removing the window check turns 5 tests red.
+- Gates rerun on `eff34f0` (scratch TimescaleDB, removed afterwards): `test_decision_grade_evidence.py`
+  73 passed; migration contract 17 passed; `tests/unit/` (without `YOUTUBE_API_KEY`) 1210 passed,
+  1 skipped; `tests/integration/` 566 passed, 3 skipped (same intentional skips; no PostgreSQL
+  skip); Compose fresh init 1 passed; ruff clean; `git diff --check "$(git merge-base main HEAD)..HEAD"`
+  clean; `uv lock --check` ok; `uv build` ok with 023 packaged.
+- Limitation for PO review: only YouTube filters its supply search by the requested window today,
+  and measured zero needs two supply surfaces, so `SUFFICIENT_ZERO_SUPPLY` cannot currently occur
+  with the shipped connectors; positive supply is unaffected.
 
 ## Dependencies & Execution Order
 
