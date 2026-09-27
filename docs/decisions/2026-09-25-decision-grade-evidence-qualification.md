@@ -1,7 +1,7 @@
 # Decision Proposal: Decision-Grade Evidence Qualification
 
-**Status:** Recommended; pending product-owner approval  
-**Date:** 2026-09-25  
+**Status:** Recommended; pending product-owner approval\
+**Date:** 2026-09-25\
 **Scope:** Post-v0.5 product validation and the next product priority
 
 ## Outcome
