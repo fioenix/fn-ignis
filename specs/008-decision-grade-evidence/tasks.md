@@ -231,11 +231,33 @@ question relevance, the reason code and the `UNRELIABLE` cap on both backends.
 
 - [X] T036 [P] Update the 47-tool catalog and Agent operating flow in `README.md`, `README.vi.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE.vi.md`, and `CLAUDE.md`
 - [X] T037 [P] Add static convention gates for typed qualification tools, manifest count, migration inventory, no prompt transcript storage, and no hardcoded vocabulary in `tests/unit/test_tool_manifests_drift.py`, `tests/unit/test_repo_conventions.py`, and `tests/unit/test_sql_packaging.py`
-- [ ] T038 Run the complete `quickstart.md` scenarios with a scratch PostgreSQL server, including negative controls that remove one migration command and re-enable unsupported evidence; record exact results in `.handoff/008-decision-grade-evidence.handoff.md`
-- [ ] T039 Run unit, full dual-backend integration, ruff, `git diff --check`, `uv lock --check`, `uv build`, and fresh Compose init; verify no PostgreSQL case was skipped and no scratch resource or credential remains
-- [ ] T040 Update `BACKLOG.md` and this task ledger with verified counts and explicit limits, without bumping version, tagging, pushing, merging, migrating a persistent database, or claiming release readiness
+- [X] T038 Run the complete `quickstart.md` scenarios with a scratch PostgreSQL server, including negative controls that remove one migration command and re-enable unsupported evidence; record exact results in `.handoff/008-decision-grade-evidence.handoff.md`
+- [X] T039 Run unit, full dual-backend integration, ruff, `git diff --check`, `uv lock --check`, `uv build`, and fresh Compose init; verify no PostgreSQL case was skipped and no scratch resource or credential remains
+- [X] T040 Update `BACKLOG.md` and this task ledger with verified counts and explicit limits, without bumping version, tagging, pushing, merging, migrating a persistent database, or claiming release readiness
 
 ---
+
+**Phase 7 evidence (27/09/2026, scratch TimescaleDB `pg16` container, removed afterwards):**
+
+- Quickstart: `cold_start` 8 passed; `keyword_noise or insufficient_market` 8 passed;
+  `qualified_market_control` 4 passed; `attention_handoff` 4 passed;
+  `reopen or revision or evidence_replacement` 8 passed; `test_data_provenance` +
+  `test_html_builder` 37 passed; whole `test_decision_grade_evidence.py` 59 passed;
+  `test_postgres_migration_contract.py` 17 passed.
+- Negative controls: removing 023's `ENABLE ROW LEVEL SECURITY` or its composite evidence key
+  fails the migration contract; counting every judged observation as support fails the corpus
+  replay and the keyword-noise controls; a least-bad Attention fallback fails 4 handoff tests;
+  adding a `prompt_text` column or dropping an enum from the submit tool fails the static gates.
+- `tests/unit/`: 1190 passed, 1 skipped. `tests/integration/`: 552 passed, 3 skipped (two `[sqlite]`
+  parameters of PostgreSQL-only backfill contracts, the Compose opt-in); no PostgreSQL skip.
+  `IGNIS_TEST_COMPOSE_INIT=1 test_compose_init.py`: 1 passed. `ruff`: clean. `uv lock --check`: ok.
+  `uv build`: wheel and sdist built; both contain `sql/023_evidence_qualification.sql`, the wheel
+  holds both new use-case modules. `git diff --check` over `ce88f61..HEAD`: first run found one
+  trailing blank line, fixed in its own commit; rerun clean.
+- Cleanup readback: the scratch container and its credential file are gone; no Compose project
+  container, volume or network remains; 12 report files the unit suite wrote into `reports/` during
+  this work were removed (two fixed-name files the existing tests overwrite on every run were left).
+- Not done by design: no version bump, tag, push, merge, release or persistent-database migration.
 
 ## Dependencies & Execution Order
 

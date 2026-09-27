@@ -1017,13 +1017,19 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Brief. Chi tiết và giới hạn của phép đo nằm trong
   [decision note](docs/decisions/2026-09-25-decision-grade-evidence-qualification.md).
 
-- [ ] **Ưu tiên kế tiếp được đề xuất: Decision-Grade Evidence Qualification.** Chưa mở spec hay
-  plan cho tới khi PO duyệt hướng. Phạm vi đề xuất gồm đồng bộ vocabulary trước ingress kể cả cold
-  start, chấm question relevance ở downstream, hạ trần confidence khi thiếu bằng chứng phù hợp,
-  không phát Opportunity Index khi evidence chưa đủ, trả rõ "không có handoff candidate đạt chuẩn"
-  và thêm negative control cho nội dung có keyword nhưng sai ngữ nghĩa. Chưa ưu tiên Live Alerts,
-  mở rộng taxonomy hay thêm connector, vì các hướng đó chỉ khuếch đại hoặc tăng số lượng evidence
-  chưa đủ tin cậy.
+- [x] **Decision-Grade Evidence Qualification (spec 008) đã triển khai trên nhánh
+  `codex/decision-grade-evidence`; chưa merge, chưa release, chưa áp vào database lâu dài nào.**
+  Mission đầu tiên sau khi server khởi động nạp từ vựng đã lưu trước mọi lời gọi connector.
+  Migration `023` thêm `mission_probe_outcomes` và `mission_evidence_qualifications`. Agent gửi
+  đánh giá có kiểu qua hai tool mới (tổng 47 tool); Ignis kiểm tra, lưu lại và áp chuẩn bằng chứng
+  tối thiểu, nên không phát Opportunity Index hay kết luận Market khi thiếu bằng chứng đạt chuẩn.
+  Attention không tự chọn ứng viên handoff thay thế. Corpus post-v0.5 đã redact nằm ở
+  `tests/fixtures/decision_grade_evidence.json`; replay qua handler thật cho 0 kết luận không được
+  hỗ trợ, so với mốc 0/21 đã ghi. Kiểm chứng ngày 27/09/2026: 1.190 unit test passed, 1 skipped;
+  552 integration test passed, 3 skipped trên PostgreSQL dùng một lần, không có case PostgreSQL
+  nào bị skip; Compose khởi tạo mới chạy đủ 23 file SQL; ruff, `uv lock --check` và `uv build` đạt.
+  Giới hạn: chưa đo trên corpus live; các ngưỡng tối thiểu là mặc định an toàn, chưa hiệu chỉnh;
+  chất lượng đánh giá ngữ nghĩa phụ thuộc Agent đang chạy phiên nghiên cứu.
 
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 
