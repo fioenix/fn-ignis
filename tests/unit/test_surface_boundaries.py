@@ -415,3 +415,156 @@ async def test_a_mission_outside_a_research_workspace_runs_exactly_as_before(tmp
         assert await store.list_run_journals(mission.id) == []
     finally:
         await repository.close()
+
+
+# --- User Story 2: the deterministic evidence minimum for a Market verdict ----------------------
+#
+# The semantic judgment labels evidence; policy code decides whether a verdict is allowed. The
+# minimums are product safety defaults: one qualified demand observation, and either two qualified
+# supply observations from two canonical sources or two relevant surfaces that completed and came
+# back empty for the same query.
+
+from datetime import datetime, timezone  # noqa: E402
+from uuid import uuid4  # noqa: E402
+
+from ignis.domain.research_workspace import (  # noqa: E402
+    EvidencePurpose,
+    EvidenceSufficiency,
+    MissionProbeOutcome,
+    QualificationStatus,
+    QualifiedObservation,
+    assess_topic_sufficiency,
+)
+
+QUERY = "q" * 64
+RUN = uuid4()
+
+
+def _qualified(purpose, source=None, platform="youtube"):
+    return QualifiedObservation(
+        observation_id=str(uuid4()),
+        source_id=source or str(uuid4()),
+        purpose=EvidencePurpose(purpose),
+        platform=platform,
+    )
+
+
+def _probe(surface, status="EMPTY_NO_DATA", platform=None, query=QUERY, count=0):
+    return MissionProbeOutcome(
+        run_id=RUN, platform=platform or surface, connector_surface=surface, status=status,
+        signals_collected=count, query_fingerprint=query,
+        completed_at=datetime(2026, 9, 27, tzinfo=timezone.utc),
+    )
+
+
+def _assess(qualified=(), outcomes=(), state=QualificationStatus.READY):
+    return assess_topic_sufficiency(
+        topic="ai cho cửa hàng",
+        qualified=list(qualified),
+        probe_outcomes=list(outcomes),
+        query_fingerprint=QUERY,
+        assessment_state=state,
+    )
+
+
+def test_no_qualified_demand_withholds_the_verdict_whatever_the_supply():
+    result = _assess([_qualified("SUPPLY"), _qualified("SUPPLY"), _qualified("VOC", platform="threads")])
+
+    assert result.state is EvidenceSufficiency.MISSING_DEMAND
+    assert result.state.permits_verdict is False
+    assert result.qualified_demand_count == 0 and result.qualified_supply_count == 2
+
+
+def test_one_demand_and_two_supply_observations_from_two_sources_is_sufficient():
+    result = _assess([_qualified("DEMAND", platform="google"), _qualified("SUPPLY"), _qualified("SUPPLY")])
+
+    assert result.state is EvidenceSufficiency.SUFFICIENT_POSITIVE_SUPPLY
+    assert result.state.permits_verdict is True
+    assert (result.qualified_demand_count, result.qualified_supply_count,
+            result.independent_supply_sources) == (1, 2, 2)
+
+
+def test_two_sightings_of_one_canonical_source_count_once():
+    source = str(uuid4())
+    result = _assess([
+        _qualified("DEMAND", platform="google"),
+        _qualified("SUPPLY", source=source, platform="youtube"),
+        _qualified("SUPPLY", source=source, platform="tiktok"),
+    ])
+
+    assert result.state is EvidenceSufficiency.MISSING_SUPPLY
+    assert result.independent_supply_sources == 1
+
+
+def test_a_single_supply_observation_is_neither_supply_nor_measured_absence():
+    result = _assess(
+        [_qualified("DEMAND", platform="google"), _qualified("SUPPLY")],
+        [_probe("tiktok_video_grid", platform="tiktok"), _probe("reels")],
+    )
+
+    assert result.state is EvidenceSufficiency.MISSING_SUPPLY
+
+
+def test_two_completed_empty_supply_surfaces_measure_zero_supply():
+    result = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("youtube"), _probe("tiktok_video_grid", platform="tiktok")],
+    )
+
+    assert result.state is EvidenceSufficiency.SUFFICIENT_ZERO_SUPPLY
+    assert result.measured_zero_surfaces == ("tiktok_video_grid", "youtube")
+    assert result.qualified_supply_count == 0
+
+
+@pytest.mark.parametrize("failed", ["AUTH_REQUIRED", "RATE_LIMITED", "DEGRADED"])
+def test_a_surface_that_could_not_measure_is_never_zero_supply(failed):
+    result = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("youtube"), _probe("tiktok_video_grid", status=failed, platform="tiktok")],
+    )
+
+    assert result.state is EvidenceSufficiency.MISSING_SUPPLY
+    assert result.measured_zero_surfaces == ("youtube",)
+
+
+def test_an_empty_surface_measures_zero_only_for_its_own_query_and_only_as_supply():
+    stale = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("youtube", query="z" * 64), _probe("tiktok_video_grid", platform="tiktok")],
+    )
+    not_supply = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("google"), _probe("threads"), _probe("youtube")],
+    )
+    healthy_but_irrelevant = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("youtube", status="HEALTHY", count=30), _probe("reels")],
+    )
+
+    assert stale.state is EvidenceSufficiency.MISSING_SUPPLY
+    assert not_supply.state is EvidenceSufficiency.MISSING_SUPPLY
+    assert healthy_but_irrelevant.state is EvidenceSufficiency.MISSING_SUPPLY, (
+        "a surface that returned only irrelevant items measured no absence"
+    )
+
+
+def test_unfinished_or_failed_qualification_withholds_every_verdict():
+    sufficient = [_qualified("DEMAND", platform="google"), _qualified("SUPPLY"), _qualified("SUPPLY")]
+
+    pending = _assess(sufficient, state=QualificationStatus.QUALIFICATION_REQUIRED)
+    unavailable = _assess(sufficient, state=QualificationStatus.UNAVAILABLE)
+
+    assert pending.state is EvidenceSufficiency.QUALIFICATION_REQUIRED
+    assert unavailable.state is EvidenceSufficiency.QUALIFIER_UNAVAILABLE
+    assert not pending.state.permits_verdict and not unavailable.state.permits_verdict
+
+
+def test_every_withheld_state_carries_a_reason():
+    for result in (
+        _assess(),
+        _assess([_qualified("DEMAND", platform="google")]),
+        _assess(state=QualificationStatus.QUALIFICATION_REQUIRED),
+        _assess(state=QualificationStatus.UNAVAILABLE),
+    ):
+        assert not result.state.permits_verdict
+        assert result.reason, result.state

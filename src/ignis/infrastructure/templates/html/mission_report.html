@@ -101,7 +101,7 @@
           <div>
             <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Market Stage</div>
             <div class="text-sm font-extrabold text-orange-600 mt-0.5">
-              {{ maturity_stage.value if maturity_stage.value is defined else maturity_stage }}
+              {% if maturity_stage is none %}Withheld{% else %}{{ maturity_stage.value if maturity_stage.value is defined else maturity_stage }}{% endif %}
             </div>
           </div>
         </div>

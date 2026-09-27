@@ -24,7 +24,17 @@ from ignis.application.use_cases.create_research_workspace import (
     CreateResearchWorkspaceUseCase,
 )
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
-from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
+from ignis.application.use_cases.get_evidence_qualification_batch import (
+    DEFAULT_BATCH_LIMIT,
+    GetEvidenceQualificationBatchUseCase,
+)
+from ignis.application.use_cases.get_mission_analysis import (
+    GetMissionAnalysisUseCase,
+    load_qualification_context,
+)
+from ignis.application.use_cases.submit_evidence_qualifications import (
+    SubmitEvidenceQualificationsUseCase,
+)
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS, IngestTrendsUseCase
@@ -38,6 +48,7 @@ from ignis.domain.research_workspace import (
     IncompleteMarketBriefError,
     MissionLineage,
     MissionWriterConflictError,
+    QualificationStatus,
     ResearchSurface,
     WorkspaceScopeMismatchError,
     opportunity_index_is_allowed,
@@ -225,6 +236,12 @@ def _init_components():
         confirm_use_case=confirm_market_brief_use_case,
     )
     get_mission_analysis_use_case = GetMissionAnalysisUseCase(repository=repository)
+    get_evidence_qualification_batch_use_case = GetEvidenceQualificationBatchUseCase(
+        repository=repository, store=workspace_store
+    )
+    submit_evidence_qualifications_use_case = SubmitEvidenceQualificationsUseCase(
+        repository=repository, store=workspace_store
+    )
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
     ingest_use_case = IngestTrendsUseCase(registry=registry, repository=repository)
     cluster_use_case = ClusterSignalsUseCase(clusterer=clusterer, repository=repository)
@@ -262,6 +279,8 @@ def _init_components():
         "create_mission_use_case": create_mission_use_case,
         "execute_mission_use_case": execute_mission_use_case,
         "get_mission_analysis_use_case": get_mission_analysis_use_case,
+        "get_evidence_qualification_batch_use_case": get_evidence_qualification_batch_use_case,
+        "submit_evidence_qualifications_use_case": submit_evidence_qualifications_use_case,
         "top_clusters_use_case": top_clusters_use_case,
         "ingest_use_case": ingest_use_case,
         "cluster_use_case": cluster_use_case,
@@ -442,6 +461,11 @@ def _serialize_opportunity(opp: Any, include_supporting: int = 0) -> Dict[str, A
         "recommendation": opp.strategic_recommendation,
         "citations": [_serialize_citation(c) for c in getattr(opp, "citations", []) or []],
     }
+    if getattr(opp, "evidence_sufficiency", None):
+        payload["evidence_sufficiency"] = opp.evidence_sufficiency
+        payload["qualified_demand_count"] = opp.qualified_demand_count
+        payload["qualified_supply_count"] = opp.qualified_supply_count
+        payload["independent_supply_sources"] = opp.independent_supply_sources
     if include_supporting:
         payload["supporting_signals"] = opp.supporting_signals[:include_supporting]
     return payload
@@ -450,11 +474,16 @@ def _serialize_opportunity(opp: Any, include_supporting: int = 0) -> Dict[str, A
 def _surface_payload(report: Any, mission: Any) -> Dict[str, Any]:
     """What surface this analysis speaks for, and what that surface is allowed to say."""
     surface = resolve_surface(getattr(mission, "surface", None))
+    qualification = getattr(report, "qualification", None)
     payload: Dict[str, Any] = {
         "surface": surface.value if surface else None,
         "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
-        "opportunity_index_applies": opportunity_index_is_allowed(surface),
+        # A surfaced Market mission may carry an index only once its qualified evidence met the
+        # minimum; a pending or insufficient assessment says so instead of printing a number.
+        "opportunity_index_applies": opportunity_index_is_allowed(surface)
+        and (qualification is None or qualification.status == QualificationStatus.READY.value),
     }
+    payload.update(_qualification_payload(report))
     if surface is ResearchSurface.ATTENTION:
         payload["note"] = (
             "ATTENTION context. Ranked topics, momentum, freshness and source coverage are "
@@ -476,6 +505,45 @@ def _surface_payload(report: Any, mission: Any) -> Dict[str, Any]:
             "question came from and are not counted as support for this Brief."
         )
     return payload
+
+
+def _qualification_payload(report: Any) -> Dict[str, Any]:
+    """The qualification block every analysis boundary returns, in one place so they agree.
+
+    Empty for a mission that declared no surface, which keeps its legacy payload unchanged.
+    """
+    qualification = getattr(report, "qualification", None)
+    if qualification is None:
+        return {}
+    payload: Dict[str, Any] = {
+        "analysis_status": qualification.status,
+        "qualification": qualification.to_payload(),
+    }
+    if qualification.status == QualificationStatus.QUALIFICATION_REQUIRED.value:
+        payload["next_step"] = "Call get_mission_evidence_qualification_batch."
+    if getattr(report, "topic_sufficiency", None):
+        payload["topic_sufficiency"] = report.topic_sufficiency
+    if getattr(report, "handoff_status", None):
+        payload["handoff_status"] = report.handoff_status
+        payload["qualified_handoff_candidates"] = [
+            {**c, "citations": [_serialize_citation(x) for x in c.get("citations", [])]}
+            for c in report.qualified_handoff_candidates
+        ]
+        payload["cluster_qualification"] = report.cluster_qualification
+    return payload
+
+
+def _maturity_value(report: Any) -> Optional[str]:
+    stage = getattr(report, "maturity_stage", None)
+    return stage.value if stage is not None else None
+
+
+async def _qualification_for(comp: Dict[str, Any], mission: Any, signals: List[Any]):
+    """The persisted qualification context for a surfaced mission, or None for a legacy one."""
+    store = comp.get("workspace_store")
+    if store is None:
+        return None
+    return await load_qualification_context(store, mission, signals)
 
 
 async def _attention_context_signals(comp: Dict[str, Any], mission: Any) -> List[Any]:
@@ -714,12 +782,13 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
         auth_status=auth_status,
         connector_health=connector_health,
         market_brief=brief,
+        qualification=await _qualification_for(comp, mission, signals),
     )
 
     return json.dumps(
         {
             "mission_id": str(mission.id),
-            "maturity_stage": report.maturity_stage.value,
+            "maturity_stage": _maturity_value(report),
             **_surface_payload(report, mission),
             "market_opportunities": [
                 _serialize_opportunity(opp) for opp in report.market_opportunities
@@ -1602,6 +1671,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     tf_days = timeframe_to_days(mission.timeframe)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
     auth_status, connector_health = await _collect_channel_context(comp)
+    qualification = await _qualification_for(comp, mission, signals)
     report = comp["strategic_reasoner"].analyze_mission(
         mission=mission,
         signals=signals,
@@ -1611,7 +1681,15 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         connector_health=connector_health,
         market_brief=brief,
         attention_context_signals=await _attention_context_signals(comp, mission),
+        qualification=qualification,
     )
+
+    if qualification is not None:
+        # Every raw observation stays readable, labelled with what its judgment made of it.
+        for item in analysis["top_signals"]:
+            judged = qualification.judgment_of(item.get("observation_id"))
+            item["qualification_relation"] = judged.relation.value if judged else "UNASSESSED"
+            item["qualification_reason"] = judged.reason_code.value if judged else None
 
     analysis["quality_scorecard"] = {
         "overall_confidence": scorecard.overall_confidence,
@@ -1623,7 +1701,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         "strengths": scorecard.strengths_detected,
         "flaws": scorecard.flaws_detected,
     }
-    analysis["maturity_stage"] = report.maturity_stage.value
+    analysis["maturity_stage"] = _maturity_value(report)
     analysis.update(_surface_payload(report, mission))
     analysis["market_opportunities"] = [
         _serialize_opportunity(opp, include_supporting=2) for opp in report.market_opportunities
@@ -1696,6 +1774,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         auth_status=auth_status,
         connector_health=connector_health,
         market_brief=brief,
+        qualification=await _qualification_for(comp, mission, signals),
     )
     
     platform_breakdown = {}
@@ -1752,6 +1831,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
                 "strengths": scorecard.strengths_detected,
                 "flaws": scorecard.flaws_detected,
             },
+            **_surface_payload(report, mission),
             "top_market_opportunities": [
                 {
                     "topic": opp.topic,
@@ -1771,6 +1851,26 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         ensure_ascii=False,
         indent=2
     )
+
+
+async def handle_get_mission_evidence_qualification_batch(
+    mission_id: str, cursor: Optional[str] = None, limit: int = DEFAULT_BATCH_LIMIT
+) -> str:
+    comp = get_components()
+    result = await comp["get_evidence_qualification_batch_use_case"].execute(
+        mission_id=mission_id, cursor=cursor, limit=limit
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def handle_submit_mission_evidence_qualifications(
+    mission_id: str, frame_fingerprint: str, assessments: List[Dict[str, Any]]
+) -> str:
+    comp = get_components()
+    result = await comp["submit_evidence_qualifications_use_case"].execute(
+        mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 async def handle_list_research_missions(limit: int = 10) -> str:
@@ -2126,6 +2226,16 @@ async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optio
 @mcp.tool(name="generate_mission_artifact", description="Export a standalone Infographic Canvas HTML report to local disk (reports/ folder). Use ONLY when the user explicitly requests an exported HTML file.")
 async def generate_mission_artifact(mission_id: str) -> str:
     return await handle_generate_mission_artifact(mission_id)
+
+
+@mcp.tool(name="get_mission_evidence_qualification_batch", description="Read a bounded batch (default 25, max 50) of a mission's current evidence that still needs a semantic judgment, with the immutable frame it is judged against: the confirmed Market Brief revision, or the Attention title and keywords. Judge each item in your own context and send the typed result to submit_mission_evidence_qualifications with the returned frame_fingerprint. Returns READY when nothing is pending, NOT_APPLICABLE for a mission with no research surface.")
+async def get_mission_evidence_qualification_batch(mission_id: str, cursor: Optional[str] = None, limit: int = DEFAULT_BATCH_LIMIT) -> str:
+    return await handle_get_mission_evidence_qualification_batch(mission_id=mission_id, cursor=cursor, limit=limit)
+
+
+@mcp.tool(name="submit_mission_evidence_qualifications", description="Record 1-50 typed evidence judgments for one mission, atomically: each assessment names an observation_id from the batch, a relation (QUALIFIED_SUPPORT, CONTEXT_ONLY, EXCLUDED_IRRELEVANT, UNASSESSED), a purpose (DEMAND, SUPPLY, VOC, CONTEXT), a confidence from 0.0 to 1.0 (null only for UNASSESSED), a reason_code (DIRECT_TO_FRAME, ADJACENT_ONLY, KEYWORD_ONLY, WRONG_AUDIENCE_OR_PROBLEM, FICTION_NEWS_OR_ENTERTAINMENT, INSUFFICIENT_CONTENT, EVALUATOR_UNAVAILABLE), judged_by and an optional model identifier. A stale frame, a foreign or duplicate observation, or any invalid assessment refuses the whole batch; an identical replay is idempotent and a different judgment for an already judged observation is refused. Never send a prompt, transcript or credential.")
+async def submit_mission_evidence_qualifications(mission_id: str, frame_fingerprint: str, assessments: list[dict]) -> str:
+    return await handle_submit_mission_evidence_qualifications(mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments)
 
 
 @mcp.tool(name="list_research_missions", description="List recent trend research missions and tracking campaigns.")

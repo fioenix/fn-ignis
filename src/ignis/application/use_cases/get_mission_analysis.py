@@ -4,14 +4,37 @@ from uuid import UUID
 from collections import defaultdict
 
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.domain.research_workspace import (
     EvidenceRole,
     MissionLineage,
+    QualificationContext,
     ResearchSurface,
+    compute_query_fingerprint,
     resolve_surface,
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def load_qualification_context(
+    store: IResearchWorkspaceStore, mission, signals
+) -> Optional[QualificationContext]:
+    """The persisted qualification state of a surfaced mission, or None for a legacy one.
+
+    Everything comes from stored rows -- the judgments, and the outcomes of the latest completed
+    run -- so reopening a mission reads the same answer and calls no evaluator.
+    """
+    if resolve_surface(getattr(mission, "surface", None)) is None:
+        return None
+    return QualificationContext.build(
+        observation_ids=[s.observation_id for s in signals if s.observation_id],
+        qualifications=await store.list_evidence_qualifications(mission.id),
+        probe_outcomes=await store.get_latest_completed_probe_outcomes(mission.id),
+        query_fingerprint=compute_query_fingerprint(
+            mission.keywords, mission.geo_code, mission.timeframe
+        ),
+    )
 
 
 class GetMissionAnalysisUseCase:

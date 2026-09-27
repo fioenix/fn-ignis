@@ -384,7 +384,13 @@ class ProbeCountingRegistry(StubRegistry):
 
 def _mcp_components(repository, store, registry):
     """The real handlers over the real database, with only the connectors replaced."""
+    from ignis.application.use_cases.get_evidence_qualification_batch import (
+        GetEvidenceQualificationBatchUseCase,
+    )
     from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
+    from ignis.application.use_cases.submit_evidence_qualifications import (
+        SubmitEvidenceQualificationsUseCase,
+    )
     from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
     from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
     from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
@@ -399,6 +405,12 @@ def _mcp_components(repository, store, registry):
         "artifact_builder": HtmlArtifactBuilder(),
         "top_clusters_use_case": GetTopClustersUseCase(repository=repository),
         "get_mission_analysis_use_case": GetMissionAnalysisUseCase(repository=repository),
+        "get_evidence_qualification_batch_use_case": GetEvidenceQualificationBatchUseCase(
+            repository=repository, store=store
+        ),
+        "submit_evidence_qualifications_use_case": SubmitEvidenceQualificationsUseCase(
+            repository=repository, store=store
+        ),
         "execute_mission_use_case": ExecuteMissionUseCase(
             repository=repository,
             registry=registry,
@@ -537,9 +549,12 @@ async def test_the_gate_does_not_block_a_confirmed_brief_or_an_attention_mission
     assert market_run["status"] == "COMPLETED"
 
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(market.id)))
+    assert analysis.get("status") != "BLOCKED", "the Brief gate must let a confirmed Brief through"
     assert analysis["surface"] == "MARKET"
-    assert analysis["opportunity_index_applies"] is True
     assert analysis["market_brief"]["falsifiers"] == COMPLETE_BRIEF["falsifiers"]
+    # Past the Brief gate, the evidence gate: an index waits until the evidence is qualified.
+    assert analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
+    assert analysis["opportunity_index_applies"] is False
 
     artifact = json.loads(await mcp_server.handle_generate_mission_artifact(str(market.id)))
     assert artifact["status"] == "SUCCESS"
@@ -1173,3 +1188,34 @@ async def test_four_concurrent_confirmations_take_four_distinct_revision_numbers
         (workspace_text,),
     )[0]
     assert (unauthorized, detached) == (0, 0)
+
+
+# --- Decision-grade evidence: a mission with no surface keeps its behaviour --------------------
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_mission_without_a_surface_gets_no_qualification_gate(
+    repository_case, host_workspace, monkeypatch
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, _workspace_record = await _workspace(repository, host_workspace)
+    legacy = ResearchMission(title="Legacy mission", keywords=["ai customer service"])
+    await repository.create_mission(legacy)
+    registry = ProbeCountingRegistry(_probe_signals())
+    components = _mcp_components(repository, store, registry)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    ingress = json.loads(await mcp_server.handle_execute_mission_ingress(str(legacy.id)))
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(legacy.id)))
+    batch = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(legacy.id)))
+
+    assert ingress["status"] == "COMPLETED" and "run" not in ingress
+    assert analysis["surface"] is None
+    assert analysis["opportunity_index_applies"] is True
+    assert [o["topic"] for o in analysis["market_opportunities"]] == ["ai customer service"]
+    assert "qualification" not in analysis and "analysis_status" not in analysis
+    assert all("qualification_relation" not in s for s in analysis["top_signals"])
+    assert batch["status"] == "NOT_APPLICABLE"
+    assert await store.list_evidence_qualifications(legacy.id) == []

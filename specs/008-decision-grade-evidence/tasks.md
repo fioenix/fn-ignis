@@ -116,21 +116,47 @@ retains an Opportunity Index with qualified citations only.
 
 ### Tests for User Story 2
 
-- [ ] T017 [P] [US2] Add RED batch-read and atomic-submit use-case tests, including pagination, stale frame, foreign observation, duplicate observation, conflicting rewrite, and idempotent replay in `tests/unit/test_evidence_qualification.py`
-- [ ] T018 [P] [US2] Add RED deterministic sufficiency tests for missing demand, positive supply, measured-zero supply, failed/unauthenticated surfaces, source deduplication, and unassessed evidence in `tests/unit/test_surface_boundaries.py`
-- [ ] T019 [P] [US2] Commit the redacted post-v0.5 corpus as `tests/fixtures/decision_grade_evidence.json` and add RED semantic negative and positive controls for film, sports, lottery, unrelated news, synonyms, target-user mismatch, and direct support in `tests/integration/test_decision_grade_evidence.py`
+- [X] T017 [P] [US2] Add RED batch-read and atomic-submit use-case tests, including pagination, stale frame, foreign observation, duplicate observation, conflicting rewrite, and idempotent replay in `tests/unit/test_evidence_qualification.py`
+- [X] T018 [P] [US2] Add RED deterministic sufficiency tests for missing demand, positive supply, measured-zero supply, failed/unauthenticated surfaces, source deduplication, and unassessed evidence in `tests/unit/test_surface_boundaries.py`
+- [X] T019 [P] [US2] Commit the redacted post-v0.5 corpus as `tests/fixtures/decision_grade_evidence.json` and add RED semantic negative and positive controls for film, sports, lottery, unrelated news, synonyms, target-user mismatch, and direct support in `tests/integration/test_decision_grade_evidence.py`
 
 ### Implementation for User Story 2
 
-- [ ] T020 [US2] Implement bounded pending-batch reads and stable mission/Brief frame fingerprints in `src/ignis/application/use_cases/get_evidence_qualification_batch.py`
-- [ ] T021 [US2] Implement atomic typed submission validation and immutable replay/conflict semantics in `src/ignis/application/use_cases/submit_evidence_qualifications.py`
-- [ ] T022 [US2] Expose `get_mission_evidence_qualification_batch` and `submit_mission_evidence_qualifications` in `src/ignis/interfaces/mcp/server.py`, `hermes_manifest.json`, `.hermes/tools.json`, and `openclaw.json`
-- [ ] T023 [US2] Implement deterministic per-topic evidence sufficiency and independent-source counting in `src/ignis/domain/research_workspace.py`
-- [ ] T024 [US2] Restrict Market demand, supply, maturity, insights, takeaways, and citations to qualified support in `src/ignis/infrastructure/harness/strategic_reasoner.py`
-- [ ] T025 [US2] Return structured `QUALIFICATION_REQUIRED`, `UNAVAILABLE`, and `INSUFFICIENT_RELEVANT_EVIDENCE` results from analysis, opportunity discovery, and artifact boundaries in `src/ignis/application/use_cases/get_mission_analysis.py` and `src/ignis/interfaces/mcp/server.py`
-- [ ] T026 [US2] Prove reopen stability, Market revision isolation, evidence-replacement invalidation, measured-zero probe history, and no legacy-surface gate on both backends in `tests/integration/test_decision_grade_evidence.py` and `tests/integration/test_dual_surface_journey.py`
+- [X] T020 [US2] Implement bounded pending-batch reads and stable mission/Brief frame fingerprints in `src/ignis/application/use_cases/get_evidence_qualification_batch.py`
+- [X] T021 [US2] Implement atomic typed submission validation and immutable replay/conflict semantics in `src/ignis/application/use_cases/submit_evidence_qualifications.py`
+- [X] T022 [US2] Expose `get_mission_evidence_qualification_batch` and `submit_mission_evidence_qualifications` in `src/ignis/interfaces/mcp/server.py`, `hermes_manifest.json`, `.hermes/tools.json`, and `openclaw.json`
+- [X] T023 [US2] Implement deterministic per-topic evidence sufficiency and independent-source counting in `src/ignis/domain/research_workspace.py`
+- [X] T024 [US2] Restrict Market demand, supply, maturity, insights, takeaways, and citations to qualified support in `src/ignis/infrastructure/harness/strategic_reasoner.py`
+- [X] T025 [US2] Return structured `QUALIFICATION_REQUIRED`, `UNAVAILABLE`, and `INSUFFICIENT_RELEVANT_EVIDENCE` results from analysis, opportunity discovery, and artifact boundaries in `src/ignis/application/use_cases/get_mission_analysis.py` and `src/ignis/interfaces/mcp/server.py`
+- [X] T026 [US2] Prove reopen stability, Market revision isolation, evidence-replacement invalidation, measured-zero probe history, and no legacy-surface gate on both backends in `tests/integration/test_decision_grade_evidence.py` and `tests/integration/test_dual_surface_journey.py`
 
 **Checkpoint**: US2 prevents unsupported Market verdicts while preserving positive qualified controls.
+
+**US2 evidence (27/09/2026):**
+
+- RED captured before production code: T017/T018 failed on missing use-case modules and missing
+  `QualifiedObservation`; T019 failed on the missing MCP handlers (12 = 6 tests x 2 backends).
+- `test_decision_grade_evidence.py`: 53 passed (every contract on SQLite and PostgreSQL), including
+  the corpus replay (`direct_market`, `attention_to_market`) with zero emitted unsupported conclusion
+  units against the committed `0/21` baseline, the film/lottery/news/sports/target-user negative
+  controls, the positive control (`SUFFICIENT_POSITIVE_SUPPLY`, 1 demand, 3 supply, 2 sources), the
+  measured-zero control, reopen stability under changed connector health, a later failed run,
+  revision isolation and evidence replacement.
+- Negative control: counting every judged observation as support with its platform purpose (the
+  pre-008 reading) turns the `direct_market` replay and the negative-control test red on both
+  backends. The first negative-control attempt passed, exposing that the negative controls carried
+  no demand; the fixture gained the corpus `att-032` adjacent Google item so the control can fail.
+- Consumer updates: `test_dual_surface_journey` now expects `QUALIFICATION_REQUIRED` rather than an
+  index right after ingress, and gains the legacy no-surface regression (2 passed); tool counts 45
+  -> 47 in the manifests, the wheel smoke and the stdio/clean-user contracts (8 passed).
+- Full suites before staging: unit 1165 passed, 1 skipped; integration 544 passed, 3 skipped,
+  2 failed -- the clean-user contracts copy `git ls-files`, which did not yet include the two new
+  untracked modules; staged, they pass (8 passed). No PostgreSQL skip.
+- Interpretation recorded for review: an explicit `UNASSESSED`/`INSUFFICIENT_CONTENT` row counts
+  as unassessed and never as support, but does not block the mission once every observation
+  carries a row; `EVALUATOR_UNAVAILABLE` makes the mission `UNAVAILABLE`. A measured zero counts
+  only `EMPTY_NO_DATA` supply surfaces of the same query; a `HEALTHY` surface whose items were all
+  excluded is not a measured absence.
 
 ---
 

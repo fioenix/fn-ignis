@@ -16,7 +16,7 @@ import select
 import subprocess
 import sys
 
-EXPECTED_TOOL_COUNT = 45
+EXPECTED_TOOL_COUNT = 47
 PROTOCOL_VERSION = "2024-11-05"
 RESPONSE_TIMEOUT_SECONDS = 120.0
 

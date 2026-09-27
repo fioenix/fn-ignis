@@ -796,6 +796,8 @@ class QualificationProgress:
     excluded_irrelevant: int = 0
     unassessed: int = 0
     evaluator_unavailable: int = 0
+    # Current evidence with no persisted row at all: what the next batch read will hand out.
+    unjudged: int = 0
 
     @classmethod
     def from_evidence(
@@ -821,6 +823,7 @@ class QualificationProgress:
                 if q.relation is QualificationRelation.UNASSESSED
                 and q.reason_code is QualificationReason.EVALUATOR_UNAVAILABLE
             ),
+            unjudged=len(current) - len(by_observation),
         )
 
     @property
@@ -846,3 +849,204 @@ class QualificationProgress:
             "excluded_irrelevant": self.excluded_irrelevant,
             "unassessed": self.unassessed,
         }
+
+
+# ---------------------------------------------------------------------------
+# Evidence sufficiency: the deterministic minimum for a verdict
+# ---------------------------------------------------------------------------
+#
+# Product safety defaults, deliberately not configurable in this feature. The semantic judgment
+# decides what an observation is; these decide whether enough of it exists to say anything.
+
+QUALIFIED_DEMAND_MINIMUM = 1
+POSITIVE_SUPPLY_OBSERVATIONS = 2
+POSITIVE_SUPPLY_SOURCES = 2
+MEASURED_ZERO_SURFACES = 2
+HANDOFF_OBSERVATIONS = 2
+HANDOFF_SOURCES = 2
+
+# The platforms whose surfaces measure content supply. Platform identifiers, not vocabulary.
+SUPPLY_SURFACE_PLATFORMS = frozenset({"youtube", "tiktok", "reels"})
+
+
+@dataclass(frozen=True)
+class QualifiedObservation:
+    """One observation a mission's judgment qualified as support, reduced to what policy counts."""
+
+    observation_id: str
+    source_id: Optional[str]
+    purpose: EvidencePurpose
+    platform: str
+
+
+@dataclass(frozen=True)
+class TopicSufficiency:
+    """Whether one Market topic may carry a demand-versus-supply verdict, and why."""
+
+    topic: str
+    state: EvidenceSufficiency
+    qualified_demand_count: int = 0
+    qualified_supply_count: int = 0
+    independent_supply_sources: int = 0
+    measured_zero_surfaces: Tuple[str, ...] = ()
+    reason: str = ""
+
+
+def assess_topic_sufficiency(
+    topic: str,
+    qualified: Sequence[QualifiedObservation],
+    probe_outcomes: Sequence[MissionProbeOutcome],
+    query_fingerprint: Optional[str],
+    assessment_state: QualificationStatus,
+) -> TopicSufficiency:
+    """Apply the evidence minimum to one topic.
+
+    `qualified` is the topic's QUALIFIED_SUPPORT evidence only; context-only, excluded and
+    unassessed observations never reach this function. A measured zero is read from the persisted
+    outcomes of the latest completed run, and only for the query that run actually sent.
+    """
+    if assessment_state is QualificationStatus.QUALIFICATION_REQUIRED:
+        return TopicSufficiency(
+            topic=topic,
+            state=EvidenceSufficiency.QUALIFICATION_REQUIRED,
+            reason="Current mission evidence still requires semantic qualification.",
+        )
+    if assessment_state is QualificationStatus.UNAVAILABLE:
+        return TopicSufficiency(
+            topic=topic,
+            state=EvidenceSufficiency.QUALIFIER_UNAVAILABLE,
+            reason="A semantic judgment could not be obtained for some of the mission's evidence.",
+        )
+
+    demand = [q for q in qualified if q.purpose is EvidencePurpose.DEMAND]
+    supply = [q for q in qualified if q.purpose is EvidencePurpose.SUPPLY]
+    sources = {q.source_id for q in supply if q.source_id}
+    zero_surfaces = tuple(sorted({
+        o.connector_surface
+        for o in probe_outcomes
+        if o.measures_zero
+        and o.platform in SUPPLY_SURFACE_PLATFORMS
+        and query_fingerprint is not None
+        and o.query_fingerprint == query_fingerprint
+    }))
+    counts = dict(
+        qualified_demand_count=len(demand),
+        qualified_supply_count=len(supply),
+        independent_supply_sources=len(sources),
+        measured_zero_surfaces=zero_surfaces,
+    )
+
+    if len(demand) < QUALIFIED_DEMAND_MINIMUM:
+        return TopicSufficiency(
+            topic=topic,
+            state=EvidenceSufficiency.MISSING_DEMAND,
+            reason="No qualified demand observation addresses this topic.",
+            **counts,
+        )
+    if len(supply) >= POSITIVE_SUPPLY_OBSERVATIONS and len(sources) >= POSITIVE_SUPPLY_SOURCES:
+        return TopicSufficiency(
+            topic=topic,
+            state=EvidenceSufficiency.SUFFICIENT_POSITIVE_SUPPLY,
+            reason="Qualified demand and qualified supply from independent sources.",
+            **counts,
+        )
+    if not supply and len(zero_surfaces) >= MEASURED_ZERO_SURFACES:
+        return TopicSufficiency(
+            topic=topic,
+            state=EvidenceSufficiency.SUFFICIENT_ZERO_SUPPLY,
+            reason="Qualified demand, and relevant supply surfaces completed with no results.",
+            **counts,
+        )
+    return TopicSufficiency(
+        topic=topic,
+        state=EvidenceSufficiency.MISSING_SUPPLY,
+        reason=(
+            "Supply is neither qualified by two observations from two independent sources nor "
+            "measured absent by two completed, empty supply surfaces."
+        ),
+        **counts,
+    )
+
+
+@dataclass(frozen=True)
+class HandoffCandidate:
+    """An Attention cluster qualified to become the question of a new Market Brief."""
+
+    cluster_id: str
+    observation_ids: Tuple[str, ...]
+    independent_sources: int
+
+
+def select_handoff_candidates(
+    qualified_by_cluster: Mapping[str, Sequence[QualifiedObservation]],
+) -> List[HandoffCandidate]:
+    """Every cluster backed by enough directly relevant evidence from independent sources.
+
+    No fallback: when nothing qualifies the answer is an empty list, never the least-bad cluster.
+    """
+    candidates: List[HandoffCandidate] = []
+    for cluster_id, observations in qualified_by_cluster.items():
+        sources = {o.source_id for o in observations if o.source_id}
+        if len(observations) >= HANDOFF_OBSERVATIONS and len(sources) >= HANDOFF_SOURCES:
+            candidates.append(
+                HandoffCandidate(
+                    cluster_id=str(cluster_id),
+                    observation_ids=tuple(sorted(o.observation_id for o in observations)),
+                    independent_sources=len(sources),
+                )
+            )
+    return sorted(candidates, key=lambda c: (-c.independent_sources, c.cluster_id))
+
+
+@dataclass(frozen=True)
+class QualificationContext:
+    """Everything the analysis needs to know about a surfaced mission's evidence qualification.
+
+    Read from persisted rows only. `assessment_state` is QUALIFICATION_REQUIRED while any current
+    observation has no row, UNAVAILABLE when an evaluator failure was recorded, and READY once
+    every observation carries a judgment -- READY here means "assessed"; whether a conclusion is
+    permitted is decided afterwards by the sufficiency policy.
+    """
+
+    assessment_state: QualificationStatus
+    progress: QualificationProgress
+    qualifications: Mapping[str, EvidenceQualification] = field(default_factory=dict)
+    probe_outcomes: Tuple[MissionProbeOutcome, ...] = ()
+    query_fingerprint: Optional[str] = None
+
+    @classmethod
+    def build(
+        cls,
+        observation_ids: Sequence[Any],
+        qualifications: Sequence[EvidenceQualification],
+        probe_outcomes: Sequence[MissionProbeOutcome],
+        query_fingerprint: Optional[str],
+    ) -> "QualificationContext":
+        current = {str(observation_id) for observation_id in observation_ids}
+        by_observation = {
+            str(q.observation_id): q for q in qualifications if str(q.observation_id) in current
+        }
+        progress = QualificationProgress.from_evidence(list(current), list(by_observation.values()))
+        if progress.unjudged:
+            state = QualificationStatus.QUALIFICATION_REQUIRED
+        elif progress.evaluator_unavailable:
+            state = QualificationStatus.UNAVAILABLE
+        else:
+            state = QualificationStatus.READY
+        return cls(
+            assessment_state=state,
+            progress=progress,
+            qualifications=by_observation,
+            probe_outcomes=tuple(probe_outcomes),
+            query_fingerprint=query_fingerprint,
+        )
+
+    def judgment_of(self, observation_id: Any) -> Optional[EvidenceQualification]:
+        return self.qualifications.get(str(observation_id)) if observation_id else None
+
+    def support_of(self, observation_id: Any) -> Optional[EvidenceQualification]:
+        """The judgment, only when it qualifies the observation as support."""
+        judged = self.judgment_of(observation_id)
+        if judged is not None and judged.relation is QualificationRelation.QUALIFIED_SUPPORT:
+            return judged
+        return None

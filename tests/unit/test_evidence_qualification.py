@@ -342,3 +342,270 @@ def test_a_legacy_scorecard_carries_no_relevance_dimension():
     scorecard = QualityScorecard()
     assert scorecard.question_relevance_score is None
     assert scorecard.qualification_counts is None
+
+
+# --- User Story 2: the two MCP operations, as use cases over a real store -----------------------
+#
+# The host Agent reads bounded batches and submits typed judgments. Ignis cannot prove a semantic
+# judgment, so what it enforces is identity and integrity: every judgment names evidence the
+# mission holds, against the frame the mission was framed by, and a batch lands whole or not at all.
+
+import json  # noqa: E402
+
+import pytest_asyncio  # noqa: E402
+
+from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase  # noqa: E402
+from ignis.application.use_cases.create_attention_mission import (  # noqa: E402
+    CreateAttentionMissionUseCase,
+)
+from ignis.application.use_cases.create_research_workspace import (  # noqa: E402
+    CreateResearchWorkspaceUseCase,
+)
+from ignis.application.use_cases.get_evidence_qualification_batch import (  # noqa: E402
+    GetEvidenceQualificationBatchUseCase,
+)
+from ignis.application.use_cases.submit_evidence_qualifications import (  # noqa: E402
+    SubmitEvidenceQualificationsUseCase,
+)
+from ignis.domain.entities import TrendSignal  # noqa: E402
+from ignis.domain.value_objects import PlatformType  # noqa: E402
+from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository  # noqa: E402
+from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository  # noqa: E402
+
+BRIEF = dict(
+    decision="Decide whether to build an AI operations copilot for small retailers",
+    target_user="Owners of independent Vietnamese retail shops",
+    problem="Daily sales and inventory decisions depend on manual checking",
+    geo="VN",
+    timeframe="7d",
+    hypothesis="Independent retailers want affordable AI help with daily operating data",
+    falsifiers=["Probes find only generic AI content"],
+    confirmed_by="requester",
+)
+
+
+@pytest_asyncio.fixture
+async def research(tmp_path):
+    repository = SqliteTrendRepository(str(tmp_path / "qualification.sqlite"))
+    store = WorkspaceRepository(repository=repository)
+    workspaces = CreateResearchWorkspaceUseCase(store=store)
+    host = tmp_path / "host"
+    host.mkdir()
+    workspace = await workspaces.confirm(await workspaces.propose(host, "Retail copilot"), confirmation=True)
+    yield repository, store, workspace
+    await repository.close()
+
+
+async def _market(repository, store, workspace, titles=("AI quản lý kho cho shop nhỏ",)):
+    mission, brief = await ConfirmMarketBriefUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id, keywords=["ai cho cửa hàng"], **BRIEF
+    )
+    return mission, brief, await _hold(repository, mission, titles)
+
+
+async def _hold(repository, mission, titles):
+    signals = [
+        TrendSignal(
+            platform=PlatformType.YOUTUBE,
+            raw_title=title,
+            metric_value=1000.0 + index,
+            source_url=f"https://www.youtube.com/watch?v=q{index:010d}",
+            captured_at=NOW,
+            mission_id=mission.id,
+            metadata={"keyword": "ai cho cửa hàng", "connector_surface": "youtube",
+                      "top_comment": "gọi 0912345678 để mua"},
+        )
+        for index, title in enumerate(titles)
+    ]
+    await repository.save_signals(signals)
+    return sorted(await repository.get_mission_signals(mission.id), key=lambda s: str(s.observation_id))
+
+
+def _assessment(observation_id, **overrides):
+    values = {
+        "observation_id": str(observation_id),
+        "relation": "QUALIFIED_SUPPORT",
+        "purpose": "SUPPLY",
+        "confidence": 0.9,
+        "reason_code": "DIRECT_TO_FRAME",
+        "judged_by": "claude-code",
+        "model": "claude-opus-5-5",
+    }
+    values.update(overrides)
+    return values
+
+
+def _use_cases(repository, store):
+    return (
+        GetEvidenceQualificationBatchUseCase(repository=repository, store=store),
+        SubmitEvidenceQualificationsUseCase(repository=repository, store=store),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_market_batch_carries_the_frame_the_brief_revision_and_only_unjudged_evidence(research):
+    repository, store, workspace = research
+    mission, brief, held = await _market(repository, store, workspace, ("a", "b", "c"))
+    read, submit = _use_cases(repository, store)
+
+    batch = await read.execute(str(mission.id))
+
+    assert batch["status"] == "QUALIFICATION_REQUIRED"
+    assert batch["surface"] == "MARKET"
+    assert batch["frame_fingerprint"] == compute_frame_fingerprint(mission, brief)
+    assert batch["frame"]["brief_revision_id"] == str(brief.brief_revision_id)
+    assert batch["frame"]["target_user"] == BRIEF["target_user"]
+    assert batch["frame"]["falsifiers"] == BRIEF["falsifiers"]
+    assert batch["progress"] == {"total_evidence": 3, "qualified_support": 0, "context_only": 0,
+                                 "excluded_irrelevant": 0, "unassessed": 3}
+    assert [e["observation_id"] for e in batch["evidence"]] == [str(s.observation_id) for s in held]
+    first = batch["evidence"][0]
+    assert first["probe_keyword"] == "ai cho cửa hàng" and first["connector_surface"] == "youtube"
+    assert first["source_id"] == str(held[0].source_id)
+    assert "0912345678" not in json.dumps(batch, ensure_ascii=False), "a phone number leaked"
+    assert set(batch["recommended_judgment"]["relation"]) == {r.value for r in QualificationRelation}
+
+    await submit.execute(str(mission.id), batch["frame_fingerprint"], [_assessment(held[0].observation_id)])
+    again = await read.execute(str(mission.id))
+    assert [e["observation_id"] for e in again["evidence"]] == [str(s.observation_id) for s in held[1:]]
+
+
+@pytest.mark.asyncio
+async def test_batches_paginate_stably_and_end_ready(research):
+    repository, store, workspace = research
+    mission, _brief, held = await _market(repository, store, workspace, tuple("abcde"))
+    read, submit = _use_cases(repository, store)
+
+    first = await read.execute(str(mission.id), limit=2)
+    second = await read.execute(str(mission.id), cursor=first["next_cursor"], limit=2)
+    third = await read.execute(str(mission.id), cursor=second["next_cursor"], limit=2)
+
+    seen = [e["observation_id"] for page in (first, second, third) for e in page["evidence"]]
+    assert seen == [str(s.observation_id) for s in held]
+    assert third["next_cursor"] is None
+    assert (await read.execute(str(mission.id), limit=500))["evidence"].__len__() == 5, "limit caps at 50"
+
+    await submit.execute(
+        str(mission.id), first["frame_fingerprint"],
+        [_assessment(s.observation_id, relation="EXCLUDED_IRRELEVANT", reason_code="KEYWORD_ONLY") for s in held],
+    )
+    done = await read.execute(str(mission.id))
+    assert done["status"] == "READY" and done["evidence"] == [] and done["next_cursor"] is None
+    assert done["progress"]["excluded_irrelevant"] == 5
+
+
+@pytest.mark.asyncio
+async def test_a_cursor_from_another_mission_or_frame_is_a_conflict(research):
+    repository, store, workspace = research
+    mission, _brief, _held = await _market(repository, store, workspace, tuple("abc"))
+    other, _other_brief, _ = await _market(repository, store, workspace, tuple("de"))
+    read, _submit = _use_cases(repository, store)
+
+    cursor = (await read.execute(str(mission.id), limit=1))["next_cursor"]
+
+    refused = await read.execute(str(other.id), cursor=cursor)
+    assert refused["status"] == "CONFLICT" and refused["evidence"] == []
+    assert (await read.execute(str(mission.id), cursor="not-a-cursor"))["status"] == "CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_an_attention_frame_is_its_declared_scope_and_carries_no_brief(research):
+    repository, store, workspace = research
+    mission = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id, title="What is gaining attention", seed="ai bán lẻ",
+        keywords=["pos"],
+    )
+    await _hold(repository, mission, ("x",))
+    read, _submit = _use_cases(repository, store)
+
+    batch = await read.execute(str(mission.id))
+
+    assert batch["surface"] == "ATTENTION"
+    assert batch["frame"]["title"] == "What is gaining attention"
+    assert batch["frame"]["keywords"] == ["ai bán lẻ", "pos"]
+    assert "brief_revision_id" not in batch["frame"] and "target_user" not in batch["frame"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_legacy_and_unauthorized_missions_are_refused_without_state(research):
+    repository, store, workspace = research
+    read, submit = _use_cases(repository, store)
+    legacy = ResearchMission(title="Legacy", keywords=["ai"])
+    await repository.create_mission(legacy)
+
+    assert (await read.execute(str(uuid4())))["status"] == "NOT_FOUND"
+    assert (await read.execute(str(legacy.id)))["status"] == "NOT_APPLICABLE"
+    assert (await submit.execute(str(legacy.id), "f" * 64, [_assessment(uuid4())]))["status"] == "NOT_APPLICABLE"
+
+    unauthorized = ResearchMission(
+        title="Unframed market", keywords=["ai"], surface="MARKET", workspace_id=workspace.workspace_id
+    )
+    await repository.create_mission(unauthorized)
+    assert (await read.execute(str(unauthorized.id)))["status"] == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_a_submission_against_a_stale_frame_writes_nothing(research):
+    repository, store, workspace = research
+    mission, _brief, held = await _market(repository, store, workspace)
+    _read, submit = _use_cases(repository, store)
+
+    refused = await submit.execute(str(mission.id), "0" * 64, [_assessment(held[0].observation_id)])
+
+    assert refused["status"] == "CONFLICT" and refused["reason_code"] == "STALE_FRAME"
+    assert await store.list_evidence_qualifications(mission.id) == []
+
+
+@pytest.mark.parametrize(
+    "mutate, reason_code",
+    [
+        (lambda held: [_assessment(held[0].observation_id), _assessment(uuid4())], "FOREIGN_OBSERVATION"),
+        (lambda held: [_assessment(held[0].observation_id), _assessment(held[0].observation_id)],
+         "DUPLICATE_OBSERVATION"),
+        (lambda held: [_assessment(held[0].observation_id), _assessment(held[1].observation_id, purpose="CONTEXT")],
+         "INVALID_JUDGMENT"),
+        (lambda held: [_assessment(held[0].observation_id), _assessment(held[1].observation_id, confidence=2)],
+         "INVALID_JUDGMENT"),
+        (lambda held: [_assessment(held[0].observation_id, judged_by="an agent that thought hard")],
+         "INVALID_JUDGMENT"),
+        (lambda held: [], "INVALID_BATCH_SIZE"),
+        (lambda held: [_assessment(held[0].observation_id)] * 51, "INVALID_BATCH_SIZE"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_one_invalid_assessment_refuses_the_whole_batch(research, mutate, reason_code):
+    repository, store, workspace = research
+    mission, brief, held = await _market(repository, store, workspace, ("a", "b"))
+    _read, submit = _use_cases(repository, store)
+
+    refused = await submit.execute(str(mission.id), compute_frame_fingerprint(mission, brief), mutate(held))
+
+    assert refused["status"] == "INVALID", refused
+    assert refused["reason_code"] == reason_code
+    assert await store.list_evidence_qualifications(mission.id) == []
+
+
+@pytest.mark.asyncio
+async def test_a_replay_is_idempotent_and_a_rewrite_is_a_conflict(research):
+    repository, store, workspace = research
+    mission, brief, held = await _market(repository, store, workspace, ("a", "b"))
+    _read, submit = _use_cases(repository, store)
+    frame = compute_frame_fingerprint(mission, brief)
+    batch = [_assessment(held[0].observation_id), _assessment(held[1].observation_id, relation="CONTEXT_ONLY",
+                                                               purpose="CONTEXT", reason_code="ADJACENT_ONLY")]
+
+    recorded = await submit.execute(str(mission.id), frame, batch)
+    replay = await submit.execute(str(mission.id), frame, batch)
+    rewrite = await submit.execute(
+        str(mission.id), frame,
+        [_assessment(held[0].observation_id, relation="EXCLUDED_IRRELEVANT", reason_code="KEYWORD_ONLY")],
+    )
+
+    assert recorded["status"] == "RECORDED" and recorded["recorded"] == 2
+    assert recorded["progress"]["qualified_support"] == 1 and recorded["progress"]["context_only"] == 1
+    assert replay["status"] == "RECORDED" and replay["progress"] == recorded["progress"]
+    assert rewrite["status"] == "CONFLICT" and rewrite["reason_code"] == "CONFLICTING_REWRITE"
+    stored = {str(q.observation_id): q for q in await store.list_evidence_qualifications(mission.id)}
+    assert stored[str(held[0].observation_id)].relation is QualificationRelation.QUALIFIED_SUPPORT
+    assert stored[str(held[0].observation_id)].brief_revision_id == brief.brief_revision_id
+    assert "get_mission_evidence_qualification_batch" in recorded["next_step"]

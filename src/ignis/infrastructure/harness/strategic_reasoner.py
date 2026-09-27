@@ -13,6 +13,7 @@ from ignis.domain.harness_models import (
     ChannelHealthStatus,
     CitationEvidence,
     MarketOpportunity,
+    QualificationSummary,
     StrategicInsight,
     TrendMaturityStage,
     HarnessResearchReport,
@@ -20,12 +21,23 @@ from ignis.domain.harness_models import (
 )
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
+from ignis.domain.probe_provenance import probe_keyword_of
 from ignis.domain.research_workspace import (
+    EvidencePurpose,
     EvidenceRole,
+    HandoffStatus,
     MissionLineage,
+    MissionProbeOutcome,
+    QualificationContext,
+    QualificationRelation,
+    QualificationStatus,
+    QualifiedObservation,
     ResearchSurface,
+    TopicSufficiency,
+    assess_topic_sufficiency,
     opportunity_index_is_allowed,
     resolve_surface,
+    select_handoff_candidates,
 )
 from ignis.domain.value_objects import PlatformType, GeoCode
 
@@ -118,7 +130,27 @@ class StrategicMarketReasoner:
         connector_health: Optional[Dict[str, Any]] = None,
         market_brief: Optional[Dict[str, Any]] = None,
         attention_context_signals: Optional[List[TrendSignal]] = None,
+        qualification: Optional[QualificationContext] = None,
     ) -> HarnessResearchReport:
+        """Analyse one mission.
+
+        `qualification` is supplied for a mission that declared a surface. A Market mission then
+        concludes only from evidence qualified for its confirmed Brief; an Attention mission keeps
+        its exploratory view and gains a handoff answer with no fallback. None keeps the legacy
+        behaviour of a mission that declared no surface.
+        """
+        if qualification is not None and resolve_surface(mission.surface) is ResearchSurface.MARKET:
+            return self._analyze_qualified_market(
+                mission=mission,
+                signals=signals,
+                clusters=clusters,
+                scorecard=scorecard,
+                auth_status=auth_status,
+                connector_health=connector_health,
+                market_brief=market_brief,
+                attention_context_signals=attention_context_signals,
+                qualification=qualification,
+            )
         maturity_stage, maturity_reasons = self._assess_maturity(signals, clusters, geo=mission.geo_code)
         verified_trends = self._extract_verified_trends(signals, clusters, geo=mission.geo_code)
 
@@ -141,12 +173,8 @@ class StrategicMarketReasoner:
             else []
         )
 
-        channel_summaries = self.summarize_channel_ingress(
-            mission=mission,
-            signals=signals,
-            auth_status=auth_status,
-            connector_health=connector_health,
-            citation_registry=citation_registry,
+        channel_summaries = self._channel_summaries(
+            mission, signals, auth_status, connector_health, citation_registry, qualification
         )
 
         insights, actionables = self._synthesize_insights(
@@ -158,6 +186,12 @@ class StrategicMarketReasoner:
             channel_summaries=channel_summaries,
             citation_registry=citation_registry,
         )
+
+        handoff: Optional[Dict[str, Any]] = None
+        if qualification is not None and surface is ResearchSurface.ATTENTION:
+            handoff = self._qualified_handoff(
+                signals, clusters, qualification, citation_registry, geo=mission.geo_code
+            )
 
         # Everything minted so far was collected for this mission's own question, so it is
         # stamped before any carried observation reaches the registry.
@@ -186,7 +220,384 @@ class StrategicMarketReasoner:
             market_brief=market_brief if surface is ResearchSurface.MARKET else None,
             lineage=None if lineage.is_empty else lineage.to_payload(),
             attention_context=attention_context,
+            qualification=handoff["summary"] if handoff else None,
+            handoff_status=handoff["status"] if handoff else None,
+            qualified_handoff_candidates=handoff["candidates"] if handoff else [],
+            cluster_qualification=handoff["clusters"] if handoff else [],
         )
+
+    # ------------------------------------------------------------------
+    # Evidence qualification: Market conclusions and Attention handoff
+    # ------------------------------------------------------------------
+
+    _WITHHELD = {
+        QualificationStatus.QUALIFICATION_REQUIRED: (
+            "Current mission evidence still requires semantic qualification.",
+            "QUALIFICATION_INCOMPLETE",
+        ),
+        QualificationStatus.UNAVAILABLE: (
+            "A semantic judgment could not be obtained for some of the mission's evidence, so no "
+            "conclusion is permitted.",
+            "EVALUATOR_UNAVAILABLE",
+        ),
+    }
+
+    @staticmethod
+    def _summary(
+        qualification: QualificationContext,
+        status: QualificationStatus,
+        reason: Optional[str] = None,
+        reason_code: Optional[str] = None,
+    ) -> QualificationSummary:
+        progress = qualification.progress
+        return QualificationSummary(
+            status=status.value,
+            total_evidence=progress.total_evidence,
+            qualified_support=progress.qualified_support,
+            context_only=progress.context_only,
+            excluded_irrelevant=progress.excluded_irrelevant,
+            unassessed=progress.unassessed,
+            question_relevance_score=progress.question_relevance_score,
+            reason=reason,
+            reason_code=reason_code,
+        )
+
+    def _belongs_to_topic(self, signal: TrendSignal, topic: str) -> bool:
+        """Whether a qualified observation speaks to one mission topic.
+
+        The query that retrieved it is the strongest evidence of what it is about, so when there
+        is one it decides alone: the title matcher's acronym rule lets any title containing "AI"
+        match every AI topic, which would count one topic's demand as another's. A title match
+        (with the persisted synonyms) covers only evidence that arrived without a query.
+        Relevance itself was already decided by the judgment; this only routes support to a topic.
+        """
+        probe = probe_keyword_of(signal)
+        if probe is not None:
+            return probe == " ".join(topic.split()).casefold()
+        return self._matches_topic_strictly(signal.raw_title or "", topic.lower().strip())
+
+    def _qualified_observation(
+        self, signal: TrendSignal, qualification: QualificationContext
+    ) -> QualifiedObservation:
+        judged = qualification.support_of(signal.observation_id)
+        return QualifiedObservation(
+            observation_id=str(signal.observation_id),
+            source_id=str(signal.source_id) if signal.source_id else None,
+            purpose=judged.purpose,
+            platform=self._platform_value(signal.platform),
+        )
+
+    def _analyze_qualified_market(
+        self,
+        mission: ResearchMission,
+        signals: List[TrendSignal],
+        clusters: List[TopicCluster],
+        scorecard: QualityScorecard,
+        auth_status: Optional[Dict[str, bool]],
+        connector_health: Optional[Dict[str, Any]],
+        market_brief: Optional[Dict[str, Any]],
+        attention_context_signals: Optional[List[TrendSignal]],
+        qualification: QualificationContext,
+    ) -> HarnessResearchReport:
+        """A Market analysis that concludes only from evidence qualified for its Brief.
+
+        Raw observations stay readable and every channel outcome is reported, but demand, supply,
+        maturity, insights, takeaways and citations draw on QUALIFIED_SUPPORT alone, and only a
+        topic that meets the evidence minimum carries an Opportunity Index.
+        """
+        geo = mission.geo_code
+        registry: Dict[str, CitationEvidence] = {}
+        state = qualification.assessment_state
+        qualified = [s for s in signals if qualification.support_of(s.observation_id)]
+        channel_summaries = self._channel_summaries(
+            mission, signals, auth_status, connector_health, registry, qualification
+        )
+
+        topics: List[TopicSufficiency] = []
+        opportunities: List[MarketOpportunity] = []
+        for raw_kw in mission.keywords or []:
+            topic_signals = [s for s in qualified if self._belongs_to_topic(s, raw_kw)]
+            sufficiency = assess_topic_sufficiency(
+                topic=raw_kw,
+                qualified=[self._qualified_observation(s, qualification) for s in topic_signals],
+                probe_outcomes=qualification.probe_outcomes,
+                query_fingerprint=qualification.query_fingerprint,
+                assessment_state=state,
+            )
+            topics.append(sufficiency)
+            if sufficiency.state.permits_verdict:
+                opportunities.append(
+                    self._qualified_opportunity(
+                        raw_kw, topic_signals, qualification, sufficiency, registry, geo
+                    )
+                )
+        opportunities.sort(key=lambda o: o.opportunity_index, reverse=True)
+
+        if state in self._WITHHELD:
+            status = state
+            reason, reason_code = self._WITHHELD[state]
+        elif opportunities:
+            status, reason, reason_code = QualificationStatus.READY, None, None
+        else:
+            status = QualificationStatus.INSUFFICIENT_RELEVANT_EVIDENCE
+            reason = "No topic has both qualified demand and qualified supply measurement."
+            reason_code = "NO_SUFFICIENT_TOPIC"
+
+        maturity_stage: Optional[TrendMaturityStage] = None
+        insights: List[StrategicInsight] = []
+        actionables: List[StrategicInsight] = []
+        if status is QualificationStatus.READY:
+            supply = [
+                s for s in qualified
+                if qualification.support_of(s.observation_id).purpose is EvidencePurpose.SUPPLY
+            ]
+            maturity_stage, maturity_reasons = self._assess_maturity(supply, clusters, geo=geo)
+            insights, actionables = self._synthesize_insights(
+                mission,
+                qualified,
+                opportunities,
+                maturity_stage,
+                maturity_reasons,
+                channel_summaries=channel_summaries,
+                citation_registry=registry,
+            )
+
+        for citation in registry.values():
+            citation.evidence_role = EvidenceRole.MARKET_EVIDENCE.value
+        attention_context = self._carry_attention_context(attention_context_signals, registry, geo=geo)
+        strip_context_citations(list(opportunities) + list(insights) + list(actionables))
+        lineage = MissionLineage.of_mission(mission)
+
+        return HarnessResearchReport(
+            mission_id=str(mission.id),
+            title=mission.title,
+            scorecard=scorecard,
+            maturity_stage=maturity_stage,
+            channel_summaries=channel_summaries,
+            verified_cross_platform_trends=self._extract_verified_trends(signals, clusters, geo=geo),
+            market_opportunities=opportunities,
+            strategic_insights=insights,
+            actionable_takeaways=actionables,
+            surface=ResearchSurface.MARKET.value,
+            market_brief=market_brief,
+            lineage=None if lineage.is_empty else lineage.to_payload(),
+            attention_context=attention_context,
+            qualification=self._summary(qualification, status, reason, reason_code),
+            topic_sufficiency=[
+                {
+                    "topic": t.topic,
+                    "evidence_sufficiency": t.state.value,
+                    "qualified_demand_count": t.qualified_demand_count,
+                    "qualified_supply_count": t.qualified_supply_count,
+                    "independent_supply_sources": t.independent_supply_sources,
+                    "measured_zero_surfaces": list(t.measured_zero_surfaces),
+                    "reason": t.reason,
+                }
+                for t in topics
+            ],
+        )
+
+    def _qualified_opportunity(
+        self,
+        raw_kw: str,
+        topic_signals: List[TrendSignal],
+        qualification: QualificationContext,
+        sufficiency: TopicSufficiency,
+        registry: Dict[str, CitationEvidence],
+        geo: GeoCode,
+    ) -> MarketOpportunity:
+        """Score one sufficient topic from its qualified evidence only.
+
+        The localization heuristic is not applied here: whether an observation addresses the
+        confirmed Brief -- its geography included -- is exactly what the judgment decided.
+        """
+        def purpose_of(signal: TrendSignal) -> EvidencePurpose:
+            return qualification.support_of(signal.observation_id).purpose
+
+        demand = [s for s in topic_signals if purpose_of(s) is EvidencePurpose.DEMAND]
+        supply = [s for s in topic_signals if purpose_of(s) is EvidencePurpose.SUPPLY]
+        demand_score = max(float(s.metric_value or 0.0) for s in demand)
+        supply_score, opportunity_index, opp_type, rec, support_sigs = self._score_topic(
+            raw_kw, demand_score, True, supply
+        )
+        return MarketOpportunity(
+            topic=raw_kw,
+            opportunity_type=opp_type,
+            search_interest_score=round(demand_score, 1),
+            content_supply_score=supply_score,
+            opportunity_index=opportunity_index,
+            strategic_recommendation=rec,
+            supporting_signals=support_sigs,
+            citations=[
+                self._mint_citation(s, registry, geo=geo) for s in (demand[:2] + supply[:3])
+            ],
+            evidence_sufficiency=sufficiency.state.value,
+            qualified_demand_count=sufficiency.qualified_demand_count,
+            qualified_supply_count=sufficiency.qualified_supply_count,
+            independent_supply_sources=sufficiency.independent_supply_sources,
+        )
+
+    def _qualified_handoff(
+        self,
+        signals: List[TrendSignal],
+        clusters: List[TopicCluster],
+        qualification: QualificationContext,
+        registry: Dict[str, CitationEvidence],
+        geo: GeoCode = GeoCode.VN,
+    ) -> Dict[str, Any]:
+        """Which Attention clusters, if any, qualify to become the question of a new Market Brief.
+
+        No fallback: when nothing qualifies the answer is NO_QUALIFIED_CANDIDATE, not the
+        least-bad cluster. Every cluster stays visible with its qualification counts.
+        """
+        labels = {str(c.id): c.topic_label for c in clusters or []}
+        by_cluster: Dict[str, List[TrendSignal]] = defaultdict(list)
+        for signal in signals:
+            if signal.cluster_id:
+                by_cluster[str(signal.cluster_id)].append(signal)
+
+        def relation_counts(members: List[TrendSignal]) -> Dict[str, int]:
+            counts = {r.value: 0 for r in QualificationRelation}
+            for member in members:
+                judged = qualification.judgment_of(member.observation_id)
+                counts[(judged.relation if judged else QualificationRelation.UNASSESSED).value] += 1
+            return counts
+
+        state = qualification.assessment_state
+        candidates = []
+        if state not in self._WITHHELD:
+            qualified_by_cluster = {
+                cluster_id: [
+                    self._qualified_observation(s, qualification)
+                    for s in members
+                    if qualification.support_of(s.observation_id)
+                ]
+                for cluster_id, members in by_cluster.items()
+            }
+            candidates = select_handoff_candidates(
+                {k: v for k, v in qualified_by_cluster.items() if v}
+            )
+        eligible = {c.cluster_id for c in candidates}
+
+        if state in self._WITHHELD:
+            status = state
+            handoff_status = (
+                HandoffStatus.QUALIFICATION_REQUIRED
+                if state is QualificationStatus.QUALIFICATION_REQUIRED
+                else HandoffStatus.UNAVAILABLE
+            )
+            reason, reason_code = self._WITHHELD[state]
+        elif candidates:
+            status, handoff_status = QualificationStatus.READY, HandoffStatus.QUALIFIED_CANDIDATE_AVAILABLE
+            reason, reason_code = None, None
+        else:
+            status = QualificationStatus.INSUFFICIENT_RELEVANT_EVIDENCE
+            handoff_status = HandoffStatus.NO_QUALIFIED_CANDIDATE
+            reason = "No cluster is directly relevant and backed by two independent sources."
+            reason_code = "NO_QUALIFIED_CLUSTER"
+
+        return {
+            "summary": self._summary(qualification, status, reason, reason_code),
+            "status": handoff_status.value,
+            "candidates": [
+                {
+                    "cluster_id": c.cluster_id,
+                    "topic_label": labels.get(c.cluster_id),
+                    "qualified_observations": len(c.observation_ids),
+                    "independent_sources": c.independent_sources,
+                    "reason": (
+                        "Directly relevant to the declared Attention scope and backed by "
+                        f"{c.independent_sources} independent sources."
+                    ),
+                    "citations": [
+                        self._mint_citation(s, registry, geo=geo)
+                        for s in sorted(
+                            (
+                                s for s in by_cluster[c.cluster_id]
+                                if qualification.support_of(s.observation_id)
+                            ),
+                            key=self._engagement_rank,
+                            reverse=True,
+                        )[:5]
+                    ],
+                }
+                for c in candidates
+            ],
+            "clusters": [
+                {
+                    "cluster_id": cluster_id,
+                    "topic_label": labels.get(cluster_id),
+                    "handoff_eligible": cluster_id in eligible,
+                    **relation_counts(members),
+                }
+                for cluster_id, members in sorted(by_cluster.items())
+            ],
+        }
+
+    _RECORDED_NOTES = {
+        ChannelHealthStatus.EMPTY_NO_DATA: "Completed during this run and returned no signals for its query.",
+        ChannelHealthStatus.AUTH_REQUIRED: "No token or browser session let this surface search during this run.",
+        ChannelHealthStatus.RATE_LIMITED: "Rate limited during this run; it measured nothing.",
+        ChannelHealthStatus.DEGRADED: "Failed during this run; it measured nothing.",
+    }
+
+    def _channel_summaries(
+        self,
+        mission: ResearchMission,
+        signals: List[TrendSignal],
+        auth_status: Optional[Dict[str, bool]],
+        connector_health: Optional[Dict[str, Any]],
+        registry: Dict[str, CitationEvidence],
+        qualification: Optional[QualificationContext],
+    ) -> List[ChannelDataSummary]:
+        """What each surface did, from the latest completed run when that run was recorded.
+
+        A reopened report must not change because a connector's health changed since, so a run's
+        persisted outcomes win over current process health. A mission whose runs predate the
+        record keeps the live audit it always had.
+        """
+        if qualification is None or not qualification.probe_outcomes:
+            return self.summarize_channel_ingress(
+                mission=mission,
+                signals=signals,
+                auth_status=auth_status,
+                connector_health=connector_health,
+                citation_registry=registry,
+            )
+        market = resolve_surface(mission.surface) is ResearchSurface.MARKET
+        geo_value = self._platform_value(mission.geo_code).upper()
+        by_surface: Dict[str, List[TrendSignal]] = defaultdict(list)
+        for signal in signals:
+            # A Market audit cites only qualified evidence, so no citation anywhere in a Market
+            # report can be one its conclusions were not allowed to rest on.
+            if market and not qualification.support_of(signal.observation_id):
+                continue
+            by_surface[self._connector_surface_of(signal)].append(signal)
+        summaries: List[ChannelDataSummary] = []
+        for outcome in sorted(qualification.probe_outcomes, key=lambda o: o.connector_surface):
+            members = by_surface.get(outcome.connector_surface, [])
+            top = max(members, key=self._engagement_rank) if members else None
+            summaries.append(
+                ChannelDataSummary(
+                    platform=self._recorded_platform(outcome),
+                    connector_surface=outcome.connector_surface,
+                    status=outcome.status,
+                    signals_count=outcome.signals_collected,
+                    timeframe_used=f"{self._platform_value(mission.timeframe)} ({geo_value})",
+                    top_citation=(
+                        self._mint_citation(top, registry, geo=mission.geo_code) if top else None
+                    ),
+                    notes=self._RECORDED_NOTES.get(outcome.status),
+                )
+            )
+        return summaries
+
+    @staticmethod
+    def _recorded_platform(outcome: MissionProbeOutcome) -> Any:
+        try:
+            return PlatformType(outcome.platform)
+        except ValueError:
+            return outcome.platform
 
     # ------------------------------------------------------------------
     # Data Provenance: channel ingress audit & citation attribution
@@ -717,73 +1128,9 @@ class StrategicMarketReasoner:
 
             # Empirical market localization filter
             localized_videos = [s for s in matching_videos if self._is_localized(s.raw_title, geo=geo)]
-            loc_count = len(localized_videos)
-            loc_views = sum(float(s.metric_value) for s in localized_videos)
-
-            # View-Weighted Supply Scoring Equation across all video platforms
-            if loc_count == 0:
-                supply_score = 0.0
-            elif loc_views < 1000.0:
-                base_supply = min(40.0, loc_count * 4.0)
-                view_factor = min(15.0, math.log10(max(10.0, loc_views)) * 3.0) if loc_views > 0 else 0.0
-                supply_score = round(base_supply + view_factor, 1)
-            else:
-                base_supply = min(settings.SUPPLY_BASE_MAX, loc_count * settings.SUPPLY_VIDEO_WEIGHT)
-                view_factor = min(settings.SUPPLY_VIEW_MAX, math.log10(max(10.0, loc_views)) * settings.SUPPLY_VIEW_LOG_WEIGHT)
-                supply_score = round(min(100.0, base_supply + view_factor), 1)
-
-            yt_count = sum(1 for s in localized_videos if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "youtube")
-            tt_count = sum(1 for s in localized_videos if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "tiktok")
-            breakdown_parts = []
-            if yt_count > 0:
-                breakdown_parts.append(f"{yt_count} YouTube")
-            if tt_count > 0:
-                breakdown_parts.append(f"{tt_count} TikTok")
-            plat_str = f" ({', '.join(breakdown_parts)})" if breakdown_parts else ""
-            v_str = f"{loc_count} video{plat_str}"
-
-            # Strict Opportunity Index with Inverted Sample Size Damping & Label Alignment
-            if not has_demand_signal:
-                if loc_count == 0:
-                    opportunity_index = 0.0
-                    opp_type = "NO_DATA_RECORDED"
-                    rec = f"No search interest signals on Google Trends and zero local video supply recorded for '{raw_kw}' ({v_str}). Insufficient data to verify market opportunity (Opportunity Index: {opportunity_index:+0.1f})."
-                else:
-                    opportunity_index = round(-supply_score * 0.5, 1)
-                    opp_type = "SUPPLY_DRIVEN_UNASSESSED"
-                    rec = f"Local supply detected ({v_str}), but no active Google search interest signals were recorded for '{raw_kw}'. Topic may be platform-specific or emerging via social feeds rather than active search (Opportunity Index: {opportunity_index:+0.1f})."
-            elif loc_count == 0:
-                opportunity_index = round(demand_score * 0.15, 1)
-                opp_type = "UNVERIFIED_DEMAND_GAP"
-                rec = f"Search demand for '{raw_kw}' reached {demand_score:.0f}/100 with zero local video supply recorded ({v_str}). Unverified demand gap requiring VoC interviews (Effective Opportunity Index: {opportunity_index:+0.1f})."
-            else:
-                raw_oi = demand_score - supply_score
-                if raw_oi < 0:
-                    opportunity_index = round(raw_oi, 1)
-                    opp_type = "SATURATED_SEGMENT"
-                    rec = f"Segment '{raw_kw}' is heavily saturated ({v_str}) relative to demand (Opportunity Index: {opportunity_index:+0.1f}). Vertical differentiation required."
-                else:
-                    damping_map = {1: 0.35, 2: 0.55, 3: 0.75, 4: 0.90}
-                    damping_factor = damping_map.get(loc_count, 1.0)
-                    opportunity_index = round(raw_oi * damping_factor, 1)
-
-                    if loc_count == 1:
-                        opp_type = "PROBE_OPPORTUNITY"
-                        rec = f"Initial single probe detected for '{raw_kw}' ({v_str}). Early signal with thin local supply (Effective Opportunity Index: {opportunity_index:+0.1f})."
-                    elif opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
-                        opp_type = "HIGH_DEMAND_LOW_SUPPLY"
-                        rec = f"Search demand for '{raw_kw}' reached {demand_score:.0f}/100, heavily outpacing supply ({v_str}). High-conviction verified opportunity (Effective Opportunity Index: {opportunity_index:+0.1f})."
-                    elif opportunity_index >= 10.0:
-                        opp_type = "GROWING_OPPORTUNITY"
-                        rec = f"Segment '{raw_kw}' shows positive momentum ({v_str}) with viable market runway (Effective Opportunity Index: {opportunity_index:+0.1f})."
-                    else:
-                        opp_type = "BALANCED_COMPETITION"
-                        rec = f"Segment '{raw_kw}' is in competitive equilibrium ({v_str}); content supply matches user demand."
-
-            if localized_videos:
-                support_sigs = [f"[{s.platform.value.upper() if hasattr(s.platform, 'value') else str(s.platform).upper()}] {s.raw_title}" for s in localized_videos[:3]]
-            else:
-                support_sigs = ["No localized videos recorded on YouTube or TikTok within selected timeframe."]
+            supply_score, opportunity_index, opp_type, rec, support_sigs = self._score_topic(
+                raw_kw, demand_score, has_demand_signal, localized_videos
+            )
 
             # Both sides of the comparison, so the reader can reach the observation behind the
             # index rather than a title that may belong to two different sightings. An empty
@@ -816,6 +1163,89 @@ class StrategicMarketReasoner:
 
         opportunities.sort(key=lambda o: o.opportunity_index, reverse=True)
         return opportunities
+
+
+    def _score_topic(
+        self,
+        raw_kw: str,
+        demand_score: float,
+        has_demand_signal: bool,
+        localized_videos: List[TrendSignal],
+    ) -> Tuple[float, float, str, str, List[str]]:
+        """The Opportunity Index for one topic from its demand score and its supply signals.
+
+        Shared by the legacy analysis and the qualified one, which differ only in which signals
+        they are allowed to hand in.
+        """
+        loc_count = len(localized_videos)
+        loc_views = sum(float(s.metric_value) for s in localized_videos)
+
+        # View-Weighted Supply Scoring Equation across all video platforms
+        if loc_count == 0:
+            supply_score = 0.0
+        elif loc_views < 1000.0:
+            base_supply = min(40.0, loc_count * 4.0)
+            view_factor = min(15.0, math.log10(max(10.0, loc_views)) * 3.0) if loc_views > 0 else 0.0
+            supply_score = round(base_supply + view_factor, 1)
+        else:
+            base_supply = min(settings.SUPPLY_BASE_MAX, loc_count * settings.SUPPLY_VIDEO_WEIGHT)
+            view_factor = min(settings.SUPPLY_VIEW_MAX, math.log10(max(10.0, loc_views)) * settings.SUPPLY_VIEW_LOG_WEIGHT)
+            supply_score = round(min(100.0, base_supply + view_factor), 1)
+
+        yt_count = sum(1 for s in localized_videos if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "youtube")
+        tt_count = sum(1 for s in localized_videos if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)) == "tiktok")
+        breakdown_parts = []
+        if yt_count > 0:
+            breakdown_parts.append(f"{yt_count} YouTube")
+        if tt_count > 0:
+            breakdown_parts.append(f"{tt_count} TikTok")
+        plat_str = f" ({', '.join(breakdown_parts)})" if breakdown_parts else ""
+        v_str = f"{loc_count} video{plat_str}"
+
+        # Strict Opportunity Index with Inverted Sample Size Damping & Label Alignment
+        if not has_demand_signal:
+            if loc_count == 0:
+                opportunity_index = 0.0
+                opp_type = "NO_DATA_RECORDED"
+                rec = f"No search interest signals on Google Trends and zero local video supply recorded for '{raw_kw}' ({v_str}). Insufficient data to verify market opportunity (Opportunity Index: {opportunity_index:+0.1f})."
+            else:
+                opportunity_index = round(-supply_score * 0.5, 1)
+                opp_type = "SUPPLY_DRIVEN_UNASSESSED"
+                rec = f"Local supply detected ({v_str}), but no active Google search interest signals were recorded for '{raw_kw}'. Topic may be platform-specific or emerging via social feeds rather than active search (Opportunity Index: {opportunity_index:+0.1f})."
+        elif loc_count == 0:
+            opportunity_index = round(demand_score * 0.15, 1)
+            opp_type = "UNVERIFIED_DEMAND_GAP"
+            rec = f"Search demand for '{raw_kw}' reached {demand_score:.0f}/100 with zero local video supply recorded ({v_str}). Unverified demand gap requiring VoC interviews (Effective Opportunity Index: {opportunity_index:+0.1f})."
+        else:
+            raw_oi = demand_score - supply_score
+            if raw_oi < 0:
+                opportunity_index = round(raw_oi, 1)
+                opp_type = "SATURATED_SEGMENT"
+                rec = f"Segment '{raw_kw}' is heavily saturated ({v_str}) relative to demand (Opportunity Index: {opportunity_index:+0.1f}). Vertical differentiation required."
+            else:
+                damping_map = {1: 0.35, 2: 0.55, 3: 0.75, 4: 0.90}
+                damping_factor = damping_map.get(loc_count, 1.0)
+                opportunity_index = round(raw_oi * damping_factor, 1)
+
+                if loc_count == 1:
+                    opp_type = "PROBE_OPPORTUNITY"
+                    rec = f"Initial single probe detected for '{raw_kw}' ({v_str}). Early signal with thin local supply (Effective Opportunity Index: {opportunity_index:+0.1f})."
+                elif opportunity_index >= settings.WHITE_SPACE_HIGH_DEMAND_INDEX_THRESHOLD:
+                    opp_type = "HIGH_DEMAND_LOW_SUPPLY"
+                    rec = f"Search demand for '{raw_kw}' reached {demand_score:.0f}/100, heavily outpacing supply ({v_str}). High-conviction verified opportunity (Effective Opportunity Index: {opportunity_index:+0.1f})."
+                elif opportunity_index >= 10.0:
+                    opp_type = "GROWING_OPPORTUNITY"
+                    rec = f"Segment '{raw_kw}' shows positive momentum ({v_str}) with viable market runway (Effective Opportunity Index: {opportunity_index:+0.1f})."
+                else:
+                    opp_type = "BALANCED_COMPETITION"
+                    rec = f"Segment '{raw_kw}' is in competitive equilibrium ({v_str}); content supply matches user demand."
+
+        if localized_videos:
+            support_sigs = [f"[{s.platform.value.upper() if hasattr(s.platform, 'value') else str(s.platform).upper()}] {s.raw_title}" for s in localized_videos[:3]]
+        else:
+            support_sigs = ["No localized videos recorded on YouTube or TikTok within selected timeframe."]
+
+        return supply_score, opportunity_index, opp_type, rec, support_sigs
 
 
     def _synthesize_insights(

@@ -9,7 +9,7 @@ from ignis.interfaces.mcp.server import mcp
 @pytest.mark.asyncio
 async def test_all_tool_manifests_are_synchronized():
     """Verify that hermes_manifest.json, .hermes/tools.json, openclaw.json,
-    and FastMCP server expose exactly the same set of 45 tools.
+    and FastMCP server expose exactly the same set of 47 tools.
     """
     tools = await mcp.list_tools()
     server_tool_names = {t.name for t in tools}
@@ -26,14 +26,14 @@ async def test_all_tool_manifests_are_synchronized():
     hermes_manifest_names = {t["function"]["name"] for t in hermes_manifest}
     hermes_tools_names = {t["function"]["name"] for t in hermes_tools}
 
-    assert len(server_tool_names) == 45, f"Expected 45 tools in server, got {len(server_tool_names)}"
+    assert len(server_tool_names) == 47, f"Expected 47 tools in server, got {len(server_tool_names)}"
     assert hermes_manifest_names == server_tool_names, (
         f"hermes_manifest drift: {server_tool_names ^ hermes_manifest_names}"
     )
     assert hermes_tools_names == server_tool_names, (
         f".hermes/tools.json drift: {server_tool_names ^ hermes_tools_names}"
     )
-    assert openclaw.get("protocols", {}).get("tools_count") == 45
+    assert openclaw.get("protocols", {}).get("tools_count") == 47
 
 
 def test_wheel_smoke_uses_the_manifest_tool_count():
