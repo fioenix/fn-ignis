@@ -1025,9 +1025,12 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   tối thiểu, nên không phát Opportunity Index hay kết luận Market khi thiếu bằng chứng đạt chuẩn.
   Attention không tự chọn ứng viên handoff thay thế. Corpus post-v0.5 đã redact nằm ở
   `tests/fixtures/decision_grade_evidence.json`; replay qua handler thật cho 0 kết luận không được
-  hỗ trợ, so với mốc 0/21 đã ghi. Kiểm chứng ngày 27/09/2026: 1.190 unit test passed, 1 skipped;
-  552 integration test passed, 3 skipped trên PostgreSQL dùng một lần, không có case PostgreSQL
-  nào bị skip; Compose khởi tạo mới chạy đủ 23 file SQL; ruff, `uv lock --check` và `uv build` đạt.
+  hỗ trợ, so với mốc 0/21 đã ghi. Sau khi sửa bốn lỗi chặn từ review độc lập (row `UNASSESSED`
+  mở cổng kết luận, fingerprint phủ cả keyword connector không query, lỗi đồng bộ từ vựng ghi đè
+  mission của writer khác, surface browser không chạy vẫn bị tính là rỗng đo được), kiểm chứng
+  ngày 27/09/2026: 1.200 unit test passed, 1 skipped; 560 integration test passed, 3 skipped trên
+  PostgreSQL dùng một lần, không có case PostgreSQL nào bị skip; Compose khởi tạo mới chạy đủ 23
+  file SQL; ruff, `git diff --check` từ `merge-base main`, `uv lock --check` và `uv build` đạt.
   Giới hạn: chưa đo trên corpus live; các ngưỡng tối thiểu là mặc định an toàn, chưa hiệu chỉnh;
   chất lượng đánh giá ngữ nghĩa phụ thuộc Agent đang chạy phiên nghiên cứu.
 

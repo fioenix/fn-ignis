@@ -281,6 +281,12 @@ question relevance, the reason code and the `UNRELIABLE` cap on both backends.
   Reels and Threads browser paths with no payload returned `EMPTY_NO_DATA`.
 - P2 `git diff --check "$(git merge-base main HEAD)..HEAD"`: two trailing-space line breaks in the
   2026-09-25 decision note replaced by backslash breaks.
+- Gates rerun on `fb17060` with a new scratch TimescaleDB container (removed afterwards):
+  `test_decision_grade_evidence.py` 67 passed; migration contract 17 passed; `tests/unit/`
+  (without `YOUTUBE_API_KEY`) 1200 passed, 1 skipped; `tests/integration/` 560 passed, 3 skipped
+  (the same two `[sqlite]` parameters and the Compose opt-in; no PostgreSQL skip); Compose fresh
+  init 1 passed; ruff clean; `git diff --check "$(git merge-base main HEAD)..HEAD"` clean;
+  `uv lock --check` ok; `uv build` ok with migration 023 packaged.
 
 ## Dependencies & Execution Order
 
