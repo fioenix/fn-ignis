@@ -170,16 +170,25 @@ multi-source fixture through the real analysis handler.
 
 ### Tests for User Story 3
 
-- [ ] T027 [P] [US3] Add RED Attention qualification tests for noise, adjacent context, synonyms, one-source repetition, two-source support, and no-fallback behavior in `tests/unit/test_surface_boundaries.py`
-- [ ] T028 [P] [US3] Add RED end-to-end Attention handoff payload scenarios on SQLite and PostgreSQL in `tests/integration/test_decision_grade_evidence.py`
+- [X] T027 [P] [US3] Add RED Attention qualification tests for noise, adjacent context, synonyms, one-source repetition, two-source support, and no-fallback behavior in `tests/unit/test_surface_boundaries.py`
+- [X] T028 [P] [US3] Add RED end-to-end Attention handoff payload scenarios on SQLite and PostgreSQL in `tests/integration/test_decision_grade_evidence.py`
 
 ### Implementation for User Story 3
 
-- [ ] T029 [US3] Implement qualified Attention cluster/source aggregation and no-fallback candidate selection in `src/ignis/infrastructure/harness/strategic_reasoner.py`
-- [ ] T030 [US3] Serialize `handoff_status`, qualified candidates, context-only clusters, and refusal reasons in `src/ignis/interfaces/mcp/server.py`
+- [X] T029 [US3] Implement qualified Attention cluster/source aggregation and no-fallback candidate selection in `src/ignis/infrastructure/harness/strategic_reasoner.py`
+- [X] T030 [US3] Serialize `handoff_status`, qualified candidates, context-only clusters, and refusal reasons in `src/ignis/interfaces/mcp/server.py`
 
 **Checkpoint**: US3 can be demonstrated without running a Market mission and Attention still never
 emits an Opportunity Index.
+
+**US3 evidence (27/09/2026):** the Attention aggregation and serialization (T029/T030) landed in the
+same reasoner and server edit as T024/T025, before T027/T028 were written, so this story's RED is
+shown by negative controls rather than by a pre-implementation run: a least-bad cluster fallback
+turns 4 tests red (2 unit, the corpus replay on SQLite and PostgreSQL), and dropping the handoff
+block from the serializer turns all 4 integration handoff tests red. Green: `test_surface_boundaries`
+34 passed; `-k attention_handoff` 4 passed on both backends; every Attention payload keeps
+`opportunity_index_applies: false` and `market_opportunities: []`. The validation's three Attention
+clusters are not recoverable from the redacted corpus, so the replay groups by probe keyword.
 
 ---
 

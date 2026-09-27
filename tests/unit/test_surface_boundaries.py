@@ -568,3 +568,154 @@ def test_every_withheld_state_carries_a_reason():
     ):
         assert not result.state.permits_verdict
         assert result.reason, result.state
+
+
+# --- User Story 3: an Attention handoff candidate must be qualified, never a fallback -----------
+#
+# Attention ranks what is being looked at; a ranked list is not evidence that any item clears a
+# bar. A cluster becomes a Market handoff candidate only when its qualified evidence is directly
+# relevant to the declared scope and comes from two canonical sources.
+
+from ignis.domain.entities import ResearchMission, TrendSignal  # noqa: E402
+from ignis.domain.harness_models import QualityScorecard  # noqa: E402
+from ignis.domain.research_workspace import (  # noqa: E402
+    EvidenceQualification,
+    HandoffStatus,
+    QualificationContext,
+    select_handoff_candidates,
+)
+from ignis.domain.value_objects import GeoCode, PlatformType  # noqa: E402
+from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner  # noqa: E402
+
+ATTENTION = ResearchMission(
+    title="What is gaining attention around retail AI",
+    keywords=["AI cho cửa hàng bán lẻ", "phần mềm AI bán hàng"],
+    surface="ATTENTION",
+)
+
+
+def _attention_signal(title, cluster, source=None):
+    return TrendSignal(
+        platform=PlatformType.YOUTUBE,
+        raw_title=title,
+        metric_value=1000.0,
+        source_url=f"https://www.youtube.com/watch?v={uuid4().hex[:11]}",
+        geo_code=GeoCode.VN,
+        observation_id=uuid4(),
+        source_id=source or uuid4(),
+        cluster_id=cluster,
+        metadata={"keyword": "AI cho cửa hàng bán lẻ", "connector_surface": "youtube"},
+    )
+
+
+def _judged(signal, relation, reason, purpose="SUPPLY", confidence=0.9):
+    return EvidenceQualification(
+        mission_id=ATTENTION.id,
+        observation_id=signal.observation_id,
+        frame_fingerprint="a" * 64,
+        relation=relation,
+        purpose="CONTEXT" if relation != "QUALIFIED_SUPPORT" else purpose,
+        confidence=None if relation == "UNASSESSED" else confidence,
+        reason_code=reason,
+        judged_by="unit-test",
+    )
+
+
+def _attention_report(signals, judgments):
+    context = QualificationContext.build(
+        [s.observation_id for s in signals], judgments, probe_outcomes=(), query_fingerprint=None
+    )
+    return StrategicMarketReasoner().analyze_mission(
+        mission=ATTENTION, signals=signals, clusters=[], scorecard=QualityScorecard(),
+        qualification=context,
+    )
+
+
+def test_attention_noise_and_adjacent_clusters_offer_no_candidate_and_no_fallback():
+    noise, adjacent = uuid4(), uuid4()
+    signals = [
+        _attention_signal("Phim hành động AI cho cửa hàng bán lẻ tập 12", noise),
+        _attention_signal("Xổ số hôm nay: AI cho cửa hàng bán lẻ", noise),
+        _attention_signal("Cách tạo video AI drama viral", adjacent),
+        _attention_signal("AI xây website bán hàng cho người mới", adjacent),
+    ]
+    judgments = [
+        _judged(signals[0], "EXCLUDED_IRRELEVANT", "FICTION_NEWS_OR_ENTERTAINMENT"),
+        _judged(signals[1], "EXCLUDED_IRRELEVANT", "KEYWORD_ONLY"),
+        _judged(signals[2], "CONTEXT_ONLY", "ADJACENT_ONLY"),
+        _judged(signals[3], "CONTEXT_ONLY", "ADJACENT_ONLY"),
+    ]
+
+    report = _attention_report(signals, judgments)
+
+    assert report.handoff_status == HandoffStatus.NO_QUALIFIED_CANDIDATE.value
+    assert report.qualified_handoff_candidates == []
+    assert report.qualification.status == "INSUFFICIENT_RELEVANT_EVIDENCE"
+    assert report.qualification.reason_code == "NO_QUALIFIED_CLUSTER"
+    assert report.market_opportunities == [], "Attention never carries an Opportunity Index"
+    visible = {row["cluster_id"]: row for row in report.cluster_qualification}
+    assert visible[str(adjacent)]["CONTEXT_ONLY"] == 2 and not visible[str(adjacent)]["handoff_eligible"]
+    assert visible[str(noise)]["EXCLUDED_IRRELEVANT"] == 2
+
+
+def test_attention_one_source_seen_twice_is_not_two_independent_sources():
+    cluster, source = uuid4(), uuid4()
+    signals = [
+        _attention_signal("Phần mềm quản lý bán hàng cho tiệm tạp hóa", cluster, source),
+        _attention_signal("Phần mềm quản lý bán hàng cho tiệm tạp hóa (bản mới)", cluster, source),
+    ]
+    report = _attention_report(
+        signals, [_judged(s, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME") for s in signals]
+    )
+
+    assert report.handoff_status == HandoffStatus.NO_QUALIFIED_CANDIDATE.value
+
+
+def test_attention_two_source_direct_support_is_the_only_candidate_even_through_synonyms():
+    supported, adjacent = uuid4(), uuid4()
+    signals = [
+        # Neither title repeats a mission keyword: relevance was judged, not string-matched.
+        _attention_signal("Chủ tiệm tạp hóa hỏi phần mềm quản lý kho nào dễ dùng", supported),
+        _attention_signal("Review phần mềm bán hàng cho shop nhỏ sau 3 tháng", supported),
+        _attention_signal("AI xây website bán hàng", adjacent),
+        _attention_signal("AI tạo landing page", adjacent),
+    ]
+    judgments = [
+        _judged(signals[0], "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME", purpose="VOC"),
+        _judged(signals[1], "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME"),
+        _judged(signals[2], "CONTEXT_ONLY", "ADJACENT_ONLY"),
+        _judged(signals[3], "CONTEXT_ONLY", "ADJACENT_ONLY"),
+    ]
+
+    report = _attention_report(signals, judgments)
+
+    assert report.handoff_status == HandoffStatus.QUALIFIED_CANDIDATE_AVAILABLE.value
+    assert [c["cluster_id"] for c in report.qualified_handoff_candidates] == [str(supported)]
+    candidate = report.qualified_handoff_candidates[0]
+    assert candidate["independent_sources"] == 2 and candidate["qualified_observations"] == 2
+    assert {c.observation_id for c in candidate["citations"]} == {
+        str(signals[0].observation_id), str(signals[1].observation_id),
+    }
+    assert report.qualification.status == "READY"
+    assert report.market_opportunities == []
+
+
+def test_attention_handoff_waits_for_qualification_and_refuses_on_evaluator_failure():
+    cluster = uuid4()
+    signals = [_attention_signal("a", cluster), _attention_signal("b", cluster)]
+
+    pending = _attention_report(signals, [_judged(signals[0], "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME")])
+    failed = _attention_report(signals, [
+        _judged(signals[0], "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME"),
+        _judged(signals[1], "UNASSESSED", "EVALUATOR_UNAVAILABLE"),
+    ])
+
+    assert pending.handoff_status == HandoffStatus.QUALIFICATION_REQUIRED.value
+    assert failed.handoff_status == HandoffStatus.UNAVAILABLE.value
+    assert pending.qualified_handoff_candidates == failed.qualified_handoff_candidates == []
+
+
+def test_select_handoff_candidates_never_returns_a_least_bad_cluster():
+    assert select_handoff_candidates({}) == []
+    one = _qualified("SUPPLY")
+    assert select_handoff_candidates({"c1": [one], "c2": [_qualified("SUPPLY")]}) == []

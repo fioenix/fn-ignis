@@ -1186,3 +1186,94 @@ async def test_evidence_replacement_prunes_only_its_judgment_and_new_evidence_re
     assert analysis["market_opportunities"] == [] and analysis["opportunity_index_applies"] is False
     latest = {o.connector_surface: o.status.value for o in await store.get_latest_completed_probe_outcomes(mission.id)}
     assert latest == {"google": "HEALTHY", "youtube": "RATE_LIMITED"}
+
+
+# --- User Story 3: Attention hands off only a qualified candidate --------------------------------
+
+
+async def _attention_with(repository, store, workspace, clusters):
+    """An Attention mission whose evidence is grouped into the given clusters of fixture items."""
+    from ignis.domain.entities import TopicCluster
+
+    mission = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        title=CORPUS["journeys"]["attention_only"]["title"],
+        keywords=CORPUS["journeys"]["attention_only"]["keywords"],
+    )
+    items = [item for members in clusters.values() for item in members]
+    held = await _hold(repository, mission, [_corpus_signal(item) for item in items])
+    by_url = {s.source_url: s for s in held}
+    for label, members in clusters.items():
+        cluster = TopicCluster(canonical_name=f"{label} {mission.id}")
+        grouped = [by_url[_corpus_signal(item).source_url] for item in members]
+        for signal in grouped:
+            signal.cluster_id = cluster.id
+        cluster.signals = grouped
+        await repository.save_clusters([cluster])
+        await repository.assign_observation_clusters(grouped)
+    return mission, await repository.get_mission_signals(mission.id), items
+
+
+@pytest.mark.asyncio
+async def test_attention_handoff_corpus_offers_no_candidate_and_selects_no_fallback(
+    repository_case, host_workspace, monkeypatch
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    observations = CORPUS["journeys"]["attention_only"]["observations"]
+    # The validation's three clusters are not recoverable from the redacted corpus, so the replay
+    # groups by probe keyword: the grouping the recorded candidate ("ai xay website") shared.
+    groups = {}
+    for item in observations:
+        groups.setdefault(item["probe_keyword"], []).append(item)
+    mission, held, items = await _attention_with(repository, store, workspace, groups)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
+
+    await _qualify_through_handlers(mcp_server, mission, _judgments_by_observation(held, items))
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
+
+    assert analysis["surface"] == "ATTENTION"
+    assert analysis["opportunity_index_applies"] is False
+    assert analysis["market_opportunities"] == []
+    assert analysis["handoff_status"] == "NO_QUALIFIED_CANDIDATE"
+    assert analysis["qualified_handoff_candidates"] == []
+    assert analysis["qualification"]["reason_code"] == "NO_QUALIFIED_CLUSTER"
+    assert len(analysis["cluster_qualification"]) == len(groups)
+    assert not any(row["handoff_eligible"] for row in analysis["cluster_qualification"])
+
+
+@pytest.mark.asyncio
+async def test_attention_handoff_offers_only_the_directly_relevant_two_source_cluster(
+    repository_case, host_workspace, monkeypatch
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    controls = CORPUS["semantic_controls"]
+    positives = {c["case_id"]: c for c in controls["positive"]}
+    supported = [positives["ctl-dm-012"], positives["ctl-supply-001"]]
+    noise = controls["negative"][:3]
+    mission, held, items = await _attention_with(
+        repository, store, workspace, {"supported": supported, "noise": noise}
+    )
+    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
+
+    await _qualify_through_handlers(
+        mcp_server, mission, _judgments_by_observation(held, items, "control_judgment")
+    )
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
+
+    assert analysis["handoff_status"] == "QUALIFIED_CANDIDATE_AVAILABLE"
+    assert analysis["opportunity_index_applies"] is False and analysis["market_opportunities"] == []
+    [candidate] = analysis["qualified_handoff_candidates"]
+    supported_ids = {
+        str(s.observation_id) for s in held
+        if s.source_url in {_corpus_signal(i).source_url for i in supported}
+    }
+    assert {c["observation_id"] for c in candidate["citations"]} == supported_ids
+    assert candidate["independent_sources"] == 2
+    eligible = [row for row in analysis["cluster_qualification"] if row["handoff_eligible"]]
+    assert [row["cluster_id"] for row in eligible] == [candidate["cluster_id"]]
