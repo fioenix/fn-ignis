@@ -311,6 +311,19 @@ question relevance, the reason code and the `UNRELIABLE` cap on both backends.
   and measured zero needs two supply surfaces, so `SUFFICIENT_ZERO_SUPPLY` cannot currently occur
   with the shipped connectors; positive supply is unaffected.
 
+**Review corrections (review of `ccd22fb`, 28/09/2026):**
+
+- P1 batch and analysis split under mixed state: the batch now applies the analysis's priority
+  before paging, so a recorded `EVALUATOR_UNAVAILABLE` row returns `UNAVAILABLE` with the
+  reassessment guidance even while other observations are pending; a paging response names
+  `QUALIFICATION_INCOMPLETE`. RED on `ccd22fb`: `QUALIFICATION_REQUIRED` with no reason and one more
+  evidence item. Mixed-state regressions at use-case level and through the real handlers on both
+  backends; negative control restoring the old placement turns both red.
+- P2 the batch tool description no longer promises READY whenever nothing is pending; it names
+  `unassessed: 0`, `QUALIFICATION_REQUIRED`/`UNASSESSED_EVIDENCE` and
+  `UNAVAILABLE`/`EVALUATOR_UNAVAILABLE`. Both Hermes manifests regenerated from the server schema;
+  a drift gate pins the wording.
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

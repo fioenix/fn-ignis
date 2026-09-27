@@ -1656,3 +1656,36 @@ async def test_a_surface_that_executed_another_window_is_not_a_measured_zero_for
 
     [topic] = analysis["topic_sufficiency"]
     assert topic["evidence_sufficiency"] == expected
+
+
+# --- Review of ccd22fb: batch and analysis agree while evidence is still pending -----------------
+
+
+@pytest.mark.asyncio
+async def test_an_evaluator_failure_with_pending_evidence_gives_batch_and_analysis_one_answer(
+    repository_case, host_workspace, monkeypatch
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    positives = CORPUS["semantic_controls"]["positive"]
+    mission, _revision, held = await _market_with(repository, store, workspace, positives[:2], CONTROL_KEYWORDS)
+    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
+    first = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id), limit=1))
+    recorded = json.loads(await mcp_server.handle_submit_mission_evidence_qualifications(
+        str(mission.id), first["frame_fingerprint"],
+        [{"observation_id": first["evidence"][0]["observation_id"], "relation": "UNASSESSED",
+          "purpose": "CONTEXT", "confidence": None, "reason_code": "EVALUATOR_UNAVAILABLE",
+          "judged_by": "fixture-host"}],
+    ))
+    assert recorded["status"] == "RECORDED" and recorded["progress"]["unassessed"] == len(held)
+
+    batch = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id)))
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
+
+    assert batch["status"] == analysis["analysis_status"] == "UNAVAILABLE"
+    assert batch["reason_code"] == analysis["qualification"]["reason_code"] == "EVALUATOR_UNAVAILABLE"
+    assert batch["next_step"] == analysis["next_step"]
+    assert batch["evidence"] == [], "no further evidence is handed out once the frame is unavailable"
+    assert analysis["opportunity_index_applies"] is False and analysis["market_opportunities"] == []

@@ -180,7 +180,7 @@
     "type": "function",
     "function": {
       "name": "get_mission_evidence_qualification_batch",
-      "description": "Read a bounded batch (default 25, max 50) of a mission's current evidence that still needs a semantic judgment, with the immutable frame it is judged against: the confirmed Market Brief revision, or the Attention title and keywords. Judge each item in your own context and send the typed result to submit_mission_evidence_qualifications with the returned frame_fingerprint. Returns READY when nothing is pending, NOT_APPLICABLE for a mission with no research surface.",
+      "description": "Read a bounded batch (default 25, max 50) of a mission's current evidence that still needs a semantic judgment, with the immutable frame it is judged against: the confirmed Market Brief revision, or the Attention title and keywords. Judge each item in your own context and send the typed result to submit_mission_evidence_qualifications with the returned frame_fingerprint. READY means every observation carries an actual assessment (unassessed: 0). When recorded judgments leave the frame unassessed the answer is terminal with no evidence: QUALIFICATION_REQUIRED with reason_code UNASSESSED_EVIDENCE, or UNAVAILABLE with reason_code EVALUATOR_UNAVAILABLE (which takes priority over pending evidence); recorded judgments are final, so reassess under a new mission or Market Brief revision instead of reading again. NOT_APPLICABLE for a mission with no research surface.",
       "parameters": {
         "additionalProperties": false,
         "properties": {

@@ -752,3 +752,41 @@ async def test_the_batch_is_not_ready_while_an_explicit_unassessed_row_remains(r
     assert batch["reason_code"] == ("UNASSESSED_EVIDENCE" if status == "QUALIFICATION_REQUIRED" else "EVALUATOR_UNAVAILABLE")
     assert "new mission" in batch["next_step"] and "Brief revision" in batch["next_step"]
     assert "get_mission_evidence_qualification_batch" not in batch["next_step"], "a read loop cannot help"
+
+
+@pytest.mark.asyncio
+async def test_an_evaluator_failure_outranks_pending_evidence_in_the_batch_as_in_the_analysis(research):
+    """One recorded evaluator failure and one unjudged observation: no further paging, UNAVAILABLE."""
+    from ignis.domain.research_workspace import QualificationContext
+
+    repository, store, workspace = research
+    mission, brief, held = await _market(repository, store, workspace, ("a", "b"))
+    read, submit = _use_cases(repository, store)
+    await submit.execute(str(mission.id), compute_frame_fingerprint(mission, brief), [
+        _assessment(held[0].observation_id, relation="UNASSESSED", purpose="CONTEXT",
+                    confidence=None, reason_code="EVALUATOR_UNAVAILABLE"),
+    ])
+
+    batch = await read.execute(str(mission.id))
+    context = QualificationContext.build(
+        [s.observation_id for s in held], await store.list_evidence_qualifications(mission.id), ()
+    )
+
+    assert context.assessment_state.value == "UNAVAILABLE"
+    assert batch["status"] == context.assessment_state.value
+    assert batch["reason_code"] == "EVALUATOR_UNAVAILABLE"
+    assert batch["evidence"] == [] and batch["next_cursor"] is None
+    assert "new mission" in batch["next_step"]
+    assert batch["progress"]["unassessed"] == 2
+
+
+@pytest.mark.asyncio
+async def test_a_paging_batch_names_why_it_pages(research):
+    repository, store, workspace = research
+    mission, _brief, _held = await _market(repository, store, workspace, ("a",))
+    read, _submit = _use_cases(repository, store)
+
+    batch = await read.execute(str(mission.id))
+
+    assert batch["status"] == "QUALIFICATION_REQUIRED"
+    assert batch["reason_code"] == "QUALIFICATION_INCOMPLETE" and len(batch["evidence"]) == 1

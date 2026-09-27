@@ -81,3 +81,14 @@ async def test_the_two_qualification_tools_carry_their_typed_contract_everywhere
     for enum in (QualificationRelation, EvidencePurpose, QualificationReason):
         missing = [member.value for member in enum if member.value not in description]
         assert not missing, f"the submit tool does not tell the Agent about {missing}"
+
+
+@pytest.mark.asyncio
+async def test_the_batch_tool_does_not_promise_ready_whenever_nothing_is_pending():
+    """The description is an instruction an Agent reads, so it must name the terminal non-ready states."""
+    tools = {t.name: t for t in await mcp.list_tools()}
+    description = tools["get_mission_evidence_qualification_batch"].description
+
+    assert "Returns READY when nothing is pending" not in description
+    for required in ("QUALIFICATION_REQUIRED", "UNAVAILABLE", "unassessed"):
+        assert required in description, required

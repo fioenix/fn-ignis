@@ -168,13 +168,16 @@ class GetEvidenceQualificationBatchUseCase:
             "frame_fingerprint": frame_fingerprint,
             "progress": progress.to_payload(),
         }
+        # The same state priority QualificationContext gives the analysis, decided before any
+        # paging. A recorded evaluator failure makes the frame UNAVAILABLE whatever is still
+        # pending, so handing out more evidence would only produce judgments that cannot help.
+        done = {**payload, "evidence": [], "next_cursor": None}
+        if progress.evaluator_unavailable:
+            return {**done, "status": "UNAVAILABLE", "reason_code": "EVALUATOR_UNAVAILABLE",
+                    "next_step": REASSESSMENT_GUIDANCE}
         if not pending:
-            done = {**payload, "evidence": [], "next_cursor": None}
             # Nothing left to hand out is not the same as everything assessed: an UNASSESSED row
             # is a recorded absence of judgment, and it can never be read out again.
-            if progress.evaluator_unavailable:
-                return {**done, "status": "UNAVAILABLE", "reason_code": "EVALUATOR_UNAVAILABLE",
-                        "next_step": REASSESSMENT_GUIDANCE}
             if progress.unassessed:
                 return {**done, "status": "QUALIFICATION_REQUIRED",
                         "reason_code": "UNASSESSED_EVIDENCE", "next_step": REASSESSMENT_GUIDANCE}
@@ -191,6 +194,7 @@ class GetEvidenceQualificationBatchUseCase:
         return {
             **payload,
             "status": "QUALIFICATION_REQUIRED",
+            "reason_code": "QUALIFICATION_INCOMPLETE",
             "frame": (
                 market_frame_payload(brief)
                 if surface is ResearchSurface.MARKET

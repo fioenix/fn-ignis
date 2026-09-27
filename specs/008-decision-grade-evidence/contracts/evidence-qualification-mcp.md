@@ -92,7 +92,9 @@ When every current mission-evidence row has a persisted assessment:
 `reason_code: "UNASSESSED_EVIDENCE"`, or `UNAVAILABLE` with `reason_code: "EVALUATOR_UNAVAILABLE"`
 when an evaluator failure was recorded. Both carry `evidence: []` and the same `next_step` the
 analysis returns: recorded judgments are final, so reassessment needs a new mission or a new Market
-Brief revision rather than another batch read.
+Brief revision rather than another batch read. The batch applies the analysis's state priority
+before paging: a recorded `EVALUATOR_UNAVAILABLE` row returns `UNAVAILABLE` even while other
+observations are still pending. A paging response carries `reason_code: "QUALIFICATION_INCOMPLETE"`.
 
 ### Refusals
 
