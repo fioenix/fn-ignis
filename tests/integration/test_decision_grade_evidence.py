@@ -426,3 +426,216 @@ async def test_a_run_whose_outcomes_cannot_be_stored_does_not_complete(repositor
     assert [j.status for j in journals] == ["FAILED"]
     assert await store.get_latest_completed_probe_outcomes(mission.id) == []
 
+
+# --- User Story 1: the first mission after startup matches a warmed process ----------------------
+#
+# The post-v0.5 validation's first two missions got no TikTok signals although the database held
+# the vocabulary: the TikTok grid rejects every card until its UI-noise vocabulary is registered,
+# and only an analysis call had ever registered it. These plugins are the real classes with the
+# network replaced, so the mechanism under test is the production one.
+
+from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin  # noqa: E402
+from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry  # noqa: E402
+from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin  # noqa: E402
+
+# Test data: persisted vocabulary, written through the same repository path an operator uses.
+PERSISTED_VOCABULARY = {
+    ("probe_templates_vn", "template"): ["{} là gì", "{} giá bao nhiêu"],
+    ("tiktok_ui_noise", "notification"): ["thông báo", "tin nhắn"],
+    ("retail_ops", "vernacular"): ["quản lý kho", "phần mềm bán hàng"],
+}
+TIKTOK_CARDS = ["Quản lý kho bằng AI cho shop nhỏ", "thông báo mới: có 3 tin nhắn"]
+
+
+class OfflineGoogle(GoogleTrendsRssPlugin):
+    """Google demand probe with the network removed: one signal per registered template."""
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
+        return [
+            _signal(pattern.format(keywords[0]), PlatformType.GOOGLE_TRENDS, keyword=keywords[0],
+                    external=f"g{index}-{keywords[0]}")
+            for index, pattern in enumerate(self._get_probe_patterns(geo.value))
+        ]
+
+
+class OfflineTikTok(TikTokPlugin):
+    """The video grid with the browser removed: fixed cards through the real public-card guard."""
+
+    async def keyword_search_blocked_reason(self):
+        return None
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
+        return [
+            _signal(card, PlatformType.TIKTOK, external=f"t{index}", keyword=keywords[0])
+            for index, card in enumerate(TIKTOK_CARDS)
+            if not self._is_private_or_notification(card)
+        ]
+
+
+async def _persist_vocabulary(repository_case):
+    """Persist the vocabulary a first mission depends on, on either backend.
+
+    The shared PostgreSQL fixture applies the source/observation migrations only, so the
+    vocabulary tables are created here from 003 exactly as shipped; SQLite's bootstrap already
+    holds them. Returns the VN probe templates the database now holds.
+    """
+    from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
+
+    if repository_case.name == "postgres":
+        import psycopg
+        from conftest import REPO_SQL
+
+        with psycopg.connect(repository_case.dsn) as conn:
+            conn.execute((REPO_SQL / "003_market_lexicons.sql").read_text(encoding="utf-8"))
+    repository = repository_case.repository
+    for (domain, category), terms in PERSISTED_VOCABULARY.items():
+        await repository.register_lexicon_terms(domain, terms, category)
+    return (await load_market_vocabulary(repository)).probe_templates["VN"]
+
+
+def _fresh_process(repository):
+    """What a newly started server holds: engines and plugins that have registered nothing."""
+    from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
+    from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+    from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
+    from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
+    from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+
+    google, tiktok = OfflineGoogle(), OfflineTikTok()
+    registry = ConnectorPluginRegistry(repository=repository)
+    registry.register(google)
+    registry.register(tiktok)
+    detector = HeuristicLanguageDetector()
+    clusterer = SemanticClusterer()
+    synchronizer = VocabularySynchronizer(
+        repository,
+        quality_evaluator=QualityEvaluator(detector=detector),
+        strategic_reasoner=StrategicMarketReasoner(detector=detector),
+        clusterer=clusterer,
+        google_trends_plugin=google,
+        language_detector=detector,
+        tiktok_plugin=tiktok,
+        registry=registry,
+    )
+    return {"registry": registry, "google": google, "tiktok": tiktok, "sync": synchronizer}
+
+
+async def _run_first_mission(repository, store, workspace, process):
+    mission = await _attention_mission(repository, store, workspace)
+    result = await _executor(repository, store, process["registry"], process["sync"]).execute(mission.id)
+    outcomes = await store.get_latest_completed_probe_outcomes(mission.id)
+    signals = await repository.get_mission_signals(mission.id)
+    return result, outcomes, signals
+
+
+def _observed(outcomes, signals):
+    return (
+        sorted((o.connector_surface, o.status.value, o.signals_collected) for o in outcomes),
+        sorted(s.raw_title for s in signals),
+    )
+
+
+@pytest.mark.asyncio
+async def test_cold_start_first_mission_registers_persisted_vocabulary_before_any_connector_call(
+    repository_case, host_workspace
+):
+    repository = repository_case.repository
+    templates = await _persist_vocabulary(repository_case)
+    store, workspace = await _workspace(repository, host_workspace)
+    cold = _fresh_process(repository)
+
+    result, outcomes, signals = await _run_first_mission(repository, store, workspace, cold)
+
+    assert result["status"] == "COMPLETED"
+    surfaces, titles = _observed(outcomes, signals)
+    assert surfaces == [
+        ("google", "HEALTHY", len(templates)), ("tiktok_video_grid", "HEALTHY", 1),
+    ], (
+        "the first mission must see the persisted TikTok UI noise and probe templates"
+    )
+    assert "Quản lý kho bằng AI cho shop nhỏ" in titles
+    assert "ai cho cửa hàng là gì" in titles and "ai cho cửa hàng giá bao nhiêu" in titles
+
+
+@pytest.mark.asyncio
+async def test_cold_start_and_warm_process_invoke_the_same_surfaces_with_the_same_vocabulary(
+    repository_case, host_workspace
+):
+    repository = repository_case.repository
+    await _persist_vocabulary(repository_case)
+    store, workspace = await _workspace(repository, host_workspace)
+
+    cold = _fresh_process(repository)
+    cold_observed = _observed(*(await _run_first_mission(repository, store, workspace, cold))[1:])
+
+    warm = _fresh_process(repository)
+    await warm["sync"].synchronize()  # what an earlier analysis call used to do by accident
+    warm_observed = _observed(*(await _run_first_mission(repository, store, workspace, warm))[1:])
+
+    assert cold_observed == warm_observed
+    assert cold["tiktok"]._ui_noise and len(cold["tiktok"]._ui_noise) == len(warm["tiktok"]._ui_noise)
+    assert cold["google"]._probe_templates == warm["google"]._probe_templates
+
+
+@pytest.mark.asyncio
+async def test_cold_start_vocabulary_failure_calls_no_connector_and_fails_clearly(
+    repository_case, host_workspace
+):
+    from ignis.domain.exceptions import VocabularySynchronizationError
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    process = _fresh_process(repository)
+    mission = await _attention_mission(repository, store, workspace)
+
+    class CountingRegistry:
+        calls = 0
+
+        async def search_with_outcomes(self, **_kwargs):
+            CountingRegistry.calls += 1
+            raise AssertionError("a connector was called under partial configuration")
+
+    async def unreadable(*_args, **_kwargs):
+        raise RuntimeError("market_lexicons is unreadable")
+
+    process["sync"]._repository = type(
+        "UnreadableVocabulary", (), {"get_domain_lexicons": unreadable,
+                                     "get_industry_taxonomies": unreadable}
+    )()
+
+    with pytest.raises(VocabularySynchronizationError):
+        await _executor(repository, store, CountingRegistry(), process["sync"]).execute(mission.id)
+
+    assert CountingRegistry.calls == 0
+    stored = await repository.get_mission(mission.id)
+    assert stored.status == "FAILED" and "vocabulary" in stored.summary.lower()
+    assert await store.list_run_journals(mission.id) == [], "no run was started"
+    assert await repository.get_mission_signals(mission.id) == []
+
+
+@pytest.mark.asyncio
+async def test_cold_start_execute_mission_ingress_handler_needs_no_prior_analysis_call(
+    repository_case, host_workspace, monkeypatch
+):
+    import json
+
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    await _persist_vocabulary(repository_case)
+    store, workspace = await _workspace(repository, host_workspace)
+    mission = await _attention_mission(repository, store, workspace)
+    process = _fresh_process(repository)
+    components = {
+        "repository": repository,
+        "workspace_store": store,
+        "execute_mission_use_case": _executor(repository, store, process["registry"], process["sync"]),
+    }
+    monkeypatch.setattr(mcp_server, "get_components", lambda: components)
+
+    payload = json.loads(await mcp_server.handle_execute_mission_ingress(str(mission.id)))
+
+    assert payload["status"] == "COMPLETED", payload
+    outcomes = {o.connector_surface: o for o in await store.get_latest_completed_probe_outcomes(mission.id)}
+    assert outcomes["tiktok_video_grid"].status.value == "HEALTHY"
+    assert outcomes["tiktok_video_grid"].signals_collected == 1

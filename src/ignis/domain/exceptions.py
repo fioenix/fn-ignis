@@ -33,6 +33,16 @@ class ConnectorAuthenticationException(ConnectorExecutionException):
     pass
 
 
+class VocabularySynchronizationError(IgnisDomainException):
+    """The persisted vocabulary a mission depends on could not be loaded into its engines.
+
+    Raised before any connector is called, so no result is ever produced under a partial
+    configuration -- the TikTok grid, for one, rejects every card until its UI-noise vocabulary
+    is registered, and an empty platform would otherwise read as an absent market.
+    """
+    pass
+
+
 class EncryptionKeyMissingException(IgnisDomainException):
     """A persistent IGNIS_ENCRYPTION_KEY is required for this operation but is not configured."""
     pass

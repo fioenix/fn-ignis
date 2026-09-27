@@ -188,3 +188,95 @@ async def test_mcp_verify_connectors_health():
         assert res["connectors"]["YouTube Data API v3"]["status"] == "HEALTHY"
 
 
+
+
+# --- User Story 1: mission ingress needs no earlier analysis call to be configured ---------------
+
+
+def test_the_server_wires_one_synchronizer_into_mission_ingress(monkeypatch):
+    """The synchronizer the mission path calls is bound to the very plugins the registry probes."""
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    from ignis.interfaces.mcp import server as mcp_server
+
+    monkeypatch.setattr(
+        mcp_server, "create_repository", lambda: SqliteTrendRepository("sqlite:///:memory:")
+    )
+    comp = mcp_server._init_components()
+
+    synchronizer = comp["vocabulary_synchronizer"]
+    assert comp["execute_mission_use_case"]._vocabulary_sync is synchronizer
+    assert synchronizer._tiktok_plugin is comp["tiktok_plugin"]
+    assert synchronizer._google_trends_plugin is comp["google_trends_plugin"]
+    assert synchronizer._registry is comp["registry"]
+    assert synchronizer._clusterer is comp["clusterer"]
+    assert comp["registry"].get_plugin_by_id("tiktok_video_grid") is comp["tiktok_plugin"]
+
+
+@pytest.mark.asyncio
+async def test_execute_mission_ingress_synchronizes_before_any_connector_call_as_the_first_operation():
+    from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
+    from ignis.domain.entities import ResearchMission
+    from ignis.infrastructure.connectors.registry import SearchPassResult
+    from ignis.interfaces.mcp.server import handle_execute_mission_ingress
+
+    order = []
+
+    class Synchronizer:
+        async def synchronize(self):
+            order.append("synchronize")
+
+    class Registry:
+        async def search_with_outcomes(self, **_kwargs):
+            order.append("connector")
+            return SearchPassResult()
+
+    mission = ResearchMission(title="Cold start", keywords=["ai retail"])
+    repository = MagicMock()
+    repository.get_mission = AsyncMock(return_value=mission)
+    repository.get_mission_signals = AsyncMock(return_value=[])
+    repository.update_mission = AsyncMock()
+    repository.prune_mission_evidence = AsyncMock(return_value=0)
+    use_case = ExecuteMissionUseCase(
+        repository=repository, registry=Registry(), clusterer=MagicMock(),
+        vocabulary_sync=Synchronizer(),
+    )
+
+    with patch("ignis.interfaces.mcp.server.get_components") as get_components:
+        get_components.return_value = {"repository": repository, "execute_mission_use_case": use_case}
+        payload = json.loads(await handle_execute_mission_ingress(str(mission.id)))
+
+    assert payload["status"] == "COMPLETED"
+    assert order == ["synchronize", "connector"]
+
+
+@pytest.mark.asyncio
+async def test_a_vocabulary_failure_is_a_structured_refusal_not_a_transport_error():
+    from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
+    from ignis.domain.entities import ResearchMission
+    from ignis.domain.exceptions import VocabularySynchronizationError
+    from ignis.interfaces.mcp.server import handle_execute_mission_ingress
+
+    class Unreadable:
+        async def synchronize(self):
+            raise VocabularySynchronizationError("market_lexicons is unreadable")
+
+    registry = MagicMock()
+    registry.search_with_outcomes = AsyncMock()
+    mission = ResearchMission(title="Cold start", keywords=["ai retail"])
+    repository = MagicMock()
+    repository.get_mission = AsyncMock(return_value=mission)
+    repository.update_mission = AsyncMock()
+    use_case = ExecuteMissionUseCase(
+        repository=repository, registry=registry, clusterer=MagicMock(),
+        vocabulary_sync=Unreadable(),
+    )
+
+    with patch("ignis.interfaces.mcp.server.get_components") as get_components:
+        get_components.return_value = {"repository": repository, "execute_mission_use_case": use_case}
+        payload = json.loads(await handle_execute_mission_ingress(str(mission.id)))
+
+    assert payload["status"] == "FAILED"
+    assert payload["operation"] == "execute_mission_ingress"
+    assert "market_lexicons is unreadable" in payload["error"]
+    assert "No connector was called" in payload["note"]
+    registry.search_with_outcomes.assert_not_called()

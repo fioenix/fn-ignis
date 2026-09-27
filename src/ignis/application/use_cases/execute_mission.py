@@ -7,6 +7,7 @@ from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.domain.entities import TrendSignal
+from ignis.domain.exceptions import VocabularySynchronizationError
 from ignis.domain.research_workspace import (
     REQUIRED_BRIEF_FIELDS,
     IncompleteMarketBriefError,
@@ -16,6 +17,7 @@ from ignis.domain.research_workspace import (
     compute_query_fingerprint,
     resolve_surface,
 )
+from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 
 logger = logging.getLogger(__name__)
@@ -33,11 +35,13 @@ class ExecuteMissionUseCase:
         registry: ConnectorPluginRegistry,
         clusterer: IClusteringEngine,
         workspace_store: Optional[IResearchWorkspaceStore] = None,
+        vocabulary_sync: Optional[VocabularySynchronizer] = None,
     ):
         self._repo = repository
         self._registry = registry
         self._clusterer = clusterer
         self._workspace_store = workspace_store
+        self._vocabulary_sync = vocabulary_sync
 
     async def _require_confirmed_brief(self, mission) -> None:
         """A Market mission does not probe until the requester has confirmed its Brief.
@@ -87,6 +91,27 @@ class ExecuteMissionUseCase:
             )
         return workspace
 
+    async def _synchronize_vocabulary(self, mission) -> None:
+        """Load the persisted vocabulary before the mission can reach a connector.
+
+        The first mission after a process starts used to run with none of it: only an analysis
+        call had ever registered the TikTok UI noise and the probe templates, so the grid
+        rejected every card and demand was measured from the bare keyword. A failure here stops
+        the mission before it claims a writer, starts a run or calls anything.
+        """
+        if self._vocabulary_sync is None:
+            return
+        try:
+            await self._vocabulary_sync.synchronize()
+        except VocabularySynchronizationError as exc:
+            mission.status = "FAILED"
+            mission.summary = (
+                "Failed before ingress: the persisted vocabulary could not be synchronized, so "
+                f"no connector was called. {exc}"
+            )
+            await self._repo.update_mission(mission)
+            raise
+
     async def execute(self, mission_id: UUID) -> Dict[str, Any]:
         mission = await self._repo.get_mission(mission_id)
         if not mission:
@@ -95,6 +120,7 @@ class ExecuteMissionUseCase:
         await self._require_confirmed_brief(mission)
 
         workspace = await self._run_workspace(mission)
+        await self._synchronize_vocabulary(mission)
         if workspace is None:
             return await self._execute_pass(mission)
 

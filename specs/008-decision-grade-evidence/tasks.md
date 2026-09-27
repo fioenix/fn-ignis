@@ -85,15 +85,23 @@ read failure that must call zero connectors.
 
 ### Tests for User Story 1
 
-- [ ] T013 [US1] Add RED cold-versus-warm parity, first-operation TikTok vocabulary, probe-template, and fail-before-connector scenarios in `tests/integration/test_decision_grade_evidence.py`
+- [X] T013 [US1] Add RED cold-versus-warm parity, first-operation TikTok vocabulary, probe-template, and fail-before-connector scenarios in `tests/integration/test_decision_grade_evidence.py`
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] Extract the idempotent database-to-runtime vocabulary registration from MCP handlers into `src/ignis/infrastructure/config/vocabulary_loader.py`
-- [ ] T015 [US1] Inject and invoke vocabulary synchronization before mission `RUNNING` state and connector search in `src/ignis/application/use_cases/execute_mission.py` and component construction in `src/ignis/interfaces/mcp/server.py`
-- [ ] T016 [US1] Add handler-level regression coverage proving `execute_mission_ingress` needs no prior analysis call in `tests/unit/test_mcp_server.py` and `tests/integration/test_decision_grade_evidence.py`
+- [X] T014 [US1] Extract the idempotent database-to-runtime vocabulary registration from MCP handlers into `src/ignis/infrastructure/config/vocabulary_loader.py`
+- [X] T015 [US1] Inject and invoke vocabulary synchronization before mission `RUNNING` state and connector search in `src/ignis/application/use_cases/execute_mission.py` and component construction in `src/ignis/interfaces/mcp/server.py`
+- [X] T016 [US1] Add handler-level regression coverage proving `execute_mission_ingress` needs no prior analysis call in `tests/unit/test_mcp_server.py` and `tests/integration/test_decision_grade_evidence.py`
 
 **Checkpoint**: US1 is deployable independently as a cold-start correctness fix.
+
+**US1 evidence (27/09/2026):** `-k cold_start` in `test_decision_grade_evidence.py`: 8 passed (4 x
+SQLite and PostgreSQL), including the handler-level first operation. RED before T014: the
+synchronizer did not exist (ImportError); negative control with the synchronizer disabled
+reproduces the validation defect exactly -- TikTok `EMPTY_NO_DATA`/0 and Google probing the bare
+keyword once instead of every persisted template. Unit wiring test fails when the server stops
+passing the synchronizer. Full suites: unit 1140 passed, 1 skipped; integration 523 passed,
+3 skipped (the same `[sqlite]` backfill parameters and the Compose opt-in); no PostgreSQL skip.
 
 ---
 

@@ -31,7 +31,7 @@ from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS, Ingest
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster
-from ignis.domain.exceptions import IgnisDomainException
+from ignis.domain.exceptions import IgnisDomainException, VocabularySynchronizationError
 from ignis.domain.research_workspace import (
     RESEARCH_ROOT_SEGMENTS,
     REQUIRED_BRIEF_FIELDS,
@@ -47,7 +47,6 @@ from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepos
 
 from ignis.config import reveal_secret, settings
 
-from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
 from ignis.domain.token_rotation import (
     STATUS_EXPIRED,
     STATUS_EXPIRING_SOON,
@@ -85,7 +84,7 @@ from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
-from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
+from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
@@ -187,6 +186,18 @@ def _init_components():
     )
 
     workspace_store = WorkspaceRepository(repository=repository)
+    # One synchronizer for every entry point, so the first mission after startup registers the
+    # same persisted vocabulary a process warmed by an analysis call would already hold.
+    vocabulary_synchronizer = VocabularySynchronizer(
+        repository,
+        quality_evaluator=quality_evaluator,
+        strategic_reasoner=strategic_reasoner,
+        clusterer=clusterer,
+        google_trends_plugin=google_trends_plugin,
+        language_detector=language_detector,
+        tiktok_plugin=tiktok_plugin,
+        registry=registry,
+    )
 
     create_mission_use_case = CreateMissionUseCase(repository=repository)
     execute_mission_use_case = ExecuteMissionUseCase(
@@ -194,6 +205,7 @@ def _init_components():
         registry=registry,
         clusterer=clusterer,
         workspace_store=workspace_store,
+        vocabulary_sync=vocabulary_synchronizer,
     )
     create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store)
     create_attention_mission_use_case = CreateAttentionMissionUseCase(
@@ -242,6 +254,7 @@ def _init_components():
         "strategic_reasoner": strategic_reasoner,
         "harness_orchestrator": harness_orchestrator,
         "workspace_store": workspace_store,
+        "vocabulary_synchronizer": vocabulary_synchronizer,
         "create_research_workspace_use_case": create_research_workspace_use_case,
         "create_attention_mission_use_case": create_attention_mission_use_case,
         "confirm_market_brief_use_case": confirm_market_brief_use_case,
@@ -513,47 +526,32 @@ def _serialize_channel_summaries(summaries: Any) -> List[Dict[str, Any]]:
     return out
 
 
-async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
-    """Sync every persisted vocabulary domain from the database into the engines that use it."""
-    try:
-        vocabulary = await load_market_vocabulary(comp["repository"])
-        pos_terms = vocabulary.positive_terms
-        stop_terms = vocabulary.foreign_stopwords
-        noise_terms = vocabulary.noise_blacklist
+def _vocabulary_synchronizer(comp: Dict[str, Any]) -> VocabularySynchronizer:
+    """The shared synchronizer, or one bound to whatever engines this component map holds."""
+    synchronizer = comp.get("vocabulary_synchronizer")
+    if synchronizer is not None:
+        return synchronizer
+    return VocabularySynchronizer(
+        comp["repository"],
+        quality_evaluator=comp.get("quality_evaluator"),
+        strategic_reasoner=comp.get("strategic_reasoner"),
+        clusterer=comp.get("clusterer"),
+        google_trends_plugin=comp.get("google_trends_plugin"),
+        language_detector=comp.get("language_detector"),
+        tiktok_plugin=comp.get("tiktok_plugin"),
+        registry=comp.get("registry"),
+    )
 
-        if pos_terms:
-            comp["quality_evaluator"].register_terms(pos_terms)
-            comp["strategic_reasoner"].register_terms(pos_terms)
-            # Terms sharing a (domain, category) bucket are treated as expansions of each other,
-            # so keyword matching uses the persisted vocabulary instead of hardcoded synonyms.
-            comp["strategic_reasoner"].register_synonym_groups(
-                [g for g in vocabulary.by_domain_and_category.values() if len(g) > 1]
-            )
-        if "clusterer" in comp:
-            comp["clusterer"].register_ambiguous_unigrams(vocabulary.ambiguous_unigrams)
-        if "google_trends_plugin" in comp:
-            comp["google_trends_plugin"].register_probe_templates(vocabulary.probe_templates)
-            comp["google_trends_plugin"].register_intent_keywords(vocabulary.search_intent)
-        if "language_detector" in comp:
-            comp["language_detector"].register_foreign_phrases(vocabulary.foreign_phrases)
-            comp["language_detector"].register_portuguese_words(vocabulary.portuguese_words)
-        if "tiktok_plugin" in comp:
-            comp["tiktok_plugin"].register_ui_noise(vocabulary.tiktok_ui_noise)
-            comp["tiktok_plugin"].register_suggest_templates(vocabulary.tiktok_suggest_templates)
-        if stop_terms:
-            comp["quality_evaluator"].register_foreign_stopwords(stop_terms)
-            comp["strategic_reasoner"].register_foreign_stopwords(stop_terms)
-            if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
-                comp["clusterer"].register_stopwords(stop_terms)
-        if noise_terms:
-            comp["quality_evaluator"].register_noise_blacklist(noise_terms)
-            comp["strategic_reasoner"].register_noise_blacklist(noise_terms)
-            if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
-                comp["clusterer"].register_stopwords(noise_terms)
-        if "clusterer" in comp and hasattr(comp["clusterer"], "register_taxonomies"):
-            taxonomies = await comp["repository"].get_industry_taxonomies()
-            if taxonomies:
-                comp["clusterer"].register_taxonomies(taxonomies)
+
+async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
+    """Sync every persisted vocabulary domain from the database into the engines that use it.
+
+    Read paths stay tolerant: a failed read is logged and the handler carries on with what it has.
+    Mission ingress does not go through here -- ExecuteMissionUseCase synchronizes on its own and
+    refuses to run under a partial configuration.
+    """
+    try:
+        await _vocabulary_synchronizer(comp).synchronize_vocabulary()
     except Exception as e:
         logger.warning(f"Could not sync dynamic lexicons from DB: {e}")
 
@@ -563,19 +561,7 @@ async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
 async def _sync_self_identities(comp: Dict[str, Any]) -> None:
     """Bind the operator's own connected accounts so market passes can exclude their content."""
     try:
-        identities = await SelfIdentityRegistry(comp["repository"]).load()
-        comp["registry"].register_self_identities(identities)
-        comp["self_identities"] = identities
-        if identities:
-            logger.info(
-                "Self-content guard armed for: "
-                + ", ".join(sorted({f"{i.platform}:{i.normalized_username or i.normalized_account_id}" for i in identities}))
-            )
-        else:
-            logger.info(
-                "No connected account identity is known, so self-authored content cannot be "
-                "recognised. Set the 'self_accounts' runtime config to close that gap."
-            )
+        comp["self_identities"] = await _vocabulary_synchronizer(comp).synchronize_self_identities()
     except Exception as e:
         logger.warning(f"Could not load self-account identities: {e}")
 
@@ -1562,6 +1548,26 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
             operation="execute_mission_ingress",
             missing_fields=exc.missing_fields,
             detail=str(exc),
+        )
+    except VocabularySynchronizationError as exc:
+        # Refused before the writer claim and before any connector call, so no result exists that
+        # was produced under a partial configuration.
+        return json.dumps(
+            {
+                "status": "FAILED",
+                "operation": "execute_mission_ingress",
+                "mission_id": str(mission.id),
+                "shortcode": mission.shortcode,
+                "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+                "error": str(exc),
+                "note": (
+                    "No connector was called and no run was started: the persisted vocabulary "
+                    "this mission depends on could not be loaded. Check the configured database, "
+                    "then run the mission again."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
         )
 
     result["shortcode"] = mission.shortcode
