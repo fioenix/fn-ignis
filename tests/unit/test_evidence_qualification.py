@@ -725,3 +725,30 @@ def test_an_explicit_unassessed_row_never_opens_the_verdict_gate(reason, expecte
 
     assert context.progress.unjudged == 0 and context.progress.unassessed == 1
     assert context.assessment_state is expected
+
+
+@pytest.mark.parametrize(
+    "reason, status",
+    [("INSUFFICIENT_CONTENT", "QUALIFICATION_REQUIRED"), ("EVALUATOR_UNAVAILABLE", "UNAVAILABLE")],
+)
+@pytest.mark.asyncio
+async def test_the_batch_is_not_ready_while_an_explicit_unassessed_row_remains(research, reason, status):
+    """Nothing is left to hand out, but an UNASSESSED row is not an assessment."""
+    repository, store, workspace = research
+    mission, brief, held = await _market(repository, store, workspace, ("a", "b"))
+    read, submit = _use_cases(repository, store)
+    frame = compute_frame_fingerprint(mission, brief)
+    await submit.execute(str(mission.id), frame, [
+        _assessment(held[0].observation_id),
+        _assessment(held[1].observation_id, relation="UNASSESSED", purpose="CONTEXT",
+                    confidence=None, reason_code=reason),
+    ])
+
+    batch = await read.execute(str(mission.id))
+
+    assert batch["status"] == status
+    assert batch["evidence"] == [] and batch["next_cursor"] is None
+    assert batch["progress"]["unassessed"] == 1
+    assert batch["reason_code"] == ("UNASSESSED_EVIDENCE" if status == "QUALIFICATION_REQUIRED" else "EVALUATOR_UNAVAILABLE")
+    assert "new mission" in batch["next_step"] and "Brief revision" in batch["next_step"]
+    assert "get_mission_evidence_qualification_batch" not in batch["next_step"], "a read loop cannot help"

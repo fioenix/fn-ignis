@@ -510,10 +510,13 @@ minimum before it allows a conclusion:
 4. `get_mission_analysis` and `generate_mission_artifact` then read the persisted judgments. A Market
    topic carries an Opportunity Index only with one qualified demand observation and either two
    qualified supply observations from two independent sources or two relevant supply surfaces that
-   completed and returned nothing for the same query. An Attention cluster becomes a handoff
+   completed, filtered by the mission's own time window, and returned nothing for the same query. A
+   surface that cannot restrict its search to that window never counts as a measured absence. An
+   Attention cluster becomes a handoff
    candidate only when it is directly relevant and backed by two independent sources.
 
-Until every observation carries a judgment the analysis reports `QUALIFICATION_REQUIRED`; a recorded
+Until every observation carries an actual assessment the analysis reports `QUALIFICATION_REQUIRED`
+(an explicit `UNASSESSED` judgment is final, so it needs a new mission or Brief revision); a recorded
 evaluator failure reports `UNAVAILABLE`; a complete assessment that meets no minimum reports
 `INSUFFICIENT_RELEVANT_EVIDENCE`. Each carries the four qualification counts, the question-relevance
 score and a machine-readable reason, and confidence is capped at `LOW` or `UNRELIABLE` accordingly.

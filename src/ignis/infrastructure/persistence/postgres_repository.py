@@ -1983,8 +1983,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                 async with conn.cursor() as cur:
                     await cur.executemany(
                         "INSERT INTO mission_probe_outcomes (run_id, platform, connector_surface,"
-                        " status, signals_collected, queried_keywords, query_fingerprint,"
-                        " completed_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);",
+                        " status, signals_collected, queried_keywords, queried_window,"
+                        " query_fingerprint, completed_at)"
+                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);",
                         [
                             (
                                 str(o.run_id),
@@ -1993,6 +1994,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 o.status.value,
                                 o.signals_collected,
                                 list(o.queried_keywords),
+                                o.queried_window,
                                 o.query_fingerprint,
                                 o.completed_at,
                             )
@@ -2014,7 +2016,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 await cur.execute(
                     "SELECT o.run_id, o.platform, o.connector_surface, o.status,"
                     " o.signals_collected, o.query_fingerprint, o.completed_at,"
-                    " o.queried_keywords"
+                    " o.queried_keywords, o.queried_window"
                     " FROM mission_probe_outcomes o"
                     " WHERE o.run_id = ("
                     "   SELECT j.id FROM mission_run_journals j"
@@ -2034,6 +2036,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 query_fingerprint=r[5],
                 completed_at=r[6],
                 queried_keywords=tuple(r[7] or ()),
+                queried_window=r[8],
             )
             for r in rows
         ]

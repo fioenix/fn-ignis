@@ -39,7 +39,10 @@ CREATE TABLE IF NOT EXISTS mission_probe_outcomes (
     -- The keywords the surface attested to having queried. A connector that probes only ten
     -- keywords never measured the eleventh, so a measured zero covers exactly this list.
     queried_keywords TEXT[] NOT NULL DEFAULT '{}',
-    -- A digest of this surface's queried keywords, geo and timeframe. Never a credential.
+    -- The window the platform attested to filtering by (e.g. '7d'); NULL when it applied none.
+    -- A measured zero holds only for the frame's own window.
+    queried_window VARCHAR(20),
+    -- A digest of this surface's queried keywords, geo and window. Never a credential.
     query_fingerprint VARCHAR(128) NOT NULL,
     completed_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT mission_probe_outcomes_run_surface_key UNIQUE (run_id, connector_surface),

@@ -87,6 +87,13 @@ When every current mission-evidence row has a persisted assessment:
 }
 ```
 
+`READY` requires `unassessed: 0`. When nothing is left to hand out but some rows are explicit
+`UNASSESSED` judgments, the response is not ready: `QUALIFICATION_REQUIRED` with
+`reason_code: "UNASSESSED_EVIDENCE"`, or `UNAVAILABLE` with `reason_code: "EVALUATOR_UNAVAILABLE"`
+when an evaluator failure was recorded. Both carry `evidence: []` and the same `next_step` the
+analysis returns: recorded judgments are final, so reassessment needs a new mission or a new Market
+Brief revision rather than another batch read.
+
 ### Refusals
 
 - Unknown mission: `NOT_FOUND`.

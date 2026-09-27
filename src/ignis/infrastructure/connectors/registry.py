@@ -75,6 +75,8 @@ class SurfaceProbeResult:
     note: Optional[str] = None
     # The keywords the surface attested to having queried; a measured zero covers only these.
     queried_keywords: Tuple[str, ...] = ()
+    # The window the platform attested to filtering by, or None when it applied none.
+    queried_window: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -577,6 +579,7 @@ class ConnectorPluginRegistry:
             signals_collected=len(result),
             note=note,
             queried_keywords=queried,
+            queried_window=attestation.window if attestation else None,
         )
 
     @staticmethod

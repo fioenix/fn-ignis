@@ -529,3 +529,96 @@ async def test_a_browser_surface_attests_only_the_ten_keywords_it_actually_queri
     [outcome] = result.outcomes
     assert outcome.status is ChannelHealthStatus.EMPTY_NO_DATA
     assert outcome.queried_keywords == tuple(keywords[:10])
+
+
+# --- Follow-up review: the window each surface attests is the one the platform filtered by -------
+
+
+@pytest.mark.asyncio
+async def test_youtube_attests_the_published_after_window_it_sent_for_each_answered_query():
+    from unittest.mock import MagicMock, patch
+
+    from ignis.application.ports.connector_port import SearchAttestation
+    from ignis.infrastructure.connectors.youtube import youtube_plugin as module
+
+    module._YOUTUBE_QUERY_CACHE.clear()
+    sent = []
+    empty = MagicMock(status_code=200)
+    empty.json.return_value = {"items": []}
+
+    async def _get(url, params=None, **kwargs):
+        sent.append(params.get("publishedAfter"))
+        return empty
+
+    attestation = SearchAttestation()
+    with patch("httpx.AsyncClient.get", side_effect=_get):
+        signals = await module.YouTubeDataPlugin(api_key="unit-test").search_signals(
+            keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_30D, attestation=attestation,
+        )
+
+    assert signals == [] and sent and all(sent)
+    assert attestation.window == "30d" and attestation.queried == ["ai cho cửa hàng"]
+
+
+@pytest.mark.asyncio
+async def test_youtube_attests_no_query_when_its_search_call_fails():
+    from unittest.mock import patch
+
+    from ignis.application.ports.connector_port import SearchAttestation
+    from ignis.infrastructure.connectors.youtube import youtube_plugin as module
+
+    module._YOUTUBE_QUERY_CACHE.clear()
+    attestation = SearchAttestation()
+    with patch("httpx.AsyncClient.get", side_effect=RuntimeError("connection reset")):
+        await module.YouTubeDataPlugin(api_key="unit-test").search_signals(
+            keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D, attestation=attestation,
+        )
+
+    assert attestation.queried == [] and attestation.failures
+
+
+@pytest.mark.asyncio
+async def test_threads_graph_attests_the_since_until_window_it_sent():
+    from unittest.mock import MagicMock, patch
+
+    from ignis.application.ports.connector_port import SearchAttestation
+
+    oauth = AsyncMock()
+    oauth.get_access_token.return_value = "LONG_LIVED_TOKEN"
+    windows = []
+    empty = MagicMock(status_code=200)
+    empty.json.return_value = {"data": []}
+
+    async def _get(url, params=None, **kwargs):
+        if "keyword_search" in url:
+            windows.append((params.get("since"), params.get("until")))
+        return empty
+
+    attestation = SearchAttestation()
+    with patch("httpx.AsyncClient.get", side_effect=_get):
+        await ThreadsPlugin(auth_manager=oauth).search_signals(
+            keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D, attestation=attestation,
+        )
+
+    assert windows and all(since and until for since, until in windows)
+    assert attestation.window == "7d" and attestation.queried == ["ai cho cửa hàng"]
+
+
+@pytest.mark.parametrize(
+    "plugin_class, module",
+    [
+        (ReelsPlugin, "ignis.infrastructure.connectors.reels.reels_plugin"),
+        (ThreadsPlugin, "ignis.infrastructure.connectors.threads.threads_plugin"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_browser_surface_attests_no_window_because_it_filters_by_none(plugin_class, module):
+    from unittest.mock import patch
+
+    registry = _registry(_session_plugin(plugin_class))
+    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[EMPTY_SEARCH_PAYLOAD])), \
+            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
+        result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D)
+
+    [outcome] = result.outcomes
+    assert outcome.status is ChannelHealthStatus.EMPTY_NO_DATA and outcome.queried_window is None

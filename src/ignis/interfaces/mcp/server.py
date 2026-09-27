@@ -48,6 +48,7 @@ from ignis.domain.research_workspace import (
     IncompleteMarketBriefError,
     MissionLineage,
     MissionWriterConflictError,
+    REASSESSMENT_GUIDANCE,
     QualificationStatus,
     ResearchSurface,
     WorkspaceScopeMismatchError,
@@ -521,11 +522,8 @@ def _qualification_payload(report: Any) -> Dict[str, Any]:
     }
     if qualification.reason_code == "QUALIFICATION_INCOMPLETE":
         payload["next_step"] = "Call get_mission_evidence_qualification_batch."
-    elif qualification.reason_code == "UNASSESSED_EVIDENCE":
-        payload["next_step"] = (
-            "Confirm a new Market Brief revision or start a new mission to assess the evidence "
-            "again; this mission's recorded judgments are final."
-        )
+    elif qualification.reason_code in ("UNASSESSED_EVIDENCE", "EVALUATOR_UNAVAILABLE"):
+        payload["next_step"] = REASSESSMENT_GUIDANCE
     if getattr(report, "topic_sufficiency", None):
         payload["topic_sufficiency"] = report.topic_sufficiency
     if getattr(report, "handoff_status", None):

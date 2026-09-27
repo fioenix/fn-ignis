@@ -288,6 +288,21 @@ question relevance, the reason code and the `UNRELIABLE` cap on both backends.
   init 1 passed; ruff clean; `git diff --check "$(git merge-base main HEAD)..HEAD"` clean;
   `uv lock --check` ok; `uv build` ok with migration 023 packaged.
 
+**Follow-up review corrections (review of `1205030`, 28/09/2026):**
+
+- P1 batch `READY` beside an explicit `UNASSESSED` row: the batch read now returns
+  `QUALIFICATION_REQUIRED`/`UNASSESSED_EVIDENCE` or `UNAVAILABLE`/`EVALUATOR_UNAVAILABLE` with
+  `evidence: []` and the same final-judgment guidance as analysis (`REASSESSMENT_GUIDANCE`). RED on
+  `1205030`: `READY` for both reasons. The end-to-end test now asserts batch and analysis agree.
+- P1 fingerprint claimed an unexecuted window: the executor passes the mission window as both
+  `timeframe` and `custom_timeframe`; surfaces attest the window the platform itself filtered by
+  (YouTube `publishedAfter`, Threads Graph `since/until`); outcomes persist `queried_window`
+  (migration 023 amended before release); the fingerprint covers that window; a measured zero
+  requires it to equal the frame's timeframe. RED on `1205030`: a `timeframe`-only connector got
+  `24h` for a `30d` mission. Browser Reels/Threads and TikTok filter by no window, so they record
+  `queried_window: null` and can no longer contribute a measured zero -- a deliberate fail-closed
+  consequence (see limitations). Negative control removing the window check turns 5 tests red.
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

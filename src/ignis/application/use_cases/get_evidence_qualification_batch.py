@@ -16,6 +16,7 @@ from ignis.application.ports.research_workspace_port import IResearchWorkspaceSt
 from ignis.domain.entities import TrendSignal
 from ignis.domain.probe_provenance import PROBE_KEY_ALIASES
 from ignis.domain.research_workspace import (
+    REASSESSMENT_GUIDANCE,
     EvidencePurpose,
     QualificationProgress,
     QualificationRelation,
@@ -168,7 +169,16 @@ class GetEvidenceQualificationBatchUseCase:
             "progress": progress.to_payload(),
         }
         if not pending:
-            return {**payload, "status": "READY", "evidence": [], "next_cursor": None}
+            done = {**payload, "evidence": [], "next_cursor": None}
+            # Nothing left to hand out is not the same as everything assessed: an UNASSESSED row
+            # is a recorded absence of judgment, and it can never be read out again.
+            if progress.evaluator_unavailable:
+                return {**done, "status": "UNAVAILABLE", "reason_code": "EVALUATOR_UNAVAILABLE",
+                        "next_step": REASSESSMENT_GUIDANCE}
+            if progress.unassessed:
+                return {**done, "status": "QUALIFICATION_REQUIRED",
+                        "reason_code": "UNASSESSED_EVIDENCE", "next_step": REASSESSMENT_GUIDANCE}
+            return {**done, "status": "READY"}
 
         page_size = max(1, min(int(limit), MAX_BATCH_LIMIT))
         remaining = [s for s in pending if str(s.observation_id) > after]

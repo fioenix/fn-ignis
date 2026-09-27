@@ -7,6 +7,7 @@ from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.domain.entities import TrendSignal
+from ignis.domain.value_objects import resolve_timeframe
 from ignis.domain.exceptions import VocabularySynchronizationError
 from ignis.domain.research_workspace import (
     REQUIRED_BRIEF_FIELDS,
@@ -161,8 +162,11 @@ class ExecuteMissionUseCase:
                     # Each surface's own query: the keywords it attested to running, not the
                     # mission's full list, which a connector capped at ten never saw in full.
                     queried_keywords=outcome.queried_keywords,
+                    queried_window=outcome.queried_window,
+                    # The window the surface attested to filtering by, not the one the mission
+                    # asked for: a connector handed another window measured that one instead.
                     query_fingerprint=compute_query_fingerprint(
-                        outcome.queried_keywords, mission.geo_code, mission.timeframe
+                        outcome.queried_keywords, mission.geo_code, outcome.queried_window
                     ),
                     completed_at=completed_at,
                 )
@@ -183,6 +187,9 @@ class ExecuteMissionUseCase:
             search = await self._registry.search_with_outcomes(
                 keywords=mission.keywords,
                 geo=mission.geo_code,
+                # Both forms of the window: some connectors read only `timeframe`, and left at
+                # its 24h default they searched a different window from the mission's.
+                timeframe=resolve_timeframe(mission.timeframe),
                 target_platforms=mission.platforms,
                 custom_timeframe=mission.timeframe,
             )

@@ -22,7 +22,8 @@ One factual result for one connector surface during one workspace mission run.
 | `status` | Observed run outcome | `HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`, `RATE_LIMITED`, or `DEGRADED` |
 | `signals_collected` | Number returned by this surface before mission-level preservation | Integer greater than or equal to zero |
 | `queried_keywords` | Keywords the surface attested to having queried during the run | Required non-empty for `EMPTY_NO_DATA`; a connector that probes ten keywords never lists an eleventh |
-| `query_fingerprint` | Digest of this surface's `queried_keywords`, geo and timeframe | Required; never contains credentials |
+| `queried_window` | Time window the platform attested to filtering by, e.g. `7d` | Absent when the surface applies no window; such an outcome measures no frame |
+| `query_fingerprint` | Digest of this surface's `queried_keywords`, geo and `queried_window` | Required; never contains credentials |
 | `completed_at` | When this surface finished or failed | Required UTC instant |
 
 **Uniqueness**: `(run_id, connector_surface)`.
@@ -32,8 +33,10 @@ would permit a probe outcome to name a mission different from the run that produ
 
 **Interpretation**:
 
-- `EMPTY_NO_DATA` is a measured zero only for the keywords in `queried_keywords`, and only when
-  `query_fingerprint` is the digest of exactly that query in the mission's geo and timeframe. A
+- `EMPTY_NO_DATA` is a measured zero only for the keywords in `queried_keywords`, only when
+  `queried_window` equals the mission's timeframe, and only when `query_fingerprint` is the digest
+  of exactly that query. A surface that filters by no window, or by another window, measured
+  another frame. A
   connector records a keyword only after positively attesting that the query ran; an empty answer
   it cannot attest (no browser runtime, unusable session, failed capture, swallowed HTTP error) is
   `DEGRADED` or `AUTH_REQUIRED`, never `EMPTY_NO_DATA`.

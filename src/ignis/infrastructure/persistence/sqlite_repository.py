@@ -469,6 +469,7 @@ class SqliteTrendRepository(ITrendRepository):
                 signals_collected INTEGER NOT NULL,
                 -- JSON list of the keywords the surface attested to querying.
                 queried_keywords TEXT NOT NULL DEFAULT '[]',
+                queried_window TEXT,
                 query_fingerprint TEXT NOT NULL,
                 completed_at TEXT NOT NULL,
                 UNIQUE (run_id, connector_surface),
@@ -2439,8 +2440,8 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.execute("BEGIN IMMEDIATE")
                 conn.executemany(
                     "INSERT INTO mission_probe_outcomes (id, run_id, platform, connector_surface,"
-                    " status, signals_collected, queried_keywords, query_fingerprint, completed_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " status, signals_collected, queried_keywords, queried_window,"
+                    " query_fingerprint, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [
                         (
                             str(uuid4()),
@@ -2450,6 +2451,7 @@ class SqliteTrendRepository(ITrendRepository):
                             o.status.value,
                             o.signals_collected,
                             json.dumps(list(o.queried_keywords), ensure_ascii=False),
+                            o.queried_window,
                             o.query_fingerprint,
                             o.completed_at.isoformat(),
                         )
@@ -2483,7 +2485,7 @@ class SqliteTrendRepository(ITrendRepository):
                 rows = conn.execute(
                     "SELECT o.run_id, o.platform, o.connector_surface, o.status,"
                     " o.signals_collected, o.query_fingerprint, o.completed_at,"
-                    " o.queried_keywords"
+                    " o.queried_keywords, o.queried_window"
                     " FROM mission_probe_outcomes o"
                     " WHERE o.run_id = ("
                     "   SELECT j.id FROM mission_run_journals j"
@@ -2502,6 +2504,7 @@ class SqliteTrendRepository(ITrendRepository):
                         query_fingerprint=r["query_fingerprint"],
                         completed_at=datetime.fromisoformat(r["completed_at"]),
                         queried_keywords=tuple(json.loads(r["queried_keywords"] or "[]")),
+                        queried_window=r["queried_window"],
                     )
                     for r in rows
                 ]

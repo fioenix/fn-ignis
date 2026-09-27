@@ -255,6 +255,9 @@ class YouTubeDataPlugin(IConnectorPlugin):
         
         tf_str = custom_timeframe or (timeframe.value if hasattr(timeframe, "value") else str(timeframe))
         published_after_str, published_after_dt = self._timeframe_to_published_after(tf_str)
+        if attestation is not None:
+            # publishedAfter is sent with every search below, so the API filters to this window.
+            attestation.applied_window(tf_str)
 
         for raw_kw in keywords:
             cache_key = f"{raw_kw.lower().strip()}|{region_code}|{tf_str}|{limit}"

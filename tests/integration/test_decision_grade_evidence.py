@@ -354,12 +354,12 @@ class OutcomeRegistry:
         )
 
 
-def _surface(surface, status, count=0, platform=None, queried=("ai cho cửa hàng",)):
+def _surface(surface, status, count=0, platform=None, queried=("ai cho cửa hàng",), window="7d"):
     from ignis.infrastructure.connectors.registry import SurfaceProbeResult
 
     return SurfaceProbeResult(
         platform=platform or surface, connector_surface=surface, status=status,
-        signals_collected=count, queried_keywords=tuple(queried),
+        signals_collected=count, queried_keywords=tuple(queried), queried_window=window,
     )
 
 
@@ -403,9 +403,10 @@ async def test_a_workspace_run_records_every_surface_outcome_before_it_completes
     assert {str(o.run_id) for o in outcomes} == {result["run"]["run_id"]}
     for outcome in outcomes:
         assert outcome.queried_keywords == ("ai cho cửa hàng",)
+        assert outcome.queried_window == "7d"
         assert outcome.query_fingerprint == compute_query_fingerprint(
-            outcome.queried_keywords, mission.geo_code, mission.timeframe
-        ), "each surface is fingerprinted over the query it ran"
+            outcome.queried_keywords, mission.geo_code, outcome.queried_window
+        ), "each surface is fingerprinted over the query and window it ran"
 
 
 @pytest.mark.asyncio
@@ -745,12 +746,13 @@ async def _market_with(repository, store, workspace, items, keywords, brief=None
     run = await _journal(store, workspace, mission, "COMPLETED", T0, 1)
     # Every surface here attests the whole keyword list, which is within its ten-keyword cap.
     queried = tuple(mission.keywords[:10])
-    fingerprint = compute_query_fingerprint(queried, mission.geo_code, mission.timeframe)
+    window = getattr(mission.timeframe, "value", mission.timeframe)
+    fingerprint = compute_query_fingerprint(queried, mission.geo_code, window)
     await store.record_probe_outcomes(run.run_id, [
         MissionProbeOutcome(
             run_id=run.run_id, platform=platform, connector_surface=surface, status=status,
-            signals_collected=count, queried_keywords=queried, query_fingerprint=fingerprint,
-            completed_at=T0,
+            signals_collected=count, queried_keywords=queried, queried_window=window,
+            query_fingerprint=fingerprint, completed_at=T0,
         )
         for surface, platform, status, count in outcomes
     ])
@@ -773,7 +775,8 @@ async def _qualify_through_handlers(mcp_server, mission, judgments):
         batch = json.loads(
             await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id), limit=7)
         )
-        if batch["status"] == "READY":
+        if batch["status"] == "READY" or not batch.get("evidence"):
+            # READY, or nothing left to hand out because the remaining rows are final UNASSESSED.
             return batch, responses
         assert batch["status"] == "QUALIFICATION_REQUIRED", batch
         assessments = [
@@ -1399,11 +1402,15 @@ async def test_explicit_unassessed_evidence_keeps_every_market_verdict_withheld(
             {"relation": "UNASSESSED", "purpose": "CONTEXT", "confidence": None, "reason_code": reason}
             if item is thin else item["control_judgment"]
         )
-    ready, _ = await _qualify_through_handlers(mcp_server, mission, judgments)
+    final_batch, _ = await _qualify_through_handlers(mcp_server, mission, judgments)
 
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
 
-    assert ready["status"] == "READY", "every observation carries a persisted row"
+    # Every observation carries a persisted row, and still nothing reads as ready: the batch and
+    # the analysis give the same status, reason and recovery guidance.
+    assert final_batch["evidence"] == [] and final_batch["status"] == expected_status
+    assert final_batch["reason_code"] == analysis["qualification"]["reason_code"]
+    assert final_batch["next_step"] == analysis["next_step"]
     assert analysis["qualification"]["unassessed"] == 1
     assert analysis["analysis_status"] == expected_status
     assert analysis["opportunity_index_applies"] is False
@@ -1519,6 +1526,9 @@ async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query
     assert outcomes["reels"].status.value == outcomes["tiktok_video_grid"].status.value == "EMPTY_NO_DATA"
     assert outcomes["reels"].queried_keywords == tuple(keywords[:10])
     assert outcomes["tiktok_video_grid"].queried_keywords == tuple(keywords[:10])
+    # Neither real search restricts results to a window, so neither measured the 7d frame.
+    assert outcomes["reels"].queried_window is None
+    assert outcomes["tiktok_video_grid"].queried_window is None
 
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
     held = await repository.get_mission_signals(mission.id)
@@ -1531,7 +1541,118 @@ async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
     topics = {t["topic"]: t for t in analysis["topic_sufficiency"]}
+    assert topics["topic1"]["evidence_sufficiency"] == "MISSING_SUPPLY"
+    assert topics["topic11"]["evidence_sufficiency"] == "MISSING_SUPPLY"
+    assert topics["topic11"]["measured_zero_surfaces"] == topics["topic1"]["measured_zero_surfaces"] == []
+    assert analysis["market_opportunities"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_windowed_measured_zero_still_covers_only_the_ten_keywords_each_surface_queried(
+    repository_case, host_workspace, monkeypatch
+):
+    """Surfaces that filter by the frame's window and probe ten keywords: topic11 is not covered."""
+    from ignis.interfaces.mcp import server as mcp_server
+
+    keywords = [f"topic{index}" for index in range(1, 12)]
+
+    class DemandForFirstAndEleventh(DemandOnly):
+        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
+            return [_signal(f"Google Search Trends: {k}", PlatformType.GOOGLE_TRENDS, external=f"g-{k}",
+                            keyword=k, connector_surface="google") for k in (keywords[0], keywords[10])]
+
+    registry = ConnectorPluginRegistry(repository=repository_case.repository)
+    for plugin in (DemandForFirstAndEleventh(), WindowedSupply("reels", PlatformType.REELS),
+                   WindowedSupply("tiktok_video_grid", PlatformType.TIKTOK)):
+        registry.register(plugin)
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    mission, _brief = await _market_mission(repository, store, workspace, keywords=keywords)
+    await _executor(repository, store, registry).execute(mission.id)
+
+    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
+    held = await repository.get_mission_signals(mission.id)
+    await _qualify_through_handlers(mcp_server, mission, {
+        str(s.observation_id): {"relation": "QUALIFIED_SUPPORT", "purpose": "DEMAND", "confidence": 0.9,
+                                "reason_code": "DIRECT_TO_FRAME"}
+        for s in held
+    })
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
+
+    topics = {t["topic"]: t for t in analysis["topic_sufficiency"]}
     assert topics["topic1"]["evidence_sufficiency"] == "SUFFICIENT_ZERO_SUPPLY"
     assert topics["topic11"]["evidence_sufficiency"] == "MISSING_SUPPLY"
     assert topics["topic11"]["measured_zero_surfaces"] == []
     assert [o["topic"] for o in analysis["market_opportunities"]] == ["topic1"]
+
+
+# --- Follow-up review of 1205030: the executed window is part of the measured query --------------
+
+
+class WindowedSupply:
+    """A supply surface that accepts only `timeframe`, as Reels and Threads do, and attests it."""
+
+    supports_search = True
+
+    def __init__(self, plugin_id, platform, fixed_window=None):
+        self.plugin_id, self.name, self._platform, self.fixed_window = plugin_id, plugin_id, platform, fixed_window
+        self.received = []
+
+    @property
+    def platform(self):
+        return self._platform
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, limit=20, attestation=None):
+        self.received.append(timeframe)
+        window = self.fixed_window or (timeframe.value if hasattr(timeframe, "value") else timeframe)
+        attestation.applied_window(window)
+        for keyword in keywords[:10]:
+            attestation.executed(keyword)
+        return []
+
+
+class DemandOnly:
+    platform, name, plugin_id, supports_search = PlatformType.GOOGLE_TRENDS, "Google", "google", True
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
+        return [_signal(f"Google Search Trends: {keywords[0]}", PlatformType.GOOGLE_TRENDS,
+                        external=f"g-{keywords[0]}", keyword=keywords[0], connector_surface="google")]
+
+
+@pytest.mark.parametrize("mismatch, expected", [(False, "SUFFICIENT_ZERO_SUPPLY"), (True, "MISSING_SUPPLY")])
+@pytest.mark.asyncio
+async def test_a_surface_that_executed_another_window_is_not_a_measured_zero_for_the_frame(
+    repository_case, host_workspace, monkeypatch, mismatch, expected
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    mission, _brief = await _market_mission(repository, store, workspace, keywords=["ai cho cửa hàng"],
+                                            timeframe="30d")
+    reels = WindowedSupply("reels", PlatformType.REELS)
+    tiktok = WindowedSupply("tiktok_video_grid", PlatformType.TIKTOK, fixed_window="24h" if mismatch else None)
+    registry = ConnectorPluginRegistry(repository=repository)
+    for plugin in (DemandOnly(), reels, tiktok):
+        registry.register(plugin)
+
+    await _executor(repository, store, registry).execute(mission.id)
+
+    assert [str(getattr(t, "value", t)) for t in reels.received] == ["30d"], (
+        "a connector that reads only `timeframe` must receive the mission's window"
+    )
+    outcomes = {o.connector_surface: o for o in await store.get_latest_completed_probe_outcomes(mission.id)}
+    assert outcomes["reels"].queried_window == "30d"
+    assert outcomes["tiktok_video_grid"].queried_window == ("24h" if mismatch else "30d")
+
+    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
+    held = await repository.get_mission_signals(mission.id)
+    await _qualify_through_handlers(mcp_server, mission, {
+        str(s.observation_id): {"relation": "QUALIFIED_SUPPORT", "purpose": "DEMAND", "confidence": 0.9,
+                                "reason_code": "DIRECT_TO_FRAME"}
+        for s in held
+    })
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
+
+    [topic] = analysis["topic_sufficiency"]
+    assert topic["evidence_sufficiency"] == expected

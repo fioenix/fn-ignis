@@ -453,12 +453,13 @@ TOPIC = "ai cho cửa hàng"
 GEO, TIMEFRAME = "VN", "7d"
 
 
-def _probe(surface, status="EMPTY_NO_DATA", platform=None, queried=(TOPIC,), fingerprint=None, count=0):
-    """One surface outcome naming the exact keywords it attested to having queried."""
+def _probe(surface, status="EMPTY_NO_DATA", platform=None, queried=(TOPIC,), fingerprint=None, count=0,
+           window=TIMEFRAME):
+    """One surface outcome naming the exact keywords and window it attested to having queried."""
     return MissionProbeOutcome(
         run_id=RUN, platform=platform or surface, connector_surface=surface, status=status,
-        signals_collected=count, queried_keywords=tuple(queried),
-        query_fingerprint=fingerprint or compute_query_fingerprint(queried, GEO, TIMEFRAME),
+        signals_collected=count, queried_keywords=tuple(queried), queried_window=window,
+        query_fingerprint=fingerprint or compute_query_fingerprint(queried, GEO, window),
         completed_at=datetime(2026, 9, 27, tzinfo=timezone.utc),
     )
 
@@ -575,6 +576,18 @@ def test_an_outcome_whose_fingerprint_does_not_match_its_own_query_measures_noth
     tampered = _probe("reels", fingerprint=compute_query_fingerprint(["other"], GEO, TIMEFRAME))
 
     result = _assess([_qualified("DEMAND", platform="google")], [_probe("youtube"), tampered])
+
+    assert result.measured_zero_surfaces == ("youtube",)
+    assert result.state is EvidenceSufficiency.MISSING_SUPPLY
+
+
+@pytest.mark.parametrize("window", ["24h", "30d", None])
+def test_an_empty_surface_measures_zero_only_for_the_window_it_actually_filtered_by(window):
+    """The frame is 7d: a 24h or 30d search, or one with no window at all, measured another frame."""
+    result = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("youtube"), _probe("reels", window=window)],
+    )
 
     assert result.measured_zero_surfaces == ("youtube",)
     assert result.state is EvidenceSufficiency.MISSING_SUPPLY

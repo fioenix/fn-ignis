@@ -709,6 +709,9 @@ class MissionProbeOutcome:
     # The keywords this surface attested to having queried during the run. A measured zero
     # covers only these: a connector that probes ten keywords never measured the eleventh.
     queried_keywords: Tuple[str, ...] = ()
+    # The window the platform attested to filtering by during the run, or None when it applied
+    # none. A measured zero holds only for the frame's own window.
+    queried_window: Optional[str] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _coerce_uuid(self.run_id, "run_id"))
@@ -747,16 +750,19 @@ class MissionProbeOutcome:
     def measured_zero_for(self, topic: str, geo: Any, timeframe: Any) -> bool:
         """Whether this outcome is a measured zero for `topic` in the given frame.
 
-        True only for an EMPTY_NO_DATA surface that attested querying the topic, and whose stored
-        fingerprint is the digest of exactly the query it recorded -- so a keyword the surface
-        never sent, or a row describing some other geo, timeframe or query, measures nothing.
+        True only for an EMPTY_NO_DATA surface that attested querying the topic within exactly
+        the frame's window, and whose stored fingerprint is the digest of that recorded query --
+        so a keyword the surface never sent, a window it did not filter by (or no window at all),
+        or a row describing some other geo or query measures nothing.
         """
-        if not self.measures_zero:
+        if not self.measures_zero or self.queried_window is None:
+            return False
+        if self.queried_window != _plain(timeframe):
             return False
         if _normalized_keyword(topic) not in {_normalized_keyword(k) for k in self.queried_keywords}:
             return False
         return self.query_fingerprint == compute_query_fingerprint(
-            self.queried_keywords, geo, timeframe
+            self.queried_keywords, geo, self.queried_window
         )
 
 
@@ -775,13 +781,21 @@ def _plain(value: Any) -> str:
     return str(value.value if hasattr(value, "value") else value)
 
 
-def compute_query_fingerprint(keywords: Sequence[str], geo: Any, timeframe: str) -> str:
+# What a batch read or an analysis tells the Agent when recorded judgments leave the frame
+# without an assessment: those judgments are final, so no further batch read can help.
+REASSESSMENT_GUIDANCE = (
+    "This mission's recorded judgments are final. Start a new mission or confirm a new Market "
+    "Brief revision to assess the evidence again."
+)
+
+
+def compute_query_fingerprint(keywords: Sequence[str], geo: Any, timeframe: Any) -> str:
     """A digest of the exact query one surface ran, so a measured zero names what it measured."""
     return _digest(
         {
             "keywords": sorted(" ".join(str(k).split()) for k in keywords or []),
             "geo": _plain(geo),
-            "timeframe": _plain(timeframe),
+            "timeframe": _plain(timeframe) if timeframe is not None else None,
         }
     )
 

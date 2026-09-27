@@ -305,6 +305,9 @@ class ThreadsPlugin(IConnectorPlugin):
 
         token = await self._require_token()
         since, until = self._resolve_window(timeframe)
+        if attestation is not None:
+            # since/until are sent with every keyword_search call below.
+            attestation.applied_window(timeframe.value if hasattr(timeframe, "value") else str(timeframe))
 
         all_signals: List[TrendSignal] = []
         seen_ids: set[str] = set()
