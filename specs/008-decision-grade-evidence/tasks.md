@@ -323,6 +323,11 @@ question relevance, the reason code and the `UNRELIABLE` cap on both backends.
   `unassessed: 0`, `QUALIFICATION_REQUIRED`/`UNASSESSED_EVIDENCE` and
   `UNAVAILABLE`/`EVALUATOR_UNAVAILABLE`. Both Hermes manifests regenerated from the server schema;
   a drift gate pins the wording.
+- Gates rerun on `dfcc6df` (scratch TimescaleDB, removed afterwards): `test_decision_grade_evidence.py`
+  75 passed; migration contract 17 passed; `tests/unit/` (without `YOUTUBE_API_KEY`) 1213 passed,
+  1 skipped; `tests/integration/` 568 passed, 3 skipped (same intentional skips; no PostgreSQL
+  skip); Compose fresh init 1 passed; ruff clean; `git diff --check "$(git merge-base main HEAD)..HEAD"`
+  clean; `uv lock --check` ok; `uv build` ok with 023 packaged.
 
 ## Dependencies & Execution Order
 

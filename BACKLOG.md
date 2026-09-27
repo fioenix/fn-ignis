@@ -1029,9 +1029,9 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   mở cổng kết luận, fingerprint phủ cả keyword connector không query, lỗi đồng bộ từ vựng ghi đè
   mission của writer khác, surface browser không chạy vẫn bị tính là rỗng đo được), kiểm chứng
   ngày 28/09/2026, sau cả vòng review tiếp theo (batch báo `READY` dù còn row `UNASSESSED`,
-  fingerprint ghi khung thời gian connector không thực sự áp): 1.210 unit test passed, 1 skipped;
-  566 integration test passed, 3 skipped trên PostgreSQL dùng một lần, không có case PostgreSQL nào
-  bị skip; Compose khởi tạo mới chạy đủ 23 file SQL; ruff, `git diff --check` từ `merge-base main`,
+  fingerprint ghi khung thời gian connector không thực sự áp, batch và analysis lệch nhau khi lỗi
+  evaluator đi cùng evidence còn chờ): 1.213 unit test passed, 1 skipped; 568 integration test
+  passed, 3 skipped trên PostgreSQL dùng một lần, không có case PostgreSQL nào bị skip; Compose khởi tạo mới chạy đủ 23 file SQL; ruff, `git diff --check` từ `merge-base main`,
   `uv lock --check` và `uv build` đạt. Hệ quả cần PO quyết: hiện chỉ YouTube lọc supply theo đúng
   khung thời gian, mà "vắng supply đo được" cần hai surface, nên trạng thái này chưa thể xảy ra với
   các connector hiện có; supply dương không bị ảnh hưởng.
