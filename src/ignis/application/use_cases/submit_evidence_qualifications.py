@@ -163,5 +163,3 @@ class SubmitEvidenceQualificationsUseCase:
             "error": error,
             "note": "The whole batch was refused and nothing was recorded.",
         }
-
-
