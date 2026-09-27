@@ -3,9 +3,10 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
+from psycopg import errors as pg_errors
 from psycopg.rows import tuple_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -17,7 +18,11 @@ from ignis.application.ports.repository_port import (
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
 from ignis.domain.research_workspace import (
+    EvidenceQualification,
+    EvidenceQualificationConflictError,
+    InvalidEvidenceQualificationError,
     MarketBriefRevision,
+    MissionProbeOutcome,
     ResearchWorkspace,
     WorkspaceScopeMismatchError,
     WorkspaceStatus,
@@ -1954,3 +1959,175 @@ class PostgresTimescaleRepository(ITrendRepository):
                     ),
                 )
         return journal
+
+    # ------------------------------------------------------------------
+    # Probe outcomes and evidence qualifications (sql/023)
+    # ------------------------------------------------------------------
+
+    async def record_probe_outcomes(
+        self, run_id: UUID, outcomes: Sequence[MissionProbeOutcome]
+    ) -> int:
+        """Record one run's surface outcomes in one transaction, all of them or none."""
+        rows = list(outcomes)
+        if any(str(o.run_id) != str(run_id) for o in rows):
+            raise InvalidEvidenceQualificationError(
+                f"Every probe outcome recorded for run {run_id} must belong to that run."
+            )
+        if not rows:
+            return 0
+        pool = await self._get_pool()
+        try:
+            # One connection block is one transaction: psycopg commits it on a clean exit and
+            # rolls it back on any exception, so a refused row takes the whole run with it.
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.executemany(
+                        "INSERT INTO mission_probe_outcomes (run_id, platform, connector_surface,"
+                        " status, signals_collected, query_fingerprint, completed_at)"
+                        " VALUES (%s, %s, %s, %s, %s, %s, %s);",
+                        [
+                            (
+                                str(o.run_id),
+                                o.platform,
+                                o.connector_surface,
+                                o.status.value,
+                                o.signals_collected,
+                                o.query_fingerprint,
+                                o.completed_at,
+                            )
+                            for o in rows
+                        ],
+                    )
+            return len(rows)
+        except pg_errors.IntegrityError as exc:
+            raise RepositoryException(
+                f"Probe outcomes for run {run_id} were refused and none was written: {exc}"
+            ) from exc
+
+    async def get_latest_completed_probe_outcomes(
+        self, mission_id: UUID
+    ) -> List[MissionProbeOutcome]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    "SELECT o.run_id, o.platform, o.connector_surface, o.status,"
+                    " o.signals_collected, o.query_fingerprint, o.completed_at"
+                    " FROM mission_probe_outcomes o"
+                    " WHERE o.run_id = ("
+                    "   SELECT j.id FROM mission_run_journals j"
+                    "   WHERE j.mission_id = %s AND j.status = 'COMPLETED'"
+                    "   ORDER BY j.started_at DESC, j.sequence DESC LIMIT 1)"
+                    " ORDER BY o.connector_surface;",
+                    (str(mission_id),),
+                )
+                rows = await cur.fetchall()
+        return [
+            MissionProbeOutcome(
+                run_id=UUID(str(r[0])),
+                platform=r[1],
+                connector_surface=r[2],
+                status=r[3],
+                signals_collected=int(r[4]),
+                query_fingerprint=r[5],
+                completed_at=r[6],
+            )
+            for r in rows
+        ]
+
+    _QUALIFICATION_COLUMNS = (
+        "SELECT mission_id, observation_id, brief_revision_id, frame_fingerprint, relation,"
+        " purpose, confidence, reason_code, judged_by, model, created_at"
+        " FROM mission_evidence_qualifications"
+    )
+
+    @staticmethod
+    def _qualification_from_row(row) -> EvidenceQualification:
+        return EvidenceQualification(
+            mission_id=UUID(str(row[0])),
+            observation_id=UUID(str(row[1])),
+            brief_revision_id=_uuid_or_none(row[2]),
+            frame_fingerprint=row[3],
+            relation=row[4],
+            purpose=row[5],
+            confidence=row[6],
+            reason_code=row[7],
+            judged_by=row[8],
+            model=row[9],
+            created_at=row[10],
+        )
+
+    async def list_evidence_qualifications(
+        self, mission_id: UUID
+    ) -> List[EvidenceQualification]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    self._QUALIFICATION_COLUMNS
+                    + " WHERE mission_id = %s ORDER BY observation_id::text;",
+                    (str(mission_id),),
+                )
+                rows = await cur.fetchall()
+        return [self._qualification_from_row(r) for r in rows]
+
+    async def save_evidence_qualifications(
+        self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]
+    ) -> int:
+        """Persist one batch atomically; replay is idempotent, a rewrite is refused."""
+        batch = list(qualifications)
+        if any(str(q.mission_id) != str(mission_id) for q in batch):
+            raise InvalidEvidenceQualificationError(
+                f"Every judgment in a batch for mission {mission_id} must name that mission."
+            )
+        if not batch:
+            return 0
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    for q in batch:
+                        # Insert-or-keep, then compare: the unique pair decides a race, and the
+                        # comparison decides whether the survivor says the same thing.
+                        await cur.execute(
+                            "INSERT INTO mission_evidence_qualifications (mission_id,"
+                            " observation_id, brief_revision_id, frame_fingerprint, relation,"
+                            " purpose, confidence, reason_code, judged_by, model)"
+                            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                            " ON CONFLICT (mission_id, observation_id) DO NOTHING;",
+                            (
+                                str(q.mission_id),
+                                str(q.observation_id),
+                                str(q.brief_revision_id) if q.brief_revision_id else None,
+                                q.frame_fingerprint,
+                                q.relation.value,
+                                q.purpose.value,
+                                q.confidence,
+                                q.reason_code.value,
+                                q.judged_by,
+                                q.model,
+                            ),
+                        )
+                        if cur.rowcount:
+                            continue
+                        await cur.execute(
+                            self._QUALIFICATION_COLUMNS
+                            + " WHERE mission_id = %s AND observation_id = %s;",
+                            (str(q.mission_id), str(q.observation_id)),
+                        )
+                        existing = await cur.fetchone()
+                        if existing is None or not self._qualification_from_row(
+                            existing
+                        ).same_judgment(q):
+                            raise EvidenceQualificationConflictError(
+                                f"Observation {q.observation_id} already carries a different "
+                                f"judgment for mission {mission_id}. A recorded judgment is not "
+                                "rewritten; a different one needs a new mission or Market Brief "
+                                "revision."
+                            )
+            return len(batch)
+        except pg_errors.IntegrityError as exc:
+            raise InvalidEvidenceQualificationError(
+                f"The batch names evidence mission {mission_id} does not hold, so none of it was "
+                f"recorded: {exc}"
+            ) from exc

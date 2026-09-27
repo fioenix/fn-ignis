@@ -17,6 +17,7 @@ from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.domain.entities import ResearchMission
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
+from ignis.infrastructure.connectors.registry import SearchPassResult
 from conftest import YT_ID, YT_URL, OneSightingRegistry
 
 pytestmark = pytest.mark.asyncio
@@ -105,6 +106,10 @@ async def test_a_failure_while_attaching_preserved_evidence_keeps_the_previous_e
     before = await _seed_prior_evidence(repository_case, mission)
 
     class Silent:
+        async def search_with_outcomes(self, **kwargs):
+            # The mission executor asks for per-surface outcomes; this double reports none.
+            return SearchPassResult(signals=await self.search_across_all(**kwargs))
+
         async def search_across_all(self, **_kwargs):
             return []
 
@@ -166,6 +171,10 @@ async def test_a_preserved_platform_is_not_pruned_as_stale(repository_case):
     before = await _seed_prior_evidence(repository_case, mission)
 
     class Silent:
+        async def search_with_outcomes(self, **kwargs):
+            # The mission executor asks for per-surface outcomes; this double reports none.
+            return SearchPassResult(signals=await self.search_across_all(**kwargs))
+
         async def search_across_all(self, **_kwargs):
             return []
 

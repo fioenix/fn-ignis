@@ -275,6 +275,8 @@ async def test_a_dry_run_stays_read_only_even_when_the_target_tables_are_missing
         pytest.skip("about Postgres transaction semantics; SQLite uses PRAGMA query_only")
 
     with psycopg.connect(repository_case.dsn, autocommit=True) as conn:
+        # A schema from before 016 has no 023 either, and 023 references mission_evidence.
+        conn.execute("DROP TABLE mission_evidence_qualifications")
         conn.execute("DROP TABLE mission_evidence")
         conn.execute("DROP TABLE observations")
 
@@ -299,10 +301,14 @@ async def test_a_dry_run_reports_whether_the_target_schema_is_there(repository_c
 
     if repository_case.name == "postgres":
         with psycopg.connect(repository_case.dsn, autocommit=True) as conn:
+            # A schema from before 016 has no 023 either, and 023 references mission_evidence.
+            conn.execute("DROP TABLE mission_evidence_qualifications")
             conn.execute("DROP TABLE mission_evidence")
             conn.execute("DROP TABLE observations")
     else:
         with sqlite3.connect(repository_case.repository._db_path) as conn:
+            # A schema from before 016 has no 023 either, and 023 references mission_evidence.
+            conn.execute("DROP TABLE mission_evidence_qualifications")
             conn.execute("DROP TABLE mission_evidence")
             conn.execute("DROP TABLE observations")
 
@@ -313,10 +319,14 @@ async def test_a_dry_run_reports_whether_the_target_schema_is_there(repository_c
 async def test_applying_against_a_missing_target_schema_is_refused(repository_case):
     if repository_case.name == "postgres":
         with psycopg.connect(repository_case.dsn, autocommit=True) as conn:
+            # A schema from before 016 has no 023 either, and 023 references mission_evidence.
+            conn.execute("DROP TABLE mission_evidence_qualifications")
             conn.execute("DROP TABLE mission_evidence")
             conn.execute("DROP TABLE observations")
     else:
         with sqlite3.connect(repository_case.repository._db_path) as conn:
+            # A schema from before 016 has no 023 either, and 023 references mission_evidence.
+            conn.execute("DROP TABLE mission_evidence_qualifications")
             conn.execute("DROP TABLE mission_evidence")
             conn.execute("DROP TABLE observations")
 

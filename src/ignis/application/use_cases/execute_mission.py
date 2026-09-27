@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -9,8 +10,10 @@ from ignis.domain.entities import TrendSignal
 from ignis.domain.research_workspace import (
     REQUIRED_BRIEF_FIELDS,
     IncompleteMarketBriefError,
+    MissionProbeOutcome,
     ResearchSurface,
     WorkspaceScopeMismatchError,
+    compute_query_fingerprint,
     resolve_surface,
 )
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
@@ -99,7 +102,7 @@ class ExecuteMissionUseCase:
         # never touches the state of the run that holds the mission. Both the claim and the
         # journal are given back by the context manager, including when the pass raises.
         async with self._workspace_store.mission_run(workspace, mission.id) as journal:
-            result = await self._execute_pass(mission)
+            result = await self._execute_pass(mission, journal=journal)
             result["run"] = {
                 "run_id": str(journal.run_id),
                 "workspace_id": str(journal.workspace_id),
@@ -108,20 +111,50 @@ class ExecuteMissionUseCase:
             }
             return result
 
-    async def _execute_pass(self, mission) -> Dict[str, Any]:
+    async def _record_probe_outcomes(self, mission, journal, outcomes) -> None:
+        """Write what every surface did during this run, before the mission can complete.
+
+        A failure here propagates: a run whose outcomes are not on record would later be read as
+        having measured nothing in particular, and a measured zero is only honest when the run
+        that measured it is known.
+        """
+        query_fingerprint = compute_query_fingerprint(
+            mission.keywords, mission.geo_code, mission.timeframe
+        )
+        completed_at = datetime.now(timezone.utc)
+        await self._workspace_store.record_probe_outcomes(
+            journal.run_id,
+            [
+                MissionProbeOutcome(
+                    run_id=journal.run_id,
+                    platform=outcome.platform,
+                    connector_surface=outcome.connector_surface,
+                    status=outcome.status,
+                    signals_collected=outcome.signals_collected,
+                    query_fingerprint=query_fingerprint,
+                    completed_at=completed_at,
+                )
+                for outcome in outcomes
+            ],
+        )
+
+    async def _execute_pass(self, mission, journal=None) -> Dict[str, Any]:
         mission_id = mission.id
         logger.info(f"Executing Research Mission '{mission.title}' [ID: {mission_id}] with keywords: {mission.keywords} (Timeframe: {mission.timeframe})...")
         mission.status = "RUNNING"
         await self._repo.update_mission(mission)
 
         try:
-            # 1. Targeted ingress across active connector plugins
-            signals = await self._registry.search_across_all(
+            # 1. Targeted ingress across active connector plugins, with the outcome of every
+            # surface it reached: a workspace run records them, so a reopened report can tell a
+            # measured zero from a probe that never measured.
+            search = await self._registry.search_with_outcomes(
                 keywords=mission.keywords,
                 geo=mission.geo_code,
                 target_platforms=mission.platforms,
                 custom_timeframe=mission.timeframe,
             )
+            signals = search.signals
 
             # Fail-safe: a connector can exhaust its quota mid-pass, and the mission should not
             # lose the platform it already had. What it keeps is the evidence -- the observations
@@ -181,6 +214,9 @@ class ExecuteMissionUseCase:
             await self._repo.prune_mission_evidence(mission.id, retained)
             active_platforms = list(set(s.platform.value if hasattr(s.platform, "value") else str(s.platform) for s in signals))
             active_plat_str = ", ".join(active_platforms) if active_platforms else "none"
+
+            if journal is not None:
+                await self._record_probe_outcomes(mission, journal, search.outcomes)
 
             mission.status = "COMPLETED"
             mission.summary = f"Successfully collected {len(signals)} signals across {len(active_platforms)}/{len(mission.platforms)} responsive platforms ({active_plat_str}), discovered {len(clusters)} topic clusters."

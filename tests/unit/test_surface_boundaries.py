@@ -14,6 +14,7 @@ from ignis.domain.research_workspace import (
     opportunity_index_is_allowed,
     resolve_surface,
 )
+from ignis.infrastructure.connectors.registry import SearchPassResult
 
 
 def test_the_two_surfaces_are_the_only_ones_that_exist():
@@ -291,11 +292,19 @@ def test_a_context_citation_is_dropped_from_anything_a_conclusion_rests_on():
 class _ExplodingRegistry:
     """A connector pass that fails, which is what the failure path exists for."""
 
+    async def search_with_outcomes(self, **kwargs):
+        # The mission executor asks for per-surface outcomes; this double reports none.
+        return SearchPassResult(signals=await self.search_across_all(**kwargs))
+
     async def search_across_all(self, **_kwargs):
         raise RuntimeError("connector pass failed")
 
 
 class _SilentRegistry:
+    async def search_with_outcomes(self, **kwargs):
+        # The mission executor asks for per-surface outcomes; this double reports none.
+        return SearchPassResult(signals=await self.search_across_all(**kwargs))
+
     async def search_across_all(self, **_kwargs):
         return []
 

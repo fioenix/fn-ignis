@@ -32,6 +32,7 @@ from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+from ignis.infrastructure.connectors.registry import SearchPassResult
 
 COMPLETE_BRIEF = {
     "decision": "Should we build a VN customer service assistant for fashion retailers?",
@@ -49,6 +50,10 @@ class StubRegistry:
 
     def __init__(self, signals):
         self._signals = signals
+
+    async def search_with_outcomes(self, **kwargs):
+        # The mission executor asks for per-surface outcomes; this double reports none.
+        return SearchPassResult(signals=await self.search_across_all(**kwargs))
 
     async def search_across_all(self, **_kwargs):
         return [

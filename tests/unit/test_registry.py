@@ -276,3 +276,166 @@ async def test_search_across_all_accepts_and_forwards_a_result_limit():
     assert len(signals) == 1
     assert grid.search_calls == [["ai agent"]]
     assert grid.search_limits == [30], "The cap must reach the connector, not be dropped"
+
+
+# --- Per-surface outcomes for a mission search ---
+#
+# A mission run records what every eligible surface did, so a reopened report can tell a measured
+# zero from a probe that never measured. The outcome travels with the call's own result: reading a
+# registry-wide "last pass" would let two concurrent missions overwrite each other's facts.
+
+from ignis.domain.exceptions import (  # noqa: E402
+    ConnectorAuthenticationException,
+    ConnectorQuotaExceededException,
+)
+from ignis.domain.harness_models import ChannelHealthStatus  # noqa: E402
+
+
+class EmptyYouTubePlugin(_BasePlugin):
+    _platform = PlatformType.YOUTUBE
+    _name = "YouTube Empty"
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        return []
+
+
+class QuotaGridPlugin(VideoGridPlugin):
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        raise ConnectorQuotaExceededException("quota exhausted")
+
+
+class HttpRateLimitedPlugin(VideoGridPlugin):
+    _plugin_id = "reels"
+    _platform = PlatformType.REELS
+    _name = "Reels 429"
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        raise ConnectorExecutionException("HTTP 429 Too Many Requests")
+
+
+class AuthRejectedPlugin(VideoGridPlugin):
+    _plugin_id = "threads"
+    _platform = PlatformType.THREADS
+    _name = "Threads without session"
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        raise ConnectorAuthenticationException("no token and no browser session")
+
+
+class SessionlessGridPlugin(VideoGridPlugin):
+    """TikTok keyword search returns nothing, without error, when no session is stored."""
+
+    async def keyword_search_blocked_reason(self):
+        return "No TikTok session is stored, so keyword search returns nothing."
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        return []
+
+
+class BrokenGridPlugin(VideoGridPlugin):
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        raise ConnectorExecutionException("selector changed")
+
+
+def _by_surface(result):
+    return {o.connector_surface: (o.status, o.signals_collected) for o in result.outcomes}
+
+
+@pytest.mark.asyncio
+async def test_every_eligible_surface_reports_exactly_what_it_did():
+    registry = _registry(GooglePlugin(), EmptyYouTubePlugin(), CreativeCenterPlugin())
+
+    result = await registry.search_with_outcomes(keywords=["ai agent"], geo=GeoCode.VN)
+
+    assert [s.raw_title for s in result.signals] == ["google: ai agent"]
+    # The Creative Center has no keyword probe, so it is not an eligible surface of this search.
+    assert _by_surface(result) == {
+        "google": (ChannelHealthStatus.HEALTHY, 1),
+        "youtube": (ChannelHealthStatus.EMPTY_NO_DATA, 0),
+    }
+    assert {o.platform for o in result.outcomes} == {"google", "youtube"}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_probe_is_never_reported_as_an_empty_one():
+    registry = _registry(
+        QuotaGridPlugin(), HttpRateLimitedPlugin(), AuthRejectedPlugin(), EmptyYouTubePlugin()
+    )
+    broken = _registry(BrokenGridPlugin())
+
+    result = await registry.search_with_outcomes(keywords=["ai agent"])
+    failed = await broken.search_with_outcomes(keywords=["ai agent"])
+
+    assert _by_surface(result) == {
+        "tiktok_video_grid": (ChannelHealthStatus.RATE_LIMITED, 0),
+        "reels": (ChannelHealthStatus.RATE_LIMITED, 0),
+        "threads": (ChannelHealthStatus.AUTH_REQUIRED, 0),
+        "youtube": (ChannelHealthStatus.EMPTY_NO_DATA, 0),
+    }
+    assert _by_surface(failed) == {"tiktok_video_grid": (ChannelHealthStatus.DEGRADED, 0)}
+
+
+@pytest.mark.asyncio
+async def test_an_empty_answer_from_a_surface_that_needs_a_missing_session_is_not_a_measured_zero():
+    result = await _registry(SessionlessGridPlugin()).search_with_outcomes(keywords=["ai agent"])
+
+    assert _by_surface(result) == {"tiktok_video_grid": (ChannelHealthStatus.AUTH_REQUIRED, 0)}
+
+
+@pytest.mark.asyncio
+async def test_a_surface_skipped_by_an_open_circuit_is_recorded_not_dropped():
+    registry = _registry(BrokenGridPlugin(), EmptyYouTubePlugin())
+    for _ in range(3):
+        await registry.search_with_outcomes(keywords=["ai agent"])
+    assert registry._breakers["tiktok_video_grid"].state == "OPEN"
+
+    result = await registry.search_with_outcomes(keywords=["ai agent"])
+
+    assert _by_surface(result)["tiktok_video_grid"] == (ChannelHealthStatus.DEGRADED, 0)
+
+    quota = _registry(QuotaGridPlugin())
+    for _ in range(3):
+        await quota.search_with_outcomes(keywords=["ai agent"])
+    skipped = await quota.search_with_outcomes(keywords=["ai agent"])
+    assert _by_surface(skipped) == {"tiktok_video_grid": (ChannelHealthStatus.RATE_LIMITED, 0)}
+
+
+@pytest.mark.asyncio
+async def test_platform_filtering_decides_which_surfaces_are_eligible():
+    registry = _registry(GooglePlugin(), EmptyYouTubePlugin(), VideoGridPlugin())
+
+    result = await registry.search_with_outcomes(
+        keywords=["ai agent"], target_platforms=[PlatformType.YOUTUBE]
+    )
+
+    assert _by_surface(result) == {"youtube": (ChannelHealthStatus.EMPTY_NO_DATA, 0)}
+
+
+@pytest.mark.asyncio
+async def test_two_concurrent_searches_each_keep_their_own_outcomes():
+    import asyncio
+
+    class SlowGoogle(GooglePlugin):
+        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+            await asyncio.sleep(0.01)
+            return [] if keywords == ["nothing"] else await super().search_signals(keywords, geo)
+
+    registry = _registry(SlowGoogle())
+
+    found, empty = await asyncio.gather(
+        registry.search_with_outcomes(keywords=["ai agent"]),
+        registry.search_with_outcomes(keywords=["nothing"]),
+    )
+
+    assert _by_surface(found) == {"google": (ChannelHealthStatus.HEALTHY, 1)}
+    assert _by_surface(empty) == {"google": (ChannelHealthStatus.EMPTY_NO_DATA, 0)}
+
+
+@pytest.mark.asyncio
+async def test_the_list_only_search_keeps_its_contract():
+    registry = _registry(GooglePlugin(), EmptyYouTubePlugin())
+
+    signals = await registry.search_across_all(keywords=["ai agent"])
+
+    assert isinstance(signals, list)
+    assert [s.raw_title for s in signals] == ["google: ai agent"]

@@ -2,15 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from itertools import zip_longest
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from ignis.application.ports.connector_port import IConnectorPlugin
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.domain.exceptions import (
+    ConnectorAuthenticationException,
+    ConnectorQuotaExceededException,
+)
+from ignis.domain.harness_models import ChannelHealthStatus
 from ignis.domain.self_content import SelfIdentity, partition_self_authored
 from ignis.domain.entities import TrendSignal
 from ignis.domain.value_objects import GeoCode, IngressScope, IngressTrigger, PlatformType, Timeframe
+from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,44 @@ class CircuitBreaker:
                     return True
             return False
         return True
+
+
+@dataclass(frozen=True)
+class SurfaceProbeResult:
+    """What one eligible connector surface did during one keyword search."""
+
+    platform: str
+    connector_surface: str
+    status: ChannelHealthStatus
+    signals_collected: int
+    note: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class SearchPassResult:
+    """The signals of one keyword search, and the outcome of every surface it was sent to.
+
+    Returned rather than stored on the registry, so two missions searching at once cannot read
+    each other's outcomes.
+    """
+
+    signals: List[TrendSignal] = field(default_factory=list)
+    outcomes: List[SurfaceProbeResult] = field(default_factory=list)
+
+
+def _looks_rate_limited(text: str) -> bool:
+    # One list of rate-limit hints, shared with the channel audit that explains empty surfaces.
+    lowered = (text or "").lower()
+    return any(hint in lowered for hint in StrategicMarketReasoner.RATE_LIMIT_HINTS)
+
+
+def _failure_status(error: BaseException) -> ChannelHealthStatus:
+    """A probe that raised measured nothing; say which kind of nothing."""
+    if isinstance(error, ConnectorAuthenticationException):
+        return ChannelHealthStatus.AUTH_REQUIRED
+    if isinstance(error, ConnectorQuotaExceededException) or _looks_rate_limited(str(error)):
+        return ChannelHealthStatus.RATE_LIMITED
+    return ChannelHealthStatus.DEGRADED
 
 
 class ConnectorPluginRegistry:
@@ -363,13 +408,47 @@ class ConnectorPluginRegistry:
         scope: IngressScope = IngressScope.PUBLIC_MARKET,
         limit: int = 20,
     ) -> List[TrendSignal]:
-        """Probe every keyword-capable connector.
+        """Probe every keyword-capable connector and return the signals only.
+
+        The list-only contract ad-hoc callers rely on. A mission run needs the per-surface
+        outcomes too and calls `search_with_outcomes`.
+        """
+        result = await self.search_with_outcomes(
+            keywords=keywords,
+            geo=geo,
+            timeframe=timeframe,
+            target_platforms=target_platforms,
+            custom_timeframe=custom_timeframe,
+            scope=scope,
+            limit=limit,
+        )
+        return result.signals
+
+    async def search_with_outcomes(
+        self,
+        keywords: List[str],
+        geo: GeoCode = GeoCode.VN,
+        timeframe: Timeframe = Timeframe.LAST_24H,
+        target_platforms: Optional[List[PlatformType]] = None,
+        custom_timeframe: Optional[str] = None,
+        scope: IngressScope = IngressScope.PUBLIC_MARKET,
+        limit: int = 20,
+    ) -> SearchPassResult:
+        """Probe every keyword-capable connector, reporting what each eligible surface did.
 
         A keyword search reads a public surface, but it can still surface the operator's own post
         when they happened to write about that keyword, so the same scope guard applies here.
+
+        Every eligible surface -- one whose platform was asked for and which has a keyword probe
+        -- gets exactly one outcome, including one skipped by an open circuit. An empty answer is
+        EMPTY_NO_DATA only when the surface ran and had no reason to come back empty: a surface
+        that says in advance it cannot search without a session is AUTH_REQUIRED, because its
+        silence measured nothing.
         """
         tasks = []
         enabled_plugins = []
+        outcomes: Dict[str, SurfaceProbeResult] = {}
+        blocked_reasons: Dict[str, Optional[str]] = {}
 
         for plugin_id, plugin in self._plugins.items():
             if target_platforms and plugin.platform not in target_platforms:
@@ -391,8 +470,22 @@ class ConnectorPluginRegistry:
                         message=f"Skipping search on {plugin.name} due to OPEN Circuit Breaker.",
                         level="WARNING"
                     )
+                outcomes[plugin_id] = SurfaceProbeResult(
+                    platform=plugin.platform.value,
+                    connector_surface=plugin_id,
+                    status=(
+                        ChannelHealthStatus.RATE_LIMITED
+                        if _looks_rate_limited(
+                            f"{breaker.last_error_type} {breaker.last_error_message}"
+                        )
+                        else ChannelHealthStatus.DEGRADED
+                    ),
+                    signals_collected=0,
+                    note=f"Circuit Breaker is OPEN after {breaker.failure_count} consecutive failures.",
+                )
                 continue
 
+            blocked_reasons[plugin_id] = await self._keyword_search_blocked_reason(plugin)
             enabled_plugins.append(plugin)
             tasks.append(self._safe_search(plugin, breaker, keywords, geo, timeframe, custom_timeframe, limit))
 
@@ -401,6 +494,13 @@ class ConnectorPluginRegistry:
 
         for plugin, result in zip(enabled_plugins, results):
             if isinstance(result, Exception):
+                outcomes[plugin.plugin_id] = SurfaceProbeResult(
+                    platform=plugin.platform.value,
+                    connector_surface=plugin.plugin_id,
+                    status=_failure_status(result),
+                    signals_collected=0,
+                    note=str(result)[:200],
+                )
                 logger.error(f"Plugin [{plugin.name}] encountered exception during search: {result}")
                 if self._repository:
                     await self._repository.log_event(
@@ -411,6 +511,20 @@ class ConnectorPluginRegistry:
                         details={"keywords": keywords, "error": str(result)}
                     )
             elif isinstance(result, list):
+                blocked = blocked_reasons.get(plugin.plugin_id)
+                if result:
+                    status = ChannelHealthStatus.HEALTHY
+                elif blocked:
+                    status = ChannelHealthStatus.AUTH_REQUIRED
+                else:
+                    status = ChannelHealthStatus.EMPTY_NO_DATA
+                outcomes[plugin.plugin_id] = SurfaceProbeResult(
+                    platform=plugin.platform.value,
+                    connector_surface=plugin.plugin_id,
+                    status=status,
+                    signals_collected=len(result),
+                    note=blocked if status is ChannelHealthStatus.AUTH_REQUIRED else None,
+                )
                 all_signals.extend(result)
                 logger.info(f"Plugin [{plugin.name}] retrieved {len(result)} signals for keywords {keywords}.")
                 if self._repository:
@@ -422,7 +536,25 @@ class ConnectorPluginRegistry:
                         details={"keywords": keywords, "count": len(result)}
                     )
 
-        return await self._apply_scope_guard(all_signals, scope, [])
+        kept = await self._apply_scope_guard(all_signals, scope, [])
+        return SearchPassResult(signals=kept, outcomes=list(outcomes.values()))
+
+    @staticmethod
+    async def _keyword_search_blocked_reason(plugin: IConnectorPlugin) -> Optional[str]:
+        """Why a surface's keyword search would come back empty, when it knows in advance.
+
+        Optional on the plugin: only a surface that can return an empty answer without an error
+        -- TikTok with no stored session -- declares it. A check that itself fails reports
+        nothing, so the probe still runs and its own outcome is what gets recorded.
+        """
+        check = getattr(plugin, "keyword_search_blocked_reason", None)
+        if check is None:
+            return None
+        try:
+            return await check()
+        except Exception as exc:
+            logger.debug(f"Could not ask [{plugin.name}] whether keyword search is blocked: {exc}")
+            return None
 
     async def _apply_regional_script_guard(
         self,

@@ -91,6 +91,12 @@ class QualityScorecard:
     confidence_level: ConfidenceLevel = ConfidenceLevel.LOW
     flaws_detected: List[str] = field(default_factory=list)
     strengths_detected: List[str] = field(default_factory=list)
+    # How much of the assessed evidence directly addresses the declared scope or Brief (0-100).
+    # Reported beside the other dimensions, never folded into them: low coverage and low
+    # relevance are different failures. None for a mission with no declared surface.
+    question_relevance_score: Optional[float] = None
+    # Qualified support, context-only, excluded and unassessed counts, when a surface applies.
+    qualification_counts: Optional[Dict[str, int]] = None
 
 
 @dataclass

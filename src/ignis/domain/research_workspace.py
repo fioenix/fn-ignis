@@ -12,7 +12,9 @@ is a rule the next caller will get wrong:
 - a ``MARKET`` mission never runs without all seven requester-confirmed Brief fields.
 """
 
+import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -22,6 +24,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
 from ignis.domain.exceptions import IgnisDomainException
+from ignis.domain.harness_models import ChannelHealthStatus
 
 # Bumped when a workspace on disk can no longer be read by this build. A workspace whose manifest
 # names a higher version is reported INCOMPATIBLE rather than opened and partially understood.
@@ -426,4 +429,420 @@ class MarketBriefRevision:
             "falsifiers": list(self.falsifiers),
             "confirmed_by": self.confirmed_by,
             "confirmed_at": self.confirmed_at.isoformat(),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Evidence qualification
+# ---------------------------------------------------------------------------
+#
+# A citation that reaches a canonical observation is traceable; that does not make it support.
+# The host Agent judges whether each observation addresses the mission's question and submits a
+# typed judgment. These records keep that judgment bounded and self-consistent, and keep it apart
+# from the immutable observation: one observation can support one question and be noise to another.
+
+
+class QualificationRelation(str, Enum):
+    """How one observation relates to the mission's question."""
+
+    QUALIFIED_SUPPORT = "QUALIFIED_SUPPORT"      # Directly addresses the declared scope or Brief
+    CONTEXT_ONLY = "CONTEXT_ONLY"                # Related, visible, never counted as support
+    EXCLUDED_IRRELEVANT = "EXCLUDED_IRRELEVANT"  # Does not address the question at all
+    UNASSESSED = "UNASSESSED"                    # No judgment was obtained
+
+
+class EvidencePurpose(str, Enum):
+    """What a qualified observation can measure."""
+
+    DEMAND = "DEMAND"
+    SUPPLY = "SUPPLY"
+    VOC = "VOC"
+    CONTEXT = "CONTEXT"
+
+
+class QualificationReason(str, Enum):
+    """The bounded explanation for a judgment. Free text is refused on purpose."""
+
+    DIRECT_TO_FRAME = "DIRECT_TO_FRAME"
+    ADJACENT_ONLY = "ADJACENT_ONLY"
+    KEYWORD_ONLY = "KEYWORD_ONLY"
+    WRONG_AUDIENCE_OR_PROBLEM = "WRONG_AUDIENCE_OR_PROBLEM"
+    FICTION_NEWS_OR_ENTERTAINMENT = "FICTION_NEWS_OR_ENTERTAINMENT"
+    INSUFFICIENT_CONTENT = "INSUFFICIENT_CONTENT"
+    EVALUATOR_UNAVAILABLE = "EVALUATOR_UNAVAILABLE"
+
+
+class QualificationStatus(str, Enum):
+    """Where a mission's evidence stands between raw collection and a permitted conclusion."""
+
+    QUALIFICATION_REQUIRED = "QUALIFICATION_REQUIRED"  # Current evidence still lacks a judgment
+    READY = "READY"                                    # Assessed, and a conclusion is permitted
+    INSUFFICIENT_RELEVANT_EVIDENCE = "INSUFFICIENT_RELEVANT_EVIDENCE"
+    UNAVAILABLE = "UNAVAILABLE"                        # A judgment could not be obtained
+    NOT_APPLICABLE = "NOT_APPLICABLE"                  # No declared surface; legacy behaviour
+
+
+class EvidenceSufficiency(str, Enum):
+    """Whether one Market topic meets the minimum evidence for a demand-versus-supply verdict."""
+
+    SUFFICIENT_POSITIVE_SUPPLY = "SUFFICIENT_POSITIVE_SUPPLY"
+    SUFFICIENT_ZERO_SUPPLY = "SUFFICIENT_ZERO_SUPPLY"
+    MISSING_DEMAND = "MISSING_DEMAND"
+    MISSING_SUPPLY = "MISSING_SUPPLY"
+    QUALIFICATION_REQUIRED = "QUALIFICATION_REQUIRED"
+    QUALIFIER_UNAVAILABLE = "QUALIFIER_UNAVAILABLE"
+
+    @property
+    def permits_verdict(self) -> bool:
+        return self in (
+            EvidenceSufficiency.SUFFICIENT_POSITIVE_SUPPLY,
+            EvidenceSufficiency.SUFFICIENT_ZERO_SUPPLY,
+        )
+
+
+class HandoffStatus(str, Enum):
+    """Whether an Attention result offers anything worth a new Market Brief."""
+
+    QUALIFIED_CANDIDATE_AVAILABLE = "QUALIFIED_CANDIDATE_AVAILABLE"
+    NO_QUALIFIED_CANDIDATE = "NO_QUALIFIED_CANDIDATE"
+    QUALIFICATION_REQUIRED = "QUALIFICATION_REQUIRED"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class InvalidEvidenceQualificationError(IgnisDomainException):
+    """A judgment or probe outcome is malformed, contradicts itself, or names foreign evidence."""
+
+
+class EvidenceQualificationConflictError(IgnisDomainException):
+    """A submission disagrees with what is already recorded, or with the current frame.
+
+    Semantic history is not rewritten in place. A different judgment needs a new mission or a new
+    Market Brief revision, so the report a reader already saw keeps meaning what it meant.
+    """
+
+
+# The reasons an honest UNASSESSED row can give.
+UNASSESSED_REASONS = frozenset(
+    {QualificationReason.INSUFFICIENT_CONTENT, QualificationReason.EVALUATOR_UNAVAILABLE}
+)
+
+# An evaluator identifier such as "claude-code" or "anthropic/claude-opus-5-5". No whitespace is
+# allowed, which keeps a prompt, a transcript or a model's reasoning from being pasted in here.
+MAX_EVALUATOR_IDENTIFIER_LENGTH = 128
+_EVALUATOR_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+\-]*$")
+MAX_FINGERPRINT_LENGTH = 128
+
+
+def _coerce_enum(enum_type, value: Any, field_name: str):
+    if isinstance(value, enum_type):
+        return value
+    try:
+        return enum_type(str(value).strip().upper())
+    except ValueError as exc:
+        raise InvalidEvidenceQualificationError(
+            f"'{value}' is not a valid {field_name}. Expected one of: "
+            f"{', '.join(member.value for member in enum_type)}."
+        ) from exc
+
+
+def _coerce_uuid(value: Any, field_name: str) -> UUID:
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError) as exc:
+        raise InvalidEvidenceQualificationError(f"{field_name} '{value}' is not a UUID.") from exc
+
+
+def _evaluator_identifier(value: Any, field_name: str, required: bool) -> Optional[str]:
+    if value is None and not required:
+        return None
+    text = value if isinstance(value, str) else ""
+    if (
+        not text
+        or len(text) > MAX_EVALUATOR_IDENTIFIER_LENGTH
+        or not _EVALUATOR_IDENTIFIER.match(text)
+    ):
+        raise InvalidEvidenceQualificationError(
+            f"{field_name} must be a bounded identifier of at most "
+            f"{MAX_EVALUATOR_IDENTIFIER_LENGTH} characters with no whitespace, such as "
+            "'claude-code'. It is metadata, never a prompt, transcript or credential."
+        )
+    return text
+
+
+def _fingerprint(value: Any, field_name: str) -> str:
+    text = value if isinstance(value, str) else ""
+    if not text.strip() or len(text) > MAX_FINGERPRINT_LENGTH:
+        raise InvalidEvidenceQualificationError(
+            f"{field_name} must be a non-empty digest of at most {MAX_FINGERPRINT_LENGTH} "
+            "characters."
+        )
+    return text
+
+
+@dataclass(frozen=True)
+class EvidenceQualification:
+    """One mission's judgment of one observation it holds, against one immutable frame."""
+
+    mission_id: UUID
+    observation_id: UUID
+    frame_fingerprint: str
+    relation: QualificationRelation
+    purpose: EvidencePurpose
+    confidence: Optional[float]
+    reason_code: QualificationReason
+    judged_by: str
+    brief_revision_id: Optional[UUID] = None
+    model: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mission_id", _coerce_uuid(self.mission_id, "mission_id"))
+        object.__setattr__(
+            self, "observation_id", _coerce_uuid(self.observation_id, "observation_id")
+        )
+        if self.brief_revision_id is not None:
+            object.__setattr__(
+                self,
+                "brief_revision_id",
+                _coerce_uuid(self.brief_revision_id, "brief_revision_id"),
+            )
+        object.__setattr__(
+            self, "frame_fingerprint", _fingerprint(self.frame_fingerprint, "frame_fingerprint")
+        )
+        relation = _coerce_enum(QualificationRelation, self.relation, "relation")
+        purpose = _coerce_enum(EvidencePurpose, self.purpose, "purpose")
+        reason = _coerce_enum(QualificationReason, self.reason_code, "reason_code")
+        object.__setattr__(self, "relation", relation)
+        object.__setattr__(self, "purpose", purpose)
+        object.__setattr__(self, "reason_code", reason)
+        object.__setattr__(
+            self, "judged_by", _evaluator_identifier(self.judged_by, "judged_by", required=True)
+        )
+        object.__setattr__(
+            self, "model", _evaluator_identifier(self.model, "model", required=False)
+        )
+
+        if relation is QualificationRelation.QUALIFIED_SUPPORT and purpose is EvidencePurpose.CONTEXT:
+            raise InvalidEvidenceQualificationError(
+                "QUALIFIED_SUPPORT must name what it measures: DEMAND, SUPPLY or VOC, not CONTEXT."
+            )
+        if relation is QualificationRelation.CONTEXT_ONLY and purpose is not EvidencePurpose.CONTEXT:
+            raise InvalidEvidenceQualificationError(
+                "CONTEXT_ONLY evidence measures nothing, so its purpose must be CONTEXT."
+            )
+
+        confidence = self.confidence
+        if relation is QualificationRelation.UNASSESSED:
+            if confidence is not None:
+                raise InvalidEvidenceQualificationError(
+                    "An UNASSESSED row holds no judgment, so its confidence must be null."
+                )
+            if reason not in UNASSESSED_REASONS:
+                raise InvalidEvidenceQualificationError(
+                    "An UNASSESSED row must give the reason INSUFFICIENT_CONTENT or "
+                    "EVALUATOR_UNAVAILABLE."
+                )
+            return
+        # bool is an int in Python, and True is not a probability.
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or math.isnan(confidence)
+            or not 0.0 <= float(confidence) <= 1.0
+        ):
+            raise InvalidEvidenceQualificationError(
+                "An assessed judgment needs a confidence from 0.0 through 1.0."
+            )
+        object.__setattr__(self, "confidence", float(confidence))
+
+    @property
+    def contributes_to(self) -> Optional[EvidencePurpose]:
+        """What this judgment lets the observation measure. Only support measures anything."""
+        if self.relation is QualificationRelation.QUALIFIED_SUPPORT:
+            return self.purpose
+        return None
+
+    def same_judgment(self, other: "EvidenceQualification") -> bool:
+        """Whether a replay says exactly what was recorded. The persisted time is not compared."""
+        return (
+            self.mission_id,
+            self.observation_id,
+            self.frame_fingerprint,
+            self.brief_revision_id,
+            self.relation,
+            self.purpose,
+            self.confidence,
+            self.reason_code,
+            self.judged_by,
+            self.model,
+        ) == (
+            other.mission_id,
+            other.observation_id,
+            other.frame_fingerprint,
+            other.brief_revision_id,
+            other.relation,
+            other.purpose,
+            other.confidence,
+            other.reason_code,
+            other.judged_by,
+            other.model,
+        )
+
+
+@dataclass(frozen=True)
+class MissionProbeOutcome:
+    """What one connector surface did during one workspace run.
+
+    A measured zero is this record with EMPTY_NO_DATA, for the query its fingerprint names. A
+    surface that failed, was rate limited or had no session measured nothing, and says so.
+    """
+
+    run_id: UUID
+    platform: str
+    connector_surface: str
+    status: ChannelHealthStatus
+    signals_collected: int
+    query_fingerprint: str
+    completed_at: datetime
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _coerce_uuid(self.run_id, "run_id"))
+        status = _coerce_enum(ChannelHealthStatus, self.status, "probe status")
+        object.__setattr__(self, "status", status)
+        for name in ("platform", "connector_surface"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value.strip():
+                raise InvalidEvidenceQualificationError(f"A probe outcome needs its {name}.")
+        object.__setattr__(
+            self, "query_fingerprint", _fingerprint(self.query_fingerprint, "query_fingerprint")
+        )
+        count = self.signals_collected
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise InvalidEvidenceQualificationError(
+                "signals_collected must be a non-negative integer."
+            )
+        if (status is ChannelHealthStatus.HEALTHY) != (count > 0):
+            raise InvalidEvidenceQualificationError(
+                f"A {status.value} surface cannot report {count} collected signals: HEALTHY means "
+                "signals came back, and every other outcome collected none."
+            )
+
+    @property
+    def measures_zero(self) -> bool:
+        return self.status is ChannelHealthStatus.EMPTY_NO_DATA
+
+
+def _digest(payload: Mapping[str, Any]) -> str:
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _plain(value: Any) -> str:
+    # A str-based Enum renders as "Timeframe.LAST_7D" under str(), and one backend reads the
+    # value back as the enum while the other keeps the string, so the value is taken explicitly.
+    return str(value.value if hasattr(value, "value") else value)
+
+
+def compute_query_fingerprint(keywords: Sequence[str], geo: Any, timeframe: str) -> str:
+    """A digest of what one run asked every surface, so a measured zero names its query."""
+    return _digest(
+        {
+            "keywords": sorted(" ".join(str(k).split()) for k in keywords or []),
+            "geo": _plain(geo),
+            "timeframe": _plain(timeframe),
+        }
+    )
+
+
+def compute_frame_fingerprint(mission: Any, brief: Optional[MarketBriefRevision]) -> str:
+    """A digest of the immutable question a judgment answers.
+
+    Market: the exact confirmed Brief revision and all seven fields. Attention: the declared
+    scope -- title and keywords, which hold the seed -- plus geo and timeframe. Run state is not
+    part of the question, so a later run never invalidates a judgment of evidence it retained.
+    """
+    surface = resolve_surface(getattr(mission, "surface", None))
+    payload: Dict[str, Any] = {"mission_id": str(mission.id), "surface": _plain(surface)}
+    if surface is ResearchSurface.MARKET:
+        if brief is None:
+            raise InvalidEvidenceQualificationError(
+                f"Market mission {mission.id} has no readable confirmed Brief, so there is no "
+                "frame to judge its evidence against."
+            )
+        payload["brief"] = {
+            "brief_revision_id": str(brief.brief_revision_id),
+            **{name: getattr(brief, name) for name in REQUIRED_BRIEF_FIELDS},
+        }
+        payload["brief"]["falsifiers"] = list(brief.falsifiers)
+    else:
+        payload["scope"] = {
+            "title": mission.title,
+            "keywords": list(mission.keywords or []),
+            "geo": _plain(mission.geo_code),
+            "timeframe": _plain(mission.timeframe),
+        }
+    return _digest(payload)
+
+
+@dataclass(frozen=True)
+class QualificationProgress:
+    """Counts over a mission's current evidence. Derived from persisted rows, never stored."""
+
+    total_evidence: int = 0
+    qualified_support: int = 0
+    context_only: int = 0
+    excluded_irrelevant: int = 0
+    unassessed: int = 0
+    evaluator_unavailable: int = 0
+
+    @classmethod
+    def from_evidence(
+        cls,
+        observation_ids: Sequence[Any],
+        qualifications: Sequence[EvidenceQualification],
+    ) -> "QualificationProgress":
+        current = {str(observation_id) for observation_id in observation_ids}
+        by_observation = {
+            str(q.observation_id): q for q in qualifications if str(q.observation_id) in current
+        }
+        relations = [q.relation for q in by_observation.values()]
+        return cls(
+            total_evidence=len(current),
+            qualified_support=relations.count(QualificationRelation.QUALIFIED_SUPPORT),
+            context_only=relations.count(QualificationRelation.CONTEXT_ONLY),
+            excluded_irrelevant=relations.count(QualificationRelation.EXCLUDED_IRRELEVANT),
+            unassessed=(len(current) - len(by_observation))
+            + relations.count(QualificationRelation.UNASSESSED),
+            evaluator_unavailable=sum(
+                1
+                for q in by_observation.values()
+                if q.relation is QualificationRelation.UNASSESSED
+                and q.reason_code is QualificationReason.EVALUATOR_UNAVAILABLE
+            ),
+        )
+
+    @property
+    def assessed(self) -> int:
+        return self.total_evidence - self.unassessed
+
+    @property
+    def is_complete(self) -> bool:
+        return self.unassessed == 0
+
+    @property
+    def question_relevance_score(self) -> float:
+        """Qualified support as a percentage of assessed evidence; zero when nothing was assessed."""
+        if self.assessed <= 0:
+            return 0.0
+        return round(self.qualified_support / self.assessed * 100.0, 1)
+
+    def to_payload(self) -> Dict[str, int]:
+        return {
+            "total_evidence": self.total_evidence,
+            "qualified_support": self.qualified_support,
+            "context_only": self.context_only,
+            "excluded_irrelevant": self.excluded_irrelevant,
+            "unassessed": self.unassessed,
         }

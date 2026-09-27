@@ -6,7 +6,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
 from ignis.application.ports.repository_port import (
@@ -18,7 +18,11 @@ from ignis.resources import sql_seed_file
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.cross_platform_score import cluster_rank_key, cross_platform_score
 from ignis.domain.research_workspace import (
+    EvidenceQualification,
+    EvidenceQualificationConflictError,
+    InvalidEvidenceQualificationError,
     MarketBriefRevision,
+    MissionProbeOutcome,
     ResearchWorkspace,
     WorkspaceScopeMismatchError,
     WorkspaceStatus,
@@ -447,6 +451,62 @@ class SqliteTrendRepository(ITrendRepository):
                 mission_id TEXT PRIMARY KEY REFERENCES research_missions(id) ON DELETE CASCADE,
                 run_id TEXT NOT NULL,
                 claimed_at TEXT NOT NULL
+            );
+
+            -- The two tables sql/023_evidence_qualification.sql creates on Postgres, restated
+            -- with the same keys and checks. See the migration header for why each exists.
+            -- No mission_id here: the mission is derived through the run journal, so an outcome
+            -- cannot name a mission different from the run that probed.
+            CREATE TABLE IF NOT EXISTS mission_probe_outcomes (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES mission_run_journals(id) ON DELETE CASCADE,
+                platform TEXT NOT NULL,
+                connector_surface TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (
+                    status IN ('HEALTHY', 'EMPTY_NO_DATA', 'AUTH_REQUIRED', 'RATE_LIMITED',
+                               'DEGRADED')
+                ),
+                signals_collected INTEGER NOT NULL,
+                query_fingerprint TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                UNIQUE (run_id, connector_surface),
+                CHECK (signals_collected >= 0
+                       AND (status = 'HEALTHY') = (signals_collected > 0))
+            );
+
+            -- Keyed to the mission_evidence pair, so a mission cannot judge an observation it
+            -- does not hold and pruning the association removes the judgment.
+            CREATE TABLE IF NOT EXISTS mission_evidence_qualifications (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                observation_id TEXT NOT NULL,
+                brief_revision_id TEXT REFERENCES market_brief_revisions(id) ON DELETE CASCADE,
+                frame_fingerprint TEXT NOT NULL,
+                relation TEXT NOT NULL CHECK (
+                    relation IN ('QUALIFIED_SUPPORT', 'CONTEXT_ONLY', 'EXCLUDED_IRRELEVANT',
+                                 'UNASSESSED')
+                ),
+                purpose TEXT NOT NULL CHECK (purpose IN ('DEMAND', 'SUPPLY', 'VOC', 'CONTEXT')),
+                confidence REAL,
+                reason_code TEXT NOT NULL CHECK (
+                    reason_code IN ('DIRECT_TO_FRAME', 'ADJACENT_ONLY', 'KEYWORD_ONLY',
+                                    'WRONG_AUDIENCE_OR_PROBLEM', 'FICTION_NEWS_OR_ENTERTAINMENT',
+                                    'INSUFFICIENT_CONTENT', 'EVALUATOR_UNAVAILABLE')
+                ),
+                judged_by TEXT NOT NULL,
+                model TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE (mission_id, observation_id),
+                FOREIGN KEY (mission_id, observation_id)
+                    REFERENCES mission_evidence (mission_id, observation_id) ON DELETE CASCADE,
+                CHECK ((relation <> 'QUALIFIED_SUPPORT' OR purpose <> 'CONTEXT')
+                       AND (relation <> 'CONTEXT_ONLY' OR purpose = 'CONTEXT')),
+                CHECK (CASE
+                    WHEN relation = 'UNASSESSED' THEN
+                        confidence IS NULL
+                        AND reason_code IN ('INSUFFICIENT_CONTENT', 'EVALUATOR_UNAVAILABLE')
+                    ELSE confidence IS NOT NULL AND confidence >= 0 AND confidence <= 1
+                END)
             );
         """)
 
@@ -2351,3 +2411,209 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.close()
 
         return await asyncio.to_thread(_sync_record)
+
+    # ------------------------------------------------------------------
+    # Probe outcomes and evidence qualifications (sql/023)
+    # ------------------------------------------------------------------
+
+    async def record_probe_outcomes(
+        self, run_id: UUID, outcomes: Sequence[MissionProbeOutcome]
+    ) -> int:
+        """Record one run's surface outcomes in one transaction. See the port."""
+        rows = list(outcomes)
+        if any(str(o.run_id) != str(run_id) for o in rows):
+            raise InvalidEvidenceQualificationError(
+                f"Every probe outcome recorded for run {run_id} must belong to that run."
+            )
+        if not rows:
+            return 0
+        await self._ensure_schema()
+
+        def _sync_record():
+            conn = self._get_connection()
+            try:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                conn.executemany(
+                    "INSERT INTO mission_probe_outcomes (id, run_id, platform, connector_surface,"
+                    " status, signals_collected, query_fingerprint, completed_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            str(uuid4()),
+                            str(o.run_id),
+                            o.platform,
+                            o.connector_surface,
+                            o.status.value,
+                            o.signals_collected,
+                            o.query_fingerprint,
+                            o.completed_at.isoformat(),
+                        )
+                        for o in rows
+                    ],
+                )
+                conn.commit()
+                return len(rows)
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                raise RepositoryException(
+                    f"Probe outcomes for run {run_id} were refused and none was written: {exc}"
+                ) from exc
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_record)
+
+    async def get_latest_completed_probe_outcomes(
+        self, mission_id: UUID
+    ) -> List[MissionProbeOutcome]:
+        await self._ensure_schema()
+
+        def _sync_get():
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT o.run_id, o.platform, o.connector_surface, o.status,"
+                    " o.signals_collected, o.query_fingerprint, o.completed_at"
+                    " FROM mission_probe_outcomes o"
+                    " WHERE o.run_id = ("
+                    "   SELECT j.id FROM mission_run_journals j"
+                    "   WHERE j.mission_id = ? AND j.status = 'COMPLETED'"
+                    "   ORDER BY j.started_at DESC, j.sequence DESC LIMIT 1)"
+                    " ORDER BY o.connector_surface",
+                    (str(mission_id),),
+                ).fetchall()
+                return [
+                    MissionProbeOutcome(
+                        run_id=UUID(r["run_id"]),
+                        platform=r["platform"],
+                        connector_surface=r["connector_surface"],
+                        status=r["status"],
+                        signals_collected=int(r["signals_collected"]),
+                        query_fingerprint=r["query_fingerprint"],
+                        completed_at=datetime.fromisoformat(r["completed_at"]),
+                    )
+                    for r in rows
+                ]
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_get)
+
+    _QUALIFICATION_COLUMNS = (
+        "SELECT mission_id, observation_id, brief_revision_id, frame_fingerprint, relation,"
+        " purpose, confidence, reason_code, judged_by, model, created_at"
+        " FROM mission_evidence_qualifications"
+    )
+
+    @staticmethod
+    def _qualification_from_row(row: Any) -> EvidenceQualification:
+        return EvidenceQualification(
+            mission_id=UUID(row["mission_id"]),
+            observation_id=UUID(row["observation_id"]),
+            brief_revision_id=_uuid_or_none(row["brief_revision_id"]),
+            frame_fingerprint=row["frame_fingerprint"],
+            relation=row["relation"],
+            purpose=row["purpose"],
+            confidence=row["confidence"],
+            reason_code=row["reason_code"],
+            judged_by=row["judged_by"],
+            model=row["model"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    async def list_evidence_qualifications(
+        self, mission_id: UUID
+    ) -> List[EvidenceQualification]:
+        await self._ensure_schema()
+
+        def _sync_list():
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    self._QUALIFICATION_COLUMNS + " WHERE mission_id = ? ORDER BY observation_id",
+                    (str(mission_id),),
+                ).fetchall()
+                return [self._qualification_from_row(r) for r in rows]
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_list)
+
+    async def save_evidence_qualifications(
+        self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]
+    ) -> int:
+        """Persist one batch atomically; replay is idempotent, a rewrite is refused. See the port."""
+        batch = list(qualifications)
+        if any(str(q.mission_id) != str(mission_id) for q in batch):
+            raise InvalidEvidenceQualificationError(
+                f"Every judgment in a batch for mission {mission_id} must name that mission."
+            )
+        if not batch:
+            return 0
+        await self._ensure_schema()
+
+        def _sync_save():
+            conn = self._get_connection()
+            try:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                now = datetime.now(timezone.utc).isoformat()
+                for q in batch:
+                    # Insert-or-keep, then compare: the unique pair decides a race, and the
+                    # comparison decides whether the survivor says the same thing.
+                    inserted = conn.execute(
+                        "INSERT INTO mission_evidence_qualifications (id, mission_id,"
+                        " observation_id, brief_revision_id, frame_fingerprint, relation, purpose,"
+                        " confidence, reason_code, judged_by, model, created_at)"
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                        " ON CONFLICT (mission_id, observation_id) DO NOTHING",
+                        (
+                            str(uuid4()),
+                            str(q.mission_id),
+                            str(q.observation_id),
+                            str(q.brief_revision_id) if q.brief_revision_id else None,
+                            q.frame_fingerprint,
+                            q.relation.value,
+                            q.purpose.value,
+                            q.confidence,
+                            q.reason_code.value,
+                            q.judged_by,
+                            q.model,
+                            now,
+                        ),
+                    ).rowcount
+                    if inserted:
+                        continue
+                    existing = conn.execute(
+                        self._QUALIFICATION_COLUMNS + " WHERE mission_id = ? AND observation_id = ?",
+                        (str(q.mission_id), str(q.observation_id)),
+                    ).fetchone()
+                    if existing is None or not self._qualification_from_row(existing).same_judgment(q):
+                        raise EvidenceQualificationConflictError(
+                            f"Observation {q.observation_id} already carries a different judgment "
+                            f"for mission {mission_id}. A recorded judgment is not rewritten; a "
+                            "different one needs a new mission or Market Brief revision."
+                        )
+                conn.commit()
+                return len(batch)
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                raise InvalidEvidenceQualificationError(
+                    f"The batch names evidence mission {mission_id} does not hold, so none of it "
+                    f"was recorded: {exc}"
+                ) from exc
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_save)

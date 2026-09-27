@@ -18,7 +18,7 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
 from ignis.application.ports.repository_port import ITrendRepository
@@ -31,8 +31,10 @@ from ignis.domain.entities import ResearchMission
 from ignis.domain.research_workspace import (
     JOURNAL_DIRNAME,
     MANIFEST_FILENAME,
+    EvidenceQualification,
     InvalidWorkspaceManifestError,
     MarketBriefRevision,
+    MissionProbeOutcome,
     MissionWriterConflictError,
     ResearchWorkspace,
     WorkspaceScopeMismatchError,
@@ -340,3 +342,27 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         """The most recent run of a mission, or None when it has never run."""
         journals = await self.list_run_journals(mission_id, limit=1)
         return journals[0] if journals else None
+
+    # ------------------------------------------------------------------
+    # Probe outcomes and evidence qualifications (configured shared database)
+    # ------------------------------------------------------------------
+
+    async def record_probe_outcomes(
+        self, run_id: UUID, outcomes: Sequence[MissionProbeOutcome]
+    ) -> int:
+        return await self._repo.record_probe_outcomes(run_id, outcomes)
+
+    async def get_latest_completed_probe_outcomes(
+        self, mission_id: UUID
+    ) -> List[MissionProbeOutcome]:
+        return await self._repo.get_latest_completed_probe_outcomes(mission_id)
+
+    async def list_evidence_qualifications(
+        self, mission_id: UUID
+    ) -> List[EvidenceQualification]:
+        return await self._repo.list_evidence_qualifications(mission_id)
+
+    async def save_evidence_qualifications(
+        self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]
+    ) -> int:
+        return await self._repo.save_evidence_qualifications(mission_id, qualifications)

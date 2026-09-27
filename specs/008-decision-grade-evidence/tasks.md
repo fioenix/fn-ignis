@@ -27,8 +27,8 @@ an independent increment after the shared foundation.
 **Purpose**: Establish the additive schema endpoint and make packaging/fresh-init tests fail before
 the migration exists.
 
-- [ ] T001 Add RED expectations for migration `023`, 19 RLS-enabled public tables, and packaged SQL in `tests/unit/test_sql_packaging.py`, `tests/integration/test_postgres_migration_contract.py`, and `tests/integration/test_compose_init.py`
-- [ ] T002 Create idempotent PostgreSQL migration `sql/023_evidence_qualification.sql` for `mission_probe_outcomes` and `mission_evidence_qualifications`, including constraints, indexes, composite evidence foreign key, RLS, owner-only ACLs, and `gen_random_uuid()` defaults
+- [X] T001 Add RED expectations for migration `023`, 19 RLS-enabled public tables, and packaged SQL in `tests/unit/test_sql_packaging.py`, `tests/integration/test_postgres_migration_contract.py`, and `tests/integration/test_compose_init.py`
+- [X] T002 Create idempotent PostgreSQL migration `sql/023_evidence_qualification.sql` for `mission_probe_outcomes` and `mission_evidence_qualifications`, including constraints, indexes, composite evidence foreign key, RLS, owner-only ACLs, and `gen_random_uuid()` defaults
 
 **Checkpoint**: Fresh and upgraded PostgreSQL schemas can represent the feature without changing any
 existing source, observation, mission evidence, mission, Brief, or journal row.
@@ -41,19 +41,36 @@ existing source, observation, mission evidence, mission, Brief, or journal row.
 
 **CRITICAL**: No user-story implementation begins until this phase passes on SQLite and PostgreSQL.
 
-- [ ] T003 Add RED enum/dataclass validation tests for qualification relation, evidence purpose, reason code, probe outcome, frame fingerprint, and invalid combinations in `tests/unit/test_evidence_qualification.py`
-- [ ] T004 Implement typed qualification, probe-outcome, progress, and sufficiency domain records in `src/ignis/domain/research_workspace.py` and extend `QualityScorecard` fields in `src/ignis/domain/harness_models.py`
-- [ ] T005 Extend `IResearchWorkspaceStore` with atomic batch qualification and run-outcome read/write contracts in `src/ignis/application/ports/research_workspace_port.py`
-- [ ] T006 Add RED dual-backend contracts for qualification atomicity, idempotency, frame conflicts, foreign-key ownership, evidence-prune cascade, latest-completed-run selection, and no semantic backfill in `tests/integration/test_decision_grade_evidence.py`
-- [ ] T007 Implement SQLite schema restatement and persistence methods for both records in `src/ignis/infrastructure/persistence/sqlite_repository.py`
-- [ ] T008 Implement PostgreSQL persistence methods for both records with equivalent transactions and row decoding in `src/ignis/infrastructure/persistence/postgres_repository.py`
-- [ ] T009 Add RED registry contracts for per-surface data, empty, failure, auth, rate-limit, and circuit-open outcomes without process-global last-result state in `tests/unit/test_registry.py`
-- [ ] T010 Refactor connector search to return a typed signals-plus-outcomes result while preserving the existing list-only caller contract in `src/ignis/infrastructure/connectors/registry.py`
-- [ ] T011 Persist run-scoped probe outcomes before a workspace mission becomes `COMPLETED`, and read only the latest completed run for analysis in `src/ignis/application/use_cases/execute_mission.py`
-- [ ] T012 Run the Phase 1–2 migration, domain, registry, and dual-backend targeted suites and record exact PostgreSQL skips/failures in `specs/008-decision-grade-evidence/tasks.md`
+- [X] T003 Add RED enum/dataclass validation tests for qualification relation, evidence purpose, reason code, probe outcome, frame fingerprint, and invalid combinations in `tests/unit/test_evidence_qualification.py`
+- [X] T004 Implement typed qualification, probe-outcome, progress, and sufficiency domain records in `src/ignis/domain/research_workspace.py` and extend `QualityScorecard` fields in `src/ignis/domain/harness_models.py`
+- [X] T005 Extend `IResearchWorkspaceStore` with atomic batch qualification and run-outcome read/write contracts in `src/ignis/application/ports/research_workspace_port.py`
+- [X] T006 Add RED dual-backend contracts for qualification atomicity, idempotency, frame conflicts, foreign-key ownership, evidence-prune cascade, latest-completed-run selection, and no semantic backfill in `tests/integration/test_decision_grade_evidence.py`
+- [X] T007 Implement SQLite schema restatement and persistence methods for both records in `src/ignis/infrastructure/persistence/sqlite_repository.py`
+- [X] T008 Implement PostgreSQL persistence methods for both records with equivalent transactions and row decoding in `src/ignis/infrastructure/persistence/postgres_repository.py`
+- [X] T009 Add RED registry contracts for per-surface data, empty, failure, auth, rate-limit, and circuit-open outcomes without process-global last-result state in `tests/unit/test_registry.py`
+- [X] T010 Refactor connector search to return a typed signals-plus-outcomes result while preserving the existing list-only caller contract in `src/ignis/infrastructure/connectors/registry.py`
+- [X] T011 Persist run-scoped probe outcomes before a workspace mission becomes `COMPLETED`, and read only the latest completed run for analysis in `src/ignis/application/use_cases/execute_mission.py`
+- [X] T012 Run the Phase 1–2 migration, domain, registry, and dual-backend targeted suites and record exact PostgreSQL skips/failures in `specs/008-decision-grade-evidence/tasks.md`
 
 **Checkpoint**: Canonical evidence can carry stable semantic judgments and historical connector
 surface outcomes with identical SQLite/PostgreSQL behavior.
+
+**T012 evidence (27/09/2026, scratch TimescaleDB `pg16` container, `IGNIS_TEST_POSTGRES_DSN` set):**
+
+- Targeted Phase 1-2 suites (`test_sql_packaging`, `test_evidence_qualification`, `test_registry`,
+  `test_postgres_migration_contract`, `test_postgres_rls_coverage`,
+  `test_decision_grade_evidence`): 119 passed, 0 skipped, 0 failed.
+- `tests/unit/`: 1137 passed, 1 skipped (`test_diagram_and_release_claims.py:143`, banner declares
+  no unreleased state), 0 failed.
+- `tests/integration/`: 515 passed, 3 skipped, 0 failed. Skips: the `[sqlite]` parameter of two
+  PostgreSQL-only backfill contracts (`test_backfill_observations.py:275`, `:378`) and the Compose
+  opt-in; no PostgreSQL case skipped.
+- `IGNIS_TEST_COMPOSE_INIT=1 tests/integration/test_compose_init.py`: 1 passed (every file through
+  023 in order, 19 public tables, 0 without RLS, 13 built-in UUID defaults, no leftovers).
+- Negative controls: removing 023's `ENABLE ROW LEVEL SECURITY` fails the owner-only contract;
+  removing its composite evidence foreign key fails the ownership contract.
+- Consumer fix found by the checkpoint: three backfill contracts drop `mission_evidence` to model a
+  pre-016 schema and now drop the 023 table first.
 
 ---
 

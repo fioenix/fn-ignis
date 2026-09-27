@@ -9,11 +9,13 @@ never has to know which backend is configured or where the manifest lives.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID
 
 from ignis.domain.research_workspace import (
+    EvidenceQualification,
     MarketBriefRevision,
+    MissionProbeOutcome,
     ResearchWorkspace,
     WorkspaceStatus,
 )
@@ -194,4 +196,43 @@ class IResearchWorkspaceStore(ABC):
         `completed_at` is absent for a run that never finished. That is the difference between
         a run that ended and a run nobody ever heard from again, so it is read back as stored
         rather than filled in at read time.
+        """
+
+    @abstractmethod
+    async def record_probe_outcomes(
+        self, run_id: UUID, outcomes: Sequence[MissionProbeOutcome]
+    ) -> int:
+        """Record every connector surface's outcome for one run, all of them or none.
+
+        Written before the mission is marked COMPLETED. A run whose outcomes could not be stored
+        must not complete, because a reopened report would then have no record of which surfaces
+        measured anything.
+        """
+
+    @abstractmethod
+    async def get_latest_completed_probe_outcomes(
+        self, mission_id: UUID
+    ) -> List[MissionProbeOutcome]:
+        """The probe outcomes of the mission's most recent COMPLETED run, or an empty list.
+
+        A later run that failed or never finished does not replace what the last completed run
+        measured, and current connector health never rewrites it.
+        """
+
+    @abstractmethod
+    async def list_evidence_qualifications(
+        self, mission_id: UUID
+    ) -> List[EvidenceQualification]:
+        """Every persisted judgment for the mission's current evidence."""
+
+    @abstractmethod
+    async def save_evidence_qualifications(
+        self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]
+    ) -> int:
+        """Persist one batch of judgments atomically, returning how many the batch carried.
+
+        A byte-equivalent replay of an existing judgment is accepted and writes nothing. A
+        different judgment for an already judged observation raises
+        `EvidenceQualificationConflictError`, and an observation outside the mission's evidence
+        raises `InvalidEvidenceQualificationError`; either way no row of the batch is written.
         """
