@@ -42,6 +42,8 @@ LATER_OBJECTS = (
     "public.mission_writer_claims",
     "public.source_identity_aliases",
     "public.idx_observations_latest_per_source",
+    "public.mission_probe_outcomes",
+    "public.mission_evidence_qualifications",
 )
 # Test data: the T016 retirements, which only exist once 020 has run.
 RETIRED_UI_NOISE = {"live", "thông báo", "tin nhắn"}
@@ -323,6 +325,8 @@ UUID_DEFAULT_TABLES = (
 )
 # 003 already used the built-in generator for these two.
 BUILTIN_SINCE_003 = ("industry_taxonomies", "market_lexicons")
+# 023 creates its two tables with the built-in generator from the start.
+BUILTIN_SINCE_023 = ("mission_evidence_qualifications", "mission_probe_outcomes")
 UUID_DEFAULTS = (
     "SELECT c.relname, a.attname, pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d"
     " JOIN pg_class c ON c.oid = d.adrelid"
@@ -461,7 +465,7 @@ def test_a_fresh_install_defaults_every_uuid_key_to_the_builtin_generator(empty_
 
     assert _all(dsn, UUID_DEFAULTS) == [
         (table, "id", "gen_random_uuid()")
-        for table in sorted(UUID_DEFAULT_TABLES + BUILTIN_SINCE_003)
+        for table in sorted(UUID_DEFAULT_TABLES + BUILTIN_SINCE_003 + BUILTIN_SINCE_023)
     ]
     assert _one(dsn, UUID_OSSP_DEPENDENT_DEFAULTS)[0] == 0, "a default still calls uuid-ossp"
     # Left installed, in place, for anything outside Ignis that calls it.
@@ -536,3 +540,222 @@ def test_re_applying_022_and_the_whole_chain_changes_no_uuid_or_function_state(s
     assert (_uuid_state(dsn), _security_state(dsn)) == settled
     _apply(dsn, *all_postgres_migrations())
     assert (_uuid_state(dsn), _security_state(dsn)) == settled
+
+
+# --- D. 023: mission probe outcomes and evidence qualifications ---------------------------------
+#
+# Two additive tables. A probe outcome records what one connector surface did during one run; a
+# qualification records the semantic judgment one mission made about one observation it holds.
+# Nothing existing is rewritten and nothing is backfilled, because a migration cannot know
+# historical connector health or a semantic judgment nobody made.
+
+QUALIFICATION_MIGRATION = "023_evidence_qualification.sql"
+LAST_BEFORE_023 = 22
+NEW_TABLES = ("mission_evidence_qualifications", "mission_probe_outcomes")
+# Test data: one of every parent the two new tables reference.
+Q_WORKSPACE = "00000000-0000-4000-8000-000000000301"
+Q_MISSION = "00000000-0000-4000-8000-000000000302"
+Q_OTHER_MISSION = "00000000-0000-4000-8000-000000000303"
+Q_SOURCE = "00000000-0000-4000-8000-000000000304"
+Q_OBSERVATION = "00000000-0000-4000-8000-000000000305"
+Q_RUN = "00000000-0000-4000-8000-000000000306"
+Q_BRIEF = "00000000-0000-4000-8000-000000000307"
+Q_PARENTS = (
+    f"INSERT INTO research_workspaces (id, slug, root_path) VALUES ('{Q_WORKSPACE}', 't008', '/t008')",
+    f"INSERT INTO research_missions (id, title, workspace_id, surface) VALUES"
+    f" ('{Q_MISSION}', 't008 mission', '{Q_WORKSPACE}', 'MARKET'),"
+    f" ('{Q_OTHER_MISSION}', 't008 other', '{Q_WORKSPACE}', 'MARKET')",
+    "INSERT INTO market_brief_revisions (id, workspace_id, mission_id, revision_number, decision,"
+    " target_user, problem, geo, timeframe, hypothesis, falsifiers, confirmed_by) VALUES"
+    f" ('{Q_BRIEF}', '{Q_WORKSPACE}', '{Q_MISSION}', 1, 'd', 'u', 'p', 'VN', '7d', 'h',"
+    " ARRAY['f'], 'owner')",
+    f"INSERT INTO sources (id, platform, external_id) VALUES ('{Q_SOURCE}', 'youtube', 'video:t008')",
+    "INSERT INTO observations (id, source_id, observed_at, time_provenance, identity_source)"
+    f" VALUES ('{Q_OBSERVATION}', '{Q_SOURCE}', now(), 'exact_ingestion', 'metadata_external_id')",
+    f"INSERT INTO mission_evidence (mission_id, observation_id) VALUES ('{Q_MISSION}', '{Q_OBSERVATION}')",
+    "INSERT INTO mission_run_journals (id, workspace_id, mission_id, journal_path, sequence, status)"
+    f" VALUES ('{Q_RUN}', '{Q_WORKSPACE}', '{Q_MISSION}', '/t008/journal-1', 1, 'COMPLETED')",
+)
+PROBE_OUTCOME = (
+    "INSERT INTO mission_probe_outcomes (run_id, platform, connector_surface, status,"
+    " signals_collected, query_fingerprint, completed_at) VALUES"
+    " ('{run}', 'youtube', '{surface}', '{status}', {count}, 'fp', now())"
+)
+QUALIFICATION = (
+    "INSERT INTO mission_evidence_qualifications (mission_id, observation_id, brief_revision_id,"
+    " frame_fingerprint, relation, purpose, confidence, reason_code, judged_by) VALUES"
+    " ('{mission}', '{observation}', '{brief}', 'frame', '{relation}', '{purpose}', {confidence},"
+    " '{reason}', 'agent')"
+)
+# The rows every existing table holds before 023 runs, digested so a rewrite is visible.
+EXISTING_DIGEST = (
+    "SELECT md5(string_agg(t.row, '|' ORDER BY t.row)) FROM ("
+    " SELECT 'source:' || id::text || platform || external_id AS row FROM sources"
+    " UNION ALL SELECT 'observation:' || id::text || source_id::text FROM observations"
+    " UNION ALL SELECT 'evidence:' || mission_id::text || observation_id::text FROM mission_evidence"
+    " UNION ALL SELECT 'mission:' || id::text || title || coalesce(surface, '') FROM research_missions"
+    " UNION ALL SELECT 'brief:' || id::text || mission_id::text || hypothesis FROM market_brief_revisions"
+    " UNION ALL SELECT 'journal:' || id::text || status || journal_path FROM mission_run_journals"
+    ") t"
+)
+
+
+def _seed_qualification_parents(dsn: str) -> None:
+    with psycopg.connect(dsn) as conn:
+        for statement in Q_PARENTS:
+            conn.execute(statement)
+
+
+def _refused(dsn: str, statement: str):
+    """The SQLSTATE class a statement is refused with, or None when it lands (rolled back)."""
+    with psycopg.connect(dsn) as conn:
+        try:
+            conn.execute(statement)
+            return None
+        except psycopg.Error as exc:
+            return type(exc).__name__
+        finally:
+            conn.rollback()
+
+
+def _qualification_catalog(dsn: str) -> dict:
+    """What 023 governs, for the idempotence contract: columns, constraints, RLS and grants."""
+    return {
+        "columns": _all(
+            dsn,
+            "SELECT table_name, column_name, data_type, is_nullable, column_default"
+            " FROM information_schema.columns WHERE table_schema = 'public'"
+            " AND table_name = ANY(%s) ORDER BY table_name, ordinal_position",
+            (list(NEW_TABLES),),
+        ),
+        "constraints": _all(
+            dsn,
+            "SELECT conrelid::regclass::text, conname, pg_get_constraintdef(oid) FROM pg_constraint"
+            " WHERE conrelid = ANY(ARRAY[to_regclass('public.mission_probe_outcomes'),"
+            " to_regclass('public.mission_evidence_qualifications')]) ORDER BY 1, 2",
+        ),
+        "rls": _all(
+            dsn,
+            "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class"
+            " WHERE relnamespace = 'public'::regnamespace AND relname = ANY(%s) ORDER BY relname",
+            (list(NEW_TABLES),),
+        ),
+        "grants": _all(
+            dsn,
+            "SELECT table_name, grantee, privilege_type FROM information_schema.role_table_grants"
+            " WHERE table_schema = 'public' AND table_name = ANY(%s)"
+            " AND grantee IN ('anon', 'authenticated', 'PUBLIC') ORDER BY 1, 2, 3",
+            (list(NEW_TABLES),),
+        ),
+        "policies": _all(
+            dsn,
+            "SELECT tablename, policyname FROM pg_policies WHERE schemaname = 'public'"
+            " AND tablename = ANY(%s)",
+            (list(NEW_TABLES),),
+        ),
+    }
+
+
+def test_023_creates_both_tables_owner_only_with_rls_and_builtin_uuid_defaults(supabase_like_dsn):
+    dsn = supabase_like_dsn
+    _apply_with_rpc_probe(dsn)
+
+    catalog = _qualification_catalog(dsn)
+    assert catalog["rls"] == [(table, True, False) for table in sorted(NEW_TABLES)]
+    assert catalog["grants"] == [], "a client role or PUBLIC holds a privilege on a 023 table"
+    assert catalog["policies"] == [], "a 023 table must have no policy"
+    defaults = {
+        (table, column): default
+        for table, column, _type, _nullable, default in catalog["columns"]
+        if column == "id"
+    }
+    assert defaults == {(table, "id"): "gen_random_uuid()" for table in NEW_TABLES}
+    for role in SUPABASE_ROLES:
+        for table in NEW_TABLES:
+            with pytest.raises(errors.InsufficientPrivilege):
+                _as_role(dsn, role, f"SELECT count(*) FROM {table}")
+
+
+def test_023_enforces_evidence_ownership_value_checks_and_cascades(empty_postgres_dsn):
+    dsn = empty_postgres_dsn
+    _apply(dsn, *all_postgres_migrations())
+    _seed_qualification_parents(dsn)
+
+    def qualification(**overrides):
+        values = {
+            "mission": Q_MISSION, "observation": Q_OBSERVATION, "brief": Q_BRIEF,
+            "relation": "QUALIFIED_SUPPORT", "purpose": "SUPPLY", "confidence": "0.9",
+            "reason": "DIRECT_TO_FRAME",
+        }
+        values.update(overrides)
+        return QUALIFICATION.format(**values)
+
+    # A mission may only qualify an observation it holds: the composite key names mission_evidence.
+    assert _refused(dsn, qualification(mission=Q_OTHER_MISSION)) == "ForeignKeyViolation"
+    # Relation and purpose must agree, confidence is a probability, and an unassessed row is honest.
+    assert _refused(dsn, qualification(purpose="CONTEXT")) == "CheckViolation"
+    assert _refused(dsn, qualification(relation="CONTEXT_ONLY")) == "CheckViolation"
+    assert _refused(dsn, qualification(confidence="1.5")) == "CheckViolation"
+    assert _refused(dsn, qualification(relation="UNASSESSED", reason="EVALUATOR_UNAVAILABLE")) == (
+        "CheckViolation"
+    ), "an unassessed row cannot carry a confidence"
+    assert _refused(
+        dsn, qualification(relation="UNASSESSED", confidence="NULL", reason="DIRECT_TO_FRAME")
+    ) == "CheckViolation"
+    assert _refused(dsn, qualification(relation="RELEVANT")) == "CheckViolation"
+    assert _refused(dsn, qualification(reason="FREE_TEXT")) == "CheckViolation"
+    assert _refused(dsn, qualification()) is None
+
+    probe = dict(run=Q_RUN, surface="youtube", status="EMPTY_NO_DATA", count=0)
+    assert _refused(dsn, PROBE_OUTCOME.format(**{**probe, "count": 3})) == "CheckViolation", (
+        "an empty surface cannot report collected signals"
+    )
+    assert _refused(dsn, PROBE_OUTCOME.format(**{**probe, "status": "FINE"})) == "CheckViolation"
+    assert _refused(dsn, PROBE_OUTCOME.format(**{**probe, "count": -1})) == "CheckViolation"
+    assert _refused(
+        dsn, PROBE_OUTCOME.format(**{**probe, "run": "00000000-0000-4000-8000-000000000399"})
+    ) == "ForeignKeyViolation"
+
+    with psycopg.connect(dsn) as conn:
+        conn.execute(qualification())
+        conn.execute(PROBE_OUTCOME.format(**probe))
+    assert _refused(dsn, qualification(relation="EXCLUDED_IRRELEVANT")) == "UniqueViolation"
+    assert _refused(dsn, PROBE_OUTCOME.format(**probe)) == "UniqueViolation"
+
+    # Pruning the evidence association removes its judgment; deleting a run removes its outcomes.
+    with psycopg.connect(dsn) as conn:
+        conn.execute(
+            "DELETE FROM mission_evidence WHERE mission_id = %s AND observation_id = %s",
+            (Q_MISSION, Q_OBSERVATION),
+        )
+        conn.execute("DELETE FROM mission_run_journals WHERE id = %s", (Q_RUN,))
+    assert _one(dsn, "SELECT count(*) FROM mission_evidence_qualifications")[0] == 0
+    assert _one(dsn, "SELECT count(*) FROM mission_probe_outcomes")[0] == 0
+    # The immutable observation outlives both.
+    assert _one(dsn, "SELECT count(*) FROM observations WHERE id = %s", (Q_OBSERVATION,))[0] == 1
+
+
+def test_023_upgrades_an_existing_database_without_changing_or_backfilling_a_row(
+    empty_postgres_dsn,
+):
+    dsn = empty_postgres_dsn
+    _apply(dsn, *_through(LAST_BEFORE_023))
+    _seed_qualification_parents(dsn)
+    before = _one(dsn, EXISTING_DIGEST)[0]
+
+    _apply(dsn, QUALIFICATION_MIGRATION)
+
+    assert _one(dsn, EXISTING_DIGEST)[0] == before, "023 rewrote an existing row"
+    for table in NEW_TABLES:
+        assert _one(dsn, f"SELECT count(*) FROM {table}")[0] == 0, f"023 backfilled {table}"
+
+
+def test_re_applying_023_and_the_whole_chain_changes_no_qualification_state(supabase_like_dsn):
+    dsn = supabase_like_dsn
+    _apply_with_rpc_probe(dsn)
+    settled = (_qualification_catalog(dsn), _security_state(dsn), _uuid_state(dsn))
+
+    _apply(dsn, QUALIFICATION_MIGRATION)
+    assert (_qualification_catalog(dsn), _security_state(dsn), _uuid_state(dsn)) == settled
+    _apply(dsn, *all_postgres_migrations())
+    assert (_qualification_catalog(dsn), _security_state(dsn), _uuid_state(dsn)) == settled

@@ -20,7 +20,7 @@ SEED_FILES = (
 )
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
-NEWEST_POSTGRES_MIGRATION = "022_builtin_uuid_defaults.sql"
+NEWEST_POSTGRES_MIGRATION = "023_evidence_qualification.sql"
 
 
 def test_seed_directory_is_found_in_this_layout():
