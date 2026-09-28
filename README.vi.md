@@ -227,9 +227,11 @@ Xem các báo cáo tương tác mẫu do `fn-ignis` kết xuất trong [`example
 Nếu bạn là AI Agent (**Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, Pi Agent**) hoặc muốn cài đặt tự động 1 lệnh trên máy:
 ```bash
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
+git checkout "$(git describe --tags --abbrev=0)"   # ghim vào tag release mới nhất; bỏ dòng này nếu muốn theo main
 ./scripts/bootstrap.sh
 ```
-*Script cài đúng bộ version đã khoá trong `uv.lock`, tạo SQLite database kèm schema và seed từ
+*Cách cài được hỗ trợ là cài từ một tag release: tag trỏ tới một commit cố định, còn `main` thay
+đổi theo quá trình phát triển. Script cài đúng bộ version đã khoá trong `uv.lock`, tạo SQLite database kèm schema và seed từ
 vựng, sinh `.env` với khoá Fernet mới (256-bit: AES-128-CBC + HMAC-SHA256), rồi đăng ký FastMCP
 vào các client nó tìm thấy. SQLite dùng được ngay. Connector bên ngoài sẽ báo unavailable hoặc
 degraded cho tới khi bạn cung cấp credential của mình — lần chạy đầu như vậy là đúng, không phải
@@ -256,15 +258,17 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 Khi volume dữ liệu còn trống, container `db` chạy mọi file trong `sql/` theo thứ tự tên file rồi
-mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `022` trên
+mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `023` trên
 `timescale/timescaledb-ha:pg16`. Mọi bảng mà chuỗi migration tạo trong `public` đều bật
 row-level security. Nếu server đã có hai role Supabase là `anon` và `authenticated`, `006` cho hai
 role này policy chỉ đọc trên `market_lexicons` và `industry_taxonomies`, còn `021` thu hồi mọi quyền
 khác của chúng trên các bảng của chuỗi. Không migration nào tự tạo role. PostgreSQL không chạy lại
 script init khi volume đã có dữ liệu. Hãy dùng kết nối của chủ sở hữu bảng để chạy các migration còn
 thiếu theo thứ tự tên file: database khởi tạo trước `021` cần chạy
-`sql/021_public_schema_rls_coverage.sql`, còn database khởi tạo trước `022` cần chạy
-`sql/022_builtin_uuid_defaults.sql`. Chạy lại từng file không làm thay đổi gì.
+`sql/021_public_schema_rls_coverage.sql`, database khởi tạo trước `022` cần chạy
+`sql/022_builtin_uuid_defaults.sql`, còn database khởi tạo trước `023` cần chạy
+`sql/023_evidence_qualification.sql`. Chạy lại bất kỳ file nào trong số này cũng không làm thay
+đổi gì.
 
 > Installation PostgreSQL đã có corpus legacy trong `trend_signals` phải chạy
 > [production cutover source/observation](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).

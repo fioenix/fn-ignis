@@ -68,16 +68,16 @@ home, verify schema through `023`, initialize MCP, discover 47 tools, and call
 
 ### Tests for User Story 1
 
-- [ ] T013 [US1] Add RED source-observer tests for exact-tag clone, resolved commit, isolated home, no inherited `.venv`/`.env`/MCP config, and public URL credential rejection in `tests/unit/test_public_distribution_contract.py`
-- [ ] T014 [P] [US1] Extend `tests/integration/test_clean_user_journey.py` to prove migration `023` tables and packaged qualification modules are present after bootstrap, without contacting credentialed connectors
+- [X] T013 [US1] Add RED source-observer tests for exact-tag clone, resolved commit, isolated home, no inherited `.venv`/`.env`/MCP config, and public URL credential rejection in `tests/unit/test_public_distribution_contract.py`
+- [X] T014 [P] [US1] Extend `tests/integration/test_clean_user_journey.py` to prove migration `023` tables and packaged qualification modules are present after bootstrap, without contacting credentialed connectors
 
 ### Implementation for User Story 1
 
-- [ ] T015 [US1] Implement `source` mode with exact-tag clone, isolated bootstrap, schema/seed readback, and MCP smoke in `scripts/public_release_acceptance.py`
-- [ ] T016 [US1] Make source acceptance compare the cloned tag SHA with the expected verified `main` commit and classify missing tag, wrong commit, bootstrap failure, and unreadable network separately in `scripts/public_release_acceptance.py`
-- [ ] T017 [P] [US1] Update source-bootstrap, 47-tool catalog, and migration-`023` install/upgrade guidance in `README.md` and `docs/USER_GUIDE.md`
-- [ ] T018 [P] [US1] Apply the same source-bootstrap and migration guidance in target-market Vietnamese in `README.vi.md` and `docs/USER_GUIDE.vi.md`
-- [ ] T019 [US1] Run the source observer unit suite and tracked-tree clean-user journey, confirm GREEN and no credential/quota use, and record results in `.handoff/009-public-distribution-v0.6.0.handoff.md`
+- [X] T015 [US1] Implement `source` mode with exact-tag clone, isolated bootstrap, schema/seed readback, and MCP smoke in `scripts/public_release_acceptance.py`
+- [X] T016 [US1] Make source acceptance compare the cloned tag SHA with the expected verified `main` commit and classify missing tag, wrong commit, bootstrap failure, and unreadable network separately in `scripts/public_release_acceptance.py`
+- [X] T017 [P] [US1] Update source-bootstrap, 47-tool catalog, and migration-`023` install/upgrade guidance in `README.md` and `docs/USER_GUIDE.md`
+- [X] T018 [P] [US1] Apply the same source-bootstrap and migration guidance in target-market Vietnamese in `README.vi.md` and `docs/USER_GUIDE.vi.md`
+- [X] T019 [US1] Run the source observer unit suite and tracked-tree clean-user journey, confirm GREEN and no credential/quota use, and record results in `.handoff/009-public-distribution-v0.6.0.handoff.md`
 
 **Checkpoint**: The source path is implementation-complete and testable before a public `v0.6.0`
 tag exists; the live tag scenario remains a release-owner task.

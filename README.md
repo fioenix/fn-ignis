@@ -269,9 +269,11 @@ Explore sample interactive Infographic HTML reports generated directly by `fn-ig
 If you are an AI Agent (**Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, Pi Agent**) or setting up locally with 1 command:
 ```bash
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
+git checkout "$(git describe --tags --abbrev=0)"   # pin the newest release tag; skip to track main
 ./scripts/bootstrap.sh
 ```
-*Installs the exact environment recorded in `uv.lock`, creates the SQLite database with its
+*A release tag is the supported install: it names an immutable commit, while `main` moves with
+development. Installs the exact environment recorded in `uv.lock`, creates the SQLite database with its
 schema and seed vocabulary, generates `.env` with a fresh Fernet key, and registers the FastMCP
 server with the clients it finds. SQLite is usable immediately. External connectors are reported
 as unavailable or degraded until you supply your own credentials — that is expected on a first
@@ -298,15 +300,15 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 With an empty data volume, the `db` container runs every file in `sql/` in filename order before
-it reports healthy. This path is verified through `022` on `timescale/timescaledb-ha:pg16`.
+it reports healthy. This path is verified through `023` on `timescale/timescaledb-ha:pg16`.
 Every table the chain creates in `public` has row-level security on. When the Supabase roles `anon`
 and `authenticated` already exist, `006` gives them read-only policies on `market_lexicons` and
 `industry_taxonomies`, and `021` revokes every other privilege they hold on the chain's tables;
 neither migration creates a role. PostgreSQL init scripts do not run again for an existing data
 volume. Apply every missing migration in filename order, connected as the table owner: a database
-initialised before `021` needs `sql/021_public_schema_rls_coverage.sql`, and any database
-initialised before `022` needs `sql/022_builtin_uuid_defaults.sql`. Running either file again
-changes nothing.
+initialised before `021` needs `sql/021_public_schema_rls_coverage.sql`, any database initialised
+before `022` needs `sql/022_builtin_uuid_defaults.sql`, and any database initialised before `023`
+needs `sql/023_evidence_qualification.sql`. Running any of these files again changes nothing.
 
 > Existing PostgreSQL installations with a legacy `trend_signals` corpus require the reviewed
 > [source/observation production cutover](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
