@@ -255,6 +255,27 @@ def test_every_release_version_carrier_agrees():
     )
 
 
+# The release this branch prepares (Plan 009) and the date of the release before it. Both move with
+# the next version bump, in the same commit as the carriers themselves.
+RELEASE_CANDIDATE = "0.6.0"
+PREVIOUS_RELEASE_DATE = "2026-09-25"
+
+
+def test_every_carrier_names_the_release_candidate():
+    """One MINOR increment, written everywhere at once -- the lock included."""
+    carriers = release_version_carriers()
+    stale = {name: value for name, value in carriers.items() if value != RELEASE_CANDIDATE}
+    assert not stale, f"these release carriers do not read {RELEASE_CANDIDATE}: {stale}"
+
+
+def test_the_citation_release_date_moves_with_the_version():
+    released = str(yaml.safe_load(_read(REPO / "CITATION.cff")).get("date-released"))
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", released), released
+    assert released > PREVIOUS_RELEASE_DATE, (
+        f"CITATION.cff still dates the release {released}, the previous release's date or earlier"
+    )
+
+
 # --------------------------------------------------------------------------------------------
 # Image role: the direct image is the MCP server, Compose selects the worker
 # --------------------------------------------------------------------------------------------
