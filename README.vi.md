@@ -227,9 +227,11 @@ Xem các báo cáo tương tác mẫu do `fn-ignis` kết xuất trong [`example
 Nếu bạn là AI Agent (**Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, Pi Agent**) hoặc muốn cài đặt tự động 1 lệnh trên máy:
 ```bash
 git clone https://github.com/fioenix/fn-ignis.git && cd fn-ignis
+git checkout "$(git describe --tags --abbrev=0)"   # ghim vào tag release mới nhất; bỏ dòng này nếu muốn theo main
 ./scripts/bootstrap.sh
 ```
-*Script cài đúng bộ version đã khoá trong `uv.lock`, tạo SQLite database kèm schema và seed từ
+*Cách cài được hỗ trợ là cài từ một tag release: tag trỏ tới một commit cố định, còn `main` thay
+đổi theo quá trình phát triển. Script cài đúng bộ version đã khoá trong `uv.lock`, tạo SQLite database kèm schema và seed từ
 vựng, sinh `.env` với khoá Fernet mới (256-bit: AES-128-CBC + HMAC-SHA256), rồi đăng ký FastMCP
 vào các client nó tìm thấy. SQLite dùng được ngay. Connector bên ngoài sẽ báo unavailable hoặc
 degraded cho tới khi bạn cung cấp credential của mình — lần chạy đầu như vậy là đúng, không phải
@@ -256,20 +258,47 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 Khi volume dữ liệu còn trống, container `db` chạy mọi file trong `sql/` theo thứ tự tên file rồi
-mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `022` trên
+mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `023` trên
 `timescale/timescaledb-ha:pg16`. Mọi bảng mà chuỗi migration tạo trong `public` đều bật
 row-level security. Nếu server đã có hai role Supabase là `anon` và `authenticated`, `006` cho hai
 role này policy chỉ đọc trên `market_lexicons` và `industry_taxonomies`, còn `021` thu hồi mọi quyền
 khác của chúng trên các bảng của chuỗi. Không migration nào tự tạo role. PostgreSQL không chạy lại
 script init khi volume đã có dữ liệu. Hãy dùng kết nối của chủ sở hữu bảng để chạy các migration còn
 thiếu theo thứ tự tên file: database khởi tạo trước `021` cần chạy
-`sql/021_public_schema_rls_coverage.sql`, còn database khởi tạo trước `022` cần chạy
-`sql/022_builtin_uuid_defaults.sql`. Chạy lại từng file không làm thay đổi gì.
+`sql/021_public_schema_rls_coverage.sql`, database khởi tạo trước `022` cần chạy
+`sql/022_builtin_uuid_defaults.sql`, còn database khởi tạo trước `023` cần chạy
+`sql/023_evidence_qualification.sql`. Chạy lại bất kỳ file nào trong số này cũng không làm thay
+đổi gì.
 
 > Installation PostgreSQL đã có corpus legacy trong `trend_signals` phải chạy
 > [production cutover source/observation](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
 > Sau khi apply `sql/016`, không khởi động runtime mới cho tới khi baseline sinh từ đúng snapshot,
 > backfill và verifier trả `VERIFIED`.
+
+### 4. Container Image (MCP stdio)
+Image công khai `ghcr.io/fioenix/fn-ignis` là OCI package mà `server.json` khai báo. Process mặc
+định của image là MCP stdio server, nên MCP client có thể chạy image trực tiếp; hãy ghim vào tag
+phiên bản release:
+```bash
+docker run --rm -i ghcr.io/fioenix/fn-ignis:<version>
+```
+Khi không có `DATABASE_URL`, server dùng SQLite nằm bên trong container. Database này không bền:
+nó mất cùng container, phù hợp để chạy thử nhưng không dùng được cho công việc lâu dài. Muốn dữ
+liệu được giữ lại, hãy truyền một DSN PostgreSQL, hoặc mount một volume rồi trỏ SQLite vào đó:
+```bash
+docker run --rm -i -v ignis-data:/data -e DATABASE_URL=sqlite:////data/ignis.db ghcr.io/fioenix/fn-ignis:<version>
+```
+
+**Nâng cấp worker chạy trực tiếp từ `0.5.0` trở về trước.** Các image trước `0.6.0` mặc định khởi
+động scheduler worker; từ `0.6.0`, mặc định là MCP server. Cả hai file Compose đều ghi rõ lệnh của
+worker, nên deployment dùng Compose vẫn giữ nguyên worker. Nếu bạn chạy image trực tiếp làm worker,
+hãy tự chỉ định lệnh:
+```bash
+docker run -d --env-file .env ghcr.io/fioenix/fn-ignis:<version> python -m ignis.interfaces.cli.scheduler
+```
+
+Tag mã nguồn và image này là hai kênh phân phối được hỗ trợ. Bản phát hành này không phân phối qua
+PyPI.
 
 ---
 

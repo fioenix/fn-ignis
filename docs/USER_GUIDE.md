@@ -82,13 +82,19 @@ so that pruning before the backfill cannot cascade away the rows the backfill ne
 Ideal for quick evaluation, local research, and single-user workflows with zero infrastructure dependencies.
 
 ```bash
-# 1. Clone repository
+# 1. Clone repository and pin the newest release tag (skip the checkout to track main)
 git clone https://github.com/fioenix/fn-ignis.git
 cd fn-ignis
+git checkout "$(git describe --tags --abbrev=0)"
 
 # 2. Run automated bootstrap
 ./scripts/bootstrap.sh
 ```
+
+A release tag is the supported source distribution: it names an immutable commit, needs no GitHub
+credential to clone, and is what release acceptance exercises. `main` is the development line.
+PyPI is not a distribution channel for this release; install from a source tag or the container
+image.
 
 The bootstrap script will automatically:
 - Create the Python virtual environment (`.venv`) and install the exact solution recorded in the
@@ -131,19 +137,44 @@ Services started:
 - `fn-ignis-nginx`: Static HTML report server on port 8080.
 
 For a fresh database, the `db` container runs every file in `sql/` in filename order on its first
-start and only then reports healthy; this is verified through `022` on
+start and only then reports healthy; this is verified through `023` on
 `timescale/timescaledb-ha:pg16`. Every table the chain creates in `public` has row-level security
 on. On a server that has the Supabase roles `anon` and `authenticated`, `006` adds their read-only
 policies on `market_lexicons` and `industry_taxonomies`, and `021` revokes every other privilege
 they hold on the chain's tables; no migration creates a role. The init scripts run only while the
 data volume is empty. Apply every missing migration in filename order, connected as the table
-owner: a database initialised before `021` needs `sql/021_public_schema_rls_coverage.sql`, and any
-database initialised before `022` needs `sql/022_builtin_uuid_defaults.sql`. Running either file
+owner: a database initialised before `021` needs `sql/021_public_schema_rls_coverage.sql`, any
+database initialised before `022` needs `sql/022_builtin_uuid_defaults.sql`, and any database
+initialised before `023` needs `sql/023_evidence_qualification.sql`. Running any of these files
 again changes nothing. For an existing PostgreSQL corpus, do not start the new worker immediately
 after deploying its artifact. Follow the canonical
 [source/observation production cutover](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
 quiesce the old runtime, snapshot, generate a baseline from that exact snapshot, apply `sql/016`,
 backfill, require `VERIFIED`, then start the new runtime and reopen ingress.
+
+---
+
+### Container Image: MCP Server by Default, Worker by Command
+
+`ghcr.io/fioenix/fn-ignis` is the OCI package advertised in `server.json`. Its default process is
+the MCP stdio server (`python -m ignis.interfaces.mcp.server`), so an MCP client can run the image
+directly with `docker run --rm -i ghcr.io/fioenix/fn-ignis:<version>`. The image carries the labels
+`org.opencontainers.image.source=https://github.com/fioenix/fn-ignis` and
+`io.modelcontextprotocol.server.name=io.github.fioenix/fn-ignis`.
+
+Without `DATABASE_URL` the server writes SQLite into the container's working directory, which is
+ephemeral and is lost when the container exits. For continuing use, set a PostgreSQL DSN or mount a
+volume and point SQLite into it, for example
+`-v ignis-data:/data -e DATABASE_URL=sqlite:////data/ignis.db`.
+
+Images before `0.6.0` started the scheduler worker by default. From `0.6.0` the worker is a role
+you select: both Compose files already run `python -m ignis.interfaces.cli.scheduler` explicitly,
+so a Compose deployment is unchanged. A worker started directly with `docker run` must now name
+that command:
+
+```bash
+docker run -d --env-file .env ghcr.io/fioenix/fn-ignis:<version> python -m ignis.interfaces.cli.scheduler
+```
 
 ---
 

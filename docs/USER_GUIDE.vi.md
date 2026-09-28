@@ -64,9 +64,10 @@ Chế độ này phù hợp để chạy ngay trên máy tính cá nhân (macOS,
 
 #### Bước 2: Clone repository & Tạo Virtual Environment
 ```bash
-# Clone source code
+# Clone source code và ghim vào tag release mới nhất (bỏ lệnh checkout nếu muốn theo main)
 git clone https://github.com/fioenix/fn-ignis.git
 cd fn-ignis
+git checkout "$(git describe --tags --abbrev=0)"
 
 # Tạo và kích hoạt môi trường ảo bằng uv (khuyến nghị)
 uv venv
@@ -76,6 +77,11 @@ source .venv/bin/activate    # Trên macOS/Linux
 # Cài đặt đúng bộ version đã khoá trong uv.lock
 uv sync --locked --inexact
 ```
+
+Tag release là kênh phân phối mã nguồn được hỗ trợ: tag trỏ tới một commit cố định, có thể clone
+mà không cần credential GitHub và cũng là đối tượng quy trình nghiệm thu release kiểm tra. `main`
+là nhánh phát triển. Bản phát hành này không phân phối qua PyPI; hãy cài từ tag mã nguồn hoặc từ
+container image.
 
 `--locked` bắt uv dùng đúng lời giải đã commit trong `uv.lock` và báo lỗi nếu lock lệch với
 `pyproject.toml`. `--inexact` không gỡ những package nằm ngoài lock, nên nó không âm thầm xoá bộ
@@ -144,19 +150,44 @@ docker compose -f docker-compose.prod.yml ps
 Sau khi khởi chạy, bạn có thể mở trình duyệt truy cập `http://localhost:53080/` để xem danh sách các báo cáo HTML đã xuất bản.
 
 Với database mới, container `db` chạy mọi file trong `sql/` theo thứ tự tên file ở lần khởi động
-đầu tiên rồi mới chuyển sang healthy; điều này đã được kiểm chứng tới `022` trên
+đầu tiên rồi mới chuyển sang healthy; điều này đã được kiểm chứng tới `023` trên
 `timescale/timescaledb-ha:pg16`. Mọi bảng mà chuỗi migration tạo trong `public` đều bật
 row-level security. Trên server có hai role Supabase `anon` và `authenticated`, `006` thêm policy
 chỉ đọc cho hai role này trên `market_lexicons` và `industry_taxonomies`, còn `021` thu hồi mọi
 quyền khác của chúng trên các bảng của chuỗi. Không migration nào tự tạo role. Các script init chỉ
 chạy khi volume dữ liệu còn trống. Hãy dùng kết nối của chủ sở hữu bảng để chạy các migration còn
 thiếu theo thứ tự tên file: database khởi tạo trước `021` cần chạy
-`sql/021_public_schema_rls_coverage.sql`, còn database khởi tạo trước `022` cần chạy
-`sql/022_builtin_uuid_defaults.sql`. Chạy lại từng file không làm thay đổi gì. Với PostgreSQL
+`sql/021_public_schema_rls_coverage.sql`, database khởi tạo trước `022` cần chạy
+`sql/022_builtin_uuid_defaults.sql`, còn database khởi tạo trước `023` cần chạy
+`sql/023_evidence_qualification.sql`. Chạy lại bất kỳ file nào trong số này cũng không làm thay
+đổi gì. Với PostgreSQL
 đã có corpus legacy, không khởi động worker mới ngay sau khi đưa artifact lên. Chạy đúng
 [production cutover source/observation](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
 quiesce runtime cũ, snapshot, sinh baseline từ chính snapshot đó, apply `sql/016`, backfill, bắt
 buộc verifier trả `VERIFIED`, rồi mới khởi động runtime mới và mở lại ingress.
+
+---
+
+### Container image: mặc định là MCP server, worker chạy bằng lệnh riêng
+
+`ghcr.io/fioenix/fn-ignis` là OCI package được khai báo trong `server.json`. Process mặc định của
+image là MCP stdio server (`python -m ignis.interfaces.mcp.server`), nên MCP client có thể chạy image
+trực tiếp bằng `docker run --rm -i ghcr.io/fioenix/fn-ignis:<version>`. Image mang hai label
+`org.opencontainers.image.source=https://github.com/fioenix/fn-ignis` và
+`io.modelcontextprotocol.server.name=io.github.fioenix/fn-ignis`.
+
+Khi không có `DATABASE_URL`, server ghi SQLite vào thư mục làm việc của container. Database này
+không bền và sẽ mất khi container dừng. Muốn dùng lâu dài, hãy đặt một DSN PostgreSQL hoặc mount một
+volume rồi trỏ SQLite vào đó, ví dụ `-v ignis-data:/data -e DATABASE_URL=sqlite:////data/ignis.db`.
+
+Các image trước `0.6.0` mặc định khởi động scheduler worker. Từ `0.6.0`, worker là một vai trò bạn
+phải chọn: cả hai file Compose đã ghi rõ lệnh `python -m ignis.interfaces.cli.scheduler`, nên
+deployment dùng Compose không thay đổi gì. Worker khởi động trực tiếp bằng `docker run` giờ phải ghi
+rõ lệnh đó:
+
+```bash
+docker run -d --env-file .env ghcr.io/fioenix/fn-ignis:<version> python -m ignis.interfaces.cli.scheduler
+```
 
 ---
 

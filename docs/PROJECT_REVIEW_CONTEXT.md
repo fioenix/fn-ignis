@@ -69,7 +69,7 @@ defect. The review itself is kept outside the repository.
 ## 1. What this is
 
 A self-hosted social-listening and market-opportunity harness. It is an **agent harness**, not
-a pipeline: it exposes 39 FastMCP tools and expects the calling agent to compose them. The
+a pipeline: it exposes 47 FastMCP tools and expects the calling agent to compose them. The
 6-step research framework in `CLAUDE.md` is a recipe on offer, not a flow the code enforces.
 
 Two ways in, and they differ in what they are allowed to filter:
@@ -97,14 +97,15 @@ The date is recorded here as well as in the footer, and a test fails when the tw
 otherwise redrawing a diagram and leaving its footer alone dates the new picture to the day the
 old one was checked.
 
-- `docs/assets/architecture.{png,svg,html}` — **what the shape is** (footer verified 16/09/2026).
+- `docs/assets/architecture.{png,svg,html}` — **what the shape is** (footer verified 16/09/2026;
+  tool count re-verified 28/09/2026).
   The dual-track model, the two-stage ingress, and the evidence store it writes into.
 - `docs/diagrams/ignis-source-map.{png,svg,html}` — **where the data comes from** (footer verified
   16/09/2026). Six connectors grouped by the runtime each needs, which is what decides whether the
   unattended worker can register it, with the credential each wants and whether it discovers topics
   or answers keyword probes.
 - `docs/diagrams/ignis-pipeline.{png,svg,html}` — **how a signal becomes a dossier** (footer
-  verified 17/09/2026). Lane-scoped flow from discovery through the quality gate to the artifact.
+  verified 17/09/2026; tool count re-verified 28/09/2026). Lane-scoped flow from discovery through the quality gate to the artifact.
 
 A fourth diagram, a tool-by-tool call trace of one session, was retired on 14/09/2026. It
 documented a defect fixed on 10/09 — `trigger_ingress_refresh` took no timeframe, so every

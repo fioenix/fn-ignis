@@ -205,16 +205,19 @@ def setup_all_mcp_clients(project_root: Path, python_bin: str) -> List[Dict[str,
             if manifest_path.exists():
                 with open(manifest_path, "r", encoding="utf-8") as f:
                     manifest = json.load(f)
+                written = 0
                 for item in manifest:
                     fn = item.get("function", {})
                     if fn.get("name"):
                         with open(schema_dir / f"{fn['name']}.json", "w", encoding="utf-8") as sf:
                             json.dump(fn, sf, indent=2, ensure_ascii=False)
+                        written += 1
+                # The count is the schemas just written, so the instructions cannot drift from them.
                 with open(schema_dir / "instructions.md", "w", encoding="utf-8") as inf:
                     inf.write(
                         "# fn-ignis MCP Server\n"
                         "Autonomous Trend Intelligence & Market Opportunity Platform. "
-                        "Provides 39 tools for multi-platform social listening (Google Trends, YouTube, TikTok, Threads, Instagram Reels), "
+                        f"Provides {written} tools for multi-platform social listening (Google Trends, YouTube, TikTok, Threads, Instagram Reels), "
                         "White Space Opportunity Index calculation (+100 to -100), and interactive infographic HTML dossier generation.\n"
                     )
         except Exception:
@@ -324,19 +327,21 @@ def auto_provision(json_output: bool = False) -> Dict[str, Any]:
     # 4. Run Diagnostics
     diag = asyncio.run(run_synthetic_diagnostics())
 
-    tools_cnt = 39
-    prompts_cnt = 2
-    resources_cnt = 2
+    # Counted from the running catalog or not at all. A remembered fallback number printed on a
+    # failed discovery reads as a healthy server with a catalog nobody measured.
+    tools_cnt = prompts_cnt = resources_cnt = None
+    discovery_error = None
     try:
         from ignis.interfaces.mcp.server import mcp
         tools_cnt = len(asyncio.run(mcp.list_tools()))
         prompts_cnt = len(asyncio.run(mcp.list_prompts()))
         resources_cnt = len(asyncio.run(mcp.list_resources()))
-    except Exception:
-        pass
+    except Exception as e:
+        tools_cnt = prompts_cnt = resources_cnt = None
+        discovery_error = f"MCP catalog discovery failed: {e}"
 
     report = {
-        "status": "success" if db_ok else "warning",
+        "status": "success" if db_ok and discovery_error is None else "warning",
         "project_root": str(project_root),
         "python_executable": python_bin,
         "environment": env_msg,
@@ -350,6 +355,8 @@ def auto_provision(json_output: bool = False) -> Dict[str, Any]:
             "framework": "6-Step Strategic Market Research Reference Framework"
         }
     }
+    if discovery_error:
+        report["capabilities"]["discovery_error"] = discovery_error
 
     if json_output:
         print(json.dumps(report, indent=2))
@@ -370,6 +377,10 @@ def auto_provision(json_output: bool = False) -> Dict[str, Any]:
     print(f"  • DB Pool / SQLite: {diag.get('database')}")
     print(f"  • Google Trends RSS: {diag.get('google_rss')}")
     print(f"  • Seed Lexicons: {diag.get('lexicon_count')} terms loaded")
+    if discovery_error:
+        print(f"  • MCP catalog: {discovery_error}")
+    else:
+        print(f"  • MCP catalog: {tools_cnt} tools, {prompts_cnt} prompts, {resources_cnt} resources")
 
     print("\n🚀 Ready for AI Agents (Claude Desktop, Claude Code, Codex, Antigravity, OpenClaw, Hermes, Pi Agent)")
     print("Quickstart prompt for agent:")

@@ -7,20 +7,20 @@
     "url": "https://github.com/fioenix/fn-ignis",
     "source": "github"
   },
-  "version": "0.5.0",
+  "version": "0.6.0",
   "packages": [
     {
-      "registryType": "pypi",
-      "identifier": "fn-ignis",
-      "version": "0.5.0",
+      "registryType": "oci",
+      "identifier": "ghcr.io/fioenix/fn-ignis:0.6.0",
+      "version": "0.6.0",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "DATABASE_URL",
-          "description": "PostgreSQL DSN or sqlite:///ignis.db for zero-Docker mode",
-          "isRequired": true,
+          "description": "Optional. Without it the server uses sqlite:///ignis.db in the container's working directory, which is ephemeral and disappears with the container. Set a PostgreSQL DSN, or mount a volume and point a sqlite:/// path into it, for persistent operation.",
+          "isRequired": false,
           "format": "string"
         },
         {

@@ -51,10 +51,10 @@ BENCHMARK = "scripts/t021_read_path_benchmark.py"
 DOCKER_TAG_RULES = (
     "type=semver,pattern={{version}}",
     "type=semver,pattern={{major}}.{{minor}}",
-    "type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v')"
-    " && !contains(github.ref, '-beta') && !contains(github.ref, '-rc')"
-    " && !contains(github.ref, '-alpha') }}",
 )
+# Plan 009 replaced the hand-written `type=raw,value=latest,enable=...` filter, which only knew
+# three prerelease spellings, with metadata-action's own stable-only rule.
+DOCKER_LATEST_FLAVOR = "latest=auto"
 
 
 def _load(path: Path) -> dict:
@@ -283,3 +283,5 @@ def test_docker_publish_keeps_its_trigger_and_tag_rules():
     rules = [line.strip() for line in meta["with"]["tags"].splitlines() if line.strip()]
     for rule in DOCKER_TAG_RULES:
         assert rule in rules, f"Docker Publish lost the tag rule {rule!r}; found {rules}"
+    flavor = [line.strip() for line in str(meta["with"].get("flavor", "")).splitlines() if line.strip()]
+    assert DOCKER_LATEST_FLAVOR in flavor, f"Docker Publish lost stable-only latest; flavor is {flavor}"

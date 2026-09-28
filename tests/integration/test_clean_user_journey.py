@@ -271,6 +271,60 @@ def test_bootstrap_loads_schema_and_seed_lexicons(bootstrapped):
     assert seeded_terms > 0, "the database has its schema but none of its seed vocabulary"
 
 
+def _newest_migration(tree: Path) -> Path:
+    return sorted((tree / "sql").glob("[0-9][0-9][0-9]_*.sql"))[-1]
+
+
+def test_bootstrap_applies_the_newest_migration(bootstrapped):
+    """The schema must reach the end of the chain the tag ships, not the end some doc remembers.
+
+    The table names come from the newest migration file itself, so the day a new migration is
+    committed this contract demands its tables without anyone editing it.
+    """
+    import re
+    import sqlite3
+
+    newest = _newest_migration(REPO_ROOT)
+    expected = re.findall(r"CREATE TABLE IF NOT EXISTS\s+(\w+)", newest.read_text(encoding="utf-8"))
+    assert expected, f"{newest.name} creates no table; this contract would pass on nothing"
+    assert (bootstrapped["checkout"] / "sql" / newest.name).is_file(), f"the checkout lacks {newest.name}"
+
+    with sqlite3.connect(bootstrapped["checkout"] / "ignis.db") as connection:
+        tables = {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    missing = [table for table in expected if table not in tables]
+    assert not missing, f"bootstrap did not create the tables {newest.name} adds: {missing}"
+
+
+def test_the_qualification_use_cases_ship_and_import(bootstrapped):
+    """The two evidence-qualification tools are served from modules a clean install must carry."""
+    checkout = bootstrapped["checkout"]
+    modules = sorted(
+        f"ignis.application.use_cases.{path.stem}"
+        for path in (checkout / "src" / "ignis" / "application" / "use_cases").glob("*qualification*.py")
+    )
+    assert len(modules) == 2, f"expected the two qualification use-case modules, found {modules}"
+
+    env = _bootstrap_env(bootstrapped["home"])
+    env["IGNIS_ENV_FILE"] = str((checkout / ".env").resolve())
+    completed = subprocess.run(
+        [
+            str(checkout / ".venv" / "bin" / "python"),
+            "-c",
+            "import importlib, sys; [importlib.import_module(name) for name in sys.argv[1:]]",
+            *modules,
+        ],
+        cwd=str(checkout),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert completed.returncode == 0, completed.stderr[-2000:]
+
+
 def test_workspace_registration_carries_a_path_not_secrets(bootstrapped):
     checkout = bootstrapped["checkout"]
     entry = json.loads((checkout / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]["fn-ignis"]

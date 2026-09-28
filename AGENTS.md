@@ -289,7 +289,7 @@ Every AI Agent modifying this repository or preparing a release must verify comp
 
 ### Checklist B: Harness Autonomy & Non-Prescriptive Decoupling
 - [ ] **Non-Prescriptive Instructions**: Verify FastMCP server instructions and tool docstrings do NOT coerce agents into forced pipelines (no "MUST STRICTLY FOLLOW").
-- [ ] **Atomic Independence**: Ensure all 39 FastMCP tools remain callable independently for ad-hoc tactical operations.
+- [ ] **Atomic Independence**: Ensure all 47 FastMCP tools remain callable independently for ad-hoc tactical operations.
 - [ ] **Framework Separation**: The 6-Step SOP is exposed as an analytical reference recipe (via resources/prompts), never as an unskippable constraint.
 - [ ] **Contextual Deliverables**: Deliverables match user intent (concise text, cards, tables, or full HTML dashboards) without forcing boilerplate templates for trivial queries.
 
