@@ -4,15 +4,15 @@
 > - **Phiên bản:** `v0.6.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (47 Handlers & Tools)
-> - **Trạng thái:** `v0.6.0` là release candidate của Plan 009, chưa phát hành. Bản live hiện
->   hành `v0.5.0` đã tag và publish.
+> - **Trạng thái:** `v0.6.0` đã tag và publish ngày 28/09/2026 qua public source, GitHub Release
+>   và public GHCR; 14/14 bề mặt bắt buộc được xác minh, PyPI được hoãn theo policy.
 >   Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`; đừng tin dòng này — nó
 >   là tài liệu, còn
 >   tag với release nằm trên Git và GitHub. Cutover T020 trên corpus PostgreSQL hiện hữu đã chạy
 >   xong 20/09/2026: verifier trả `VERIFIED`, runtime mới đã khởi động, ingress theo lịch đã mở lại.
-> - **Trạng thái Tests:** Release verification: 1.058 unit test passed, 2 skipped khi không có DSN;
->   487 integration test passed, 3 skipped với PostgreSQL dùng một lần; Fresh Compose được chạy
->   riêng và đã qua; Ruff clean
+> - **Trạng thái Tests:** Release gate: 1.961 test passed, 5 intentional skips trên dual backend;
+>   SC-004 đạt 91,13%; Fresh Compose, wheel smoke 47 tools, Ruff, lock, packaging, gitleaks và
+>   public clean-room acceptance đều qua
 
 ---
 
