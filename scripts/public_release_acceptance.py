@@ -1350,6 +1350,235 @@ def observe_compose_worker(
 
 
 # --------------------------------------------------------------------------------------------
+# GitHub facts, version parity, provenance and registry validation
+# --------------------------------------------------------------------------------------------
+
+GITHUB_API = "https://api.github.com"
+PUBLISH_WORKFLOW = "docker-publish.yml"
+PROVENANCE_TIMEOUT_SECONDS = 300
+
+
+def _owner_repo(repository: str) -> str:
+    from urllib.parse import urlsplit
+
+    path = urlsplit(repository).path.strip("/")
+    return path[:-4] if path.endswith(".git") else path
+
+
+def _api(fetch, url: str) -> tuple[int, dict | None, str]:
+    """(status, JSON body or None, message). Anonymous: no Authorization header is ever sent."""
+    answer = fetch(url, {"Accept": "application/vnd.github+json"})
+    raw = b"".join(answer.chunks())
+    try:
+        body = json.loads(raw) if raw else None
+    except json.JSONDecodeError:
+        body = None
+    message = body.get("message", "") if isinstance(body, dict) else ""
+    return answer.status, body, message
+
+
+def _api_failure(name: str, subject: str, status: int, message: str) -> SurfaceRecord:
+    """404 is GitHub positively saying the object is not there for an anonymous reader."""
+    if status == 404:
+        return SurfaceRecord(name, SurfaceState.MISSING, subject, f"GitHub answered 404 ({message})", "missing")
+    failure_class = "auth" if status in (401, 403, 429) else "unclassified"
+    return SurfaceRecord(name, SurfaceState.UNREADABLE, subject, f"GitHub answered HTTP {status}: {message}", failure_class)
+
+
+def observe_github(*, repository: str, version: str, expected_commit: str | None, fetch=http_fetch) -> list[SurfaceRecord]:
+    """Repository visibility, tag on main, the published Release and the publish workflow, read anonymously."""
+    slug = _owner_repo(repository)
+    base = f"{GITHUB_API}/repos/{slug}"
+    tag = f"v{version}"
+    records: list[SurfaceRecord] = []
+
+    def guarded(name: str, subject: str, observe) -> SurfaceRecord:
+        try:
+            return observe()
+        except OSError as error:
+            return SurfaceRecord(name, SurfaceState.UNREADABLE, subject, f"GitHub could not be reached: {error}", "network")
+
+    def repository_public() -> SurfaceRecord:
+        status, body, message = _api(fetch, base)
+        if status != 200:
+            return _api_failure("repository_public", slug, status, message)
+        if body.get("private") is False:
+            return SurfaceRecord("repository_public", SurfaceState.VERIFIED, slug, "an anonymous reader sees a public repository")
+        return SurfaceRecord("repository_public", SurfaceState.MISSING, slug, "the repository is not public", "missing")
+
+    tag_commit: list[str] = []
+
+    def tag_on_main() -> SurfaceRecord:
+        subject = f"{slug} {tag}"
+        status, body, message = _api(fetch, f"{base}/git/ref/tags/{tag}")
+        if status != 200:
+            return _api_failure("tag_on_main", subject, status, message)
+        target = body.get("object", {})
+        if target.get("type") == "tag":
+            status, body, message = _api(fetch, f"{base}/git/tags/{target.get('sha')}")
+            if status != 200:
+                return _api_failure("tag_on_main", subject, status, message)
+            target = body.get("object", {})
+        commit = target.get("sha", "")
+        tag_commit.append(commit)
+        if expected_commit and commit != expected_commit:
+            return SurfaceRecord("tag_on_main", SurfaceState.FAILED, subject,
+                                 f"{tag} names {commit}, not the verified main commit {expected_commit}", "behavior_mismatch")
+        status, body, message = _api(fetch, f"{base}/compare/{commit}...main")
+        if status != 200:
+            return _api_failure("tag_on_main", subject, status, message)
+        if body.get("behind_by") != 0:
+            return SurfaceRecord("tag_on_main", SurfaceState.FAILED, subject,
+                                 f"{commit} is not an ancestor of main (compare status {body.get('status')!r})",
+                                 "behavior_mismatch")
+        if not expected_commit:
+            return SurfaceRecord("tag_on_main", SurfaceState.UNREADABLE, subject,
+                                 f"{tag} names {commit} on main; no verified main commit was supplied to compare it with",
+                                 "not_observed")
+        return SurfaceRecord("tag_on_main", SurfaceState.VERIFIED, subject, f"{tag} names {commit}, which is on main")
+
+    def release_published() -> SurfaceRecord:
+        subject = f"{slug} Release {tag}"
+        status, body, message = _api(fetch, f"{base}/releases/tags/{tag}")
+        if status != 200:
+            return _api_failure("github_release_published", subject, status, message)
+        if body.get("draft") or not body.get("published_at"):
+            return SurfaceRecord("github_release_published", SurfaceState.MISSING, subject, "the Release is a draft", "missing")
+        return SurfaceRecord("github_release_published", SurfaceState.VERIFIED, body.get("html_url", subject),
+                             f"published {body.get('published_at')}")
+
+    def workflow() -> SurfaceRecord:
+        subject = f"{slug} {PUBLISH_WORKFLOW} for {tag}"
+        status, body, message = _api(
+            fetch, f"{base}/actions/workflows/{PUBLISH_WORKFLOW}/runs?branch={tag}&event=push&per_page=5"
+        )
+        if status != 200:
+            return _api_failure("container_workflow", subject, status, message)
+        runs = body.get("workflow_runs", [])
+        if not runs:
+            return SurfaceRecord("container_workflow", SurfaceState.MISSING, subject, "no tag-driven publish run exists", "missing")
+        run = runs[0]
+        commit = tag_commit[0] if tag_commit else expected_commit
+        if run.get("status") != "completed":
+            return SurfaceRecord("container_workflow", SurfaceState.UNREADABLE, run.get("html_url", subject),
+                                 f"the newest run is still {run.get('status')}", "unclassified")
+        if run.get("conclusion") != "success":
+            return SurfaceRecord("container_workflow", SurfaceState.FAILED, run.get("html_url", subject),
+                                 f"the newest run concluded {run.get('conclusion')}", "behavior_mismatch")
+        if commit and run.get("head_sha") != commit:
+            return SurfaceRecord("container_workflow", SurfaceState.FAILED, run.get("html_url", subject),
+                                 f"the run built {run.get('head_sha')}, not the tag commit {commit}", "behavior_mismatch")
+        return SurfaceRecord("container_workflow", SurfaceState.VERIFIED, run.get("html_url", subject),
+                             f"tag-driven publish succeeded on {run.get('head_sha')}")
+
+    records.append(guarded("repository_public", slug, repository_public))
+    records.append(guarded("tag_on_main", f"{slug} {tag}", tag_on_main))
+    records.append(guarded("github_release_published", f"{slug} Release {tag}", release_published))
+    records.append(guarded("container_workflow", f"{slug} {PUBLISH_WORKFLOW}", workflow))
+    return records
+
+
+def version_carriers(tree: Path) -> dict[str, str | None]:
+    """Every release-controlled version value in a tree, each read with its own file's grammar."""
+    import tomllib
+
+    def text(relative: str) -> str:
+        return (tree / relative).read_text(encoding="utf-8")
+
+    def yaml_version(relative: str) -> str | None:
+        found = re.search(r"^version:\s*['\"]?([^\s'\"]+)", text(relative), re.MULTILINE)
+        return found.group(1) if found else None
+
+    manifest = json.loads(text("server.json"))
+    oci = [p for p in manifest.get("packages", []) if p.get("registryType") == "oci"]
+    identifier = oci[0].get("identifier", "") if len(oci) == 1 else ""
+    banner = re.search(r"\*\*Phiên bản:\*\*\s*`v([^`]+)`", text("BACKLOG.md").split("\n---", 1)[0])
+    locked = [p["version"] for p in tomllib.loads(text("uv.lock")).get("package", []) if p.get("name") == "fn-ignis"]
+    return {
+        "pyproject.toml": tomllib.loads(text("pyproject.toml"))["project"]["version"],
+        "openclaw.json": json.loads(text("openclaw.json")).get("version"),
+        "server.json version": manifest.get("version"),
+        "server.json package version": oci[0].get("version") if len(oci) == 1 else None,
+        "server.json OCI identifier tag": identifier.rsplit(":", 1)[1] if ":" in identifier.rsplit("/", 1)[-1] else None,
+        "CITATION.cff": yaml_version("CITATION.cff"),
+        ".openclaw/config.yaml": yaml_version(".openclaw/config.yaml"),
+        "BACKLOG.md banner": banner.group(1) if banner else None,
+        "uv.lock": locked[0] if len(locked) == 1 else None,
+    }
+
+
+def observe_version_parity(tree: Path | None, version: str) -> SurfaceRecord:
+    subject = f"release carriers at v{version}"
+    if tree is None or not (tree / "pyproject.toml").is_file():
+        return _unread("version_parity", subject, "no tagged source tree to read")
+    try:
+        carriers = version_carriers(tree)
+    except (OSError, ValueError, KeyError) as error:
+        return SurfaceRecord("version_parity", SurfaceState.FAILED, subject, f"a carrier could not be parsed: {error}",
+                             "behavior_mismatch")
+    wrong = {name: value for name, value in carriers.items() if value != version}
+    if wrong:
+        return SurfaceRecord("version_parity", SurfaceState.FAILED, subject, f"carriers disagree with {version}: {wrong}",
+                             "behavior_mismatch")
+    return SurfaceRecord("version_parity", SurfaceState.VERIFIED, subject, f"all {len(carriers)} carriers read {version}")
+
+
+def observe_provenance(
+    *, image: str, digest: str | None, version: str, repository: str, expected_commit: str | None, gh: str = "gh"
+) -> SurfaceRecord:
+    """Authenticated, and deliberately separate from the anonymous consumer: it uses the operator's gh."""
+    if not digest:
+        return _unread("container_provenance", f"{image}:{version}", "no anonymously verified digest to check")
+    slug = _owner_repo(repository)
+    subject = f"{image}@{digest}"
+    command = [
+        gh, "attestation", "verify", f"oci://{subject}",
+        "--repo", slug,
+        "--source-ref", f"refs/tags/v{version}",
+        "--signer-workflow", f"{slug}/.github/workflows/{PUBLISH_WORKFLOW}",
+    ]
+    if expected_commit:
+        command += ["--source-digest", expected_commit]
+    outcome = run_bounded(command, timeout=PROVENANCE_TIMEOUT_SECONDS)
+    failure = classify_failure(outcome, ("no attestations found",))
+    if failure:
+        state, failure_class = failure
+        if failure_class == "unclassified":
+            state, failure_class = SurfaceState.FAILED, "behavior_mismatch"
+        return SurfaceRecord("container_provenance", state, subject, outcome.summary, failure_class, outcome.returncode)
+    return SurfaceRecord("container_provenance", SurfaceState.VERIFIED, subject,
+                         f"gh attestation verify constrained to {slug}, refs/tags/v{version} and {PUBLISH_WORKFLOW}"
+                         + (f" at {expected_commit}" if expected_commit else ""), command_exit=0)
+
+
+def observe_registry_validation(
+    tree: Path, *, publisher: str = "mcp-publisher", passthrough_env: tuple[str, ...] = ()
+) -> SurfaceRecord:
+    """`mcp-publisher validate` on the tagged server.json, with the publisher version recorded.
+
+    It runs under an empty home so no publisher login redirects validation to another registry.
+    """
+    subject = str(tree / "server.json")
+    (tree.parent / "publisher-home").mkdir(exist_ok=True)
+    extra = {name: os.environ[name] for name in passthrough_env if name in os.environ}
+    env = isolated_env(tree.parent / "publisher-home", extra=extra)
+    version = run_bounded([publisher, "--version"], timeout=60, env=env, cwd=tree)
+    if version.tool_missing:
+        return SurfaceRecord("mcp_registry_validation", SurfaceState.UNREADABLE, subject,
+                             "mcp-publisher is not installed", "tool_unavailable")
+    outcome = run_bounded([publisher, "validate"], timeout=300, env=env, cwd=tree)
+    failure = classify_failure(outcome)
+    publisher_version = (version.stdout.strip() or version.stderr.strip()).splitlines()[:1]
+    if failure:
+        state, failure_class = failure
+        if failure_class == "unclassified":
+            state, failure_class = SurfaceState.FAILED, "behavior_mismatch"
+        return SurfaceRecord("mcp_registry_validation", state, subject, outcome.summary, failure_class, outcome.returncode)
+    return SurfaceRecord("mcp_registry_validation", SurfaceState.VERIFIED, subject,
+                         f"{publisher_version[0] if publisher_version else 'mcp-publisher'}: validate passed", command_exit=0)
+
+
+# --------------------------------------------------------------------------------------------
 # Command line
 # --------------------------------------------------------------------------------------------
 
@@ -1380,7 +1609,7 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=("source", "container"), help="which public path to accept")
+    parser.add_argument("mode", choices=("source", "container", "all"), help="which public path to accept")
     parser.add_argument("--version", required=True, help="release version without the v prefix")
     parser.add_argument("--repository", default="https://github.com/fioenix/fn-ignis.git")
     parser.add_argument("--expected-commit", default=None, help="the verified main commit the tag must name")
@@ -1403,17 +1632,47 @@ def main(argv: list[str] | None = None) -> int:
 
     records: list[SurfaceRecord] = []
     with TemporaryRoot(parent=args.work_root) as root:
-        if args.mode == "source":
+        checkout = None
+        if args.mode in ("source", "all"):
+            source_root = root.path / "source"
+            source_root.mkdir()
             records += observe_source(
                 repository=args.repository,
                 version=args.version,
                 expected_commit=args.expected_commit,
-                root=root.path,
+                root=source_root,
                 expected_migration=args.expected_migration,
             )
-        if args.mode == "container":
+            checkout = source_root / "checkout" if (source_root / "checkout").is_dir() else None
+        if args.mode in ("container", "all"):
+            container_root = root.path / "container"
+            container_root.mkdir()
             records += observe_container(
-                image=args.image, version=args.version, root=root.path, platform=args.platform, check_worker=True
+                image=args.image, version=args.version, root=container_root, platform=args.platform, check_worker=True
+            )
+        if args.mode == "all":
+            records += observe_github(
+                repository=args.repository, version=args.version, expected_commit=args.expected_commit
+            )
+            records.append(observe_version_parity(checkout, args.version))
+            pulled = next((r for r in records if r.name == "container_anonymous_pull"), None)
+            digest = (
+                pulled.subject.rsplit("@", 1)[1] if pulled and pulled.state == SurfaceState.VERIFIED else None
+            )
+            # The only authenticated observation: it runs with the operator's gh, never in isolation.
+            records.append(
+                observe_provenance(
+                    image=args.image,
+                    digest=digest,
+                    version=args.version,
+                    repository=args.repository,
+                    expected_commit=args.expected_commit,
+                )
+            )
+            records.append(
+                observe_registry_validation(checkout)
+                if checkout
+                else _unread("mcp_registry_validation", "server.json", "no tagged source tree to validate")
             )
 
     bundle = build_bundle(args.version, args.expected_commit, complete_with_unobserved(records))

@@ -1922,3 +1922,260 @@ def test_a_failed_tool_discovery_is_not_reported_as_a_successful_count(monkeypat
     assert report["capabilities"]["tools_count"] is None, report["capabilities"]
     assert report["status"] != "success", report["status"]
     assert "tool registry failed to load" in report["capabilities"].get("discovery_error", "")
+
+
+# --------------------------------------------------------------------------------------------
+# `all` mode: the GitHub facts, version parity, provenance and registry validation
+# --------------------------------------------------------------------------------------------
+
+API = "https://api.github.com/repos/fioenix/fn-ignis"
+TAG_COMMIT = "1" * 40
+
+
+class FakeGitHub:
+    """Anonymous GitHub REST answers for one release, each overridable."""
+
+    def __init__(self):
+        self.answers = {
+            API: (200, {"private": False, "visibility": "public"}),
+            f"{API}/git/ref/tags/v0.6.0": (200, {"object": {"type": "commit", "sha": TAG_COMMIT}}),
+            f"{API}/compare/{TAG_COMMIT}...main": (200, {"status": "behind", "behind_by": 0, "ahead_by": 2}),
+            f"{API}/releases/tags/v0.6.0": (200, {"draft": False, "published_at": "2026-09-30T00:00:00Z",
+                                                  "html_url": "https://github.com/fioenix/fn-ignis/releases/tag/v0.6.0"}),
+            f"{API}/actions/workflows/docker-publish.yml/runs?branch=v0.6.0&event=push&per_page=5": (
+                200, {"workflow_runs": [{"status": "completed", "conclusion": "success", "head_sha": TAG_COMMIT,
+                                         "html_url": "https://github.com/fioenix/fn-ignis/actions/runs/1"}]}),
+        }
+        self.requests = []
+
+    def __call__(self, url, headers):
+        self.requests.append((url, dict(headers)))
+        status, body = self.answers.get(url, (404, {"message": "Not Found"}))
+        return FakeResponse(status, json.dumps(body).encode())
+
+
+def _github(module, fake=None, expected=TAG_COMMIT):
+    fake = fake or FakeGitHub()
+    records = module.observe_github(
+        repository="https://github.com/fioenix/fn-ignis.git", version="0.6.0", expected_commit=expected, fetch=fake
+    )
+    return {record.name: record for record in records}, fake
+
+
+def test_a_public_repository_tag_on_main_release_and_green_workflow_are_verified():
+    module = _acceptance()
+    records, fake = _github(module)
+    for name in ("repository_public", "tag_on_main", "github_release_published", "container_workflow"):
+        assert records[name].state == module.SurfaceState.VERIFIED, records[name]
+    assert all("Authorization" not in headers for _, headers in fake.requests), "GitHub facts must be read anonymously"
+
+
+def test_a_repository_hidden_from_anonymous_readers_is_not_public():
+    module = _acceptance()
+    fake = FakeGitHub()
+    fake.answers[API] = (404, {"message": "Not Found"})
+    records, _ = _github(module, fake)
+    assert records["repository_public"].state == module.SurfaceState.MISSING
+
+
+def test_a_rate_limited_github_answer_is_unreadable_not_absent():
+    module = _acceptance()
+    fake = FakeGitHub()
+    fake.answers[f"{API}/releases/tags/v0.6.0"] = (403, {"message": "API rate limit exceeded"})
+    records, _ = _github(module, fake)
+    assert records["github_release_published"].state == module.SurfaceState.UNREADABLE
+
+
+def test_a_missing_release_is_missing():
+    module = _acceptance()
+    fake = FakeGitHub()
+    del fake.answers[f"{API}/releases/tags/v0.6.0"]
+    records, _ = _github(module, fake)
+    assert records["github_release_published"].state == module.SurfaceState.MISSING
+
+
+def test_a_tag_off_main_or_on_another_commit_fails():
+    module = _acceptance()
+    fake = FakeGitHub()
+    fake.answers[f"{API}/compare/{TAG_COMMIT}...main"] = (200, {"status": "diverged", "behind_by": 3, "ahead_by": 1})
+    records, _ = _github(module, fake)
+    assert records["tag_on_main"].state == module.SurfaceState.FAILED
+
+    records, _ = _github(module, FakeGitHub(), expected="2" * 40)
+    assert records["tag_on_main"].state == module.SurfaceState.FAILED
+
+
+def test_a_failed_or_foreign_publish_workflow_is_not_verified():
+    module = _acceptance()
+    runs = f"{API}/actions/workflows/docker-publish.yml/runs?branch=v0.6.0&event=push&per_page=5"
+    fake = FakeGitHub()
+    fake.answers[runs] = (200, {"workflow_runs": [{"status": "completed", "conclusion": "failure", "head_sha": TAG_COMMIT,
+                                                   "html_url": "x"}]})
+    assert _github(module, fake)[0]["container_workflow"].state == module.SurfaceState.FAILED
+    fake.answers[runs] = (200, {"workflow_runs": [{"status": "completed", "conclusion": "success", "head_sha": "3" * 40,
+                                                   "html_url": "x"}]})
+    assert _github(module, fake)[0]["container_workflow"].state == module.SurfaceState.FAILED
+    fake.answers[runs] = (200, {"workflow_runs": []})
+    assert _github(module, fake)[0]["container_workflow"].state == module.SurfaceState.MISSING
+
+
+def test_version_parity_reads_every_carrier_in_the_tagged_tree(tmp_path):
+    module = _acceptance()
+    for relative in ("pyproject.toml", "openclaw.json", "server.json", "CITATION.cff", ".openclaw/config.yaml",
+                     "BACKLOG.md", "uv.lock"):
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(REPO / relative, target)
+    declared = tomllib.loads(_read(REPO / "pyproject.toml"))["project"]["version"]
+
+    assert module.observe_version_parity(tmp_path, declared).state == module.SurfaceState.VERIFIED
+    assert module.observe_version_parity(tmp_path, "9.9.9").state == module.SurfaceState.FAILED
+    _mutate(tmp_path, "uv.lock", r'(name = "fn-ignis"\nversion = )"\d+\.\d+\.\d+"', r'\1"9.9.9"')
+    record = module.observe_version_parity(tmp_path, declared)
+    assert record.state == module.SurfaceState.FAILED and "uv.lock" in record.evidence
+    assert module.observe_version_parity(None, declared).state == module.SurfaceState.UNREADABLE
+
+
+FAKE_TOOL = r'''#!__PYTHON__
+import json, os, sys
+with open(os.environ["FAKE_TOOL_LOG"], "a") as handle:
+    handle.write(json.dumps(sys.argv[1:]) + "\n")
+mode = os.environ.get("FAKE_TOOL_MODE", "ok")
+if "--version" in sys.argv:
+    print("mcp-publisher 1.2.3")
+    sys.exit(0)
+if mode == "ok":
+    print("✅ server.json is valid" if "validate" in sys.argv else "Loaded 1 attestation")
+    sys.exit(0)
+if mode == "no-attestation":
+    print("Error: no attestations found for subject", file=sys.stderr)
+    sys.exit(1)
+if mode == "auth":
+    print("error: HTTP 401: Bad credentials", file=sys.stderr)
+    sys.exit(1)
+print("verification failed: signer workflow mismatch", file=sys.stderr)
+sys.exit(1)
+'''
+
+
+def _fake_tool(tmp_path, monkeypatch, name, mode="ok"):
+    import sys
+
+    tool = tmp_path / "tools" / name
+    tool.parent.mkdir(parents=True, exist_ok=True)
+    tool.write_text(FAKE_TOOL.replace("__PYTHON__", sys.executable), encoding="utf-8")
+    tool.chmod(0o755)
+    log = tmp_path / f"{name}.jsonl"
+    monkeypatch.setenv("FAKE_TOOL_LOG", str(log))
+    monkeypatch.setenv("FAKE_TOOL_MODE", mode)
+    return str(tool), log
+
+
+@pytest.mark.parametrize(
+    ("mode", "state"),
+    [("ok", "VERIFIED"), ("no-attestation", "MISSING"), ("auth", "UNREADABLE"), ("mismatch", "FAILED")],
+)
+def test_provenance_is_verified_against_the_digest_repository_ref_and_workflow(tmp_path, monkeypatch, mode, state):
+    module = _acceptance()
+    gh, log = _fake_tool(tmp_path, monkeypatch, "gh", mode)
+    digest = "sha256:" + "a" * 64
+    record = module.observe_provenance(
+        image="ghcr.io/fioenix/fn-ignis", digest=digest, version="0.6.0",
+        repository="https://github.com/fioenix/fn-ignis.git", expected_commit=TAG_COMMIT, gh=gh,
+    )
+    assert record.name == "container_provenance" and record.state == state, record
+    argv = json.loads(log.read_text().splitlines()[0])
+    assert argv[:3] == ["attestation", "verify", f"oci://ghcr.io/fioenix/fn-ignis@{digest}"]
+    for flag, value in (("--repo", "fioenix/fn-ignis"), ("--source-ref", "refs/tags/v0.6.0"),
+                        ("--signer-workflow", "fioenix/fn-ignis/.github/workflows/docker-publish.yml"),
+                        ("--source-digest", TAG_COMMIT)):
+        assert argv[argv.index(flag) + 1] == value, argv
+
+
+def test_provenance_without_a_verified_digest_is_unread(tmp_path, monkeypatch):
+    module = _acceptance()
+    gh, _ = _fake_tool(tmp_path, monkeypatch, "gh")
+    record = module.observe_provenance(image="ghcr.io/fioenix/fn-ignis", digest=None, version="0.6.0",
+                                       repository="https://github.com/fioenix/fn-ignis.git", expected_commit=None, gh=gh)
+    assert record.state == module.SurfaceState.UNREADABLE
+
+
+@pytest.mark.parametrize(("mode", "state"), [("ok", "VERIFIED"), ("mismatch", "FAILED")])
+def test_registry_validation_runs_the_publisher_on_the_tagged_manifest(tmp_path, monkeypatch, mode, state):
+    module = _acceptance()
+    publisher, log = _fake_tool(tmp_path, monkeypatch, "mcp-publisher", mode)
+    tree = tmp_path / "checkout"
+    tree.mkdir()
+    _shutil.copy2(REPO / "server.json", tree / "server.json")
+    record = module.observe_registry_validation(
+        tree, publisher=publisher, passthrough_env=("FAKE_TOOL_LOG", "FAKE_TOOL_MODE")
+    )
+    assert record.state == state, record
+    if state == "VERIFIED":
+        assert "mcp-publisher 1.2.3" in record.evidence
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    assert ["validate"] in calls or any(call[:1] == ["validate"] for call in calls), calls
+
+
+def test_a_missing_publisher_leaves_registry_validation_unread(tmp_path):
+    module = _acceptance()
+    tree = tmp_path / "checkout"
+    tree.mkdir()
+    record = module.observe_registry_validation(tree, publisher=str(tmp_path / "no-such-publisher"))
+    assert record.state == module.SurfaceState.UNREADABLE
+    assert record.failure_class == "tool_unavailable"
+
+
+def test_all_mode_combines_every_observation_into_one_verdict(tmp_path, monkeypatch):
+    module = _acceptance()
+    digest = "sha256:" + "b" * 64
+    seen = {}
+
+    def verified(name, subject=None):
+        return _record(module, name, subject=subject or name)
+
+    def source(**kwargs):
+        checkout = kwargs["root"] / "checkout"
+        checkout.mkdir(parents=True)
+        seen["checkout"] = checkout
+        return [verified(n) for n in ("source_tag_checkout", "source_bootstrap", "source_mcp_runtime")]
+
+    def container(**kwargs):
+        seen["check_worker"] = kwargs.get("check_worker")
+        return [
+            verified("container_anonymous_pull", f"ghcr.io/fioenix/fn-ignis@{digest}"),
+            verified("container_digest", f"ghcr.io/fioenix/fn-ignis@{digest}"),
+            verified("container_mcp_runtime"),
+            verified("compose_worker_override"),
+        ]
+
+    monkeypatch.setattr(module, "observe_source", source)
+    monkeypatch.setattr(module, "observe_container", container)
+    monkeypatch.setattr(module, "observe_github", lambda **kwargs: [verified(n) for n in (
+        "repository_public", "tag_on_main", "github_release_published", "container_workflow")])
+
+    def parity(tree, version):
+        seen["parity_tree"] = tree
+        return verified("version_parity")
+
+    def provenance(**kwargs):
+        seen["provenance_digest"] = kwargs["digest"]
+        return verified("container_provenance")
+
+    def registry(tree, **kwargs):
+        seen["registry_tree"] = tree
+        return verified("mcp_registry_validation")
+
+    monkeypatch.setattr(module, "observe_version_parity", parity)
+    monkeypatch.setattr(module, "observe_provenance", provenance)
+    monkeypatch.setattr(module, "observe_registry_validation", registry)
+
+    output = tmp_path / "evidence.json"
+    exit_code = module.main(["all", "--version", "0.6.0", "--expected-commit", MAIN_COMMIT,
+                             "--work-root", str(tmp_path), "--json-output", str(output)])
+
+    assert exit_code == 0
+    assert json.loads(_read(output))["verdict"] == "RELEASED"
+    assert seen["parity_tree"] == seen["checkout"] and seen["registry_tree"] == seen["checkout"]
+    assert seen["provenance_digest"] == digest
+    assert seen["check_worker"] is True
