@@ -22,6 +22,12 @@
   evidence? → A: No. Only a recorded evaluator failure outranks pending evidence; the rest is still
   judged so the qualification counts stay complete, and the frame turns terminal once nothing is
   pending (agent decided; basis: US4 inspection and the accepted corpus replay counts).
+- Q: Does an empty supply search count as measured-zero evidence when the connector did not apply
+  the mission's timeframe? → A: No. Only a supply surface that attests the same bounded timeframe
+  may contribute a measured zero. Until at least two supply surfaces implement that contract,
+  `SUFFICIENT_ZERO_SUPPLY` may be unreachable; that is the intended fail-closed result, not a reason
+  to reinterpret an unbounded empty search as evidence (agent decided; basis: decision-grade
+  evidence requires the stored query claim to match what the connector actually measured).
 
 ## User Scenarios & Testing
 
