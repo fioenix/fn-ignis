@@ -343,6 +343,20 @@ def test_server_json_marks_the_sqlite_defaulted_database_url_optional():
     assert variables["DATABASE_URL"].get("isRequired") is False, variables["DATABASE_URL"]
 
 
+def test_server_json_says_the_default_database_is_ephemeral_sqlite():
+    """Optional is only honest if the client learns what it gets without the variable."""
+    package = _oci_package(json.loads(_read(SERVER_JSON)))
+    variables = {v["name"]: v for v in package.get("environmentVariables", [])}
+    description = variables["DATABASE_URL"].get("description", "").lower()
+    assert "sqlite" in description and "ephemeral" in description, description
+
+
+def test_the_production_worker_runs_the_published_image():
+    services = yaml.safe_load(_read(REPO / "docker-compose.prod.yml"))["services"]
+    image = services["worker"]["image"]
+    assert image.startswith(f"{IMAGE_REPOSITORY}:"), image
+
+
 # --------------------------------------------------------------------------------------------
 # The tag-driven publish workflow
 # --------------------------------------------------------------------------------------------
@@ -1176,3 +1190,474 @@ def test_a_source_server_with_the_wrong_catalog_fails_runtime(tmp_path, monkeypa
     assert records["source_bootstrap"].state == module.SurfaceState.VERIFIED
     assert records["source_mcp_runtime"].state == module.SurfaceState.FAILED
     assert "discovered 45" in records["source_mcp_runtime"].evidence
+
+
+# --------------------------------------------------------------------------------------------
+# Container mode: an anonymous consumer pulls the image and talks MCP to its default process
+# --------------------------------------------------------------------------------------------
+#
+# The registry is a fake speaking the OCI distribution protocol's anonymous-token dance, and
+# `docker` is a fake executable, so these run offline. What they pin is the observer's judgment:
+# which bytes it demands, which answers it calls missing, failed or unread, and that no credential
+# reaches either side.
+
+import hashlib  # noqa: E402
+
+OCI_INDEX = "application/vnd.oci.image.index.v1+json"
+OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json"
+REGISTRY = "https://ghcr.io"
+IMAGE_PATH = "fioenix/fn-ignis"
+ANONYMOUS_TOKEN = "anonymous-pull-token"
+
+
+def _digest(body: bytes) -> str:
+    return "sha256:" + hashlib.sha256(body).hexdigest()
+
+
+class FakeResponse:
+    def __init__(self, status: int, body: bytes = b"", headers: dict | None = None):
+        self.status = status
+        self.body = body
+        self.headers = {k.lower(): v for k, v in (headers or {}).items()}
+
+    def chunks(self):
+        yield self.body
+
+
+class FakeRegistry:
+    """Anonymous-token GHCR stand-in. Every request is recorded with its headers."""
+
+    def __init__(self, *, labels=None, anonymous=True):
+        self.requests: list[tuple[str, dict]] = []
+        self.anonymous = anonymous
+        self.overrides: dict[str, FakeResponse] = {}
+        labels = labels if labels is not None else {
+            SOURCE_LABEL: SOURCE_REPOSITORY_URL,
+            MCP_NAME_LABEL: json.loads(_read(SERVER_JSON))["name"],
+        }
+        self.config = json.dumps({"config": {"Labels": labels}, "architecture": "amd64", "os": "linux"}).encode()
+        self.layers = [b"layer-one" * 100, b"layer-two" * 50]
+        self.image_manifest = json.dumps(
+            {
+                "mediaType": OCI_MANIFEST,
+                "config": {"digest": _digest(self.config), "size": len(self.config)},
+                "layers": [{"digest": _digest(layer), "size": len(layer)} for layer in self.layers],
+            }
+        ).encode()
+        attestation = json.dumps({"mediaType": OCI_MANIFEST, "config": {"digest": "sha256:" + "0" * 64}, "layers": []}).encode()
+        self.attestation = attestation
+        self.index = json.dumps(
+            {
+                "mediaType": OCI_INDEX,
+                "manifests": [
+                    {"digest": _digest(self.image_manifest), "mediaType": OCI_MANIFEST,
+                     "platform": {"os": "linux", "architecture": "amd64"}},
+                    {"digest": _digest(attestation), "mediaType": OCI_MANIFEST,
+                     "platform": {"os": "unknown", "architecture": "unknown"}},
+                ],
+            }
+        ).encode()
+        self.tags = {tag: self.index for tag in ("0.6.0", "0.6", "latest")}
+
+    @property
+    def index_digest(self) -> str:
+        return _digest(self.index)
+
+    def __call__(self, url: str, headers: dict) -> FakeResponse:
+        self.requests.append((url, dict(headers)))
+        if url in self.overrides:
+            return self.overrides[url]
+        if url.startswith(f"{REGISTRY}/token"):
+            return FakeResponse(200, json.dumps({"token": ANONYMOUS_TOKEN}).encode()) if self.anonymous else FakeResponse(401)
+        if headers.get("Authorization") != f"Bearer {ANONYMOUS_TOKEN}":
+            return FakeResponse(
+                401,
+                headers={"WWW-Authenticate": f'Bearer realm="{REGISTRY}/token",service="ghcr.io",'
+                                             f'scope="repository:{IMAGE_PATH}:pull"'},
+            )
+        if not self.anonymous:
+            return FakeResponse(401)
+        prefix = f"{REGISTRY}/v2/{IMAGE_PATH}/"
+        if url.startswith(prefix + "manifests/"):
+            reference = url.rsplit("/", 1)[1]
+            body = self.tags.get(reference)
+            if body is None:
+                body = {_digest(self.image_manifest): self.image_manifest, _digest(self.attestation): self.attestation}.get(reference)
+            if body is None:
+                return FakeResponse(404, b'{"errors":[{"code":"MANIFEST_UNKNOWN"}]}')
+            media = json.loads(body)["mediaType"]
+            return FakeResponse(200, body, {"Docker-Content-Digest": _digest(body), "Content-Type": media})
+        if url.startswith(prefix + "blobs/"):
+            digest = url.rsplit("/", 1)[1]
+            for blob in [self.config, *self.layers]:
+                if _digest(blob) == digest:
+                    return FakeResponse(200, blob)
+            return FakeResponse(404)
+        return FakeResponse(404)
+
+
+FAKE_DOCKER = r'''#!__PYTHON__
+import json, os, sys
+log = os.environ["FAKE_DOCKER_LOG"]
+with open(log, "a") as handle:
+    config_dir = os.environ.get("DOCKER_CONFIG", "")
+    config = open(os.path.join(config_dir, "config.json")).read() if config_dir and os.path.exists(os.path.join(config_dir, "config.json")) else None
+    handle.write(json.dumps({"argv": sys.argv[1:], "docker_config": config,
+                             "github": [k for k in os.environ if k in ("GH_TOKEN", "GITHUB_TOKEN")]}) + "\n")
+args = sys.argv[1:]
+if args[:2] == ["image", "inspect"]:
+    state = os.environ.get("FAKE_DOCKER_PRESENT", "")
+    if state == "yes" or os.path.exists(log + ".pulled"):
+        print(json.dumps([os.environ["FAKE_DOCKER_REPO_DIGEST"]]))
+        sys.exit(0)
+    print("Error: No such image", file=sys.stderr)
+    sys.exit(1)
+if args[0] == "pull":
+    if os.environ.get("FAKE_DOCKER_PULL") == "unauthorized":
+        print("Error response from daemon: Head \"https://ghcr.io/v2/fioenix/fn-ignis/manifests/0.6.0\": unauthorized", file=sys.stderr)
+        sys.exit(1)
+    open(log + ".pulled", "w").close()
+    print("Digest: " + os.environ["FAKE_DOCKER_REPO_DIGEST"].split("@", 1)[1])
+    sys.exit(0)
+if args[0] == "run":
+    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "47"])
+if args[:2] == ["image", "rm"]:
+    sys.exit(0)
+print("unexpected docker call: " + " ".join(args), file=sys.stderr)
+sys.exit(2)
+'''
+
+
+def _fake_docker(tmp_path: Path, monkeypatch, registry: FakeRegistry, **env) -> tuple[str, Path]:
+    import sys
+
+    executable = tmp_path / "fake-bin" / "docker"
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    executable.write_text(FAKE_DOCKER.replace("__PYTHON__", sys.executable), encoding="utf-8")
+    executable.chmod(0o755)
+    server = tmp_path / "fake_server.py"
+    server.write_text(FAKE_SERVER, encoding="utf-8")
+    log = tmp_path / "docker-calls.jsonl"
+    monkeypatch.setenv("FAKE_DOCKER_LOG", str(log))
+    monkeypatch.setenv("FAKE_SERVER_PATH", str(server))
+    monkeypatch.setenv("FAKE_DOCKER_REPO_DIGEST", f"ghcr.io/{IMAGE_PATH}@{registry.index_digest}")
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    return str(executable), log
+
+
+def _observe_container(module, tmp_path, monkeypatch, registry=None, version="0.6.0", **env):
+    registry = registry or FakeRegistry()
+    docker, log = _fake_docker(tmp_path, monkeypatch, registry, **env)
+    with module.TemporaryRoot(parent=tmp_path) as root:
+        records = module.observe_container(
+            image=f"ghcr.io/{IMAGE_PATH}",
+            version=version,
+            root=root.path,
+            fetch=registry,
+            docker=docker,
+            passthrough_env=("FAKE_DOCKER_LOG", "FAKE_SERVER_PATH", "FAKE_DOCKER_REPO_DIGEST", *env),
+            smoke_timeout=15,
+        )
+    calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    return {record.name: record for record in records}, registry, calls
+
+
+def test_the_container_is_pulled_digest_checked_and_serves_mcp_anonymously(tmp_path, monkeypatch):
+    module = _acceptance()
+    records, registry, _ = _observe_container(module, tmp_path, monkeypatch)
+    for name in ("container_anonymous_pull", "container_digest", "container_mcp_runtime"):
+        assert records[name].state == module.SurfaceState.VERIFIED, records[name]
+    assert registry.index_digest in records["container_digest"].subject
+
+
+def test_docker_runs_with_an_empty_config_and_no_github_credentials(tmp_path, monkeypatch):
+    module = _acceptance()
+    monkeypatch.setenv("GH_TOKEN", "inherited-gh-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "inherited-github-token")
+    _, _, calls = _observe_container(module, tmp_path, monkeypatch)
+    assert calls, "the observer never invoked docker"
+    for call in calls:
+        assert call["docker_config"] is not None and json.loads(call["docker_config"]) == {}, call
+        assert call["github"] == [], call
+
+
+def test_only_anonymous_registry_requests_are_made(tmp_path, monkeypatch):
+    module = _acceptance()
+    monkeypatch.setenv("GITHUB_TOKEN", "inherited-github-token")
+    _, registry, _ = _observe_container(module, tmp_path, monkeypatch)
+    for url, headers in registry.requests:
+        authorization = headers.get("Authorization")
+        assert authorization in (None, f"Bearer {ANONYMOUS_TOKEN}"), (url, authorization)
+    token_requests = [url for url, headers in registry.requests if url.startswith(f"{REGISTRY}/token")]
+    assert token_requests and all("Authorization" not in dict(h) for u, h in registry.requests if u in token_requests)
+
+
+def test_the_selected_platform_config_and_every_layer_are_downloaded(tmp_path, monkeypatch):
+    module = _acceptance()
+    _, registry, _ = _observe_container(module, tmp_path, monkeypatch)
+    fetched = {url.rsplit("/", 1)[1] for url, _ in registry.requests if "/blobs/" in url}
+    expected = {_digest(registry.config), *(_digest(layer) for layer in registry.layers)}
+    assert expected <= fetched, f"not every blob of the selected platform was fetched: {expected - fetched}"
+
+
+def test_an_unauthorized_anonymous_consumer_is_missing_public_access(tmp_path, monkeypatch):
+    """The v0.5.0 baseline: the package exists, the anonymous consumer is refused."""
+    module = _acceptance()
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, FakeRegistry(anonymous=False))
+    assert records["container_anonymous_pull"].state == module.SurfaceState.MISSING
+    assert records["container_anonymous_pull"].failure_class == "missing"
+    assert records["container_mcp_runtime"].state == module.SurfaceState.UNREADABLE
+
+
+def test_a_daemon_pull_refused_after_registry_success_is_missing(tmp_path, monkeypatch):
+    module = _acceptance()
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, FAKE_DOCKER_PULL="unauthorized")
+    assert records["container_anonymous_pull"].state == module.SurfaceState.MISSING
+
+
+def test_an_absent_release_tag_is_missing(tmp_path, monkeypatch):
+    module = _acceptance()
+    registry = FakeRegistry()
+    del registry.tags["0.6.0"]
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, registry)
+    assert records["container_anonymous_pull"].state == module.SurfaceState.MISSING
+
+
+def test_a_layer_refused_after_the_manifest_is_failed(tmp_path, monkeypatch):
+    module = _acceptance()
+    registry = FakeRegistry()
+    registry.overrides[f"{REGISTRY}/v2/{IMAGE_PATH}/blobs/{_digest(registry.layers[1])}"] = FakeResponse(403)
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, registry)
+    assert records["container_anonymous_pull"].state == module.SurfaceState.FAILED
+    assert _digest(registry.layers[1]) in records["container_anonymous_pull"].evidence
+
+
+def test_a_layer_whose_bytes_do_not_match_its_digest_is_failed(tmp_path, monkeypatch):
+    module = _acceptance()
+    registry = FakeRegistry()
+    registry.overrides[f"{REGISTRY}/v2/{IMAGE_PATH}/blobs/{_digest(registry.layers[0])}"] = FakeResponse(200, b"tampered")
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, registry)
+    assert records["container_anonymous_pull"].state == module.SurfaceState.FAILED
+
+
+def test_a_registry_that_cannot_be_reached_is_unreadable(tmp_path, monkeypatch):
+    module = _acceptance()
+
+    def unreachable(url, headers):
+        raise OSError("Could not resolve host: ghcr.io")
+
+    docker, _ = _fake_docker(tmp_path, monkeypatch, FakeRegistry())
+    with module.TemporaryRoot(parent=tmp_path) as root:
+        records = module.observe_container(
+            image=f"ghcr.io/{IMAGE_PATH}", version="0.6.0", root=root.path, fetch=unreachable, docker=docker
+        )
+    by_name = {record.name: record for record in records}
+    assert by_name["container_anonymous_pull"].state == module.SurfaceState.UNREADABLE
+    assert by_name["container_anonymous_pull"].failure_class == "network"
+
+
+def test_a_moving_tag_on_another_digest_fails_the_digest_surface(tmp_path, monkeypatch):
+    module = _acceptance()
+    registry = FakeRegistry()
+    registry.tags["latest"] = registry.image_manifest
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, registry)
+    assert records["container_digest"].state == module.SurfaceState.FAILED
+    assert "latest" in records["container_digest"].evidence
+
+
+def test_an_absent_moving_tag_is_missing(tmp_path, monkeypatch):
+    module = _acceptance()
+    registry = FakeRegistry()
+    del registry.tags["0.6"]
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, registry)
+    assert records["container_digest"].state == module.SurfaceState.MISSING
+
+
+def test_a_prerelease_is_checked_against_its_exact_tag_only(tmp_path, monkeypatch):
+    """metadata-action never moves major.minor or latest for a prerelease, so neither is expected."""
+    module = _acceptance()
+    registry = FakeRegistry()
+    registry.tags = {"1.0.0-rc.1": registry.index}
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, registry, version="1.0.0-rc.1")
+    assert records["container_digest"].state == module.SurfaceState.VERIFIED, records["container_digest"]
+
+
+def test_a_missing_or_different_ownership_label_fails_the_digest_surface(tmp_path, monkeypatch):
+    module = _acceptance()
+    for labels in (
+        {SOURCE_LABEL: SOURCE_REPOSITORY_URL},
+        {SOURCE_LABEL: SOURCE_REPOSITORY_URL, MCP_NAME_LABEL: "io.github.someone/else"},
+        {MCP_NAME_LABEL: json.loads(_read(SERVER_JSON))["name"]},
+    ):
+        records, _, _ = _observe_container(module, tmp_path, monkeypatch, FakeRegistry(labels=labels))
+        assert records["container_digest"].state == module.SurfaceState.FAILED, labels
+
+
+def test_an_image_whose_default_process_is_not_mcp_fails_runtime(tmp_path, monkeypatch):
+    """The scheduler default logs to stdout; that is exactly what the smoke must reject."""
+    module = _acceptance()
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, FAKE_SERVER_MODE="banner")
+    assert records["container_mcp_runtime"].state == module.SurfaceState.FAILED
+    assert "non-MCP" in records["container_mcp_runtime"].evidence
+
+
+def test_the_runtime_uses_the_pulled_digest_and_never_pulls_again(tmp_path, monkeypatch):
+    module = _acceptance()
+    registry = FakeRegistry()
+    _, _, calls = _observe_container(module, tmp_path, monkeypatch, registry)
+    runs = [call["argv"] for call in calls if call["argv"][:1] == ["run"]]
+    assert len(runs) == 1
+    assert f"ghcr.io/{IMAGE_PATH}@{registry.index_digest}" in runs[0]
+    assert "--pull" in runs[0] and runs[0][runs[0].index("--pull") + 1] == "never"
+    assert "--platform" in runs[0] and runs[0][runs[0].index("--platform") + 1] == "linux/amd64"
+
+
+def test_an_image_the_run_pulled_is_removed_and_a_preexisting_one_is_kept(tmp_path, monkeypatch):
+    module = _acceptance()
+    _, _, calls = _observe_container(module, tmp_path, monkeypatch)
+    assert any(call["argv"][:2] == ["image", "rm"] for call in calls), "the pulled image was left behind"
+
+    other = tmp_path / "second"
+    other.mkdir()
+    _, _, calls = _observe_container(module, other, monkeypatch, FAKE_DOCKER_PRESENT="yes")
+    assert not any(call["argv"][:2] == ["image", "rm"] for call in calls), (
+        "the observer removed an image that existed before it ran"
+    )
+
+
+# --------------------------------------------------------------------------------------------
+# The Compose worker role, started for real rather than read from YAML
+# --------------------------------------------------------------------------------------------
+
+FAKE_COMPOSE_DOCKER = r'''#!__PYTHON__
+import json, os, sys
+log = os.environ["FAKE_DOCKER_LOG"]
+args = sys.argv[1:]
+with open(log, "a") as handle:
+    handle.write(json.dumps({"argv": args}) + "\n")
+mode = os.environ.get("FAKE_COMPOSE_MODE", "ok")
+if mode == "no-daemon":
+    print("Cannot connect to the Docker daemon at unix:///var/run/docker.sock", file=sys.stderr)
+    sys.exit(1)
+if args[0] == "compose":
+    # Like the real CLI: an isolated DOCKER_CONFIG hides the user's cli-plugins directory unless the
+    # config names it, and an override may not name a service its base file lacks.
+    config = json.load(open(os.path.join(os.environ["DOCKER_CONFIG"], "config.json")))
+    if set(config) - {"cliPluginsExtraDirs"} or not config.get("cliPluginsExtraDirs"):
+        print("docker: unknown command: docker compose", file=sys.stderr)
+        sys.exit(1)
+    files = [args[i + 1] for i, a in enumerate(args) if a == "-f"]
+    if files[0].endswith("docker-compose.yml") and "  db:" in open(files[1]).read():
+        print('service "db" has neither an image nor a build context specified: invalid compose project', file=sys.stderr)
+        sys.exit(15)
+    if "config" in args:
+        if mode == "config-error":
+            print("yaml: line 3: invalid compose project", file=sys.stderr)
+            sys.exit(15)
+        command = ["python", "-m", "ignis.interfaces.cli.scheduler"]
+        if mode == "no-override" and files[0].endswith("docker-compose.yml"):
+            command = None
+        worker = {"image": "x"}
+        if command:
+            worker["command"] = command
+        print(json.dumps({"services": {"worker": worker}}))
+        sys.exit(0)
+    if "up" in args:
+        sys.exit(0)
+    if "down" in args:
+        open(log + ".down", "w").close()
+        sys.exit(0)
+if args[0] == "inspect":
+    print("running")
+    sys.exit(0)
+if args[0] == "top":
+    module = "ignis.interfaces.mcp.server" if mode == "wrong-process" else "ignis.interfaces.cli.scheduler"
+    print("UID PID CMD\nroot 1 python -m " + module)
+    sys.exit(0)
+if args[0] == "logs":
+    print("Starting fn-ignis Worker Scheduler (Ingress: 8640s)...", file=sys.stderr)
+    sys.exit(0)
+if args[0] in ("ps", "volume", "network"):
+    sys.exit(0)
+print("unexpected: " + " ".join(args), file=sys.stderr)
+sys.exit(2)
+'''
+
+
+def _observe_compose(module, tmp_path, monkeypatch, **env):
+    import sys
+
+    plugins = tmp_path / "operator-docker" / "cli-plugins"
+    plugins.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("DOCKER_CONFIG", str(plugins.parent))
+    executable = tmp_path / "compose-bin" / "docker"
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    executable.write_text(FAKE_COMPOSE_DOCKER.replace("__PYTHON__", sys.executable), encoding="utf-8")
+    executable.chmod(0o755)
+    log = tmp_path / "compose-calls.jsonl"
+    monkeypatch.setenv("FAKE_DOCKER_LOG", str(log))
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    with module.TemporaryRoot(parent=tmp_path) as root:
+        record = module.observe_compose_worker(
+            image_ref="ghcr.io/fioenix/fn-ignis@sha256:" + "1" * 64,
+            root=root.path,
+            docker=str(executable),
+            passthrough_env=("FAKE_DOCKER_LOG", *env),
+            settle_seconds=0,
+            observe_seconds=1,
+        )
+        leftover_env = list(root.path.rglob("*.env"))
+    calls = [json.loads(line)["argv"] for line in log.read_text().splitlines()] if log.exists() else []
+    return record, calls, leftover_env, Path(str(log) + ".down").exists()
+
+
+def test_the_production_worker_starts_the_scheduler(tmp_path, monkeypatch):
+    module = _acceptance()
+    record, calls, leftover_env, torn_down = _observe_compose(module, tmp_path, monkeypatch)
+    assert record.name == "compose_worker_override"
+    assert record.state == module.SurfaceState.VERIFIED, record
+    ups = [call for call in calls if call[0] == "compose" and "up" in call]
+    assert ups and any(arg.endswith("docker-compose.prod.yml") for arg in ups[0]), ups
+    assert torn_down, "the throwaway Compose project was not torn down"
+    assert not leftover_env, "the generated Compose credential file outlived the run"
+
+
+def test_a_compose_file_without_the_scheduler_command_fails(tmp_path, monkeypatch):
+    """Without the explicit command the worker would run the image's MCP default and exit on EOF."""
+    module = _acceptance()
+    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="no-override")
+    assert record.state == module.SurfaceState.FAILED
+    assert "docker-compose.yml" in record.evidence
+
+
+def test_a_worker_running_anything_but_the_scheduler_fails(tmp_path, monkeypatch):
+    module = _acceptance()
+    record, _, _, torn_down = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="wrong-process")
+    assert record.state == module.SurfaceState.FAILED
+    assert torn_down
+
+
+def test_an_unreachable_docker_daemon_leaves_the_worker_role_unread(tmp_path, monkeypatch):
+    module = _acceptance()
+    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="no-daemon")
+    assert record.state == module.SurfaceState.UNREADABLE
+    assert record.failure_class == "network"
+
+
+def test_the_compose_docker_config_names_only_the_plugin_directory(tmp_path, monkeypatch):
+    """Compose is a CLI plugin: isolation must keep it reachable while carrying no credential."""
+    module = _acceptance()
+    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch)
+    assert record.state == module.SurfaceState.VERIFIED, record
+
+
+def test_a_compose_config_that_fails_is_reported_with_its_error(tmp_path, monkeypatch):
+    """A failed `compose config` is not a worker command of None."""
+    module = _acceptance()
+    monkeypatch.setenv("FAKE_COMPOSE_MODE", "config-error")
+    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="config-error")
+    assert record.state in (module.SurfaceState.FAILED, module.SurfaceState.UNREADABLE)
+    assert "resolves to None" not in record.evidence
+    assert "invalid compose project" in record.evidence

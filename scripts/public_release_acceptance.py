@@ -35,6 +35,7 @@ release owner's registry authentication and is recorded as its own surface.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -818,6 +819,537 @@ def observe_source(
 
 
 # --------------------------------------------------------------------------------------------
+# Container mode
+# --------------------------------------------------------------------------------------------
+
+SOURCE_REPOSITORY_URL = "https://github.com/fioenix/fn-ignis"
+SOURCE_LABEL = "org.opencontainers.image.source"
+MCP_NAME_LABEL = "io.modelcontextprotocol.server.name"
+REGISTRY_TIMEOUT_SECONDS = 60
+PULL_TIMEOUT_SECONDS = 900
+CONTAINER_SMOKE_TIMEOUT_SECONDS = 180.0
+MANIFEST_ACCEPT = ", ".join(
+    (
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    )
+)
+DOCKER_ABSENT_MARKERS = ("unauthorized", "denied", "manifest unknown", "not found")
+
+
+class RegistryAnswer(Exception):
+    """The registry answered, and the answer is not the object asked for."""
+
+    def __init__(self, status: int, what: str):
+        # "(HTTP n)" rather than ": HTTP n": after a word like "token", a colon reads as a secret
+        # assignment to the redactor and the status would be blanked out of the evidence.
+        super().__init__(f"{what} (HTTP {status})")
+        self.status = status
+
+
+@dataclass
+class HttpResponse:
+    status: int
+    headers: dict[str, str]
+    _stream: object = None
+    body: bytes = b""
+
+    def chunks(self):
+        if self._stream is None:
+            yield self.body
+            return
+        try:
+            while chunk := self._stream.read(1 << 20):
+                yield chunk
+        finally:
+            self._stream.close()
+
+
+def http_fetch(url: str, headers: dict[str, str]) -> HttpResponse:
+    """GET without ambient credentials, following redirects by hand.
+
+    urllib forwards an Authorization header across a redirect. Blob downloads redirect to object
+    storage on another host, where a stray bearer token is at best refused, so it is dropped the
+    moment the host changes.
+    """
+    from urllib.error import HTTPError
+    from urllib.parse import urljoin, urlsplit
+    from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+    class _NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = build_opener(_NoRedirect)
+    current, current_headers = url, dict(headers)
+    for _ in range(6):
+        try:
+            response = opener.open(Request(current, headers=current_headers), timeout=REGISTRY_TIMEOUT_SECONDS)
+        except HTTPError as error:
+            if error.code in (301, 302, 303, 307, 308) and error.headers.get("Location"):
+                target = urljoin(current, error.headers["Location"])
+                if urlsplit(target).netloc != urlsplit(current).netloc:
+                    current_headers.pop("Authorization", None)
+                current = target
+                error.close()
+                continue
+            body = error.read()
+            error.close()
+            return HttpResponse(error.code, {k.lower(): v for k, v in error.headers.items()}, body=body)
+        return HttpResponse(response.status, {k.lower(): v for k, v in response.headers.items()}, response)
+    raise OSError(f"too many redirects fetching {redact(url)}")
+
+
+class AnonymousRegistry:
+    """The OCI distribution protocol, as a client with no credential sees it."""
+
+    def __init__(self, image: str, fetch=http_fetch):
+        host, _, self.path = image.partition("/")
+        self.base = f"https://{host}"
+        self.fetch = fetch
+        self.token: str | None = None
+        self.requested_token = False
+
+    def _authorize(self, challenge: str) -> None:
+        from urllib.parse import urlencode
+
+        fields = dict(re.findall(r'(\w+)="([^"]*)"', challenge))
+        if not challenge.lower().startswith("bearer") or "realm" not in fields or self.requested_token:
+            raise RegistryAnswer(401, "the registry refused the anonymous consumer")
+        self.requested_token = True
+        query = urlencode({key: fields[key] for key in ("service", "scope") if key in fields})
+        answer = self.fetch(f"{fields['realm']}?{query}", {})
+        if answer.status != 200:
+            raise RegistryAnswer(answer.status, "the registry issued no anonymous pull token")
+        self.token = json.loads(b"".join(answer.chunks()) or b"{}").get("token") or None
+        if not self.token:
+            raise RegistryAnswer(401, "the registry issued no anonymous pull token")
+
+    def get(self, kind: str, reference: str, accept: str | None = None) -> HttpResponse:
+        url = f"{self.base}/v2/{self.path}/{kind}/{reference}"
+        for _ in range(2):
+            headers = {"Accept": accept} if accept else {}
+            if self.token:
+                headers["Authorization"] = f"Bearer {self.token}"
+            answer = self.fetch(url, headers)
+            if answer.status == 401 and not self.token:
+                self._authorize(answer.headers.get("www-authenticate", ""))
+                continue
+            return answer
+        return answer
+
+    def manifest(self, reference: str) -> tuple[str, dict]:
+        answer = self.get("manifests", reference, MANIFEST_ACCEPT)
+        if answer.status != 200:
+            raise RegistryAnswer(answer.status, f"manifest {reference}")
+        body = b"".join(answer.chunks())
+        digest = answer.headers.get("docker-content-digest") or "sha256:" + hashlib.sha256(body).hexdigest()
+        return digest, json.loads(body)
+
+    def blob(self, digest: str) -> bytes | int:
+        """The blob's bytes after verifying their digest, or the failing HTTP status (0: digest mismatch)."""
+        answer = self.get("blobs", digest)
+        if answer.status != 200:
+            return answer.status
+        hasher = hashlib.sha256()
+        kept = bytearray()
+        for chunk in answer.chunks():
+            hasher.update(chunk)
+            if len(kept) < 1 << 20:
+                kept.extend(chunk)
+        return bytes(kept) if f"sha256:{hasher.hexdigest()}" == digest else 0
+
+
+def _host_platform() -> str:
+    import platform as host
+
+    machine = host.machine().lower()
+    return "linux/arm64" if machine in ("arm64", "aarch64") else "linux/amd64"
+
+
+def _select_platform(index: dict, requested: str | None) -> tuple[str, str] | None:
+    """(platform, manifest digest) to pull: the requested one, the only runnable one, or the host's."""
+    runnable = {}
+    for entry in index.get("manifests", []):
+        platform = entry.get("platform", {})
+        if platform.get("os") in (None, "unknown"):
+            continue
+        name = f"{platform['os']}/{platform['architecture']}" + (f"/{platform['variant']}" if platform.get("variant") else "")
+        runnable[name] = entry["digest"]
+    if requested:
+        return (requested, runnable[requested]) if requested in runnable else None
+    if len(runnable) == 1:
+        return next(iter(runnable.items()))
+    host = _host_platform()
+    return (host, runnable[host]) if host in runnable else None
+
+
+def _expected_tags(version: str) -> list[str]:
+    """The tags one release event must move: the exact version, plus major.minor and latest when stable."""
+    match = SEMVER.fullmatch(version)
+    if match.group(4):
+        return [version]
+    return [version, f"{match.group(1)}.{match.group(2)}", "latest"]
+
+
+def _docker(docker: str, args: list[str], env: dict, timeout: float) -> CommandOutcome:
+    return run_bounded([docker, *args], timeout=timeout, env=env)
+
+
+def _expected_mcp_name(reference: Path) -> str | None:
+    try:
+        return json.loads((reference / "server.json").read_text(encoding="utf-8")).get("name")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _registry_pull(
+    registry: AnonymousRegistry, image: str, version: str, platform: str | None
+) -> tuple[SurfaceRecord | None, dict]:
+    """Fetch tag, platform manifest, config and every layer anonymously. Returns (problem, facts)."""
+    subject = f"{image}:{version}"
+    facts: dict = {}
+    try:
+        index_digest, index = registry.manifest(version)
+    except RegistryAnswer as answer:
+        return SurfaceRecord("container_anonymous_pull", SurfaceState.MISSING, subject,
+                             f"{answer}: the anonymous consumer cannot obtain the release tag", "missing"), facts
+    facts["digest"] = index_digest
+    if "manifests" in index:
+        selected = _select_platform(index, platform)
+        if not selected:
+            return SurfaceRecord("container_anonymous_pull", SurfaceState.FAILED, subject,
+                                 f"no runnable platform{f' {platform}' if platform else ''} in {index_digest}",
+                                 "behavior_mismatch"), facts
+        facts["platform"], manifest_digest = selected
+        try:
+            _, manifest = registry.manifest(manifest_digest)
+        except RegistryAnswer as answer:
+            return SurfaceRecord("container_anonymous_pull", SurfaceState.FAILED, subject,
+                                 f"the index resolved but its {facts['platform']} manifest did not: {answer}",
+                                 "behavior_mismatch"), facts
+    else:
+        manifest = index
+        facts["platform"] = platform or _host_platform()
+
+    blobs = [manifest["config"]["digest"], *(layer["digest"] for layer in manifest.get("layers", []))]
+    refused = []
+    for digest in blobs:
+        got = registry.blob(digest)
+        if isinstance(got, int):
+            refused.append(f"{digest} ({'bytes do not match the digest' if got == 0 else f'HTTP {got}'})")
+        elif digest == blobs[0]:
+            try:
+                facts["labels"] = (json.loads(got).get("config") or {}).get("Labels") or {}
+            except json.JSONDecodeError:
+                facts["labels"] = {}
+    if refused:
+        return SurfaceRecord("container_anonymous_pull", SurfaceState.FAILED, subject,
+                             f"the manifest resolved anonymously but these blobs did not download intact: {refused}",
+                             "behavior_mismatch"), facts
+    facts["blob_count"] = len(blobs)
+    return None, facts
+
+
+def observe_container(
+    *,
+    image: str,
+    version: str,
+    root: Path,
+    reference: Path = REFERENCE_TREE,
+    platform: str | None = None,
+    source_url: str = SOURCE_REPOSITORY_URL,
+    fetch=http_fetch,
+    docker: str = "docker",
+    passthrough_env: tuple[str, ...] = (),
+    smoke_timeout: float = CONTAINER_SMOKE_TIMEOUT_SECONDS,
+    check_worker: bool = False,
+) -> list[SurfaceRecord]:
+    """Pull the release image as a stranger would, check what it is, and talk MCP to it.
+
+    With `check_worker`, the Compose worker role is then started on the same pulled digest before
+    the image is cleaned up; without a verified anonymous pull there is nothing to run, and the
+    role is recorded as unread.
+    """
+    subject = f"{image}:{version}"
+    docker_config = root / "docker-config"
+    docker_config.mkdir()
+    (docker_config / "config.json").write_text("{}\n", encoding="utf-8")
+    home = root / "home"
+    home.mkdir(exist_ok=True)
+    extra = {name: os.environ[name] for name in passthrough_env if name in os.environ}
+    env = isolated_env(home, docker_config=docker_config, extra=extra)
+
+    def downstream(why: str) -> list[SurfaceRecord]:
+        unread = [_unread("container_digest", subject, why), _unread("container_mcp_runtime", subject, why)]
+        if check_worker:
+            unread.append(_unread("compose_worker_override", subject, why))
+        return unread
+
+    registry = AnonymousRegistry(image, fetch)
+    try:
+        problem, facts = _registry_pull(registry, image, version, platform)
+    except OSError as error:
+        record = SurfaceRecord("container_anonymous_pull", SurfaceState.UNREADABLE, subject,
+                               f"the registry could not be reached: {error}", "network")
+        return [record, *downstream("the registry could not be reached")]
+    if problem:
+        return [problem, *downstream("the image was not obtained anonymously")]
+
+    selected = facts["platform"]
+    before = _docker(docker, ["image", "inspect", f"{image}:{version}", "--format", "{{json .RepoDigests}}"], env, 60)
+    preexisting = before.ok
+    pulled = _docker(docker, ["pull", "--platform", selected, f"{image}:{version}"], env, PULL_TIMEOUT_SECONDS)
+    try:
+        failure = classify_failure(pulled, DOCKER_ABSENT_MARKERS)
+        if failure:
+            state, failure_class = failure
+            record = SurfaceRecord("container_anonymous_pull", state, subject,
+                                   f"docker pull with an empty credential store: {pulled.summary}",
+                                   failure_class, pulled.returncode)
+            return [record, *downstream("the daemon did not pull the image anonymously")]
+        pulled_digest = next(iter(re.findall(r"Digest:\s*(sha256:[0-9a-f]{64})", pulled.stdout)), None)
+        pull_record = SurfaceRecord(
+            "container_anonymous_pull",
+            SurfaceState.VERIFIED,
+            f"{image}@{facts['digest']}",
+            f"no credential: anonymous token, {selected} manifest, config and all {facts['blob_count'] - 1} "
+            f"layers downloaded and digest-verified; docker pull with an empty DOCKER_CONFIG succeeded",
+            command_exit=0,
+        )
+
+        digest_problems, digest_missing = [], []
+        if pulled_digest != facts["digest"]:
+            digest_problems.append(f"docker pulled {pulled_digest}, the registry tag names {facts['digest']}")
+        tag_digests = {}
+        for tag in _expected_tags(version):
+            try:
+                tag_digests[tag] = registry.manifest(tag)[0]
+            except RegistryAnswer as answer:
+                digest_missing.append(f"{tag}: {answer}")
+        moved_elsewhere = [f"{tag} -> {digest}" for tag, digest in tag_digests.items() if digest != facts["digest"]]
+        if moved_elsewhere:
+            digest_problems.append(f"tags resolve to another digest: {moved_elsewhere}")
+        labels = facts.get("labels", {})
+        expected_name = _expected_mcp_name(reference)
+        if labels.get(SOURCE_LABEL) != source_url:
+            digest_problems.append(f"{SOURCE_LABEL} is {labels.get(SOURCE_LABEL)!r}, expected {source_url!r}")
+        if not expected_name or labels.get(MCP_NAME_LABEL) != expected_name:
+            digest_problems.append(f"{MCP_NAME_LABEL} is {labels.get(MCP_NAME_LABEL)!r}, expected {expected_name!r}")
+        digest_subject = f"{image}@{facts['digest']}"
+        if digest_problems:
+            digest_record = SurfaceRecord("container_digest", SurfaceState.FAILED, digest_subject,
+                                          "; ".join(digest_problems + digest_missing), "behavior_mismatch")
+        elif digest_missing:
+            digest_record = SurfaceRecord("container_digest", SurfaceState.MISSING, digest_subject,
+                                          f"release tags absent: {digest_missing}", "missing")
+        else:
+            digest_record = SurfaceRecord(
+                "container_digest",
+                SurfaceState.VERIFIED,
+                digest_subject,
+                f"tags {sorted(tag_digests)} all resolve to {facts['digest']}; {SOURCE_LABEL}={source_url}; "
+                f"{MCP_NAME_LABEL}={expected_name}",
+            )
+
+        runtime = _smoke_record(
+            "container_mcp_runtime",
+            digest_subject,
+            [docker, "run", "--rm", "-i", "--pull", "never", "--platform", selected, digest_subject],
+            env=env,
+            cwd=None,
+            timeout=smoke_timeout,
+        )
+        records = [pull_record, digest_record, runtime]
+        if check_worker:
+            records.append(
+                observe_compose_worker(
+                    image_ref=digest_subject,
+                    root=root,
+                    reference=reference,
+                    docker=docker,
+                    platform=selected,
+                    passthrough_env=passthrough_env,
+                )
+            )
+        return records
+    finally:
+        if not preexisting and pulled.ok:
+            _docker(docker, ["image", "rm", f"{image}:{version}"], env, 120)
+
+
+# --------------------------------------------------------------------------------------------
+# The Compose worker role
+# --------------------------------------------------------------------------------------------
+
+COMPOSE_FILES = ("docker-compose.yml", "docker-compose.prod.yml")
+PRODUCTION_COMPOSE = "docker-compose.prod.yml"
+SCHEDULER_COMMAND = ["python", "-m", "ignis.interfaces.cli.scheduler"]
+SCHEDULER_STARTED_MARKER = "Starting fn-ignis Worker Scheduler"
+COMPOSE_UP_TIMEOUT_SECONDS = 900
+WORKER_OBSERVE_SECONDS = 90
+
+
+def _operator_cli_plugins() -> list[str]:
+    """Where the operator's Docker CLI plugins live. Compose is one of them.
+
+    The CLI finds user plugins under $DOCKER_CONFIG/cli-plugins, so an isolated DOCKER_CONFIG hides
+    `docker compose`. The directory holds executables, not credentials, so naming it is safe.
+    """
+    base = Path(os.environ.get("DOCKER_CONFIG") or Path.home() / ".docker")
+    plugins = base / "cli-plugins"
+    return [str(plugins)] if plugins.is_dir() else []
+
+
+def _compose_worker_command(docker: str, compose_file: Path, override: Path, env: dict) -> tuple[list | None, CommandOutcome]:
+    """The worker command Compose itself resolves, not a YAML reading of it."""
+    outcome = _docker(
+        docker,
+        ["compose", "-f", str(compose_file), "-f", str(override), "config", "--format", "json"],
+        env,
+        120,
+    )
+    if not outcome.ok:
+        return None, outcome
+    try:
+        worker = json.loads(outcome.stdout).get("services", {}).get("worker", {})
+    except json.JSONDecodeError:
+        return None, outcome
+    return worker.get("command"), outcome
+
+
+def observe_compose_worker(
+    *,
+    image_ref: str,
+    root: Path,
+    reference: Path = REFERENCE_TREE,
+    docker: str = "docker",
+    platform: str | None = None,
+    passthrough_env: tuple[str, ...] = (),
+    settle_seconds: float = 5,
+    observe_seconds: float = WORKER_OBSERVE_SECONDS,
+) -> SurfaceRecord:
+    """Both Compose files select the scheduler, and the production worker really runs it."""
+    import secrets
+    import time
+
+    subject = f"{PRODUCTION_COMPOSE} worker on {image_ref}"
+    run_dir = root / "compose"
+    run_dir.mkdir()
+    docker_config = root / "compose-docker-config"
+    docker_config.mkdir()
+    # No auths, no credsStore: only where the compose plugin is.
+    (docker_config / "config.json").write_text(
+        json.dumps({"cliPluginsExtraDirs": _operator_cli_plugins()}) + "\n", encoding="utf-8"
+    )
+    extra = {name: os.environ[name] for name in passthrough_env if name in os.environ}
+    env = isolated_env(root / "home", docker_config=docker_config, extra=extra)
+
+    # Only what isolation needs: a unique project and names, no published ports, no restart, no
+    # operator env file, and the image under test instead of the moving `latest`.
+    project = f"ignis-accept-{uuid.uuid4().hex[:8]}"
+    worker = f"{project}-worker"
+    override = run_dir / "override.yml"
+    override.write_text(
+        "services:\n"
+        "  db:\n"
+        f"    container_name: {project}-db\n"
+        "    ports: !reset []\n"
+        '    restart: "no"\n'
+        "  worker:\n"
+        f"    image: {image_ref}\n"
+        "    pull_policy: never\n"
+        f"    container_name: {worker}\n"
+        '    restart: "no"\n'
+        "    env_file: !reset []\n"
+        + (f"    platform: {platform}\n" if platform else "")
+        + "  reports:\n"
+        f"    container_name: {project}-reports\n"
+        "    ports: !reset []\n"
+        '    restart: "no"\n',
+        encoding="utf-8",
+    )
+
+    # Resolving the command needs only the worker, which is the one service both files define.
+    config_override = run_dir / "config-override.yml"
+    config_override.write_text("services:\n  worker:\n    env_file: !reset []\n", encoding="utf-8")
+    wrong = []
+    for name in COMPOSE_FILES:
+        command, outcome = _compose_worker_command(docker, reference / name, config_override, env)
+        failure = classify_failure(outcome)
+        if failure and failure[1] in ("network", "tool_unavailable"):
+            return SurfaceRecord("compose_worker_override", failure[0], subject,
+                                 f"docker compose config for {name}: {outcome.summary}", failure[1], outcome.returncode)
+        if not outcome.ok:
+            return SurfaceRecord("compose_worker_override", SurfaceState.FAILED, subject,
+                                 f"docker compose could not resolve {name}: {outcome.summary}",
+                                 "behavior_mismatch", outcome.returncode)
+        if command != SCHEDULER_COMMAND:
+            wrong.append(f"{name} worker command resolves to {command!r}")
+    if wrong:
+        return SurfaceRecord("compose_worker_override", SurfaceState.FAILED, subject,
+                             "; ".join(wrong) + f"; expected {SCHEDULER_COMMAND}", "behavior_mismatch")
+
+    env_file = run_dir / "compose.env"
+    env_file.write_text(
+        f"POSTGRES_USER=postgres\nPOSTGRES_DB=ignis\nPOSTGRES_PASSWORD={secrets.token_hex(24)}\n", encoding="utf-8"
+    )
+    env_file.chmod(0o600)
+    compose = [
+        "compose", "-p", project, "--env-file", str(env_file),
+        "-f", str(reference / PRODUCTION_COMPOSE), "-f", str(override),
+    ]
+    try:
+        up = _docker(docker, [*compose, "up", "-d", "worker"], env, COMPOSE_UP_TIMEOUT_SECONDS)
+        failure = classify_failure(up)
+        if failure:
+            state, failure_class = failure
+            if state == SurfaceState.MISSING or failure_class == "unclassified":
+                state, failure_class = SurfaceState.FAILED, "behavior_mismatch"
+            return SurfaceRecord("compose_worker_override", state, subject,
+                                 f"docker compose up worker: {up.summary}", failure_class, up.returncode)
+
+        time.sleep(settle_seconds)
+        deadline = time.monotonic() + observe_seconds
+        status = processes = logs = ""
+        while True:
+            status = _docker(docker, ["inspect", "-f", "{{.State.Status}}", worker], env, 30).stdout.strip()
+            processes = _docker(docker, ["top", worker], env, 30).stdout if status == "running" else ""
+            logged = _docker(docker, ["logs", worker], env, 30)
+            logs = f"{logged.stdout}\n{logged.stderr}"
+            if (SCHEDULER_STARTED_MARKER in logs and "ignis.interfaces.cli.scheduler" in processes) or status not in (
+                "running",
+                "created",
+                "restarting",
+            ):
+                break
+            if time.monotonic() > deadline:
+                break
+            time.sleep(min(3, observe_seconds))
+
+        if status == "running" and "ignis.interfaces.cli.scheduler" in processes and SCHEDULER_STARTED_MARKER in logs:
+            return SurfaceRecord(
+                "compose_worker_override",
+                SurfaceState.VERIFIED,
+                subject,
+                f"both Compose files resolve the worker command to {SCHEDULER_COMMAND}; the production worker "
+                f"is running `python -m ignis.interfaces.cli.scheduler` and logged '{SCHEDULER_STARTED_MARKER}'",
+            )
+        return SurfaceRecord(
+            "compose_worker_override",
+            SurfaceState.FAILED,
+            subject,
+            f"worker state {status!r}; processes: {processes.strip()[-400:]!r}; log tail: {logs.strip()[-800:]!r}",
+            "behavior_mismatch",
+        )
+    finally:
+        _docker(docker, [*compose, "down", "-v", "--remove-orphans"], env, 300)
+        env_file.unlink(missing_ok=True)
+
+
+# --------------------------------------------------------------------------------------------
 # Command line
 # --------------------------------------------------------------------------------------------
 
@@ -848,7 +1380,7 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=("source",), help="which public path to accept")
+    parser.add_argument("mode", choices=("source", "container"), help="which public path to accept")
     parser.add_argument("--version", required=True, help="release version without the v prefix")
     parser.add_argument("--repository", default="https://github.com/fioenix/fn-ignis.git")
     parser.add_argument("--expected-commit", default=None, help="the verified main commit the tag must name")
@@ -857,6 +1389,8 @@ def main(argv: list[str] | None = None) -> int:
         default=_newest_reference_migration(),
         help="migration prefix the packaged chain must end at (default: this tree's newest)",
     )
+    parser.add_argument("--image", default="ghcr.io/fioenix/fn-ignis", help="container repository without a tag")
+    parser.add_argument("--platform", default=None, help="platform to pull, e.g. linux/amd64 (default: the image's)")
     parser.add_argument("--work-root", type=Path, default=None, help="parent for the run's temporary root")
     parser.add_argument("--json-output", type=Path, default=None, help="write the redacted evidence bundle here")
     args = parser.parse_args(argv)
@@ -876,6 +1410,10 @@ def main(argv: list[str] | None = None) -> int:
                 expected_commit=args.expected_commit,
                 root=root.path,
                 expected_migration=args.expected_migration,
+            )
+        if args.mode == "container":
+            records += observe_container(
+                image=args.image, version=args.version, root=root.path, platform=args.platform, check_worker=True
             )
 
     bundle = build_bundle(args.version, args.expected_commit, complete_with_unobserved(records))
