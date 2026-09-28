@@ -1017,8 +1017,8 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Brief. Chi tiết và giới hạn của phép đo nằm trong
   [decision note](docs/decisions/2026-09-25-decision-grade-evidence-qualification.md).
 
-- [x] **Decision-Grade Evidence Qualification (spec 008) đã triển khai trên nhánh
-  `codex/decision-grade-evidence`; chưa merge, chưa release, chưa áp vào database lâu dài nào.**
+- [x] **Decision-Grade Evidence Qualification (spec 008) đã merge vào `main` qua PR #34 tại
+  merge commit `27b3deadfdd44e5a9ddbe221a6d2793002a5136c`; chưa release và chưa áp vào database lâu dài nào.**
   Mission đầu tiên sau khi server khởi động nạp từ vựng đã lưu trước mọi lời gọi connector.
   Migration `023` thêm `mission_probe_outcomes` và `mission_evidence_qualifications`. Agent gửi
   đánh giá có kiểu qua hai tool mới (tổng 47 tool); Ignis kiểm tra, lưu lại và áp chuẩn bằng chứng
@@ -1035,9 +1035,11 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   duy nhất là `decide_qualification`. Kết quả: 1.226 unit test passed, 1 skipped; 574 integration
   test passed, 3 skipped trên PostgreSQL dùng một lần, không có case PostgreSQL nào bị skip; Compose
   khởi tạo mới chạy đủ 23 file SQL; ruff, `git diff --check` từ `merge-base main`,
-  `uv lock --check` và `uv build` đạt. Hệ quả cần PO quyết: hiện chỉ YouTube lọc supply theo đúng
-  khung thời gian, mà "vắng supply đo được" cần hai surface, nên trạng thái này chưa thể xảy ra với
-  các connector hiện có; supply dương không bị ảnh hưởng.
+  `uv lock --check` và `uv build` đạt. Cả bảy required check của PR và bảy check chạy lại trên merge
+  commit đều đạt. PO đã chốt hướng fail-closed: một lượt tìm kiếm không áp đúng khung thời gian của
+  mission không được tính là "vắng supply đo được". Hiện chỉ YouTube lọc supply theo đúng khung thời
+  gian, mà trạng thái này cần hai surface, nên nó chưa thể xảy ra với các connector hiện có; supply
+  dương không bị ảnh hưởng.
   Giới hạn: chưa đo trên corpus live; các ngưỡng tối thiểu là mặc định an toàn, chưa hiệu chỉnh;
   chất lượng đánh giá ngữ nghĩa phụ thuộc Agent đang chạy phiên nghiên cứu.
 
