@@ -3,7 +3,7 @@
 > - **Cập nhật lần cuối:** 25/09/2026
 > - **Phiên bản:** `v0.5.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
->   + FastMCP Server (45 Handlers & Tools)
+>   + FastMCP Server (47 Handlers & Tools)
 > - **Trạng thái:** Bản live hiện hành `v0.5.0` đã tag và publish.
 >   Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`; đừng tin dòng này — nó
 >   là tài liệu, còn
@@ -976,7 +976,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 - [x] **Deterministic Artifact Builder:** Single-file HTML Report (Tailwind CSS) trực quan hóa Scorecard, Ma trận Cung-Cầu và Bằng chứng đa kênh.
 
 ### D. Tối Ưu Hóa Giao Tiếp & FastMCP Catalog
-- [x] **Danh mục 45 FastMCP Tools:** Hoàn thiện và đồng bộ đối xứng giữa `server.py`, `openclaw.json`, `hermes_manifest.json`, `.hermes/tools.json` và `setup_bundle.py`.
+- [x] **Danh mục 47 FastMCP Tools:** Hoàn thiện và đồng bộ đối xứng giữa `server.py`, `openclaw.json`, `hermes_manifest.json`, `.hermes/tools.json` và `setup_bundle.py`.
 - [x] **Cross-Agent Session Tracing:** Lưu trữ trường `agent` và `session_id`. Tool `get_current_session_mission` tự động khôi phục ngữ cảnh làm việc mà không cần nhập lại ID.
 - [x] **Tài liệu Tích hợp Meta Dedicated:** [docs/META_INTEGRATION_GUIDE.md](docs/META_INTEGRATION_GUIDE.md) định nghĩa toàn diện mô hình Dual-UX và kịch bản tự động hóa cho AI Agent.
 
