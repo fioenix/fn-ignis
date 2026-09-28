@@ -849,6 +849,14 @@ class RegistryAnswer(Exception):
         self.status = status
 
 
+class RegistryProtocolError(Exception):
+    """The registry control plane answered, but its response could not be interpreted safely."""
+
+
+class RegistryArtifactError(Exception):
+    """The registry returned an OCI object whose bytes are not a valid manifest."""
+
+
 @dataclass
 class HttpResponse:
     status: int
@@ -923,7 +931,13 @@ class AnonymousRegistry:
         answer = self.fetch(f"{fields['realm']}?{query}", {})
         if answer.status != 200:
             raise RegistryAnswer(answer.status, "the registry issued no anonymous pull token")
-        self.token = json.loads(b"".join(answer.chunks()) or b"{}").get("token") or None
+        try:
+            document = json.loads(b"".join(answer.chunks()) or b"{}")
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise RegistryProtocolError("the anonymous token response was malformed") from error
+        if not isinstance(document, dict):
+            raise RegistryProtocolError("the anonymous token response was not an object")
+        self.token = document.get("token") or None
         if not self.token:
             raise RegistryAnswer(401, "the registry issued no anonymous pull token")
 
@@ -946,7 +960,13 @@ class AnonymousRegistry:
             raise RegistryAnswer(answer.status, f"manifest {reference}")
         body = b"".join(answer.chunks())
         digest = answer.headers.get("docker-content-digest") or "sha256:" + hashlib.sha256(body).hexdigest()
-        return digest, json.loads(body)
+        try:
+            document = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise RegistryArtifactError(f"manifest {reference} was malformed") from error
+        if not isinstance(document, dict):
+            raise RegistryArtifactError(f"manifest {reference} was not an object")
+        return digest, document
 
     def blob(self, digest: str) -> bytes | int:
         """The blob's bytes after verifying their digest, or the failing HTTP status (0: digest mismatch)."""
@@ -1014,11 +1034,27 @@ def _registry_pull(
     try:
         index_digest, index = registry.manifest(version)
     except RegistryAnswer as answer:
-        return SurfaceRecord("container_anonymous_pull", SurfaceState.MISSING, subject,
-                             f"{answer}: the anonymous consumer cannot obtain the release tag", "missing"), facts
+        if answer.status in (401, 403, 404):
+            return SurfaceRecord("container_anonymous_pull", SurfaceState.MISSING, subject,
+                                 f"{answer}: the anonymous consumer cannot obtain the release tag", "missing"), facts
+        failure_class = "auth" if answer.status == 429 else "unclassified"
+        return SurfaceRecord("container_anonymous_pull", SurfaceState.UNREADABLE, subject,
+                             f"{answer}: the registry did not provide a conclusive release-tag answer",
+                             failure_class), facts
+    except RegistryProtocolError as error:
+        return SurfaceRecord("container_anonymous_pull", SurfaceState.UNREADABLE, subject,
+                             str(error), "unclassified"), facts
+    except RegistryArtifactError as error:
+        return SurfaceRecord("container_anonymous_pull", SurfaceState.FAILED, subject,
+                             str(error), "behavior_mismatch"), facts
     facts["digest"] = index_digest
+    try:
+        selected = _select_platform(index, platform) if "manifests" in index else None
+    except (KeyError, TypeError) as error:
+        return SurfaceRecord("container_anonymous_pull", SurfaceState.FAILED, subject,
+                             f"the release index has an invalid platform entry: {error}",
+                             "behavior_mismatch"), facts
     if "manifests" in index:
-        selected = _select_platform(index, platform)
         if not selected:
             return SurfaceRecord("container_anonymous_pull", SurfaceState.FAILED, subject,
                                  f"no runnable platform{f' {platform}' if platform else ''} in {index_digest}",
@@ -1027,24 +1063,45 @@ def _registry_pull(
         try:
             _, manifest = registry.manifest(manifest_digest)
         except RegistryAnswer as answer:
+            if answer.status == 429 or answer.status >= 500:
+                return SurfaceRecord("container_anonymous_pull", SurfaceState.UNREADABLE, subject,
+                                     f"the index resolved but its {facts['platform']} manifest was unreadable: {answer}",
+                                     "auth" if answer.status == 429 else "unclassified"), facts
             return SurfaceRecord("container_anonymous_pull", SurfaceState.FAILED, subject,
                                  f"the index resolved but its {facts['platform']} manifest did not: {answer}",
                                  "behavior_mismatch"), facts
+        except RegistryProtocolError as error:
+            return SurfaceRecord("container_anonymous_pull", SurfaceState.UNREADABLE, subject,
+                                 str(error), "unclassified"), facts
+        except RegistryArtifactError as error:
+            return SurfaceRecord("container_anonymous_pull", SurfaceState.FAILED, subject,
+                                 str(error), "behavior_mismatch"), facts
     else:
         manifest = index
         facts["platform"] = platform or _host_platform()
 
-    blobs = [manifest["config"]["digest"], *(layer["digest"] for layer in manifest.get("layers", []))]
+    try:
+        blobs = [manifest["config"]["digest"], *(layer["digest"] for layer in manifest.get("layers", []))]
+    except (KeyError, TypeError) as error:
+        return SurfaceRecord("container_anonymous_pull", SurfaceState.FAILED, subject,
+                             f"the selected image manifest has an invalid blob list: {error}",
+                             "behavior_mismatch"), facts
     refused = []
+    unreadable = []
     for digest in blobs:
         got = registry.blob(digest)
         if isinstance(got, int):
-            refused.append(f"{digest} ({'bytes do not match the digest' if got == 0 else f'HTTP {got}'})")
+            detail = f"{digest} ({'bytes do not match the digest' if got == 0 else f'HTTP {got}'})"
+            (unreadable if got == 429 or got >= 500 else refused).append(detail)
         elif digest == blobs[0]:
             try:
                 facts["labels"] = (json.loads(got).get("config") or {}).get("Labels") or {}
             except json.JSONDecodeError:
                 facts["labels"] = {}
+    if unreadable:
+        return SurfaceRecord("container_anonymous_pull", SurfaceState.UNREADABLE, subject,
+                             f"the registry could not conclusively return these blobs: {unreadable}",
+                             "unclassified"), facts
     if refused:
         return SurfaceRecord("container_anonymous_pull", SurfaceState.FAILED, subject,
                              f"the manifest resolved anonymously but these blobs did not download intact: {refused}",
@@ -1099,9 +1156,10 @@ def observe_container(
         return [problem, *downstream("the image was not obtained anonymously")]
 
     selected = facts["platform"]
-    before = _docker(docker, ["image", "inspect", f"{image}:{version}", "--format", "{{json .RepoDigests}}"], env, 60)
+    digest_subject = f"{image}@{facts['digest']}"
+    before = _docker(docker, ["image", "inspect", digest_subject, "--format", "{{json .RepoDigests}}"], env, 60)
     preexisting = before.ok
-    pulled = _docker(docker, ["pull", "--platform", selected, f"{image}:{version}"], env, PULL_TIMEOUT_SECONDS)
+    pulled = _docker(docker, ["pull", "--platform", selected, digest_subject], env, PULL_TIMEOUT_SECONDS)
     try:
         failure = classify_failure(pulled, DOCKER_ABSENT_MARKERS)
         if failure:
@@ -1138,7 +1196,6 @@ def observe_container(
             digest_problems.append(f"{SOURCE_LABEL} is {labels.get(SOURCE_LABEL)!r}, expected {source_url!r}")
         if not expected_name or labels.get(MCP_NAME_LABEL) != expected_name:
             digest_problems.append(f"{MCP_NAME_LABEL} is {labels.get(MCP_NAME_LABEL)!r}, expected {expected_name!r}")
-        digest_subject = f"{image}@{facts['digest']}"
         if digest_problems:
             digest_record = SurfaceRecord("container_digest", SurfaceState.FAILED, digest_subject,
                                           "; ".join(digest_problems + digest_missing), "behavior_mismatch")
@@ -1177,7 +1234,7 @@ def observe_container(
         return records
     finally:
         if not preexisting and pulled.ok:
-            _docker(docker, ["image", "rm", f"{image}:{version}"], env, 120)
+            _docker(docker, ["image", "rm", digest_subject], env, 120)
 
 
 # --------------------------------------------------------------------------------------------
@@ -1414,11 +1471,18 @@ def observe_github(*, repository: str, version: str, expected_commit: str | None
         if status != 200:
             return _api_failure("tag_on_main", subject, status, message)
         target = body.get("object", {})
-        if target.get("type") == "tag":
-            status, body, message = _api(fetch, f"{base}/git/tags/{target.get('sha')}")
-            if status != 200:
-                return _api_failure("tag_on_main", subject, status, message)
-            target = body.get("object", {})
+        if target.get("type") != "tag":
+            return SurfaceRecord("tag_on_main", SurfaceState.FAILED, subject,
+                                 f"{tag} is a lightweight tag; the release contract requires an annotated tag",
+                                 "behavior_mismatch")
+        status, body, message = _api(fetch, f"{base}/git/tags/{target.get('sha')}")
+        if status != 200:
+            return _api_failure("tag_on_main", subject, status, message)
+        target = body.get("object", {})
+        if target.get("type") != "commit":
+            return SurfaceRecord("tag_on_main", SurfaceState.FAILED, subject,
+                                 f"the annotated tag targets {target.get('type')!r}, not a commit",
+                                 "behavior_mismatch")
         commit = target.get("sha", "")
         tag_commit.append(commit)
         if expected_commit and commit != expected_commit:
@@ -1626,6 +1690,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if not SEMVER.fullmatch(args.version):
         parser.error(f"not a release version: {args.version}")
+    if args.mode in ("source", "all") and not args.expected_commit:
+        parser.error("--expected-commit is required for source and all modes")
     if args.expected_commit and not FULL_SHA.fullmatch(args.expected_commit):
         parser.error("--expected-commit must be a full lowercase commit SHA")
     check_public_url(args.repository)

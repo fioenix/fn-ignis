@@ -23,6 +23,8 @@ import re
 import tomllib
 from pathlib import Path
 
+import pytest
+
 # PyYAML arrives with fastmcp, a required runtime dependency. Parsed, not pattern-matched: a
 # comment is not configuration, and indentation changes what a key means.
 import yaml
@@ -472,6 +474,40 @@ def test_the_semver_gate_refuses_malformed_tags_and_branches():
     assert not wrong, "the SemVer gate misjudged these refs:\n" + "\n".join(wrong)
 
 
+def _version_match_gate_index() -> int:
+    for index, step in enumerate(_publish_steps()):
+        if "matches project version" in str(step.get("name", "")).lower():
+            return index
+    raise AssertionError("the publish workflow has no gate matching the tag to the project version")
+
+
+def test_the_release_tag_must_match_the_checked_out_project_before_login():
+    """A valid but wrong SemVer tag must not publish this checkout under another version."""
+    import subprocess
+
+    gate = _version_match_gate_index()
+    steps = _publish_steps()
+    checkout = steps.index(_step_using("actions/checkout"))
+    login = steps.index(_step_using("docker/login-action"))
+    assert checkout < gate < login, "the version-match gate must read the checkout before registry login"
+
+    step = steps[gate]
+    assert step.get("env", {}).get("REF_NAME") == "${{ github.ref_name }}", step.get("env")
+    for ref_name, accepted in (("v0.6.0", True), ("v0.6.1", False)):
+        completed = subprocess.run(
+            ["bash", "-c", step["run"]],
+            cwd=REPO,
+            env={"PATH": "/usr/bin:/bin", "REF_NAME": ref_name},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert (completed.returncode == 0) == accepted, (
+            f"project/tag version gate returned {completed.returncode} for {ref_name}: "
+            f"{completed.stdout}{completed.stderr}"
+        )
+
+
 def test_image_tags_come_only_from_stable_semver_rules():
     meta = _step_using("docker/metadata-action")["with"]
     rules = [line.strip() for line in meta["tags"].splitlines() if line.strip()]
@@ -607,6 +643,32 @@ def test_the_version_must_be_semver_without_a_prefix():
     for version in ("v0.6.0", "0.6", "0.6.0.1", ""):
         with pytest.raises(ValueError, match="version"):
             module.build_bundle(version, MAIN_COMMIT, _full_policy(module))
+
+
+def test_source_acceptance_modes_require_the_verified_main_commit_before_observation(tmp_path, monkeypatch):
+    import pytest
+
+    module = _acceptance()
+    observed = []
+    monkeypatch.setattr(module, "observe_source", lambda **kwargs: observed.append(kwargs))
+    for mode in ("source", "all"):
+        with pytest.raises(SystemExit) as stopped:
+            module.main([mode, "--version", "0.6.0", "--work-root", str(tmp_path)])
+        assert stopped.value.code == 2
+    assert not observed, "source observation started before the verified main commit was supplied"
+
+
+def test_release_quickstart_supplies_the_verified_main_commit_to_source_modes():
+    quickstart = _read(REPO / "specs/009-public-distribution-v0-6-0/quickstart.md")
+    for mode in ("source", "all"):
+        command = re.search(
+            rf"public_release_acceptance\.py {mode} \\\n(?P<body>(?:.*\n){{1,8}}?)```",
+            quickstart,
+        )
+        assert command, f"quickstart has no {mode} acceptance command"
+        assert '--expected-commit "$VERIFIED_MAIN_COMMIT"' in command.group("body"), (
+            f"quickstart {mode} acceptance does not bind the public tag to the reviewed main commit"
+        )
 
 
 def test_redaction_removes_url_credentials_tokens_and_ambient_secret_values(monkeypatch):
@@ -1445,6 +1507,37 @@ def test_an_absent_release_tag_is_missing(tmp_path, monkeypatch):
     assert records["container_anonymous_pull"].state == module.SurfaceState.MISSING
 
 
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_a_rate_limited_or_failed_registry_is_unreadable_not_absent(tmp_path, monkeypatch, status):
+    module = _acceptance()
+    registry = FakeRegistry()
+    registry.overrides[f"{REGISTRY}/v2/{IMAGE_PATH}/manifests/0.6.0"] = FakeResponse(status)
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, registry)
+    assert records["container_anonymous_pull"].state == module.SurfaceState.UNREADABLE
+
+
+def test_a_malformed_anonymous_token_response_is_unreadable(tmp_path, monkeypatch):
+    module = _acceptance()
+
+    class MalformedTokenRegistry(FakeRegistry):
+        def __call__(self, url, headers):
+            if url.startswith(f"{REGISTRY}/token"):
+                self.requests.append((url, dict(headers)))
+                return FakeResponse(200, b"{")
+            return super().__call__(url, headers)
+
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, MalformedTokenRegistry())
+    assert records["container_anonymous_pull"].state == module.SurfaceState.UNREADABLE
+
+
+def test_a_malformed_release_manifest_is_failed_not_a_crash(tmp_path, monkeypatch):
+    module = _acceptance()
+    registry = FakeRegistry()
+    registry.overrides[f"{REGISTRY}/v2/{IMAGE_PATH}/manifests/0.6.0"] = FakeResponse(200, b"{")
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, registry)
+    assert records["container_anonymous_pull"].state == module.SurfaceState.FAILED
+
+
 def test_a_layer_refused_after_the_manifest_is_failed(tmp_path, monkeypatch):
     module = _acceptance()
     registry = FakeRegistry()
@@ -1536,8 +1629,12 @@ def test_the_runtime_uses_the_pulled_digest_and_never_pulls_again(tmp_path, monk
 
 def test_an_image_the_run_pulled_is_removed_and_a_preexisting_one_is_kept(tmp_path, monkeypatch):
     module = _acceptance()
-    _, _, calls = _observe_container(module, tmp_path, monkeypatch)
-    assert any(call["argv"][:2] == ["image", "rm"] for call in calls), "the pulled image was left behind"
+    _, registry, calls = _observe_container(module, tmp_path, monkeypatch)
+    immutable = f"ghcr.io/{IMAGE_PATH}@{registry.index_digest}"
+    pulls = [call["argv"] for call in calls if call["argv"][:1] == ["pull"]]
+    assert len(pulls) == 1 and pulls[0][-1] == immutable, pulls
+    removals = [call["argv"] for call in calls if call["argv"][:2] == ["image", "rm"]]
+    assert len(removals) == 1 and removals[0][-1] == immutable, "the pulled immutable image was left behind"
 
     other = tmp_path / "second"
     other.mkdir()
@@ -1695,8 +1792,6 @@ def test_a_compose_config_that_fails_is_reported_with_its_error(tmp_path, monkey
 
 import sys as _sys  # noqa: E402
 import shutil as _shutil  # noqa: E402
-
-import pytest  # noqa: E402
 
 THIS_MODULE = _sys.modules[__name__]
 
@@ -1959,7 +2054,8 @@ class FakeGitHub:
     def __init__(self):
         self.answers = {
             API: (200, {"private": False, "visibility": "public"}),
-            f"{API}/git/ref/tags/v0.6.0": (200, {"object": {"type": "commit", "sha": TAG_COMMIT}}),
+            f"{API}/git/ref/tags/v0.6.0": (200, {"object": {"type": "tag", "sha": "a" * 40}}),
+            f"{API}/git/tags/{'a' * 40}": (200, {"object": {"type": "commit", "sha": TAG_COMMIT}}),
             f"{API}/compare/{TAG_COMMIT}...main": (200, {"status": "behind", "behind_by": 0, "ahead_by": 2}),
             f"{API}/releases/tags/v0.6.0": (200, {"draft": False, "published_at": "2026-09-30T00:00:00Z",
                                                   "html_url": "https://github.com/fioenix/fn-ignis/releases/tag/v0.6.0"}),
@@ -2013,6 +2109,14 @@ def test_a_missing_release_is_missing():
     del fake.answers[f"{API}/releases/tags/v0.6.0"]
     records, _ = _github(module, fake)
     assert records["github_release_published"].state == module.SurfaceState.MISSING
+
+
+def test_a_lightweight_release_tag_fails_the_annotated_tag_contract():
+    module = _acceptance()
+    fake = FakeGitHub()
+    fake.answers[f"{API}/git/ref/tags/v0.6.0"] = (200, {"object": {"type": "commit", "sha": TAG_COMMIT}})
+    records, _ = _github(module, fake)
+    assert records["tag_on_main"].state == module.SurfaceState.FAILED
 
 
 def test_a_tag_off_main_or_on_another_commit_fails():

@@ -162,8 +162,8 @@ here and hands control to Codex.
 
 **Purpose**: Codex independently accepts, integrates, publishes, and verifies the exact candidate.
 
-- [ ] T041 [US4] Codex independently inspect the T001–T040 commit range, handoff claims, governed file set, negative controls, and built artifact inventories; record findings in `.handoff/009-public-distribution-v0.6.0-release-review.md`
-- [ ] T042 [US4] Codex dispatch a fresh-context whole-branch review against `spec.md`, `plan.md`, `tasks.md`, and the Engineering diff; resolve Critical/Important findings through one RED→GREEN fix pass and record deferred minors in `.handoff/009-public-distribution-v0.6.0-release-review.md`
+- [X] T041 [US4] Codex independently inspect the T001–T040 commit range, handoff claims, governed file set, negative controls, and built artifact inventories; record findings in `.handoff/009-public-distribution-v0.6.0-release-review.md`
+- [X] T042 [US4] Codex dispatch a fresh-context whole-branch review against `spec.md`, `plan.md`, `tasks.md`, and the Engineering diff; resolve Critical/Important findings through one RED→GREEN fix pass and record deferred minors in `.handoff/009-public-distribution-v0.6.0-release-review.md`
 - [ ] T043 [US4] Codex rerun the complete release-candidate gate on the reviewed HEAD, push `codex/009-public-distribution-v0.6.0`, create a PR against `main`, and attach the PR URL to the current Codex task
 - [ ] T044 [US4] Codex wait for CI, Compose Init, Performance, secret scan, and required review on the PR; record each owning GitHub check URL and conclusion in `.handoff/009-public-distribution-v0.6.0-release-evidence.md`
 - [ ] T045 [US4] Codex merge only the green reviewed PR to `main`, check out the exact merge commit, rerun the release gate, wait for and read back CI/Compose Init/Performance/secret checks on that main commit, and record the full mainline SHA plus check URLs in `.handoff/009-public-distribution-v0.6.0-release-evidence.md`

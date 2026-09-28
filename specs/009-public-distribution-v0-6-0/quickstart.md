@@ -160,6 +160,7 @@ Run from outside every existing checkout with no GitHub credential in the clone 
 ```bash
 uv run python scripts/public_release_acceptance.py source \
   --version 0.6.0 \
+  --expected-commit "$VERIFIED_MAIN_COMMIT" \
   --repository https://github.com/fioenix/fn-ignis.git
 ```
 
@@ -198,6 +199,7 @@ After both distribution paths pass, publish the approved GitHub Release from `v0
 uv run python scripts/check_release_state.py 0.6.0
 uv run python scripts/public_release_acceptance.py all \
   --version 0.6.0 \
+  --expected-commit "$VERIFIED_MAIN_COMMIT" \
   --repository https://github.com/fioenix/fn-ignis.git \
   --image ghcr.io/fioenix/fn-ignis \
   --json-output .handoff/009-public-distribution-v0.6.0-evidence.json
