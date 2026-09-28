@@ -42,9 +42,10 @@ Allowed statuses:
   "qualification": {
     "status": "QUALIFICATION_REQUIRED",
     "unassessed": 35,
-    "reason": "Current mission evidence still requires semantic qualification."
+    "reason": "Current mission evidence still requires semantic qualification.",
+    "reason_code": "QUALIFICATION_INCOMPLETE"
   },
-  "next_step": "Call get_mission_evidence_qualification_batch."
+  "next_step": "Read the pending evidence with get_mission_evidence_qualification_batch, judge it, and record the judgments with submit_mission_evidence_qualifications."
 }
 ```
 

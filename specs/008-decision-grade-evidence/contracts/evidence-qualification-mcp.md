@@ -20,6 +20,8 @@ Returns a bounded, stable batch of current mission evidence that still requires 
 ```json
 {
   "status": "QUALIFICATION_REQUIRED",
+  "reason_code": "QUALIFICATION_INCOMPLETE",
+  "next_step": "Read the pending evidence with get_mission_evidence_qualification_batch, judge it, and record the judgments with submit_mission_evidence_qualifications.",
   "mission_id": "uuid",
   "shortcode": "VN-MARKET-7D-1234",
   "surface": "MARKET",
@@ -73,6 +75,8 @@ When every current mission-evidence row has a persisted assessment:
 ```json
 {
   "status": "READY",
+  "reason_code": null,
+  "next_step": "Every observation is assessed. Read the result with get_mission_analysis.",
   "mission_id": "uuid",
   "frame_fingerprint": "immutable-frame-digest",
   "progress": {
@@ -87,14 +91,10 @@ When every current mission-evidence row has a persisted assessment:
 }
 ```
 
-`READY` requires `unassessed: 0`. When nothing is left to hand out but some rows are explicit
-`UNASSESSED` judgments, the response is not ready: `QUALIFICATION_REQUIRED` with
-`reason_code: "UNASSESSED_EVIDENCE"`, or `UNAVAILABLE` with `reason_code: "EVALUATOR_UNAVAILABLE"`
-when an evaluator failure was recorded. Both carry `evidence: []` and the same `next_step` the
-analysis returns: recorded judgments are final, so reassessment needs a new mission or a new Market
-Brief revision rather than another batch read. The batch applies the analysis's state priority
-before paging: a recorded `EVALUATOR_UNAVAILABLE` row returns `UNAVAILABLE` even while other
-observations are still pending. A paging response carries `reason_code: "QUALIFICATION_INCOMPLETE"`.
+`READY` requires `unassessed: 0`. Every answer's `status`, `reason_code` and `next_step` come from
+the single decision described under [Qualification state authority](#qualification-state-authority).
+The batch hands out evidence only while that decision is `QUALIFICATION_INCOMPLETE`; every other
+state returns `evidence: []`.
 
 ### Refusals
 
@@ -150,9 +150,17 @@ Semantic rules:
     "excluded_irrelevant": 15,
     "unassessed": 35
   },
-  "next_step": "Call get_mission_evidence_qualification_batch with this mission."
+  "qualification_status": "QUALIFICATION_REQUIRED",
+  "qualification_reason_code": "QUALIFICATION_INCOMPLETE",
+  "next_step": "Read the pending evidence with get_mission_evidence_qualification_batch, judge it, and record the judgments with submit_mission_evidence_qualifications."
 }
 ```
+
+`qualification_status`, `qualification_reason_code` and `next_step` describe the state this write
+produced, from the same decision the batch read and the analysis use. A batch that records the
+first `EVALUATOR_UNAVAILABLE` judgment, or the last judgment of a frame with an `UNASSESSED` row,
+therefore answers with the reassessment guidance rather than another batch read. The fields carry a
+`qualification_` prefix so they cannot be mistaken for a refusal's `reason_code`.
 
 ### Atomic refusal contract
 
@@ -167,6 +175,36 @@ The whole batch is refused and no row is written when:
 Submitting the same byte-equivalent judgments again is idempotent. A different judgment for an
 already assessed observation returns `CONFLICT`; changing semantic history requires a new mission or
 Market Brief revision.
+
+## Qualification state authority
+
+`decide_qualification` in `src/ignis/domain/research_workspace.py` is the one function that turns a
+persisted evidence state into `(status, reason_code, next_step)`. It reads only
+`QualificationProgress`, which is derived from the current mission evidence and its recorded
+judgments. The first matching row wins:
+
+| # | Persisted state | `status` | `reason_code` | `next_step` | Batch hands out evidence |
+|---|---|---|---|---|---|
+| 1 | Any `UNASSESSED` judgment with reason `EVALUATOR_UNAVAILABLE` | `UNAVAILABLE` | `EVALUATOR_UNAVAILABLE` | Reassessment guidance | No |
+| 2 | Current evidence with no recorded judgment | `QUALIFICATION_REQUIRED` | `QUALIFICATION_INCOMPLETE` | Read, judge and submit the next batch | Yes |
+| 3 | Any `UNASSESSED` judgment with reason `INSUFFICIENT_CONTENT` | `QUALIFICATION_REQUIRED` | `UNASSESSED_EVIDENCE` | Reassessment guidance | No |
+| 4 | Every observation assessed | `READY` | none | Read the analysis | No |
+
+An evaluator failure outranks pending evidence because the evaluator the rest would need has
+already failed. An `INSUFFICIENT_CONTENT` judgment concerns one item, so the remaining evidence is
+still handed out and the qualification counts stay complete for inspection. The frame becomes
+terminal once nothing is left to judge, because recorded judgments are never rewritten.
+
+| Consumer | What it takes from the decision |
+|---|---|
+| `submit_mission_evidence_qualifications` | `qualification_status`, `qualification_reason_code` and `next_step` for the state after the write |
+| `get_mission_evidence_qualification_batch` | `status`, `reason_code` and `next_step`; paging only in row 2 |
+| `get_mission_analysis`, `evaluate_mission_quality`, `generate_mission_artifact` | `analysis_status`, `qualification.reason_code` and `next_step` while a conclusion is withheld (rows 1–3) |
+| HTML artifact | `data-qualification-status` and `data-reason-code` |
+
+A READY analysis carries no qualification `next_step`, because it is the step row 4 points to.
+`INSUFFICIENT_RELEVANT_EVIDENCE` is decided later, by the sufficiency policy, and only for an
+assessed frame.
 
 ## Recommended host-Agent judgment
 

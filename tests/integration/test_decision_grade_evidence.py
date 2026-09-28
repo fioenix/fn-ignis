@@ -855,8 +855,11 @@ async def test_keyword_noise_corpus_replay_emits_zero_unsupported_conclusion_uni
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
     judgments = _judgments_by_observation(held, record["observations"])
 
-    ready, _ = await _qualify_through_handlers(mcp_server, mission, judgments)
+    ready, submissions = await _qualify_through_handlers(mcp_server, mission, judgments)
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
+    # The submission that judged the last observation already names where the frame ended.
+    assert submissions[-1]["next_step"] == ready["next_step"]
+    assert submissions[-1]["qualification_status"] == ready["status"]
 
     units = _conclusion_units(analysis)
     assert _unsupported(units, _qualified_ids(judgments)) == [], (
@@ -873,6 +876,7 @@ async def test_keyword_noise_corpus_replay_emits_zero_unsupported_conclusion_uni
         assert analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
         assert analysis["qualification"]["reason_code"] == "UNASSESSED_EVIDENCE"
         assert "new Market Brief revision" in analysis["next_step"]
+        assert analysis["next_step"] == ready["next_step"]
     else:
         assert analysis["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
         assert analysis["qualification"]["reason_code"] == "NO_SUFFICIENT_TOPIC"
@@ -1688,4 +1692,50 @@ async def test_an_evaluator_failure_with_pending_evidence_gives_batch_and_analys
     assert batch["reason_code"] == analysis["qualification"]["reason_code"] == "EVALUATOR_UNAVAILABLE"
     assert batch["next_step"] == analysis["next_step"]
     assert batch["evidence"] == [], "no further evidence is handed out once the frame is unavailable"
+    assert analysis["opportunity_index_applies"] is False and analysis["market_opportunities"] == []
+
+
+# --- Review of a81661b: the submit response speaks for the state its write produced -----------
+
+
+@pytest.mark.parametrize(
+    "judgment, status, reason_code",
+    [
+        ({"relation": "QUALIFIED_SUPPORT", "purpose": "DEMAND", "confidence": 0.9,
+          "reason_code": "DIRECT_TO_FRAME"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
+        ({"relation": "UNASSESSED", "purpose": "CONTEXT", "confidence": None,
+          "reason_code": "EVALUATOR_UNAVAILABLE"}, "UNAVAILABLE", "EVALUATOR_UNAVAILABLE"),
+        ({"relation": "UNASSESSED", "purpose": "CONTEXT", "confidence": None,
+          "reason_code": "INSUFFICIENT_CONTENT"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_submit_batch_and_analysis_give_one_next_step_while_evidence_is_pending(
+    repository_case, host_workspace, monkeypatch, judgment, status, reason_code
+):
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, workspace = await _workspace(repository, host_workspace)
+    positives = CORPUS["semantic_controls"]["positive"]
+    mission, _revision, held = await _market_with(repository, store, workspace, positives[:2], CONTROL_KEYWORDS)
+    assert len(held) >= 2, "the regression needs evidence still pending after the submission"
+    monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
+    first = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id), limit=1))
+    recorded = json.loads(await mcp_server.handle_submit_mission_evidence_qualifications(
+        str(mission.id), first["frame_fingerprint"],
+        [{"observation_id": first["evidence"][0]["observation_id"], "judged_by": "fixture-host", **judgment}],
+    ))
+
+    batch = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id)))
+    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
+
+    assert recorded["status"] == "RECORDED"
+    assert recorded["next_step"] == batch["next_step"] == analysis["next_step"], (
+        "consecutive tool answers must not give conflicting instructions"
+    )
+    assert recorded["qualification_status"] == batch["status"] == analysis["analysis_status"] == status
+    assert (recorded["qualification_reason_code"] == batch["reason_code"]
+            == analysis["qualification"]["reason_code"] == reason_code)
+    assert bool(batch["evidence"]) is (reason_code == "QUALIFICATION_INCOMPLETE")
     assert analysis["opportunity_index_applies"] is False and analysis["market_opportunities"] == []

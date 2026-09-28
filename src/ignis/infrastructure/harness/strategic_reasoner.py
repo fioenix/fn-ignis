@@ -230,38 +230,31 @@ class StrategicMarketReasoner:
     # Evidence qualification: Market conclusions and Attention handoff
     # ------------------------------------------------------------------
 
-    _WITHHELD = {
-        QualificationStatus.QUALIFICATION_REQUIRED: (
-            "Current mission evidence still requires semantic qualification.",
-            "QUALIFICATION_INCOMPLETE",
+    # Reason text per withheld reason code. Which code applies, and what the Agent does next, is
+    # decided by `decide_qualification` alone, the authority every tool answer shares.
+    _WITHHELD_REASONS = {
+        "QUALIFICATION_INCOMPLETE": "Current mission evidence still requires semantic qualification.",
+        "UNASSESSED_EVIDENCE": (
+            "Some observations carry an UNASSESSED judgment, and a recorded judgment is not "
+            "rewritten, so this frame cannot reach a conclusion. Assess the evidence again "
+            "under a new mission or a new Market Brief revision."
         ),
-        QualificationStatus.UNAVAILABLE: (
+        "EVALUATOR_UNAVAILABLE": (
             "A semantic judgment could not be obtained for some of the mission's evidence, so no "
-            "conclusion is permitted.",
-            "EVALUATOR_UNAVAILABLE",
+            "conclusion is permitted."
         ),
     }
 
     @classmethod
-    def _withheld(cls, qualification: QualificationContext) -> Tuple[str, str]:
+    def _withheld(cls, qualification: QualificationContext) -> Optional[Tuple[str, str, str]]:
         """Why a pending or failed assessment withholds every conclusion, and what comes next.
 
-        Two different pending states: observations with no row yet, which the next batch read
-        hands out, and observations whose recorded judgment is UNASSESSED, which no batch will
-        ever hand out again because a recorded judgment is not rewritten.
+        None when every observation carries an assessment and the sufficiency policy decides.
         """
-        state = qualification.assessment_state
-        if (
-            state is QualificationStatus.QUALIFICATION_REQUIRED
-            and not qualification.progress.unjudged
-        ):
-            return (
-                "Some observations carry an UNASSESSED judgment, and a recorded judgment is not "
-                "rewritten, so this frame cannot reach a conclusion. Assess the evidence again "
-                "under a new mission or a new Market Brief revision.",
-                "UNASSESSED_EVIDENCE",
-            )
-        return cls._WITHHELD[state]
+        decision = qualification.decision
+        if decision.status is QualificationStatus.READY:
+            return None
+        return cls._WITHHELD_REASONS[decision.reason_code], decision.reason_code, decision.next_step
 
     @staticmethod
     def _summary(
@@ -269,6 +262,7 @@ class StrategicMarketReasoner:
         status: QualificationStatus,
         reason: Optional[str] = None,
         reason_code: Optional[str] = None,
+        next_step: Optional[str] = None,
     ) -> QualificationSummary:
         progress = qualification.progress
         return QualificationSummary(
@@ -281,6 +275,7 @@ class StrategicMarketReasoner:
             question_relevance_score=progress.question_relevance_score,
             reason=reason,
             reason_code=reason_code,
+            next_step=next_step,
         )
 
     def _belongs_to_topic(self, signal: TrendSignal, topic: str) -> bool:
@@ -355,9 +350,11 @@ class StrategicMarketReasoner:
                 )
         opportunities.sort(key=lambda o: o.opportunity_index, reverse=True)
 
-        if state in self._WITHHELD:
+        withheld = self._withheld(qualification)
+        next_step: Optional[str] = None
+        if withheld:
             status = state
-            reason, reason_code = self._withheld(qualification)
+            reason, reason_code, next_step = withheld
         elif opportunities:
             status, reason, reason_code = QualificationStatus.READY, None, None
         else:
@@ -404,7 +401,7 @@ class StrategicMarketReasoner:
             market_brief=market_brief,
             lineage=None if lineage.is_empty else lineage.to_payload(),
             attention_context=attention_context,
-            qualification=self._summary(qualification, status, reason, reason_code),
+            qualification=self._summary(qualification, status, reason, reason_code, next_step),
             topic_sufficiency=[
                 {
                     "topic": t.topic,
@@ -486,8 +483,9 @@ class StrategicMarketReasoner:
             return counts
 
         state = qualification.assessment_state
+        withheld = self._withheld(qualification)
         candidates = []
-        if state not in self._WITHHELD:
+        if not withheld:
             qualified_by_cluster = {
                 cluster_id: [
                     self._qualified_observation(s, qualification)
@@ -501,14 +499,15 @@ class StrategicMarketReasoner:
             )
         eligible = {c.cluster_id for c in candidates}
 
-        if state in self._WITHHELD:
+        next_step: Optional[str] = None
+        if withheld:
             status = state
             handoff_status = (
                 HandoffStatus.QUALIFICATION_REQUIRED
                 if state is QualificationStatus.QUALIFICATION_REQUIRED
                 else HandoffStatus.UNAVAILABLE
             )
-            reason, reason_code = self._withheld(qualification)
+            reason, reason_code, next_step = withheld
         elif candidates:
             status, handoff_status = QualificationStatus.READY, HandoffStatus.QUALIFIED_CANDIDATE_AVAILABLE
             reason, reason_code = None, None
@@ -519,7 +518,7 @@ class StrategicMarketReasoner:
             reason_code = "NO_QUALIFIED_CLUSTER"
 
         return {
-            "summary": self._summary(qualification, status, reason, reason_code),
+            "summary": self._summary(qualification, status, reason, reason_code, next_step),
             "status": handoff_status.value,
             "candidates": [
                 {

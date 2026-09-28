@@ -611,7 +611,8 @@ async def test_a_replay_is_idempotent_and_a_rewrite_is_a_conflict(research):
     stored = {str(q.observation_id): q for q in await store.list_evidence_qualifications(mission.id)}
     assert stored[str(held[0].observation_id)].relation is QualificationRelation.QUALIFIED_SUPPORT
     assert stored[str(held[0].observation_id)].brief_revision_id == brief.brief_revision_id
-    assert "get_mission_evidence_qualification_batch" in recorded["next_step"]
+    assert recorded["qualification_status"] == "READY"
+    assert "get_mission_analysis" in recorded["next_step"], "a complete frame points to its analysis"
 
 
 # --- User Story 4: question relevance is its own dimension, and it caps confidence --------------
@@ -790,3 +791,128 @@ async def test_a_paging_batch_names_why_it_pages(research):
 
     assert batch["status"] == "QUALIFICATION_REQUIRED"
     assert batch["reason_code"] == "QUALIFICATION_INCOMPLETE" and len(batch["evidence"]) == 1
+
+
+# --- Review of a81661b: one authority decides state, reason and next step ----------------------
+
+_UNASSESSED = dict(relation="UNASSESSED", purpose="CONTEXT", confidence=None)
+
+
+@pytest.mark.parametrize(
+    "judged, status, reason_code, step",
+    [
+        # (relation/reason per judged observation of three, expected status, reason, step kind)
+        ([], "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE", "batch"),
+        (["QUALIFIED_SUPPORT"], "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE", "batch"),
+        (["EVALUATOR_UNAVAILABLE"], "UNAVAILABLE", "EVALUATOR_UNAVAILABLE", "reassess"),
+        (["INSUFFICIENT_CONTENT"], "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE", "batch"),
+        (["INSUFFICIENT_CONTENT", "EVALUATOR_UNAVAILABLE"], "UNAVAILABLE", "EVALUATOR_UNAVAILABLE", "reassess"),
+        (["QUALIFIED_SUPPORT", "QUALIFIED_SUPPORT", "INSUFFICIENT_CONTENT"], "QUALIFICATION_REQUIRED",
+         "UNASSESSED_EVIDENCE", "reassess"),
+        (["QUALIFIED_SUPPORT", "CONTEXT_ONLY", "EXCLUDED_IRRELEVANT"], "READY", None, "analysis"),
+    ],
+)
+def test_one_decision_names_the_state_reason_and_next_step_for_every_persisted_state(
+    judged, status, reason_code, step
+):
+    """Priority: evaluator failure, then unjudged evidence, then a recorded UNASSESSED row, then READY.
+
+    An evaluator failure outranks pending evidence: the evaluator the rest would need has failed.
+    An INSUFFICIENT_CONTENT row concerns one item, so the rest is still handed out and the frame
+    turns terminal only once nothing is left to judge.
+    """
+    from ignis.domain.research_workspace import REASSESSMENT_GUIDANCE, decide_qualification
+
+    mission_id = uuid4()
+    observations = [uuid4() for _ in range(3)]
+    rows = []
+    for observation_id, kind in zip(observations, judged):
+        if kind in ("EVALUATOR_UNAVAILABLE", "INSUFFICIENT_CONTENT"):
+            rows.append(_qualification(mission_id=mission_id, observation_id=observation_id,
+                                       reason_code=kind, **_UNASSESSED))
+        elif kind == "QUALIFIED_SUPPORT":
+            rows.append(_qualification(mission_id=mission_id, observation_id=observation_id))
+        else:
+            rows.append(_qualification(
+                mission_id=mission_id, observation_id=observation_id, relation=kind,
+                purpose="CONTEXT" if kind == "CONTEXT_ONLY" else "SUPPLY",
+                reason_code="ADJACENT_ONLY" if kind == "CONTEXT_ONLY" else "KEYWORD_ONLY",
+            ))
+
+    decision = decide_qualification(QualificationProgress.from_evidence(observations, rows))
+
+    assert (decision.status.value, decision.reason_code) == (status, reason_code)
+    if step == "reassess":
+        assert decision.next_step == REASSESSMENT_GUIDANCE
+    elif step == "batch":
+        assert "get_mission_evidence_qualification_batch" in decision.next_step
+        assert "submit_mission_evidence_qualifications" in decision.next_step
+    else:
+        assert "get_mission_analysis" in decision.next_step
+    assert decision.pages_evidence is (reason_code == "QUALIFICATION_INCOMPLETE")
+
+
+@pytest.mark.parametrize(
+    "submitted, status, reason_code",
+    [
+        ({"relation": "QUALIFIED_SUPPORT"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
+        ({**_UNASSESSED, "reason_code": "EVALUATOR_UNAVAILABLE"}, "UNAVAILABLE", "EVALUATOR_UNAVAILABLE"),
+        ({**_UNASSESSED, "reason_code": "INSUFFICIENT_CONTENT"}, "QUALIFICATION_REQUIRED",
+         "QUALIFICATION_INCOMPLETE"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_submit_batch_and_analysis_context_give_one_answer_after_a_partial_submission(
+    research, submitted, status, reason_code
+):
+    """The submit response speaks for the state its own write produced, as the next read will."""
+    from ignis.domain.research_workspace import QualificationContext
+
+    repository, store, workspace = research
+    mission, brief, held = await _market(repository, store, workspace, ("a", "b", "c"))
+    read, submit = _use_cases(repository, store)
+
+    recorded = await submit.execute(str(mission.id), compute_frame_fingerprint(mission, brief), [
+        _assessment(held[0].observation_id, **submitted),
+    ])
+    batch = await read.execute(str(mission.id))
+    decision = QualificationContext.build(
+        [s.observation_id for s in held], await store.list_evidence_qualifications(mission.id), ()
+    ).decision
+
+    assert recorded["status"] == "RECORDED"
+    assert (recorded["qualification_status"], recorded["qualification_reason_code"]) == (status, reason_code)
+    assert (batch["status"], batch["reason_code"]) == (status, reason_code)
+    assert (decision.status.value, decision.reason_code) == (status, reason_code)
+    assert recorded["next_step"] == batch["next_step"] == decision.next_step
+    assert bool(batch["evidence"]) is (reason_code == "QUALIFICATION_INCOMPLETE"), (
+        "only an incomplete frame hands out more evidence"
+    )
+
+
+@pytest.mark.parametrize(
+    "last, status, reason_code, step",
+    [
+        ({}, "READY", None, "get_mission_analysis"),
+        ({**_UNASSESSED, "reason_code": "INSUFFICIENT_CONTENT"}, "QUALIFICATION_REQUIRED",
+         "UNASSESSED_EVIDENCE", "new Market Brief revision"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_the_submission_that_judges_the_last_observation_names_where_the_frame_ended(
+    research, last, status, reason_code, step
+):
+    """Complete means READY and read the analysis; a final UNASSESSED row means reassess."""
+    repository, store, workspace = research
+    mission, brief, held = await _market(repository, store, workspace, ("a", "b"))
+    read, submit = _use_cases(repository, store)
+    frame = compute_frame_fingerprint(mission, brief)
+    await submit.execute(str(mission.id), frame, [_assessment(held[0].observation_id)])
+
+    recorded = await submit.execute(str(mission.id), frame, [_assessment(held[1].observation_id, **last)])
+    batch = await read.execute(str(mission.id))
+
+    assert (recorded["qualification_status"], recorded["qualification_reason_code"]) == (status, reason_code)
+    assert (batch["status"], batch["reason_code"]) == (status, reason_code)
+    assert recorded["next_step"] == batch["next_step"] and step in recorded["next_step"]
+    assert batch["evidence"] == []

@@ -787,6 +787,11 @@ REASSESSMENT_GUIDANCE = (
     "This mission's recorded judgments are final. Start a new mission or confirm a new Market "
     "Brief revision to assess the evidence again."
 )
+QUALIFICATION_STEP = (
+    "Read the pending evidence with get_mission_evidence_qualification_batch, judge it, and record "
+    "the judgments with submit_mission_evidence_qualifications."
+)
+ANALYSIS_STEP = "Every observation is assessed. Read the result with get_mission_analysis."
 
 
 def compute_query_fingerprint(keywords: Sequence[str], geo: Any, timeframe: Any) -> str:
@@ -893,6 +898,45 @@ class QualificationProgress:
             "excluded_irrelevant": self.excluded_irrelevant,
             "unassessed": self.unassessed,
         }
+
+
+@dataclass(frozen=True)
+class QualificationDecision:
+    """Where the qualification of one persisted evidence state stands, and what the Agent does next."""
+
+    status: QualificationStatus
+    reason_code: Optional[str]
+    next_step: str
+
+    @property
+    def pages_evidence(self) -> bool:
+        """Only an incomplete frame hands out evidence; a terminal one would only waste judgments."""
+        return self.reason_code == "QUALIFICATION_INCOMPLETE"
+
+
+def decide_qualification(progress: QualificationProgress) -> QualificationDecision:
+    """The one authority for qualification state, reason and next step.
+
+    The submit response, the batch read, the analysis and the artifact all answer from this, so
+    consecutive tool answers cannot contradict each other. Priority: a recorded evaluator failure
+    outranks everything, pending evidence included, because the evaluator the rest would need has
+    already failed. A recorded INSUFFICIENT_CONTENT row is a judgment about one item: the rest is
+    still handed out, so the qualification counts stay complete for inspection, and the frame turns
+    terminal once nothing is left to judge, because recorded judgments are write-once.
+    """
+    if progress.evaluator_unavailable:
+        return QualificationDecision(
+            QualificationStatus.UNAVAILABLE, "EVALUATOR_UNAVAILABLE", REASSESSMENT_GUIDANCE
+        )
+    if progress.unjudged:
+        return QualificationDecision(
+            QualificationStatus.QUALIFICATION_REQUIRED, "QUALIFICATION_INCOMPLETE", QUALIFICATION_STEP
+        )
+    if progress.unassessed:
+        return QualificationDecision(
+            QualificationStatus.QUALIFICATION_REQUIRED, "UNASSESSED_EVIDENCE", REASSESSMENT_GUIDANCE
+        )
+    return QualificationDecision(QualificationStatus.READY, None, ANALYSIS_STEP)
 
 
 # ---------------------------------------------------------------------------
@@ -1045,9 +1089,10 @@ def select_handoff_candidates(
 class QualificationContext:
     """Everything the analysis needs to know about a surfaced mission's evidence qualification.
 
-    Read from persisted rows only. `assessment_state` is UNAVAILABLE when an evaluator failure was
-    recorded, QUALIFICATION_REQUIRED while any current observation has no row or carries an
-    explicit UNASSESSED row, and READY only when every observation carries an actual assessment --
+    Read from persisted rows only. `assessment_state` is the status `decide_qualification` gives:
+    UNAVAILABLE when an evaluator failure was recorded, QUALIFICATION_REQUIRED while any current
+    observation has no row or carries an explicit UNASSESSED row, and READY only when every
+    observation carries an actual assessment --
     READY here means "assessed"; whether a conclusion is permitted is decided afterwards by the
     sufficiency policy. A persisted row is not an assessment: UNASSESSED says none was made.
     """
@@ -1073,20 +1118,18 @@ class QualificationContext:
             str(q.observation_id): q for q in qualifications if str(q.observation_id) in current
         }
         progress = QualificationProgress.from_evidence(list(current), list(by_observation.values()))
-        if progress.evaluator_unavailable:
-            state = QualificationStatus.UNAVAILABLE
-        elif progress.unassessed:
-            state = QualificationStatus.QUALIFICATION_REQUIRED
-        else:
-            state = QualificationStatus.READY
         return cls(
-            assessment_state=state,
+            assessment_state=decide_qualification(progress).status,
             progress=progress,
             qualifications=by_observation,
             probe_outcomes=tuple(probe_outcomes),
             geo=_plain(geo) if geo is not None else None,
             timeframe=_plain(timeframe) if timeframe is not None else None,
         )
+
+    @property
+    def decision(self) -> QualificationDecision:
+        return decide_qualification(self.progress)
 
     def judgment_of(self, observation_id: Any) -> Optional[EvidenceQualification]:
         return self.qualifications.get(str(observation_id)) if observation_id else None

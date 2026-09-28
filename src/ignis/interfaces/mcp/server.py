@@ -48,7 +48,6 @@ from ignis.domain.research_workspace import (
     IncompleteMarketBriefError,
     MissionLineage,
     MissionWriterConflictError,
-    REASSESSMENT_GUIDANCE,
     QualificationStatus,
     ResearchSurface,
     WorkspaceScopeMismatchError,
@@ -520,10 +519,9 @@ def _qualification_payload(report: Any) -> Dict[str, Any]:
         "analysis_status": qualification.status,
         "qualification": qualification.to_payload(),
     }
-    if qualification.reason_code == "QUALIFICATION_INCOMPLETE":
-        payload["next_step"] = "Call get_mission_evidence_qualification_batch."
-    elif qualification.reason_code in ("UNASSESSED_EVIDENCE", "EVALUATOR_UNAVAILABLE"):
-        payload["next_step"] = REASSESSMENT_GUIDANCE
+    # Decided by decide_qualification, the authority the batch and submit tools answer from too.
+    if qualification.next_step:
+        payload["next_step"] = qualification.next_step
     if getattr(report, "topic_sufficiency", None):
         payload["topic_sufficiency"] = report.topic_sufficiency
     if getattr(report, "handoff_status", None):
@@ -2258,7 +2256,7 @@ async def get_mission_evidence_qualification_batch(mission_id: str, cursor: Opti
     return await handle_get_mission_evidence_qualification_batch(mission_id=mission_id, cursor=cursor, limit=limit)
 
 
-@mcp.tool(name="submit_mission_evidence_qualifications", description="Record 1-50 typed evidence judgments for one mission, atomically: each assessment names an observation_id from the batch, a relation (QUALIFIED_SUPPORT, CONTEXT_ONLY, EXCLUDED_IRRELEVANT, UNASSESSED), a purpose (DEMAND, SUPPLY, VOC, CONTEXT), a confidence from 0.0 to 1.0 (null only for UNASSESSED), a reason_code (DIRECT_TO_FRAME, ADJACENT_ONLY, KEYWORD_ONLY, WRONG_AUDIENCE_OR_PROBLEM, FICTION_NEWS_OR_ENTERTAINMENT, INSUFFICIENT_CONTENT, EVALUATOR_UNAVAILABLE), judged_by and an optional model identifier. A stale frame, a foreign or duplicate observation, or any invalid assessment refuses the whole batch; an identical replay is idempotent and a different judgment for an already judged observation is refused. Never send a prompt, transcript or credential.")
+@mcp.tool(name="submit_mission_evidence_qualifications", description="Record 1-50 typed evidence judgments for one mission, atomically: each assessment names an observation_id from the batch, a relation (QUALIFIED_SUPPORT, CONTEXT_ONLY, EXCLUDED_IRRELEVANT, UNASSESSED), a purpose (DEMAND, SUPPLY, VOC, CONTEXT), a confidence from 0.0 to 1.0 (null only for UNASSESSED), a reason_code (DIRECT_TO_FRAME, ADJACENT_ONLY, KEYWORD_ONLY, WRONG_AUDIENCE_OR_PROBLEM, FICTION_NEWS_OR_ENTERTAINMENT, INSUFFICIENT_CONTENT, EVALUATOR_UNAVAILABLE), judged_by and an optional model identifier. A stale frame, a foreign or duplicate observation, or any invalid assessment refuses the whole batch; an identical replay is idempotent and a different judgment for an already judged observation is refused. The response reports the state the write produced (qualification_status, qualification_reason_code) and a next_step from the same decision the batch read and the analysis use: the next batch while evidence is pending, reassessment under a new mission or Market Brief revision once recorded judgments make the frame terminal, or the analysis once everything is assessed. Never send a prompt, transcript or credential.")
 async def submit_mission_evidence_qualifications(mission_id: str, frame_fingerprint: str, assessments: list[dict]) -> str:
     return await handle_submit_mission_evidence_qualifications(mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments)
 

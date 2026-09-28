@@ -92,3 +92,13 @@ async def test_the_batch_tool_does_not_promise_ready_whenever_nothing_is_pending
     assert "Returns READY when nothing is pending" not in description
     for required in ("QUALIFICATION_REQUIRED", "UNAVAILABLE", "unassessed"):
         assert required in description, required
+
+
+@pytest.mark.asyncio
+async def test_the_submit_tool_says_its_next_step_follows_the_state_it_produced():
+    """After a write that made the frame terminal, another batch read is not the next step."""
+    tools = {t.name: t for t in await mcp.list_tools()}
+    description = tools["submit_mission_evidence_qualifications"].description
+
+    for required in ("qualification_status", "qualification_reason_code", "next_step"):
+        assert required in description, required

@@ -17,11 +17,11 @@ from ignis.domain.research_workspace import (
     QualificationProgress,
     ResearchSurface,
     compute_frame_fingerprint,
+    decide_qualification,
     resolve_surface,
 )
 
 MAX_ASSESSMENTS_PER_BATCH = 50
-NEXT_STEP = "Call get_mission_evidence_qualification_batch with this mission."
 
 
 class SubmitEvidenceQualificationsUseCase:
@@ -119,12 +119,18 @@ class SubmitEvidenceQualificationsUseCase:
         progress = QualificationProgress.from_evidence(
             list(held), await self._store.list_evidence_qualifications(mission.id)
         )
+        # The state this write produced, from the authority the batch read and the analysis use:
+        # a batch that recorded an UNASSESSED judgment may have made the frame terminal, and then
+        # another batch read is not the next step.
+        decision = decide_qualification(progress)
         return {
             **base,
             "status": "RECORDED",
             "recorded": recorded,
             "progress": progress.to_payload(),
-            "next_step": NEXT_STEP,
+            "qualification_status": decision.status.value,
+            "qualification_reason_code": decision.reason_code,
+            "next_step": decision.next_step,
         }
 
     @staticmethod

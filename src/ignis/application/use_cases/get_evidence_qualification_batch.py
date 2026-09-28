@@ -16,12 +16,12 @@ from ignis.application.ports.research_workspace_port import IResearchWorkspaceSt
 from ignis.domain.entities import TrendSignal
 from ignis.domain.probe_provenance import PROBE_KEY_ALIASES
 from ignis.domain.research_workspace import (
-    REASSESSMENT_GUIDANCE,
     EvidencePurpose,
     QualificationProgress,
     QualificationRelation,
     ResearchSurface,
     compute_frame_fingerprint,
+    decide_qualification,
     resolve_surface,
 )
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
@@ -155,7 +155,7 @@ class GetEvidenceQualificationBatchUseCase:
         signals = await self._repo.get_mission_signals(mission.id)
         qualifications = await self._store.list_evidence_qualifications(mission.id)
         progress = QualificationProgress.from_evidence(
-            [s.observation_id for s in signals], qualifications
+            [s.observation_id for s in signals if s.observation_id], qualifications
         )
         judged = {str(q.observation_id) for q in qualifications}
         pending = sorted(
@@ -168,20 +168,14 @@ class GetEvidenceQualificationBatchUseCase:
             "frame_fingerprint": frame_fingerprint,
             "progress": progress.to_payload(),
         }
-        # The same state priority QualificationContext gives the analysis, decided before any
-        # paging. A recorded evaluator failure makes the frame UNAVAILABLE whatever is still
-        # pending, so handing out more evidence would only produce judgments that cannot help.
-        done = {**payload, "evidence": [], "next_cursor": None}
-        if progress.evaluator_unavailable:
-            return {**done, "status": "UNAVAILABLE", "reason_code": "EVALUATOR_UNAVAILABLE",
-                    "next_step": REASSESSMENT_GUIDANCE}
-        if not pending:
-            # Nothing left to hand out is not the same as everything assessed: an UNASSESSED row
-            # is a recorded absence of judgment, and it can never be read out again.
-            if progress.unassessed:
-                return {**done, "status": "QUALIFICATION_REQUIRED",
-                        "reason_code": "UNASSESSED_EVIDENCE", "next_step": REASSESSMENT_GUIDANCE}
-            return {**done, "status": "READY"}
+        # One authority decides the state before any paging, the same one the submit response and
+        # the analysis answer from. A terminal frame hands out nothing: judgments made on the rest
+        # of its evidence could not change the outcome.
+        decision = decide_qualification(progress)
+        payload.update(status=decision.status.value, reason_code=decision.reason_code,
+                       next_step=decision.next_step)
+        if not decision.pages_evidence:
+            return {**payload, "evidence": [], "next_cursor": None}
 
         page_size = max(1, min(int(limit), MAX_BATCH_LIMIT))
         remaining = [s for s in pending if str(s.observation_id) > after]
@@ -193,8 +187,6 @@ class GetEvidenceQualificationBatchUseCase:
         )
         return {
             **payload,
-            "status": "QUALIFICATION_REQUIRED",
-            "reason_code": "QUALIFICATION_INCOMPLETE",
             "frame": (
                 market_frame_payload(brief)
                 if surface is ResearchSurface.MARKET

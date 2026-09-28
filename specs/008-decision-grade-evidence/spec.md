@@ -9,6 +9,20 @@
 **Input**: Product-owner approval of
 `docs/decisions/2026-09-25-decision-grade-evidence-qualification.md`
 
+## Clarifications
+
+### Session 2026-09-28
+
+- Q: Which answer decides the qualification state and the next step when the submit, batch,
+  analysis and artifact responses could disagree? → A: One domain function,
+  `decide_qualification`, over the persisted progress; every response answers from it (agent
+  decided after the fourth review's churn stop; basis: the review of `a81661b` and the
+  architecture checkpoint).
+- Q: Does a recorded `INSUFFICIENT_CONTENT` judgment stop the batch from handing out the remaining
+  evidence? → A: No. Only a recorded evaluator failure outranks pending evidence; the rest is still
+  judged so the qualification counts stay complete, and the frame turns terminal once nothing is
+  pending (agent decided; basis: US4 inspection and the accepted corpus replay counts).
+
 ## User Scenarios & Testing
 
 ### User Story 1 - Get the Same First Mission After Every Startup (Priority: P1)

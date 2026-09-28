@@ -124,6 +124,8 @@ class QualificationSummary:
     """Where a surfaced mission's evidence stands, and why a conclusion was allowed or withheld.
 
     `reason_code` is the machine-readable form of `reason`; both are None when nothing was withheld.
+    `next_step` is what `decide_qualification` tells the Agent while a conclusion is withheld; it
+    stays out of `to_payload`, which boundaries report beside it.
     """
     status: str
     total_evidence: int = 0
@@ -134,6 +136,7 @@ class QualificationSummary:
     question_relevance_score: float = 0.0
     reason: Optional[str] = None
     reason_code: Optional[str] = None
+    next_step: Optional[str] = None
 
     def to_payload(self) -> Dict[str, Any]:
         return {
