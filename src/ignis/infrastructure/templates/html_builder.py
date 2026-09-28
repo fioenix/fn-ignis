@@ -274,17 +274,30 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             "Establish recurring ingress monitoring to capture emerging trend momentum."
         ])
 
+        qualification = getattr(report, "qualification", None) if report else None
+        surface = getattr(report, "surface", None) if report else None
         return template.render(
             mission=mission,
             signals=signals,
             platform_breakdown=platform_breakdown,
             scorecard=scorecard,
+            # Rendered from the persisted qualification the application layer supplied; the
+            # template never infers or recomputes a semantic judgment.
+            qualification=qualification.to_payload() if qualification else None,
+            opportunity_index_applies=(
+                surface != "ATTENTION"
+                and (qualification is None or qualification.status == "READY")
+            ),
+            handoff_status=getattr(report, "handoff_status", None) if report else None,
+            qualified_handoff_candidates=(
+                getattr(report, "qualified_handoff_candidates", None) or [] if report else []
+            ),
             maturity_stage=maturity,
             market_opportunities=opportunities,
             strategic_insights=insights,
             channel_summaries=channel_summaries,
             actionable_takeaways=actionables,
-            surface=getattr(report, "surface", None) if report else None,
+            surface=surface,
             market_brief=getattr(report, "market_brief", None) if report else None,
             customer_inquiries=customer_inquiries or [],
             search_suggestions=search_suggestions or [],

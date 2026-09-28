@@ -15,6 +15,7 @@ from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.domain.entities import ResearchMission
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
+from ignis.infrastructure.connectors.registry import SearchPassResult
 from conftest import YT_ID, YT_URL, OneSightingRegistry
 
 pytestmark = pytest.mark.asyncio
@@ -113,6 +114,10 @@ async def test_a_pass_that_collected_nothing_says_so(repository_case):
     mission = await _youtube_only(repository_case.repository)
 
     class Silent:
+        async def search_with_outcomes(self, **kwargs):
+            # The mission executor asks for per-surface outcomes; this double reports none.
+            return SearchPassResult(signals=await self.search_across_all(**kwargs))
+
         async def search_across_all(self, **_kwargs):
             return []
 

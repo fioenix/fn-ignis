@@ -25,6 +25,7 @@ from ignis.domain.entities import TrendSignal
 from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+from ignis.infrastructure.connectors.registry import SearchPassResult
 
 # A real YouTube id is 11 characters and the URL pattern needs at least 6, so a short stand-in
 # would resolve by the normalized-URL fallback and a route assertion would be measuring the
@@ -49,6 +50,9 @@ SCHEMA_MIGRATIONS = (
     # key through it, so a backend missing this table silently keeps filing two rows per post.
     "018_source_identity_aliases.sql",
     "019_observations_latest_per_source_index.sql",
+    # Probe outcomes and evidence qualifications. SQLite restates both tables in _ensure_schema,
+    # so a judgment or refusal only one backend honours is what listing it here catches.
+    "023_evidence_qualification.sql",
 )
 
 
@@ -249,6 +253,10 @@ class TwoObservationRegistry:
             )
         )
 
+    async def search_with_outcomes(self, **kwargs):
+        # The mission executor asks for per-surface outcomes; this double reports none.
+        return SearchPassResult(signals=await self.search_across_all(**kwargs))
+
     async def search_across_all(self, **_kwargs):
         metric, captured_at = next(self._observations)
         return [
@@ -278,6 +286,10 @@ class OneSightingRegistry:
         self._metadata = metadata
         self._platform = platform or PlatformType.YOUTUBE
 
+    async def search_with_outcomes(self, **kwargs):
+        # The mission executor asks for per-surface outcomes; this double reports none.
+        return SearchPassResult(signals=await self.search_across_all(**kwargs))
+
     async def search_across_all(self, **_kwargs):
         return [
             TrendSignal(
@@ -294,6 +306,10 @@ class OneSightingRegistry:
 
 class SilentRegistry:
     """A connector that returns nothing this pass -- the quota exhaustion case."""
+
+    async def search_with_outcomes(self, **kwargs):
+        # The mission executor asks for per-surface outcomes; this double reports none.
+        return SearchPassResult(signals=await self.search_across_all(**kwargs))
 
     async def search_across_all(self, **_kwargs):
         return []

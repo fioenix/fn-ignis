@@ -47,6 +47,8 @@ CLIENT_READ_ONLY = ("industry_taxonomies", "market_lexicons")
 OWNER_ONLY = {
     "market_brief_revisions": "Market Brief",
     "mission_evidence": "mission evidence",
+    "mission_evidence_qualifications": "evidence qualification",
+    "mission_probe_outcomes": "probe outcome",
     "mission_run_journals": "run journal",
     "mission_writer_claims": "writer claim",
     "observations": "observation",
@@ -84,6 +86,8 @@ SPARE_MISSION = "00000000-0000-4000-8000-000000000003"
 CLUSTER = "00000000-0000-4000-8000-000000000004"
 SOURCE = "00000000-0000-4000-8000-000000000005"
 OBSERVATION = "00000000-0000-4000-8000-000000000006"
+RUN = "00000000-0000-4000-8000-000000000007"
+SPARE_OBSERVATION = "00000000-0000-4000-8000-000000000008"
 OWNER_ROWS = (
     f"INSERT INTO research_workspaces (id, slug, root_path) VALUES ('{WORKSPACE}', 't018', '/t018')",
     f"INSERT INTO topic_clusters (id, canonical_name) VALUES ('{CLUSTER}', 't018 cluster')",
@@ -92,13 +96,18 @@ OWNER_ROWS = (
     "INSERT INTO market_brief_revisions (workspace_id, mission_id, revision_number, decision,"
     " target_user, problem, geo, timeframe, hypothesis, falsifiers, confirmed_by) VALUES"
     f" ('{WORKSPACE}', '{MISSION}', 1, 'd', 'u', 'p', 'VN', '7d', 'h', ARRAY['f'], 'owner')",
-    "INSERT INTO mission_run_journals (workspace_id, mission_id, journal_path, sequence) VALUES"
-    f" ('{WORKSPACE}', '{MISSION}', '/t018/journal-1', 1)",
+    "INSERT INTO mission_run_journals (id, workspace_id, mission_id, journal_path, sequence) VALUES"
+    f" ('{RUN}', '{WORKSPACE}', '{MISSION}', '/t018/journal-1', 1)",
     f"INSERT INTO mission_writer_claims (mission_id, run_id) VALUES ('{MISSION}', '{uuid4()}')",
     f"INSERT INTO sources (id, platform, external_id) VALUES ('{SOURCE}', 'threads', 'post:1')",
     "INSERT INTO observations (id, source_id, observed_at, time_provenance, identity_source)"
     f" VALUES ('{OBSERVATION}', '{SOURCE}', now(), 'exact_ingestion', 'metadata_external_id')",
     f"INSERT INTO mission_evidence (mission_id, observation_id) VALUES ('{MISSION}', '{OBSERVATION}')",
+    # A second association, unjudged, so a client's qualification row would satisfy every key.
+    "INSERT INTO observations (id, source_id, observed_at, time_provenance, identity_source)"
+    f" VALUES ('{SPARE_OBSERVATION}', '{SOURCE}', now(), 'exact_ingestion', 'metadata_external_id')",
+    "INSERT INTO mission_evidence (mission_id, observation_id)"
+    f" VALUES ('{SPARE_MISSION}', '{SPARE_OBSERVATION}')",
     "INSERT INTO source_identity_aliases (platform, alias_external_id, canonical_external_id,"
     " witnessed_by) VALUES ('threads', 'post_shortcode:abc', 'post:1', 'owner')",
     "INSERT INTO platform_credentials (platform, auth_type, credentials_data)"
@@ -107,6 +116,17 @@ OWNER_ROWS = (
     "INSERT INTO system_audit_logs (component, event_type, message) VALUES ('t018', 'seed', 'owner')",
     "INSERT INTO trend_signals (platform, raw_title) VALUES ('tiktok', 't018 owner')",
     "INSERT INTO signal_metrics (signal_id) VALUES (1)",
+)
+# The two tables 023 adds. Seeded only once they exist, so a database migrated through 020 can
+# still be seeded to reproduce the pre-021 exposure.
+OWNER_ROWS_SINCE_023 = (
+    "INSERT INTO mission_evidence_qualifications (mission_id, observation_id, frame_fingerprint,"
+    " relation, purpose, confidence, reason_code, judged_by) VALUES"
+    f" ('{MISSION}', '{OBSERVATION}', 'frame', 'EXCLUDED_IRRELEVANT', 'CONTEXT', 0.9,"
+    " 'KEYWORD_ONLY', 'owner')",
+    "INSERT INTO mission_probe_outcomes (run_id, platform, connector_surface, status,"
+    f" signals_collected, queried_keywords, query_fingerprint, completed_at) VALUES ('{RUN}',"
+    " 'youtube', 'youtube', 'EMPTY_NO_DATA', 0, ARRAY['t018'], 'fp', now())",
 )
 # A valid row a client could write to each table, so an INSERT that is allowed actually lands.
 # Ids are supplied rather than defaulted, so the outcome turns only on the table privilege and RLS
@@ -119,6 +139,13 @@ CLIENT_ROWS = {
     "market_lexicons": "(domain, term) VALUES ('t018', 'written by a client')",
     "mission_evidence": "(id, mission_id, observation_id) VALUES"
     f" ('{uuid4()}', '{SPARE_MISSION}', '{OBSERVATION}')",
+    "mission_evidence_qualifications": "(id, mission_id, observation_id, frame_fingerprint,"
+    " relation, purpose, confidence, reason_code, judged_by) VALUES"
+    f" ('{uuid4()}', '{SPARE_MISSION}', '{SPARE_OBSERVATION}', 'frame', 'CONTEXT_ONLY', 'CONTEXT', 0.5,"
+    " 'ADJACENT_ONLY', 'client')",
+    "mission_probe_outcomes": "(id, run_id, platform, connector_surface, status,"
+    " signals_collected, queried_keywords, query_fingerprint, completed_at) VALUES"
+    f" ('{uuid4()}', '{RUN}', 'tiktok', 'tiktok', 'EMPTY_NO_DATA', 0, ARRAY['t018'], 'fp', now())",
     "mission_run_journals": "(id, workspace_id, mission_id, journal_path, sequence) VALUES"
     f" ('{uuid4()}', '{WORKSPACE}', '{MISSION}', '/t018/journal-2', 2)",
     "mission_writer_claims": f"(mission_id, run_id) VALUES ('{SPARE_MISSION}', '{uuid4()}')",
@@ -170,6 +197,15 @@ def _seed(dsn: str) -> None:
     with psycopg.connect(dsn) as conn:
         for statement in OWNER_ROWS:
             conn.execute(statement)
+        if conn.execute("SELECT to_regclass('public.mission_probe_outcomes')").fetchone()[0]:
+            for statement in OWNER_ROWS_SINCE_023:
+                conn.execute(statement)
+
+
+def _present(dsn: str) -> list:
+    """The declared tables this database actually holds; an older chain lacks the newest ones."""
+    tables = {row[0] for row in _all(dsn, PUBLIC_TABLES)}
+    return sorted(set(POSTURE) & tables)
 
 
 def _posture_violations(dsn: str) -> list:
@@ -271,7 +307,7 @@ def _role_matrix(dsn: str) -> dict:
     return {
         (role, table, statement): _attempt(dsn, role, table, statement)
         for role in SUPABASE_ROLES
-        for table in sorted(POSTURE)
+        for table in _present(dsn)
         for statement in STATEMENTS
     }
 

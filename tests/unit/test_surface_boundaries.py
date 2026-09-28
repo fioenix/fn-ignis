@@ -14,6 +14,7 @@ from ignis.domain.research_workspace import (
     opportunity_index_is_allowed,
     resolve_surface,
 )
+from ignis.infrastructure.connectors.registry import SearchPassResult
 
 
 def test_the_two_surfaces_are_the_only_ones_that_exist():
@@ -291,11 +292,19 @@ def test_a_context_citation_is_dropped_from_anything_a_conclusion_rests_on():
 class _ExplodingRegistry:
     """A connector pass that fails, which is what the failure path exists for."""
 
+    async def search_with_outcomes(self, **kwargs):
+        # The mission executor asks for per-surface outcomes; this double reports none.
+        return SearchPassResult(signals=await self.search_across_all(**kwargs))
+
     async def search_across_all(self, **_kwargs):
         raise RuntimeError("connector pass failed")
 
 
 class _SilentRegistry:
+    async def search_with_outcomes(self, **kwargs):
+        # The mission executor asks for per-surface outcomes; this double reports none.
+        return SearchPassResult(signals=await self.search_across_all(**kwargs))
+
     async def search_across_all(self, **_kwargs):
         return []
 
@@ -406,3 +415,352 @@ async def test_a_mission_outside_a_research_workspace_runs_exactly_as_before(tmp
         assert await store.list_run_journals(mission.id) == []
     finally:
         await repository.close()
+
+
+# --- User Story 2: the deterministic evidence minimum for a Market verdict ----------------------
+#
+# The semantic judgment labels evidence; policy code decides whether a verdict is allowed. The
+# minimums are product safety defaults: one qualified demand observation, and either two qualified
+# supply observations from two canonical sources or two relevant surfaces that completed and came
+# back empty for the same query.
+
+from datetime import datetime, timezone  # noqa: E402
+from uuid import uuid4  # noqa: E402
+
+from ignis.domain.research_workspace import (  # noqa: E402
+    EvidencePurpose,
+    EvidenceSufficiency,
+    MissionProbeOutcome,
+    QualificationStatus,
+    QualifiedObservation,
+    assess_topic_sufficiency,
+    compute_query_fingerprint,
+)
+
+RUN = uuid4()
+
+
+def _qualified(purpose, source=None, platform="youtube"):
+    return QualifiedObservation(
+        observation_id=str(uuid4()),
+        source_id=source or str(uuid4()),
+        purpose=EvidencePurpose(purpose),
+        platform=platform,
+    )
+
+
+TOPIC = "ai cho cửa hàng"
+GEO, TIMEFRAME = "VN", "7d"
+
+
+def _probe(surface, status="EMPTY_NO_DATA", platform=None, queried=(TOPIC,), fingerprint=None, count=0,
+           window=TIMEFRAME):
+    """One surface outcome naming the exact keywords and window it attested to having queried."""
+    return MissionProbeOutcome(
+        run_id=RUN, platform=platform or surface, connector_surface=surface, status=status,
+        signals_collected=count, queried_keywords=tuple(queried), queried_window=window,
+        query_fingerprint=fingerprint or compute_query_fingerprint(queried, GEO, window),
+        completed_at=datetime(2026, 9, 27, tzinfo=timezone.utc),
+    )
+
+
+def _assess(qualified=(), outcomes=(), state=QualificationStatus.READY, topic=TOPIC):
+    return assess_topic_sufficiency(
+        topic=topic,
+        qualified=list(qualified),
+        probe_outcomes=list(outcomes),
+        geo=GEO,
+        timeframe=TIMEFRAME,
+        assessment_state=state,
+    )
+
+
+def test_no_qualified_demand_withholds_the_verdict_whatever_the_supply():
+    result = _assess([_qualified("SUPPLY"), _qualified("SUPPLY"), _qualified("VOC", platform="threads")])
+
+    assert result.state is EvidenceSufficiency.MISSING_DEMAND
+    assert result.state.permits_verdict is False
+    assert result.qualified_demand_count == 0 and result.qualified_supply_count == 2
+
+
+def test_one_demand_and_two_supply_observations_from_two_sources_is_sufficient():
+    result = _assess([_qualified("DEMAND", platform="google"), _qualified("SUPPLY"), _qualified("SUPPLY")])
+
+    assert result.state is EvidenceSufficiency.SUFFICIENT_POSITIVE_SUPPLY
+    assert result.state.permits_verdict is True
+    assert (result.qualified_demand_count, result.qualified_supply_count,
+            result.independent_supply_sources) == (1, 2, 2)
+
+
+def test_two_sightings_of_one_canonical_source_count_once():
+    source = str(uuid4())
+    result = _assess([
+        _qualified("DEMAND", platform="google"),
+        _qualified("SUPPLY", source=source, platform="youtube"),
+        _qualified("SUPPLY", source=source, platform="tiktok"),
+    ])
+
+    assert result.state is EvidenceSufficiency.MISSING_SUPPLY
+    assert result.independent_supply_sources == 1
+
+
+def test_a_single_supply_observation_is_neither_supply_nor_measured_absence():
+    result = _assess(
+        [_qualified("DEMAND", platform="google"), _qualified("SUPPLY")],
+        [_probe("tiktok_video_grid", platform="tiktok"), _probe("reels")],
+    )
+
+    assert result.state is EvidenceSufficiency.MISSING_SUPPLY
+
+
+def test_two_completed_empty_supply_surfaces_measure_zero_supply():
+    result = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("youtube"), _probe("tiktok_video_grid", platform="tiktok")],
+    )
+
+    assert result.state is EvidenceSufficiency.SUFFICIENT_ZERO_SUPPLY
+    assert result.measured_zero_surfaces == ("tiktok_video_grid", "youtube")
+    assert result.qualified_supply_count == 0
+
+
+@pytest.mark.parametrize("failed", ["AUTH_REQUIRED", "RATE_LIMITED", "DEGRADED"])
+def test_a_surface_that_could_not_measure_is_never_zero_supply(failed):
+    result = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("youtube"), _probe("tiktok_video_grid", status=failed, platform="tiktok")],
+    )
+
+    assert result.state is EvidenceSufficiency.MISSING_SUPPLY
+    assert result.measured_zero_surfaces == ("youtube",)
+
+
+def test_an_empty_surface_measures_zero_only_for_its_own_query_and_only_as_supply():
+    stale = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("youtube", fingerprint="z" * 64), _probe("tiktok_video_grid", platform="tiktok")],
+    )
+    not_supply = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("google"), _probe("threads"), _probe("youtube")],
+    )
+    healthy_but_irrelevant = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("youtube", status="HEALTHY", count=30), _probe("reels")],
+    )
+
+    assert stale.state is EvidenceSufficiency.MISSING_SUPPLY
+    assert not_supply.state is EvidenceSufficiency.MISSING_SUPPLY
+    assert healthy_but_irrelevant.state is EvidenceSufficiency.MISSING_SUPPLY, (
+        "a surface that returned only irrelevant items measured no absence"
+    )
+
+
+def test_a_measured_zero_covers_only_the_keywords_each_surface_actually_queried():
+    """TikTok, Threads and Reels probe ten keywords; an eleventh was never asked of them."""
+    keywords = [f"topic-{index}" for index in range(1, 12)]
+    sent = tuple(keywords[:10])
+    outcomes = [_probe("tiktok_video_grid", platform="tiktok", queried=sent),
+                _probe("reels", queried=sent)]
+    demand = [_qualified("DEMAND", platform="google")]
+
+    first = _assess(demand, outcomes, topic="topic-1")
+    eleventh = _assess(demand, outcomes, topic="topic-11")
+
+    assert first.state is EvidenceSufficiency.SUFFICIENT_ZERO_SUPPLY
+    assert eleventh.state is EvidenceSufficiency.MISSING_SUPPLY
+    assert eleventh.measured_zero_surfaces == ()
+
+
+def test_an_outcome_whose_fingerprint_does_not_match_its_own_query_measures_nothing():
+    tampered = _probe("reels", fingerprint=compute_query_fingerprint(["other"], GEO, TIMEFRAME))
+
+    result = _assess([_qualified("DEMAND", platform="google")], [_probe("youtube"), tampered])
+
+    assert result.measured_zero_surfaces == ("youtube",)
+    assert result.state is EvidenceSufficiency.MISSING_SUPPLY
+
+
+@pytest.mark.parametrize("window", ["24h", "30d", None])
+def test_an_empty_surface_measures_zero_only_for_the_window_it_actually_filtered_by(window):
+    """The frame is 7d: a 24h or 30d search, or one with no window at all, measured another frame."""
+    result = _assess(
+        [_qualified("DEMAND", platform="google")],
+        [_probe("youtube"), _probe("reels", window=window)],
+    )
+
+    assert result.measured_zero_surfaces == ("youtube",)
+    assert result.state is EvidenceSufficiency.MISSING_SUPPLY
+
+
+def test_unfinished_or_failed_qualification_withholds_every_verdict():
+    sufficient = [_qualified("DEMAND", platform="google"), _qualified("SUPPLY"), _qualified("SUPPLY")]
+
+    pending = _assess(sufficient, state=QualificationStatus.QUALIFICATION_REQUIRED)
+    unavailable = _assess(sufficient, state=QualificationStatus.UNAVAILABLE)
+
+    assert pending.state is EvidenceSufficiency.QUALIFICATION_REQUIRED
+    assert unavailable.state is EvidenceSufficiency.QUALIFIER_UNAVAILABLE
+    assert not pending.state.permits_verdict and not unavailable.state.permits_verdict
+
+
+def test_every_withheld_state_carries_a_reason():
+    for result in (
+        _assess(),
+        _assess([_qualified("DEMAND", platform="google")]),
+        _assess(state=QualificationStatus.QUALIFICATION_REQUIRED),
+        _assess(state=QualificationStatus.UNAVAILABLE),
+    ):
+        assert not result.state.permits_verdict
+        assert result.reason, result.state
+
+
+# --- User Story 3: an Attention handoff candidate must be qualified, never a fallback -----------
+#
+# Attention ranks what is being looked at; a ranked list is not evidence that any item clears a
+# bar. A cluster becomes a Market handoff candidate only when its qualified evidence is directly
+# relevant to the declared scope and comes from two canonical sources.
+
+from ignis.domain.entities import ResearchMission, TrendSignal  # noqa: E402
+from ignis.domain.harness_models import QualityScorecard  # noqa: E402
+from ignis.domain.research_workspace import (  # noqa: E402
+    EvidenceQualification,
+    HandoffStatus,
+    QualificationContext,
+    select_handoff_candidates,
+)
+from ignis.domain.value_objects import GeoCode, PlatformType  # noqa: E402
+from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner  # noqa: E402
+
+ATTENTION = ResearchMission(
+    title="What is gaining attention around retail AI",
+    keywords=["AI cho cửa hàng bán lẻ", "phần mềm AI bán hàng"],
+    surface="ATTENTION",
+)
+
+
+def _attention_signal(title, cluster, source=None):
+    return TrendSignal(
+        platform=PlatformType.YOUTUBE,
+        raw_title=title,
+        metric_value=1000.0,
+        source_url=f"https://www.youtube.com/watch?v={uuid4().hex[:11]}",
+        geo_code=GeoCode.VN,
+        observation_id=uuid4(),
+        source_id=source or uuid4(),
+        cluster_id=cluster,
+        metadata={"keyword": "AI cho cửa hàng bán lẻ", "connector_surface": "youtube"},
+    )
+
+
+def _judged(signal, relation, reason, purpose="SUPPLY", confidence=0.9):
+    return EvidenceQualification(
+        mission_id=ATTENTION.id,
+        observation_id=signal.observation_id,
+        frame_fingerprint="a" * 64,
+        relation=relation,
+        purpose="CONTEXT" if relation != "QUALIFIED_SUPPORT" else purpose,
+        confidence=None if relation == "UNASSESSED" else confidence,
+        reason_code=reason,
+        judged_by="unit-test",
+    )
+
+
+def _attention_report(signals, judgments):
+    context = QualificationContext.build(
+        [s.observation_id for s in signals], judgments, probe_outcomes=(), geo="VN", timeframe="7d"
+    )
+    return StrategicMarketReasoner().analyze_mission(
+        mission=ATTENTION, signals=signals, clusters=[], scorecard=QualityScorecard(),
+        qualification=context,
+    )
+
+
+def test_attention_noise_and_adjacent_clusters_offer_no_candidate_and_no_fallback():
+    noise, adjacent = uuid4(), uuid4()
+    signals = [
+        _attention_signal("Phim hành động AI cho cửa hàng bán lẻ tập 12", noise),
+        _attention_signal("Xổ số hôm nay: AI cho cửa hàng bán lẻ", noise),
+        _attention_signal("Cách tạo video AI drama viral", adjacent),
+        _attention_signal("AI xây website bán hàng cho người mới", adjacent),
+    ]
+    judgments = [
+        _judged(signals[0], "EXCLUDED_IRRELEVANT", "FICTION_NEWS_OR_ENTERTAINMENT"),
+        _judged(signals[1], "EXCLUDED_IRRELEVANT", "KEYWORD_ONLY"),
+        _judged(signals[2], "CONTEXT_ONLY", "ADJACENT_ONLY"),
+        _judged(signals[3], "CONTEXT_ONLY", "ADJACENT_ONLY"),
+    ]
+
+    report = _attention_report(signals, judgments)
+
+    assert report.handoff_status == HandoffStatus.NO_QUALIFIED_CANDIDATE.value
+    assert report.qualified_handoff_candidates == []
+    assert report.qualification.status == "INSUFFICIENT_RELEVANT_EVIDENCE"
+    assert report.qualification.reason_code == "NO_QUALIFIED_CLUSTER"
+    assert report.market_opportunities == [], "Attention never carries an Opportunity Index"
+    visible = {row["cluster_id"]: row for row in report.cluster_qualification}
+    assert visible[str(adjacent)]["CONTEXT_ONLY"] == 2 and not visible[str(adjacent)]["handoff_eligible"]
+    assert visible[str(noise)]["EXCLUDED_IRRELEVANT"] == 2
+
+
+def test_attention_one_source_seen_twice_is_not_two_independent_sources():
+    cluster, source = uuid4(), uuid4()
+    signals = [
+        _attention_signal("Phần mềm quản lý bán hàng cho tiệm tạp hóa", cluster, source),
+        _attention_signal("Phần mềm quản lý bán hàng cho tiệm tạp hóa (bản mới)", cluster, source),
+    ]
+    report = _attention_report(
+        signals, [_judged(s, "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME") for s in signals]
+    )
+
+    assert report.handoff_status == HandoffStatus.NO_QUALIFIED_CANDIDATE.value
+
+
+def test_attention_two_source_direct_support_is_the_only_candidate_even_through_synonyms():
+    supported, adjacent = uuid4(), uuid4()
+    signals = [
+        # Neither title repeats a mission keyword: relevance was judged, not string-matched.
+        _attention_signal("Chủ tiệm tạp hóa hỏi phần mềm quản lý kho nào dễ dùng", supported),
+        _attention_signal("Review phần mềm bán hàng cho shop nhỏ sau 3 tháng", supported),
+        _attention_signal("AI xây website bán hàng", adjacent),
+        _attention_signal("AI tạo landing page", adjacent),
+    ]
+    judgments = [
+        _judged(signals[0], "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME", purpose="VOC"),
+        _judged(signals[1], "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME"),
+        _judged(signals[2], "CONTEXT_ONLY", "ADJACENT_ONLY"),
+        _judged(signals[3], "CONTEXT_ONLY", "ADJACENT_ONLY"),
+    ]
+
+    report = _attention_report(signals, judgments)
+
+    assert report.handoff_status == HandoffStatus.QUALIFIED_CANDIDATE_AVAILABLE.value
+    assert [c["cluster_id"] for c in report.qualified_handoff_candidates] == [str(supported)]
+    candidate = report.qualified_handoff_candidates[0]
+    assert candidate["independent_sources"] == 2 and candidate["qualified_observations"] == 2
+    assert {c.observation_id for c in candidate["citations"]} == {
+        str(signals[0].observation_id), str(signals[1].observation_id),
+    }
+    assert report.qualification.status == "READY"
+    assert report.market_opportunities == []
+
+
+def test_attention_handoff_waits_for_qualification_and_refuses_on_evaluator_failure():
+    cluster = uuid4()
+    signals = [_attention_signal("a", cluster), _attention_signal("b", cluster)]
+
+    pending = _attention_report(signals, [_judged(signals[0], "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME")])
+    failed = _attention_report(signals, [
+        _judged(signals[0], "QUALIFIED_SUPPORT", "DIRECT_TO_FRAME"),
+        _judged(signals[1], "UNASSESSED", "EVALUATOR_UNAVAILABLE"),
+    ])
+
+    assert pending.handoff_status == HandoffStatus.QUALIFICATION_REQUIRED.value
+    assert failed.handoff_status == HandoffStatus.UNAVAILABLE.value
+    assert pending.qualified_handoff_candidates == failed.qualified_handoff_candidates == []
+
+
+def test_select_handoff_candidates_never_returns_a_least_bad_cluster():
+    assert select_handoff_candidates({}) == []
+    one = _qualified("SUPPLY")
+    assert select_handoff_candidates({"c1": [one], "c2": [_qualified("SUPPLY")]}) == []

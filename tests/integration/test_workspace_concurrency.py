@@ -21,6 +21,7 @@ from ignis.domain.entities import ResearchMission
 from ignis.domain.research_workspace import MissionWriterConflictError, ResearchSurface
 from ignis.infrastructure.persistence import workspace_repository
 from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+from ignis.infrastructure.connectors.registry import SearchPassResult
 
 
 @pytest.fixture
@@ -125,6 +126,10 @@ class GatedRegistry:
         self.gate = gate
         self.started = asyncio.Event()
         self.calls = 0
+
+    async def search_with_outcomes(self, **kwargs):
+        # The mission executor asks for per-surface outcomes; this double reports none.
+        return SearchPassResult(signals=await self.search_across_all(**kwargs))
 
     async def search_across_all(self, keywords=None, **_kwargs):
         self.calls += 1
@@ -280,6 +285,10 @@ async def test_a_failed_run_frees_the_mission_and_keeps_the_evidence_it_had(
     assert evidence_before
 
     class _Exploding:
+        async def search_with_outcomes(self, **kwargs):
+            # The mission executor asks for per-surface outcomes; this double reports none.
+            return SearchPassResult(signals=await self.search_across_all(**kwargs))
+
         async def search_across_all(self, **_kwargs):
             raise RuntimeError("connector pass failed")
 

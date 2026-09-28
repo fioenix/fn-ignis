@@ -276,3 +276,349 @@ async def test_search_across_all_accepts_and_forwards_a_result_limit():
     assert len(signals) == 1
     assert grid.search_calls == [["ai agent"]]
     assert grid.search_limits == [30], "The cap must reach the connector, not be dropped"
+
+
+# --- Per-surface outcomes for a mission search ---
+#
+# A mission run records what every eligible surface did, so a reopened report can tell a measured
+# zero from a probe that never measured. The outcome travels with the call's own result: reading a
+# registry-wide "last pass" would let two concurrent missions overwrite each other's facts.
+
+from ignis.domain.exceptions import (  # noqa: E402
+    ConnectorAuthenticationException,
+    ConnectorQuotaExceededException,
+)
+from ignis.domain.harness_models import ChannelHealthStatus  # noqa: E402
+
+
+class EmptyYouTubePlugin(_BasePlugin):
+    """Ran every query and found nothing, and says so."""
+
+    _platform = PlatformType.YOUTUBE
+    _name = "YouTube Empty"
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20,
+                             attestation=None):
+        for keyword in keywords:
+            attestation.executed(keyword)
+        return []
+
+
+class SilentYouTubePlugin(_BasePlugin):
+    """Returns nothing and attests nothing: its silence measured nothing."""
+
+    _platform = PlatformType.YOUTUBE
+    _name = "YouTube Silent"
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        return []
+
+
+class QuotaGridPlugin(VideoGridPlugin):
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        raise ConnectorQuotaExceededException("quota exhausted")
+
+
+class HttpRateLimitedPlugin(VideoGridPlugin):
+    _plugin_id = "reels"
+    _platform = PlatformType.REELS
+    _name = "Reels 429"
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        raise ConnectorExecutionException("HTTP 429 Too Many Requests")
+
+
+class AuthRejectedPlugin(VideoGridPlugin):
+    _plugin_id = "threads"
+    _platform = PlatformType.THREADS
+    _name = "Threads without session"
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        raise ConnectorAuthenticationException("no token and no browser session")
+
+
+class SessionlessGridPlugin(VideoGridPlugin):
+    """TikTok keyword search returns nothing, without error, when no session is stored."""
+
+    async def keyword_search_blocked_reason(self):
+        return "No TikTok session is stored, so keyword search returns nothing."
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        return []
+
+
+class BrokenGridPlugin(VideoGridPlugin):
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        raise ConnectorExecutionException("selector changed")
+
+
+def _by_surface(result):
+    return {o.connector_surface: (o.status, o.signals_collected) for o in result.outcomes}
+
+
+@pytest.mark.asyncio
+async def test_every_eligible_surface_reports_exactly_what_it_did():
+    registry = _registry(GooglePlugin(), EmptyYouTubePlugin(), CreativeCenterPlugin())
+
+    result = await registry.search_with_outcomes(keywords=["ai agent"], geo=GeoCode.VN)
+
+    assert [s.raw_title for s in result.signals] == ["google: ai agent"]
+    # The Creative Center has no keyword probe, so it is not an eligible surface of this search.
+    assert _by_surface(result) == {
+        "google": (ChannelHealthStatus.HEALTHY, 1),
+        "youtube": (ChannelHealthStatus.EMPTY_NO_DATA, 0),
+    }
+    assert {o.platform for o in result.outcomes} == {"google", "youtube"}
+
+
+@pytest.mark.asyncio
+async def test_a_failed_probe_is_never_reported_as_an_empty_one():
+    registry = _registry(
+        QuotaGridPlugin(), HttpRateLimitedPlugin(), AuthRejectedPlugin(), EmptyYouTubePlugin()
+    )
+    broken = _registry(BrokenGridPlugin())
+
+    result = await registry.search_with_outcomes(keywords=["ai agent"])
+    failed = await broken.search_with_outcomes(keywords=["ai agent"])
+
+    assert _by_surface(result) == {
+        "tiktok_video_grid": (ChannelHealthStatus.RATE_LIMITED, 0),
+        "reels": (ChannelHealthStatus.RATE_LIMITED, 0),
+        "threads": (ChannelHealthStatus.AUTH_REQUIRED, 0),
+        "youtube": (ChannelHealthStatus.EMPTY_NO_DATA, 0),
+    }
+    assert _by_surface(failed) == {"tiktok_video_grid": (ChannelHealthStatus.DEGRADED, 0)}
+
+
+@pytest.mark.asyncio
+async def test_an_empty_answer_from_a_surface_that_needs_a_missing_session_is_not_a_measured_zero():
+    result = await _registry(SessionlessGridPlugin()).search_with_outcomes(keywords=["ai agent"])
+
+    assert _by_surface(result) == {"tiktok_video_grid": (ChannelHealthStatus.AUTH_REQUIRED, 0)}
+
+
+@pytest.mark.asyncio
+async def test_a_surface_skipped_by_an_open_circuit_is_recorded_not_dropped():
+    registry = _registry(BrokenGridPlugin(), EmptyYouTubePlugin())
+    for _ in range(3):
+        await registry.search_with_outcomes(keywords=["ai agent"])
+    assert registry._breakers["tiktok_video_grid"].state == "OPEN"
+
+    result = await registry.search_with_outcomes(keywords=["ai agent"])
+
+    assert _by_surface(result)["tiktok_video_grid"] == (ChannelHealthStatus.DEGRADED, 0)
+
+    quota = _registry(QuotaGridPlugin())
+    for _ in range(3):
+        await quota.search_with_outcomes(keywords=["ai agent"])
+    skipped = await quota.search_with_outcomes(keywords=["ai agent"])
+    assert _by_surface(skipped) == {"tiktok_video_grid": (ChannelHealthStatus.RATE_LIMITED, 0)}
+
+
+@pytest.mark.asyncio
+async def test_platform_filtering_decides_which_surfaces_are_eligible():
+    registry = _registry(GooglePlugin(), EmptyYouTubePlugin(), VideoGridPlugin())
+
+    result = await registry.search_with_outcomes(
+        keywords=["ai agent"], target_platforms=[PlatformType.YOUTUBE]
+    )
+
+    assert _by_surface(result) == {"youtube": (ChannelHealthStatus.EMPTY_NO_DATA, 0)}
+
+
+@pytest.mark.asyncio
+async def test_two_concurrent_searches_each_keep_their_own_outcomes():
+    import asyncio
+
+    class SlowGoogle(GooglePlugin):
+        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20,
+                                 attestation=None):
+            await asyncio.sleep(0.01)
+            attestation.executed(keywords[0])
+            return [] if keywords == ["nothing"] else await super().search_signals(keywords, geo)
+
+    registry = _registry(SlowGoogle())
+
+    found, empty = await asyncio.gather(
+        registry.search_with_outcomes(keywords=["ai agent"]),
+        registry.search_with_outcomes(keywords=["nothing"]),
+    )
+
+    assert _by_surface(found) == {"google": (ChannelHealthStatus.HEALTHY, 1)}
+    assert _by_surface(empty) == {"google": (ChannelHealthStatus.EMPTY_NO_DATA, 0)}
+    assert [o.queried_keywords for o in empty.outcomes] == [("nothing",)]
+    assert [o.queried_keywords for o in found.outcomes] == [("ai agent",)]
+
+
+@pytest.mark.asyncio
+async def test_the_list_only_search_keeps_its_contract():
+    registry = _registry(GooglePlugin(), EmptyYouTubePlugin())
+
+    signals = await registry.search_across_all(keywords=["ai agent"])
+
+    assert isinstance(signals, list)
+    assert [s.raw_title for s in signals] == ["google: ai agent"]
+
+
+# --- Review 0d70e9b: an empty answer is a measured zero only when the surface attests it ran ------
+
+from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin  # noqa: E402
+from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin  # noqa: E402
+
+BROWSER_STATE = {"cookies": [{"name": "sessionid", "value": "unit-test"}]}
+# A search page that answered with its API envelope but no matching item: the query ran.
+EMPTY_SEARCH_PAYLOAD = {"data": {"recent": {"sections": []}, "searchResults": {"edges": []}}}
+
+
+def _session_plugin(plugin_class):
+    oauth, browser = AsyncMock(), AsyncMock()
+    oauth.get_access_token.return_value = None
+    browser.get_storage_state.return_value = BROWSER_STATE
+    return plugin_class(auth_manager=oauth, browser_auth_manager=browser)
+
+
+@pytest.mark.parametrize(
+    "plugin_class, module",
+    [
+        (ReelsPlugin, "ignis.infrastructure.connectors.reels.reels_plugin"),
+        (ThreadsPlugin, "ignis.infrastructure.connectors.threads.threads_plugin"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_browser_surface_that_captured_nothing_is_not_a_measured_empty(plugin_class, module):
+    """No Playwright, an unusable session and a failed capture all return [] from collect."""
+    from unittest.mock import patch
+
+    registry = _registry(_session_plugin(plugin_class))
+    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[])), \
+            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
+        result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"])
+
+    [outcome] = result.outcomes
+    assert outcome.status is not ChannelHealthStatus.EMPTY_NO_DATA
+    assert outcome.status in (ChannelHealthStatus.DEGRADED, ChannelHealthStatus.AUTH_REQUIRED)
+
+
+
+@pytest.mark.asyncio
+async def test_an_empty_answer_without_an_attestation_is_degraded_not_measured():
+    result = await _registry(SilentYouTubePlugin()).search_with_outcomes(keywords=["ai agent"])
+
+    [outcome] = result.outcomes
+    assert outcome.status is ChannelHealthStatus.DEGRADED and outcome.queried_keywords == ()
+
+
+@pytest.mark.parametrize(
+    "plugin_class, module",
+    [
+        (ReelsPlugin, "ignis.infrastructure.connectors.reels.reels_plugin"),
+        (ThreadsPlugin, "ignis.infrastructure.connectors.threads.threads_plugin"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_browser_surface_attests_only_the_ten_keywords_it_actually_queried(plugin_class, module):
+    """The page answered with an empty envelope for each query it ran; the eleventh never ran."""
+    from unittest.mock import patch
+
+    keywords = [f"topic{index}" for index in range(1, 12)]
+    registry = _registry(_session_plugin(plugin_class))
+    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[EMPTY_SEARCH_PAYLOAD])), \
+            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
+        result = await registry.search_with_outcomes(keywords=keywords)
+
+    [outcome] = result.outcomes
+    assert outcome.status is ChannelHealthStatus.EMPTY_NO_DATA
+    assert outcome.queried_keywords == tuple(keywords[:10])
+
+
+# --- Follow-up review: the window each surface attests is the one the platform filtered by -------
+
+
+@pytest.mark.asyncio
+async def test_youtube_attests_the_published_after_window_it_sent_for_each_answered_query():
+    from unittest.mock import MagicMock, patch
+
+    from ignis.application.ports.connector_port import SearchAttestation
+    from ignis.infrastructure.connectors.youtube import youtube_plugin as module
+
+    module._YOUTUBE_QUERY_CACHE.clear()
+    sent = []
+    empty = MagicMock(status_code=200)
+    empty.json.return_value = {"items": []}
+
+    async def _get(url, params=None, **kwargs):
+        sent.append(params.get("publishedAfter"))
+        return empty
+
+    attestation = SearchAttestation()
+    with patch("httpx.AsyncClient.get", side_effect=_get):
+        signals = await module.YouTubeDataPlugin(api_key="unit-test").search_signals(
+            keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_30D, attestation=attestation,
+        )
+
+    assert signals == [] and sent and all(sent)
+    assert attestation.window == "30d" and attestation.queried == ["ai cho cửa hàng"]
+
+
+@pytest.mark.asyncio
+async def test_youtube_attests_no_query_when_its_search_call_fails():
+    from unittest.mock import patch
+
+    from ignis.application.ports.connector_port import SearchAttestation
+    from ignis.infrastructure.connectors.youtube import youtube_plugin as module
+
+    module._YOUTUBE_QUERY_CACHE.clear()
+    attestation = SearchAttestation()
+    with patch("httpx.AsyncClient.get", side_effect=RuntimeError("connection reset")):
+        await module.YouTubeDataPlugin(api_key="unit-test").search_signals(
+            keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D, attestation=attestation,
+        )
+
+    assert attestation.queried == [] and attestation.failures
+
+
+@pytest.mark.asyncio
+async def test_threads_graph_attests_the_since_until_window_it_sent():
+    from unittest.mock import MagicMock, patch
+
+    from ignis.application.ports.connector_port import SearchAttestation
+
+    oauth = AsyncMock()
+    oauth.get_access_token.return_value = "LONG_LIVED_TOKEN"
+    windows = []
+    empty = MagicMock(status_code=200)
+    empty.json.return_value = {"data": []}
+
+    async def _get(url, params=None, **kwargs):
+        if "keyword_search" in url:
+            windows.append((params.get("since"), params.get("until")))
+        return empty
+
+    attestation = SearchAttestation()
+    with patch("httpx.AsyncClient.get", side_effect=_get):
+        await ThreadsPlugin(auth_manager=oauth).search_signals(
+            keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D, attestation=attestation,
+        )
+
+    assert windows and all(since and until for since, until in windows)
+    assert attestation.window == "7d" and attestation.queried == ["ai cho cửa hàng"]
+
+
+@pytest.mark.parametrize(
+    "plugin_class, module",
+    [
+        (ReelsPlugin, "ignis.infrastructure.connectors.reels.reels_plugin"),
+        (ThreadsPlugin, "ignis.infrastructure.connectors.threads.threads_plugin"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_browser_surface_attests_no_window_because_it_filters_by_none(plugin_class, module):
+    from unittest.mock import patch
+
+    registry = _registry(_session_plugin(plugin_class))
+    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[EMPTY_SEARCH_PAYLOAD])), \
+            patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
+        result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D)
+
+    [outcome] = result.outcomes
+    assert outcome.status is ChannelHealthStatus.EMPTY_NO_DATA and outcome.queried_window is None

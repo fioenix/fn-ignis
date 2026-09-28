@@ -20,7 +20,7 @@ SEED_FILES = (
 )
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
-NEWEST_POSTGRES_MIGRATION = "022_builtin_uuid_defaults.sql"
+NEWEST_POSTGRES_MIGRATION = "023_evidence_qualification.sql"
 
 
 def test_seed_directory_is_found_in_this_layout():
@@ -84,3 +84,21 @@ def test_the_whole_postgres_migration_chain_ships_not_only_the_seeds():
     sdist = pyproject.read_text(encoding="utf-8").split("[tool.hatch.build.targets.sdist]", 1)[1]
     excluded = sdist.split("]", 1)[0]
     assert '"sql"' not in excluded and '"/sql"' not in excluded, "the sdist excludes sql/"
+
+
+def test_the_migration_inventory_ends_at_023_and_both_backends_state_its_tables():
+    """Compose and a hand-applied chain need 023 in order; SQLite restates it, not reads it."""
+    directory = sql_seed_dir()
+    names = sorted(path.name for path in directory.glob("*.sql"))
+    assert names[-1] == NEWEST_POSTGRES_MIGRATION
+    assert [int(name[:3]) for name in names] == list(range(1, len(names) + 1))
+
+    migration = (directory / NEWEST_POSTGRES_MIGRATION).read_text(encoding="utf-8")
+    sqlite_source = (
+        Path(__file__).resolve().parents[2]
+        / "src/ignis/infrastructure/persistence/sqlite_repository.py"
+    ).read_text(encoding="utf-8")
+    for table in ("mission_probe_outcomes", "mission_evidence_qualifications"):
+        assert f"CREATE TABLE IF NOT EXISTS {table}" in migration, table
+        assert f"CREATE TABLE IF NOT EXISTS {table}" in sqlite_source, f"SQLite does not restate {table}"
+    assert "ENABLE ROW LEVEL SECURITY" in migration and "gen_random_uuid()" in migration

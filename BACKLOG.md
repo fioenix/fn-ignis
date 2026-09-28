@@ -1004,6 +1004,43 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   khỏi Market evidence. Serializer MCP và provenance tests giữ contract này, còn URL/title chỉ là
   dữ liệu hiển thị.
 
+### Hậu kiểm v0.5: Chất lượng bằng chứng cho quyết định thị trường
+
+- [x] **Kiểm tra ba hành trình sản phẩm trên dữ liệu dev thật, ngày 25/09/2026.** Đã chạy
+  Attention-only, Market trực tiếp và handoff Attention sang Market cho bài toán AI hỗ trợ vận hành
+  cửa hàng bán lẻ nhỏ tại Việt Nam. Contract vận hành đạt yêu cầu: workspace dùng database chung,
+  Brief và lineage đọc lại được, ba journal đều hoàn tất, Attention không phát Opportunity Index,
+  citation có `observation_id` và vai trò evidence đúng. Tuy nhiên, chất lượng quyết định chưa đạt:
+  chỉ 2/50 signal của Market trực tiếp và 0/50 signal của handoff đủ liên quan ở ngưỡng kiểm tra;
+  0/21 kết luận Market đạt xác suất được citation hỗ trợ từ 0,70 trở lên. Scorecard vẫn báo
+  `MEDIUM` ở mức 71,5 và 79,9, nên điểm confidence hiện tại chưa phản ánh độ liên quan với Market
+  Brief. Chi tiết và giới hạn của phép đo nằm trong
+  [decision note](docs/decisions/2026-09-25-decision-grade-evidence-qualification.md).
+
+- [x] **Decision-Grade Evidence Qualification (spec 008) đã triển khai trên nhánh
+  `codex/decision-grade-evidence`; chưa merge, chưa release, chưa áp vào database lâu dài nào.**
+  Mission đầu tiên sau khi server khởi động nạp từ vựng đã lưu trước mọi lời gọi connector.
+  Migration `023` thêm `mission_probe_outcomes` và `mission_evidence_qualifications`. Agent gửi
+  đánh giá có kiểu qua hai tool mới (tổng 47 tool); Ignis kiểm tra, lưu lại và áp chuẩn bằng chứng
+  tối thiểu, nên không phát Opportunity Index hay kết luận Market khi thiếu bằng chứng đạt chuẩn.
+  Attention không tự chọn ứng viên handoff thay thế. Corpus post-v0.5 đã redact nằm ở
+  `tests/fixtures/decision_grade_evidence.json`; replay qua handler thật cho 0 kết luận không được
+  hỗ trợ, so với mốc 0/21 đã ghi. Sau khi sửa bốn lỗi chặn từ review độc lập (row `UNASSESSED`
+  mở cổng kết luận, fingerprint phủ cả keyword connector không query, lỗi đồng bộ từ vựng ghi đè
+  mission của writer khác, surface browser không chạy vẫn bị tính là rỗng đo được), kiểm chứng
+  ngày 28/09/2026, sau cả vòng review tiếp theo (batch báo `READY` dù còn row `UNASSESSED`,
+  fingerprint ghi khung thời gian connector không thực sự áp, batch và analysis lệch nhau khi lỗi
+  evaluator đi cùng evidence còn chờ, submit vẫn bảo đọc batch tiếp dù chính lần ghi đó đã khiến
+  frame không thể đi tiếp): mọi câu trả lời về trạng thái đánh giá giờ lấy từ một hàm quyết định
+  duy nhất là `decide_qualification`. Kết quả: 1.226 unit test passed, 1 skipped; 574 integration
+  test passed, 3 skipped trên PostgreSQL dùng một lần, không có case PostgreSQL nào bị skip; Compose
+  khởi tạo mới chạy đủ 23 file SQL; ruff, `git diff --check` từ `merge-base main`,
+  `uv lock --check` và `uv build` đạt. Hệ quả cần PO quyết: hiện chỉ YouTube lọc supply theo đúng
+  khung thời gian, mà "vắng supply đo được" cần hai surface, nên trạng thái này chưa thể xảy ra với
+  các connector hiện có; supply dương không bị ảnh hưởng.
+  Giới hạn: chưa đo trên corpus live; các ngưỡng tối thiểu là mặc định an toàn, chưa hiệu chỉnh;
+  chất lượng đánh giá ngữ nghĩa phụ thuộc Agent đang chạy phiên nghiên cứu.
+
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 
 Các mục dưới đây chưa có measurement, decision hay release target. Chúng được giữ để không mất ý

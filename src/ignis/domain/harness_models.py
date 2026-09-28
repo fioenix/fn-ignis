@@ -91,6 +91,12 @@ class QualityScorecard:
     confidence_level: ConfidenceLevel = ConfidenceLevel.LOW
     flaws_detected: List[str] = field(default_factory=list)
     strengths_detected: List[str] = field(default_factory=list)
+    # How much of the assessed evidence directly addresses the declared scope or Brief (0-100).
+    # Reported beside the other dimensions, never folded into them: low coverage and low
+    # relevance are different failures. None for a mission with no declared surface.
+    question_relevance_score: Optional[float] = None
+    # Qualified support, context-only, excluded and unassessed counts, when a surface applies.
+    qualification_counts: Optional[Dict[str, int]] = None
 
 
 @dataclass
@@ -106,6 +112,53 @@ class MarketOpportunity:
     # The observations this opportunity actually stands on. Empty is a real answer and means
     # the opportunity rests on a measured absence of supply rather than on a sighting.
     citations: List[CitationEvidence] = field(default_factory=list)
+    # Set only for a surfaced Market mission, where the verdict passed the evidence minimum.
+    evidence_sufficiency: Optional[str] = None
+    qualified_demand_count: Optional[int] = None
+    qualified_supply_count: Optional[int] = None
+    independent_supply_sources: Optional[int] = None
+
+
+@dataclass
+class QualificationSummary:
+    """Where a surfaced mission's evidence stands, and why a conclusion was allowed or withheld.
+
+    `reason_code` is the machine-readable form of `reason`; both are None when nothing was withheld.
+    `next_step` is what `decide_qualification` tells the Agent while a conclusion is withheld; it
+    stays out of `to_payload`, which boundaries report beside it.
+    """
+    status: str
+    total_evidence: int = 0
+    qualified_support: int = 0
+    context_only: int = 0
+    excluded_irrelevant: int = 0
+    unassessed: int = 0
+    question_relevance_score: float = 0.0
+    reason: Optional[str] = None
+    reason_code: Optional[str] = None
+    next_step: Optional[str] = None
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "status": self.status,
+            "total_evidence": self.total_evidence,
+            "qualified_support": self.qualified_support,
+            "context_only": self.context_only,
+            "excluded_irrelevant": self.excluded_irrelevant,
+            "unassessed": self.unassessed,
+            "question_relevance_score": self.question_relevance_score,
+            "reason": self.reason,
+            "reason_code": self.reason_code,
+        }
+
+    @property
+    def counts(self) -> Dict[str, int]:
+        return {
+            "qualified_support": self.qualified_support,
+            "context_only": self.context_only,
+            "excluded_irrelevant": self.excluded_irrelevant,
+            "unassessed": self.unassessed,
+        }
 
 
 @dataclass
@@ -119,7 +172,9 @@ class HarnessResearchReport:
     mission_id: str
     title: str
     scorecard: QualityScorecard
-    maturity_stage: TrendMaturityStage
+    # None when a surfaced Market mission may not claim a maturity stage: a stage read off
+    # unqualified evidence is a market claim the evidence does not support.
+    maturity_stage: Optional[TrendMaturityStage]
     channel_summaries: List[ChannelDataSummary] = field(default_factory=list)
     verified_cross_platform_trends: List[Dict[str, Any]] = field(default_factory=list)
     market_opportunities: List[MarketOpportunity] = field(default_factory=list)
@@ -134,5 +189,13 @@ class HarnessResearchReport:
     # Observations carried over from the Attention mission named in `lineage`. Reported so the
     # origin stays readable, and kept out of every list a conclusion is drawn from.
     attention_context: List[CitationEvidence] = field(default_factory=list)
+    # Evidence qualification, for a mission that declared a surface. None keeps legacy behaviour.
+    qualification: Optional[QualificationSummary] = None
+    # Market: one entry per mission topic, including the ones whose verdict was withheld.
+    topic_sufficiency: List[Dict[str, Any]] = field(default_factory=list)
+    # Attention: whether any cluster qualifies to become a new Market question, never a fallback.
+    handoff_status: Optional[str] = None
+    qualified_handoff_candidates: List[Dict[str, Any]] = field(default_factory=list)
+    cluster_qualification: List[Dict[str, Any]] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

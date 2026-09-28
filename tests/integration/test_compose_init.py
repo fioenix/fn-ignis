@@ -32,7 +32,8 @@ READBACK = {
     "later_objects": (
         "SELECT count(*) FROM unnest(ARRAY['public.sources', 'public.observations',"
         " 'public.mission_evidence', 'public.research_workspaces', 'public.mission_run_journals',"
-        " 'public.source_identity_aliases', 'public.idx_observations_latest_per_source']) AS o(name)"
+        " 'public.source_identity_aliases', 'public.idx_observations_latest_per_source',"
+        " 'public.mission_probe_outcomes', 'public.mission_evidence_qualifications']) AS o(name)"
         " WHERE to_regclass(o.name) IS NOT NULL"
     ),
     "ui_noise_terms": "SELECT count(*) FROM market_lexicons WHERE domain = 'tiktok_ui_noise'",
@@ -68,7 +69,7 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "022_builtin_uuid_defaults.sql"
+NEWEST_MIGRATION = "023_evidence_qualification.sql"
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("IGNIS_TEST_COMPOSE_INIT") != "1" or shutil.which("docker") is None,
@@ -206,15 +207,15 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
         assert NEWEST_MIGRATION in run["ran"], f"init never reached {NEWEST_MIGRATION}"
         assert run["errors"] == []
         assert run["readback"] == {
-            "later_objects": "7",
+            "later_objects": "9",
             "ui_noise_terms": "10",
             "retired_present": "0",
             "rls_market_lexicons": "t",
             "public_policies": "0",
-            "public_tables": "17",
+            "public_tables": "19",
             "public_tables_without_rls": "0",
             "supabase_roles": "0",
-            "builtin_uuid_defaults": "11",
+            "builtin_uuid_defaults": "13",
             "uuid_ossp_defaults": "0",
         }
         assert run["cleanup"]["returncode"] == 0, run["cleanup"]

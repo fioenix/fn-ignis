@@ -24,3 +24,22 @@ paths = [
   # ciphertext. Present in history at 5990054e rather than in the current file.
   '''tests/unit/test_round2_regressions\.py''',
 ]
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = """
+The decision-grade corpus identifies canonical sources with deterministic 16-character hex keys.
+The generic API-key rule sees the field name and entropy as credential-like, so exempt only that
+exact identifier shape in the fixture and its integration test. All three conditions must match.
+"""
+condition = "AND"
+regexTarget = "line"
+regexes = [
+  '''(?i)source_key(?:"\s*:\s*|=)\s*["']?[0-9a-f]{16}["']?''',
+]
+paths = [
+  '''tests/fixtures/decision_grade_evidence\.json''',
+  '''tests/integration/test_decision_grade_evidence\.py''',
+]

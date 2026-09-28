@@ -17,7 +17,8 @@ Tài liệu này cung cấp hướng dẫn đầy đủ, chi tiết từng bư�
 6. [Quản lý Báo cáo & Nginx Report Portal](#6-quản-lý-báo-cáo--nginx-report-portal)
 7. [Xử lý Sự cố Thường gặp (Troubleshooting)](#7-xử-lý-sự-cố-thường-gặp-troubleshooting)
 8. [Research Workspace & Hai bề mặt Nghiên cứu](#8-research-workspace--hai-bề-mặt-nghiên-cứu)
-9. [Danh mục 45 FastMCP Tools & Khả năng Nghiên cứu Toàn diện](#9-danh-mục-45-fastmcp-tools--khả-năng-nghiên-cứu-toàn-diện)
+9. [Danh mục 47 FastMCP Tools & Khả năng Nghiên cứu Toàn diện](#9-danh-mục-47-fastmcp-tools--khả-năng-nghiên-cứu-toàn-diện)
+10. [Đánh giá Bằng chứng trước khi Kết luận Thị trường](#10-đánh-giá-bằng-chứng-trước-khi-kết-luận-thị-trường)
 
 ---
 
@@ -530,9 +531,9 @@ claim và không ghi journal; chúng chạy y như trước.
 
 ---
 
-## 9. Danh mục 45 FastMCP Tools & Khả năng Nghiên cứu Toàn diện
+## 9. Danh mục 47 FastMCP Tools & Khả năng Nghiên cứu Toàn diện
 
-Khi FastMCP Server khởi chạy (`ignis-mcp`), 45 tools, 2 prompts và 2 resources sau đây luôn sẵn sàng cho AI Agents hoặc MCP clients:
+Khi FastMCP Server khởi chạy (`ignis-mcp`), 47 tools, 2 prompts và 2 resources sau đây luôn sẵn sàng cho AI Agents hoặc MCP clients:
 
 ### 0. Nhóm Research Workspace & Hai bề mặt Nghiên cứu
 | Tên Tool | Tham số chính | Chức năng & Giá trị đầu ra |
@@ -549,10 +550,12 @@ Khi FastMCP Server khởi chạy (`ignis-mcp`), 45 tools, 2 prompts và 2 resour
 |---|---|---|
 | `run_autonomous_research_mission` | `topic, keywords, geo, timeframe, min_signals` | Tạo mission, chạy ingress đa nền tảng, tính Opportunity Index và xuất dashboard trong 1 bước. |
 | `create_research_mission` | `topic, keywords, platforms, geo, timeframe` | Khởi tạo chiến dịch nghiên cứu nhắm đích bên ngoài research workspace; mission không khai báo bề mặt nên không bị chặn bởi Brief. |
-| `execute_mission_ingress` | `mission_id` | Thực thi cào dữ liệu đa nguồn và đánh giá Quality Scorecard (Confidence $\ge 70\%$). |
+| `execute_mission_ingress` | `mission_id` | Thực thi cào dữ liệu đa nguồn và đánh giá Quality Scorecard (Confidence $\ge 70\%$). Mission đầu tiên sau khi server khởi động nạp từ vựng đã lưu trước mọi lời gọi connector. |
+| `get_mission_evidence_qualification_batch` | `mission_id, cursor, limit` | Đọc một lô bằng chứng chưa được đánh giá ngữ nghĩa, kèm khung câu hỏi dùng để đánh giá. |
+| `submit_mission_evidence_qualifications` | `mission_id, frame_fingerprint, assessments` | Ghi nhận trọn một lô đánh giá có kiểu của Agent; gửi lại y hệt thì không đổi gì. |
 | `evaluate_mission_quality` | `mission_id` | Đánh giá lại 4 chiều chất lượng dữ liệu (Coverage, Language, Freshness, Diversity). |
 | `discover_market_opportunities` | `mission_id` | Khám phá các khoảng trống thị trường (Unserved White Spaces) và xếp hạng tiềm năng. |
-| `get_mission_analysis` | `mission_id, limit, platform` | Trích xuất phân tích tổng hợp theo bề mặt của mission: bằng chứng xếp hạng, scorecard chất lượng, lineage, và riêng `MARKET` mới có Opportunity Index cùng white space. |
+| `get_mission_analysis` | `mission_id, limit, platform` | Trích xuất phân tích tổng hợp theo bề mặt của mission: bằng chứng xếp hạng, scorecard có chiều độ liên quan với câu hỏi, lineage, và chỉ topic `MARKET` đạt chuẩn bằng chứng tối thiểu mới có Opportunity Index cùng white space; nếu chưa đạt thì báo rõ lý do. |
 | `generate_mission_artifact` | `mission_id` | Xuất bản file HTML Dashboard Infographic tương tác trực quan vào thư mục `reports/`. |
 | `list_research_missions` | `limit` | Liệt kê lịch sử các chiến dịch nghiên cứu đã thực hiện. |
 | `get_current_session_mission` | `session_id` | Khôi phục ngữ cảnh chiến dịch gắn với phiên chat của agent. |
@@ -608,3 +611,14 @@ Khi FastMCP Server khởi chạy (`ignis-mcp`), 45 tools, 2 prompts và 2 resour
 - **Resources**:
   - `fn-ignis://sop/market-research`: Toàn văn hướng dẫn SOP nghiên cứu thị trường.
   - `fn-ignis://methodology/opportunity-index`: Công thức toán học và giải thích Opportunity Index (+100 đến -100).
+
+## 10. Đánh giá Bằng chứng trước khi Kết luận Thị trường
+
+Một trích dẫn truy vết được chưa có nghĩa là nó ủng hộ kết luận. Với mission có khai báo bề mặt nghiên cứu, Agent đánh giá từng observation theo câu hỏi của mission, còn Ignis áp một chuẩn bằng chứng tối thiểu cố định trước khi cho phép kết luận:
+
+1. `execute_mission_ingress` thu thập observation thô; không observation nào bị xóa chỉ vì không liên quan.
+2. `get_mission_evidence_qualification_batch` trả về tối đa 50 observation chưa được đánh giá cùng khung câu hỏi: bản Market Brief đã xác nhận, hoặc tiêu đề và từ khóa của mission Attention.
+3. Agent tự đánh giá từng mục trong ngữ cảnh của mình (quan hệ, mục đích, độ tin cậy và một mã lý do), rồi gửi cả lô qua `submit_mission_evidence_qualifications` cùng `frame_fingerprint` đã nhận. Đánh giá có độ tin cậy thấp hoặc thất bại được gửi dưới dạng `UNASSESSED`.
+4. `get_mission_analysis` và `generate_mission_artifact` đọc lại các đánh giá đã lưu. Một topic `MARKET` chỉ có Opportunity Index khi có ít nhất một observation demand đạt chuẩn và thêm một trong hai điều kiện: hai observation supply đạt chuẩn từ hai nguồn độc lập, hoặc hai supply surface liên quan đã chạy xong, lọc đúng khung thời gian của mission, mà không trả về kết quả nào cho cùng một truy vấn. Surface không lọc được theo khung thời gian đó không bao giờ được tính là vắng supply. Một cluster `ATTENTION` chỉ trở thành ứng viên handoff khi liên quan trực tiếp và có hai nguồn độc lập xác nhận.
+
+Khi còn observation chưa có đánh giá thực sự, phân tích báo `QUALIFICATION_REQUIRED` (đánh giá `UNASSESSED` đã ghi là cuối cùng, nên cần mission mới hoặc bản Brief mới); khi có lỗi evaluator được ghi nhận, phân tích báo `UNAVAILABLE`; khi đã đánh giá đủ mà không topic nào đạt chuẩn, phân tích báo `INSUFFICIENT_RELEVANT_EVIDENCE`. Mỗi trạng thái đều kèm bốn con số đánh giá, điểm độ liên quan với câu hỏi và lý do dạng mã, đồng thời độ tin cậy bị giới hạn ở `LOW` hoặc `UNRELIABLE` tương ứng. Mở lại mission sẽ đọc đúng kết quả đã lưu cho tới khi có lượt chạy hoàn tất mới, mission mới hoặc bản Brief mới. Mission không khai báo bề mặt vẫn giữ hành vi cũ. Server không cần AI provider hay API key nào; việc đánh giá do Agent đang chạy phiên nghiên cứu đảm nhận.

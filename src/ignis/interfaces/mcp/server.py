@@ -24,20 +24,31 @@ from ignis.application.use_cases.create_research_workspace import (
     CreateResearchWorkspaceUseCase,
 )
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
-from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
+from ignis.application.use_cases.get_evidence_qualification_batch import (
+    DEFAULT_BATCH_LIMIT,
+    GetEvidenceQualificationBatchUseCase,
+)
+from ignis.application.use_cases.get_mission_analysis import (
+    GetMissionAnalysisUseCase,
+    load_qualification_context,
+)
+from ignis.application.use_cases.submit_evidence_qualifications import (
+    SubmitEvidenceQualificationsUseCase,
+)
 from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS, IngestTrendsUseCase
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import TopicCluster
-from ignis.domain.exceptions import IgnisDomainException
+from ignis.domain.exceptions import IgnisDomainException, VocabularySynchronizationError
 from ignis.domain.research_workspace import (
     RESEARCH_ROOT_SEGMENTS,
     REQUIRED_BRIEF_FIELDS,
     IncompleteMarketBriefError,
     MissionLineage,
     MissionWriterConflictError,
+    QualificationStatus,
     ResearchSurface,
     WorkspaceScopeMismatchError,
     opportunity_index_is_allowed,
@@ -47,7 +58,6 @@ from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepos
 
 from ignis.config import reveal_secret, settings
 
-from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
 from ignis.domain.token_rotation import (
     STATUS_EXPIRED,
     STATUS_EXPIRING_SOON,
@@ -85,7 +95,7 @@ from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
-from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary
+from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
@@ -187,6 +197,18 @@ def _init_components():
     )
 
     workspace_store = WorkspaceRepository(repository=repository)
+    # One synchronizer for every entry point, so the first mission after startup registers the
+    # same persisted vocabulary a process warmed by an analysis call would already hold.
+    vocabulary_synchronizer = VocabularySynchronizer(
+        repository,
+        quality_evaluator=quality_evaluator,
+        strategic_reasoner=strategic_reasoner,
+        clusterer=clusterer,
+        google_trends_plugin=google_trends_plugin,
+        language_detector=language_detector,
+        tiktok_plugin=tiktok_plugin,
+        registry=registry,
+    )
 
     create_mission_use_case = CreateMissionUseCase(repository=repository)
     execute_mission_use_case = ExecuteMissionUseCase(
@@ -194,6 +216,7 @@ def _init_components():
         registry=registry,
         clusterer=clusterer,
         workspace_store=workspace_store,
+        vocabulary_sync=vocabulary_synchronizer,
     )
     create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store)
     create_attention_mission_use_case = CreateAttentionMissionUseCase(
@@ -213,6 +236,12 @@ def _init_components():
         confirm_use_case=confirm_market_brief_use_case,
     )
     get_mission_analysis_use_case = GetMissionAnalysisUseCase(repository=repository)
+    get_evidence_qualification_batch_use_case = GetEvidenceQualificationBatchUseCase(
+        repository=repository, store=workspace_store
+    )
+    submit_evidence_qualifications_use_case = SubmitEvidenceQualificationsUseCase(
+        repository=repository, store=workspace_store
+    )
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
     ingest_use_case = IngestTrendsUseCase(registry=registry, repository=repository)
     cluster_use_case = ClusterSignalsUseCase(clusterer=clusterer, repository=repository)
@@ -242,6 +271,7 @@ def _init_components():
         "strategic_reasoner": strategic_reasoner,
         "harness_orchestrator": harness_orchestrator,
         "workspace_store": workspace_store,
+        "vocabulary_synchronizer": vocabulary_synchronizer,
         "create_research_workspace_use_case": create_research_workspace_use_case,
         "create_attention_mission_use_case": create_attention_mission_use_case,
         "confirm_market_brief_use_case": confirm_market_brief_use_case,
@@ -249,6 +279,8 @@ def _init_components():
         "create_mission_use_case": create_mission_use_case,
         "execute_mission_use_case": execute_mission_use_case,
         "get_mission_analysis_use_case": get_mission_analysis_use_case,
+        "get_evidence_qualification_batch_use_case": get_evidence_qualification_batch_use_case,
+        "submit_evidence_qualifications_use_case": submit_evidence_qualifications_use_case,
         "top_clusters_use_case": top_clusters_use_case,
         "ingest_use_case": ingest_use_case,
         "cluster_use_case": cluster_use_case,
@@ -429,6 +461,11 @@ def _serialize_opportunity(opp: Any, include_supporting: int = 0) -> Dict[str, A
         "recommendation": opp.strategic_recommendation,
         "citations": [_serialize_citation(c) for c in getattr(opp, "citations", []) or []],
     }
+    if getattr(opp, "evidence_sufficiency", None):
+        payload["evidence_sufficiency"] = opp.evidence_sufficiency
+        payload["qualified_demand_count"] = opp.qualified_demand_count
+        payload["qualified_supply_count"] = opp.qualified_supply_count
+        payload["independent_supply_sources"] = opp.independent_supply_sources
     if include_supporting:
         payload["supporting_signals"] = opp.supporting_signals[:include_supporting]
     return payload
@@ -437,11 +474,16 @@ def _serialize_opportunity(opp: Any, include_supporting: int = 0) -> Dict[str, A
 def _surface_payload(report: Any, mission: Any) -> Dict[str, Any]:
     """What surface this analysis speaks for, and what that surface is allowed to say."""
     surface = resolve_surface(getattr(mission, "surface", None))
+    qualification = getattr(report, "qualification", None)
     payload: Dict[str, Any] = {
         "surface": surface.value if surface else None,
         "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
-        "opportunity_index_applies": opportunity_index_is_allowed(surface),
+        # A surfaced Market mission may carry an index only once its qualified evidence met the
+        # minimum; a pending or insufficient assessment says so instead of printing a number.
+        "opportunity_index_applies": opportunity_index_is_allowed(surface)
+        and (qualification is None or qualification.status == QualificationStatus.READY.value),
     }
+    payload.update(_qualification_payload(report))
     if surface is ResearchSurface.ATTENTION:
         payload["note"] = (
             "ATTENTION context. Ranked topics, momentum, freshness and source coverage are "
@@ -463,6 +505,46 @@ def _surface_payload(report: Any, mission: Any) -> Dict[str, Any]:
             "question came from and are not counted as support for this Brief."
         )
     return payload
+
+
+def _qualification_payload(report: Any) -> Dict[str, Any]:
+    """The qualification block every analysis boundary returns, in one place so they agree.
+
+    Empty for a mission that declared no surface, which keeps its legacy payload unchanged.
+    """
+    qualification = getattr(report, "qualification", None)
+    if qualification is None:
+        return {}
+    payload: Dict[str, Any] = {
+        "analysis_status": qualification.status,
+        "qualification": qualification.to_payload(),
+    }
+    # Decided by decide_qualification, the authority the batch and submit tools answer from too.
+    if qualification.next_step:
+        payload["next_step"] = qualification.next_step
+    if getattr(report, "topic_sufficiency", None):
+        payload["topic_sufficiency"] = report.topic_sufficiency
+    if getattr(report, "handoff_status", None):
+        payload["handoff_status"] = report.handoff_status
+        payload["qualified_handoff_candidates"] = [
+            {**c, "citations": [_serialize_citation(x) for x in c.get("citations", [])]}
+            for c in report.qualified_handoff_candidates
+        ]
+        payload["cluster_qualification"] = report.cluster_qualification
+    return payload
+
+
+def _maturity_value(report: Any) -> Optional[str]:
+    stage = getattr(report, "maturity_stage", None)
+    return stage.value if stage is not None else None
+
+
+async def _qualification_for(comp: Dict[str, Any], mission: Any, signals: List[Any]):
+    """The persisted qualification context for a surfaced mission, or None for a legacy one."""
+    store = comp.get("workspace_store")
+    if store is None:
+        return None
+    return await load_qualification_context(store, mission, signals)
 
 
 async def _attention_context_signals(comp: Dict[str, Any], mission: Any) -> List[Any]:
@@ -513,47 +595,32 @@ def _serialize_channel_summaries(summaries: Any) -> List[Dict[str, Any]]:
     return out
 
 
-async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
-    """Sync every persisted vocabulary domain from the database into the engines that use it."""
-    try:
-        vocabulary = await load_market_vocabulary(comp["repository"])
-        pos_terms = vocabulary.positive_terms
-        stop_terms = vocabulary.foreign_stopwords
-        noise_terms = vocabulary.noise_blacklist
+def _vocabulary_synchronizer(comp: Dict[str, Any]) -> VocabularySynchronizer:
+    """The shared synchronizer, or one bound to whatever engines this component map holds."""
+    synchronizer = comp.get("vocabulary_synchronizer")
+    if synchronizer is not None:
+        return synchronizer
+    return VocabularySynchronizer(
+        comp["repository"],
+        quality_evaluator=comp.get("quality_evaluator"),
+        strategic_reasoner=comp.get("strategic_reasoner"),
+        clusterer=comp.get("clusterer"),
+        google_trends_plugin=comp.get("google_trends_plugin"),
+        language_detector=comp.get("language_detector"),
+        tiktok_plugin=comp.get("tiktok_plugin"),
+        registry=comp.get("registry"),
+    )
 
-        if pos_terms:
-            comp["quality_evaluator"].register_terms(pos_terms)
-            comp["strategic_reasoner"].register_terms(pos_terms)
-            # Terms sharing a (domain, category) bucket are treated as expansions of each other,
-            # so keyword matching uses the persisted vocabulary instead of hardcoded synonyms.
-            comp["strategic_reasoner"].register_synonym_groups(
-                [g for g in vocabulary.by_domain_and_category.values() if len(g) > 1]
-            )
-        if "clusterer" in comp:
-            comp["clusterer"].register_ambiguous_unigrams(vocabulary.ambiguous_unigrams)
-        if "google_trends_plugin" in comp:
-            comp["google_trends_plugin"].register_probe_templates(vocabulary.probe_templates)
-            comp["google_trends_plugin"].register_intent_keywords(vocabulary.search_intent)
-        if "language_detector" in comp:
-            comp["language_detector"].register_foreign_phrases(vocabulary.foreign_phrases)
-            comp["language_detector"].register_portuguese_words(vocabulary.portuguese_words)
-        if "tiktok_plugin" in comp:
-            comp["tiktok_plugin"].register_ui_noise(vocabulary.tiktok_ui_noise)
-            comp["tiktok_plugin"].register_suggest_templates(vocabulary.tiktok_suggest_templates)
-        if stop_terms:
-            comp["quality_evaluator"].register_foreign_stopwords(stop_terms)
-            comp["strategic_reasoner"].register_foreign_stopwords(stop_terms)
-            if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
-                comp["clusterer"].register_stopwords(stop_terms)
-        if noise_terms:
-            comp["quality_evaluator"].register_noise_blacklist(noise_terms)
-            comp["strategic_reasoner"].register_noise_blacklist(noise_terms)
-            if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
-                comp["clusterer"].register_stopwords(noise_terms)
-        if "clusterer" in comp and hasattr(comp["clusterer"], "register_taxonomies"):
-            taxonomies = await comp["repository"].get_industry_taxonomies()
-            if taxonomies:
-                comp["clusterer"].register_taxonomies(taxonomies)
+
+async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
+    """Sync every persisted vocabulary domain from the database into the engines that use it.
+
+    Read paths stay tolerant: a failed read is logged and the handler carries on with what it has.
+    Mission ingress does not go through here -- ExecuteMissionUseCase synchronizes on its own and
+    refuses to run under a partial configuration.
+    """
+    try:
+        await _vocabulary_synchronizer(comp).synchronize_vocabulary()
     except Exception as e:
         logger.warning(f"Could not sync dynamic lexicons from DB: {e}")
 
@@ -563,19 +630,7 @@ async def _sync_lexicons_from_db(comp: Dict[str, Any]) -> None:
 async def _sync_self_identities(comp: Dict[str, Any]) -> None:
     """Bind the operator's own connected accounts so market passes can exclude their content."""
     try:
-        identities = await SelfIdentityRegistry(comp["repository"]).load()
-        comp["registry"].register_self_identities(identities)
-        comp["self_identities"] = identities
-        if identities:
-            logger.info(
-                "Self-content guard armed for: "
-                + ", ".join(sorted({f"{i.platform}:{i.normalized_username or i.normalized_account_id}" for i in identities}))
-            )
-        else:
-            logger.info(
-                "No connected account identity is known, so self-authored content cannot be "
-                "recognised. Set the 'self_accounts' runtime config to close that gap."
-            )
+        comp["self_identities"] = await _vocabulary_synchronizer(comp).synchronize_self_identities()
     except Exception as e:
         logger.warning(f"Could not load self-account identities: {e}")
 
@@ -681,6 +736,18 @@ async def handle_evaluate_mission_quality(mission_id: str) -> str:
     signals = await comp["repository"].get_mission_signals(m_id)
     tf_days = timeframe_to_days(mission.timeframe)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
+    qualification = await _qualification_for(comp, mission, signals)
+    extra: Dict[str, Any] = {}
+    if qualification is not None:
+        # Whether a conclusion is permitted decides the confidence cap, so the same analysis that
+        # every other boundary runs decides it here too.
+        clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
+        report = comp["strategic_reasoner"].analyze_mission(
+            mission=mission, signals=signals, clusters=clusters, scorecard=scorecard,
+            qualification=qualification,
+        )
+        comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
+        extra = _qualification_payload(report)
 
     return json.dumps(
         {
@@ -689,10 +756,13 @@ async def handle_evaluate_mission_quality(mission_id: str) -> str:
             "language_precision": scorecard.language_precision,
             "data_freshness_score": scorecard.data_freshness_score,
             "creator_diversity_score": scorecard.creator_diversity_score,
+            "question_relevance_score": scorecard.question_relevance_score,
+            "qualification_counts": scorecard.qualification_counts,
             "overall_confidence": scorecard.overall_confidence,
             "confidence_level": scorecard.confidence_level.value,
             "flaws_detected": scorecard.flaws_detected,
             "strengths_detected": scorecard.strengths_detected,
+            **extra,
         },
         ensure_ascii=False,
         indent=2
@@ -728,12 +798,14 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
         auth_status=auth_status,
         connector_health=connector_health,
         market_brief=brief,
+        qualification=await _qualification_for(comp, mission, signals),
     )
+    comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
 
     return json.dumps(
         {
             "mission_id": str(mission.id),
-            "maturity_stage": report.maturity_stage.value,
+            "maturity_stage": _maturity_value(report),
             **_surface_payload(report, mission),
             "market_opportunities": [
                 _serialize_opportunity(opp) for opp in report.market_opportunities
@@ -1563,6 +1635,26 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
             missing_fields=exc.missing_fields,
             detail=str(exc),
         )
+    except VocabularySynchronizationError as exc:
+        # Refused before the writer claim and before any connector call, so no result exists that
+        # was produced under a partial configuration.
+        return json.dumps(
+            {
+                "status": "FAILED",
+                "operation": "execute_mission_ingress",
+                "mission_id": str(mission.id),
+                "shortcode": mission.shortcode,
+                "workspace_id": str(mission.workspace_id) if mission.workspace_id else None,
+                "error": str(exc),
+                "note": (
+                    "No connector was called and no run was started: the persisted vocabulary "
+                    "this mission depends on could not be loaded. Check the configured database, "
+                    "then run the mission again."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     result["shortcode"] = mission.shortcode
     result["display_label"] = f"[{mission.shortcode}] {mission.title}" 
@@ -1596,6 +1688,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     tf_days = timeframe_to_days(mission.timeframe)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
     auth_status, connector_health = await _collect_channel_context(comp)
+    qualification = await _qualification_for(comp, mission, signals)
     report = comp["strategic_reasoner"].analyze_mission(
         mission=mission,
         signals=signals,
@@ -1605,7 +1698,16 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         connector_health=connector_health,
         market_brief=brief,
         attention_context_signals=await _attention_context_signals(comp, mission),
+        qualification=qualification,
     )
+    comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
+
+    if qualification is not None:
+        # Every raw observation stays readable, labelled with what its judgment made of it.
+        for item in analysis["top_signals"]:
+            judged = qualification.judgment_of(item.get("observation_id"))
+            item["qualification_relation"] = judged.relation.value if judged else "UNASSESSED"
+            item["qualification_reason"] = judged.reason_code.value if judged else None
 
     analysis["quality_scorecard"] = {
         "overall_confidence": scorecard.overall_confidence,
@@ -1614,10 +1716,12 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
         "language_precision": scorecard.language_precision,
         "data_freshness_score": scorecard.data_freshness_score,
         "creator_diversity_score": scorecard.creator_diversity_score,
+        "question_relevance_score": scorecard.question_relevance_score,
+        "qualification_counts": scorecard.qualification_counts,
         "strengths": scorecard.strengths_detected,
         "flaws": scorecard.flaws_detected,
     }
-    analysis["maturity_stage"] = report.maturity_stage.value
+    analysis["maturity_stage"] = _maturity_value(report)
     analysis.update(_surface_payload(report, mission))
     analysis["market_opportunities"] = [
         _serialize_opportunity(opp, include_supporting=2) for opp in report.market_opportunities
@@ -1690,7 +1794,9 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         auth_status=auth_status,
         connector_health=connector_health,
         market_brief=brief,
+        qualification=await _qualification_for(comp, mission, signals),
     )
+    comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
     
     platform_breakdown = {}
     macro_trends = []
@@ -1743,9 +1849,12 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
                 "coverage_score": scorecard.coverage_score,
                 "data_freshness_score": scorecard.data_freshness_score,
                 "language_precision": scorecard.language_precision,
+                "question_relevance_score": scorecard.question_relevance_score,
+                "qualification_counts": scorecard.qualification_counts,
                 "strengths": scorecard.strengths_detected,
                 "flaws": scorecard.flaws_detected,
             },
+            **_surface_payload(report, mission),
             "top_market_opportunities": [
                 {
                     "topic": opp.topic,
@@ -1765,6 +1874,26 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         ensure_ascii=False,
         indent=2
     )
+
+
+async def handle_get_mission_evidence_qualification_batch(
+    mission_id: str, cursor: Optional[str] = None, limit: int = DEFAULT_BATCH_LIMIT
+) -> str:
+    comp = get_components()
+    result = await comp["get_evidence_qualification_batch_use_case"].execute(
+        mission_id=mission_id, cursor=cursor, limit=limit
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def handle_submit_mission_evidence_qualifications(
+    mission_id: str, frame_fingerprint: str, assessments: List[Dict[str, Any]]
+) -> str:
+    comp = get_components()
+    result = await comp["submit_evidence_qualifications_use_case"].execute(
+        mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 async def handle_list_research_missions(limit: int = 10) -> str:
@@ -2120,6 +2249,16 @@ async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optio
 @mcp.tool(name="generate_mission_artifact", description="Export a standalone Infographic Canvas HTML report to local disk (reports/ folder). Use ONLY when the user explicitly requests an exported HTML file.")
 async def generate_mission_artifact(mission_id: str) -> str:
     return await handle_generate_mission_artifact(mission_id)
+
+
+@mcp.tool(name="get_mission_evidence_qualification_batch", description="Read a bounded batch (default 25, max 50) of a mission's current evidence that still needs a semantic judgment, with the immutable frame it is judged against: the confirmed Market Brief revision, or the Attention title and keywords. Judge each item in your own context and send the typed result to submit_mission_evidence_qualifications with the returned frame_fingerprint. READY means every observation carries an actual assessment (unassessed: 0). When recorded judgments leave the frame unassessed the answer is terminal with no evidence: QUALIFICATION_REQUIRED with reason_code UNASSESSED_EVIDENCE, or UNAVAILABLE with reason_code EVALUATOR_UNAVAILABLE (which takes priority over pending evidence); recorded judgments are final, so reassess under a new mission or Market Brief revision instead of reading again. NOT_APPLICABLE for a mission with no research surface.")
+async def get_mission_evidence_qualification_batch(mission_id: str, cursor: Optional[str] = None, limit: int = DEFAULT_BATCH_LIMIT) -> str:
+    return await handle_get_mission_evidence_qualification_batch(mission_id=mission_id, cursor=cursor, limit=limit)
+
+
+@mcp.tool(name="submit_mission_evidence_qualifications", description="Record 1-50 typed evidence judgments for one mission, atomically: each assessment names an observation_id from the batch, a relation (QUALIFIED_SUPPORT, CONTEXT_ONLY, EXCLUDED_IRRELEVANT, UNASSESSED), a purpose (DEMAND, SUPPLY, VOC, CONTEXT), a confidence from 0.0 to 1.0 (null only for UNASSESSED), a reason_code (DIRECT_TO_FRAME, ADJACENT_ONLY, KEYWORD_ONLY, WRONG_AUDIENCE_OR_PROBLEM, FICTION_NEWS_OR_ENTERTAINMENT, INSUFFICIENT_CONTENT, EVALUATOR_UNAVAILABLE), judged_by and an optional model identifier. A stale frame, a foreign or duplicate observation, or any invalid assessment refuses the whole batch; an identical replay is idempotent and a different judgment for an already judged observation is refused. The response reports the state the write produced (qualification_status, qualification_reason_code) and a next_step from the same decision the batch read and the analysis use: the next batch while evidence is pending, reassessment under a new mission or Market Brief revision once recorded judgments make the frame terminal, or the analysis once everything is assessed. Never send a prompt, transcript or credential.")
+async def submit_mission_evidence_qualifications(mission_id: str, frame_fingerprint: str, assessments: list[dict]) -> str:
+    return await handle_submit_mission_evidence_qualifications(mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments)
 
 
 @mcp.tool(name="list_research_missions", description="List recent trend research missions and tracking campaigns.")

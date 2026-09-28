@@ -8,9 +8,10 @@ vocabulary, otherwise a stopword like "new" would count as a reason a signal is 
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.domain.exceptions import VocabularySynchronizationError
 
 logger = logging.getLogger(__name__)
 
@@ -95,3 +96,132 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
         tiktok_suggest_templates=_templates_for(TIKTOK_SUGGEST_TEMPLATE_PREFIX),
         by_domain_and_category=buckets,
     )
+
+
+class VocabularySynchronizer:
+    """Push the persisted vocabulary into the engines and connectors that depend on it.
+
+    One synchronizer, called by every entry point that needs it, so the first mission after a
+    process starts sees exactly what a process warmed by an earlier call would see. Every
+    registration it performs replaces or unions, so calling it again changes nothing.
+
+    Any engine left as None is skipped: a caller that holds only some of them synchronizes those.
+    """
+
+    def __init__(
+        self,
+        repository: ITrendRepository,
+        *,
+        quality_evaluator: Optional[Any] = None,
+        strategic_reasoner: Optional[Any] = None,
+        clusterer: Optional[Any] = None,
+        google_trends_plugin: Optional[Any] = None,
+        language_detector: Optional[Any] = None,
+        tiktok_plugin: Optional[Any] = None,
+        registry: Optional[Any] = None,
+    ):
+        self._repository = repository
+        self._quality_evaluator = quality_evaluator
+        self._strategic_reasoner = strategic_reasoner
+        self._clusterer = clusterer
+        self._google_trends_plugin = google_trends_plugin
+        self._language_detector = language_detector
+        self._tiktok_plugin = tiktok_plugin
+        self._registry = registry
+        self.self_identities: List[Any] = []
+
+    async def synchronize(self) -> MarketVocabulary:
+        """Synchronize everything, raising `VocabularySynchronizationError` on any failed read.
+
+        The mission path calls this before a mission runs and lets the failure stop it.
+        """
+        vocabulary = await self.synchronize_vocabulary()
+        await self.synchronize_self_identities()
+        return vocabulary
+
+    async def synchronize_vocabulary(self) -> MarketVocabulary:
+        """Load market_lexicons and industry_taxonomies into every bound engine."""
+        try:
+            vocabulary = await load_market_vocabulary(self._repository)
+            taxonomies = (
+                await self._repository.get_industry_taxonomies()
+                if self._clusterer is not None and hasattr(self._clusterer, "register_taxonomies")
+                else None
+            )
+        except Exception as exc:
+            raise VocabularySynchronizationError(
+                f"Could not read the persisted vocabulary from the configured database: {exc}"
+            ) from exc
+
+        pos_terms = vocabulary.positive_terms
+        stop_terms = vocabulary.foreign_stopwords
+        noise_terms = vocabulary.noise_blacklist
+
+        if pos_terms:
+            for engine in (self._quality_evaluator, self._strategic_reasoner):
+                if engine is not None:
+                    engine.register_terms(pos_terms)
+            if self._strategic_reasoner is not None:
+                # Terms sharing a (domain, category) bucket are treated as expansions of each
+                # other, so keyword matching uses the persisted vocabulary instead of hardcoded
+                # synonyms.
+                self._strategic_reasoner.register_synonym_groups(
+                    [g for g in vocabulary.by_domain_and_category.values() if len(g) > 1]
+                )
+        if self._clusterer is not None:
+            self._clusterer.register_ambiguous_unigrams(vocabulary.ambiguous_unigrams)
+        if self._google_trends_plugin is not None:
+            self._google_trends_plugin.register_probe_templates(vocabulary.probe_templates)
+            self._google_trends_plugin.register_intent_keywords(vocabulary.search_intent)
+        if self._language_detector is not None:
+            self._language_detector.register_foreign_phrases(vocabulary.foreign_phrases)
+            self._language_detector.register_portuguese_words(vocabulary.portuguese_words)
+        if self._tiktok_plugin is not None:
+            self._tiktok_plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
+            self._tiktok_plugin.register_suggest_templates(vocabulary.tiktok_suggest_templates)
+        if stop_terms:
+            for engine in (self._quality_evaluator, self._strategic_reasoner):
+                if engine is not None:
+                    engine.register_foreign_stopwords(stop_terms)
+            if self._clusterer is not None and hasattr(self._clusterer, "register_stopwords"):
+                self._clusterer.register_stopwords(stop_terms)
+        if noise_terms:
+            for engine in (self._quality_evaluator, self._strategic_reasoner):
+                if engine is not None:
+                    engine.register_noise_blacklist(noise_terms)
+            if self._clusterer is not None and hasattr(self._clusterer, "register_stopwords"):
+                self._clusterer.register_stopwords(noise_terms)
+        if taxonomies:
+            self._clusterer.register_taxonomies(taxonomies)
+        return vocabulary
+
+    async def synchronize_self_identities(self) -> List[Any]:
+        """Bind the operator's own connected accounts so market passes can exclude their content."""
+        if self._registry is None:
+            return []
+        # Imported here: the auth package reaches the credential store, which the vocabulary
+        # half of this module has no reason to load.
+        from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
+
+        try:
+            identities = await SelfIdentityRegistry(self._repository).load()
+        except Exception as exc:
+            raise VocabularySynchronizationError(
+                f"Could not load the operator's own account identities: {exc}"
+            ) from exc
+        self._registry.register_self_identities(identities)
+        self.self_identities = identities
+        if identities:
+            logger.info(
+                "Self-content guard armed for: "
+                + ", ".join(sorted({
+                    f"{i.platform}:{i.normalized_username or i.normalized_account_id}"
+                    for i in identities
+                }))
+            )
+        else:
+            logger.info(
+                "No connected account identity is known, so self-authored content cannot be "
+                "recognised. Set the 'self_accounts' runtime config to close that gap."
+            )
+        return identities

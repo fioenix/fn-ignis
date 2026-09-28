@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -6,13 +7,18 @@ from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.domain.entities import TrendSignal
+from ignis.domain.value_objects import resolve_timeframe
+from ignis.domain.exceptions import VocabularySynchronizationError
 from ignis.domain.research_workspace import (
     REQUIRED_BRIEF_FIELDS,
     IncompleteMarketBriefError,
+    MissionProbeOutcome,
     ResearchSurface,
     WorkspaceScopeMismatchError,
+    compute_query_fingerprint,
     resolve_surface,
 )
+from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 
 logger = logging.getLogger(__name__)
@@ -30,11 +36,13 @@ class ExecuteMissionUseCase:
         registry: ConnectorPluginRegistry,
         clusterer: IClusteringEngine,
         workspace_store: Optional[IResearchWorkspaceStore] = None,
+        vocabulary_sync: Optional[VocabularySynchronizer] = None,
     ):
         self._repo = repository
         self._registry = registry
         self._clusterer = clusterer
         self._workspace_store = workspace_store
+        self._vocabulary_sync = vocabulary_sync
 
     async def _require_confirmed_brief(self, mission) -> None:
         """A Market mission does not probe until the requester has confirmed its Brief.
@@ -84,6 +92,28 @@ class ExecuteMissionUseCase:
             )
         return workspace
 
+    async def _synchronize_vocabulary(self, mission) -> None:
+        """Load the persisted vocabulary before the mission can reach a connector.
+
+        The first mission after a process starts used to run with none of it: only an analysis
+        call had ever registered the TikTok UI noise and the probe templates, so the grid
+        rejected every card and demand was measured from the bare keyword. A failure here stops
+        the mission before it is marked RUNNING and before any connector is called; for a
+        workspace mission it runs inside the writer claim, so only the claim holder records it.
+        """
+        if self._vocabulary_sync is None:
+            return
+        try:
+            await self._vocabulary_sync.synchronize()
+        except VocabularySynchronizationError as exc:
+            mission.status = "FAILED"
+            mission.summary = (
+                "Failed before ingress: the persisted vocabulary could not be synchronized, so "
+                f"no connector was called. {exc}"
+            )
+            await self._repo.update_mission(mission)
+            raise
+
     async def execute(self, mission_id: UUID) -> Dict[str, Any]:
         mission = await self._repo.get_mission(mission_id)
         if not mission:
@@ -93,13 +123,17 @@ class ExecuteMissionUseCase:
 
         workspace = await self._run_workspace(mission)
         if workspace is None:
+            await self._synchronize_vocabulary(mission)
             return await self._execute_pass(mission)
 
-        # The claim is taken before the mission is moved to RUNNING, so a refused second run
-        # never touches the state of the run that holds the mission. Both the claim and the
-        # journal are given back by the context manager, including when the pass raises.
+        # The claim is taken before anything else writes, so a refused second run never touches
+        # the state of the run that holds the mission -- not even to record that its own
+        # vocabulary read failed. Synchronization follows the claim and still precedes RUNNING
+        # and every connector call. The claim and the journal are given back by the context
+        # manager, including when synchronization or the pass raises.
         async with self._workspace_store.mission_run(workspace, mission.id) as journal:
-            result = await self._execute_pass(mission)
+            await self._synchronize_vocabulary(mission)
+            result = await self._execute_pass(mission, journal=journal)
             result["run"] = {
                 "run_id": str(journal.run_id),
                 "workspace_id": str(journal.workspace_id),
@@ -108,20 +142,58 @@ class ExecuteMissionUseCase:
             }
             return result
 
-    async def _execute_pass(self, mission) -> Dict[str, Any]:
+    async def _record_probe_outcomes(self, mission, journal, outcomes) -> None:
+        """Write what every surface did during this run, before the mission can complete.
+
+        A failure here propagates: a run whose outcomes are not on record would later be read as
+        having measured nothing in particular, and a measured zero is only honest when the run
+        that measured it is known.
+        """
+        completed_at = datetime.now(timezone.utc)
+        await self._workspace_store.record_probe_outcomes(
+            journal.run_id,
+            [
+                MissionProbeOutcome(
+                    run_id=journal.run_id,
+                    platform=outcome.platform,
+                    connector_surface=outcome.connector_surface,
+                    status=outcome.status,
+                    signals_collected=outcome.signals_collected,
+                    # Each surface's own query: the keywords it attested to running, not the
+                    # mission's full list, which a connector capped at ten never saw in full.
+                    queried_keywords=outcome.queried_keywords,
+                    queried_window=outcome.queried_window,
+                    # The window the surface attested to filtering by, not the one the mission
+                    # asked for: a connector handed another window measured that one instead.
+                    query_fingerprint=compute_query_fingerprint(
+                        outcome.queried_keywords, mission.geo_code, outcome.queried_window
+                    ),
+                    completed_at=completed_at,
+                )
+                for outcome in outcomes
+            ],
+        )
+
+    async def _execute_pass(self, mission, journal=None) -> Dict[str, Any]:
         mission_id = mission.id
         logger.info(f"Executing Research Mission '{mission.title}' [ID: {mission_id}] with keywords: {mission.keywords} (Timeframe: {mission.timeframe})...")
         mission.status = "RUNNING"
         await self._repo.update_mission(mission)
 
         try:
-            # 1. Targeted ingress across active connector plugins
-            signals = await self._registry.search_across_all(
+            # 1. Targeted ingress across active connector plugins, with the outcome of every
+            # surface it reached: a workspace run records them, so a reopened report can tell a
+            # measured zero from a probe that never measured.
+            search = await self._registry.search_with_outcomes(
                 keywords=mission.keywords,
                 geo=mission.geo_code,
+                # Both forms of the window: some connectors read only `timeframe`, and left at
+                # its 24h default they searched a different window from the mission's.
+                timeframe=resolve_timeframe(mission.timeframe),
                 target_platforms=mission.platforms,
                 custom_timeframe=mission.timeframe,
             )
+            signals = search.signals
 
             # Fail-safe: a connector can exhaust its quota mid-pass, and the mission should not
             # lose the platform it already had. What it keeps is the evidence -- the observations
@@ -181,6 +253,9 @@ class ExecuteMissionUseCase:
             await self._repo.prune_mission_evidence(mission.id, retained)
             active_platforms = list(set(s.platform.value if hasattr(s.platform, "value") else str(s.platform) for s in signals))
             active_plat_str = ", ".join(active_platforms) if active_platforms else "none"
+
+            if journal is not None:
+                await self._record_probe_outcomes(mission, journal, search.outcomes)
 
             mission.status = "COMPLETED"
             mission.summary = f"Successfully collected {len(signals)} signals across {len(active_platforms)}/{len(mission.platforms)} responsive platforms ({active_plat_str}), discovered {len(clusters)} topic clusters."

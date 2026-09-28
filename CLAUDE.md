@@ -78,7 +78,8 @@ Step 1: Clarify Research Objectives & Formulate Core Hypothesis
 Step 2: Macro Scan & Real-World Keyword Expansion (Creative Center & Autocomplete Suggestions)
    ↓
 Step 3: Deep Multi-Platform Ingress & Quality Gate (Spam rejection, Confidence >= 70%)
-   ↓
+   ↓ (Surfaced missions: judge evidence via get_mission_evidence_qualification_batch
+   ↓  and submit_mission_evidence_qualifications before reading a verdict)
 Step 4: Single-Source 4-Lens Breakdown (Demand, Supply, Intent, Voice of Customer)
    ↓
 Step 5: Cross-Source Synthesis & Opportunity Index Matrix (Identify White Spaces)
@@ -127,7 +128,7 @@ Before completing changes or cutting a release, verify these three checklist gat
 
 ### Checklist B: Harness Autonomy & Decoupling
 - [ ] FastMCP server instructions and tool definitions do NOT dictate mandatory agent workflows.
-- [ ] All 45 tools are callable independently for ad-hoc queries.
+- [ ] All 47 tools are callable independently for ad-hoc queries.
 - [ ] Output formatting is adapted to conversational context, not forced into rigid report templates.
 
 ### Checklist C: Pre-Release & Version Bump Gate

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 import httpx
 
-from ignis.application.ports.connector_port import IConnectorPlugin
+from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe
@@ -224,8 +224,14 @@ class TikTokPlugin(IConnectorPlugin):
         timeframe: Timeframe = Timeframe.LAST_24H,
         limit: int = 20,
         custom_timeframe: Optional[str] = None,
+        attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
-        """Search public trending videos by specific keywords on TikTok."""
+        """Search public trending videos by specific keywords on TikTok.
+
+        `attestation`, when given, records a keyword only when its search answered: a search API
+        response was captured or cards were read from the grid. Only the first ten keywords are
+        probed, and only those can ever be attested.
+        """
 
         storage_state = None
         if self._auth_manager:
@@ -245,6 +251,7 @@ class TikTokPlugin(IConnectorPlugin):
                 limit=limit,
                 keyword=kw_clean,
                 seen_urls=seen_urls,
+                attestation=attestation,
             )
             for s in signals:
                 if s.source_url and s.source_url not in seen_urls:
@@ -613,15 +620,20 @@ class TikTokPlugin(IConnectorPlugin):
         limit: int = 30,
         keyword: Optional[str] = None,
         seen_urls: Optional[Set[str]] = None,
+        attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
         try:
             from playwright.async_api import async_playwright
         except ImportError:
             logger.warning("Playwright not installed, skipping TikTok scraping.")
+            if attestation is not None and keyword:
+                attestation.failed(keyword, "Playwright is not installed")
             return []
 
         signals: List[TrendSignal] = []
         captured_items: List[Dict[str, Any]] = []
+        # Set once a search API body is read, even an empty one: the proof the query ran.
+        answered: List[bool] = []
         local_seen: Set[str] = set(seen_urls or [])
 
         try:
@@ -662,6 +674,7 @@ class TikTokPlugin(IConnectorPlugin):
                                     return
                                 if not isinstance(body, dict):
                                     return
+                                answered.append(True)
                                 items = body.get("itemList") or body.get("data", {}).get("list", []) or body.get("data", [])
                                 if isinstance(items, list):
                                     for item in items:
@@ -724,6 +737,11 @@ class TikTokPlugin(IConnectorPlugin):
             logger.error(f"Error executing TikTok Ingress ({url}): {e}")
             raise ConnectorExecutionException(f"Failed to fetch TikTok signals: {e}") from e
 
+        if attestation is not None and keyword:
+            if answered or signals:
+                attestation.executed(keyword)
+            else:
+                attestation.failed(keyword, "no search response or card was captured")
         return signals
 
     def _parse_json_item(self, item: Dict[str, Any], geo: GeoCode, keyword: Optional[str]) -> Optional[TrendSignal]:

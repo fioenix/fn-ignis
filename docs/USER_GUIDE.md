@@ -17,7 +17,8 @@ This document provides a comprehensive, step-by-step guide for developers, data 
 6. [Report Management & Nginx Report Portal](#6-report-management--nginx-report-portal)
 7. [Troubleshooting & Common Issues](#7-troubleshooting--common-issues)
 8. [Research Workspaces & the Two Surfaces](#8-research-workspaces--the-two-surfaces)
-9. [Catalog of 45 FastMCP Tools & Comprehensive Research Capabilities](#9-catalog-of-45-fastmcp-tools--comprehensive-research-capabilities)
+9. [Catalog of 47 FastMCP Tools & Comprehensive Research Capabilities](#9-catalog-of-47-fastmcp-tools--comprehensive-research-capabilities)
+10. [Qualifying Evidence Before a Market Verdict](#10-qualifying-evidence-before-a-market-verdict)
 
 ---
 
@@ -421,9 +422,9 @@ no writer claim and write no journal, and run exactly as they did before.
 
 ---
 
-## 9. Catalog of 45 FastMCP Tools & Comprehensive Research Capabilities
+## 9. Catalog of 47 FastMCP Tools & Comprehensive Research Capabilities
 
-The `fn-ignis` FastMCP server exposes **45 atomic and strategic tools**:
+The `fn-ignis` FastMCP server exposes **47 atomic and strategic tools**:
 
 ### 0. Research Workspaces & Dual-Surface Missions (6 Tools)
 - `propose_research_workspace`: Report where a research would live. Read-only; creates nothing.
@@ -433,10 +434,12 @@ The `fn-ignis` FastMCP server exposes **45 atomic and strategic tools**:
 - `confirm_market_brief`: Persist a confirmed Brief and open the `MARKET` mission it authorizes; also the Attention handoff and the Brief revision entry point.
 - `release_mission_writer`: Recover a mission whose run died holding its single writer slot, by naming that exact run.
 
-### 1. Research Mission Orchestration & Analysis (8 Tools)
+### 1. Research Mission Orchestration & Analysis (10 Tools)
 - `create_research_mission`: Initialize a new targeted research campaign.
-- `execute_mission_ingress`: Deploy active multi-channel data harvesting.
-- `get_mission_analysis`: Calculate Opportunity Index, Demand vs Supply matrix, and White Spaces.
+- `execute_mission_ingress`: Deploy active multi-channel data harvesting. The first mission after a server start loads the persisted vocabulary before any connector call.
+- `get_mission_evidence_qualification_batch`: Read a bounded batch of a surfaced mission's evidence that still needs a semantic judgment, with the frame it is judged against.
+- `submit_mission_evidence_qualifications`: Record the host Agent's typed judgments for one batch, atomically and idempotently.
+- `get_mission_analysis`: Calculate Opportunity Index, Demand vs Supply matrix, and White Spaces for a `MARKET` topic whose qualified evidence meets the minimum; otherwise report why the verdict is withheld.
 - `generate_mission_artifact`: Render an interactive, standalone HTML Infographic Dashboard.
 - `list_research_missions`: List all missions with filters for status, query, and date range.
 - `get_current_session_mission`: Retrieve or auto-link active mission for current agent session.
@@ -490,3 +493,34 @@ The `fn-ignis` FastMCP server exposes **45 atomic and strategic tools**:
 - `trigger_autonomous_discovery`: Trigger unguided exploration for whitespace opportunities.
 - `get_latest_daily_discovery`: Inspect latest automated daily digest.
 - `refresh_runtime_config_cache`: Invalidate and refresh in-memory runtime config cache.
+
+
+## 10. Qualifying Evidence Before a Market Verdict
+
+A traceable citation is not yet support. For a mission that declared a research surface, the host
+Agent judges each observation against the mission's question and Ignis applies a fixed evidence
+minimum before it allows a conclusion:
+
+1. `execute_mission_ingress` collects raw observations; none is ever deleted for being irrelevant.
+2. `get_mission_evidence_qualification_batch` hands out up to 50 unjudged observations and the frame:
+   the confirmed Market Brief revision, or the Attention title and keywords.
+3. The Agent judges each item in its own context — relation, purpose, confidence and one bounded
+   reason code — and sends the batch to `submit_mission_evidence_qualifications` with the returned
+   `frame_fingerprint`. Low-confidence or failed judgments are submitted as `UNASSESSED`.
+4. `get_mission_analysis` and `generate_mission_artifact` then read the persisted judgments. A Market
+   topic carries an Opportunity Index only with one qualified demand observation and either two
+   qualified supply observations from two independent sources or two relevant supply surfaces that
+   completed, filtered by the mission's own time window, and returned nothing for the same query. A
+   surface that cannot restrict its search to that window never counts as a measured absence. An
+   Attention cluster becomes a handoff
+   candidate only when it is directly relevant and backed by two independent sources.
+
+Until every observation carries an actual assessment the analysis reports `QUALIFICATION_REQUIRED`
+(an explicit `UNASSESSED` judgment is final, so it needs a new mission or Brief revision); a recorded
+evaluator failure reports `UNAVAILABLE`; a complete assessment that meets no minimum reports
+`INSUFFICIENT_RELEVANT_EVIDENCE`. Each carries the four qualification counts, the question-relevance
+score and a machine-readable reason, and confidence is capped at `LOW` or `UNRELIABLE` accordingly.
+Reopening a mission reads the same stored answer until a new completed run, a new mission or a new
+Brief revision changes its evidence frame. Missions without a declared surface keep their previous
+behaviour. No AI provider or API key is required by the server; the judgment comes from the Agent in
+the loop.

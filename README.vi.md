@@ -129,7 +129,7 @@ Chỉ chính run đã lấy claim mới nhả được claim đó. Ở đây c�
 
 | AI Agent / IDE | Cấu hình & Tiêu chuẩn | Khả năng Hỗ trợ |
 |---|---|---|
-| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 45 FastMCP Tools, Prompts, Resources, tự động nạp 6 bước SOP |
+| **Claude Desktop** | [`bundle/claude_desktop_config.json`](bundle/claude_desktop_config.json) | 47 FastMCP Tools, Prompts, Resources, tự động nạp 6 bước SOP |
 | **Claude Code** | [`CLAUDE.md`](CLAUDE.md), [`.agents/skills/fn-ignis-harness/SKILL.md`](.agents/skills/fn-ignis-harness/SKILL.md) | Chuẩn Agent Skills, xuất Artifact HTML trực quan |
 | **Antigravity / Gemini Code** | [`AGENTS.md`](AGENTS.md) + Agent Skills | Radar liên tục Dual-Track & nạp từ điển động |
 | **OpenAI Codex** | [`.codex/instructions.md`](.codex/instructions.md), [`.codexrules`](.codexrules) | Duy trì ngữ cảnh phiên chat (`codex://threads/...`), Structured Tools |
@@ -151,7 +151,7 @@ Chỉ chính run đã lấy claim mới nhả được claim đó. Ở đây c�
 
 ---
 
-## 🛠️ Danh mục 45 FastMCP Tools, Prompts & Resources
+## 🛠️ Danh mục 47 FastMCP Tools, Prompts & Resources
 
 ### 1. Research Workspace & Hai bề mặt Nghiên cứu
 - **`propose_research_workspace(host_workspace, research_name, slug?)`**: Báo nghiên cứu sẽ nằm ở đâu. Chỉ đọc, không tạo thư mục, manifest, bản ghi database hay journal.
@@ -164,10 +164,12 @@ Chỉ chính run đã lấy claim mới nhả được claim đó. Ở đây c�
 ### 2. Nghiên cứu Thị trường & Tổng hợp Chiến lược
 - **`run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)`**: Khởi tạo chiến dịch, thu thập dữ liệu đa nguồn, tính toán Opportunity Index và xuất báo cáo trong 1 bước.
 - **`create_research_mission(topic, keywords, platforms?, geo?, timeframe?)`**: Tạo chiến dịch nghiên cứu nhắm đích bên ngoài research workspace. Mission này không khai báo bề mặt nào nên không bị chặn bởi Brief.
-- **`execute_mission_ingress(mission_id)`**: Thực thi cào dữ liệu chuyên sâu và chấm điểm Quality Scorecard.
+- **`execute_mission_ingress(mission_id)`**: Thực thi cào dữ liệu chuyên sâu và chấm điểm Quality Scorecard. Mission đầu tiên sau khi server khởi động sẽ nạp từ vựng đã lưu trước mọi lời gọi connector, và mỗi lượt chạy trong workspace ghi lại kết quả của từng connector surface.
+- **`get_mission_evidence_qualification_batch(mission_id, cursor?, limit?)`**: Đọc một lô giới hạn (mặc định 25, tối đa 50) gồm các bằng chứng chưa được đánh giá ngữ nghĩa của một mission có khai báo bề mặt, kèm khung câu hỏi bất biến dùng để đánh giá: bản Market Brief đã xác nhận, hoặc tiêu đề và từ khóa của mission Attention.
+- **`submit_mission_evidence_qualifications(mission_id, frame_fingerprint, assessments)`**: Ghi nhận trọn một lô đánh giá có kiểu do Agent gửi (quan hệ, mục đích, độ tin cậy, mã lý do trong danh sách cố định, định danh người đánh giá). Chỉ cần frame đã cũ, một observation không thuộc mission, một observation bị lặp hoặc một đánh giá không hợp lệ là cả lô bị từ chối. Gửi lại y hệt thì không đổi gì; gửi đánh giá khác cho observation đã có đánh giá thì bị từ chối. Server không lưu prompt, transcript hay thông tin xác thực.
 - **`evaluate_mission_quality(mission_id)`**: Đánh giá lại chất lượng dữ liệu (Coverage, Precision, Freshness, Diversity).
 - **`discover_market_opportunities(mission_id)`**: Phát hiện các khoảng trống thị trường tiềm năng cao.
-- **`get_mission_analysis(mission_id)`**: Trích xuất toàn văn báo cáo phân tích chiến lược tổng hợp.
+- **`get_mission_analysis(mission_id, limit?, platform?)`**: Trích xuất báo cáo phân tích tổng hợp theo bề mặt của mission: bằng chứng xếp hạng, scorecard có riêng một chiều về độ liên quan với câu hỏi, lineage, số lượng bằng chứng theo từng kết quả đánh giá, và chỉ với topic `MARKET` có demand và supply đạt chuẩn tối thiểu mới có Opportunity Index cùng white space. Nếu chưa đạt, kết quả là `QUALIFICATION_REQUIRED`, `UNAVAILABLE` hoặc `INSUFFICIENT_RELEVANT_EVIDENCE` kèm lý do dạng mã; phân tích `ATTENTION` báo `handoff_status` và không bao giờ tự chọn một ứng viên thay thế.
 - **`generate_mission_artifact(mission_id)`**: Xuất bản file HTML Dashboard Infographic tương tác trực quan vào thư mục `reports/`.
 - **`list_research_missions(limit)`**: Liệt kê các chiến dịch nghiên cứu đã thực hiện.
 - **`get_current_session_mission(session_id)`**: Khôi phục chiến dịch gắn với phiên chat hiện tại.

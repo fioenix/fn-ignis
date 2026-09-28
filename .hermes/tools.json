@@ -179,6 +179,71 @@
   {
     "type": "function",
     "function": {
+      "name": "get_mission_evidence_qualification_batch",
+      "description": "Read a bounded batch (default 25, max 50) of a mission's current evidence that still needs a semantic judgment, with the immutable frame it is judged against: the confirmed Market Brief revision, or the Attention title and keywords. Judge each item in your own context and send the typed result to submit_mission_evidence_qualifications with the returned frame_fingerprint. READY means every observation carries an actual assessment (unassessed: 0). When recorded judgments leave the frame unassessed the answer is terminal with no evidence: QUALIFICATION_REQUIRED with reason_code UNASSESSED_EVIDENCE, or UNAVAILABLE with reason_code EVALUATOR_UNAVAILABLE (which takes priority over pending evidence); recorded judgments are final, so reassess under a new mission or Market Brief revision instead of reading again. NOT_APPLICABLE for a mission with no research surface.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "limit": {
+            "default": 25,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mission_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "submit_mission_evidence_qualifications",
+      "description": "Record 1-50 typed evidence judgments for one mission, atomically: each assessment names an observation_id from the batch, a relation (QUALIFIED_SUPPORT, CONTEXT_ONLY, EXCLUDED_IRRELEVANT, UNASSESSED), a purpose (DEMAND, SUPPLY, VOC, CONTEXT), a confidence from 0.0 to 1.0 (null only for UNASSESSED), a reason_code (DIRECT_TO_FRAME, ADJACENT_ONLY, KEYWORD_ONLY, WRONG_AUDIENCE_OR_PROBLEM, FICTION_NEWS_OR_ENTERTAINMENT, INSUFFICIENT_CONTENT, EVALUATOR_UNAVAILABLE), judged_by and an optional model identifier. A stale frame, a foreign or duplicate observation, or any invalid assessment refuses the whole batch; an identical replay is idempotent and a different judgment for an already judged observation is refused. The response reports the state the write produced (qualification_status, qualification_reason_code) and a next_step from the same decision the batch read and the analysis use: the next batch while evidence is pending, reassessment under a new mission or Market Brief revision once recorded judgments make the frame terminal, or the analysis once everything is assessed. Never send a prompt, transcript or credential.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "frame_fingerprint": {
+            "type": "string"
+          },
+          "assessments": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "mission_id",
+          "frame_fingerprint",
+          "assessments"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "generate_mission_artifact",
       "description": "Export a standalone Infographic Canvas HTML report to local disk (reports/ folder). Use ONLY when the user explicitly requests an exported HTML file.",
       "parameters": {

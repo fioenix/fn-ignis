@@ -790,3 +790,126 @@ async def test_an_abandoned_framing_leaves_no_mission_revision_or_journal(tmp_pa
         assert [p.name for p in workspace.root_path.iterdir()] == [MANIFEST_FILENAME]
     finally:
         await repository.close()
+
+
+# --- Decision-grade evidence: qualification counts and citation roles, as serialized -----------
+
+from ignis.domain.research_workspace import (  # noqa: E402
+    EvidenceQualification,
+    MissionProbeOutcome,
+    QualificationContext,
+)
+
+
+def _judge(mission, signal, relation, purpose, reason="DIRECT_TO_FRAME", confidence=0.9):
+    return EvidenceQualification(
+        mission_id=mission.id, observation_id=signal.observation_id, frame_fingerprint="f" * 64,
+        relation=relation, purpose=purpose, confidence=None if relation == "UNASSESSED" else confidence,
+        reason_code=reason, judged_by="unit-test",
+    )
+
+
+def _qualified_market(assess_all=True):
+    """A Market mission holding qualified, context, excluded and (optionally) unjudged evidence."""
+    mission = _mission(workspace_id=uuid4(), surface=ResearchSurface.MARKET.value,
+                       keywords=["AI Agent Enterprise"])
+    demand = _stored_signal("AI Agent Enterprise", "google")
+    supply_a = _stored_signal("AI Agent Enterprise case study", "youtube", PlatformType.YOUTUBE, 9000.0)
+    supply_b = _stored_signal("AI Agent Enterprise walkthrough", "youtube", PlatformType.YOUTUBE, 7000.0)
+    for s in (demand, supply_a, supply_b):
+        s.source_id = uuid4()
+        s.metadata["keyword"] = "AI Agent Enterprise"  # the query that retrieved each of them
+    context = _stored_signal("AI Agent Enterprise meme", "youtube", PlatformType.YOUTUBE, 900000.0)
+    excluded = _stored_signal("AI Agent Enterprise phim tập 3", "youtube", PlatformType.YOUTUBE, 2_000_000.0)
+    pending = _stored_signal("AI Agent Enterprise ?", "youtube", PlatformType.YOUTUBE, 10.0)
+    signals = [demand, supply_a, supply_b, context, excluded, pending]
+    judgments = [
+        _judge(mission, demand, "QUALIFIED_SUPPORT", "DEMAND"),
+        _judge(mission, supply_a, "QUALIFIED_SUPPORT", "SUPPLY"),
+        _judge(mission, supply_b, "QUALIFIED_SUPPORT", "SUPPLY"),
+        _judge(mission, context, "CONTEXT_ONLY", "CONTEXT", "ADJACENT_ONLY"),
+        _judge(mission, excluded, "EXCLUDED_IRRELEVANT", "SUPPLY", "FICTION_NEWS_OR_ENTERTAINMENT"),
+    ]
+    if assess_all:
+        # Every observation assessed. An UNASSESSED row would keep the verdict withheld.
+        judgments.append(_judge(mission, pending, "EXCLUDED_IRRELEVANT", "SUPPLY", "KEYWORD_ONLY"))
+    run = uuid4()
+    outcomes = [
+        MissionProbeOutcome(run_id=run, platform="google", connector_surface="google", status="HEALTHY",
+                            signals_collected=1, query_fingerprint="q" * 64, completed_at=demand.captured_at),
+        MissionProbeOutcome(run_id=run, platform="youtube", connector_surface="youtube", status="HEALTHY",
+                            signals_collected=5, query_fingerprint="q" * 64, completed_at=demand.captured_at),
+    ]
+    qualification = QualificationContext.build(
+        [s.observation_id for s in signals], judgments, outcomes,
+        geo=mission.geo_code, timeframe=mission.timeframe,
+    )
+    report = StrategicMarketReasoner().analyze_mission(
+        mission, signals, [], QualityEvaluator().evaluate_quality(signals, geo=GeoCode.VN),
+        qualification=qualification,
+    )
+    return mission, report, signals
+
+
+def test_the_qualification_block_carries_all_four_counts_and_relevance():
+    from ignis.interfaces.mcp.server import _surface_payload
+
+    mission, report, _signals = _qualified_market()
+    payload = _surface_payload(report, mission)
+
+    assert payload["analysis_status"] == "READY"
+    assert payload["qualification"] == {
+        "status": "READY", "total_evidence": 6, "qualified_support": 3, "context_only": 1,
+        "excluded_irrelevant": 2, "unassessed": 0, "question_relevance_score": 50.0,
+        "reason": None, "reason_code": None,
+    }
+    assert payload["opportunity_index_applies"] is True
+
+
+def test_a_withheld_verdict_carries_a_machine_readable_reason_and_a_next_step():
+    from ignis.domain.research_workspace import QUALIFICATION_STEP
+    from ignis.interfaces.mcp.server import _surface_payload
+
+    mission, report, _signals = _qualified_market(assess_all=False)
+    payload = _surface_payload(report, mission)
+
+    assert payload["analysis_status"] == "QUALIFICATION_REQUIRED"
+    assert payload["qualification"]["reason_code"] == "QUALIFICATION_INCOMPLETE"
+    assert payload["qualification"]["reason"]
+    assert payload["next_step"] == QUALIFICATION_STEP, "the step the batch and submit tools give too"
+    assert payload["opportunity_index_applies"] is False
+    assert report.market_opportunities == [] and report.strategic_insights == []
+    assert report.maturity_stage is None
+
+
+def test_only_qualified_support_is_ever_cited_and_always_as_market_evidence():
+    from ignis.interfaces.mcp.server import _serialize_channel_summaries
+
+    mission, report, signals = _qualified_market()
+    qualified = {str(s.observation_id) for s in signals[:3]}
+
+    cited = _cited_observation_ids(report)
+    assert cited and cited <= qualified
+    audit = [c["top_citation"] for c in _serialize_channel_summaries(report.channel_summaries) if c["top_citation"]]
+    assert {c["observation_id"] for c in audit} <= qualified, "the channel audit cited noise"
+    roles = {
+        c.evidence_role
+        for item in list(report.market_opportunities) + report.strategic_insights + report.actionable_takeaways
+        for c in item.citations
+    }
+    assert roles == {"MARKET_EVIDENCE"}
+    [opportunity] = report.market_opportunities
+    assert opportunity.evidence_sufficiency == "SUFFICIENT_POSITIVE_SUPPLY"
+    assert (opportunity.qualified_demand_count, opportunity.qualified_supply_count,
+            opportunity.independent_supply_sources) == (1, 2, 2)
+
+
+def test_the_artifact_and_the_analysis_serialize_one_qualification_block():
+    """Both boundaries read the block from the same helper, so a reader never sees two answers."""
+    import inspect
+
+    from ignis.interfaces.mcp import server
+
+    for handler in (server.handle_get_mission_analysis, server.handle_generate_mission_artifact,
+                    server.handle_discover_market_opportunities):
+        assert "_surface_payload(report, mission)" in inspect.getsource(handler), handler.__name__
