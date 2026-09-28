@@ -476,3 +476,467 @@ def test_publish_attests_the_exact_pushed_digest():
     assert attest.get("push-to-registry") is True, attest
     steps = _publish_steps()
     assert steps.index(build) < steps.index(_step_using("actions/attest"))
+
+
+# --------------------------------------------------------------------------------------------
+# The release observation model in scripts/public_release_acceptance.py
+# --------------------------------------------------------------------------------------------
+
+ACCEPTANCE_SCRIPT = REPO / "scripts" / "public_release_acceptance.py"
+MAIN_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _acceptance():
+    assert ACCEPTANCE_SCRIPT.is_file(), "scripts/public_release_acceptance.py does not exist"
+    import sys
+
+    sys.path.insert(0, str(REPO / "scripts"))
+    import public_release_acceptance  # noqa: PLC0415
+
+    return public_release_acceptance
+
+
+def _record(module, name, state=None, **fields):
+    state = state or module.SurfaceState.VERIFIED
+    defaults = {
+        "subject": name,
+        "evidence": "fixture",
+        "failure_class": None if state == module.SurfaceState.VERIFIED else "behavior_mismatch",
+    }
+    if state == module.SurfaceState.DEFERRED:
+        defaults["failure_class"] = None
+    defaults.update(fields)
+    return module.SurfaceRecord(name=name, state=state, **defaults)
+
+
+def _full_policy(module) -> list:
+    records = [_record(module, name) for name in module.REQUIRED_SURFACES]
+    records += [_record(module, name, module.SurfaceState.DEFERRED) for name in module.DEFERRED_SURFACES]
+    return records
+
+
+def test_an_unknown_surface_name_is_refused():
+    """A typo must not create an unchecked replacement for a required surface."""
+    module = _acceptance()
+    import pytest
+
+    with pytest.raises(ValueError, match="unknown surface"):
+        _record(module, "container_anonymous_pul")
+
+
+def test_a_duplicate_surface_is_refused():
+    module = _acceptance()
+    import pytest
+
+    records = _full_policy(module) + [_record(module, "source_bootstrap")]
+    with pytest.raises(ValueError, match="duplicate"):
+        module.build_bundle("0.6.0", MAIN_COMMIT, records)
+
+
+def test_a_missing_required_surface_record_is_refused():
+    """Every required surface appears exactly once; silence is not a pass."""
+    module = _acceptance()
+    import pytest
+
+    records = [r for r in _full_policy(module) if r.name != "container_digest"]
+    with pytest.raises(ValueError, match="container_digest"):
+        module.build_bundle("0.6.0", MAIN_COMMIT, records)
+
+
+def test_a_verified_record_carries_no_failure_class_and_others_must():
+    module = _acceptance()
+    import pytest
+
+    with pytest.raises(ValueError, match="failure_class"):
+        _record(module, "source_bootstrap", module.SurfaceState.VERIFIED, failure_class="network")
+    with pytest.raises(ValueError, match="failure_class"):
+        _record(module, "source_bootstrap", module.SurfaceState.FAILED, failure_class=None)
+    with pytest.raises(ValueError, match="failure_class"):
+        _record(module, "source_bootstrap", module.SurfaceState.FAILED, failure_class="bad luck")
+
+
+def test_the_main_commit_must_be_a_full_lowercase_sha():
+    module = _acceptance()
+    import pytest
+
+    for commit in ("abc123", MAIN_COMMIT.upper(), MAIN_COMMIT + "0", "g" * 40):
+        with pytest.raises(ValueError, match="commit"):
+            module.build_bundle("0.6.0", commit, _full_policy(module))
+    assert module.build_bundle("0.6.0", MAIN_COMMIT, _full_policy(module)).main_commit == MAIN_COMMIT
+
+
+def test_the_version_must_be_semver_without_a_prefix():
+    module = _acceptance()
+    import pytest
+
+    for version in ("v0.6.0", "0.6", "0.6.0.1", ""):
+        with pytest.raises(ValueError, match="version"):
+            module.build_bundle(version, MAIN_COMMIT, _full_policy(module))
+
+
+def test_redaction_removes_url_credentials_tokens_and_ambient_secret_values(monkeypatch):
+    module = _acceptance()
+    ambient = "ambient-" + "q" * 24
+    monkeypatch.setenv("GITHUB_TOKEN", ambient)
+    token = "ghp_" + "A" * 36
+    text = (
+        f"clone https://operator:{token}@github.com/fioenix/fn-ignis.git failed; "
+        f"Authorization: Bearer {ambient}; postgresql://postgres:hunter22@127.0.0.1/db"
+    )
+    redacted = module.redact(text)
+    for secret in (token, ambient, "hunter22", "operator:"):
+        assert secret not in redacted, f"{secret!r} survived redaction: {redacted}"
+    assert "github.com/fioenix/fn-ignis.git" in redacted, "redaction destroyed the non-secret subject"
+
+
+def test_a_record_redacts_its_subject_and_evidence_on_construction(monkeypatch):
+    module = _acceptance()
+    ambient = "ambient-" + "z" * 24
+    monkeypatch.setenv("DOCKER_REGISTRY_PASSWORD", ambient)
+    record = _record(
+        module,
+        "source_tag_checkout",
+        module.SurfaceState.UNREADABLE,
+        failure_class="auth",
+        subject="https://user:pw12345@github.com/fioenix/fn-ignis.git",
+        evidence=f"git said {ambient}",
+    )
+    assert "pw12345" not in record.subject
+    assert ambient not in record.evidence
+
+
+def test_the_bundle_serializes_to_the_contract_shape():
+    module = _acceptance()
+    records = _full_policy(module)
+    records[0] = _record(module, records[0].name, module.SurfaceState.MISSING, failure_class="missing")
+    bundle = module.build_bundle("0.6.0", MAIN_COMMIT, records)
+    payload = json.loads(json.dumps(bundle.to_dict()))
+
+    assert set(payload) == {
+        "schema_version",
+        "version",
+        "main_commit",
+        "surfaces",
+        "verdict",
+        "missing",
+        "failed",
+        "unreadable",
+        "deferred",
+    }
+    assert payload["schema_version"] == 1
+    assert payload["verdict"] == "NOT_RELEASED"
+    assert payload["missing"] == [records[0].name]
+    assert payload["deferred"] == ["pypi_distribution"]
+    surface = payload["surfaces"][records[0].name]
+    assert set(surface) == {
+        "name",
+        "required",
+        "state",
+        "observed_at",
+        "subject",
+        "evidence",
+        "command_exit",
+        "failure_class",
+    }
+    assert surface["required"] is True and surface["state"] == "MISSING"
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", surface["observed_at"])
+
+
+def test_surfaces_a_mode_did_not_observe_are_unreadable_not_absent():
+    """A source-only run proves nothing about GHCR, so it can never be RELEASED."""
+    module = _acceptance()
+    observed = [_record(module, "source_tag_checkout"), _record(module, "source_bootstrap")]
+    records = module.complete_with_unobserved(observed)
+    bundle = module.build_bundle("0.6.0", None, records)
+
+    assert bundle.verdict == module.Verdict.INDETERMINATE
+    assert "container_anonymous_pull" in bundle.unreadable
+    assert "source_bootstrap" not in bundle.unreadable
+    assert bundle.surfaces["container_anonymous_pull"].failure_class == "not_observed"
+    assert bundle.surfaces["pypi_distribution"].state == module.SurfaceState.DEFERRED
+
+
+# --------------------------------------------------------------------------------------------
+# Bounded commands: known absence is not an outage
+# --------------------------------------------------------------------------------------------
+
+
+def test_a_missing_tool_is_unreadable_not_absent():
+    module = _acceptance()
+    outcome = module.run_bounded(["ignis-no-such-tool-for-release-acceptance"], timeout=5)
+    assert outcome.tool_missing and outcome.returncode is None
+    assert module.classify_failure(outcome) == (module.SurfaceState.UNREADABLE, "tool_unavailable")
+
+
+def test_a_command_that_outlives_its_bound_is_stopped_and_unreadable():
+    import sys
+
+    module = _acceptance()
+    outcome = module.run_bounded([sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.5)
+    assert outcome.timed_out and outcome.returncode is None
+    assert module.classify_failure(outcome) == (module.SurfaceState.UNREADABLE, "network")
+
+
+def test_command_output_is_bounded_and_redacted():
+    import sys
+
+    module = _acceptance()
+    token = "ghp_" + "B" * 36
+    outcome = module.run_bounded(
+        [sys.executable, "-c", f"print('x' * 200000); import sys; print('{token}', file=sys.stderr)"],
+        timeout=30,
+    )
+    assert outcome.returncode == 0
+    assert len(outcome.stdout) <= module.MAX_CAPTURED_CHARS
+    assert token not in outcome.stderr
+
+
+def test_a_known_absence_answer_is_missing():
+    module = _acceptance()
+    outcome = module.CommandOutcome(returncode=1, stdout="", stderr="release not found")
+    assert module.classify_failure(outcome, absent_markers=("release not found",)) == (
+        module.SurfaceState.MISSING,
+        "missing",
+    )
+
+
+def test_a_forbidden_api_answer_with_empty_stdout_is_unreadable():
+    """The contract's own negative control: 403 plus empty stdout is not proof of absence."""
+    module = _acceptance()
+    outcome = module.CommandOutcome(
+        returncode=1, stdout="", stderr="gh: You need at least read:packages scope (HTTP 403)"
+    )
+    assert module.classify_failure(outcome, absent_markers=("not found",)) == (
+        module.SurfaceState.UNREADABLE,
+        "auth",
+    )
+
+
+def test_an_unrecognized_failure_is_unreadable_and_says_so():
+    module = _acceptance()
+    outcome = module.CommandOutcome(returncode=2, stdout="", stderr="something odd")
+    assert module.classify_failure(outcome, absent_markers=("not found",)) == (
+        module.SurfaceState.UNREADABLE,
+        "unclassified",
+    )
+
+
+def test_a_network_failure_is_unreadable():
+    module = _acceptance()
+    outcome = module.CommandOutcome(
+        returncode=128, stdout="", stderr="fatal: unable to access: Could not resolve host: github.com"
+    )
+    assert module.classify_failure(outcome) == (module.SurfaceState.UNREADABLE, "network")
+
+
+# --------------------------------------------------------------------------------------------
+# Temporary state belongs to the run that created it
+# --------------------------------------------------------------------------------------------
+
+
+def test_each_run_owns_a_unique_root_and_removes_it(tmp_path):
+    module = _acceptance()
+    with module.TemporaryRoot(parent=tmp_path) as first, module.TemporaryRoot(parent=tmp_path) as second:
+        assert first.path != second.path
+        assert first.path.parent == tmp_path and first.path.is_dir()
+        (first.path / "checkout").mkdir()
+    assert not first.path.exists() and not second.path.exists()
+    assert tmp_path.is_dir(), "cleanup removed the parent it did not create"
+
+
+def test_the_root_is_removed_when_the_run_fails(tmp_path):
+    module = _acceptance()
+    import pytest
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with module.TemporaryRoot(parent=tmp_path) as root:
+            created = root.path
+            raise RuntimeError("boom")
+    assert not created.exists()
+
+
+def test_a_root_whose_ownership_marker_changed_is_not_deleted(tmp_path):
+    """Remove only what this run created: a replaced marker means somebody else owns the tree."""
+    module = _acceptance()
+    root = module.TemporaryRoot(parent=tmp_path)
+    root.__enter__()
+    root.marker.write_text("someone-else", encoding="utf-8")
+    root.__exit__(None, None, None)
+    assert root.path.exists()
+
+
+def test_the_isolated_environment_inherits_no_credentials(monkeypatch, tmp_path):
+    module = _acceptance()
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "DATABASE_URL", "IGNIS_ENV_FILE", "DOCKER_AUTH_CONFIG", "VIRTUAL_ENV"):
+        monkeypatch.setenv(name, "inherited-" + name.lower())
+    env = module.isolated_env(tmp_path / "home", docker_config=tmp_path / "docker")
+
+    assert env["HOME"] == str(tmp_path / "home")
+    assert env["DOCKER_CONFIG"] == str(tmp_path / "docker")
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["PATH"]
+    leaked = [value for value in env.values() if value.startswith("inherited-")]
+    assert not leaked, f"credentials or developer state leaked into the isolated environment: {leaked}"
+
+
+def test_evidence_json_carries_no_ambient_secret(monkeypatch, tmp_path):
+    module = _acceptance()
+    ambient = "ambient-" + "w" * 24
+    monkeypatch.setenv("GH_TOKEN", ambient)
+    records = module.complete_with_unobserved(
+        [
+            _record(
+                module,
+                "source_tag_checkout",
+                module.SurfaceState.UNREADABLE,
+                failure_class="auth",
+                evidence=f"token {ambient} refused",
+            )
+        ]
+    )
+    output = tmp_path / "evidence.json"
+    module.write_evidence(module.build_bundle("0.6.0", None, records), output)
+    text = output.read_text(encoding="utf-8")
+    assert ambient not in text
+    assert json.loads(text)["verdict"] == "INDETERMINATE"
+
+
+# --------------------------------------------------------------------------------------------
+# One MCP smoke conversation for the wheel, the source checkout, and the container
+# --------------------------------------------------------------------------------------------
+
+SMOKE_SCRIPT = REPO / "scripts" / "wheel_mcp_smoke.py"
+
+# A minimal stdio server. Each behaviour flag breaks one part of the protocol the smoke must catch.
+FAKE_SERVER = r'''
+import json, sys, time
+mode = sys.argv[1]
+tools = int(sys.argv[2]) if len(sys.argv) > 2 else 47
+if mode == "banner":
+    print("starting worker loop", flush=True)
+for raw in sys.stdin:
+    message = json.loads(raw)
+    if "id" not in message:
+        continue
+    if mode == "silent":
+        time.sleep(60)
+    if mode == "garbage":
+        print("{not json", flush=True)
+        continue
+    method = message["method"]
+    if method == "initialize":
+        result = {"protocolVersion": message["params"]["protocolVersion"], "capabilities": {},
+                  "serverInfo": {"name": "fake", "version": "1"}}
+    elif method == "tools/list":
+        result = {"tools": [{"name": f"tool_{i}", "inputSchema": {}} for i in range(tools)]}
+    else:
+        failed = mode == "tool-error"
+        payload = {"status": "ERROR" if failed else "SUCCESS", "total_configs": 3}
+        result = {"isError": failed, "content": [{"type": "text", "text": json.dumps(payload)}]}
+    print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
+if mode == "linger":
+    time.sleep(60)
+'''
+
+
+def _smoke():
+    import sys
+
+    sys.path.insert(0, str(REPO / "scripts"))
+    import wheel_mcp_smoke  # noqa: PLC0415
+
+    assert hasattr(wheel_mcp_smoke, "run_smoke"), (
+        "scripts/wheel_mcp_smoke.py cannot be driven with a caller-supplied server command"
+    )
+    return wheel_mcp_smoke
+
+
+def _fake(tmp_path, mode, tools=47) -> list[str]:
+    import sys
+
+    server = tmp_path / "fake_server.py"
+    server.write_text(FAKE_SERVER, encoding="utf-8")
+    return [sys.executable, str(server), mode, str(tools)]
+
+
+def test_a_caller_supplied_command_completes_the_smoke(tmp_path):
+    module = _smoke()
+    result = module.run_smoke(_fake(tmp_path, "ok"), response_timeout=10, exit_timeout=10)
+    assert result.tool_count == module.EXPECTED_TOOL_COUNT
+    assert result.runtime_configs == 3
+
+
+def test_a_wrong_tool_count_fails_the_smoke(tmp_path):
+    module = _smoke()
+    import pytest
+
+    with pytest.raises(module.SmokeFailure, match="expected 47 tools, discovered 45"):
+        module.run_smoke(_fake(tmp_path, "ok", tools=45), response_timeout=10, exit_timeout=10)
+
+
+def test_a_failed_tool_call_fails_the_smoke(tmp_path):
+    module = _smoke()
+    import pytest
+
+    with pytest.raises(module.SmokeFailure, match="get_runtime_config"):
+        module.run_smoke(_fake(tmp_path, "tool-error"), response_timeout=10, exit_timeout=10)
+
+
+def test_malformed_json_fails_the_smoke(tmp_path):
+    module = _smoke()
+    import pytest
+
+    with pytest.raises(module.SmokeFailure, match="non-MCP"):
+        module.run_smoke(_fake(tmp_path, "garbage"), response_timeout=10, exit_timeout=10)
+
+
+def test_a_process_that_prints_anything_but_json_rpc_fails_the_smoke(tmp_path):
+    """A worker started instead of the server logs to stdout; that is a role failure, not noise."""
+    module = _smoke()
+    import pytest
+
+    with pytest.raises(module.SmokeFailure, match="non-MCP"):
+        module.run_smoke(_fake(tmp_path, "banner"), response_timeout=10, exit_timeout=10)
+
+
+def test_a_silent_server_fails_the_smoke_within_its_bound(tmp_path):
+    import time
+
+    module = _smoke()
+    import pytest
+
+    started = time.monotonic()
+    with pytest.raises(module.SmokeFailure, match="did not answer"):
+        module.run_smoke(_fake(tmp_path, "silent"), response_timeout=1, exit_timeout=1)
+    assert time.monotonic() - started < 20
+
+
+def test_a_server_that_ignores_stdin_eof_fails_the_smoke(tmp_path):
+    module = _smoke()
+    import pytest
+
+    with pytest.raises(module.SmokeFailure, match="stdin closed"):
+        module.run_smoke(_fake(tmp_path, "linger"), response_timeout=10, exit_timeout=1)
+
+
+def test_the_default_command_is_the_local_interpreter_serving_ignis(tmp_path, monkeypatch):
+    """The wheel path is unchanged: no command means this interpreter's installed Ignis server."""
+    import sys
+
+    module = _smoke()
+    assert module.default_server_command() == [sys.executable, "-m", MCP_SERVER_MODULE]
+
+    env_file = tmp_path / "smoke.env"
+    env_file.write_text(f"DATABASE_URL=sqlite:///{tmp_path / 'smoke.db'}\nDEFAULT_GEO=VN\n", encoding="utf-8")
+    monkeypatch.setenv("IGNIS_ENV_FILE", str(env_file))
+    result = module.run_smoke(None, response_timeout=120, exit_timeout=30)
+    assert result.tool_count == _runtime_tool_count()
+
+
+def test_the_wheel_default_still_requires_an_environment_file(monkeypatch):
+    module = _smoke()
+    import pytest
+
+    monkeypatch.delenv("IGNIS_ENV_FILE", raising=False)
+    with pytest.raises(SystemExit, match="IGNIS_ENV_FILE"):
+        module.main([])

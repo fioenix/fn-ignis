@@ -44,13 +44,13 @@ wheel, and container acceptance.
 
 **CRITICAL**: No public-path story begins until this phase passes.
 
-- [ ] T006 Implement the typed surface record, required/deferred surface inventory, state validation, and pure verdict function in `scripts/public_release_acceptance.py`
-- [ ] T007 Add unit tests for duplicate/missing/unknown surface keys, full-SHA validation, secret redaction, and verdict serialization in `tests/unit/test_public_distribution_contract.py`
-- [ ] T008 Implement bounded command results that distinguish known absence from auth/network/tool failure and redact credential-bearing output in `scripts/public_release_acceptance.py`
-- [ ] T009 Generalize `scripts/wheel_mcp_smoke.py` to accept an optional caller-supplied server command while preserving the existing wheel default and exact 47-tool plus `get_runtime_config` checks
-- [ ] T010 Add RED→GREEN subprocess tests for local-Python and caller-supplied MCP smoke commands, timeout, malformed JSON, wrong tool count, and failed tool call in `tests/unit/test_public_distribution_contract.py`
-- [ ] T011 Implement unique temporary-root ownership, cleanup-on-success/failure, and JSON evidence output without environment or credential leakage in `scripts/public_release_acceptance.py`
-- [ ] T012 Run the foundational unit tests and existing wheel smoke tests, then record GREEN counts and any ruling in `.handoff/009-public-distribution-v0.6.0.handoff.md`
+- [X] T006 Implement the typed surface record, required/deferred surface inventory, state validation, and pure verdict function in `scripts/public_release_acceptance.py`
+- [X] T007 Add unit tests for duplicate/missing/unknown surface keys, full-SHA validation, secret redaction, and verdict serialization in `tests/unit/test_public_distribution_contract.py`
+- [X] T008 Implement bounded command results that distinguish known absence from auth/network/tool failure and redact credential-bearing output in `scripts/public_release_acceptance.py`
+- [X] T009 Generalize `scripts/wheel_mcp_smoke.py` to accept an optional caller-supplied server command while preserving the existing wheel default and exact 47-tool plus `get_runtime_config` checks
+- [X] T010 Add RED→GREEN subprocess tests for local-Python and caller-supplied MCP smoke commands, timeout, malformed JSON, wrong tool count, and failed tool call in `tests/unit/test_public_distribution_contract.py`
+- [X] T011 Implement unique temporary-root ownership, cleanup-on-success/failure, and JSON evidence output without environment or credential leakage in `scripts/public_release_acceptance.py`
+- [X] T012 Run the foundational unit tests and existing wheel smoke tests, then record GREEN counts and any ruling in `.handoff/009-public-distribution-v0.6.0.handoff.md`
 
 **Checkpoint**: A shared protocol smoke and release-state model can fail closed before touching a
 live public surface.
