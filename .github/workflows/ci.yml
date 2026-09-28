@@ -18,7 +18,7 @@ jobs:
       - name: Checkout repository
         # Full history: a secret is usually added in an earlier commit of the branch and removed
         # in a later one, which a shallow clone cannot see.
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -58,7 +58,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -125,5 +125,4 @@ jobs:
           uv pip install --python .venv/bin/python "${WHEEL}"
           printf 'DATABASE_URL=sqlite:///%s/wheel_smoke.db\nDEFAULT_GEO=VN\n' "$(pwd)" > wheel.env
           IGNIS_ENV_FILE="$(pwd)/wheel.env" .venv/bin/python "${GITHUB_WORKSPACE}/scripts/wheel_mcp_smoke.py"
-
 

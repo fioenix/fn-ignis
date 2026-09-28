@@ -14,6 +14,7 @@ the runtime underneath them does.
 """
 
 import re
+from collections import Counter
 from pathlib import Path
 
 # PyYAML arrives with fastmcp, a required runtime dependency. Parsed, not pattern-matched: `on:`
@@ -36,6 +37,7 @@ PINNED_UPLOAD_ARTIFACT = (
 # Compose Init holds the reviewed pin; the other workflows are compared with it, not with a copy.
 UV_WORKFLOWS = (CI, PERFORMANCE, COMPOSE_INIT)
 FULL_SHA = re.compile(r"[0-9a-f]{40}")
+ACTION_VERSION = re.compile(r"v\d+(?:\.\d+){0,2}")
 UV_BINARY_VERSION = re.compile(r"\d+\.\d+\.\d+")
 
 # Status names branch protection and the release selects. Renaming any of them detaches a rule.
@@ -115,7 +117,91 @@ def _canonical_setup_uv() -> dict:
     return steps[0]
 
 
+def _workflow_paths(root: Path) -> list[Path]:
+    return sorted((*root.glob("*.yml"), *root.glob("*.yaml")), key=lambda path: path.name)
+
+
+def _uses_actions(node) -> list[str]:
+    if isinstance(node, dict):
+        direct = [value for key, value in node.items() if key == "uses" and isinstance(value, str)]
+        return direct + [action for value in node.values() for action in _uses_actions(value)]
+    if isinstance(node, list):
+        return [action for value in node for action in _uses_actions(value)]
+    return []
+
+
+def _source_occurrences(path: Path, action: str) -> list[tuple[int, str]]:
+    """Find actual source occurrences and the comment that follows each action reference."""
+    occurrences = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        action_at = line.find(action)
+        if action_at < 0:
+            continue
+        comment_at = line.find("#")
+        if 0 <= comment_at < action_at:
+            continue
+        comment = "" if comment_at < 0 else line[comment_at + 1 :].strip()
+        occurrences.append((line_number, comment))
+    return occurrences
+
+
+def _workflow_action_policy_offenders(paths) -> list[str]:
+    offenders = []
+    for path in paths:
+        external_actions = [
+            action for action in _uses_actions(_load(path)) if not action.startswith("./")
+        ]
+        for action, expected_count in Counter(external_actions).items():
+            occurrences = _source_occurrences(path, action)
+            line_number = occurrences[0][0] if occurrences else "?"
+            ref = action.rsplit("@", 1)[-1] if "@" in action else ""
+            comments = [comment for _, comment in occurrences[:expected_count]]
+            if (
+                not FULL_SHA.fullmatch(ref)
+                or len(occurrences) < expected_count
+                or any(not ACTION_VERSION.fullmatch(comment) for comment in comments)
+            ):
+                offenders.append(f"{path.name}:{line_number}: {action}")
+    return offenders
+
+
 # --- runners -------------------------------------------------------------------------------------
+
+
+def test_every_workflow_action_is_pinned_to_a_reviewable_commit():
+    offenders = _workflow_action_policy_offenders(_workflow_paths(WORKFLOWS))
+    assert offenders == [], (
+        "every external action must use a full commit SHA with its reviewed release comment: "
+        f"{offenders}"
+    )
+
+
+def test_action_contract_parses_every_valid_yaml_uses_shape(tmp_path):
+    workflow = tmp_path / "shapes.yml"
+    workflow.write_text(
+        """name: Shapes
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7<TRAILING>
+      - {uses: astral-sh/setup-uv@v10}
+      - "uses": "docker/login-action@v4"
+""".replace("<TRAILING>", "   "),
+        encoding="utf-8",
+    )
+    offenders = _workflow_action_policy_offenders((workflow,))
+    assert {offender.split(": ", 1)[1] for offender in offenders} == {
+        "actions/checkout@v7",
+        "astral-sh/setup-uv@v10",
+        "docker/login-action@v4",
+    }
+
+
+def test_action_contract_discovers_both_workflow_extensions(tmp_path):
+    (tmp_path / "first.yml").write_text("name: First\n", encoding="utf-8")
+    (tmp_path / "second.yaml").write_text("name: Second\n", encoding="utf-8")
+    assert [path.name for path in _workflow_paths(tmp_path)] == ["first.yml", "second.yaml"]
 
 
 def test_every_job_in_the_four_workflows_runs_on_the_pinned_runner():
