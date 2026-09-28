@@ -329,6 +329,35 @@ question relevance, the reason code and the `UNRELIABLE` cap on both backends.
   skip); Compose fresh init 1 passed; ruff clean; `git diff --check "$(git merge-base main HEAD)..HEAD"`
   clean; `uv lock --check` ok; `uv build` ok with 023 packaged.
 
+**Review corrections (review of `a81661b`, 28/09/2026):**
+
+- Churn stop applied: the submit response was the third consumer to break the qualification-state
+  invariant after two local corrections. Architecture checkpoint in
+  `.handoff/008-qualification-state-checkpoint.handoff.md`; the durable decision is the contract
+  section "Qualification state authority" and the spec's Clarifications (Session 2026-09-28).
+- P2 submit directed a terminal evaluator failure into a useless batch read: `decide_qualification`
+  is now the single authority for `(status, reason_code, next_step)`. Submit reports
+  `qualification_status`, `qualification_reason_code` and `next_step` for the state its write
+  produced; the batch, the analysis, `evaluate_mission_quality` and the artifact answer from the
+  same decision; the server no longer keeps its own wording. RED on `a81661b`: after an
+  `EVALUATOR_UNAVAILABLE` submit, submit said "Call get_mission_evidence_qualification_batch with this
+  mission." while the batch returned the reassessment guidance; the paging batch had no
+  `next_step`. Regressions: decision table (7 states), submit/batch/context agreement after a
+  partial submission (3), the last-observation submission (READY and final `INSUFFICIENT_CONTENT`),
+  the MCP-boundary mixed state on both backends (3 × 2), the corpus replay's last submission, and a
+  submit-description drift gate. Negative controls: submit's old constant turns 11 tests red; the
+  server's old INCOMPLETE mapping turns 2 MCP-boundary tests red.
+- Rejected alternative: letting any recorded `UNASSESSED` row outrank pending evidence turned the
+  corpus replay red (37 unassessed instead of 5). Only an evaluator failure outranks pending
+  evidence; the accepted ordering is kept.
+- Gates (scratch TimescaleDB, removed afterwards): on `05cf285` `test_decision_grade_evidence.py`
+  81 passed; migration contract 17 passed; `tests/integration/` 574 passed, 3 skipped (same
+  intentional skips; no PostgreSQL skip); Compose fresh init 1 passed; `uv build` ok with 023
+  packaged. The unit run on `05cf285` had 1 failure: `test_data_provenance.py` pinned the server's
+  old copy of the batch instruction, fixed in `d8d7de5`. On `d8d7de5`: `tests/unit/` (without
+  `YOUTUBE_API_KEY`) 1226 passed, 1 skipped; ruff clean; `git diff --check
+  "$(git merge-base main HEAD)..HEAD"` clean; `uv lock --check` ok.
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
