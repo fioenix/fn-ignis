@@ -508,3 +508,382 @@ def isolated_env(home: Path, *, docker_config: Path | None = None, extra: dict[s
     if extra:
         env.update(extra)
     return env
+
+
+# --------------------------------------------------------------------------------------------
+# Shared MCP smoke
+# --------------------------------------------------------------------------------------------
+
+SCRIPTS = Path(__file__).resolve().parent
+REFERENCE_TREE = SCRIPTS.parent
+
+
+def _smoke_module():
+    import sys
+
+    if str(SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS))
+    import wheel_mcp_smoke  # noqa: PLC0415
+
+    return wheel_mcp_smoke
+
+
+def _smoke_record(name: str, subject: str, command: list[str], *, env, cwd, timeout: float) -> SurfaceRecord:
+    smoke = _smoke_module()
+    try:
+        result = smoke.run_smoke(command, env=env, cwd=cwd, response_timeout=timeout, exit_timeout=timeout)
+    except smoke.SmokeFailure as failure:
+        return SurfaceRecord(name, SurfaceState.FAILED, subject, str(failure), "behavior_mismatch")
+    return SurfaceRecord(
+        name,
+        SurfaceState.VERIFIED,
+        subject,
+        f"MCP {result.protocol_version}: {result.tool_count} tools discovered, get_runtime_config "
+        f"read {result.runtime_configs} configs, process exited when stdin closed",
+    )
+
+
+def _unread(name: str, subject: str, why: str) -> SurfaceRecord:
+    """A downstream surface that cannot be judged because its input was never obtained."""
+    return SurfaceRecord(name, SurfaceState.UNREADABLE, subject, why, "not_observed")
+
+
+# --------------------------------------------------------------------------------------------
+# Source mode
+# --------------------------------------------------------------------------------------------
+
+BOOTSTRAP_TIMEOUT_SECONDS = 900
+GIT_TIMEOUT_SECONDS = 300
+SOURCE_SMOKE_TIMEOUT_SECONDS = 120.0
+
+# What `git` says when the repository or tag positively does not exist, as opposed to when it could
+# not ask. Over HTTPS GitHub answers a nonexistent repository with an authentication prompt, which
+# stays UNREADABLE: a prompt is not an answer about the repository.
+GIT_ABSENT_MARKERS = (
+    "repository not found",
+    "does not appear to be a git repository",
+    "remote branch v",
+    "not found in upstream",
+)
+
+# Developer state a published tag must not carry: every user who clones it would inherit it.
+INHERITED_STATE = (".venv", ".env", ".mcp.json", "ignis.db")
+
+# The release inventory a tag must contain, read from the verified tree this script runs from.
+# Patterns rather than names, so a new migration or template is required the day it is committed.
+RELEASE_INVENTORY_PATTERNS = (
+    "sql/[0-9][0-9][0-9]_*.sql",
+    "src/ignis/infrastructure/templates/html/*.html",
+    "src/ignis/application/use_cases/*qualification*.py",
+    "server.json",
+    "openclaw.json",
+    "hermes_manifest.json",
+    ".hermes/tools.json",
+)
+
+BOOTSTRAP_LOCKED_MARKER = "Installed the exact solution recorded in uv.lock."
+FORBIDDEN_REGISTRATION_KEYS = ("DATABASE_URL", "IGNIS_ENCRYPTION_KEY", "YOUTUBE_API_KEY")
+
+
+def check_public_url(url: str) -> None:
+    """Refuse a clone URL that is not a plain public HTTPS address.
+
+    Credentials in the URL would both authenticate the "anonymous" consumer and land in evidence.
+    """
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme != "https" or not parts.hostname:
+        raise ValueError(f"not a public HTTPS repository URL: {redact(url)!r}")
+    if parts.username or parts.password or parts.query or parts.fragment:
+        raise ValueError(f"a public repository URL carries no credentials, query or fragment: {redact(url)!r}")
+
+
+def release_inventory(tree: Path) -> list[str]:
+    found = set()
+    for pattern in RELEASE_INVENTORY_PATTERNS:
+        found.update(path.relative_to(tree).as_posix() for path in tree.glob(pattern) if path.is_file())
+    return sorted(found)
+
+
+def _migration_tables(migration: Path) -> list[str]:
+    return re.findall(r"CREATE TABLE IF NOT EXISTS\s+(\w+)", migration.read_text(encoding="utf-8"), re.IGNORECASE)
+
+
+def _resolve_tag(repository: str, tag: str, env: dict) -> tuple[SurfaceRecord | None, str | None]:
+    outcome = run_bounded(
+        ["git", "ls-remote", "--tags", repository, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"],
+        timeout=GIT_TIMEOUT_SECONDS,
+        env=env,
+    )
+    subject = f"{repository} {tag}"
+    failure = classify_failure(outcome, GIT_ABSENT_MARKERS)
+    if failure:
+        state, failure_class = failure
+        return SurfaceRecord("source_tag_checkout", state, subject, outcome.summary, failure_class, outcome.returncode), None
+    refs = dict(reversed(line.split("\t", 1)) for line in outcome.stdout.splitlines() if "\t" in line)
+    commit = refs.get(f"refs/tags/{tag}^{{}}") or refs.get(f"refs/tags/{tag}")
+    if not commit:
+        return SurfaceRecord("source_tag_checkout", SurfaceState.MISSING, subject, "the repository has no such tag", "missing", 0), None
+    return None, commit
+
+
+def _checkout_record(repository: str, tag: str, expected_commit: str | None, checkout: Path, env: dict) -> tuple[SurfaceRecord, bool]:
+    """The source_tag_checkout record, and whether a usable checkout now exists."""
+    unresolved, tag_commit = _resolve_tag(repository, tag, env)
+    if unresolved:
+        return unresolved, False
+
+    subject = f"{repository} {tag}"
+    outcome = run_bounded(
+        ["git", "clone", "--quiet", "--depth", "1", "--single-branch", "--branch", tag, repository, str(checkout)],
+        timeout=GIT_TIMEOUT_SECONDS,
+        env=env,
+    )
+    failure = classify_failure(outcome, GIT_ABSENT_MARKERS)
+    if failure:
+        state, failure_class = failure
+        return SurfaceRecord("source_tag_checkout", state, subject, outcome.summary, failure_class, outcome.returncode), False
+
+    head = run_bounded(["git", "rev-parse", "HEAD"], timeout=30, env=env, cwd=checkout)
+    resolved = head.stdout.strip() if head.ok else ""
+    if resolved != tag_commit:
+        return (
+            SurfaceRecord(
+                "source_tag_checkout",
+                SurfaceState.FAILED,
+                subject,
+                f"tag {tag} advertises {tag_commit} but the clone checked out {resolved or 'nothing'}",
+                "behavior_mismatch",
+            ),
+            False,
+        )
+    if not expected_commit:
+        return (
+            SurfaceRecord(
+                "source_tag_checkout",
+                SurfaceState.UNREADABLE,
+                subject,
+                f"tag {tag} resolved to {resolved}; no verified main commit was supplied to compare it with",
+                "not_observed",
+            ),
+            True,
+        )
+    if resolved != expected_commit:
+        return (
+            SurfaceRecord(
+                "source_tag_checkout",
+                SurfaceState.FAILED,
+                subject,
+                f"tag {tag} resolved to {resolved}, not the verified main commit {expected_commit}",
+                "behavior_mismatch",
+            ),
+            True,
+        )
+    return (
+        SurfaceRecord(
+            "source_tag_checkout",
+            SurfaceState.VERIFIED,
+            subject,
+            f"exact-tag clone without credentials; {tag} resolved to the verified main commit {resolved}",
+            command_exit=0,
+        ),
+        True,
+    )
+
+
+def _bootstrap_problems(checkout: Path, reference: Path, expected_migration: str | None) -> list[str]:
+    """Everything wrong with a bootstrapped checkout, read from its own files and database."""
+    import sqlite3
+
+    problems = []
+    missing = [name for name in release_inventory(reference) if not (checkout / name).is_file()]
+    if missing:
+        problems.append(f"the tag lacks release files the verified tree has: {missing}")
+
+    migrations = sorted((checkout / "sql").glob("[0-9][0-9][0-9]_*.sql"))
+    endpoint = migrations[-1].name[:3] if migrations else None
+    if expected_migration and endpoint != expected_migration:
+        problems.append(f"the packaged migration chain ends at {endpoint}, expected {expected_migration}")
+
+    env_file = checkout / ".env"
+    if not env_file.is_file() or "DATABASE_URL=sqlite:///ignis.db" not in env_file.read_text(encoding="utf-8"):
+        problems.append("bootstrap did not write the SQLite default into .env")
+
+    database = checkout / "ignis.db"
+    if not database.is_file():
+        problems.append("bootstrap created no SQLite database")
+    elif migrations:
+        with sqlite3.connect(database) as connection:
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            seeded = (
+                connection.execute("SELECT COUNT(*) FROM market_lexicons").fetchone()[0]
+                if "market_lexicons" in tables
+                else 0
+            )
+        absent = [table for table in _migration_tables(migrations[-1]) if table not in tables]
+        if absent:
+            problems.append(f"schema lacks the tables {migrations[-1].name} creates: {absent}")
+        if not seeded:
+            problems.append("schema holds no seed vocabulary in market_lexicons")
+
+    registration = checkout / ".mcp.json"
+    if not registration.is_file():
+        problems.append("bootstrap registered no workspace MCP client")
+    else:
+        entry = json.loads(registration.read_text(encoding="utf-8")).get("mcpServers", {}).get("fn-ignis", {})
+        copied = [key for key in FORBIDDEN_REGISTRATION_KEYS if key in json.dumps(entry)]
+        if set(entry.get("env", {})) != {"IGNIS_ENV_FILE"} or copied:
+            problems.append(f"the MCP registration carries more than a path to .env: {sorted(entry.get('env', {}))}")
+    return problems
+
+
+def observe_source(
+    *,
+    repository: str,
+    version: str,
+    expected_commit: str | None,
+    root: Path,
+    reference: Path = REFERENCE_TREE,
+    expected_migration: str | None = None,
+    passthrough_env: tuple[str, ...] = (),
+    smoke_timeout: float = SOURCE_SMOKE_TIMEOUT_SECONDS,
+) -> list[SurfaceRecord]:
+    """Clone the exact tag, bootstrap it under an empty home, and talk MCP to the result."""
+    tag = f"v{version}"
+    home = root / "home"
+    home.mkdir()
+    checkout = root / "checkout"
+    extra = {name: os.environ[name] for name in passthrough_env if name in os.environ}
+    env = isolated_env(home, extra=extra)
+    subject = f"{repository} {tag}"
+
+    tag_record, cloned = _checkout_record(repository, tag, expected_commit, checkout, env)
+    if not cloned:
+        why = "the tagged source was not obtained"
+        return [tag_record, _unread("source_bootstrap", subject, why), _unread("source_mcp_runtime", subject, why)]
+
+    inherited = [name for name in INHERITED_STATE if (checkout / name).exists()]
+    if inherited:
+        bootstrap = SurfaceRecord(
+            "source_bootstrap",
+            SurfaceState.FAILED,
+            subject,
+            f"the tag ships developer state every clone would inherit: {inherited}",
+            "behavior_mismatch",
+        )
+        return [tag_record, bootstrap, _unread("source_mcp_runtime", subject, "bootstrap did not pass")]
+
+    outcome = run_bounded(["./scripts/bootstrap.sh"], timeout=BOOTSTRAP_TIMEOUT_SECONDS, env=env, cwd=checkout)
+    output = f"{outcome.stdout}\n{outcome.stderr}"
+    if outcome.timed_out or outcome.tool_missing:
+        state, failure_class = classify_failure(outcome)
+        bootstrap = SurfaceRecord("source_bootstrap", state, subject, outcome.summary, failure_class)
+    elif not outcome.ok:
+        bootstrap = SurfaceRecord(
+            "source_bootstrap", SurfaceState.FAILED, subject, output.strip()[-3000:], "behavior_mismatch", outcome.returncode
+        )
+    elif BOOTSTRAP_LOCKED_MARKER not in output:
+        bootstrap = SurfaceRecord(
+            "source_bootstrap",
+            SurfaceState.FAILED,
+            subject,
+            "bootstrap succeeded without the locked uv install:\n" + output.strip()[-2000:],
+            "behavior_mismatch",
+            outcome.returncode,
+        )
+    else:
+        problems = _bootstrap_problems(checkout, reference, expected_migration)
+        if problems:
+            bootstrap = SurfaceRecord(
+                "source_bootstrap", SurfaceState.FAILED, subject, "; ".join(problems), "behavior_mismatch", 0
+            )
+        else:
+            migrations = sorted((checkout / "sql").glob("[0-9][0-9][0-9]_*.sql"))
+            bootstrap = SurfaceRecord(
+                "source_bootstrap",
+                SurfaceState.VERIFIED,
+                subject,
+                f"locked install under an isolated home; SQLite schema through {migrations[-1].name} with "
+                "seed vocabulary; workspace MCP registration carries only IGNIS_ENV_FILE",
+                command_exit=0,
+            )
+    if bootstrap.state != SurfaceState.VERIFIED:
+        return [tag_record, bootstrap, _unread("source_mcp_runtime", subject, "bootstrap did not pass")]
+
+    server = [str(checkout / ".venv" / "bin" / "python"), "-m", "ignis.interfaces.mcp.server"]
+    runtime_env = {**env, "IGNIS_ENV_FILE": str((checkout / ".env").resolve())}
+    runtime = _smoke_record("source_mcp_runtime", subject, server, env=runtime_env, cwd=str(checkout), timeout=smoke_timeout)
+    return [tag_record, bootstrap, runtime]
+
+
+# --------------------------------------------------------------------------------------------
+# Command line
+# --------------------------------------------------------------------------------------------
+
+
+def _newest_reference_migration() -> str | None:
+    migrations = sorted((REFERENCE_TREE / "sql").glob("[0-9][0-9][0-9]_*.sql"))
+    return migrations[-1].name[:3] if migrations else None
+
+
+def print_report(bundle: EvidenceBundle) -> None:
+    """One line per surface, then the verdict and grouped problems. Never an environment dump."""
+    width = max(len(name) for name in bundle.surfaces)
+    for name, record in bundle.surfaces.items():
+        detail = record.failure_class or ""
+        print(f"{name:<{width}}  {record.state.value:<10}  {detail:<18}  {record.evidence.splitlines()[0][:110] if record.evidence else ''}")
+    print(f"verdict  {bundle.verdict.value}")
+    for label, names in (
+        ("missing", bundle.missing),
+        ("failed", bundle.failed),
+        ("unreadable", bundle.unreadable),
+        ("deferred", bundle.deferred),
+    ):
+        for name in names:
+            print(f"  {label:<10}  {name}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("mode", choices=("source",), help="which public path to accept")
+    parser.add_argument("--version", required=True, help="release version without the v prefix")
+    parser.add_argument("--repository", default="https://github.com/fioenix/fn-ignis.git")
+    parser.add_argument("--expected-commit", default=None, help="the verified main commit the tag must name")
+    parser.add_argument(
+        "--expected-migration",
+        default=_newest_reference_migration(),
+        help="migration prefix the packaged chain must end at (default: this tree's newest)",
+    )
+    parser.add_argument("--work-root", type=Path, default=None, help="parent for the run's temporary root")
+    parser.add_argument("--json-output", type=Path, default=None, help="write the redacted evidence bundle here")
+    args = parser.parse_args(argv)
+
+    if not SEMVER.fullmatch(args.version):
+        parser.error(f"not a release version: {args.version}")
+    if args.expected_commit and not FULL_SHA.fullmatch(args.expected_commit):
+        parser.error("--expected-commit must be a full lowercase commit SHA")
+    check_public_url(args.repository)
+
+    records: list[SurfaceRecord] = []
+    with TemporaryRoot(parent=args.work_root) as root:
+        if args.mode == "source":
+            records += observe_source(
+                repository=args.repository,
+                version=args.version,
+                expected_commit=args.expected_commit,
+                root=root.path,
+                expected_migration=args.expected_migration,
+            )
+
+    bundle = build_bundle(args.version, args.expected_commit, complete_with_unobserved(records))
+    print_report(bundle)
+    if args.json_output:
+        write_evidence(bundle, args.json_output)
+    return 0 if bundle.verdict == Verdict.RELEASED else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

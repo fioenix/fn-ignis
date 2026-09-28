@@ -940,3 +940,239 @@ def test_the_wheel_default_still_requires_an_environment_file(monkeypatch):
     monkeypatch.delenv("IGNIS_ENV_FILE", raising=False)
     with pytest.raises(SystemExit, match="IGNIS_ENV_FILE"):
         module.main([])
+
+
+# --------------------------------------------------------------------------------------------
+# Source mode: an exact public tag, bootstrapped under an empty home
+# --------------------------------------------------------------------------------------------
+#
+# The fixture is a real Git repository with a real tag, cloned through a file:// URL, so tag
+# resolution and clone behaviour are Git's own. Its bootstrap and server are stand-ins: the real
+# bootstrap is covered by tests/integration/test_clean_user_journey.py, and the point here is how
+# the observer classifies what it sees.
+
+FAKE_BOOTSTRAP = r'''#!/bin/sh
+set -e
+cd "$(dirname "$0")/.."
+env > bootstrap-env.txt
+[ "${FAKE_BOOTSTRAP_FAIL:-}" = "1" ] && { echo "boom" >&2; exit 3; }
+mkdir -p .venv/bin
+printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-47}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
+chmod +x .venv/bin/python
+printf 'DATABASE_URL=sqlite:///ignis.db\n' > .env
+"$FAKE_PYTHON" - <<'PY'
+import os, re, sqlite3
+from pathlib import Path
+db = sqlite3.connect("ignis.db")
+skip = os.environ.get("FAKE_SKIP_TABLE", "")
+for migration in sorted(Path("sql").glob("*.sql")):
+    for table in re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", migration.read_text()):
+        if table != skip:
+            db.execute(f"CREATE TABLE IF NOT EXISTS {table} (id INTEGER)")
+db.execute("CREATE TABLE IF NOT EXISTS market_lexicons (term TEXT)")
+db.execute("INSERT INTO market_lexicons VALUES ('seed')")
+db.commit()
+PY
+printf '{"mcpServers": {"fn-ignis": {"command": "%s/.venv/bin/python", "args": ["-m", "ignis.interfaces.mcp.server"], "env": {"IGNIS_ENV_FILE": "%s/.env"}}}}' "$PWD" "$PWD" > .mcp.json
+echo "Installed the exact solution recorded in uv.lock."
+'''
+
+GIT_IDENTITY = {
+    "GIT_AUTHOR_NAME": "fixture",
+    "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+    "GIT_COMMITTER_NAME": "fixture",
+    "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+}
+
+
+def _git(repo: Path, *args: str) -> str:
+    import os
+    import subprocess
+
+    env = {**os.environ, **GIT_IDENTITY, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    return subprocess.run(
+        ["git", *args], cwd=repo, env=env, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _source_fixture(tmp_path: Path, *, extra_files: dict | None = None, omit: tuple = ()) -> dict:
+    """A tagged repository plus the reference tree it is supposed to match."""
+    repo = tmp_path / "origin"
+    files = {
+        "scripts/bootstrap.sh": FAKE_BOOTSTRAP,
+        "fake_server.py": FAKE_SERVER,
+        "sql/001_base.sql": "CREATE TABLE IF NOT EXISTS sources (id TEXT);\n",
+        "sql/002_evidence.sql": "CREATE TABLE IF NOT EXISTS mission_probe_outcomes (id TEXT);\n"
+        "CREATE TABLE IF NOT EXISTS mission_evidence_qualifications (id TEXT);\n",
+        "src/ignis/application/use_cases/get_evidence_qualification_batch.py": "",
+        "src/ignis/application/use_cases/submit_evidence_qualifications.py": "",
+        "src/ignis/infrastructure/templates/html/mission_report.html": "<html></html>\n",
+        "server.json": "{}\n",
+        "openclaw.json": "{}\n",
+        "hermes_manifest.json": "[]\n",
+        ".hermes/tools.json": "[]\n",
+        **(extra_files or {}),
+    }
+    for relative, content in files.items():
+        if relative in omit:
+            continue
+        path = repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    (repo / "scripts" / "bootstrap.sh").chmod(0o755)
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Release fixture")
+    _git(repo, "tag", "-a", "v0.6.0", "-m", "Release v0.6.0")
+    tagged = _git(repo, "rev-parse", "HEAD")
+    (repo / "later.txt").write_text("after the tag\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "Move main past the tag")
+
+    reference = tmp_path / "reference"
+    for relative, content in files.items():
+        path = reference / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    return {"url": repo.as_uri(), "tagged": tagged, "main": _git(repo, "rev-parse", "HEAD"), "reference": reference}
+
+
+def _observe_source(module, fixture, tmp_path, monkeypatch, *, expected=None, version="0.6.0", **env):
+    import sys
+
+    monkeypatch.setenv("FAKE_PYTHON", sys.executable)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    with module.TemporaryRoot(parent=tmp_path) as root:
+        records = module.observe_source(
+            repository=fixture["url"],
+            version=version,
+            expected_commit=expected if expected is not None else fixture["tagged"],
+            root=root.path,
+            reference=fixture["reference"],
+            passthrough_env=("FAKE_PYTHON", *env),
+            smoke_timeout=15,
+        )
+        leaked = (root.path / "checkout" / "bootstrap-env.txt")
+        seen_env = leaked.read_text(encoding="utf-8") if leaked.exists() else ""
+    return {record.name: record for record in records}, seen_env
+
+
+def test_a_public_url_carrying_credentials_is_refused_before_any_request():
+    module = _acceptance()
+    import pytest
+
+    for url in (
+        "https://operator:token@github.com/fioenix/fn-ignis.git",
+        "https://github.com/fioenix/fn-ignis.git?access_token=abc",
+        "http://github.com/fioenix/fn-ignis.git",
+        "git@github.com:fioenix/fn-ignis.git",
+    ):
+        with pytest.raises(ValueError, match="public"):
+            module.check_public_url(url)
+    module.check_public_url("https://github.com/fioenix/fn-ignis.git")
+
+
+def test_the_exact_tag_is_cloned_and_matches_the_verified_commit(tmp_path, monkeypatch):
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path)
+    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch)
+
+    checkout = records["source_tag_checkout"]
+    assert checkout.state == module.SurfaceState.VERIFIED, checkout
+    assert fixture["tagged"] in checkout.evidence
+    assert records["source_bootstrap"].state == module.SurfaceState.VERIFIED, records["source_bootstrap"]
+    assert records["source_mcp_runtime"].state == module.SurfaceState.VERIFIED, records["source_mcp_runtime"]
+
+
+def test_a_tag_on_the_wrong_commit_fails(tmp_path, monkeypatch):
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path)
+    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch, expected=fixture["main"])
+    assert records["source_tag_checkout"].state == module.SurfaceState.FAILED
+    assert records["source_tag_checkout"].failure_class == "behavior_mismatch"
+
+
+def test_without_an_expected_commit_the_checkout_is_not_verified(tmp_path, monkeypatch):
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path)
+    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch, expected="")
+    assert records["source_tag_checkout"].state == module.SurfaceState.UNREADABLE
+    assert records["source_tag_checkout"].failure_class == "not_observed"
+
+
+def test_a_missing_tag_is_missing(tmp_path, monkeypatch):
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path)
+    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch, version="0.7.0")
+    assert records["source_tag_checkout"].state == module.SurfaceState.MISSING
+    # Nothing was obtained, so nothing downstream can be judged either way.
+    assert records["source_bootstrap"].state == module.SurfaceState.UNREADABLE
+    assert records["source_mcp_runtime"].state == module.SurfaceState.UNREADABLE
+
+
+def test_a_repository_that_does_not_exist_is_missing(tmp_path, monkeypatch):
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path)
+    fixture["url"] = (tmp_path / "no-such-repository").as_uri()
+    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch)
+    assert records["source_tag_checkout"].state == module.SurfaceState.MISSING
+
+
+def test_bootstrap_runs_under_an_isolated_home_with_no_inherited_credentials(tmp_path, monkeypatch):
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path)
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "DATABASE_URL", "IGNIS_ENV_FILE", "VIRTUAL_ENV"):
+        monkeypatch.setenv(name, f"inherited-{name.lower()}")
+    records, seen = _observe_source(module, fixture, tmp_path, monkeypatch)
+
+    assert records["source_bootstrap"].state == module.SurfaceState.VERIFIED, records["source_bootstrap"]
+    home = next(line.split("=", 1)[1] for line in seen.splitlines() if line.startswith("HOME="))
+    assert "ignis-release-acceptance-" in home and home.endswith("/home"), home
+    assert "inherited-" not in seen, "the bootstrap child saw a developer credential or override"
+
+
+def test_a_tag_that_ships_developer_state_fails_bootstrap(tmp_path, monkeypatch):
+    """A committed .env or .venv would be inherited by every user who clones the tag."""
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path, extra_files={".env": "DATABASE_URL=postgresql://x@y/z\n"})
+    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch)
+    assert records["source_bootstrap"].state == module.SurfaceState.FAILED
+    assert ".env" in records["source_bootstrap"].evidence
+
+
+def test_a_failing_bootstrap_fails_with_its_output(tmp_path, monkeypatch):
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path)
+    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch, FAKE_BOOTSTRAP_FAIL="1")
+    assert records["source_bootstrap"].state == module.SurfaceState.FAILED
+    assert "boom" in records["source_bootstrap"].evidence
+    assert records["source_mcp_runtime"].state == module.SurfaceState.UNREADABLE
+
+
+def test_a_schema_missing_the_newest_migration_fails_bootstrap(tmp_path, monkeypatch):
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path)
+    records, _ = _observe_source(
+        module, fixture, tmp_path, monkeypatch, FAKE_SKIP_TABLE="mission_evidence_qualifications"
+    )
+    assert records["source_bootstrap"].state == module.SurfaceState.FAILED
+    assert "mission_evidence_qualifications" in records["source_bootstrap"].evidence
+
+
+def test_a_tag_missing_a_file_the_release_tree_has_fails(tmp_path, monkeypatch):
+    """The local tree passes and the public tag omits a new file: the tag is what users get."""
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path, omit=("src/ignis/application/use_cases/submit_evidence_qualifications.py",))
+    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch)
+    assert records["source_bootstrap"].state == module.SurfaceState.FAILED
+    assert "submit_evidence_qualifications.py" in records["source_bootstrap"].evidence
+
+
+def test_a_source_server_with_the_wrong_catalog_fails_runtime(tmp_path, monkeypatch):
+    module = _acceptance()
+    fixture = _source_fixture(tmp_path)
+    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch, FAKE_TOOLS="45")
+    assert records["source_bootstrap"].state == module.SurfaceState.VERIFIED
+    assert records["source_mcp_runtime"].state == module.SurfaceState.FAILED
+    assert "discovered 45" in records["source_mcp_runtime"].evidence
