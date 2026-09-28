@@ -115,7 +115,30 @@ def _canonical_setup_uv() -> dict:
     return steps[0]
 
 
+def _action_references(path: Path) -> list[tuple[int, str, str]]:
+    """Return line number, action reference and trailing comment for every workflow action."""
+    found = []
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        match = re.match(r"\s*(-\s+)?uses:\s*([^\s#]+)(?:\s+#\s*(.*))?$", line)
+        if match:
+            found.append((line_number, match.group(2), match.group(3) or ""))
+    return found
+
+
 # --- runners -------------------------------------------------------------------------------------
+
+
+def test_every_workflow_action_is_pinned_to_a_reviewable_commit():
+    offenders = []
+    for path in NAMES:
+        for line_number, action, comment in _action_references(path):
+            ref = action.rsplit("@", 1)[-1]
+            if not FULL_SHA.fullmatch(ref) or not re.fullmatch(r"v\d+(?:\.\d+){0,2}", comment):
+                offenders.append(f"{path.name}:{line_number}: {action} # {comment}".rstrip())
+    assert offenders == [], (
+        "every external action must use a full commit SHA with its reviewed release comment: "
+        f"{offenders}"
+    )
 
 
 def test_every_job_in_the_four_workflows_runs_on_the_pinned_runner():
