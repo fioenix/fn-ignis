@@ -867,6 +867,7 @@ def test_the_qualification_block_carries_all_four_counts_and_relevance():
 
 
 def test_a_withheld_verdict_carries_a_machine_readable_reason_and_a_next_step():
+    from ignis.domain.research_workspace import QUALIFICATION_STEP
     from ignis.interfaces.mcp.server import _surface_payload
 
     mission, report, _signals = _qualified_market(assess_all=False)
@@ -875,7 +876,7 @@ def test_a_withheld_verdict_carries_a_machine_readable_reason_and_a_next_step():
     assert payload["analysis_status"] == "QUALIFICATION_REQUIRED"
     assert payload["qualification"]["reason_code"] == "QUALIFICATION_INCOMPLETE"
     assert payload["qualification"]["reason"]
-    assert payload["next_step"] == "Call get_mission_evidence_qualification_batch."
+    assert payload["next_step"] == QUALIFICATION_STEP, "the step the batch and submit tools give too"
     assert payload["opportunity_index_applies"] is False
     assert report.market_opportunities == [] and report.strategic_insights == []
     assert report.maturity_stage is None
