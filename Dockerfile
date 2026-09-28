@@ -26,4 +26,13 @@ COPY sql/ ./sql/
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "-m", "ignis.interfaces.cli.scheduler"]
+# GHCR links the package to its repository through the source label, and the MCP Registry binds
+# the image to server.json only when the server-name label equals server.json's `name` exactly.
+LABEL org.opencontainers.image.source="https://github.com/fioenix/fn-ignis"
+LABEL io.modelcontextprotocol.server.name="io.github.fioenix/fn-ignis"
+
+# The image is the OCI package server.json advertises, with stdio transport and no command
+# override, so its default process must be the MCP server. The optional background worker is a
+# role Compose selects explicitly (`python -m ignis.interfaces.cli.scheduler`); run that command
+# yourself when starting the image directly as a worker.
+CMD ["python", "-m", "ignis.interfaces.mcp.server"]

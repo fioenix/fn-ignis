@@ -93,17 +93,17 @@ complete the default MCP smoke, and verify both Compose files still select the s
 
 ### Tests for User Story 2
 
-- [ ] T020 [US2] Add RED container-observer tests for empty Docker config, stripped GitHub credentials, selected-platform manifest/config/layer pull, digest capture, default MCP smoke with clean stdout/EOF exit, three-tag parity, and anonymous `unauthorized` classification in `tests/unit/test_public_distribution_contract.py`
-- [ ] T021 [P] [US2] Add RED static contracts for both `server.json` version fields, OCI identity/transport, optional SQLite-default metadata, Dockerfile MCP default, both Compose scheduler commands, source/ownership labels, stable-SemVer tags, all external action pins, and attestation permissions/subject in `tests/unit/test_public_distribution_contract.py`
+- [X] T020 [US2] Add RED container-observer tests for empty Docker config, stripped GitHub credentials, selected-platform manifest/config/layer pull, digest capture, default MCP smoke with clean stdout/EOF exit, three-tag parity, and anonymous `unauthorized` classification in `tests/unit/test_public_distribution_contract.py`
+- [X] T021 [P] [US2] Add RED static contracts for both `server.json` version fields, OCI identity/transport, optional SQLite-default metadata, Dockerfile MCP default, both Compose scheduler commands, source/ownership labels, stable-SemVer tags, all external action pins, and attestation permissions/subject in `tests/unit/test_public_distribution_contract.py`
 
 ### Implementation for User Story 2
 
-- [ ] T022 [US2] Change the Dockerfile default from scheduler to `ignis.interfaces.mcp.server`, add `LABEL io.modelcontextprotocol.server.name="io.github.fioenix/fn-ignis"`, and retain the explicit scheduler commands in `docker-compose.yml` and `docker-compose.prod.yml`
-- [ ] T023 [US2] Replace the deferred/nonexistent PyPI package in `server.json` with the version-matched `ghcr.io/fioenix/fn-ignis` OCI stdio package, retain its package-version field, mark the runtime-defaulted `DATABASE_URL` optional, and document ephemeral SQLite versus persistent configuration
-- [ ] T024 [US2] Pin every external `uses:` action in `.github/workflows/docker-publish.yml` to a reviewed full commit SHA with release comments, add repository source and exact MCP server-name metadata, fail before push on non-SemVer tags, and use metadata-action semver plus automatic stable-only `latest` for `0.6.0`/`0.6`/`latest`
-- [ ] T025 [US2] Add the minimum `attestations: write` and `id-token: write` permissions plus digest-bound OCI provenance in `.github/workflows/docker-publish.yml`
-- [ ] T026 [US2] Implement `container` mode with isolated Docker state, selected-platform anonymous pull, digest/three-tag/source/ownership-label readback, and caller-supplied MCP smoke in `scripts/public_release_acceptance.py`; keep authenticated provenance outside this anonymous observer
-- [ ] T027 [US2] Run the container contract tests, build the local image, inspect both labels, smoke its digest-pinned default MCP role, actually start the production Compose worker and prove the scheduler process without persistent data, then record GREEN results in `.handoff/009-public-distribution-v0.6.0.handoff.md`
+- [X] T022 [US2] Change the Dockerfile default from scheduler to `ignis.interfaces.mcp.server`, add `LABEL io.modelcontextprotocol.server.name="io.github.fioenix/fn-ignis"`, and retain the explicit scheduler commands in `docker-compose.yml` and `docker-compose.prod.yml`
+- [X] T023 [US2] Replace the deferred/nonexistent PyPI package in `server.json` with the version-matched `ghcr.io/fioenix/fn-ignis` OCI stdio package, retain its package-version field, mark the runtime-defaulted `DATABASE_URL` optional, and document ephemeral SQLite versus persistent configuration
+- [X] T024 [US2] Pin every external `uses:` action in `.github/workflows/docker-publish.yml` to a reviewed full commit SHA with release comments, add repository source and exact MCP server-name metadata, fail before push on non-SemVer tags, and use metadata-action semver plus automatic stable-only `latest` for `0.6.0`/`0.6`/`latest`
+- [X] T025 [US2] Add the minimum `attestations: write` and `id-token: write` permissions plus digest-bound OCI provenance in `.github/workflows/docker-publish.yml`
+- [X] T026 [US2] Implement `container` mode with isolated Docker state, selected-platform anonymous pull, digest/three-tag/source/ownership-label readback, and caller-supplied MCP smoke in `scripts/public_release_acceptance.py`; keep authenticated provenance outside this anonymous observer
+- [X] T027 [US2] Run the container contract tests, build the local image, inspect both labels, smoke its digest-pinned default MCP role, actually start the production Compose worker and prove the scheduler process without persistent data, then record GREEN results in `.handoff/009-public-distribution-v0.6.0.handoff.md`
 
 **Checkpoint**: The locally built image and public manifest contract agree; live GHCR visibility and
 anonymous pull remain release-owner actions.
