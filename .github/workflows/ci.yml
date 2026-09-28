@@ -107,7 +107,7 @@ jobs:
           uv build
 
       # The clean-user journey -- bootstrap from a clean checkout, registration, stdio handshake,
-      # 39-tool discovery, a real tool call -- runs inside the suite above as
+      # 47-tool discovery, a real tool call -- runs inside the suite above as
       # tests/integration/test_clean_user_journey.py, against the source tree.
       #
       # This step covers what that cannot: the wheel. It installs the built artifact into its own

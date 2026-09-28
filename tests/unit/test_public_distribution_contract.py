@@ -1661,3 +1661,264 @@ def test_a_compose_config_that_fails_is_reported_with_its_error(tmp_path, monkey
     assert record.state in (module.SurfaceState.FAILED, module.SurfaceState.UNREADABLE)
     assert "resolves to None" not in record.evidence
     assert "invalid compose project" in record.evidence
+
+
+# --------------------------------------------------------------------------------------------
+# Negative controls: every governed claim can turn its own contract red
+# --------------------------------------------------------------------------------------------
+#
+# A contract that cannot fail certifies nothing. Each control copies the governed files into a
+# temporary tree, proves the named contract passes on the unmodified copy, applies exactly one
+# mutation, and proves the same contract then fails. The contracts are the test functions above,
+# run unchanged against the copy by pointing this module's path constants at it.
+
+import sys as _sys  # noqa: E402
+import shutil as _shutil  # noqa: E402
+
+import pytest  # noqa: E402
+
+THIS_MODULE = _sys.modules[__name__]
+
+GOVERNED_FILES = sorted(
+    {relative for relative, _ in GOVERNED_TOOL_COUNT_SURFACES}
+    | set(MIGRATION_GUIDES)
+    | {
+        "server.json",
+        "Dockerfile",
+        "docker-compose.yml",
+        "docker-compose.prod.yml",
+        ".github/workflows/docker-publish.yml",
+        "pyproject.toml",
+        "openclaw.json",
+        "CITATION.cff",
+        ".openclaw/config.yaml",
+        "BACKLOG.md",
+        "uv.lock",
+    }
+)
+
+
+@pytest.fixture
+def governed_copy(tmp_path, monkeypatch):
+    for relative in GOVERNED_FILES:
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _shutil.copy2(REPO / relative, target)
+    _shutil.copytree(REPO / "sql", tmp_path / "sql")
+    monkeypatch.setattr(THIS_MODULE, "REPO", tmp_path)
+    monkeypatch.setattr(THIS_MODULE, "DOCKERFILE", tmp_path / "Dockerfile")
+    monkeypatch.setattr(
+        THIS_MODULE, "COMPOSE_FILES", (tmp_path / "docker-compose.yml", tmp_path / "docker-compose.prod.yml")
+    )
+    monkeypatch.setattr(THIS_MODULE, "SERVER_JSON", tmp_path / "server.json")
+    monkeypatch.setattr(THIS_MODULE, "DOCKER_PUBLISH", tmp_path / ".github" / "workflows" / "docker-publish.yml")
+    monkeypatch.setattr(THIS_MODULE, "BACKLOG", tmp_path / "BACKLOG.md")
+    return tmp_path
+
+
+def _mutate(root: Path, relative: str, pattern: str, replacement: str) -> None:
+    path = root / relative
+    text, count = re.subn(pattern, replacement, _read(path), count=1, flags=re.MULTILINE)
+    assert count == 1, f"negative control pattern {pattern!r} no longer matches {relative}; update the control"
+    path.write_text(text, encoding="utf-8")
+
+
+# (control name, file, regex, replacement, contract test it must turn red)
+NEGATIVE_CONTROLS = (
+    ("AGENTS tool count", "AGENTS.md", r"all 47 FastMCP tools", "all 39 FastMCP tools",
+     "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
+    ("CLAUDE tool count", "CLAUDE.md", r"All 47 tools", "All 45 tools",
+     "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
+    ("BACKLOG banner tool count", "BACKLOG.md", r"\(47 Handlers & Tools\)", "(45 Handlers & Tools)",
+     "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
+    ("diagram tool count", "docs/assets/architecture.html", r">47 MCP tools<", ">39 MCP tools<",
+     "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
+    ("user guide category sum", "docs/USER_GUIDE.md", r"\(10 Tools\)", "(9 Tools)",
+     "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
+    ("README fresh-init endpoint", "README.md", r"verified through `023`", "verified through `022`",
+     "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
+    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/023_evidence_qualification\.sql`",
+     "`sql/022_builtin_uuid_defaults.sql`", "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
+    ("PyPI install claim", "README.md", r"^(## ⚡ Quickstart & Installation)$", r"\1\n\npip install fn-ignis\n",
+     "test_no_public_surface_claims_a_pypi_package"),
+    ("PyPI package in server.json", "server.json", r'"registryType": "oci"', '"registryType": "pypi"',
+     "test_no_public_surface_claims_a_pypi_package"),
+    ("OCI identifier not versioned", "server.json", r'"identifier": "ghcr\.io/fioenix/fn-ignis:[^"]+"',
+     '"identifier": "ghcr.io/fioenix/fn-ignis:latest"', "test_server_json_advertises_the_versioned_oci_stdio_package"),
+    ("OCI transport", "server.json", r'"type": "stdio"', '"type": "streamable-http"',
+     "test_server_json_advertises_the_versioned_oci_stdio_package"),
+    ("DATABASE_URL required again", "server.json", r'"isRequired": false,\n(\s*)"format"', r'"isRequired": true,\n\1"format"',
+     "test_server_json_marks_the_sqlite_defaulted_database_url_optional"),
+    ("local Compose override", "docker-compose.yml", r'^    command: \["python", "-m", "ignis\.interfaces\.cli\.scheduler"\]\n', "",
+     "test_both_compose_files_select_the_scheduler_explicitly"),
+    ("production Compose override", "docker-compose.prod.yml",
+     r'^    command: \["python", "-m", "ignis\.interfaces\.cli\.scheduler"\]\n', "",
+     "test_both_compose_files_select_the_scheduler_explicitly"),
+    ("Docker default role", "Dockerfile", r'^CMD \["python", "-m", "ignis\.interfaces\.mcp\.server"\]',
+     'CMD ["python", "-m", "ignis.interfaces.cli.scheduler"]', "test_the_image_defaults_to_the_mcp_stdio_server"),
+    ("Dockerfile source label", "Dockerfile", r'^LABEL org\.opencontainers\.image\.source=.*\n', "",
+     "test_the_image_carries_its_source_and_mcp_ownership_labels"),
+    ("Dockerfile MCP name label", "Dockerfile", r'io\.modelcontextprotocol\.server\.name="io\.github\.fioenix/fn-ignis"',
+     'io.modelcontextprotocol.server.name="io.github.fioenix/ignis"', "test_the_image_carries_its_source_and_mcp_ownership_labels"),
+    ("workflow source label", ".github/workflows/docker-publish.yml", r"^\s*org\.opencontainers\.image\.source=.*\n", "",
+     "test_publish_metadata_carries_source_and_mcp_ownership_labels"),
+    ("workflow MCP name label", ".github/workflows/docker-publish.yml",
+     r"io\.modelcontextprotocol\.server\.name=io\.github\.fioenix/fn-ignis", "io.modelcontextprotocol.server.name=fn-ignis",
+     "test_publish_metadata_carries_source_and_mcp_ownership_labels"),
+    ("workflow moving action tag", ".github/workflows/docker-publish.yml",
+     r"docker/metadata-action@[0-9a-f]{40} # v\d+\.\d+\.\d+", "docker/metadata-action@v6",
+     "test_every_external_action_is_pinned_to_a_full_commit_with_its_release"),
+    ("workflow hand-written latest", ".github/workflows/docker-publish.yml", r"latest=auto", "latest=true",
+     "test_image_tags_come_only_from_stable_semver_rules"),
+    ("workflow attestation subject", ".github/workflows/docker-publish.yml",
+     r"subject-digest: \$\{\{ steps\.push\.outputs\.digest \}\}", "subject-digest: ${{ steps.meta.outputs.version }}",
+     "test_publish_attests_the_exact_pushed_digest"),
+    ("pyproject version", "pyproject.toml", r'^version = "(\d+)\.(\d+)\.(\d+)"', r'version = "\1.\2.99"',
+     "test_every_release_version_carrier_agrees"),
+    ("openclaw.json version", "openclaw.json", r'"version": "\d+\.\d+\.\d+"', '"version": "9.9.9"',
+     "test_every_release_version_carrier_agrees"),
+    ("server.json root version", "server.json", r'^  "version": "\d+\.\d+\.\d+"', '  "version": "9.9.9"',
+     "test_every_release_version_carrier_agrees"),
+    ("server.json package version", "server.json", r'^      "version": "\d+\.\d+\.\d+"', '      "version": "9.9.9"',
+     "test_every_release_version_carrier_agrees"),
+    ("server.json OCI identifier tag", "server.json", r'(ghcr\.io/fioenix/fn-ignis):\d+\.\d+\.\d+', r"\1:9.9.9",
+     "test_every_release_version_carrier_agrees"),
+    ("CITATION version", "CITATION.cff", r"^version: \d+\.\d+\.\d+", "version: 9.9.9",
+     "test_every_release_version_carrier_agrees"),
+    ("openclaw config version", ".openclaw/config.yaml", r"^version: \d+\.\d+\.\d+", "version: 9.9.9",
+     "test_every_release_version_carrier_agrees"),
+    ("BACKLOG banner version", "BACKLOG.md", r"\*\*Phiên bản:\*\* `v\d+\.\d+\.\d+`", "**Phiên bản:** `v9.9.9`",
+     "test_every_release_version_carrier_agrees"),
+    ("uv.lock left behind", "uv.lock", r'(name = "fn-ignis"\nversion = )"\d+\.\d+\.\d+"', r'\1"9.9.9"',
+     "test_every_release_version_carrier_agrees"),
+)
+
+
+@pytest.mark.parametrize(
+    ("relative", "pattern", "replacement", "contract"),
+    [control[1:] for control in NEGATIVE_CONTROLS],
+    ids=[control[0] for control in NEGATIVE_CONTROLS],
+)
+def test_each_negative_control_turns_its_contract_red(governed_copy, relative, pattern, replacement, contract):
+    check = getattr(THIS_MODULE, contract)
+    check()  # the unmodified copy satisfies the contract
+    _mutate(governed_copy, relative, pattern, replacement)
+    with pytest.raises(AssertionError):
+        check()
+
+
+@pytest.mark.parametrize("moved_tag", ["0.6", "latest"])
+def test_each_moving_release_tag_on_another_digest_is_caught(tmp_path, monkeypatch, moved_tag):
+    module = _acceptance()
+    registry = FakeRegistry()
+    registry.tags[moved_tag] = registry.image_manifest
+    records, _, _ = _observe_container(module, tmp_path, monkeypatch, registry)
+    assert records["container_digest"].state == module.SurfaceState.FAILED
+    assert moved_tag in records["container_digest"].evidence
+
+
+def test_a_daemon_digest_that_differs_from_the_release_tag_is_caught(tmp_path, monkeypatch):
+    module = _acceptance()
+    records, _, _ = _observe_container(
+        module, tmp_path, monkeypatch, FAKE_DOCKER_REPO_DIGEST=f"ghcr.io/{IMAGE_PATH}@sha256:{'e' * 64}"
+    )
+    assert records["container_digest"].state == module.SurfaceState.FAILED
+
+
+# --------------------------------------------------------------------------------------------
+# History stays history: dated measurements are not current claims
+# --------------------------------------------------------------------------------------------
+
+
+def _backlog_history(path: Path) -> str:
+    """BACKLOG outside the banner and the current-accomplishments section."""
+    text = _read(path)
+    return text.replace(_backlog_banner(path), "").replace(_backlog_current_accomplishments(path), "")
+
+
+def test_dated_backlog_measurements_keep_their_original_counts():
+    """The v0.4.0 preparation log measured 39 tools on its date; that sentence stays true."""
+    history = _backlog_history(BACKLOG)
+    assert re.search(r"\b39 tool\b", history), (
+        "the dated v0.4.0 measurement of 39 tools disappeared from BACKLOG's history; history is "
+        "not rewritten to make a text search look clean"
+    )
+    assert not tool_count_offenders(_runtime_tool_count(), (("BACKLOG.md", _backlog_banner),
+                                                            ("BACKLOG.md", _backlog_current_accomplishments)))
+
+
+def test_a_dated_history_entry_is_not_governed_but_a_current_one_is(governed_copy):
+    expected = _runtime_tool_count()
+    history_anchor = r"^(### Chuẩn bị release v0\.4\.0.*)$"
+    _mutate(governed_copy, "BACKLOG.md", history_anchor, r"\1\n\nMeasured 14/09/2026: 39 tools.")
+    assert not tool_count_offenders(expected), "a dated history line was treated as a current claim"
+
+    _mutate(governed_copy, "BACKLOG.md", r"^(## 🚀 1\..*)$", r"\1\n\nIgnis exposes 39 tools.")
+    assert tool_count_offenders(expected), "an unlabeled current claim inside a governed section passed"
+
+
+def test_upgrade_guidance_may_name_earlier_migrations():
+    """`022` in the per-migration upgrade list is correct history for older databases, not drift."""
+    for relative in MIGRATION_GUIDES:
+        assert "sql/022_builtin_uuid_defaults.sql" in _read(REPO / relative), relative
+    assert not migration_endpoint_offenders(_newest_migration())
+    assert (REPO / "sql" / "022_builtin_uuid_defaults.sql").is_file()
+
+
+def test_migration_file_names_and_upgrade_tests_are_outside_the_count_gate():
+    """Migration files and the tests that upgrade 021 to 022 name old endpoints by design."""
+    governed = {relative for relative, _ in GOVERNED_TOOL_COUNT_SURFACES} | set(MIGRATION_GUIDES)
+    assert not any(relative.startswith(("sql/", "tests/", "specs/")) for relative in governed), governed
+
+
+# --------------------------------------------------------------------------------------------
+# The provisioner reports the catalog it can prove, never a remembered number
+# --------------------------------------------------------------------------------------------
+
+
+def test_generated_antigravity_instructions_state_the_manifest_catalog(tmp_path, monkeypatch):
+    from ignis.interfaces.cli import setup_bundle
+
+    home = tmp_path / "home"
+    (home / ".gemini" / "config").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(setup_bundle, "register_mcp_to_json_file", lambda *args, **kwargs: True)
+    monkeypatch.setattr(setup_bundle, "get_claude_desktop_config_path", lambda: tmp_path / "nowhere" / "c.json")
+    monkeypatch.setattr(setup_bundle.sys, "platform", "linux")
+    project = tmp_path / "project"
+    project.mkdir()
+    _shutil.copy2(REPO / "hermes_manifest.json", project / "hermes_manifest.json")
+
+    setup_bundle.setup_all_mcp_clients(project, "/usr/bin/python3")
+
+    instructions = _read(home / ".gemini" / "antigravity" / "mcp" / "fn-ignis" / "instructions.md")
+    expected = len(json.loads(_read(REPO / "hermes_manifest.json")))
+    assert f"Provides {expected} tools" in instructions, instructions
+
+
+def test_a_failed_tool_discovery_is_not_reported_as_a_successful_count(monkeypatch):
+    """A fallback number printed on failure is a false success; the report must say discovery failed."""
+    from ignis.interfaces.cli import setup_bundle
+    from ignis.interfaces.mcp import server
+
+    monkeypatch.setattr(setup_bundle, "ensure_environment_file", lambda root: (False, "exists"))
+
+    async def ok_database():
+        return True, "ready"
+
+    async def diagnostics():
+        return {"database": "healthy", "google_rss": "skipped", "lexicon_count": 1}
+
+    async def broken_discovery():
+        raise RuntimeError("tool registry failed to load")
+
+    monkeypatch.setattr(setup_bundle, "bootstrap_database", ok_database)
+    monkeypatch.setattr(setup_bundle, "setup_all_mcp_clients", lambda root, python: [])
+    monkeypatch.setattr(setup_bundle, "run_synthetic_diagnostics", diagnostics)
+    monkeypatch.setattr(server.mcp, "list_tools", broken_discovery)
+
+    report = setup_bundle.auto_provision(json_output=True)
+
+    assert report["capabilities"]["tools_count"] is None, report["capabilities"]
+    assert report["status"] != "success", report["status"]
+    assert "tool registry failed to load" in report["capabilities"].get("discovery_error", "")
