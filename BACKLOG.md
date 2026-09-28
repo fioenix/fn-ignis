@@ -1,10 +1,11 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
-> - **Cập nhật lần cuối:** 25/09/2026
-> - **Phiên bản:** `v0.5.0`
+> - **Cập nhật lần cuối:** 28/09/2026
+> - **Phiên bản:** `v0.6.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (47 Handlers & Tools)
-> - **Trạng thái:** Bản live hiện hành `v0.5.0` đã tag và publish.
+> - **Trạng thái:** `v0.6.0` là release candidate của Plan 009, chưa phát hành. Bản live hiện
+>   hành `v0.5.0` đã tag và publish.
 >   Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`; đừng tin dòng này — nó
 >   là tài liệu, còn
 >   tag với release nằm trên Git và GitHub. Cutover T020 trên corpus PostgreSQL hiện hữu đã chạy
