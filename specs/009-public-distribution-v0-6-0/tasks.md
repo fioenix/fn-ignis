@@ -120,15 +120,15 @@ remain accepted.
 
 ### Tests for User Story 3
 
-- [ ] T028 [US3] Add negative controls that independently mutate a current tool count, migration endpoint, PyPI/OCI claim, each Compose override, Docker role, each ownership label, every release tag digest, and each manifest/release version field, and prove `tests/unit/test_public_distribution_contract.py` turns red for each
-- [ ] T029 [US3] Add allowlisted historical-reference tests so dated backlog measurements, migration `022` upgrade tests, and filenames remain valid while unlabeled current claims fail in `tests/unit/test_public_distribution_contract.py`
+- [X] T028 [US3] Add negative controls that independently mutate a current tool count, migration endpoint, PyPI/OCI claim, each Compose override, Docker role, each ownership label, every release tag digest, and each manifest/release version field, and prove `tests/unit/test_public_distribution_contract.py` turns red for each
+- [X] T029 [US3] Add allowlisted historical-reference tests so dated backlog measurements, migration `022` upgrade tests, and filenames remain valid while unlabeled current claims fail in `tests/unit/test_public_distribution_contract.py`
 
 ### Implementation for User Story 3
 
-- [ ] T030 [P] [US3] Update current tool-count claims in `AGENTS.md`, `.github/workflows/ci.yml`, and generated/fallback Antigravity instructions in `src/ignis/interfaces/cli/setup_bundle.py` to 47; make discovery failure fail closed rather than emit a false success count
-- [ ] T031 [P] [US3] Update current tool-count claims in `docs/PROJECT_REVIEW_CONTEXT.md` and the `BACKLOG.md` banner/current accomplishments; use the repository's diagram workflow to update both architecture/pipeline HTML and SVG sources, regenerate both PNG derivatives, and visually verify 47 while leaving dated evidence intact
-- [ ] T032 [US3] Update current install and upgrade claims in `README.md`, `README.vi.md`, `docs/USER_GUIDE.md`, and `docs/USER_GUIDE.vi.md` so fresh-init verification and existing-database guidance reach migration `023`
-- [ ] T033 [US3] Run the public distribution, repository convention, manifest-drift, release-claim, and documentation contract suites; record exact GREEN counts and retained historical references in `.handoff/009-public-distribution-v0.6.0.handoff.md`
+- [X] T030 [P] [US3] Update current tool-count claims in `AGENTS.md`, `.github/workflows/ci.yml`, and generated/fallback Antigravity instructions in `src/ignis/interfaces/cli/setup_bundle.py` to 47; make discovery failure fail closed rather than emit a false success count
+- [X] T031 [P] [US3] Update current tool-count claims in `docs/PROJECT_REVIEW_CONTEXT.md` and the `BACKLOG.md` banner/current accomplishments; use the repository's diagram workflow to update both architecture/pipeline HTML and SVG sources, regenerate both PNG derivatives, and visually verify 47 while leaving dated evidence intact
+- [X] T032 [US3] Update current install and upgrade claims in `README.md`, `README.vi.md`, `docs/USER_GUIDE.md`, and `docs/USER_GUIDE.vi.md` so fresh-init verification and existing-database guidance reach migration `023`
+- [X] T033 [US3] Run the public distribution, repository convention, manifest-drift, release-claim, and documentation contract suites; record exact GREEN counts and retained historical references in `.handoff/009-public-distribution-v0.6.0.handoff.md`
 
 **Checkpoint**: Current release truth is governed by tests; history is not rewritten to make a text
 search look clean.

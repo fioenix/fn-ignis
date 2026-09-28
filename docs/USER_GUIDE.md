@@ -154,6 +154,30 @@ backfill, require `VERIFIED`, then start the new runtime and reopen ingress.
 
 ---
 
+### Container Image: MCP Server by Default, Worker by Command
+
+`ghcr.io/fioenix/fn-ignis` is the OCI package advertised in `server.json`. Its default process is
+the MCP stdio server (`python -m ignis.interfaces.mcp.server`), so an MCP client can run the image
+directly with `docker run --rm -i ghcr.io/fioenix/fn-ignis:<version>`. The image carries the labels
+`org.opencontainers.image.source=https://github.com/fioenix/fn-ignis` and
+`io.modelcontextprotocol.server.name=io.github.fioenix/fn-ignis`.
+
+Without `DATABASE_URL` the server writes SQLite into the container's working directory, which is
+ephemeral and is lost when the container exits. For continuing use, set a PostgreSQL DSN or mount a
+volume and point SQLite into it, for example
+`-v ignis-data:/data -e DATABASE_URL=sqlite:////data/ignis.db`.
+
+Images before `0.6.0` started the scheduler worker by default. From `0.6.0` the worker is a role
+you select: both Compose files already run `python -m ignis.interfaces.cli.scheduler` explicitly,
+so a Compose deployment is unchanged. A worker started directly with `docker run` must now name
+that command:
+
+```bash
+docker run -d --env-file .env ghcr.io/fioenix/fn-ignis:<version> python -m ignis.interfaces.cli.scheduler
+```
+
+---
+
 ### Mode 3: Manual MCP Server Configuration for IDE / Desktop Apps
 
 If you want to manually connect `fn-ignis` to your MCP client without using `bootstrap.sh`:

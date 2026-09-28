@@ -168,6 +168,29 @@ buộc verifier trả `VERIFIED`, rồi mới khởi động runtime mới và m
 
 ---
 
+### Container image: mặc định là MCP server, worker chạy bằng lệnh riêng
+
+`ghcr.io/fioenix/fn-ignis` là OCI package được khai báo trong `server.json`. Process mặc định của
+image là MCP stdio server (`python -m ignis.interfaces.mcp.server`), nên MCP client có thể chạy image
+trực tiếp bằng `docker run --rm -i ghcr.io/fioenix/fn-ignis:<version>`. Image mang hai label
+`org.opencontainers.image.source=https://github.com/fioenix/fn-ignis` và
+`io.modelcontextprotocol.server.name=io.github.fioenix/fn-ignis`.
+
+Khi không có `DATABASE_URL`, server ghi SQLite vào thư mục làm việc của container. Database này
+không bền và sẽ mất khi container dừng. Muốn dùng lâu dài, hãy đặt một DSN PostgreSQL hoặc mount một
+volume rồi trỏ SQLite vào đó, ví dụ `-v ignis-data:/data -e DATABASE_URL=sqlite:////data/ignis.db`.
+
+Các image trước `0.6.0` mặc định khởi động scheduler worker. Từ `0.6.0`, worker là một vai trò bạn
+phải chọn: cả hai file Compose đã ghi rõ lệnh `python -m ignis.interfaces.cli.scheduler`, nên
+deployment dùng Compose không thay đổi gì. Worker khởi động trực tiếp bằng `docker run` giờ phải ghi
+rõ lệnh đó:
+
+```bash
+docker run -d --env-file .env ghcr.io/fioenix/fn-ignis:<version> python -m ignis.interfaces.cli.scheduler
+```
+
+---
+
 ### Chế độ 3: Cấu hình MCP Server thủ công cho IDE / Desktop App
 
 Nếu bạn muốn kết nối `fn-ignis` làm công cụ FastMCP cho các ứng dụng AI Desktop:

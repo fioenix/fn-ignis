@@ -315,6 +315,30 @@ needs `sql/023_evidence_qualification.sql`. Running any of these files again cha
 > Do not start the new runtime after applying `sql/016` until the snapshot-specific baseline,
 > backfill, and verifier have returned `VERIFIED`.
 
+### 4. Container Image (MCP stdio)
+The public image `ghcr.io/fioenix/fn-ignis` is the OCI package `server.json` advertises. Its default
+process is the MCP stdio server, so an MCP client runs it directly; pin a release version tag:
+```bash
+docker run --rm -i ghcr.io/fioenix/fn-ignis:<version>
+```
+Without `DATABASE_URL` the server uses SQLite inside the container. That database is ephemeral: it
+disappears with the container, which is right for a smoke test and wrong for continuing work. For
+persistent operation pass a PostgreSQL DSN, or mount a volume and point SQLite into it:
+```bash
+docker run --rm -i -v ignis-data:/data -e DATABASE_URL=sqlite:////data/ignis.db ghcr.io/fioenix/fn-ignis:<version>
+```
+
+**Upgrading a direct worker from `0.5.0` or earlier.** Images before `0.6.0` started the scheduler
+worker by default; from `0.6.0` the default is the MCP server. Both Compose files name the worker
+command, so a Compose deployment keeps its worker unchanged. If you started the image directly as a
+worker, name the command yourself:
+```bash
+docker run -d --env-file .env ghcr.io/fioenix/fn-ignis:<version> python -m ignis.interfaces.cli.scheduler
+```
+
+The source tag and this image are the supported distributions. PyPI is not a distribution channel
+for this release.
+
 
 ---
 

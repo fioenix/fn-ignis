@@ -275,6 +275,31 @@ thiếu theo thứ tự tên file: database khởi tạo trước `021` cần ch
 > Sau khi apply `sql/016`, không khởi động runtime mới cho tới khi baseline sinh từ đúng snapshot,
 > backfill và verifier trả `VERIFIED`.
 
+### 4. Container Image (MCP stdio)
+Image công khai `ghcr.io/fioenix/fn-ignis` là OCI package mà `server.json` khai báo. Process mặc
+định của image là MCP stdio server, nên MCP client có thể chạy image trực tiếp; hãy ghim vào tag
+phiên bản release:
+```bash
+docker run --rm -i ghcr.io/fioenix/fn-ignis:<version>
+```
+Khi không có `DATABASE_URL`, server dùng SQLite nằm bên trong container. Database này không bền:
+nó mất cùng container, phù hợp để chạy thử nhưng không dùng được cho công việc lâu dài. Muốn dữ
+liệu được giữ lại, hãy truyền một DSN PostgreSQL, hoặc mount một volume rồi trỏ SQLite vào đó:
+```bash
+docker run --rm -i -v ignis-data:/data -e DATABASE_URL=sqlite:////data/ignis.db ghcr.io/fioenix/fn-ignis:<version>
+```
+
+**Nâng cấp worker chạy trực tiếp từ `0.5.0` trở về trước.** Các image trước `0.6.0` mặc định khởi
+động scheduler worker; từ `0.6.0`, mặc định là MCP server. Cả hai file Compose đều ghi rõ lệnh của
+worker, nên deployment dùng Compose vẫn giữ nguyên worker. Nếu bạn chạy image trực tiếp làm worker,
+hãy tự chỉ định lệnh:
+```bash
+docker run -d --env-file .env ghcr.io/fioenix/fn-ignis:<version> python -m ignis.interfaces.cli.scheduler
+```
+
+Tag mã nguồn và image này là hai kênh phân phối được hỗ trợ. Bản phát hành này không phân phối qua
+PyPI.
+
 ---
 
 ## 📖 Cẩm nang Hướng dẫn Chi tiết (User Guide)
