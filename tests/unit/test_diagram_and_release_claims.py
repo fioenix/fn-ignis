@@ -546,6 +546,134 @@ def test_the_acceptance_checker_does_not_read_documents():
 
 
 # --------------------------------------------------------------------------------------------
+# c) Public distribution verdict: five observation states, one derived verdict
+# --------------------------------------------------------------------------------------------
+#
+# Public distribution adds surfaces the three-fact checker above cannot read: a tagged-source
+# bootstrap, an anonymous container pull, the digest, the runtime role. Each can be proven present,
+# proven absent, obtained but wrong, or not observed at all, and those four call for different
+# actions. PyPI is excluded by policy for v0.6.0, which is a fifth state and never a pass.
+
+PUBLIC_ACCEPTANCE = REPO / "scripts" / "public_release_acceptance.py"
+MAIN_COMMIT = "a" * 40
+
+
+def _acceptance():
+    assert PUBLIC_ACCEPTANCE.is_file(), (
+        "scripts/public_release_acceptance.py does not exist, so no model separates VERIFIED, "
+        "MISSING, FAILED, UNREADABLE and DEFERRED release surfaces"
+    )
+    sys.path.insert(0, str(REPO / "scripts"))
+    import public_release_acceptance  # noqa: PLC0415
+
+    return public_release_acceptance
+
+
+def _records(module, **states):
+    """One record per surface in the policy, VERIFIED unless overridden; PyPI DEFERRED."""
+    records = []
+    for name in module.REQUIRED_SURFACES:
+        state = states.get(name, module.SurfaceState.VERIFIED)
+        records.append(
+            module.SurfaceRecord(
+                name=name,
+                state=state,
+                subject=f"fixture {name}",
+                evidence="fixture",
+                failure_class=None if state == module.SurfaceState.VERIFIED else "behavior_mismatch",
+            )
+        )
+    for name in module.DEFERRED_SURFACES:
+        records.append(
+            module.SurfaceRecord(
+                name=name,
+                state=states.get(name, module.SurfaceState.DEFERRED),
+                subject=name,
+                evidence="excluded by release policy",
+            )
+        )
+    return records
+
+
+def test_the_state_vocabulary_is_exactly_five_states():
+    module = _acceptance()
+    assert {state.value for state in module.SurfaceState} == {
+        "VERIFIED",
+        "MISSING",
+        "FAILED",
+        "UNREADABLE",
+        "DEFERRED",
+    }
+    assert {verdict.value for verdict in module.Verdict} == {
+        "RELEASED",
+        "NOT_RELEASED",
+        "INDETERMINATE",
+    }
+
+
+def test_every_required_surface_verified_with_pypi_deferred_is_released():
+    module = _acceptance()
+    bundle = module.build_bundle("0.6.0", MAIN_COMMIT, _records(module))
+    assert bundle.verdict == module.Verdict.RELEASED
+    assert bundle.deferred == ["pypi_distribution"]
+    assert not bundle.missing and not bundle.failed and not bundle.unreadable
+
+
+def test_a_missing_required_surface_is_not_released():
+    module = _acceptance()
+    missing = module.SurfaceState.MISSING
+    bundle = module.build_bundle(
+        "0.6.0", MAIN_COMMIT, _records(module, container_anonymous_pull=missing)
+    )
+    assert bundle.verdict == module.Verdict.NOT_RELEASED
+    assert bundle.missing == ["container_anonymous_pull"]
+
+
+def test_a_failed_required_surface_is_not_released():
+    module = _acceptance()
+    failed = module.SurfaceState.FAILED
+    bundle = module.build_bundle("0.6.0", MAIN_COMMIT, _records(module, container_mcp_runtime=failed))
+    assert bundle.verdict == module.Verdict.NOT_RELEASED
+    assert bundle.failed == ["container_mcp_runtime"]
+
+
+def test_an_unreadable_surface_is_indeterminate_and_hides_nothing_else():
+    """An outage must not mask a separately proven absence; both are listed."""
+    module = _acceptance()
+    bundle = module.build_bundle(
+        "0.6.0",
+        MAIN_COMMIT,
+        _records(
+            module,
+            container_provenance=module.SurfaceState.UNREADABLE,
+            github_release_published=module.SurfaceState.MISSING,
+            source_bootstrap=module.SurfaceState.FAILED,
+        ),
+    )
+    assert bundle.verdict == module.Verdict.INDETERMINATE
+    assert bundle.unreadable == ["container_provenance"]
+    assert bundle.missing == ["github_release_published"]
+    assert bundle.failed == ["source_bootstrap"]
+
+
+def test_deferred_never_satisfies_a_required_surface():
+    module = _acceptance()
+    with pytest.raises(ValueError, match="DEFERRED"):
+        module.SurfaceRecord(
+            name="container_anonymous_pull",
+            state=module.SurfaceState.DEFERRED,
+            subject="ghcr.io/fioenix/fn-ignis:0.6.0",
+            evidence="not checked",
+        )
+
+
+def test_pypi_is_the_only_deferred_surface():
+    module = _acceptance()
+    assert module.DEFERRED_SURFACES == ("pypi_distribution",)
+    assert "pypi_distribution" not in module.REQUIRED_SURFACES
+
+
+# --------------------------------------------------------------------------------------------
 # Diagram inventory
 # --------------------------------------------------------------------------------------------
 

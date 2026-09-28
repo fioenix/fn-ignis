@@ -27,11 +27,11 @@ before external writes. Codex executes release-owner tasks T041–T050 after ind
 **Purpose**: Capture the live baseline and make every known distribution drift fail before changing
 product or release surfaces.
 
-- [ ] T001 Create `.handoff/009-public-distribution-v0.6.0.handoff.md` with the base commit, clean/dirty status, `v0.5.0` live release facts, unit baseline, current GHCR anonymous `unauthorized` result, and the package-API `read:packages` limitation
-- [ ] T002 [P] Add RED current-state tests for 47-tool claims, migration endpoint `023`, no PyPI availability claim, and synchronized release versions in `tests/unit/test_public_distribution_contract.py`
-- [ ] T003 [P] Add RED verdict-state tests for `VERIFIED`, `MISSING`, `FAILED`, `UNREADABLE`, `DEFERRED`, and combined verdict precedence in `tests/unit/test_diagram_and_release_claims.py`
-- [ ] T004 [P] Add RED contracts for the Docker default MCP role, both Compose scheduler overrides, OCI `server.json`, all external workflow action pins, stable-SemVer release tags, source/ownership labels, and provenance attestation in `tests/unit/test_public_distribution_contract.py`
-- [ ] T005 Run the Phase 1 tests, confirm each new assertion fails for its intended current defect rather than import/setup noise, and record the exact RED results in `.handoff/009-public-distribution-v0.6.0.handoff.md`
+- [X] T001 Create `.handoff/009-public-distribution-v0.6.0.handoff.md` with the base commit, clean/dirty status, `v0.5.0` live release facts, unit baseline, current GHCR anonymous `unauthorized` result, and the package-API `read:packages` limitation
+- [X] T002 [P] Add RED current-state tests for 47-tool claims, migration endpoint `023`, no PyPI availability claim, and synchronized release versions in `tests/unit/test_public_distribution_contract.py`
+- [X] T003 [P] Add RED verdict-state tests for `VERIFIED`, `MISSING`, `FAILED`, `UNREADABLE`, `DEFERRED`, and combined verdict precedence in `tests/unit/test_diagram_and_release_claims.py`
+- [X] T004 [P] Add RED contracts for the Docker default MCP role, both Compose scheduler overrides, OCI `server.json`, all external workflow action pins, stable-SemVer release tags, source/ownership labels, and provenance attestation in `tests/unit/test_public_distribution_contract.py`
+- [X] T005 Run the Phase 1 tests, confirm each new assertion fails for its intended current defect rather than import/setup noise, and record the exact RED results in `.handoff/009-public-distribution-v0.6.0.handoff.md`
 
 **Checkpoint**: Each known false or stale release claim has an independently observed RED contract.
 
