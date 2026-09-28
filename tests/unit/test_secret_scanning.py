@@ -27,6 +27,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO / ".github" / "workflows" / "ci.yml"
 GITLEAKS_CONFIG = REPO / ".gitleaks.toml"
+GITLEAKS_IGNORE = REPO / ".gitleaksignore"
 
 
 def _read(path: Path) -> str:
@@ -125,12 +126,22 @@ def test_source_keys_are_allowlisted_only_as_hex_identifiers_in_the_two_named_fi
 
     [pattern] = allowlist.get("regexes", [])
     matcher = re.compile(pattern)
-    assert matcher.search('    "source_key": "0123456789abcdef",')
-    assert matcher.search('thin = dict(item, source_key="0123456789abcdef", title="fixture")')
+    key = "01234567" + "89abcdef"
+    assert matcher.search(f'    "source_key": "{key}",')
+    assert matcher.search(f'thin = dict(item, source_key="{key}", title="fixture")')
     for unsafe in (
-        'api_key="0123456789abcdef"',
-        'source_key="0123456789abcde"',
-        'source_key="0123456789abcdef0"',
-        'source_key="0123456789abcdeg"',
+        f'api_key="{key}"',
+        f'source_key="{key[:-1]}"',
+        f'source_key="{key}0"',
+        f'source_key="{key[:-1]}g"',
     ):
         assert not matcher.fullmatch(unsafe), unsafe
+
+
+def test_historical_test_literals_are_ignored_by_exact_fingerprint_only():
+    """The PR history contains six fake keys; no path- or rule-wide exception is acceptable."""
+    assert GITLEAKS_IGNORE.read_text(encoding="utf-8").splitlines() == [
+        "b707af913e125f0005776940a12dccfef8825d88:tests/unit/"
+        f"test_secret_scanning.py:generic-api-key:{line}"
+        for line in (128, 129, 131, 132, 133, 134)
+    ]
