@@ -19,6 +19,7 @@ believing you have one.
 """
 
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -108,3 +109,28 @@ def test_every_allowlisted_file_still_exists():
     assert not missing, (
         "The allowlist names files that no longer exist:\n" + "\n".join(missing)
     )
+
+
+def test_source_keys_are_allowlisted_only_as_hex_identifiers_in_the_two_named_files():
+    """A corpus source identity resembles an API key, but the exception must stay exact."""
+    config = tomllib.loads(_read(GITLEAKS_CONFIG))
+    [rule] = [item for item in config.get("rules", []) if item.get("id") == "generic-api-key"]
+    [allowlist] = rule.get("allowlists", [])
+    assert allowlist.get("condition", "OR").upper() == "AND"
+    assert allowlist.get("regexTarget") == "line"
+    assert allowlist.get("paths") == [
+        r"tests/fixtures/decision_grade_evidence\.json",
+        r"tests/integration/test_decision_grade_evidence\.py",
+    ]
+
+    [pattern] = allowlist.get("regexes", [])
+    matcher = re.compile(pattern)
+    assert matcher.search('    "source_key": "0123456789abcdef",')
+    assert matcher.search('thin = dict(item, source_key="0123456789abcdef", title="fixture")')
+    for unsafe in (
+        'api_key="0123456789abcdef"',
+        'source_key="0123456789abcde"',
+        'source_key="0123456789abcdef0"',
+        'source_key="0123456789abcdeg"',
+    ):
+        assert not matcher.fullmatch(unsafe), unsafe
