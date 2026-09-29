@@ -4,16 +4,18 @@
 > - **Phiên bản:** `v0.7.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
 >   + FastMCP Server (47 Handlers & Tools)
-> - **Trạng thái:** Release candidate `v0.7.0` chứa migration `024` và cơ chế quản lý quota
->   YouTube dùng chung đã merge vào `main`; chưa tag và chưa publish. Bản public hiện tại vẫn là
->   `v0.6.0` qua source, GitHub Release và GHCR; PyPI tiếp tục được hoãn theo policy.
+> - **Trạng thái:** `v0.7.0` chứa migration `024` và cơ chế quản lý quota YouTube dùng chung đã
+>   tag và publish ngày 29/09/2026 trên merge commit
+>   `0832539961cac7f0df4652da4dcaad27c3f79278` qua public source, GitHub Release và public GHCR;
+>   14/14 bề mặt bắt buộc được xác minh, PyPI tiếp tục được hoãn theo policy.
 >   Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`; đừng tin dòng này — nó
 >   là tài liệu, còn
 >   tag với release nằm trên Git và GitHub. Cutover T020 trên corpus PostgreSQL hiện hữu đã chạy
 >   xong 20/09/2026: verifier trả `VERIFIED`, runtime mới đã khởi động, ingress theo lịch đã mở lại.
-> - **Trạng thái Tests:** Candidate gate trước release: 1.999 test passed, 6 intentional skips
->   trên unit và provisioned dual backend; Fresh Compose, Performance, wheel smoke 47 tools,
->   Ruff, lock, packaging và gitleaks đều qua. Public clean-room acceptance chờ tag `v0.7.0`.
+> - **Trạng thái Tests:** Release gate: 1.999 test passed, 6 intentional skips trên unit và
+>   provisioned dual backend; PR đạt 7/7 required checks; post-merge CI, Fresh Compose,
+>   Performance, packaging, gitleaks và public clean-room acceptance 14/14 đều qua. Source và
+>   container MCP smoke đều trả 47 tools; các tag GHCR `0.7.0`, `0.7`, `latest` cùng digest.
 
 ---
 
