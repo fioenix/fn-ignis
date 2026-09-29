@@ -7,12 +7,12 @@
     "url": "https://github.com/fioenix/fn-ignis",
     "source": "github"
   },
-  "version": "0.6.0",
+  "version": "0.7.0",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/fioenix/fn-ignis:0.6.0",
-      "version": "0.6.0",
+      "identifier": "ghcr.io/fioenix/fn-ignis:0.7.0",
+      "version": "0.7.0",
       "transport": {
         "type": "stdio"
       },

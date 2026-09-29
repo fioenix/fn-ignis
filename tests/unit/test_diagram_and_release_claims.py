@@ -142,11 +142,20 @@ def test_tracked_documents_do_not_call_an_unreleased_version_shipped():
     if not UNRELEASED_BANNER.search(_banner_text()):
         pytest.skip("the banner does not declare an unreleased state; nothing to contradict")
 
+    version_match = re.search(r"\bv(\d+\.\d+\.\d+)\b", _banner_text(), re.IGNORECASE)
+    assert version_match, "BACKLOG.md's release-state banner does not name its current version"
+    current_version = version_match.group(1)
     offenders = []
     for path in TRACKED_DOCS:
         for lineno, line in enumerate(_read(path).splitlines(), 1):
             match = RELEASE_CLAIM.search(line)
             if not match:
+                continue
+            named_versions = re.findall(r"\b\d+\.\d+\.\d+\b", line)
+            describes_current_release = re.search(
+                r"\b(current|this)\s+(version|release)\b", line, re.IGNORECASE
+            )
+            if current_version not in named_versions and not describes_current_release:
                 continue
             # "must not be released until", "before release" and similar are requirements, not
             # claims that it happened. Only an assertion about the current state is a problem.

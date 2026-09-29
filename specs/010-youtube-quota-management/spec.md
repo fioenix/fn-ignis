@@ -17,6 +17,7 @@
 - Q: Which YouTube quota buckets should the feature manage? → A: Manage both `search.list` calls and the shared units used by other invoked endpoints, using current provider defaults with operator overrides. (agent decided; basis: key-level protection must cover every outbound YouTube call made by fn-ignis)
 - Q: Should this feature also change the scheduler's default cadence? → A: No; preserve the existing cadence and enforce the hard daily boundary in the shared ledger. (agent decided; basis: changing operational frequency expands scope beyond quota safety)
 - Q: Should this feature move or replace the published `v0.6.0` tag? → A: No; preserve the immutable `v0.6.0` release, integrate migration `024` through its own pull request, and leave the next release version to an explicit owner decision. (agent decided; basis: live GitHub readback shows `v0.6.0` was published on 2026-09-28, and the release ledger forbids moving that tag)
+- Q: Which version should publish migration `024` and YouTube quota management? → A: `v0.7.0`. (owner confirmed; basis: this is the next MINOR after the published `v0.6.0`, and repository policy classifies a new migration and capability as MINOR)
 
 ## User Scenarios & Testing *(mandatory)*
 
