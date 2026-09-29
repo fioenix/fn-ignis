@@ -2,6 +2,7 @@
 
 [![FINOLABS Project](https://img.shields.io/badge/FINOLABS-Open%20Source-orange.svg)](https://finolabs.io)
 [![CI](https://github.com/fioenix/fn-ignis/actions/workflows/ci.yml/badge.svg)](https://github.com/fioenix/fn-ignis/actions)
+[![Latest Release](https://img.shields.io/github/v/release/fioenix/fn-ignis?label=release)](https://github.com/fioenix/fn-ignis/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%E2%80%93%203.14-blue.svg)](https://www.python.org/downloads/)
 [![MCP](https://img.shields.io/badge/MCP-Standard%20FastMCP-purple.svg)](https://modelcontextprotocol.io/)
@@ -20,6 +21,7 @@
 
 - **⚡ Zero-Token Local Ingress**: Collects, filters, and normalizes high-volume signals locally using deterministic Python parsers without burning expensive LLM API tokens on raw scraping.
 - **🏛️ Dual-Track Architecture**: Combines an optional 24/7 background radar daemon (`fn-ignis-worker`, official HTTP APIs only) with interactive, hypothesis-driven strategic deep dives on-demand. Browser-driven channels run in the on-demand track, on your own machine with your own session — the worker image stays lean and needs no Chromium.
+- **🛡️ Shared YouTube Quota Guard**: Coordinates worker and MCP processes through one persistent daily ledger. By default, `search.list` has 100 calls per Pacific day; scheduled Track 1 stops at 70 so requested Track 2 retains at least 30, and requested work may borrow capacity Track 1 leaves unused. Provider exhaustion closes the affected bucket until reset; quota records, errors, logs, and diagnostics never contain the API key.
 - **📊 Mathematical Opportunity Index**: Quantifies market white spaces (+100 to -100) by mathematically comparing macro search demand velocity against localized content supply volume.
 - **🧾 Lossless Evidence Ledger**: Stores one canonical external source, every immutable collection
   observation, and the exact mission evidence that used it. Repeated polling cannot inflate source

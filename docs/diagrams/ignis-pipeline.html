@@ -41,10 +41,12 @@
      xmlns="http://www.w3.org/2000/svg">
   <title id="ignis-pipeline-title">fn-ignis ingress and analysis pipeline</title>
   <desc id="ignis-pipeline-desc">Role-scoped data flow across four lanes and six steps: an optional
-    radar discovers candidate topics and builds a capped probe-keyword budget, on-demand agent probes
-    and hand-triggered refreshes skip that gate, and a shared core stores signals, clusters them by
-    probe provenance, then hands scored topics to a quality gate and on to dossier and graph
-    artifacts.</desc>
+    radar discovers candidate topics and builds a capped probe-keyword budget; its YouTube calls
+    share a persistent ledger whose defaults are 100 search calls per Pacific day and a scheduled
+    Track 1 cap of 70.
+    On-demand agent probes and hand-triggered refreshes skip the ingress gate, and a shared core
+    stores signals, clusters them by probe provenance, then hands scored topics to a quality gate
+    and on to dossier and graph artifacts.</desc>
   <defs>
     <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
       <circle cx="11" cy="11" r="0.8" fill="rgba(11,11,23,0.10)"/>
@@ -144,8 +146,8 @@
   <rect x="262" y="48" width="18" height="10" rx="3" fill="rgba(11,11,23,0.12)"/>
   <text x="271" y="55" font-family="'JetBrains Mono',monospace" font-size="6" font-weight="600" fill="#5B5B79" text-anchor="middle">RDR</text>
   <text x="308" y="67" font-family="'Space Grotesk',sans-serif" font-size="9" font-weight="600" fill="#0B0B17" text-anchor="middle">Probe Budget</text>
-  <text x="308" y="79" font-family="'JetBrains Mono',monospace" font-size="6.5" fill="#5B5B79" text-anchor="middle">lexicon ⊕ discovered</text>
-  <text x="308" y="91" font-family="'JetBrains Mono',monospace" font-size="6.5" fill="#8B8BA6" text-anchor="middle">cap 10 · 1 call/query</text>
+  <text x="308" y="79" font-family="'JetBrains Mono',monospace" font-size="6.5" fill="#5B5B79" text-anchor="middle">YT default · 100/PT day</text>
+  <text x="308" y="91" font-family="'JetBrains Mono',monospace" font-size="6.5" fill="#8B8BA6" text-anchor="middle">T1 70 · request ≥30</text>
   <rect x="262" y="98" width="16" height="8" rx="3" fill="#6e6479"/>
   <text x="270" y="104" font-family="'JetBrains Mono',monospace" font-size="5" font-weight="700" fill="#fff" text-anchor="middle">WB</text>
   <rect x="338" y="98" width="16" height="8" rx="3" fill="#4a7c59"/>

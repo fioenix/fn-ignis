@@ -2,6 +2,7 @@
 
 [![FINOLABS Project](https://img.shields.io/badge/FINOLABS-Open%20Source-orange.svg)](https://finolabs.io)
 [![CI](https://github.com/fioenix/fn-ignis/actions/workflows/ci.yml/badge.svg)](https://github.com/fioenix/fn-ignis/actions)
+[![Latest Release](https://img.shields.io/github/v/release/fioenix/fn-ignis?label=release)](https://github.com/fioenix/fn-ignis/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%E2%80%93%203.14-blue.svg)](https://www.python.org/downloads/)
 [![MCP](https://img.shields.io/badge/MCP-Standard%20FastMCP-purple.svg)](https://modelcontextprotocol.io/)
@@ -19,6 +20,7 @@
 
 - **⚡ Cào Dữ liệu Cục bộ $0 Token**: Thu thập, lọc và chuẩn hóa dữ liệu lớn cục bộ bằng các bộ parser Python xác định mà không làm hao tốn token API LLM đắt đỏ.
 - **🏛️ Kiến trúc Dual-Track**: Kết hợp daemon radar nền chạy 24/7 (`fn-ignis-worker` — tùy chọn, chỉ dùng API chính thống) với các đợt nghiên cứu chiến lược chuyên sâu theo giả thuyết khi cần. Các kênh phải điều khiển browser thuộc track theo yêu cầu, chạy trên máy bạn với session của bạn — nhờ vậy image worker vẫn gọn, không cần Chromium.
+- **🛡️ Bộ bảo vệ quota YouTube dùng chung**: Phối hợp worker và các tiến trình MCP qua một ledger quota bền vững theo ngày. Theo mặc định, `search.list` có 100 lượt gọi mỗi ngày theo giờ Thái Bình Dương; Track 1 chạy theo lịch dừng ở 70 để Track 2 theo yêu cầu luôn còn ít nhất 30, và Track 2 có thể dùng phần quota Track 1 chưa sử dụng. Khi nhà cung cấp báo cạn quota, hệ thống đóng bucket tương ứng đến lần reset tiếp theo; bản ghi quota, lỗi, log và kết quả chẩn đoán không bao giờ chứa API key.
 - **📊 Chỉ số Cơ hội Toán học (Opportunity Index)**: Định lượng khoảng trống thị trường (+100 đến -100) bằng tương quan toán học giữa tốc độ tăng trưởng nhu cầu tìm kiếm vĩ mô và khối lượng cung cấp nội dung bản địa.
 - **🧾 Evidence Ledger không mất dữ liệu**: Lưu một canonical source cho mỗi object bên ngoài, mọi
   observation thu thập bất biến, và đúng evidence mà từng mission đã dùng. Poll lặp không làm tăng
