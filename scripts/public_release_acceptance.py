@@ -15,7 +15,7 @@ Every surface is recorded in one of five states, and the difference between them
     MISSING     the owning surface positively says the object or the access is absent
     FAILED      the artifact was obtained and violated its behavioral contract
     UNREADABLE  the fact could not be observed (network, auth scope, missing tool, not attempted)
-    DEFERRED    policy excludes a non-required surface -- PyPI for v0.6.0
+    DEFERRED    policy excludes a non-required surface -- PyPI for this release
 
 The verdict is derived, never typed: RELEASED only when every required surface is VERIFIED;
 INDETERMINATE when any is UNREADABLE; NOT_RELEASED when something is proven missing or failed.
@@ -26,11 +26,11 @@ Anonymous distribution and authenticated provenance are separate observations. T
 paths run with an allowlisted environment and no credential; attestation verification needs the
 release owner's registry authentication and is recorded as its own surface.
 
-    python scripts/public_release_acceptance.py source --version 0.6.0 \\
+    python scripts/public_release_acceptance.py source --version 0.7.0 \\
         --repository https://github.com/fioenix/fn-ignis.git --expected-commit <sha>
-    python scripts/public_release_acceptance.py container --version 0.6.0 \\
+    python scripts/public_release_acceptance.py container --version 0.7.0 \\
         --image ghcr.io/fioenix/fn-ignis
-    python scripts/public_release_acceptance.py all --version 0.6.0 ... --json-output <path>
+    python scripts/public_release_acceptance.py all --version 0.7.0 ... --json-output <path>
 """
 
 from __future__ import annotations

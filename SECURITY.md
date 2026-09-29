@@ -6,8 +6,8 @@ The following versions of `fn-ignis` are currently supported with security updat
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.6.x   | :white_check_mark: |
-| < 0.6   | :x:                |
+| 0.7.x   | :white_check_mark: |
+| < 0.7   | :x:                |
 
 `fn-ignis` is a beta (`0.x`). Only the current minor line receives security updates; older lines
 are not backported.

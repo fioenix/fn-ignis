@@ -201,7 +201,7 @@ def pypi_claim_offenders(surfaces=PUBLIC_INSTALL_SURFACES) -> list[str]:
 
 
 def test_no_public_surface_claims_a_pypi_package():
-    """PyPI is deferred for v0.6.0; a manifest naming it points clients at nothing."""
+    """PyPI is deferred; a manifest naming it points clients at nothing."""
     offenders = pypi_claim_offenders()
     assert not offenders, (
         "PyPI publication is deferred, yet these surfaces offer it:\n" + "\n".join(offenders)
@@ -257,10 +257,10 @@ def test_every_release_version_carrier_agrees():
     )
 
 
-# The release this branch prepares (Plan 009) and the date of the release before it. Both move with
+# The release this branch prepares and the date of the release before it. Both move with
 # the next version bump, in the same commit as the carriers themselves.
-RELEASE_CANDIDATE = "0.6.0"
-PREVIOUS_RELEASE_DATE = "2026-09-25"
+RELEASE_CANDIDATE = "0.7.0"
+PREVIOUS_RELEASE_DATE = "2026-09-28"
 
 
 def test_every_carrier_names_the_release_candidate():
@@ -493,7 +493,7 @@ def test_the_release_tag_must_match_the_checked_out_project_before_login():
 
     step = steps[gate]
     assert step.get("env", {}).get("REF_NAME") == "${{ github.ref_name }}", step.get("env")
-    for ref_name, accepted in (("v0.6.0", True), ("v0.6.1", False)):
+    for ref_name, accepted in ((f"v{RELEASE_CANDIDATE}", True), ("v0.7.1", False)):
         completed = subprocess.run(
             ["bash", "-c", step["run"]],
             cwd=REPO,
