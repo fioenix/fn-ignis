@@ -12,6 +12,7 @@ import pytest
 
 from ignis.domain.value_objects import IngestRuntime
 from ignis.interfaces.cli.scheduler import build_connector_registry
+from pydantic import SecretStr
 
 
 def _names(registry):
@@ -84,3 +85,17 @@ async def test_a_connector_that_cannot_answer_is_kept_rather_than_dropped(reposi
     registry, _ = await build_connector_registry(repository, browser_available=False)
 
     assert "Google Trends Intelligence" in _names(registry)
+
+
+@pytest.mark.asyncio
+async def test_worker_youtube_connector_uses_the_shared_repository_quota_manager(
+    repository, monkeypatch
+):
+    from ignis.interfaces.cli import scheduler
+
+    monkeypatch.setattr(scheduler.settings, "YOUTUBE_API_KEY", SecretStr("test-key"))
+    registry, _ = await build_connector_registry(repository, browser_available=False)
+
+    plugin = registry.get_plugin_by_id("youtube")
+    assert plugin is not None
+    assert plugin._quota_manager._repository is repository

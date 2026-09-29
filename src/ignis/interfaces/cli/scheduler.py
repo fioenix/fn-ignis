@@ -10,7 +10,7 @@ from ignis.application.use_cases.ingest_trends import (
     quota_safe_interval_seconds,
 )
 from ignis.config import reveal_secret, settings
-from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope
+from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, IngressTrigger
 from ignis.infrastructure.auth.meta_browser_auth import (
     InstagramBrowserAuthManager,
     ThreadsBrowserAuthManager,
@@ -36,6 +36,8 @@ from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.application.ports.connector_port import IConnectorPlugin
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.application.youtube_quota import YouTubeQuotaManager
+from ignis.domain.youtube_quota import YouTubeQuotaPolicy
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
@@ -112,7 +114,21 @@ async def build_connector_registry(
         ),
     ]
     if reveal_secret(settings.YOUTUBE_API_KEY):
-        candidates.append(YouTubeDataPlugin(api_key=reveal_secret(settings.YOUTUBE_API_KEY)))
+        candidates.append(
+            YouTubeDataPlugin(
+                api_key=reveal_secret(settings.YOUTUBE_API_KEY),
+                quota_manager=YouTubeQuotaManager(
+                    repository,
+                    YouTubeQuotaPolicy(
+                        search_daily_limit=settings.YOUTUBE_SEARCH_DAILY_LIMIT,
+                        scheduled_search_daily_limit=(
+                            settings.YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT
+                        ),
+                        other_daily_unit_limit=settings.YOUTUBE_OTHER_DAILY_UNIT_LIMIT,
+                    ),
+                ),
+            )
+        )
 
     registry = ConnectorPluginRegistry(repository=repository)
     skipped: List[Dict[str, str]] = []
@@ -190,7 +206,10 @@ class IngressScheduler:
     async def run_discovery_cycle(self, discovery_use_case: AutonomousDiscoveryUseCase):
         logger.info(f"Starting scheduled Autonomous Discovery cycle for geo={self.geo.value}...")
         try:
-            result = await discovery_use_case.execute(geo=self.geo)
+            result = await discovery_use_case.execute(
+                geo=self.geo,
+                trigger=IngressTrigger.SCHEDULED,
+            )
             logger.info(
                 f"Autonomous Discovery completed: [{result.get('shortcode')}] "
                 f"Total Signals: {result.get('total_signals')}, "
@@ -227,11 +246,14 @@ class IngressScheduler:
         self._running = True
         logger.info(f"Starting fn-ignis Worker Scheduler (Ingress: {self.interval_seconds}s, Discovery: {self.discovery_interval_seconds}s, Health: {self.health_check_interval_seconds}s)...")
 
-        quota_safe = quota_safe_interval_seconds()
+        quota_safe = quota_safe_interval_seconds(
+            scheduled_search_daily_limit=settings.YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT
+        )
         if self.interval_seconds < quota_safe:
             logger.warning(
-                f"Ingress interval {self.interval_seconds}s spends the daily YouTube search "
-                f"quota before the day ends; probes will start failing. Set "
+                f"Ingress interval {self.interval_seconds}s requests more than the scheduled "
+                f"YouTube search allocation before the day ends; the shared quota ledger will "
+                f"refuse excess probes. Set "
                 f"SCHEDULER_INTERVAL_SECONDS to {quota_safe} or more, or raise the project's "
                 f"quota allowance."
             )
@@ -368,4 +390,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

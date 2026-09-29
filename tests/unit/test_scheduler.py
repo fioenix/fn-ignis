@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from ignis.interfaces.cli.scheduler import IngressScheduler
-from ignis.domain.value_objects import GeoCode
+from ignis.domain.value_objects import GeoCode, IngressTrigger
 
 
 @pytest.mark.asyncio
@@ -45,6 +45,20 @@ async def test_scheduler_health_probe_cycle():
     call_args = mock_repo.log_event.call_args[1]
     assert call_args["event_type"] == "CONNECTOR_HEALTH_CHECK"
     assert call_args["level"] == "INFO"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_marks_autonomous_discovery_as_scheduled():
+    scheduler = IngressScheduler(interval_seconds=1, geo=GeoCode.VN)
+    discovery = AsyncMock()
+    discovery.execute.return_value = {}
+
+    await scheduler.run_discovery_cycle(discovery)
+
+    assert discovery.execute.call_args.kwargs == {
+        "geo": GeoCode.VN,
+        "trigger": IngressTrigger.SCHEDULED,
+    }
 
 
 @pytest.mark.parametrize(

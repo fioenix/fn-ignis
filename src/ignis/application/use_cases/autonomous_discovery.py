@@ -8,7 +8,7 @@ from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.harness_models import HarnessResearchReport
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngressTrigger, PlatformType, Timeframe
 from ignis.application.use_cases.ingest_trends import MAX_SEED_KEYWORDS
 from ignis.infrastructure.config.vocabulary_loader import (
     MACHINERY_DOMAINS,
@@ -78,6 +78,7 @@ class AutonomousDiscoveryUseCase:
         max_macro_topics: int = 5,
         max_videos_per_topic: int = 3,
         comments_limit: int = 20,
+        trigger: IngressTrigger = IngressTrigger.REQUESTED,
     ) -> Dict[str, Any]:
         """
         Execute a full autonomous discovery cycle for the target geography.
@@ -202,6 +203,7 @@ class AutonomousDiscoveryUseCase:
                 geo=geo,
                 timeframe=Timeframe.LAST_7D,
                 limit=30,
+                trigger=trigger,
             )
             # Bind signals to mission
             for s in ingested_signals:

@@ -3,7 +3,7 @@
 Plan 009 makes two distribution paths public: a tagged source checkout bootstrapped with one
 command, and an OCI image on GHCR. Before it, the tracked surfaces disagreed with the runtime and
 with each other: current guidance claimed 39 or 45 MCP tools while the server exposed 47, install
-guidance stopped at migration `022` while `023` shipped, `server.json` advertised a PyPI package
+guidance stopped at migration `023` while `024` shipped, `server.json` advertised a PyPI package
 that was never published, and the image defaulted to the scheduler worker while the manifest
 declared an MCP stdio server.
 
@@ -1851,10 +1851,10 @@ NEGATIVE_CONTROLS = (
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
     ("user guide category sum", "docs/USER_GUIDE.md", r"\(10 Tools\)", "(9 Tools)",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("README fresh-init endpoint", "README.md", r"verified through `023`", "verified through `022`",
+    ("README fresh-init endpoint", "README.md", r"verified through `024`", "verified through `023`",
      "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
-    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/023_evidence_qualification\.sql`",
-     "`sql/022_builtin_uuid_defaults.sql`", "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
+    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/024_youtube_quota_ledger\.sql`",
+     "`sql/023_evidence_qualification.sql`", "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
     ("PyPI install claim", "README.md", r"^(## ⚡ Quickstart & Installation)$", r"\1\n\npip install fn-ignis\n",
      "test_no_public_surface_claims_a_pypi_package"),
     ("PyPI package in server.json", "server.json", r'"registryType": "oci"', '"registryType": "pypi"',

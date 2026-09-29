@@ -212,6 +212,124 @@ def test_the_server_wires_one_synchronizer_into_mission_ingress(monkeypatch):
     assert comp["registry"].get_plugin_by_id("tiktok_video_grid") is comp["tiktok_plugin"]
 
 
+def test_the_server_wires_youtube_to_the_shared_repository_quota_manager(monkeypatch):
+    from pydantic import SecretStr
+
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = SqliteTrendRepository("sqlite:///:memory:")
+    monkeypatch.setattr(mcp_server, "create_repository", lambda: repository)
+    monkeypatch.setattr(mcp_server.settings, "YOUTUBE_API_KEY", SecretStr("test-key"))
+
+    comp = mcp_server._init_components()
+    plugin = comp["registry"].get_plugin_by_id("youtube")
+
+    assert plugin._quota_manager._repository is repository
+
+
+@pytest.mark.asyncio
+async def test_connector_health_exposes_secret_free_youtube_quota_state():
+    import json
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from ignis.domain.value_objects import PlatformType
+    from ignis.interfaces.mcp.server import handle_verify_connectors_health
+
+    class YouTubePlugin:
+        name = "YouTube Data API v3"
+        platform = PlatformType.YOUTUBE
+        _api_key = "must-not-appear"
+
+        async def is_healthy(self):
+            return True
+
+        async def quota_status(self):
+            return {
+                "quota_day": "2026-09-29",
+                "next_reset_at": "2026-09-30T07:00:00+00:00",
+                "buckets": {
+                    "search_list": {
+                        "used": 70,
+                        "scheduled_used": 70,
+                        "limit": 100,
+                        "scheduled_limit": 70,
+                        "exhausted": False,
+                    },
+                    "default_units": {
+                        "used": 4,
+                        "scheduled_used": 0,
+                        "limit": 10_000,
+                        "scheduled_limit": None,
+                        "exhausted": False,
+                    },
+                },
+            }
+
+    repository = AsyncMock()
+    repository.get_domain_lexicons.return_value = []
+    repository.list_platform_credentials.return_value = []
+    registry = MagicMock()
+    registry._plugins = {"youtube": YouTubePlugin()}
+    registry._breakers = {}
+
+    with patch(
+        "ignis.interfaces.mcp.server.get_components",
+        return_value={"repository": repository, "registry": registry},
+    ):
+        raw = await handle_verify_connectors_health()
+
+    payload = json.loads(raw)
+    youtube = payload["connectors"]["YouTube Data API v3"]
+    assert youtube["quota"]["buckets"]["search_list"] == {
+        "used": 70,
+        "scheduled_used": 70,
+        "limit": 100,
+        "scheduled_limit": 70,
+        "exhausted": False,
+    }
+    assert "must-not-appear" not in raw
+
+
+@pytest.mark.asyncio
+async def test_connector_health_reads_quota_after_its_provider_probe():
+    from ignis.interfaces.mcp.server import handle_verify_connectors_health
+
+    class YouTubePlugin:
+        name = "YouTube Data API v3"
+        platform = PlatformType.YOUTUBE
+
+        def __init__(self):
+            self.used = 0
+
+        async def is_healthy(self):
+            self.used += 1
+            return True
+
+        async def quota_status(self):
+            return {
+                "quota_day": "2026-09-29",
+                "next_reset_at": "2026-09-30T07:00:00+00:00",
+                "buckets": {"default_units": {"used": self.used, "limit": 10_000}},
+            }
+
+    repository = AsyncMock()
+    repository.get_domain_lexicons.return_value = []
+    repository.list_platform_credentials.return_value = []
+    registry = MagicMock()
+    registry._plugins = {"youtube": YouTubePlugin()}
+    registry._breakers = {}
+
+    with patch(
+        "ignis.interfaces.mcp.server.get_components",
+        return_value={"repository": repository, "registry": registry},
+    ):
+        raw = await handle_verify_connectors_health()
+
+    youtube = json.loads(raw)["connectors"]["YouTube Data API v3"]
+    assert youtube["quota"]["buckets"]["default_units"]["used"] == 1
+
+
 @pytest.mark.asyncio
 async def test_execute_mission_ingress_synchronizes_before_any_connector_call_as_the_first_operation():
     from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase

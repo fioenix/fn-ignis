@@ -40,6 +40,7 @@ from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS, IngestTrendsUseCase
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.application.ports.repository_port import ITrendRepository
+from ignis.application.youtube_quota import YouTubeQuotaManager
 from ignis.domain.entities import TopicCluster
 from ignis.domain.exceptions import IgnisDomainException, VocabularySynchronizationError
 from ignis.domain.research_workspace import (
@@ -75,6 +76,7 @@ from ignis.domain.value_objects import (
     resolve_timeframe,
     timeframe_to_days,
 )
+from ignis.domain.youtube_quota import YouTubeQuotaPolicy
 
 from ignis.infrastructure.auth.meta_browser_auth import (
     InstagramBrowserAuthManager,
@@ -179,7 +181,21 @@ def _init_components():
     )
 
     if reveal_secret(settings.YOUTUBE_API_KEY):
-        registry.register(YouTubeDataPlugin(api_key=reveal_secret(settings.YOUTUBE_API_KEY)))
+        registry.register(
+            YouTubeDataPlugin(
+                api_key=reveal_secret(settings.YOUTUBE_API_KEY),
+                quota_manager=YouTubeQuotaManager(
+                    repository,
+                    YouTubeQuotaPolicy(
+                        search_daily_limit=settings.YOUTUBE_SEARCH_DAILY_LIMIT,
+                        scheduled_search_daily_limit=(
+                            settings.YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT
+                        ),
+                        other_daily_unit_limit=settings.YOUTUBE_OTHER_DAILY_UNIT_LIMIT,
+                    ),
+                ),
+            )
+        )
 
     clusterer = SemanticClusterer()
     artifact_builder = HtmlArtifactBuilder()
@@ -3031,6 +3047,8 @@ async def handle_verify_connectors_health() -> str:
     for plugin_id, plugin in registry._plugins.items():
         platform_value = plugin.platform.value if hasattr(plugin.platform, "value") else str(plugin.platform)
         breaker = registry._breakers.get(plugin_id)
+        quota_status = None
+        quota_reader = getattr(plugin, "quota_status", None)
 
         # Check credentials & expiry
         expires_at_str = None
@@ -3059,6 +3077,17 @@ async def handle_verify_connectors_health() -> str:
 
         try:
             is_ok = await plugin.is_healthy()
+            if callable(quota_reader):
+                try:
+                    candidate = await quota_reader()
+                    if isinstance(candidate, dict):
+                        quota_status = candidate
+                except Exception as quota_error:
+                    logger.warning(
+                        "Could not read quota status for %s (%s).",
+                        plugin.name,
+                        type(quota_error).__name__,
+                    )
             if is_ok:
                 # Check if synthetic probe capability exists and whether it returns empty
                 probe_status = "HEALTHY"
@@ -3113,6 +3142,7 @@ async def handle_verify_connectors_health() -> str:
                     "expires_at": expires_at_str,
                     "days_remaining": days_remaining,
                     "remediation": remediation,
+                    **({"quota": quota_status} if quota_status is not None else {}),
                 }
             else:
                 # Determine reason: missing config vs expired vs unhealthy
@@ -3152,6 +3182,7 @@ async def handle_verify_connectors_health() -> str:
                     "expires_at": expires_at_str,
                     "days_remaining": days_remaining,
                     "remediation": remediation,
+                    **({"quota": quota_status} if quota_status is not None else {}),
                 }
                 diagnostics["overall_status"] = "DEGRADED"
         except Exception as e:
@@ -3177,6 +3208,7 @@ async def handle_verify_connectors_health() -> str:
                 "expires_at": expires_at_str,
                 "days_remaining": days_remaining,
                 "remediation": "Check system logs or network access to diagnose connector failure.",
+                **({"quota": quota_status} if quota_status is not None else {}),
             }
             diagnostics["overall_status"] = "DEGRADED"
 
@@ -3306,9 +3338,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
 
 
 

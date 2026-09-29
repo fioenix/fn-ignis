@@ -137,7 +137,7 @@ Services started:
 - `fn-ignis-nginx`: Static HTML report server on port 8080.
 
 For a fresh database, the `db` container runs every file in `sql/` in filename order on its first
-start and only then reports healthy; this is verified through `023` on
+start and only then reports healthy; this is verified through `024` on
 `timescale/timescaledb-ha:pg16`. Every table the chain creates in `public` has row-level security
 on. On a server that has the Supabase roles `anon` and `authenticated`, `006` adds their read-only
 policies on `market_lexicons` and `industry_taxonomies`, and `021` revokes every other privilege
@@ -145,8 +145,9 @@ they hold on the chain's tables; no migration creates a role. The init scripts r
 data volume is empty. Apply every missing migration in filename order, connected as the table
 owner: a database initialised before `021` needs `sql/021_public_schema_rls_coverage.sql`, any
 database initialised before `022` needs `sql/022_builtin_uuid_defaults.sql`, and any database
-initialised before `023` needs `sql/023_evidence_qualification.sql`. Running any of these files
-again changes nothing. For an existing PostgreSQL corpus, do not start the new worker immediately
+initialised before `023` needs `sql/023_evidence_qualification.sql`. A database initialised before
+`024` also needs `sql/024_youtube_quota_ledger.sql`; it stores quota counters, never the API key.
+Running any of these files again changes nothing. For an existing PostgreSQL corpus, do not start the new worker immediately
 after deploying its artifact. Follow the canonical
 [source/observation production cutover](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
 quiesce the old runtime, snapshot, generate a baseline from that exact snapshot, apply `sql/016`,
@@ -243,6 +244,9 @@ All settings can be placed in `.env` at the project root:
 | `DATABASE_URL` | String | `sqlite:///ignis.db` | Connection string (`sqlite:///...` or `postgresql://user:pass@host:5432/db`) |
 | `IGNIS_ENCRYPTION_KEY` | String | Auto-generated | 32-byte url-safe Fernet key for encrypting social platform credentials |
 | `YOUTUBE_API_KEY` | String | Optional | Official YouTube Data API v3 key |
+| `YOUTUBE_SEARCH_DAILY_LIMIT` | Integer | `100` | Total daily `search.list` calls available to this installation |
+| `YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT` | Integer | `70` | Track 1 daily ceiling; requested work uses the remaining capacity and may borrow unused scheduled capacity |
+| `YOUTUBE_OTHER_DAILY_UNIT_LIMIT` | Integer | `10000` | Shared daily units for YouTube endpoints other than `search.list` |
 | `TIKTOK_SESSION_ID` | String | Optional | TikTok session cookie for deep video & comment scraping |
 | `THREADS_APP_ID` | String | Optional | Meta Developer App ID for official Threads Graph API |
 | `THREADS_APP_SECRET`| String | Optional | Meta Developer App Secret |

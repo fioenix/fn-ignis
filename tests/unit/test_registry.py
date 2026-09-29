@@ -14,7 +14,7 @@ import pytest
 from ignis.application.ports.connector_port import IConnectorPlugin
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngressTrigger, PlatformType, Timeframe
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 
 
@@ -88,6 +88,27 @@ class GooglePlugin(_BasePlugin):
 class FailingGridPlugin(VideoGridPlugin):
     async def fetch_signals(self, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=50) -> List[TrendSignal]:
         raise ConnectorExecutionException("boom")
+
+
+class TriggerAwareVideoGrid(VideoGridPlugin):
+    def __init__(self):
+        super().__init__()
+        self.triggers = []
+
+    @property
+    def feed_yields_candidate_topics(self):
+        return False
+
+    async def search_signals(
+        self,
+        keywords,
+        geo=GeoCode.VN,
+        timeframe=Timeframe.LAST_24H,
+        limit=20,
+        trigger=IngressTrigger.REQUESTED,
+    ):
+        self.triggers.append(trigger)
+        return await super().search_signals(keywords, geo=geo, timeframe=timeframe, limit=limit)
 
 
 def _registry(*plugins, repository=None) -> ConnectorPluginRegistry:
@@ -178,6 +199,32 @@ async def test_search_across_all_reaches_the_tiktok_video_grid():
     assert grid.search_calls == [["ai agent"]]
     assert google.search_calls == [["ai agent"]]
     assert {s.raw_title for s in signals} == {"grid: ai agent", "google: ai agent"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_from_all_forwards_scheduled_identity_to_keyword_probes():
+    plugin = TriggerAwareVideoGrid()
+    registry = _registry(plugin)
+
+    await registry.fetch_from_all(
+        seed_keywords=["ai agent"],
+        trigger=IngressTrigger.SCHEDULED,
+    )
+
+    assert plugin.triggers == [IngressTrigger.SCHEDULED]
+
+
+@pytest.mark.asyncio
+async def test_direct_search_forwards_requested_identity_to_keyword_probes():
+    plugin = TriggerAwareVideoGrid()
+    registry = _registry(plugin)
+
+    await registry.search_across_all(
+        keywords=["ai agent"],
+        trigger=IngressTrigger.REQUESTED,
+    )
+
+    assert plugin.triggers == [IngressTrigger.REQUESTED]
 
 
 @pytest.mark.asyncio
@@ -551,8 +598,11 @@ async def test_youtube_attests_the_published_after_window_it_sent_for_each_answe
         return empty
 
     attestation = SearchAttestation()
+    quota = AsyncMock()
     with patch("httpx.AsyncClient.get", side_effect=_get):
-        signals = await module.YouTubeDataPlugin(api_key="unit-test").search_signals(
+        signals = await module.YouTubeDataPlugin(
+            api_key="unit-test", quota_manager=quota
+        ).search_signals(
             keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_30D, attestation=attestation,
         )
 
@@ -569,8 +619,11 @@ async def test_youtube_attests_no_query_when_its_search_call_fails():
 
     module._YOUTUBE_QUERY_CACHE.clear()
     attestation = SearchAttestation()
+    quota = AsyncMock()
     with patch("httpx.AsyncClient.get", side_effect=RuntimeError("connection reset")):
-        await module.YouTubeDataPlugin(api_key="unit-test").search_signals(
+        await module.YouTubeDataPlugin(
+            api_key="unit-test", quota_manager=quota
+        ).search_signals(
             keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D, attestation=attestation,
         )
 

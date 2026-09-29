@@ -20,7 +20,28 @@ class ConnectorExecutionException(IgnisDomainException):
 
 class ConnectorQuotaExceededException(ConnectorExecutionException):
     """Upstream connector platform API quota exhausted."""
-    pass
+
+    def __init__(
+        self,
+        message: str = "YouTube API quota limit exceeded.",
+        *,
+        bucket: str | None = None,
+        used: int | None = None,
+        limit: int | None = None,
+        reset_at=None,
+        exhausted: bool = False,
+    ) -> None:
+        self.bucket = bucket
+        self.used = used
+        self.limit = limit
+        self.reset_at = reset_at
+        self.exhausted = exhausted
+        if bucket is not None and used is not None and limit is not None and reset_at is not None:
+            message = (
+                f"YouTube quota bucket '{bucket}' is unavailable: {used}/{limit} recorded; "
+                f"resets at {reset_at.isoformat()}."
+            )
+        super().__init__(message)
 
 
 class CircuitBreakerOpenException(ConnectorExecutionException):

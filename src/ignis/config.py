@@ -58,6 +58,21 @@ class Settings(BaseSettings):
 
     # Ingress Connectors & API Keys
     YOUTUBE_API_KEY: SecretStr = Field(default=SecretStr(""), description="YouTube Data API v3 Key")
+    YOUTUBE_SEARCH_DAILY_LIMIT: int = Field(
+        default=100,
+        ge=1,
+        description="Daily search.list call allocation for the configured YouTube project",
+    )
+    YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT: int = Field(
+        default=70,
+        ge=0,
+        description="Maximum daily search.list calls admitted for scheduled Track 1 work",
+    )
+    YOUTUBE_OTHER_DAILY_UNIT_LIMIT: int = Field(
+        default=10_000,
+        ge=1,
+        description="Daily shared unit allocation for YouTube endpoints other than search.list",
+    )
 
     # Meta Threads Graph API (Official OAuth 2.0)
     THREADS_APP_ID: str = Field(default="", description="Meta Threads App ID (client_id) for Graph API OAuth 2.0")
@@ -79,7 +94,7 @@ class Settings(BaseSettings):
     )
 
     # Scheduler Configuration
-    SCHEDULER_INTERVAL_SECONDS: int = Field(default=8640, description="Daemon scheduler tick interval in seconds; the default keeps one day of topic-coupled keyword probes inside YouTube's default quota")
+    SCHEDULER_INTERVAL_SECONDS: int = Field(default=8640, description="Daemon scheduler tick interval in seconds; the shared quota ledger refuses YouTube calls beyond configured daily allocations")
     DISCOVERY_INTERVAL_HOURS: int = Field(default=24, description="Interval in hours between autonomous discovery runs")
     SYNC_INTERVAL_MINUTES: int = Field(default=0, description="Optional override for ingress sync interval in minutes; 0 = fallback to SCHEDULER_INTERVAL_SECONDS")
 

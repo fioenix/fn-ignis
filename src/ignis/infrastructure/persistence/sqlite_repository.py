@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
@@ -47,12 +47,18 @@ from ignis.domain.source_identity import (
 )
 from ignis.domain.value_objects import (
     GeoCode,
+    IngressTrigger,
     PlatformType,
     Timeframe,
     resolve_geo,
     resolve_platform,
     resolve_timeframe,
     timeframe_to_days,
+)
+from ignis.domain.youtube_quota import (
+    YouTubeQuotaBucket,
+    YouTubeQuotaReservation,
+    YouTubeQuotaUsage,
 )
 
 from ignis.domain.exceptions import RepositoryException
@@ -131,6 +137,154 @@ class SqliteTrendRepository(ITrendRepository):
         if self._mem_conn is not None:
             self._mem_conn.close()
             self._mem_conn = None
+
+    @staticmethod
+    def _youtube_quota_usage_from_row(row) -> YouTubeQuotaUsage:
+        return YouTubeQuotaUsage(
+            quota_day=date.fromisoformat(row["quota_day"]),
+            bucket=YouTubeQuotaBucket(row["bucket"]),
+            used=int(row["used"]),
+            scheduled_used=int(row["scheduled_used"]),
+            exhausted=bool(row["exhausted"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    async def reserve_youtube_quota(
+        self,
+        quota_day: date,
+        bucket: YouTubeQuotaBucket,
+        cost: int,
+        trigger: IngressTrigger,
+        daily_limit: int,
+        scheduled_limit: Optional[int],
+        now: datetime,
+    ) -> YouTubeQuotaReservation:
+        await self._ensure_schema()
+
+        def _sync_reserve() -> YouTubeQuotaReservation:
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT quota_day, bucket, used, scheduled_used, exhausted, updated_at"
+                    " FROM youtube_quota_buckets WHERE quota_day = ? AND bucket = ?",
+                    (quota_day.isoformat(), bucket.value),
+                ).fetchone()
+                used = int(row["used"]) if row else 0
+                scheduled_used = int(row["scheduled_used"]) if row else 0
+                exhausted = bool(row["exhausted"]) if row else False
+                scheduled_cost = cost if trigger == IngressTrigger.SCHEDULED else 0
+                admitted = (
+                    not exhausted
+                    and used + cost <= daily_limit
+                    and (
+                        scheduled_limit is None
+                        or scheduled_used + scheduled_cost <= scheduled_limit
+                    )
+                )
+                if admitted:
+                    stamp = now.astimezone(timezone.utc).isoformat()
+                    conn.execute(
+                        "INSERT INTO youtube_quota_buckets"
+                        " (quota_day, bucket, used, scheduled_used, exhausted, created_at, updated_at)"
+                        " VALUES (?, ?, ?, ?, 0, ?, ?)"
+                        " ON CONFLICT (quota_day, bucket) DO UPDATE SET"
+                        " used = youtube_quota_buckets.used + excluded.used,"
+                        " scheduled_used = youtube_quota_buckets.scheduled_used + excluded.scheduled_used,"
+                        " updated_at = excluded.updated_at",
+                        (
+                            quota_day.isoformat(),
+                            bucket.value,
+                            cost,
+                            scheduled_cost,
+                            stamp,
+                            stamp,
+                        ),
+                    )
+                    row = conn.execute(
+                        "SELECT quota_day, bucket, used, scheduled_used, exhausted, updated_at"
+                        " FROM youtube_quota_buckets WHERE quota_day = ? AND bucket = ?",
+                        (quota_day.isoformat(), bucket.value),
+                    ).fetchone()
+                conn.commit()
+                usage = (
+                    self._youtube_quota_usage_from_row(row)
+                    if row
+                    else YouTubeQuotaUsage(
+                        quota_day=quota_day,
+                        bucket=bucket,
+                        used=0,
+                        scheduled_used=0,
+                        exhausted=False,
+                        updated_at=now,
+                    )
+                )
+                return YouTubeQuotaReservation(admitted=admitted, usage=usage)
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        async with self._lock:
+            return await asyncio.to_thread(_sync_reserve)
+
+    async def mark_youtube_quota_exhausted(
+        self,
+        quota_day: date,
+        bucket: YouTubeQuotaBucket,
+        now: datetime,
+    ) -> YouTubeQuotaUsage:
+        await self._ensure_schema()
+
+        def _sync_mark() -> YouTubeQuotaUsage:
+            conn = self._get_connection()
+            stamp = now.astimezone(timezone.utc).isoformat()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "INSERT INTO youtube_quota_buckets"
+                    " (quota_day, bucket, used, scheduled_used, exhausted, created_at, updated_at)"
+                    " VALUES (?, ?, 0, 0, 1, ?, ?)"
+                    " ON CONFLICT (quota_day, bucket) DO UPDATE SET exhausted = 1,"
+                    " updated_at = excluded.updated_at",
+                    (quota_day.isoformat(), bucket.value, stamp, stamp),
+                )
+                row = conn.execute(
+                    "SELECT quota_day, bucket, used, scheduled_used, exhausted, updated_at"
+                    " FROM youtube_quota_buckets WHERE quota_day = ? AND bucket = ?",
+                    (quota_day.isoformat(), bucket.value),
+                ).fetchone()
+                conn.commit()
+                return self._youtube_quota_usage_from_row(row)
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        async with self._lock:
+            return await asyncio.to_thread(_sync_mark)
+
+    async def get_youtube_quota_usage(self, quota_day: date) -> List[YouTubeQuotaUsage]:
+        await self._ensure_schema()
+
+        def _sync_get() -> List[YouTubeQuotaUsage]:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT quota_day, bucket, used, scheduled_used, exhausted, updated_at"
+                    " FROM youtube_quota_buckets WHERE quota_day = ? ORDER BY bucket",
+                    (quota_day.isoformat(),),
+                ).fetchall()
+                return [self._youtube_quota_usage_from_row(row) for row in rows]
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_get)
 
     def _get_connection(self) -> sqlite3.Connection:
 
@@ -379,6 +533,21 @@ class SqliteTrendRepository(ITrendRepository):
                 updated_by TEXT DEFAULT 'system',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+
+            -- The PostgreSQL table added by sql/024_youtube_quota_ledger.sql. One aggregate row
+            -- per Pacific-Time day and provider bucket is enough for atomic admission and keeps
+            -- credentials out of the ledger.
+            CREATE TABLE IF NOT EXISTS youtube_quota_buckets (
+                quota_day TEXT NOT NULL,
+                bucket TEXT NOT NULL CHECK (bucket IN ('search_list', 'default_units')),
+                used INTEGER NOT NULL DEFAULT 0,
+                scheduled_used INTEGER NOT NULL DEFAULT 0,
+                exhausted INTEGER NOT NULL DEFAULT 0 CHECK (exhausted IN (0, 1)),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (quota_day, bucket),
+                CHECK (used >= 0 AND scheduled_used >= 0 AND scheduled_used <= used)
             );
 
             -- The five entities sql/017_research_workspace.sql creates on Postgres. SQLite does

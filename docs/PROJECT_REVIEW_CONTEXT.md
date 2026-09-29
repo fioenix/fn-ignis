@@ -101,11 +101,11 @@ old one was checked.
   tool count re-verified 28/09/2026).
   The dual-track model, the two-stage ingress, and the evidence store it writes into.
 - `docs/diagrams/ignis-source-map.{png,svg,html}` — **where the data comes from** (footer verified
-  16/09/2026). Six connectors grouped by the runtime each needs, which is what decides whether the
+  29/09/2026). Six connectors grouped by the runtime each needs, which is what decides whether the
   unattended worker can register it, with the credential each wants and whether it discovers topics
   or answers keyword probes.
 - `docs/diagrams/ignis-pipeline.{png,svg,html}` — **how a signal becomes a dossier** (footer
-  verified 17/09/2026; tool count re-verified 28/09/2026). Lane-scoped flow from discovery through the quality gate to the artifact.
+  verified 29/09/2026; tool count re-verified 28/09/2026). Lane-scoped flow from discovery through the quality gate to the artifact.
 
 A fourth diagram, a tool-by-tool call trace of one session, was retired on 14/09/2026. It
 documented a defect fixed on 10/09 — `trigger_ingress_refresh` took no timeframe, so every
