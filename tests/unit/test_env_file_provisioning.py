@@ -25,6 +25,19 @@ def test_created_file_matches_the_scheduler_default_in_settings(tmp_path):
     assert interval == Settings.model_fields["SCHEDULER_INTERVAL_SECONDS"].default
 
 
+def test_created_file_carries_the_shared_youtube_quota_defaults(tmp_path):
+    ensure_environment_file(tmp_path)
+
+    text = (tmp_path / ".env").read_text(encoding="utf-8")
+    for setting in (
+        "YOUTUBE_SEARCH_DAILY_LIMIT",
+        "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT",
+        "YOUTUBE_OTHER_DAILY_UNIT_LIMIT",
+    ):
+        expected = Settings.model_fields[setting].default
+        assert f"{setting}={expected}" in text
+
+
 def test_created_file_carries_a_usable_fernet_key(tmp_path):
     ensure_environment_file(tmp_path)
 

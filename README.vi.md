@@ -258,7 +258,7 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 Khi volume dữ liệu còn trống, container `db` chạy mọi file trong `sql/` theo thứ tự tên file rồi
-mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `023` trên
+mới chuyển sang healthy. Đường khởi tạo này đã được kiểm chứng tới `024` trên
 `timescale/timescaledb-ha:pg16`. Mọi bảng mà chuỗi migration tạo trong `public` đều bật
 row-level security. Nếu server đã có hai role Supabase là `anon` và `authenticated`, `006` cho hai
 role này policy chỉ đọc trên `market_lexicons` và `industry_taxonomies`, còn `021` thu hồi mọi quyền
@@ -267,8 +267,9 @@ script init khi volume đã có dữ liệu. Hãy dùng kết nối của chủ 
 thiếu theo thứ tự tên file: database khởi tạo trước `021` cần chạy
 `sql/021_public_schema_rls_coverage.sql`, database khởi tạo trước `022` cần chạy
 `sql/022_builtin_uuid_defaults.sql`, còn database khởi tạo trước `023` cần chạy
-`sql/023_evidence_qualification.sql`. Chạy lại bất kỳ file nào trong số này cũng không làm thay
-đổi gì.
+`sql/023_evidence_qualification.sql`. Database khởi tạo trước `024` còn cần chạy
+`sql/024_youtube_quota_ledger.sql`; migration này thêm ledger quota YouTube dùng chung và không
+lưu API key. Chạy lại bất kỳ file nào trong số này cũng không làm thay đổi gì.
 
 > Installation PostgreSQL đã có corpus legacy trong `trend_signals` phải chạy
 > [production cutover source/observation](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
@@ -314,8 +315,11 @@ PyPI.
 |---|---|---|:---:|
 | `DATABASE_URL` | Chuỗi kết nối SQLite (`sqlite:///ignis.db`) hoặc PostgreSQL/TimescaleDB | `sqlite:///ignis.db` | **Có** |
 | `YOUTUBE_API_KEY` | Google Cloud YouTube Data API v3 Key | `""` | Tùy chọn |
+| `YOUTUBE_SEARCH_DAILY_LIMIT` | Tổng số lượt gọi `search.list` mỗi ngày dành cho installation này | `100` | Không |
+| `YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT` | Trần `search.list` mỗi ngày cho Track 1; phần requested dùng phần còn lại và có thể mượn phần scheduled chưa dùng | `70` | Không |
+| `YOUTUBE_OTHER_DAILY_UNIT_LIMIT` | Quỹ unit dùng chung mỗi ngày cho các endpoint YouTube ngoài `search.list` | `10000` | Không |
 | `DEFAULT_GEO` | Mã quốc gia ISO mặc định cho nghiên cứu xu hướng | `VN` | Không |
-| `SCHEDULER_INTERVAL_SECONDS` | Nhịp chạy ingress của worker, tính bằng giây. Mặc định suy ra từ quota YouTube: 10 từ khoá x 100 unit nên một ngày chỉ đủ 10 lượt | `8640` (~2,4 giờ) | Không |
+| `SCHEDULER_INTERVAL_SECONDS` | Nhịp chạy ingress của worker; ledger dùng chung từ chối call vượt quota scheduled mà không đổi cadence này | `8640` (~2,4 giờ) | Không |
 | `DISCOVERY_INTERVAL_HOURS` | Khoảng cách giữa các đợt tự động quét toàn diện (giờ) | `24` (hàng ngày) | Không |
 | `SYNC_INTERVAL_MINUTES` | Tùy chọn ghi đè chu kỳ đồng bộ ingress (phút; 0 = dùng SCHEDULER_INTERVAL_SECONDS) | `0` | Không |
 | `YOUTUBE_CACHE_TTL_SECONDS` | Thời gian cache kết quả tìm kiếm YouTube để bảo vệ quota API | `86400` (24h) | Không |

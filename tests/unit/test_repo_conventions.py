@@ -312,6 +312,23 @@ def test_no_qualification_table_can_store_a_prompt_transcript_or_model_reasoning
     )
 
 
+def test_youtube_quota_ledger_enables_rls_and_cannot_store_credentials():
+    migration = _strip_sql_comments(
+        (SQL / "024_youtube_quota_ledger.sql").read_text(encoding="utf-8")
+    )
+    tables = {
+        block.split("(", 1)[0].strip(): block
+        for block in _CREATE_TABLE.findall(migration)
+    }
+
+    ledger = tables.get("youtube_quota_buckets")
+    assert ledger is not None, "migration 024 does not declare the shared quota ledger"
+    assert "ALTER TABLE public.youtube_quota_buckets ENABLE ROW LEVEL SECURITY" in migration
+    assert not re.search(r"\b(api_key|secret|token|credential)s?\b", ledger, re.IGNORECASE), (
+        "the quota ledger must store counters only, never credential material"
+    )
+
+
 def test_the_decision_grade_modules_hold_no_domain_vocabulary():
     """Relevance is judged by the host Agent, never by a keyword list shipped in the policy code."""
     modules = (

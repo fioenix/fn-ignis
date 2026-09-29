@@ -30,6 +30,21 @@
           "isSecret": true
         },
         {
+          "name": "YOUTUBE_SEARCH_DAILY_LIMIT",
+          "description": "Total daily search.list calls available to this fn-ignis installation. Defaults to 100.",
+          "isRequired": false
+        },
+        {
+          "name": "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT",
+          "description": "Daily search.list ceiling for scheduled Track 1 work. Defaults to 70; requested work can use the remaining capacity and borrow unused scheduled capacity.",
+          "isRequired": false
+        },
+        {
+          "name": "YOUTUBE_OTHER_DAILY_UNIT_LIMIT",
+          "description": "Shared daily units for YouTube endpoints other than search.list. Defaults to 10000.",
+          "isRequired": false
+        },
+        {
           "name": "DEFAULT_GEO",
           "description": "Default ISO-3166 region code (e.g. VN, US, JP, SG)",
           "isRequired": false

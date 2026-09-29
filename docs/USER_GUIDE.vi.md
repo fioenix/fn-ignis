@@ -150,7 +150,7 @@ docker compose -f docker-compose.prod.yml ps
 Sau khi khởi chạy, bạn có thể mở trình duyệt truy cập `http://localhost:53080/` để xem danh sách các báo cáo HTML đã xuất bản.
 
 Với database mới, container `db` chạy mọi file trong `sql/` theo thứ tự tên file ở lần khởi động
-đầu tiên rồi mới chuyển sang healthy; điều này đã được kiểm chứng tới `023` trên
+đầu tiên rồi mới chuyển sang healthy; điều này đã được kiểm chứng tới `024` trên
 `timescale/timescaledb-ha:pg16`. Mọi bảng mà chuỗi migration tạo trong `public` đều bật
 row-level security. Trên server có hai role Supabase `anon` và `authenticated`, `006` thêm policy
 chỉ đọc cho hai role này trên `market_lexicons` và `industry_taxonomies`, còn `021` thu hồi mọi
@@ -159,8 +159,9 @@ chạy khi volume dữ liệu còn trống. Hãy dùng kết nối của chủ s
 thiếu theo thứ tự tên file: database khởi tạo trước `021` cần chạy
 `sql/021_public_schema_rls_coverage.sql`, database khởi tạo trước `022` cần chạy
 `sql/022_builtin_uuid_defaults.sql`, còn database khởi tạo trước `023` cần chạy
-`sql/023_evidence_qualification.sql`. Chạy lại bất kỳ file nào trong số này cũng không làm thay
-đổi gì. Với PostgreSQL
+`sql/023_evidence_qualification.sql`. Database khởi tạo trước `024` còn cần chạy
+`sql/024_youtube_quota_ledger.sql`; migration này chỉ lưu bộ đếm quota, không lưu API key. Chạy
+lại bất kỳ file nào trong số này cũng không làm thay đổi gì. Với PostgreSQL
 đã có corpus legacy, không khởi động worker mới ngay sau khi đưa artifact lên. Chạy đúng
 [production cutover source/observation](migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook):
 quiesce runtime cũ, snapshot, sinh baseline từ chính snapshot đó, apply `sql/016`, backfill, bắt
@@ -260,11 +261,14 @@ Tất cả các biến môi trường được định nghĩa trong file `.env`:
 | `DATABASE_URL` | String | `sqlite:///ignis.db` | Có | URI kết nối database. Dùng `sqlite:///ignis.db` cho Zero-Docker hoặc `postgresql://user:pass@host:5432/db` cho Postgres/TimescaleDB. |
 | `DEFAULT_GEO` | String (ISO) | `VN` | Không | Mã quốc gia 2 ký tự mặc định để quét xu hướng (`VN`, `US`, `JP`, `UK`,...). |
 | `YOUTUBE_API_KEY` | String | `""` | Khuyến nghị | Key Google Cloud YouTube Data API v3 để cào video tutorials & case studies. |
+| `YOUTUBE_SEARCH_DAILY_LIMIT` | Integer | `100` | Không | Tổng số lượt gọi `search.list` mỗi ngày dành cho installation này. |
+| `YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT` | Integer | `70` | Không | Trần hằng ngày cho Track 1; phần requested dùng phần còn lại và có thể mượn capacity scheduled chưa dùng. |
+| `YOUTUBE_OTHER_DAILY_UNIT_LIMIT` | Integer | `10000` | Không | Quỹ unit dùng chung mỗi ngày cho các endpoint YouTube ngoài `search.list`. |
 | `IGNIS_ENCRYPTION_KEY` | Base64 String | *(Tự sinh)* | Không | Khóa Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) để mã hóa cookie/phiên đăng nhập TikTok lưu trong database. |
-| `SCHEDULER_INTERVAL_SECONDS` | Integer | `8640` (~2,4 giờ) | Không | Nhịp chạy một lượt ingress của worker. Mặc định suy ra từ quota YouTube search: 10 từ khoá x 100 unit, tức một ngày chỉ đủ 10 lượt trong 10.000 unit. |
+| `SCHEDULER_INTERVAL_SECONDS` | Integer | `8640` (~2,4 giờ) | Không | Nhịp chạy một lượt ingress của worker; ledger dùng chung sẽ từ chối call vượt trần scheduled mà không đổi cadence này. |
 | `DISCOVERY_INTERVAL_HOURS` | Integer | `24` | Không | Khoảng cách giữa các đợt tự động quét toàn diện Creative Center và phát hiện white space. |
 | `SYNC_INTERVAL_MINUTES` | Integer | `0` | Không | Ghi đè nhịp ingress của worker, tính theo phút. Giá trị lớn hơn 0 sẽ thắng `SCHEDULER_INTERVAL_SECONDS`; để 0 thì biến kia quyết định. Chỉ nâng lên khi người vận hành xác định được quota YouTube của mình chịu được số lượt tăng thêm. |
-| `YOUTUBE_CACHE_TTL_SECONDS` | Integer | `86400` (24h) | Không | Thời gian lưu cache kết quả tìm kiếm YouTube để tiết kiệm quota 10,000 unit/ngày. |
+| `YOUTUBE_CACHE_TTL_SECONDS` | Integer | `86400` (24h) | Không | Thời gian lưu cache kết quả tìm kiếm YouTube; cache hit không tạo quota reservation. |
 | `PLAYWRIGHT_PROXY_SERVER` | String | `""` | Không | Proxy server HTTP/SOCKS5 (ví dụ: `http://user:pass@proxy.ip:port`) để cào TikTok không bị chặn. |
 | `CONFIDENCE_HIGH_THRESHOLD` | Float | `80.0` | Không | Ngưỡng điểm để đánh giá chất lượng dữ liệu chiến dịch ở mức HIGH. |
 | `CONFIDENCE_MEDIUM_THRESHOLD`| Float | `60.0` | Không | Ngưỡng điểm để đánh giá chất lượng dữ liệu chiến dịch ở mức MEDIUM. |
@@ -322,7 +326,9 @@ Tạo file `run_research.py`:
 ```python
 import asyncio
 from uuid import uuid4
-from ignis.config import settings
+from ignis.application.youtube_quota import YouTubeQuotaManager
+from ignis.config import reveal_secret, settings
+from ignis.domain.youtube_quota import YouTubeQuotaPolicy
 from ignis.domain.value_objects import GeoCode, Timeframe
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
@@ -340,11 +346,24 @@ async def main():
     repo = create_repository()
     
     # 2. Đăng ký các Connector Ingress
-    registry = ConnectorPluginRegistry()
+    registry = ConnectorPluginRegistry(repository=repo)
     registry.register(GoogleTrendsRssPlugin())
     registry.register(TikTokCreativeCenterPlugin())
-    if settings.YOUTUBE_API_KEY:
-        registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
+    youtube_api_key = reveal_secret(settings.YOUTUBE_API_KEY)
+    if youtube_api_key:
+        registry.register(
+            YouTubeDataPlugin(
+                api_key=youtube_api_key,
+                quota_manager=YouTubeQuotaManager(
+                    repo,
+                    YouTubeQuotaPolicy(
+                        search_daily_limit=settings.YOUTUBE_SEARCH_DAILY_LIMIT,
+                        scheduled_search_daily_limit=settings.YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT,
+                        other_daily_unit_limit=settings.YOUTUBE_OTHER_DAILY_UNIT_LIMIT,
+                    ),
+                ),
+            )
+        )
 
     # 3. Tạo Chiến dịch Nghiên cứu mới
     create_uc = CreateMissionUseCase(repository=repo)

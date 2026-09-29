@@ -298,7 +298,14 @@ class ConnectorPluginRegistry:
             if keywords:
                 probed = await asyncio.gather(
                     *[
-                        self._safe_search(plugin, self._breakers[plugin.plugin_id], keywords, geo, timeframe)
+                        self._safe_search(
+                            plugin,
+                            self._breakers[plugin.plugin_id],
+                            keywords,
+                            geo,
+                            timeframe,
+                            trigger=trigger,
+                        )
                         for plugin in probe_plugins
                     ],
                     return_exceptions=True,
@@ -411,6 +418,7 @@ class ConnectorPluginRegistry:
         custom_timeframe: Optional[str] = None,
         scope: IngressScope = IngressScope.PUBLIC_MARKET,
         limit: int = 20,
+        trigger: IngressTrigger = IngressTrigger.REQUESTED,
     ) -> List[TrendSignal]:
         """Probe every keyword-capable connector and return the signals only.
 
@@ -425,6 +433,7 @@ class ConnectorPluginRegistry:
             custom_timeframe=custom_timeframe,
             scope=scope,
             limit=limit,
+            trigger=trigger,
         )
         return result.signals
 
@@ -437,6 +446,7 @@ class ConnectorPluginRegistry:
         custom_timeframe: Optional[str] = None,
         scope: IngressScope = IngressScope.PUBLIC_MARKET,
         limit: int = 20,
+        trigger: IngressTrigger = IngressTrigger.REQUESTED,
     ) -> SearchPassResult:
         """Probe every keyword-capable connector, reporting what each eligible surface did.
 
@@ -498,6 +508,7 @@ class ConnectorPluginRegistry:
                 self._safe_search(
                     plugin, breaker, keywords, geo, timeframe, custom_timeframe, limit,
                     attestation=attestations[plugin_id],
+                    trigger=trigger,
                 )
             )
 
@@ -763,6 +774,7 @@ class ConnectorPluginRegistry:
         custom_timeframe: Optional[str] = None,
         limit: Optional[int] = None,
         attestation: Optional[SearchAttestation] = None,
+        trigger: IngressTrigger = IngressTrigger.REQUESTED,
     ) -> List[TrendSignal]:
         try:
             import inspect
@@ -774,6 +786,8 @@ class ConnectorPluginRegistry:
                 kwargs["limit"] = limit
             if attestation is not None:
                 kwargs["attestation"] = attestation
+            if "trigger" in sig.parameters:
+                kwargs["trigger"] = trigger
             signals = await plugin.search_signals(**kwargs)
             breaker.record_success()
             return self._stamp_connector_surface(plugin, signals)
@@ -799,5 +813,4 @@ class ConnectorPluginRegistry:
             except Exception as e:
                 logger.warning(f"Error fetching suggestions from {plugin.name}: {e}")
         return all_suggestions
-
 

@@ -62,6 +62,7 @@ OWNER_ONLY = {
     "system_audit_logs": "audit log",
     "topic_clusters": "cluster",
     "trend_signals": "signal (legacy)",
+    "youtube_quota_buckets": "YouTube quota bucket",
 }
 POSTURE = {
     **{table: "client read-only" for table in CLIENT_READ_ONLY},
@@ -128,6 +129,10 @@ OWNER_ROWS_SINCE_023 = (
     f" signals_collected, queried_keywords, query_fingerprint, completed_at) VALUES ('{RUN}',"
     " 'youtube', 'youtube', 'EMPTY_NO_DATA', 0, ARRAY['t018'], 'fp', now())",
 )
+OWNER_ROWS_SINCE_024 = (
+    "INSERT INTO youtube_quota_buckets (quota_day, bucket, used, scheduled_used)"
+    " VALUES ('2026-09-29', 'search_list', 2, 1)",
+)
 # A valid row a client could write to each table, so an INSERT that is allowed actually lands.
 # Ids are supplied rather than defaulted, so the outcome turns only on the table privilege and RLS
 # under test; a client that wants to write can always send its own id.
@@ -163,6 +168,8 @@ CLIENT_ROWS = {
     "system_audit_logs": "(component, event_type, message) VALUES ('t018', 'probe', 'client')",
     "topic_clusters": f"(id, canonical_name) VALUES ('{uuid4()}', 't018 client cluster')",
     "trend_signals": "(platform, raw_title) VALUES ('tiktok', 't018 client')",
+    "youtube_quota_buckets": "(quota_day, bucket, used, scheduled_used)"
+    " VALUES ('2026-09-30', 'default_units', 2, 1)",
 }
 
 
@@ -199,6 +206,9 @@ def _seed(dsn: str) -> None:
             conn.execute(statement)
         if conn.execute("SELECT to_regclass('public.mission_probe_outcomes')").fetchone()[0]:
             for statement in OWNER_ROWS_SINCE_023:
+                conn.execute(statement)
+        if conn.execute("SELECT to_regclass('public.youtube_quota_buckets')").fetchone()[0]:
+            for statement in OWNER_ROWS_SINCE_024:
                 conn.execute(statement)
 
 

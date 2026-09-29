@@ -178,7 +178,7 @@ async def test_one_pass_produces_clusters_that_span_more_than_one_platform():
 
 @pytest.mark.asyncio
 async def test_keyword_fan_out_stays_within_the_stated_api_unit_budget():
-    """YouTube search costs 100 units against a 10,000/day quota, so the fan-out must be capped."""
+    """One scheduled pass must fit inside the reserved daily search-call allocation."""
     from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS
 
     repo = _repository([f"seed {i}" for i in range(40)])
@@ -195,18 +195,17 @@ async def test_keyword_fan_out_stays_within_the_stated_api_unit_budget():
     )
 
 
-def test_quota_safe_interval_matches_the_published_api_costs():
-    """Cadence and corpus quality trade against each other; the arithmetic must be explicit."""
+def test_quota_safe_interval_matches_the_scheduled_search_call_allocation():
+    """The advisory cadence must use the post-June-2026 search-call bucket."""
     from ignis.application.use_cases.ingest_trends import (
         MAX_TOPIC_KEYWORDS,
-        YOUTUBE_DAILY_QUOTA_UNITS,
-        YOUTUBE_SEARCH_UNIT_COST,
+        YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT,
         quota_safe_interval_seconds,
     )
 
     interval = quota_safe_interval_seconds()
     passes_per_day = 86_400 // interval
-    assert passes_per_day * MAX_TOPIC_KEYWORDS * YOUTUBE_SEARCH_UNIT_COST <= YOUTUBE_DAILY_QUOTA_UNITS
+    assert passes_per_day * MAX_TOPIC_KEYWORDS <= YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT
 
     # A narrower fan-out buys back cadence, which is the knob an operator actually has.
     assert quota_safe_interval_seconds(keywords_per_pass=1) < interval

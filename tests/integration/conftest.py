@@ -53,6 +53,8 @@ SCHEMA_MIGRATIONS = (
     # Probe outcomes and evidence qualifications. SQLite restates both tables in _ensure_schema,
     # so a judgment or refusal only one backend honours is what listing it here catches.
     "023_evidence_qualification.sql",
+    # Shared YouTube quota admission. Both repository adapters must see one persistent ledger.
+    "024_youtube_quota_ledger.sql",
 )
 
 

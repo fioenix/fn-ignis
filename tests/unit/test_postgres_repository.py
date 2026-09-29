@@ -2,9 +2,10 @@ import pytest
 from ignis.domain.cross_platform_score import cross_platform_score
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from ignis.domain.value_objects import GeoCode, Timeframe
+from ignis.domain.value_objects import GeoCode, IngressTrigger, Timeframe
+from ignis.domain.youtube_quota import YouTubeQuotaBucket
 from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
 
 
@@ -23,6 +24,78 @@ def _create_mock_pool(mock_cursor):
     mock_pool = MagicMock()
     mock_pool.connection = MagicMock(return_value=mock_conn_cm)
     return mock_pool
+
+
+@pytest.mark.asyncio
+async def test_reserve_youtube_quota_uses_one_atomic_guarded_upsert():
+    repo = PostgresTimescaleRepository(dsn="postgresql://mock")
+    now = datetime(2026, 9, 29, 7, 0, tzinfo=timezone.utc)
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchone.return_value = (
+        date(2026, 9, 29),
+        YouTubeQuotaBucket.SEARCH_LIST.value,
+        1,
+        1,
+        False,
+        now,
+    )
+    repo._pool = _create_mock_pool(mock_cursor)
+
+    result = await repo.reserve_youtube_quota(
+        quota_day=date(2026, 9, 29),
+        bucket=YouTubeQuotaBucket.SEARCH_LIST,
+        cost=1,
+        trigger=IngressTrigger.SCHEDULED,
+        daily_limit=100,
+        scheduled_limit=70,
+        now=now,
+    )
+
+    assert result.admitted is True
+    assert result.usage.used == 1
+    assert result.usage.scheduled_used == 1
+    assert mock_cursor.execute.await_count == 1
+    query, params = mock_cursor.execute.await_args.args
+    assert "INSERT INTO youtube_quota_buckets" in query
+    assert "ON CONFLICT (quota_day, bucket) DO UPDATE" in query
+    assert "WHERE NOT youtube_quota_buckets.exhausted" in query
+    assert "RETURNING quota_day, bucket, used" in query
+    assert len(params) == 14
+    assert params[6:11] == (1, 100, 70, 1, 70)
+    assert params[11:] == (100, 70, 70)
+
+
+@pytest.mark.asyncio
+async def test_reserve_youtube_quota_reads_current_usage_after_refusal():
+    repo = PostgresTimescaleRepository(dsn="postgresql://mock")
+    now = datetime(2026, 9, 29, 7, 0, tzinfo=timezone.utc)
+    current = (
+        date(2026, 9, 29),
+        YouTubeQuotaBucket.SEARCH_LIST.value,
+        70,
+        70,
+        False,
+        now,
+    )
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchone = AsyncMock(side_effect=[None, current])
+    repo._pool = _create_mock_pool(mock_cursor)
+
+    result = await repo.reserve_youtube_quota(
+        quota_day=date(2026, 9, 29),
+        bucket=YouTubeQuotaBucket.SEARCH_LIST,
+        cost=1,
+        trigger=IngressTrigger.SCHEDULED,
+        daily_limit=100,
+        scheduled_limit=70,
+        now=now,
+    )
+
+    assert result.admitted is False
+    assert result.usage.used == 70
+    assert result.usage.scheduled_used == 70
+    assert mock_cursor.execute.await_count == 2
+    assert "SELECT quota_day, bucket, used" in mock_cursor.execute.await_args_list[1].args[0]
 
 
 @pytest.mark.asyncio

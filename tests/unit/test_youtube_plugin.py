@@ -1,10 +1,12 @@
 import pytest
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 import httpx
 
-from ignis.domain.value_objects import PlatformType, GeoCode, Timeframe
+from ignis.domain.value_objects import PlatformType, GeoCode, IngressTrigger, Timeframe
+from ignis.domain.youtube_quota import YouTubeQuotaBucket
 from ignis.domain.exceptions import (
     ConnectorExecutionException,
     ConnectorQuotaExceededException,
@@ -36,9 +38,34 @@ SAMPLE_YOUTUBE_API_RESPONSE = {
 }
 
 
+class RecordingQuotaManager:
+    def __init__(self, refusal=None):
+        self.calls = []
+        self.exhausted = []
+        self.refusal = refusal
+
+    async def reserve(self, bucket, trigger=IngressTrigger.REQUESTED, cost=1):
+        self.calls.append((bucket, trigger, cost))
+        if self.refusal is not None:
+            raise self.refusal
+
+    async def mark_exhausted(self, bucket):
+        self.exhausted.append(bucket)
+        return SimpleNamespace(
+            bucket=bucket,
+            used=1,
+            limit=100 if bucket == YouTubeQuotaBucket.SEARCH_LIST else 10_000,
+            reset_at=datetime(2026, 9, 30, 7, tzinfo=timezone.utc),
+            exhausted=True,
+        )
+
+    async def status(self):
+        return {"quota_day": "2026-09-29", "buckets": {}}
+
+
 @pytest.mark.asyncio
 async def test_youtube_plugin_parse_signals():
-    plugin = YouTubeDataPlugin(api_key="mock_key_123")
+    plugin = YouTubeDataPlugin(api_key="mock_key_123", quota_manager=RecordingQuotaManager())
     assert plugin.platform == PlatformType.YOUTUBE
     assert plugin.name == "YouTube Data API v3"
 
@@ -64,8 +91,22 @@ async def test_youtube_plugin_parse_signals():
 
 
 @pytest.mark.asyncio
+async def test_feed_call_reserves_default_units_before_http():
+    quota = RecordingQuotaManager()
+    plugin = YouTubeDataPlugin(api_key="mock_key_123", quota_manager=quota)
+
+    with patch("httpx.AsyncClient.get", return_value=_json_response(SAMPLE_YOUTUBE_API_RESPONSE)):
+        await plugin.fetch_signals(geo=GeoCode.VN, limit=10)
+
+    assert quota.calls == [
+        (YouTubeQuotaBucket.DEFAULT_UNITS, IngressTrigger.REQUESTED, 1)
+    ]
+
+
+@pytest.mark.asyncio
 async def test_youtube_plugin_quota_exceeded():
-    plugin = YouTubeDataPlugin(api_key="mock_key_123")
+    quota = RecordingQuotaManager()
+    plugin = YouTubeDataPlugin(api_key="mock_key_123", quota_manager=quota)
 
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_response = MagicMock()
@@ -81,13 +122,45 @@ async def test_youtube_plugin_quota_exceeded():
         with pytest.raises(ConnectorQuotaExceededException):
             await plugin.fetch_signals(geo=GeoCode.VN)
 
+    assert quota.exhausted == [YouTubeQuotaBucket.DEFAULT_UNITS]
+
+
+@pytest.mark.asyncio
+async def test_configured_plugin_without_shared_quota_manager_refuses_before_http():
+    plugin = YouTubeDataPlugin(api_key="configured-key")
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        with pytest.raises(ConnectorExecutionException, match="quota manager"):
+            await plugin.fetch_signals(geo=GeoCode.VN)
+        with pytest.raises(ConnectorExecutionException, match="quota manager"):
+            await plugin.search_signals(["blocked"], geo=GeoCode.VN)
+
+    assert mock_get.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_fetch_http_error_never_exposes_the_api_key(caplog):
+    api_key = "literal-secret-key"
+    plugin = YouTubeDataPlugin(api_key=api_key, quota_manager=RecordingQuotaManager())
+    request = httpx.Request("GET", plugin.BASE_API_URL, params={"key": api_key})
+    response = httpx.Response(500, request=request)
+
+    with patch("httpx.AsyncClient.get", return_value=response):
+        with pytest.raises(ConnectorExecutionException) as caught:
+            await plugin.fetch_signals(geo=GeoCode.VN)
+
+    assert api_key not in str(caught.value)
+    assert api_key not in caplog.text
+
 
 @pytest.mark.asyncio
 async def test_youtube_plugin_is_healthy():
     plugin_no_key = YouTubeDataPlugin(api_key="")
     assert await plugin_no_key.is_healthy() is False
 
-    plugin_with_key = YouTubeDataPlugin(api_key="valid_key")
+    plugin_with_key = YouTubeDataPlugin(
+        api_key="valid_key", quota_manager=RecordingQuotaManager()
+    )
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -96,8 +169,22 @@ async def test_youtube_plugin_is_healthy():
 
 
 @pytest.mark.asyncio
+async def test_health_probe_daily_exhaustion_closes_the_default_units_bucket():
+    quota = RecordingQuotaManager()
+    plugin = YouTubeDataPlugin(api_key="valid_key", quota_manager=quota)
+    refusal = _json_response(
+        {"error": {"errors": [{"reason": "dailyLimitExceeded"}]}}, status_code=403
+    )
+
+    with patch("httpx.AsyncClient.get", return_value=refusal):
+        assert await plugin.is_healthy() is False
+
+    assert quota.exhausted == [YouTubeQuotaBucket.DEFAULT_UNITS]
+
+
+@pytest.mark.asyncio
 async def test_youtube_search_ttl_caching():
-    plugin = YouTubeDataPlugin(api_key="mock_key_123")
+    plugin = YouTubeDataPlugin(api_key="mock_key_123", quota_manager=RecordingQuotaManager())
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     search_response = {
         "items": [
@@ -157,14 +244,100 @@ async def test_youtube_search_ttl_caching():
         assert mock_get.call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_uncached_search_reserves_search_and_metrics_before_http():
+    """Removing either reservation would undercount the two endpoint buckets."""
+    quota = RecordingQuotaManager()
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=quota)
+    published = _recent()
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["quota_vid"])),
+            _json_response(_videos_list([("quota_vid", "Quota test", 12, published)])),
+        ]
+        await plugin.search_signals(
+            ["quota reservation"],
+            geo=GeoCode.VN,
+            trigger=IngressTrigger.SCHEDULED,
+        )
+
+    assert quota.calls == [
+        (YouTubeQuotaBucket.SEARCH_LIST, IngressTrigger.SCHEDULED, 1),
+        (YouTubeQuotaBucket.DEFAULT_UNITS, IngressTrigger.SCHEDULED, 1),
+    ]
+    assert mock_get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_cached_search_makes_no_additional_reservation():
+    """Moving reservation before the cache lookup would charge a provider call that never happened."""
+    quota = RecordingQuotaManager()
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=quota)
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["cached_quota_vid"])),
+            _json_response(
+                _videos_list([("cached_quota_vid", "Cached quota", 12, _recent())])
+            ),
+        ]
+        await plugin.search_signals(["cache quota"], geo=GeoCode.VN)
+        await plugin.search_signals(["cache quota"], geo=GeoCode.VN)
+
+    assert len(quota.calls) == 2
+    assert mock_get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_local_refusal_prevents_the_provider_call():
+    """Catching a local refusal and continuing would defeat admission control."""
+    refusal = ConnectorQuotaExceededException(
+        bucket="search_list",
+        used=100,
+        limit=100,
+        reset_at=datetime(2026, 9, 30, 7, tzinfo=timezone.utc),
+    )
+    plugin = YouTubeDataPlugin(
+        api_key="test_key",
+        quota_manager=RecordingQuotaManager(refusal=refusal),
+    )
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        with pytest.raises(ConnectorQuotaExceededException):
+            await plugin.search_signals(["blocked"], geo=GeoCode.VN)
+
+    assert mock_get.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_transport_failure_does_not_refund_an_admitted_search(tmp_path):
+    """A failed provider request still consumed the reserved call and must remain recorded."""
+    from ignis.application.youtube_quota import YouTubeQuotaManager
+    from ignis.domain.youtube_quota import YouTubeQuotaPolicy
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+
+    manager = YouTubeQuotaManager(
+        SqliteTrendRepository(f"sqlite:///{tmp_path / 'no-refund.db'}"),
+        policy=YouTubeQuotaPolicy(search_daily_limit=5, scheduled_search_daily_limit=3),
+        now=lambda: datetime(2026, 9, 29, 12, tzinfo=timezone.utc),
+    )
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=manager)
+
+    with patch("httpx.AsyncClient.get", side_effect=httpx.ConnectError("offline")):
+        signals = await plugin.search_signals(["reserved transport failure"], geo=GeoCode.VN)
+
+    status = await manager.status()
+    assert signals == []
+    assert status["buckets"]["search_list"]["used"] == 1
 
 # --- the keyword search path and the failure contract -------------------------------------------
 #
 # SC-004 promises coverage for this plugin. What was tested was the trending-feed happy path and
 # one quota case; what a research mission actually calls is `search_signals`, whose two-call
 # search.list -> videos.list shape, timeframe cutoff and error handling were untested. A
-# `search.list` costs 100 quota units against a 10,000-unit day, so the behaviour that decides how
-# often it is called is not an implementation detail.
+# `search.list` has its own 100-call daily allocation, so the behaviour that decides how often it
+# is called is not an implementation detail.
 
 
 def _json_response(payload, status_code=200, content_type="application/json"):
@@ -216,7 +389,7 @@ def _clear_youtube_query_cache():
 @pytest.mark.asyncio
 async def test_search_signals_reads_metrics_from_the_videos_call_not_the_search_call():
     """search.list returns no statistics, so a signal built from it alone would carry no metrics."""
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
     published = _recent(hours_ago=10)
 
     with patch("httpx.AsyncClient.get") as mock_get:
@@ -252,7 +425,7 @@ async def test_a_video_older_than_the_requested_window_is_dropped():
     Without the second check a 24-hour mission can return a video from last year and report it as
     current demand.
     """
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
 
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_get.side_effect = [
@@ -276,7 +449,7 @@ async def test_a_video_older_than_the_requested_window_is_dropped():
 
 @pytest.mark.asyncio
 async def test_a_title_too_short_to_be_a_topic_is_dropped():
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
 
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_get.side_effect = [
@@ -302,7 +475,7 @@ async def test_a_title_too_short_to_be_a_topic_is_dropped():
 @pytest.mark.asyncio
 async def test_the_same_video_returned_for_two_keywords_is_emitted_once():
     """Two keywords in one mission overlap often; the corpus must not double-count the overlap."""
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
 
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_get.side_effect = [
@@ -318,21 +491,46 @@ async def test_the_same_video_returned_for_two_keywords_is_emitted_once():
 
 @pytest.mark.asyncio
 async def test_a_search_quota_refusal_propagates_so_the_breaker_can_trip():
-    """Swallowing this would keep spending a 100-unit call against an exhausted daily quota."""
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    """Provider daily exhaustion closes the search bucket until its next reset."""
+    quota = RecordingQuotaManager()
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=quota)
     refusal = _json_response(
         {"error": {"errors": [{"reason": "quotaExceeded"}]}}, status_code=403
     )
 
     with patch("httpx.AsyncClient.get", return_value=refusal):
-        with pytest.raises(ConnectorQuotaExceededException):
+        with pytest.raises(ConnectorQuotaExceededException) as caught:
             await plugin.search_signals(["anything"], geo=GeoCode.VN)
+
+    assert quota.exhausted == [YouTubeQuotaBucket.SEARCH_LIST]
+    assert caught.value.bucket == YouTubeQuotaBucket.SEARCH_LIST.value
+    assert caught.value.used == 1
+    assert caught.value.limit == 100
+    assert caught.value.exhausted is True
+
+
+@pytest.mark.asyncio
+async def test_a_metrics_daily_quota_refusal_closes_only_the_default_units_bucket():
+    quota = RecordingQuotaManager()
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=quota)
+    metrics_refusal = _json_response(
+        {"error": {"errors": [{"reason": "dailyLimitExceeded"}]}}, status_code=403
+    )
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [_json_response(_search_list(["video"])), metrics_refusal]
+        with pytest.raises(ConnectorQuotaExceededException) as caught:
+            await plugin.search_signals(["metrics quota"], geo=GeoCode.VN)
+
+    assert quota.exhausted == [YouTubeQuotaBucket.DEFAULT_UNITS]
+    assert caught.value.bucket == YouTubeQuotaBucket.DEFAULT_UNITS.value
+    assert caught.value.limit == 10_000
 
 
 @pytest.mark.asyncio
 async def test_a_rate_limit_status_is_treated_as_quota_whatever_the_body_says():
     """429 carries no reason code, and retrying it immediately is the behaviour to avoid."""
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
     throttled = _json_response({}, status_code=429, content_type="text/html")
 
     with patch("httpx.AsyncClient.get", return_value=throttled):
@@ -343,7 +541,7 @@ async def test_a_rate_limit_status_is_treated_as_quota_whatever_the_body_says():
 @pytest.mark.asyncio
 async def test_a_transport_failure_on_one_keyword_does_not_lose_the_others():
     """FR: one failing source must not stop the pass. Only a quota refusal is allowed to."""
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
 
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_get.side_effect = [
@@ -378,7 +576,7 @@ async def test_the_trending_feed_without_an_api_key_is_a_connector_failure():
 @pytest.mark.asyncio
 async def test_a_403_that_is_not_about_quota_is_reported_as_an_ordinary_failure():
     """A disabled key and an exhausted quota need different responses, so they are different types."""
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
     forbidden = _json_response(
         {"error": {"message": "API key not valid", "errors": [{"reason": "forbidden"}]}},
         status_code=403,
@@ -389,12 +587,12 @@ async def test_a_403_that_is_not_about_quota_is_reported_as_an_ordinary_failure(
             await plugin.fetch_signals(geo=GeoCode.VN)
 
     assert not isinstance(caught.value, ConnectorQuotaExceededException)
-    assert "API key not valid" in str(caught.value)
+    assert "access denied" in str(caught.value)
 
 
 @pytest.mark.asyncio
 async def test_a_transport_failure_on_the_trending_feed_is_a_connector_failure():
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
     with patch("httpx.AsyncClient.get", side_effect=httpx.ConnectError("Network down")):
         with pytest.raises(ConnectorExecutionException):
             await plugin.fetch_signals(geo=GeoCode.VN)
@@ -402,7 +600,7 @@ async def test_a_transport_failure_on_the_trending_feed_is_a_connector_failure()
 
 @pytest.mark.asyncio
 async def test_a_failing_health_check_reports_unhealthy_rather_than_raising():
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
     with patch("httpx.AsyncClient.get", side_effect=httpx.ConnectError("Network down")):
         assert await plugin.is_healthy() is False
 
@@ -412,14 +610,14 @@ async def test_a_failing_health_check_reports_unhealthy_rather_than_raising():
 
 def test_a_global_request_falls_back_to_a_region_the_api_accepts():
     """`chart=mostPopular` requires a regionCode; GLOBAL is not one."""
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
     assert plugin._geo_to_region_code(GeoCode.GLOBAL) == "US"
     assert plugin._geo_to_region_code(GeoCode.VN) == "VN"
 
 
 def test_relevance_language_is_set_only_where_the_mapping_knows_one():
     """Sending a wrong language narrows the result set, so an unknown geo sends none at all."""
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
     assert plugin._geo_to_relevance_language(GeoCode.VN) == "vi"
     assert plugin._geo_to_relevance_language(GeoCode.JP) == "ja"
     assert plugin._geo_to_relevance_language(GeoCode.BR) is None
@@ -447,7 +645,7 @@ def test_relevance_language_is_set_only_where_the_mapping_knows_one():
     ],
 )
 def test_every_timeframe_alias_produces_the_documented_cutoff(requested, expected_days):
-    plugin = YouTubeDataPlugin(api_key="test_key")
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
     formatted, cutoff = plugin._timeframe_to_published_after(requested)
 
     elapsed_days = (datetime.now(timezone.utc) - cutoff).total_seconds() / 86400.0

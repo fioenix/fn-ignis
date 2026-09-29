@@ -5,7 +5,10 @@ from pathlib import Path
 from ignis.application.use_cases.create_mission import CreateMissionUseCase
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
+from ignis.application.youtube_quota import YouTubeQuotaManager
+from ignis.config import reveal_secret, settings
 from ignis.domain.value_objects import GeoCode, Timeframe
+from ignis.domain.youtube_quota import YouTubeQuotaPolicy
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
@@ -16,7 +19,6 @@ from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
-from ignis.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ignis.case_studies")
@@ -52,8 +54,23 @@ async def run_all_case_studies():
     registry.register(GoogleTrendsRssPlugin())
     registry.register(TikTokPlugin())
     registry.register(TikTokCreativeCenterPlugin())
-    if settings.YOUTUBE_API_KEY:
-        registry.register(YouTubeDataPlugin(api_key=settings.YOUTUBE_API_KEY))
+    youtube_api_key = reveal_secret(settings.YOUTUBE_API_KEY)
+    if youtube_api_key:
+        registry.register(
+            YouTubeDataPlugin(
+                api_key=youtube_api_key,
+                quota_manager=YouTubeQuotaManager(
+                    repo,
+                    YouTubeQuotaPolicy(
+                        search_daily_limit=settings.YOUTUBE_SEARCH_DAILY_LIMIT,
+                        scheduled_search_daily_limit=(
+                            settings.YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT
+                        ),
+                        other_daily_unit_limit=settings.YOUTUBE_OTHER_DAILY_UNIT_LIMIT,
+                    ),
+                ),
+            )
+        )
 
     clusterer = SemanticClusterer()
     top_clusters_use_case = GetTopClustersUseCase(repository=repo)

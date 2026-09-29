@@ -2,7 +2,7 @@ import pytest
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 from ignis.domain.entities import TrendSignal
-from ignis.domain.value_objects import GeoCode, PlatformType
+from ignis.domain.value_objects import GeoCode, IngressTrigger, PlatformType
 from ignis.domain.harness_models import HarnessResearchReport, MarketOpportunity, TrendMaturityStage, QualityScorecard
 from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
 from ignis.interfaces.mcp.server import handle_trigger_autonomous_discovery
@@ -111,6 +111,7 @@ async def test_autonomous_discovery_use_case_execution(tmp_path):
     assert "save_signals" not in calls[calls.index("save_clusters") :], (
         "clustering must not push already-persisted signals back through the writer"
     )
+    assert mock_registry.search_across_all.call_args.kwargs["trigger"] == IngressTrigger.REQUESTED
 
 
 @pytest.mark.asyncio

@@ -20,28 +20,25 @@ logger = logging.getLogger(__name__)
 MAX_SEED_KEYWORDS = 10
 # Total keywords one pass may probe with, lexicon seeds and freshly discovered topics combined.
 #
-# This is an API budget, not a tuning knob. A YouTube `search.list` call costs 100 quota units
-# against a default 10,000 units/day, so 10 keywords is 1,000 units per pass and the daily quota
-# covers 10 passes, which is where the worker's default 8640-second tick comes from. A
-# 15-minute cadence would want 96 passes a day and blow the quota by mid-morning.
-# An untargeted chart pull costs 1 unit, which is exactly why it was affordable and useless.
+# Each YouTube keyword consumes one `search.list` call. Google accounts for those calls in their
+# own 100-call daily bucket; fn-ignis reserves 70 of them for scheduled work and leaves at least
+# 30 for requested research. The persisted admission ledger is authoritative. The arithmetic
+# below is only an operator warning and intentionally does not change the existing cadence.
 MAX_TOPIC_KEYWORDS = 10
 
-# YouTube Data API v3 published costs: a `search.list` query is 100 units against a project's
-# default allowance of 10,000 units/day. Both are Google's numbers, not tuning choices.
-YOUTUBE_SEARCH_UNIT_COST = 100
-YOUTUBE_DAILY_QUOTA_UNITS = 10_000
+YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT = 70
 
 
-def quota_safe_interval_seconds(keywords_per_pass: int = MAX_TOPIC_KEYWORDS) -> int:
-    """Shortest ingress cadence whose keyword probes still fit inside one day's YouTube quota.
+def quota_safe_interval_seconds(
+    keywords_per_pass: int = MAX_TOPIC_KEYWORDS,
+    scheduled_search_daily_limit: int = YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT,
+) -> int:
+    """Shortest advisory cadence that fits the scheduled search-call allocation.
 
-    A topic-coupled pass spends real quota, so cadence and corpus quality trade against each
-    other directly. The scheduler uses this to tell an operator when their configured interval
-    will exhaust the daily allowance before the day is over.
+    The database ledger remains the hard boundary because worker and MCP calls share one key and
+    a scheduler tick can land at any point in the provider's Pacific-Time quota day.
     """
-    per_pass = max(1, keywords_per_pass) * YOUTUBE_SEARCH_UNIT_COST
-    passes_per_day = max(1, YOUTUBE_DAILY_QUOTA_UNITS // per_pass)
+    passes_per_day = max(1, scheduled_search_daily_limit // max(1, keywords_per_pass))
     return 86_400 // passes_per_day
 
 

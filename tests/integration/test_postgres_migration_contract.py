@@ -12,8 +12,9 @@ never ran. Two contracts follow from the fix, and each needs its own server stat
 Behaviour is read from the catalog and from queries run as the roles, never from the SQL text.
 """
 
+import asyncio
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import psycopg
 import pytest
@@ -28,6 +29,8 @@ from conftest import (
     runtime_owner,
 )
 from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+from ignis.domain.value_objects import IngressTrigger
+from ignis.domain.youtube_quota import YouTubeQuotaBucket
 
 SECURITY_MIGRATION = "006_supabase_security_hardening.sql"
 RETIREMENT = "020_retire_ambiguous_tiktok_ui_noise.sql"
@@ -44,6 +47,7 @@ LATER_OBJECTS = (
     "public.idx_observations_latest_per_source",
     "public.mission_probe_outcomes",
     "public.mission_evidence_qualifications",
+    "public.youtube_quota_buckets",
 )
 # Test data: the T016 retirements, which only exist once 020 has run.
 RETIRED_UI_NOISE = {"live", "thông báo", "tin nhắn"}
@@ -762,3 +766,105 @@ def test_re_applying_023_and_the_whole_chain_changes_no_qualification_state(supa
     assert (_qualification_catalog(dsn), _security_state(dsn), _uuid_state(dsn)) == settled
     _apply(dsn, *all_postgres_migrations())
     assert (_qualification_catalog(dsn), _security_state(dsn), _uuid_state(dsn)) == settled
+
+
+# --- E. 024: shared YouTube quota ledger -------------------------------------------------------
+
+QUOTA_MIGRATION = "024_youtube_quota_ledger.sql"
+
+
+def test_024_creates_an_owner_only_constrained_rls_ledger(supabase_like_dsn):
+    dsn = supabase_like_dsn
+    _apply_with_rpc_probe(dsn)
+
+    assert _one(
+        dsn,
+        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class"
+        " WHERE oid = 'public.youtube_quota_buckets'::regclass",
+    ) == (True, False)
+    assert _all(
+        dsn,
+        "SELECT grantee, privilege_type FROM information_schema.role_table_grants"
+        " WHERE table_schema = 'public' AND table_name = 'youtube_quota_buckets'"
+        " AND grantee IN ('anon', 'authenticated', 'PUBLIC')",
+    ) == []
+    assert _all(
+        dsn,
+        "SELECT policyname FROM pg_policies"
+        " WHERE schemaname = 'public' AND tablename = 'youtube_quota_buckets'",
+    ) == []
+
+    with pytest.raises(errors.CheckViolation):
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "INSERT INTO youtube_quota_buckets"
+                " (quota_day, bucket, used, scheduled_used) VALUES (current_date, 'unknown', 0, 0)"
+            )
+    with pytest.raises(errors.CheckViolation):
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "INSERT INTO youtube_quota_buckets"
+                " (quota_day, bucket, used, scheduled_used)"
+                " VALUES (current_date, 'search_list', 1, 2)"
+            )
+
+
+@pytest.mark.asyncio
+async def test_postgres_quota_reservation_never_overspends_under_concurrency(empty_postgres_dsn):
+    dsn = empty_postgres_dsn
+    _apply(dsn, *all_postgres_migrations())
+    repo = PostgresTimescaleRepository(dsn=dsn)
+    now = datetime(2026, 9, 29, 7, 0, tzinfo=timezone.utc)
+
+    try:
+        reservations = await asyncio.gather(
+            *(
+                repo.reserve_youtube_quota(
+                    quota_day=date(2026, 9, 29),
+                    bucket=YouTubeQuotaBucket.SEARCH_LIST,
+                    cost=1,
+                    trigger=IngressTrigger.SCHEDULED,
+                    daily_limit=100,
+                    scheduled_limit=7,
+                    now=now,
+                )
+                for _ in range(20)
+            )
+        )
+        usage = await repo.get_youtube_quota_usage(date(2026, 9, 29))
+    finally:
+        await repo.close()
+
+    assert sum(item.admitted for item in reservations) == 7
+    assert len(usage) == 1
+    assert usage[0].used == 7
+    assert usage[0].scheduled_used == 7
+
+
+def test_re_applying_024_and_the_whole_chain_changes_no_quota_state(supabase_like_dsn):
+    dsn = supabase_like_dsn
+    _apply_with_rpc_probe(dsn)
+    with psycopg.connect(dsn) as conn:
+        conn.execute(
+            "INSERT INTO youtube_quota_buckets"
+            " (quota_day, bucket, used, scheduled_used, exhausted)"
+            " VALUES (DATE '2026-09-29', 'search_list', 8, 3, TRUE)"
+        )
+    settled = _one(
+        dsn,
+        "SELECT quota_day, bucket, used, scheduled_used, exhausted"
+        " FROM youtube_quota_buckets WHERE quota_day = DATE '2026-09-29'",
+    )
+
+    _apply(dsn, QUOTA_MIGRATION)
+    assert _one(
+        dsn,
+        "SELECT quota_day, bucket, used, scheduled_used, exhausted"
+        " FROM youtube_quota_buckets WHERE quota_day = DATE '2026-09-29'",
+    ) == settled
+    _apply(dsn, *all_postgres_migrations())
+    assert _one(
+        dsn,
+        "SELECT quota_day, bucket, used, scheduled_used, exhausted"
+        " FROM youtube_quota_buckets WHERE quota_day = DATE '2026-09-29'",
+    ) == settled

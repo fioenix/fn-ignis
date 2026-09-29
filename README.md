@@ -300,7 +300,7 @@ docker compose -f docker-compose.prod.yml up -d
 ```
 
 With an empty data volume, the `db` container runs every file in `sql/` in filename order before
-it reports healthy. This path is verified through `023` on `timescale/timescaledb-ha:pg16`.
+it reports healthy. This path is verified through `024` on `timescale/timescaledb-ha:pg16`.
 Every table the chain creates in `public` has row-level security on. When the Supabase roles `anon`
 and `authenticated` already exist, `006` gives them read-only policies on `market_lexicons` and
 `industry_taxonomies`, and `021` revokes every other privilege they hold on the chain's tables;
@@ -308,7 +308,9 @@ neither migration creates a role. PostgreSQL init scripts do not run again for a
 volume. Apply every missing migration in filename order, connected as the table owner: a database
 initialised before `021` needs `sql/021_public_schema_rls_coverage.sql`, any database initialised
 before `022` needs `sql/022_builtin_uuid_defaults.sql`, and any database initialised before `023`
-needs `sql/023_evidence_qualification.sql`. Running any of these files again changes nothing.
+needs `sql/023_evidence_qualification.sql`. A database initialised before `024` also needs
+`sql/024_youtube_quota_ledger.sql`; it adds the shared YouTube quota ledger and stores no API key.
+Running any of these files again changes nothing.
 
 > Existing PostgreSQL installations with a legacy `trend_signals` corpus require the reviewed
 > [source/observation production cutover](docs/migrations/2026-09-10-source-observation-baseline.md#production-cutover-runbook).
@@ -354,8 +356,11 @@ For detailed manual installation, Python scripting workflows, Docker ops, and tr
 |---|---|---|:---:|
 | `DATABASE_URL` | SQLite (`sqlite:///ignis.db`) or PostgreSQL/TimescaleDB connection string | `sqlite:///ignis.db` | **Yes** |
 | `YOUTUBE_API_KEY` | Google Cloud YouTube Data API v3 Key | `""` | Optional |
+| `YOUTUBE_SEARCH_DAILY_LIMIT` | Total daily `search.list` calls available to this installation | `100` | No |
+| `YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT` | Daily `search.list` calls reserved as the Track 1 ceiling; requested work can use the remaining capacity and borrow unused scheduled capacity | `70` | No |
+| `YOUTUBE_OTHER_DAILY_UNIT_LIMIT` | Shared daily units for YouTube endpoints other than `search.list` | `10000` | No |
 | `DEFAULT_GEO` | Default ISO country code for trend intelligence | `VN` | No |
-| `SCHEDULER_INTERVAL_SECONDS` | Worker ingress tick. The default is derived from YouTube's quota: 10 keyword probes x 100 units leaves room for 10 passes a day | `8640` (~2.4h) | No |
+| `SCHEDULER_INTERVAL_SECONDS` | Worker ingress tick; the shared ledger refuses calls beyond the scheduled allocation without changing this cadence | `8640` (~2.4h) | No |
 | `DISCOVERY_INTERVAL_HOURS` | Interval between autonomous discovery runs | `24` (daily) | No |
 | `SYNC_INTERVAL_MINUTES` | Optional override for ingress sync interval in minutes (0 = use SCHEDULER_INTERVAL_SECONDS) | `0` | No |
 | `YOUTUBE_CACHE_TTL_SECONDS` | In-memory LRU+TTL cache duration to preserve YouTube API quota | `86400` (24h) | No |

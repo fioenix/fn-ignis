@@ -1,9 +1,15 @@
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import date, datetime
 from typing import Dict, Any, List, Optional, TypedDict
 from uuid import UUID
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
 from ignis.domain.value_objects import GeoCode, Timeframe
+from ignis.domain.value_objects import IngressTrigger
+from ignis.domain.youtube_quota import (
+    YouTubeQuotaBucket,
+    YouTubeQuotaReservation,
+    YouTubeQuotaUsage,
+)
 
 
 class PlatformCredentialSummary(TypedDict):
@@ -241,5 +247,33 @@ class ITrendRepository(ABC):
         """Delete a dynamic runtime configuration parameter."""
         pass
 
+    @abstractmethod
+    async def reserve_youtube_quota(
+        self,
+        quota_day: date,
+        bucket: YouTubeQuotaBucket,
+        cost: int,
+        trigger: IngressTrigger,
+        daily_limit: int,
+        scheduled_limit: Optional[int],
+        now: datetime,
+    ) -> YouTubeQuotaReservation:
+        """Atomically admit and record one YouTube request, or return the current refusal state."""
+        pass
+
+    @abstractmethod
+    async def mark_youtube_quota_exhausted(
+        self,
+        quota_day: date,
+        bucket: YouTubeQuotaBucket,
+        now: datetime,
+    ) -> YouTubeQuotaUsage:
+        """Close one provider bucket for the rest of its Pacific-Time day."""
+        pass
+
+    @abstractmethod
+    async def get_youtube_quota_usage(self, quota_day: date) -> List[YouTubeQuotaUsage]:
+        """Return persisted usage for the named Pacific-Time quota day."""
+        pass
 
 

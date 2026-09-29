@@ -38,9 +38,11 @@ def ensure_environment_file(project_root: Path) -> Tuple[bool, str]:
             "DEFAULT_GEO=VN\n"
             f"IGNIS_ENCRYPTION_KEY={Fernet.generate_key().decode()}\n"
             "YOUTUBE_API_KEY=\n"
-            # One pass probes up to MAX_TOPIC_KEYWORDS keywords and a YouTube search.list costs
-            # 100 of the 10,000 units a free project gets per day, so ~2.4h is what fits. This
-            # has to agree with SCHEDULER_INTERVAL_SECONDS in ignis.config and env.example.
+            "YOUTUBE_SEARCH_DAILY_LIMIT=100\n"
+            "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT=70\n"
+            "YOUTUBE_OTHER_DAILY_UNIT_LIMIT=10000\n"
+            # The shared database ledger enforces quota across worker and MCP processes. Keep the
+            # established cadence here; reservations, rather than cadence, are the hard boundary.
             "SCHEDULER_INTERVAL_SECONDS=8640\n"
             "DISCOVERY_INTERVAL_HOURS=24\n"
         )

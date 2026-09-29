@@ -1,7 +1,7 @@
 import dataclasses
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
@@ -50,7 +50,12 @@ from ignis.domain.source_identity import (
     resolve_identity_alias,
     resolve_source_identity,
 )
-from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe, resolve_geo, resolve_platform, timeframe_to_days
+from ignis.domain.value_objects import GeoCode, IngressTrigger, PlatformType, Timeframe, resolve_geo, resolve_platform, timeframe_to_days
+from ignis.domain.youtube_quota import (
+    YouTubeQuotaBucket,
+    YouTubeQuotaReservation,
+    YouTubeQuotaUsage,
+)
 
 from ignis.infrastructure.auth.crypto import encrypt_credentials, decrypt_credentials
 
@@ -116,6 +121,118 @@ class PostgresTimescaleRepository(ITrendRepository):
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
+
+    @staticmethod
+    def _youtube_quota_usage_from_row(row) -> YouTubeQuotaUsage:
+        return YouTubeQuotaUsage(
+            quota_day=row[0],
+            bucket=YouTubeQuotaBucket(row[1]),
+            used=int(row[2]),
+            scheduled_used=int(row[3]),
+            exhausted=bool(row[4]),
+            updated_at=row[5],
+        )
+
+    async def reserve_youtube_quota(
+        self,
+        quota_day: date,
+        bucket: YouTubeQuotaBucket,
+        cost: int,
+        trigger: IngressTrigger,
+        daily_limit: int,
+        scheduled_limit: Optional[int],
+        now: datetime,
+    ) -> YouTubeQuotaReservation:
+        scheduled_cost = cost if trigger == IngressTrigger.SCHEDULED else 0
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    "INSERT INTO youtube_quota_buckets"
+                    " (quota_day, bucket, used, scheduled_used, exhausted, created_at, updated_at)"
+                    " SELECT %s, %s, %s, %s, FALSE, %s, %s"
+                    " WHERE %s <= %s AND (%s IS NULL OR %s <= %s)"
+                    " ON CONFLICT (quota_day, bucket) DO UPDATE SET"
+                    " used = youtube_quota_buckets.used + EXCLUDED.used,"
+                    " scheduled_used = youtube_quota_buckets.scheduled_used + EXCLUDED.scheduled_used,"
+                    " updated_at = EXCLUDED.updated_at"
+                    " WHERE NOT youtube_quota_buckets.exhausted"
+                    " AND youtube_quota_buckets.used + EXCLUDED.used <= %s"
+                    " AND (%s IS NULL OR youtube_quota_buckets.scheduled_used"
+                    "      + EXCLUDED.scheduled_used <= %s)"
+                    " RETURNING quota_day, bucket, used, scheduled_used, exhausted, updated_at;",
+                    (
+                        quota_day,
+                        bucket.value,
+                        cost,
+                        scheduled_cost,
+                        now,
+                        now,
+                        cost,
+                        daily_limit,
+                        scheduled_limit,
+                        scheduled_cost,
+                        scheduled_limit,
+                        daily_limit,
+                        scheduled_limit,
+                        scheduled_limit,
+                    ),
+                )
+                row = await cur.fetchone()
+                admitted = row is not None
+                if row is None:
+                    await cur.execute(
+                        "SELECT quota_day, bucket, used, scheduled_used, exhausted, updated_at"
+                        " FROM youtube_quota_buckets WHERE quota_day = %s AND bucket = %s;",
+                        (quota_day, bucket.value),
+                    )
+                    row = await cur.fetchone()
+        usage = (
+            self._youtube_quota_usage_from_row(row)
+            if row is not None
+            else YouTubeQuotaUsage(
+                quota_day=quota_day,
+                bucket=bucket,
+                used=0,
+                scheduled_used=0,
+                exhausted=False,
+                updated_at=now,
+            )
+        )
+        return YouTubeQuotaReservation(admitted=admitted, usage=usage)
+
+    async def mark_youtube_quota_exhausted(
+        self,
+        quota_day: date,
+        bucket: YouTubeQuotaBucket,
+        now: datetime,
+    ) -> YouTubeQuotaUsage:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    "INSERT INTO youtube_quota_buckets"
+                    " (quota_day, bucket, used, scheduled_used, exhausted, created_at, updated_at)"
+                    " VALUES (%s, %s, 0, 0, TRUE, %s, %s)"
+                    " ON CONFLICT (quota_day, bucket) DO UPDATE SET exhausted = TRUE,"
+                    " updated_at = EXCLUDED.updated_at"
+                    " RETURNING quota_day, bucket, used, scheduled_used, exhausted, updated_at;",
+                    (quota_day, bucket.value, now, now),
+                )
+                row = await cur.fetchone()
+        return self._youtube_quota_usage_from_row(row)
+
+    async def get_youtube_quota_usage(self, quota_day: date) -> List[YouTubeQuotaUsage]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    "SELECT quota_day, bucket, used, scheduled_used, exhausted, updated_at"
+                    " FROM youtube_quota_buckets WHERE quota_day = %s ORDER BY bucket;",
+                    (quota_day,),
+                )
+                rows = await cur.fetchall()
+        return [self._youtube_quota_usage_from_row(row) for row in rows]
 
     async def save_signals(self, signals: List[TrendSignal]) -> int:
         """Record each sighting in the source/observation model. Nothing else is written.
