@@ -17,10 +17,12 @@ import secrets
 import shutil
 import subprocess
 import time
+import tomllib
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import yaml
 
 from conftest import all_postgres_migrations
 
@@ -70,12 +72,24 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "024_youtube_quota_ledger.sql"
+NEWEST_MIGRATION = "025_evidence_grounded_claim_ledger.sql"
 
-pytestmark = pytest.mark.skipif(
+compose_only = pytest.mark.skipif(
     os.environ.get("IGNIS_TEST_COMPOSE_INIT") != "1" or shutil.which("docker") is None,
     reason="IGNIS_TEST_COMPOSE_INIT=1 and a Docker CLI are required for the real init path",
 )
+
+
+def test_default_install_has_no_worker_service_or_scheduler_entrypoint():
+    """A clean install must not expose a resident process that can collect while idle."""
+    for path in (REPO / "docker-compose.yml", REPO / "docker-compose.prod.yml"):
+        compose = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert "worker" not in compose.get("services", {}), path.name
+
+    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    scripts = pyproject["project"]["scripts"]
+    assert "fn-ignis-worker" not in scripts
+    assert "ignis-worker" not in scripts
 
 
 def _run(args: list, env: dict, check: bool = True) -> subprocess.CompletedProcess:
@@ -195,6 +209,7 @@ def _fresh_init(tmp_path: Path) -> dict:
     }
 
 
+@compose_only
 def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_path):
     first = _fresh_init(tmp_path)
     second = _fresh_init(tmp_path)

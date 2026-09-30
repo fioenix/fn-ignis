@@ -325,3 +325,27 @@ Every AI Agent modifying this repository or preparing a release must verify comp
 - `reports/` is **local runtime output only** and is fully gitignored (except `.gitkeep`). Every artifact a tool generates at runtime lands here, and nothing in it is ever committed.
 - `examples/case-studies/` holds the **curated sample dossiers** that documentation links to. `scripts/generate_sample_case_studies.py` writes there on purpose.
 - HTML **templates** live in `src/ignis/infrastructure/templates/html/` and are the only report source committed as code.
+
+---
+
+## ⚖️ 8. Decision Boundaries & Decision Records
+
+These boundaries hold for every contributor. Where the `noulmes` skill is installed, an agent applies them with its decision check (`jev.py check`) before acting and its gate (`jev.py gate`) before asking the owner.
+
+**The owner decides these; an agent asks before acting:**
+- An agent asks the owner before writing or applying a migration in `sql/` that transforms persisted evidence (Constitution VI).
+- An agent asks the owner before a version bump, a tag, or a release (Section 4).
+- An agent asks the owner before changing or removing an MCP tool's signature.
+- An agent asks the owner before moving a connector between the HTTP and browser tiers, or into or out of the worker registry.
+- An agent asks the owner before writing to the Supabase development database; reading it needs no question.
+- An agent asks the owner before using a real TikTok, Threads, or Instagram session or token.
+
+**The agent decides these alone and records the decision:** vocabulary seeded in `sql/`, test fixtures, internal refactors that keep every contract, `.handoff/` notes, and thresholds in a local SQLite `runtime_configs`.
+
+**An agent checks a choice before acting** when it falls within the constitution (`.specify/memory/constitution.md`, Principles I–VI) or an ADR in `docs/decisions/`, such as adding a dependency or a migration.
+
+**Where a decision is recorded:**
+- A decision that belongs to a spec is recorded in that spec's `## Clarifications`, under `### Session YYYY-MM-DD`, as `- Q: … → A: … (agent decided; basis: …)`.
+- An agent records a decision in a spec's `## Clarifications` only when the task belongs to that spec, even when `.specify/feature.json` names that spec; `feature.json` can still name a finished spec.
+- A decision that belongs to no spec is recorded as a dated note tagged `fn-ignis` in the first folder of `NOULMES_DECISIONS` when it is set, and is otherwise reported as unrecorded.
+- `docs/decisions/` holds architecture and product ADRs. An agent drafts an ADR as `Proposed`, and the owner sets its status.

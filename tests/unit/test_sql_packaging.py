@@ -20,7 +20,7 @@ SEED_FILES = (
 )
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
-NEWEST_POSTGRES_MIGRATION = "024_youtube_quota_ledger.sql"
+NEWEST_POSTGRES_MIGRATION = "025_evidence_grounded_claim_ledger.sql"
 
 
 def test_seed_directory_is_found_in_this_layout():
@@ -86,8 +86,8 @@ def test_the_whole_postgres_migration_chain_ships_not_only_the_seeds():
     assert '"sql"' not in excluded and '"/sql"' not in excluded, "the sdist excludes sql/"
 
 
-def test_the_migration_inventory_ends_at_024_and_both_backends_state_its_tables():
-    """Compose and a hand-applied chain need 024 in order; SQLite restates it, not reads it."""
+def test_the_migration_inventory_ends_at_025_and_both_backends_state_its_tables():
+    """Compose and a hand-applied chain need 025 in order; SQLite restates it, not reads it."""
     directory = sql_seed_dir()
     names = sorted(path.name for path in directory.glob("*.sql"))
     assert names[-1] == NEWEST_POSTGRES_MIGRATION
@@ -98,8 +98,18 @@ def test_the_migration_inventory_ends_at_024_and_both_backends_state_its_tables(
         Path(__file__).resolve().parents[2]
         / "src/ignis/infrastructure/persistence/sqlite_repository.py"
     ).read_text(encoding="utf-8")
-    for table in ("youtube_quota_buckets",):
+    for table in ("mission_manifests", "mission_claims", "mission_claim_evidence"):
         assert f"CREATE TABLE IF NOT EXISTS {table}" in migration, table
         assert f"CREATE TABLE IF NOT EXISTS {table}" in sqlite_source, f"SQLite does not restate {table}"
     assert "ENABLE ROW LEVEL SECURITY" in migration
-    assert "PRIMARY KEY (quota_day, bucket)" in migration
+
+    quota_migration = (directory / "024_youtube_quota_ledger.sql").read_text(encoding="utf-8")
+    assert "PRIMARY KEY (quota_day, bucket)" in quota_migration
+
+
+def test_the_two_evidence_grounded_skills_ship_with_the_checkout():
+    """A release missing either capability package exposes only half of the approved product."""
+    root = Path(__file__).resolve().parents[2]
+
+    assert (root / ".agents/skills/ignis-collect/SKILL.md").is_file()
+    assert (root / ".agents/skills/ignis-analyze/SKILL.md").is_file()

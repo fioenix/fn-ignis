@@ -54,10 +54,9 @@ If the user gives you this repository link or asks you to set up `fn-ignis`, exe
 
 1. **Track 1: Always-On Autonomous Radar (Optional, Continuous Baseline)**
    - Operated by the Docker daemon (`fn-ignis-worker`) — optional, not required. On-demand research works without it.
-   - Ingests through **official HTTP APIs only**: Google Trends RSS and the YouTube Data API. The default tick remains
-     `SCHEDULER_INTERVAL_SECONDS=8640` (~2.4h). A shared database ledger caps scheduled `search.list` work at 70
-     calls per Pacific-Time day, preserves at least 30 calls for requested research, and accounts other endpoints
-     against their separate 10,000-unit bucket.
+   - Ingests through **official HTTP APIs only**: Google Trends RSS and the YouTube Data API. The default tick is
+     `SCHEDULER_INTERVAL_SECONDS=8640` (~2.4h), not a fixed 15 minutes: one pass probes up to 10 keywords and a
+     YouTube `search.list` costs 100 units, so 10 passes a day is what fits inside the 10,000-unit daily quota.
    - The worker image ships no browser runtime, so connectors that can only reach their data by driving a browser (TikTok, and Threads/Instagram without a Graph token) are left out of its registry and handled by Track 2 instead. Each connector decides this itself via `resolve_ingest_runtime()`.
 2. **Track 2: On-Demand Targeted Deep Research (Active Strategic Probes)**
    - Deployed directly by you (the Agent) upon user prompt.
@@ -109,6 +108,12 @@ ignis-mcp
 
 ---
 
+## ⚖️ Decision Boundaries
+
+Before asking the owner a question, recording a decision, or touching a migration, a release, an MCP tool signature, or a connector's runtime tier, read `AGENTS.md` Section 8: it says who decides and where the decision is recorded.
+
+---
+
 ## 🗑️ Ephemeral Handoff & Review Protocol
 
 - **Temporary Working Notes**: When generating interim reviews, architecture audits, or handoff notes meant for 1-time session exchange, **ALWAYS write them to `.handoff/` (or name them `*.handoff.md`)**.
@@ -143,4 +148,3 @@ Before completing changes or cutting a release, verify these three checklist gat
       the project's own version, so skipping it makes `uv sync --locked` fail on a clean checkout.
       Confirm with `uv lock --check`; never hand-edit the file.
 - [ ] Tag release commit (`git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`) and publish GitHub Release.
-
