@@ -3,9 +3,8 @@
 Plan 009 makes two distribution paths public: a tagged source checkout bootstrapped with one
 command, and an OCI image on GHCR. Before it, the tracked surfaces disagreed with the runtime and
 with each other: current guidance claimed 39 or 45 MCP tools while the server exposed 47, install
-guidance stopped at migration `023` while `024` shipped, `server.json` advertised a PyPI package
-that was never published, and the image defaulted to the scheduler worker while the manifest
-declared an MCP stdio server.
+guidance stopped at migration `023` while `024` shipped, and `server.json` advertised a PyPI
+package that was never published while the image contract declared an MCP stdio server.
 
 Each of those was a sentence or a setting somebody typed. These contracts read the authority each
 claim depends on -- the running MCP catalog, the migration chain on disk, the committed manifests --
@@ -32,13 +31,11 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 
 DOCKERFILE = REPO / "Dockerfile"
-COMPOSE_FILES = (REPO / "docker-compose.yml", REPO / "docker-compose.prod.yml")
 SERVER_JSON = REPO / "server.json"
 DOCKER_PUBLISH = REPO / ".github" / "workflows" / "docker-publish.yml"
 BACKLOG = REPO / "BACKLOG.md"
 
 MCP_SERVER_MODULE = "ignis.interfaces.mcp.server"
-SCHEDULER_MODULE = "ignis.interfaces.cli.scheduler"
 IMAGE_REPOSITORY = "ghcr.io/fioenix/fn-ignis"
 SOURCE_REPOSITORY_URL = "https://github.com/fioenix/fn-ignis"
 SOURCE_LABEL = "org.opencontainers.image.source"
@@ -279,7 +276,7 @@ def test_the_citation_release_date_moves_with_the_version():
 
 
 # --------------------------------------------------------------------------------------------
-# Image role: the direct image is the MCP server, Compose selects the worker
+# Image role: the direct image is the request-driven MCP server
 # --------------------------------------------------------------------------------------------
 
 
@@ -313,20 +310,6 @@ def test_the_image_defaults_to_the_mcp_stdio_server():
         f"the image's default command is {_dockerfile_cmd()}; a client following server.json "
         "would receive that process instead of the MCP server"
     )
-
-
-def _compose_worker_command(path: Path) -> list[str] | None:
-    services = yaml.safe_load(_read(path)).get("services", {})
-    return services.get("worker", {}).get("command")
-
-
-def test_both_compose_files_select_the_scheduler_explicitly():
-    """The worker role survives the image default changing only because Compose names it."""
-    for path in COMPOSE_FILES:
-        assert _compose_worker_command(path) == ["python", "-m", SCHEDULER_MODULE], (
-            f"{path.name}'s worker no longer runs the scheduler explicitly; with an MCP default "
-            "image it would start the MCP server and exit when stdin closes"
-        )
 
 
 def test_the_image_carries_its_source_and_mcp_ownership_labels():
@@ -372,12 +355,6 @@ def test_server_json_says_the_default_database_is_ephemeral_sqlite():
     variables = {v["name"]: v for v in package.get("environmentVariables", [])}
     description = variables["DATABASE_URL"].get("description", "").lower()
     assert "sqlite" in description and "ephemeral" in description, description
-
-
-def test_the_production_worker_runs_the_published_image():
-    services = yaml.safe_load(_read(REPO / "docker-compose.prod.yml"))["services"]
-    image = services["worker"]["image"]
-    assert image.startswith(f"{IMAGE_REPOSITORY}:"), image
 
 
 # --------------------------------------------------------------------------------------------
@@ -1731,56 +1708,6 @@ def _observe_compose(module, tmp_path, monkeypatch, **env):
     return record, calls, leftover_env, Path(str(log) + ".down").exists()
 
 
-def test_the_production_worker_starts_the_scheduler(tmp_path, monkeypatch):
-    module = _acceptance()
-    record, calls, leftover_env, torn_down = _observe_compose(module, tmp_path, monkeypatch)
-    assert record.name == "compose_worker_override"
-    assert record.state == module.SurfaceState.VERIFIED, record
-    ups = [call for call in calls if call[0] == "compose" and "up" in call]
-    assert ups and any(arg.endswith("docker-compose.prod.yml") for arg in ups[0]), ups
-    assert torn_down, "the throwaway Compose project was not torn down"
-    assert not leftover_env, "the generated Compose credential file outlived the run"
-
-
-def test_a_compose_file_without_the_scheduler_command_fails(tmp_path, monkeypatch):
-    """Without the explicit command the worker would run the image's MCP default and exit on EOF."""
-    module = _acceptance()
-    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="no-override")
-    assert record.state == module.SurfaceState.FAILED
-    assert "docker-compose.yml" in record.evidence
-
-
-def test_a_worker_running_anything_but_the_scheduler_fails(tmp_path, monkeypatch):
-    module = _acceptance()
-    record, _, _, torn_down = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="wrong-process")
-    assert record.state == module.SurfaceState.FAILED
-    assert torn_down
-
-
-def test_an_unreachable_docker_daemon_leaves_the_worker_role_unread(tmp_path, monkeypatch):
-    module = _acceptance()
-    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="no-daemon")
-    assert record.state == module.SurfaceState.UNREADABLE
-    assert record.failure_class == "network"
-
-
-def test_the_compose_docker_config_names_only_the_plugin_directory(tmp_path, monkeypatch):
-    """Compose is a CLI plugin: isolation must keep it reachable while carrying no credential."""
-    module = _acceptance()
-    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch)
-    assert record.state == module.SurfaceState.VERIFIED, record
-
-
-def test_a_compose_config_that_fails_is_reported_with_its_error(tmp_path, monkeypatch):
-    """A failed `compose config` is not a worker command of None."""
-    module = _acceptance()
-    monkeypatch.setenv("FAKE_COMPOSE_MODE", "config-error")
-    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="config-error")
-    assert record.state in (module.SurfaceState.FAILED, module.SurfaceState.UNREADABLE)
-    assert "resolves to None" not in record.evidence
-    assert "invalid compose project" in record.evidence
-
-
 # --------------------------------------------------------------------------------------------
 # Negative controls: every governed claim can turn its own contract red
 # --------------------------------------------------------------------------------------------
@@ -1823,9 +1750,6 @@ def governed_copy(tmp_path, monkeypatch):
     _shutil.copytree(REPO / "sql", tmp_path / "sql")
     monkeypatch.setattr(THIS_MODULE, "REPO", tmp_path)
     monkeypatch.setattr(THIS_MODULE, "DOCKERFILE", tmp_path / "Dockerfile")
-    monkeypatch.setattr(
-        THIS_MODULE, "COMPOSE_FILES", (tmp_path / "docker-compose.yml", tmp_path / "docker-compose.prod.yml")
-    )
     monkeypatch.setattr(THIS_MODULE, "SERVER_JSON", tmp_path / "server.json")
     monkeypatch.setattr(THIS_MODULE, "DOCKER_PUBLISH", tmp_path / ".github" / "workflows" / "docker-publish.yml")
     monkeypatch.setattr(THIS_MODULE, "BACKLOG", tmp_path / "BACKLOG.md")
@@ -1865,11 +1789,6 @@ NEGATIVE_CONTROLS = (
      "test_server_json_advertises_the_versioned_oci_stdio_package"),
     ("DATABASE_URL required again", "server.json", r'"isRequired": false,\n(\s*)"format"', r'"isRequired": true,\n\1"format"',
      "test_server_json_marks_the_sqlite_defaulted_database_url_optional"),
-    ("local Compose override", "docker-compose.yml", r'^    command: \["python", "-m", "ignis\.interfaces\.cli\.scheduler"\]\n', "",
-     "test_both_compose_files_select_the_scheduler_explicitly"),
-    ("production Compose override", "docker-compose.prod.yml",
-     r'^    command: \["python", "-m", "ignis\.interfaces\.cli\.scheduler"\]\n', "",
-     "test_both_compose_files_select_the_scheduler_explicitly"),
     ("Docker default role", "Dockerfile", r'^CMD \["python", "-m", "ignis\.interfaces\.mcp\.server"\]',
      'CMD ["python", "-m", "ignis.interfaces.cli.scheduler"]', "test_the_image_defaults_to_the_mcp_stdio_server"),
     ("Dockerfile source label", "Dockerfile", r'^LABEL org\.opencontainers\.image\.source=.*\n', "",
@@ -2266,12 +2185,10 @@ def test_all_mode_combines_every_observation_into_one_verdict(tmp_path, monkeypa
         return [verified(n) for n in ("source_tag_checkout", "source_bootstrap", "source_mcp_runtime")]
 
     def container(**kwargs):
-        seen["check_worker"] = kwargs.get("check_worker")
         return [
             verified("container_anonymous_pull", f"ghcr.io/fioenix/fn-ignis@{digest}"),
             verified("container_digest", f"ghcr.io/fioenix/fn-ignis@{digest}"),
             verified("container_mcp_runtime"),
-            verified("compose_worker_override"),
         ]
 
     monkeypatch.setattr(module, "observe_source", source)
@@ -2303,4 +2220,3 @@ def test_all_mode_combines_every_observation_into_one_verdict(tmp_path, monkeypa
     assert json.loads(_read(output))["verdict"] == "RELEASED"
     assert seen["parity_tree"] == seen["checkout"] and seen["registry_tree"] == seen["checkout"]
     assert seen["provenance_digest"] == digest
-    assert seen["check_worker"] is True

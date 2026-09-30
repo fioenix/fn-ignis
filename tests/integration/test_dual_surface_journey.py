@@ -8,6 +8,7 @@ citation reaches a canonical observation -- are claims about what those paths ac
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -24,8 +25,11 @@ from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.harness_models import ChannelHealthStatus, QualityScorecard
 from ignis.domain.research_workspace import (
+    AuthorityBoundary,
     IncompleteMarketBriefError,
+    MissionManifest,
     MissionLineage,
+    MissionOutputType,
     ResearchSurface,
 )
 from ignis.domain.value_objects import GeoCode, PlatformType
@@ -45,15 +49,89 @@ COMPLETE_BRIEF = {
 }
 
 
+def _manifest(output_type=MissionOutputType.ATTENTION_REPORT):
+    return MissionManifest(
+        outcome="Answer one bounded research question",
+        decision_context=(
+            COMPLETE_BRIEF["decision"]
+            if output_type is MissionOutputType.MARKET_ANALYSIS
+            else None
+        ),
+        required_channels=("google", "tiktok_video_grid"),
+        optional_channels=(),
+        authority_boundary=AuthorityBoundary(
+            public_http=True,
+            official_api=False,
+            browser_session=False,
+            paid_quota=False,
+        ),
+        quota_budget={},
+        output_type=output_type,
+        stop_conditions=("one run completed", "new authority required"),
+        analysis_policy="evidence-gated-v1",
+        retention_policy="mission-only",
+        created_by="contract-test",
+        confirmed_at=datetime.now(timezone.utc),
+    )
+
+
+def _market_args(**overrides):
+    return {**COMPLETE_BRIEF, **overrides, "manifest": _manifest(MissionOutputType.MARKET_ANALYSIS)}
+
+
+def _public_market_manifest():
+    manifest = _manifest(MissionOutputType.MARKET_ANALYSIS)
+    return {
+        "requested_outcome": manifest.outcome,
+        "allowed_resources": list(manifest.required_channels),
+        "authority_boundary": manifest.authority_boundary.to_payload(),
+        "quota_budget": dict(manifest.quota_budget),
+        "output_type": manifest.output_type.value,
+        "stop_conditions": list(manifest.stop_conditions),
+        "analysis_policy": manifest.analysis_policy,
+        "retention_policy": manifest.retention_policy,
+    }
+
+
 class StubRegistry:
     """Two connector surfaces on one platform, which is the case platform health used to hide."""
 
     def __init__(self, signals):
         self._signals = signals
 
+    async def resolve_execution_requirements(self, **kwargs):
+        return {
+            "resources": tuple(kwargs["allowed_surfaces"]),
+            "authority": ("public_http",),
+            "quota_costs": {},
+        }
+
     async def search_with_outcomes(self, **kwargs):
-        # The mission executor asks for per-surface outcomes; this double reports none.
-        return SearchPassResult(signals=await self.search_across_all(**kwargs))
+        signals = await self.search_across_all(**kwargs)
+        counts = {
+            "google": sum(signal.platform is PlatformType.GOOGLE_TRENDS for signal in signals),
+            "tiktok_video_grid": sum(signal.platform is PlatformType.TIKTOK for signal in signals),
+        }
+        from ignis.infrastructure.connectors.registry import SurfaceProbeResult
+
+        return SearchPassResult(
+            signals=signals,
+            outcomes=[
+                SurfaceProbeResult(
+                    platform=("google" if surface == "google" else "tiktok"),
+                    connector_surface=surface,
+                    status=(
+                        ChannelHealthStatus.HEALTHY
+                        if counts[surface]
+                        else ChannelHealthStatus.EMPTY_NO_DATA
+                    ),
+                    signals_collected=counts[surface],
+                    queried_keywords=tuple(kwargs["keywords"]),
+                    queried_window=kwargs.get("custom_timeframe"),
+                )
+                for surface in kwargs.get("target_surfaces") or counts
+            ],
+        )
 
     async def search_across_all(self, **_kwargs):
         return [
@@ -139,6 +217,7 @@ async def test_attention_runs_without_a_hypothesis_and_cites_real_observations(
         seed="ai customer service",
         geo=GeoCode.VN,
         timeframe="7d",
+        manifest=_manifest(),
     )
     assert mission.surface == ResearchSurface.ATTENTION.value
     assert mission.brief_revision_id is None
@@ -181,6 +260,7 @@ async def test_two_surfaces_of_one_platform_are_reported_separately(
         workspace_id=workspace.workspace_id,
         title="VN customer service attention",
         seed="ai customer service",
+        manifest=_manifest(),
     )
     await _executor(repository, store).execute(mission.id)
 
@@ -225,7 +305,7 @@ async def test_an_incomplete_brief_is_refused_and_writes_nothing(
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
 
-    incomplete = {**COMPLETE_BRIEF, "hypothesis": "", "falsifiers": []}
+    incomplete = _market_args(hypothesis="", falsifiers=[])
     with pytest.raises(IncompleteMarketBriefError) as excinfo:
         await ConfirmMarketBriefUseCase(repository, store).execute(
             workspace_id=workspace.workspace_id, confirmed_by="requester", **incomplete
@@ -244,7 +324,7 @@ async def test_a_market_mission_without_a_confirmed_brief_is_blocked_not_run(
     store, workspace = await _workspace(repository, host_workspace)
 
     mission, _revision = await ConfirmMarketBriefUseCase(repository, store).execute(
-        workspace_id=workspace.workspace_id, confirmed_by="requester", **COMPLETE_BRIEF
+        workspace_id=workspace.workspace_id, confirmed_by="requester", **_market_args()
     )
     # Stand in for a Market mission whose Brief cannot be read: the gate has to fail closed.
     orphan = await repository.get_mission(mission.id)
@@ -252,6 +332,9 @@ async def test_a_market_mission_without_a_confirmed_brief_is_blocked_not_run(
     orphan.shortcode = f"ORPHAN-{orphan.id.hex[:6].upper()}"
     orphan.brief_revision_id = None
     await repository.save_mission(orphan)
+    await repository.save_mission_manifest(
+        replace(_manifest(MissionOutputType.MARKET_ANALYSIS), mission_id=orphan.id)
+    )
 
     with pytest.raises(IncompleteMarketBriefError):
         await _executor(repository, store).execute(orphan.id)
@@ -272,7 +355,7 @@ async def test_a_confirmed_brief_authorizes_the_run_and_stays_immutable(
         confirmed_by="requester@example.com",
         keywords=["ai customer service"],
         lineage=MissionLineage(),
-        **COMPLETE_BRIEF,
+        **_market_args(),
     )
     assert mission.surface == ResearchSurface.MARKET.value
     assert mission.brief_revision_id == revision.brief_revision_id
@@ -299,7 +382,7 @@ async def test_market_conclusions_are_traceable_to_canonical_observations(
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         keywords=["ai customer service"],
-        **COMPLETE_BRIEF,
+        **_market_args(),
     )
     await _executor(repository, store).execute(mission.id)
 
@@ -346,6 +429,7 @@ async def test_an_attention_result_can_be_carried_into_a_market_brief_as_context
         workspace_id=workspace.workspace_id,
         title="VN customer service attention",
         seed="ai customer service",
+        manifest=_manifest(),
     )
     await _executor(repository, store).execute(attention.id)
 
@@ -353,7 +437,7 @@ async def test_an_attention_result_can_be_carried_into_a_market_brief_as_context
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         lineage=MissionLineage(parent_attention_mission_id=attention.id),
-        **COMPLETE_BRIEF,
+        **_market_args(),
     )
 
     stored = await repository.get_mission(market.id)
@@ -429,6 +513,9 @@ async def _unauthorized_market_mission(repository, workspace):
         surface=ResearchSurface.MARKET.value,
     )
     await repository.save_mission(mission)
+    await repository.save_mission_manifest(
+        replace(_manifest(MissionOutputType.MARKET_ANALYSIS), mission_id=mission.id)
+    )
     return mission
 
 
@@ -533,6 +620,7 @@ async def test_the_gate_does_not_block_a_confirmed_brief_or_an_attention_mission
         workspace_id=workspace.workspace_id,
         title="VN customer service attention",
         seed="ai customer service",
+        manifest=_manifest(),
     )
     attention_run = json.loads(
         await mcp_server.handle_execute_mission_ingress(str(attention.id))
@@ -543,7 +631,7 @@ async def test_the_gate_does_not_block_a_confirmed_brief_or_an_attention_mission
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         keywords=["ai customer service"],
-        **COMPLETE_BRIEF,
+        **_market_args(),
     )
     market_run = json.loads(await mcp_server.handle_execute_mission_ingress(str(market.id)))
     assert market_run["status"] == "COMPLETED"
@@ -586,7 +674,7 @@ async def test_a_failed_brief_write_leaves_no_orphan_market_mission(
             workspace_id=workspace.workspace_id,
             confirmed_by="requester",
             keywords=["ai customer service"],
-            **COMPLETE_BRIEF,
+            **_market_args(),
         )
 
     assert await store.list_workspace_missions(workspace.workspace_id) == []
@@ -615,11 +703,11 @@ async def test_a_confirmation_that_failed_can_simply_be_retried(
     use_case = ConfirmMarketBriefUseCase(repository, store)
     with pytest.raises(Exception):
         await use_case.execute(
-            workspace_id=workspace.workspace_id, confirmed_by="requester", **COMPLETE_BRIEF
+            workspace_id=workspace.workspace_id, confirmed_by="requester", **_market_args()
         )
 
     mission, revision = await use_case.execute(
-        workspace_id=workspace.workspace_id, confirmed_by="requester", **COMPLETE_BRIEF
+        workspace_id=workspace.workspace_id, confirmed_by="requester", **_market_args()
     )
     assert revision.revision_number == 1
     missions = await store.list_workspace_missions(workspace.workspace_id)
@@ -645,6 +733,7 @@ async def test_an_attention_topic_hands_off_to_a_market_mission_with_its_lineage
         workspace_id=workspace.workspace_id,
         title="VN customer service attention",
         seed="ai customer service",
+        manifest=_manifest(),
     )
     await _executor(repository, store).execute(attention.id)
     attention_signals = await repository.get_mission_signals(attention.id)
@@ -660,7 +749,7 @@ async def test_an_attention_topic_hands_off_to_a_market_mission_with_its_lineage
         lineage=MissionLineage(
             parent_attention_mission_id=attention.id, parent_cluster_id=cluster_id
         ),
-        **COMPLETE_BRIEF,
+        **_market_args(),
     )
 
     stored = await repository.get_mission(market.id)
@@ -685,7 +774,7 @@ async def test_a_revised_brief_opens_a_new_evidence_line_and_leaves_the_old_one_
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         keywords=["ai customer service"],
-        **COMPLETE_BRIEF,
+        **_market_args(),
     )
     await _executor(repository, store).execute(first_mission.id)
     first_evidence = {
@@ -693,10 +782,9 @@ async def test_a_revised_brief_opens_a_new_evidence_line_and_leaves_the_old_one_
     }
     assert first_evidence
 
-    revised_brief = {
-        **COMPLETE_BRIEF,
-        "hypothesis": "Only VN retailers above 500 orders a month will pay for sub-minute replies",
-    }
+    revised_brief = _market_args(
+        hypothesis="Only VN retailers above 500 orders a month will pay for sub-minute replies"
+    )
     second_mission, second_revision = await use_case.execute(
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
@@ -741,6 +829,7 @@ async def test_a_market_conclusion_cites_only_the_evidence_of_its_own_brief(
         workspace_id=workspace.workspace_id,
         title="VN customer service attention",
         seed="ai customer service",
+        manifest=_manifest(),
     )
     await _executor(repository, store).execute(attention.id)
     attention_ids = {
@@ -752,7 +841,7 @@ async def test_a_market_conclusion_cites_only_the_evidence_of_its_own_brief(
         confirmed_by="requester",
         keywords=["ai customer service"],
         lineage=MissionLineage(parent_attention_mission_id=attention.id),
-        **COMPLETE_BRIEF,
+        **_market_args(),
     )
     await _executor(repository, store).execute(market.id)
 
@@ -803,6 +892,7 @@ async def test_the_analysis_response_separates_attention_context_from_market_evi
         workspace_id=workspace.workspace_id,
         title="VN customer service attention",
         seed="ai customer service",
+        manifest=_manifest(),
     )
     await _executor(repository, store).execute(attention.id)
 
@@ -811,7 +901,7 @@ async def test_the_analysis_response_separates_attention_context_from_market_evi
         confirmed_by="requester",
         keywords=["ai customer service"],
         lineage=MissionLineage(parent_attention_mission_id=attention.id),
-        **COMPLETE_BRIEF,
+        **_market_args(),
     )
     await _executor(repository, store).execute(market.id)
 
@@ -843,7 +933,10 @@ async def test_a_handoff_from_another_workspace_is_refused_and_writes_nothing(
     _other_store, other = await _workspace(repository, other_host, name="Other research")
 
     foreign = await CreateAttentionMissionUseCase(repository, store).execute(
-        workspace_id=other.workspace_id, title="Foreign attention", seed="something else"
+        workspace_id=other.workspace_id,
+        title="Foreign attention",
+        seed="something else",
+        manifest=_manifest(),
     )
 
     with pytest.raises(WorkspaceScopeMismatchError):
@@ -851,7 +944,7 @@ async def test_a_handoff_from_another_workspace_is_refused_and_writes_nothing(
             workspace_id=workspace.workspace_id,
             confirmed_by="requester",
             lineage=MissionLineage(parent_attention_mission_id=foreign.id),
-            **COMPLETE_BRIEF,
+            **_market_args(),
         )
 
     assert await store.list_workspace_missions(workspace.workspace_id) == []
@@ -873,7 +966,7 @@ async def test_the_brief_tool_refuses_a_parent_that_is_not_an_attention_result(
     monkeypatch.setattr(mcp_server, "get_components", lambda: components)
 
     market, _revision = await _revision_use_case(repository, store).execute(
-        workspace_id=workspace.workspace_id, confirmed_by="requester", **COMPLETE_BRIEF
+        workspace_id=workspace.workspace_id, confirmed_by="requester", **_market_args()
     )
 
     payload = json.loads(
@@ -881,6 +974,7 @@ async def test_the_brief_tool_refuses_a_parent_that_is_not_an_attention_result(
             workspace_id=str(workspace.workspace_id),
             confirmed_by="requester",
             parent_attention_mission_id=str(market.id),
+            mission_manifest=_public_market_manifest(),
             **COMPLETE_BRIEF,
         )
     )
@@ -908,17 +1002,21 @@ async def test_the_brief_tool_revises_a_confirmed_brief_into_a_new_mission(
         await mcp_server.handle_confirm_market_brief(
             workspace_id=str(workspace.workspace_id),
             confirmed_by="requester",
+            mission_manifest=_public_market_manifest(),
             **COMPLETE_BRIEF,
         )
     )
     assert first["status"] == "CONFIRMED"
     assert first["revision_number"] == 1
+    stored_first_manifest = await store.get_mission_manifest(UUID(first["mission_id"]))
+    assert first["manifest_digest"] == stored_first_manifest.manifest_digest
 
     second = json.loads(
         await mcp_server.handle_confirm_market_brief(
             workspace_id=str(workspace.workspace_id),
             confirmed_by="requester",
             previous_mission_id=first["mission_id"],
+            mission_manifest=_public_market_manifest(),
             **{**COMPLETE_BRIEF, "hypothesis": "A narrower hypothesis about repeat buyers"},
         )
     )
@@ -927,6 +1025,8 @@ async def test_the_brief_tool_revises_a_confirmed_brief_into_a_new_mission(
     assert second["brief_revision_id"] != first["brief_revision_id"]
     assert second["lineage"]["revises_mission_id"] == first["mission_id"]
     assert first["lineage"]["revises_mission_id"] is None
+    stored_second_manifest = await store.get_mission_manifest(UUID(second["mission_id"]))
+    assert second["manifest_digest"] == stored_second_manifest.manifest_digest
 
     # The first Brief still reads exactly as it was confirmed.
     stored_first = await store.get_brief_revision_for_mission(UUID(first["mission_id"]))
@@ -967,6 +1067,7 @@ async def test_the_brief_tool_revises_a_handoff_mission_without_restating_its_or
         workspace_id=workspace.workspace_id,
         title="VN customer service attention",
         seed="ai customer service",
+        manifest=_manifest(),
     )
     await _executor(repository, store).execute(attention.id)
     attention_signals = await repository.get_mission_signals(attention.id)
@@ -981,6 +1082,7 @@ async def test_the_brief_tool_revises_a_handoff_mission_without_restating_its_or
             confirmed_by="requester",
             parent_attention_mission_id=str(attention.id),
             parent_cluster_id=str(cluster_id) if cluster_id else None,
+            mission_manifest=_public_market_manifest(),
             **COMPLETE_BRIEF,
         )
     )
@@ -993,6 +1095,7 @@ async def test_the_brief_tool_revises_a_handoff_mission_without_restating_its_or
             workspace_id=str(workspace.workspace_id),
             confirmed_by="requester",
             previous_mission_id=handoff["mission_id"],
+            mission_manifest=_public_market_manifest(),
             **{**COMPLETE_BRIEF, "hypothesis": "Only retailers above 500 orders a month will pay"},
         )
     )
@@ -1035,13 +1138,16 @@ async def test_the_brief_tool_accepts_a_revision_that_restates_the_inherited_ori
     monkeypatch.setattr(mcp_server, "get_components", lambda: components)
 
     attention = await CreateAttentionMissionUseCase(repository, store).execute(
-        workspace_id=workspace.workspace_id, title="Origin", seed="ai customer service"
+        workspace_id=workspace.workspace_id,
+        title="Origin",
+        seed="ai customer service",
+        manifest=_manifest(),
     )
     handoff, _revision = await _revision_use_case(repository, store).execute(
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         lineage=MissionLineage(parent_attention_mission_id=attention.id),
-        **COMPLETE_BRIEF,
+        **_market_args(),
     )
 
     revised = json.loads(
@@ -1050,6 +1156,7 @@ async def test_the_brief_tool_accepts_a_revision_that_restates_the_inherited_ori
             confirmed_by="requester",
             previous_mission_id=str(handoff.id),
             parent_attention_mission_id=str(attention.id),
+            mission_manifest=_public_market_manifest(),
             **{**COMPLETE_BRIEF, "hypothesis": "A narrower hypothesis about repeat buyers"},
         )
     )
@@ -1072,16 +1179,22 @@ async def test_the_brief_tool_refuses_a_revision_that_re_points_the_attention_or
     monkeypatch.setattr(mcp_server, "get_components", lambda: components)
 
     origin = await CreateAttentionMissionUseCase(repository, store).execute(
-        workspace_id=workspace.workspace_id, title="Origin", seed="ai customer service"
+        workspace_id=workspace.workspace_id,
+        title="Origin",
+        seed="ai customer service",
+        manifest=_manifest(),
     )
     elsewhere = await CreateAttentionMissionUseCase(repository, store).execute(
-        workspace_id=workspace.workspace_id, title="Elsewhere", seed="something else"
+        workspace_id=workspace.workspace_id,
+        title="Elsewhere",
+        seed="something else",
+        manifest=_manifest(),
     )
     first, _ = await _revision_use_case(repository, store).execute(
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         lineage=MissionLineage(parent_attention_mission_id=origin.id),
-        **COMPLETE_BRIEF,
+        **_market_args(),
     )
 
     payload = json.loads(
@@ -1090,6 +1203,7 @@ async def test_the_brief_tool_refuses_a_revision_that_re_points_the_attention_or
             confirmed_by="requester",
             previous_mission_id=str(first.id),
             parent_attention_mission_id=str(elsewhere.id),
+            mission_manifest=_public_market_manifest(),
             **{**COMPLETE_BRIEF, "hypothesis": "A narrower hypothesis"},
         )
     )
@@ -1126,7 +1240,7 @@ async def test_four_concurrent_confirmations_take_four_distinct_revision_numbers
                 workspace_id=workspace.workspace_id,
                 confirmed_by="requester",
                 keywords=["ai customer service"],
-                **{**COMPLETE_BRIEF, "hypothesis": f"Variant {n} of the latency hypothesis"},
+                **_market_args(hypothesis=f"Variant {n} of the latency hypothesis"),
             )
             for n in range(4)
         ),

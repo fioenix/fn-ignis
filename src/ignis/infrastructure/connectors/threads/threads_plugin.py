@@ -942,3 +942,6 @@ class ThreadsPlugin(IConnectorPlugin):
             )
 
         return signals
+    @property
+    def http_authority(self) -> str:
+        return "official_api"

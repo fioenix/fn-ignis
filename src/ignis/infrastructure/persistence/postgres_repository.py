@@ -1917,6 +1917,72 @@ class PostgresTimescaleRepository(ITrendRepository):
                 f"Market Brief confirmation failed and nothing was written: {e}"
             ) from e
 
+    async def create_attention_mission_with_manifest(
+        self, mission: ResearchMission, manifest: MissionManifest
+    ) -> Tuple[ResearchMission, MissionManifest]:
+        """Write the surfaced mission and its authority contract in one transaction."""
+        if manifest.mission_id != mission.id:
+            raise InvalidMissionManifestError(
+                "The persisted manifest must carry the mission it authorizes."
+            )
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await self._write_mission_row(cur, mission)
+                    await self._write_manifest_row(cur, manifest)
+            return mission, manifest
+        except Exception as exc:
+            logger.error(
+                "Error creating Attention mission %s with its manifest: %s",
+                mission.id,
+                exc,
+                exc_info=True,
+            )
+            raise RepositoryException(
+                f"Attention mission confirmation failed and nothing was written: {exc}"
+            ) from exc
+
+    async def create_market_mission_with_brief_and_manifest(
+        self,
+        mission: ResearchMission,
+        revision: MarketBriefRevision,
+        manifest: MissionManifest,
+    ) -> Tuple[ResearchMission, MarketBriefRevision, MissionManifest]:
+        """Write all three records that make one Market assignment executable."""
+        if manifest.mission_id != mission.id:
+            raise InvalidMissionManifestError(
+                "The persisted manifest must carry the mission it authorizes."
+            )
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT id FROM research_workspaces WHERE id = %s FOR UPDATE;",
+                        (str(revision.workspace_id),),
+                    )
+                    numbered = dataclasses.replace(
+                        revision,
+                        revision_number=await self._next_revision_number(
+                            cur, revision.workspace_id
+                        ),
+                    )
+                    await self._write_mission_row(cur, mission)
+                    await self._write_brief_revision_row(cur, numbered)
+                    await self._write_manifest_row(cur, manifest)
+            return mission, numbered, manifest
+        except Exception as exc:
+            logger.error(
+                "Error confirming Market mission %s with its manifest: %s",
+                mission.id,
+                exc,
+                exc_info=True,
+            )
+            raise RepositoryException(
+                f"Market mission confirmation failed and nothing was written: {exc}"
+            ) from exc
+
     async def get_brief_revision(
         self, workspace_id: UUID, brief_revision_id: UUID
     ) -> Optional[MarketBriefRevision]:
@@ -2033,6 +2099,32 @@ class PostgresTimescaleRepository(ITrendRepository):
         " authority_boundary, quota_budget, output_type, stop_conditions, analysis_policy,"
         " retention_policy, created_by, confirmed_at, manifest_digest FROM mission_manifests"
     )
+
+    @staticmethod
+    async def _write_manifest_row(cur, manifest: MissionManifest) -> None:
+        await cur.execute(
+            "INSERT INTO mission_manifests"
+            " (mission_id, outcome, decision_context, required_channels, optional_channels,"
+            " authority_boundary, quota_budget, output_type, stop_conditions,"
+            " analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest)"
+            " VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s);",
+            (
+                str(manifest.mission_id),
+                manifest.outcome,
+                manifest.decision_context,
+                list(manifest.required_channels),
+                list(manifest.optional_channels),
+                json.dumps(manifest.authority_boundary.to_payload(), sort_keys=True),
+                json.dumps(dict(manifest.quota_budget), sort_keys=True),
+                manifest.output_type.value,
+                list(manifest.stop_conditions),
+                manifest.analysis_policy,
+                manifest.retention_policy,
+                manifest.created_by,
+                manifest.confirmed_at,
+                manifest.manifest_digest,
+            ),
+        )
 
     async def save_mission_manifest(self, manifest: MissionManifest) -> MissionManifest:
         if manifest.mission_id is None:

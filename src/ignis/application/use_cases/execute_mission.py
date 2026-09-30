@@ -12,16 +12,25 @@ from ignis.domain.exceptions import VocabularySynchronizationError
 from ignis.domain.research_workspace import (
     REQUIRED_BRIEF_FIELDS,
     IncompleteMarketBriefError,
+    InvalidMissionAuthorizationError,
+    InvalidMissionManifestError,
+    MissionTerminalStateError,
     MissionProbeOutcome,
     ResearchSurface,
     WorkspaceScopeMismatchError,
+    compute_collection_plan_digest,
     compute_query_fingerprint,
     resolve_surface,
 )
 from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 
 logger = logging.getLogger(__name__)
+
+TERMINAL_MISSION_STATES = frozenset(
+    {"COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "INSUFFICIENT_EVIDENCE"}
+)
 
 
 class ExecuteMissionUseCase:
@@ -73,6 +82,61 @@ class ExecuteMissionUseCase:
         await self._repo.update_mission(mission)
         raise IncompleteMarketBriefError(REQUIRED_BRIEF_FIELDS)
 
+    async def _require_manifest_authority(self, mission):
+        """Resolve the connector plan and refuse before a session, writer, or journal opens."""
+        if resolve_surface(mission.surface) is None:
+            # Legacy surface-null missions remain readable until the breaking public cutover.
+            return None, {}
+        if self._workspace_store is None:
+            raise InvalidMissionManifestError(
+                f"Mission {mission.id} is surfaced but no workspace store can read its manifest."
+            )
+        manifest = await self._workspace_store.get_mission_manifest(mission.id)
+        if manifest is None:
+            mission.status = "BLOCKED"
+            mission.summary = "Blocked: surfaced missions require a confirmed Mission Manifest."
+            await self._repo.update_mission(mission)
+            raise InvalidMissionManifestError(mission.summary)
+
+        resolver = getattr(self._registry, "resolve_execution_requirements", None)
+        if resolver is None:
+            raise InvalidMissionAuthorizationError(
+                "AUTHORITY_PREFLIGHT_UNAVAILABLE",
+                "The connector registry cannot prove its authority requirements, so no connector "
+                "session was opened.",
+            )
+        requirements = await resolver(
+            target_platforms=mission.platforms,
+            allowed_surfaces=manifest.allowed_resources,
+            keywords=mission.keywords,
+        )
+        unavailable = tuple(requirements.get("unavailable_resources", ()))
+        if unavailable:
+            mission.status = "BLOCKED"
+            mission.summary = (
+                "Blocked: manifest-declared connector surfaces are unavailable: "
+                + ", ".join(unavailable)
+            )
+            await self._repo.update_mission(mission)
+            raise InvalidMissionAuthorizationError(
+                "RESOURCE_UNAVAILABLE",
+                mission.summary,
+                missing_authority=unavailable,
+            )
+        try:
+            manifest.require_execution_authority(
+                resources=requirements.get("resources", ()),
+                authority=requirements.get("authority", ()),
+                quota_costs=requirements.get("quota_costs", {}),
+                material_scope_change=bool(requirements.get("material_scope_change", False)),
+            )
+        except InvalidMissionAuthorizationError as exc:
+            mission.status = "BLOCKED"
+            mission.summary = f"Blocked: {exc}"
+            await self._repo.update_mission(mission)
+            raise
+        return manifest, requirements
+
     async def _run_workspace(self, mission):
         """The research this run writes into, or None when the mission belongs to none.
 
@@ -119,12 +183,21 @@ class ExecuteMissionUseCase:
         if not mission:
             raise ValueError(f"Research Mission {mission_id} does not exist.")
 
+        if str(mission.status).upper() in TERMINAL_MISSION_STATES:
+            raise MissionTerminalStateError(mission.id, str(mission.status).upper())
+
+        manifest, execution_requirements = await self._require_manifest_authority(mission)
         await self._require_confirmed_brief(mission)
 
         workspace = await self._run_workspace(mission)
         if workspace is None:
             await self._synchronize_vocabulary(mission)
-            return await self._execute_pass(mission)
+            result = await self._execute_pass(
+                mission,
+                manifest=manifest,
+                execution_requirements=execution_requirements,
+            )
+            return result
 
         # The claim is taken before anything else writes, so a refused second run never touches
         # the state of the run that holds the mission -- not even to record that its own
@@ -133,16 +206,26 @@ class ExecuteMissionUseCase:
         # manager, including when synchronization or the pass raises.
         async with self._workspace_store.mission_run(workspace, mission.id) as journal:
             await self._synchronize_vocabulary(mission)
-            result = await self._execute_pass(mission, journal=journal)
+            result = await self._execute_pass(
+                mission,
+                journal=journal,
+                manifest=manifest,
+                execution_requirements=execution_requirements,
+            )
             result["run"] = {
                 "run_id": str(journal.run_id),
                 "workspace_id": str(journal.workspace_id),
                 "journal_path": str(journal.journal_path),
                 "journal_status": "COMPLETED",
             }
+            if manifest is not None:
+                result["manifest_digest"] = manifest.manifest_digest
+            result["terminal_state"] = mission.status
             return result
 
-    async def _record_probe_outcomes(self, mission, journal, outcomes) -> None:
+    async def _record_probe_outcomes(
+        self, mission, journal, outcomes, *, collection_plan_digest=None
+    ) -> None:
         """Write what every surface did during this run, before the mission can complete.
 
         A failure here propagates: a run whose outcomes are not on record would later be read as
@@ -169,18 +252,57 @@ class ExecuteMissionUseCase:
                         outcome.queried_keywords, mission.geo_code, outcome.queried_window
                     ),
                     completed_at=completed_at,
+                    scope_attestation=(
+                        {
+                            "geo": mission.geo_code.value,
+                            "timeframe": outcome.queried_window or mission.timeframe,
+                            "keywords": list(outcome.queried_keywords),
+                        }
+                        if collection_plan_digest is not None
+                        and outcome.status.value in ("HEALTHY", "EMPTY_NO_DATA")
+                        else None
+                    ),
+                    note=(
+                        outcome.note
+                        or (
+                            "The connector did not produce a measurement for this declared surface."
+                            if collection_plan_digest is not None
+                            and outcome.status.value not in ("HEALTHY", "EMPTY_NO_DATA")
+                            else None
+                        )
+                    ),
+                    collection_plan_digest=collection_plan_digest,
                 )
                 for outcome in outcomes
             ],
         )
 
-    async def _execute_pass(self, mission, journal=None) -> Dict[str, Any]:
+    async def _execute_pass(
+        self, mission, journal=None, manifest=None, execution_requirements=None
+    ) -> Dict[str, Any]:
         mission_id = mission.id
         logger.info(f"Executing Research Mission '{mission.title}' [ID: {mission_id}] with keywords: {mission.keywords} (Timeframe: {mission.timeframe})...")
         mission.status = "RUNNING"
         await self._repo.update_mission(mission)
 
         try:
+            collection_plan_digest = None
+            if manifest is not None:
+                collection_plan_digest = compute_collection_plan_digest(
+                    {
+                        "manifest_digest": manifest.manifest_digest,
+                        "connector_surfaces": list(manifest.allowed_resources),
+                        "scope": {
+                            "geo": mission.geo_code.value,
+                            "timeframe": mission.timeframe,
+                            "keywords": list(mission.keywords),
+                        },
+                        "authority": list((execution_requirements or {}).get("authority", ())),
+                        "quota_costs": dict(
+                            (execution_requirements or {}).get("quota_costs", {})
+                        ),
+                    }
+                )
             # 1. Targeted ingress across active connector plugins, with the outcome of every
             # surface it reached: a workspace run records them, so a reopened report can tell a
             # measured zero from a probe that never measured.
@@ -191,6 +313,7 @@ class ExecuteMissionUseCase:
                 # its 24h default they searched a different window from the mission's.
                 timeframe=resolve_timeframe(mission.timeframe),
                 target_platforms=mission.platforms,
+                target_surfaces=manifest.allowed_resources if manifest is not None else None,
                 custom_timeframe=mission.timeframe,
             )
             signals = search.signals
@@ -255,14 +378,19 @@ class ExecuteMissionUseCase:
             active_plat_str = ", ".join(active_platforms) if active_platforms else "none"
 
             if journal is not None:
-                await self._record_probe_outcomes(mission, journal, search.outcomes)
+                await self._record_probe_outcomes(
+                    mission,
+                    journal,
+                    search.outcomes,
+                    collection_plan_digest=collection_plan_digest,
+                )
 
             mission.status = "COMPLETED"
             mission.summary = f"Successfully collected {len(signals)} signals across {len(active_platforms)}/{len(mission.platforms)} responsive platforms ({active_plat_str}), discovered {len(clusters)} topic clusters."
             await self._repo.update_mission(mission)
 
             logger.info(f"Research Mission {mission_id} completed: {mission.summary}")
-            return {
+            result = {
                 "mission_id": str(mission.id),
                 "title": mission.title,
                 "status": mission.status,
@@ -270,10 +398,19 @@ class ExecuteMissionUseCase:
                 "total_clusters": len(clusters),
                 "summary": mission.summary,
             }
+            if collection_plan_digest is not None:
+                result["collection_plan_digest"] = collection_plan_digest
+            return result
         except Exception as e:
-            logger.error(f"Error executing Research Mission {mission_id}: {e}", exc_info=True)
+            safe_error = sanitize_pii_text(str(e))
+            # Preserve the exception type for callers and tests, but replace its display payload
+            # before any logger, mission summary, or upstream handler can render it.
+            try:
+                e.args = (safe_error,)
+            except (AttributeError, TypeError):
+                pass
+            logger.error("Error executing Research Mission %s: %s", mission_id, safe_error)
             mission.status = "FAILED"
-            mission.summary = f"Execution error: {str(e)}"
+            mission.summary = f"Execution error: {safe_error}"
             await self._repo.update_mission(mission)
-            raise e
-
+            raise

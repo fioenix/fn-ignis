@@ -22,10 +22,14 @@ from ignis.application.use_cases.create_research_workspace import (
 )
 from ignis.domain.entities import TrendSignal
 from ignis.domain.research_workspace import (
+    AuthorityBoundary,
     EvidenceQualification,
     EvidenceQualificationConflictError,
     InvalidEvidenceQualificationError,
     MissionProbeOutcome,
+    MissionManifest,
+    MissionOutputType,
+    MissionTerminalStateError,
     compute_frame_fingerprint,
 )
 from ignis.domain.value_objects import GeoCode, PlatformType
@@ -43,6 +47,31 @@ MARKET_BRIEF = {
 T0 = datetime(2026, 9, 25, 3, 0, tzinfo=timezone.utc)
 
 
+def _manifest(
+    output_type=MissionOutputType.COLLECTION_FRAME,
+    channels=("youtube",),
+):
+    return MissionManifest(
+        outcome="Collect one bounded evidence frame",
+        decision_context=(MARKET_BRIEF["decision"] if output_type is MissionOutputType.MARKET_ANALYSIS else None),
+        required_channels=tuple(channels),
+        optional_channels=(),
+        authority_boundary=AuthorityBoundary(
+            public_http=True,
+            official_api=True,
+            browser_session=True,
+            paid_quota=True,
+        ),
+        quota_budget={},
+        output_type=output_type,
+        stop_conditions=("one run completed", "new authority required"),
+        analysis_policy="evidence-gated-v1",
+        retention_policy="mission-only",
+        created_by="contract-test",
+        confirmed_at=T0,
+    )
+
+
 @pytest.fixture
 def host_workspace(tmp_path):
     root = tmp_path / "host-project"
@@ -57,20 +86,35 @@ async def _workspace(repository, host_workspace, name="AI retail copilot"):
     return store, await use_case.confirm(proposal, confirmation=True)
 
 
-async def _market_mission(repository, store, workspace, keywords=("ai cho cửa hàng",), **brief):
+async def _market_mission(
+    repository,
+    store,
+    workspace,
+    keywords=("ai cho cửa hàng",),
+    channels=("youtube",),
+    **brief,
+):
     return await ConfirmMarketBriefUseCase(repository, store).execute(
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         keywords=list(keywords),
+        manifest=_manifest(MissionOutputType.MARKET_ANALYSIS, channels),
         **{**MARKET_BRIEF, **brief},
     )
 
 
-async def _attention_mission(repository, store, workspace, keywords=("ai cho cửa hàng",)):
+async def _attention_mission(
+    repository,
+    store,
+    workspace,
+    keywords=("ai cho cửa hàng",),
+    channels=("youtube",),
+):
     return await CreateAttentionMissionUseCase(repository, store).execute(
         workspace_id=workspace.workspace_id,
         title="What is gaining attention around retail AI",
         keywords=list(keywords),
+        manifest=_manifest(channels=channels),
     )
 
 
@@ -135,6 +179,7 @@ async def _journal(store, workspace, mission, status, started_at, sequence):
 
 
 def _outcome(run_id, surface, status="EMPTY_NO_DATA", count=0, platform="youtube"):
+    measured = status in ("HEALTHY", "EMPTY_NO_DATA")
     return MissionProbeOutcome(
         run_id=run_id,
         platform=platform,
@@ -144,6 +189,13 @@ def _outcome(run_id, surface, status="EMPTY_NO_DATA", count=0, platform="youtube
         queried_keywords=("ai cho cửa hàng",),
         query_fingerprint="q" * 64,
         completed_at=T0,
+        scope_attestation=(
+            {"geo": "VN", "timeframe": "7d", "keywords": ["ai cho cửa hàng"]}
+            if measured
+            else None
+        ),
+        note=None if measured else f"Fixture operational outcome: {status}",
+        collection_plan_digest="p" * 64,
     )
 
 
@@ -287,15 +339,14 @@ async def test_the_latest_completed_run_owns_the_probe_outcomes(repository_case,
     first = await _journal(store, workspace, mission, "COMPLETED", T0, 1)
     await store.record_probe_outcomes(first.run_id, [
         _outcome(first.run_id, "youtube"),
-        _outcome(first.run_id, "tiktok", status="AUTH_REQUIRED", platform="tiktok"),
     ])
     failed = await _journal(store, workspace, mission, "FAILED", T0 + timedelta(hours=1), 2)
     await store.record_probe_outcomes(failed.run_id, [_outcome(failed.run_id, "youtube", "DEGRADED")])
     await _journal(store, workspace, mission, "STARTED", T0 + timedelta(hours=2), 3)
 
     latest = await store.get_latest_completed_probe_outcomes(mission.id)
-    assert sorted((o.connector_surface, o.status.value) for o in latest) == [
-        ("tiktok", "AUTH_REQUIRED"), ("youtube", "EMPTY_NO_DATA"),
+    assert [(o.connector_surface, o.status.value) for o in latest] == [
+        ("youtube", "EMPTY_NO_DATA"),
     ]
     assert {o.run_id for o in latest} == {first.run_id}
 
@@ -344,6 +395,13 @@ class OutcomeRegistry:
         self._outcomes = outcomes
         self.calls = 0
 
+    async def resolve_execution_requirements(self, **_kwargs):
+        return {
+            "resources": tuple(outcome.connector_surface for outcome in self._outcomes),
+            "authority": ("public_http",),
+            "quota_costs": {},
+        }
+
     async def search_with_outcomes(self, **_kwargs):
         from ignis.infrastructure.connectors.registry import SearchPassResult
 
@@ -355,10 +413,13 @@ class OutcomeRegistry:
 
 
 def _surface(surface, status, count=0, platform=None, queried=("ai cho cửa hàng",), window="7d"):
+    from ignis.domain.harness_models import ChannelHealthStatus
     from ignis.infrastructure.connectors.registry import SurfaceProbeResult
 
     return SurfaceProbeResult(
-        platform=platform or surface, connector_surface=surface, status=status,
+        platform=platform or surface,
+        connector_surface=surface,
+        status=ChannelHealthStatus(status),
         signals_collected=count, queried_keywords=tuple(queried), queried_window=window,
     )
 
@@ -382,7 +443,12 @@ async def test_a_workspace_run_records_every_surface_outcome_before_it_completes
 
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
-    mission = await _attention_mission(repository, store, workspace)
+    mission = await _attention_mission(
+        repository,
+        store,
+        workspace,
+        channels=("google", "youtube", "tiktok"),
+    )
     registry = OutcomeRegistry(
         [_signal("ai cho cửa hàng", PlatformType.GOOGLE_TRENDS, keyword="ai cho cửa hàng",
                  connector_surface="google")],
@@ -525,7 +591,12 @@ def _fresh_process(repository):
 
 
 async def _run_first_mission(repository, store, workspace, process):
-    mission = await _attention_mission(repository, store, workspace)
+    mission = await _attention_mission(
+        repository,
+        store,
+        workspace,
+        channels=("google", "tiktok_video_grid"),
+    )
     result = await _executor(repository, store, process["registry"], process["sync"]).execute(mission.id)
     outcomes = await store.get_latest_completed_probe_outcomes(mission.id)
     signals = await repository.get_mission_signals(mission.id)
@@ -595,6 +666,13 @@ async def test_cold_start_vocabulary_failure_calls_no_connector_and_fails_clearl
     class CountingRegistry:
         calls = 0
 
+        async def resolve_execution_requirements(self, **_kwargs):
+            return {
+                "resources": ("youtube",),
+                "authority": ("public_http",),
+                "quota_costs": {},
+            }
+
         async def search_with_outcomes(self, **_kwargs):
             CountingRegistry.calls += 1
             raise AssertionError("a connector was called under partial configuration")
@@ -631,7 +709,12 @@ async def test_cold_start_execute_mission_ingress_handler_needs_no_prior_analysi
     repository = repository_case.repository
     await _persist_vocabulary(repository_case)
     store, workspace = await _workspace(repository, host_workspace)
-    mission = await _attention_mission(repository, store, workspace)
+    mission = await _attention_mission(
+        repository,
+        store,
+        workspace,
+        channels=("google", "tiktok_video_grid"),
+    )
     process = _fresh_process(repository)
     components = {
         "repository": repository,
@@ -732,10 +815,12 @@ async def _market_with(repository, store, workspace, items, keywords, brief=None
     """A confirmed Market mission holding `items`, with one completed run's probe outcomes."""
     from ignis.domain.research_workspace import compute_query_fingerprint
 
+    channels = tuple(surface for surface, _platform, _status, _count in outcomes)
     mission, revision = await ConfirmMarketBriefUseCase(repository, store).execute(
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         keywords=list(keywords),
+        manifest=_manifest(MissionOutputType.MARKET_ANALYSIS, channels or ("youtube",)),
         **(brief or MARKET_BRIEF),
     )
     signals = [_corpus_signal(item) for item in items]
@@ -743,6 +828,8 @@ async def _market_with(repository, store, workspace, items, keywords, brief=None
     by_url = {s.source_url: [] for s in held}
     for s in held:
         by_url[s.source_url].append(s)
+    if not outcomes:
+        return mission, revision, held
     run = await _journal(store, workspace, mission, "COMPLETED", T0, 1)
     # Every surface here attests the whole keyword list, which is within its ten-keyword cap.
     queried = tuple(mission.keywords[:10])
@@ -752,7 +839,19 @@ async def _market_with(repository, store, workspace, items, keywords, brief=None
         MissionProbeOutcome(
             run_id=run.run_id, platform=platform, connector_surface=surface, status=status,
             signals_collected=count, queried_keywords=queried, queried_window=window,
-            query_fingerprint=fingerprint, completed_at=T0,
+            query_fingerprint=fingerprint,
+            completed_at=T0,
+            scope_attestation=(
+                {"geo": "VN", "timeframe": window, "keywords": list(queried)}
+                if status in ("HEALTHY", "EMPTY_NO_DATA")
+                else None
+            ),
+            note=(
+                None
+                if status in ("HEALTHY", "EMPTY_NO_DATA")
+                else f"Fixture operational outcome: {status}"
+            ),
+            collection_plan_digest="p" * 64,
         )
         for surface, platform, status, count in outcomes
     ])
@@ -1112,6 +1211,7 @@ async def test_reopen_keeps_the_measured_zero_of_the_last_completed_run_after_a_
 
     failed = await _journal(store, workspace, mission, "FAILED", T0 + timedelta(hours=2), 2)
     await store.record_probe_outcomes(failed.run_id, [
+        _outcome(failed.run_id, "google", "DEGRADED", platform="google"),
         _outcome(failed.run_id, "youtube", "DEGRADED"),
         _outcome(failed.run_id, "tiktok_video_grid", "RATE_LIMITED", platform="tiktok"),
     ])
@@ -1141,6 +1241,7 @@ async def test_revision_starts_with_zero_qualifications_and_cannot_reuse_the_pri
     ).execute(
         workspace_id=workspace.workspace_id, confirmed_by="requester", keywords=CONTROL_KEYWORDS,
         previous_mission_id=first.id,
+        manifest=_manifest(MissionOutputType.MARKET_ANALYSIS),
         **{**MARKET_BRIEF, "target_user": "Managers of small Vietnamese pharmacies"},
     )
     await _hold(repository, revised, [_corpus_signal(item, T0 + timedelta(days=1)) for item in positives])
@@ -1168,14 +1269,20 @@ async def test_revision_starts_with_zero_qualifications_and_cannot_reuse_the_pri
 
 
 @pytest.mark.asyncio
-async def test_evidence_replacement_prunes_only_its_judgment_and_new_evidence_requires_qualification(
+async def test_terminal_mission_refuses_evidence_replacement_and_preserves_qualification(
     repository_case, host_workspace, monkeypatch
 ):
     from ignis.interfaces.mcp import server as mcp_server
 
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
-    mission, _brief = await _market_mission(repository, store, workspace, keywords=CONTROL_KEYWORDS)
+    mission, _brief = await _market_mission(
+        repository,
+        store,
+        workspace,
+        keywords=CONTROL_KEYWORDS,
+        channels=("youtube", "google"),
+    )
     positives = {c["case_id"]: c for c in CORPUS["semantic_controls"]["positive"]}
     supply, demand = positives["ctl-dm-012"], positives["ctl-dm-038"]
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
@@ -1188,32 +1295,33 @@ async def test_evidence_replacement_prunes_only_its_judgment_and_new_evidence_re
     await _qualify_through_handlers(mission=mission, mcp_server=mcp_server, judgments=_judgments_by_observation(
         list(first_pass.values()), [supply, demand], "control_judgment"
     ))
-    old_supply = first_pass[_corpus_signal(supply).source_url]
-    old_demand = first_pass[_corpus_signal(demand).source_url]
+    evidence_before = {str(s.observation_id) for s in first_pass.values()}
+    judgments_before = {
+        str(q.observation_id) for q in await store.list_evidence_qualifications(mission.id)
+    }
+    latest_before = {
+        o.connector_surface: o.status.value
+        for o in await store.get_latest_completed_probe_outcomes(mission.id)
+    }
 
-    # The second pass reaches Google only. The YouTube observation is preserved as it was; the old
-    # Google observation is replaced by the new sighting and its association is pruned.
-    await _executor(repository, store, OutcomeRegistry(
+    replacement = OutcomeRegistry(
         [_corpus_signal(demand, T0 + timedelta(hours=1))],
         [_surface("youtube", "RATE_LIMITED"), _surface("google", "HEALTHY", 1)],
-    )).execute(mission.id)
-
-    current = {str(s.observation_id): s for s in await repository.get_mission_signals(mission.id)}
-    judged = {str(q.observation_id) for q in await store.list_evidence_qualifications(mission.id)}
-    new_demand = [oid for oid, s in current.items() if oid not in (str(old_supply.observation_id),)]
-    assert str(old_supply.observation_id) in current and str(old_supply.observation_id) in judged, (
-        "a retained observation keeps its judgment: the frame and the observation are unchanged"
     )
-    assert str(old_demand.observation_id) not in current
-    assert str(old_demand.observation_id) not in judged, "the pruned association took its judgment"
-    assert len(new_demand) == 1 and new_demand[0] not in judged
-    batch = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id)))
-    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
-    assert [e["observation_id"] for e in batch["evidence"]] == new_demand
-    assert analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
-    assert analysis["market_opportunities"] == [] and analysis["opportunity_index_applies"] is False
-    latest = {o.connector_surface: o.status.value for o in await store.get_latest_completed_probe_outcomes(mission.id)}
-    assert latest == {"google": "HEALTHY", "youtube": "RATE_LIMITED"}
+    with pytest.raises(MissionTerminalStateError):
+        await _executor(repository, store, replacement).execute(mission.id)
+
+    assert replacement.calls == 0
+    assert {
+        str(s.observation_id) for s in await repository.get_mission_signals(mission.id)
+    } == evidence_before
+    assert {
+        str(q.observation_id) for q in await store.list_evidence_qualifications(mission.id)
+    } == judgments_before
+    assert {
+        o.connector_surface: o.status.value
+        for o in await store.get_latest_completed_probe_outcomes(mission.id)
+    } == latest_before
 
 
 # --- User Story 3: Attention hands off only a qualified candidate --------------------------------
@@ -1227,6 +1335,7 @@ async def _attention_with(repository, store, workspace, clusters):
         workspace_id=workspace.workspace_id,
         title=CORPUS["journeys"]["attention_only"]["title"],
         keywords=CORPUS["journeys"]["attention_only"]["keywords"],
+        manifest=_manifest(),
     )
     items = [item for members in clusters.values() for item in members]
     held = await _hold(repository, mission, [_corpus_signal(item) for item in items])
@@ -1449,6 +1558,13 @@ async def test_a_vocabulary_failure_behind_an_active_writer_is_a_conflict_that_c
             raise VocabularySynchronizationError("market_lexicons is unreadable")
 
     class NoConnector:
+        async def resolve_execution_requirements(self, **_kwargs):
+            return {
+                "resources": ("youtube",),
+                "authority": ("public_http",),
+                "quota_costs": {},
+            }
+
         async def search_with_outcomes(self, **_kwargs):
             raise AssertionError("a connector was called behind an active writer")
 
@@ -1491,6 +1607,12 @@ async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query
         """Google demand for the first and the eleventh keyword only."""
 
         platform, name, plugin_id, supports_search = PlatformType.GOOGLE_TRENDS, "Google", "google", True
+        http_authority, requires_paid_quota = "public_http", False
+
+        async def resolve_ingest_runtime(self):
+            from ignis.application.ports.connector_port import IngestRuntime
+
+            return IngestRuntime.HTTP_API
 
         async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
             return [
@@ -1520,7 +1642,13 @@ async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query
 
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
-    mission, _brief = await _market_mission(repository, store, workspace, keywords=keywords)
+    mission, _brief = await _market_mission(
+        repository,
+        store,
+        workspace,
+        keywords=keywords,
+        channels=("google", "tiktok_video_grid", "reels"),
+    )
     empty_page = {"data": {"recent": {"sections": []}}}
     with patch("ignis.infrastructure.connectors.reels.reels_plugin.collect_json_payloads",
                AsyncMock(return_value=[empty_page])):
@@ -1571,7 +1699,13 @@ async def test_a_windowed_measured_zero_still_covers_only_the_ten_keywords_each_
         registry.register(plugin)
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
-    mission, _brief = await _market_mission(repository, store, workspace, keywords=keywords)
+    mission, _brief = await _market_mission(
+        repository,
+        store,
+        workspace,
+        keywords=keywords,
+        channels=("google", "reels", "tiktok_video_grid"),
+    )
     await _executor(repository, store, registry).execute(mission.id)
 
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
@@ -1601,10 +1735,16 @@ class WindowedSupply:
     def __init__(self, plugin_id, platform, fixed_window=None):
         self.plugin_id, self.name, self._platform, self.fixed_window = plugin_id, plugin_id, platform, fixed_window
         self.received = []
+        self.http_authority, self.requires_paid_quota = "public_http", False
 
     @property
     def platform(self):
         return self._platform
+
+    async def resolve_ingest_runtime(self):
+        from ignis.application.ports.connector_port import IngestRuntime
+
+        return IngestRuntime.HTTP_API
 
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, limit=20, attestation=None):
         self.received.append(timeframe)
@@ -1617,6 +1757,12 @@ class WindowedSupply:
 
 class DemandOnly:
     platform, name, plugin_id, supports_search = PlatformType.GOOGLE_TRENDS, "Google", "google", True
+    http_authority, requires_paid_quota = "public_http", False
+
+    async def resolve_ingest_runtime(self):
+        from ignis.application.ports.connector_port import IngestRuntime
+
+        return IngestRuntime.HTTP_API
 
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
         return [_signal(f"Google Search Trends: {keywords[0]}", PlatformType.GOOGLE_TRENDS,
@@ -1632,8 +1778,14 @@ async def test_a_surface_that_executed_another_window_is_not_a_measured_zero_for
 
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
-    mission, _brief = await _market_mission(repository, store, workspace, keywords=["ai cho cửa hàng"],
-                                            timeframe="30d")
+    mission, _brief = await _market_mission(
+        repository,
+        store,
+        workspace,
+        keywords=["ai cho cửa hàng"],
+        channels=("google", "reels", "tiktok_video_grid"),
+        timeframe="30d",
+    )
     reels = WindowedSupply("reels", PlatformType.REELS)
     tiktok = WindowedSupply("tiktok_video_grid", PlatformType.TIKTOK, fixed_window="24h" if mismatch else None)
     registry = ConnectorPluginRegistry(repository=repository)

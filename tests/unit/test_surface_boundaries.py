@@ -8,6 +8,9 @@ domain rather than left to whichever renderer happens to read the report.
 import pytest
 
 from ignis.domain.research_workspace import (
+    AuthorityBoundary,
+    MissionManifest,
+    MissionOutputType,
     MissionLineage,
     ResearchSurface,
     SurfaceViolationError,
@@ -292,6 +295,13 @@ def test_a_context_citation_is_dropped_from_anything_a_conclusion_rests_on():
 class _ExplodingRegistry:
     """A connector pass that fails, which is what the failure path exists for."""
 
+    async def resolve_execution_requirements(self, **_kwargs):
+        return {
+            "resources": ("youtube",),
+            "authority": ("public_http",),
+            "quota_costs": {},
+        }
+
     async def search_with_outcomes(self, **kwargs):
         # The mission executor asks for per-surface outcomes; this double reports none.
         return SearchPassResult(signals=await self.search_across_all(**kwargs))
@@ -301,19 +311,44 @@ class _ExplodingRegistry:
 
 
 class _SilentRegistry:
+    async def resolve_execution_requirements(self, **_kwargs):
+        return {
+            "resources": ("youtube",),
+            "authority": ("public_http",),
+            "quota_costs": {},
+        }
+
     async def search_with_outcomes(self, **kwargs):
-        # The mission executor asks for per-surface outcomes; this double reports none.
-        return SearchPassResult(signals=await self.search_across_all(**kwargs))
+        from ignis.domain.harness_models import ChannelHealthStatus
+        from ignis.infrastructure.connectors.registry import SurfaceProbeResult
+
+        return SearchPassResult(
+            signals=await self.search_across_all(**kwargs),
+            outcomes=[
+                SurfaceProbeResult(
+                    platform="youtube",
+                    connector_surface="youtube",
+                    status=ChannelHealthStatus.EMPTY_NO_DATA,
+                    signals_collected=0,
+                    queried_keywords=tuple(kwargs["keywords"]),
+                    queried_window=kwargs.get("custom_timeframe"),
+                )
+            ],
+        )
 
     async def search_across_all(self, **_kwargs):
         return []
 
 
 async def _workspace_mission(repository, store, tmp_path, title="VN customer service"):
+    from datetime import datetime, timezone
+
+    from ignis.application.use_cases.create_attention_mission import (
+        CreateAttentionMissionUseCase,
+    )
     from ignis.application.use_cases.create_research_workspace import (
         CreateResearchWorkspaceUseCase,
     )
-    from ignis.domain.entities import ResearchMission
 
     use_case = CreateResearchWorkspaceUseCase(store=store)
     host = tmp_path / "host"
@@ -321,13 +356,30 @@ async def _workspace_mission(repository, store, tmp_path, title="VN customer ser
     workspace = await use_case.confirm(
         await use_case.propose(host, "AI customer service"), confirmation=True
     )
-    mission = ResearchMission(
+    mission = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
         title=title,
         keywords=["ai customer service"],
-        workspace_id=workspace.workspace_id,
-        surface=ResearchSurface.ATTENTION.value,
+        manifest=MissionManifest(
+            outcome="Test one bounded attention probe",
+            decision_context=None,
+            required_channels=("youtube",),
+            optional_channels=(),
+            authority_boundary=AuthorityBoundary(
+                public_http=True,
+                official_api=False,
+                browser_session=False,
+                paid_quota=False,
+            ),
+            quota_budget={},
+            output_type=MissionOutputType.COLLECTION_FRAME,
+            stop_conditions=("one run completed",),
+            analysis_policy="evidence-gated-v1",
+            retention_policy="test-only",
+            created_by="unit-test",
+            confirmed_at=datetime.now(timezone.utc),
+        ),
     )
-    await repository.create_mission(mission)
     return workspace, mission
 
 

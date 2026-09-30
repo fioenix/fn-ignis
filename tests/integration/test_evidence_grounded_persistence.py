@@ -40,7 +40,7 @@ from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepos
 NOW = datetime(2026, 9, 30, 10, 0, tzinfo=timezone.utc)
 
 
-async def _mission(repository, tmp_path):
+async def _mission(repository, tmp_path, **manifest_overrides):
     root = tmp_path / "host"
     root.mkdir()
     store = WorkspaceRepository(repository=repository)
@@ -51,6 +51,7 @@ async def _mission(repository, tmp_path):
         workspace_id=workspace.workspace_id,
         title="Collect customer friction",
         keywords=["retail setup friction"],
+        manifest=replace(_manifest(None), **manifest_overrides),
     )
     return store, workspace, mission
 
@@ -164,7 +165,9 @@ async def _completed_outcome(
 
 @pytest.mark.asyncio
 async def test_manifest_round_trips_exactly_and_replay_is_idempotent(repository_case, tmp_path):
-    store, _workspace, mission = await _mission(repository_case.repository, tmp_path)
+    store, _workspace, mission = await _mission(
+        repository_case.repository, tmp_path, optional_channels=("threads",)
+    )
     manifest = replace(_manifest(mission.id), optional_channels=("threads",))
 
     first = await store.save_mission_manifest(manifest)
@@ -182,7 +185,9 @@ async def test_manifest_round_trips_exactly_and_replay_is_idempotent(repository_
 async def test_manifest_declared_channels_require_one_complete_outcome_set(
     repository_case, tmp_path
 ):
-    store, workspace, mission = await _mission(repository_case.repository, tmp_path)
+    store, workspace, mission = await _mission(
+        repository_case.repository, tmp_path, required_channels=("youtube", "threads")
+    )
     await store.save_mission_manifest(
         replace(_manifest(mission.id), required_channels=("youtube", "threads"))
     )

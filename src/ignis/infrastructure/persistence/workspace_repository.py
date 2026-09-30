@@ -122,6 +122,21 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     ) -> Tuple[ResearchMission, MarketBriefRevision]:
         return await self._repo.create_market_mission_with_brief(mission, revision)
 
+    async def create_attention_mission_with_manifest(
+        self, mission: ResearchMission, manifest: MissionManifest
+    ) -> Tuple[ResearchMission, MissionManifest]:
+        return await self._repo.create_attention_mission_with_manifest(mission, manifest)
+
+    async def create_market_mission_with_brief_and_manifest(
+        self,
+        mission: ResearchMission,
+        revision: MarketBriefRevision,
+        manifest: MissionManifest,
+    ) -> Tuple[ResearchMission, MarketBriefRevision, MissionManifest]:
+        return await self._repo.create_market_mission_with_brief_and_manifest(
+            mission, revision, manifest
+        )
+
     async def get_brief_revision(
         self, workspace_id: UUID, brief_revision_id: UUID
     ) -> Optional[MarketBriefRevision]:

@@ -46,8 +46,13 @@ from ignis.domain.exceptions import IgnisDomainException, VocabularySynchronizat
 from ignis.domain.research_workspace import (
     RESEARCH_ROOT_SEGMENTS,
     REQUIRED_BRIEF_FIELDS,
+    AuthorityBoundary,
     IncompleteMarketBriefError,
+    InvalidMissionAuthorizationError,
+    InvalidMissionManifestError,
+    MissionManifest,
     MissionLineage,
+    MissionTerminalStateError,
     MissionWriterConflictError,
     QualificationStatus,
     ResearchSurface,
@@ -100,6 +105,11 @@ from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigMana
 from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
+
+# Some official APIs authenticate in the query string. Keep HTTP client request URLs out of
+# operator logs even when the host application configures the root logger at INFO.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger("ignis.mcp")
 
@@ -1262,9 +1272,45 @@ async def handle_list_research_workspaces(limit: int = 20) -> str:
     )
 
 
+def _mission_manifest_from_payload(
+    payload: Dict[str, Any], *, created_by: str, decision_context: Optional[str] = None
+) -> MissionManifest:
+    """Build the immutable domain contract from one host-confirmed public request."""
+    authority = payload.get("authority_boundary")
+    if not isinstance(authority, dict):
+        raise InvalidMissionManifestError("authority_boundary must be an object of booleans.")
+    resources = payload.get("allowed_resources") or payload.get("required_channels") or ()
+    optional = payload.get("optional_resources") or payload.get("optional_channels") or ()
+    return MissionManifest(
+        outcome=payload.get("requested_outcome") or payload.get("outcome") or "",
+        decision_context=payload.get("decision_context") or decision_context,
+        required_channels=tuple(resources),
+        optional_channels=tuple(optional),
+        authority_boundary=AuthorityBoundary(
+            public_http=authority.get("public_http"),
+            official_api=authority.get("official_api"),
+            browser_session=authority.get("browser_session"),
+            paid_quota=authority.get("paid_quota"),
+        ),
+        quota_budget=payload.get("quota_budget") or {},
+        output_type=payload.get("output_type", ""),
+        stop_conditions=tuple(payload.get("stop_conditions") or ()),
+        analysis_policy=payload.get("analysis_policy") or "evidence-gated-v1",
+        retention_policy=payload.get("retention_policy") or "",
+        created_by=created_by,
+        confirmed_at=datetime.now(timezone.utc),
+    )
+
+
 async def handle_create_attention_mission(
     workspace_id: str,
     title: str,
+    requested_outcome: str,
+    allowed_resources: List[str],
+    authority_boundary: Dict[str, bool],
+    output_type: str,
+    stop_conditions: List[str],
+    retention_policy: str,
     geo: str = "VN",
     timeframe: str = "7d",
     seed: Optional[str] = None,
@@ -1272,12 +1318,28 @@ async def handle_create_attention_mission(
     platforms: Optional[List[str]] = None,
     agent: str = "claude",
     session_id: Optional[str] = None,
+    quota_budget: Optional[Dict[str, int]] = None,
+    analysis_policy: str = "evidence-gated-v1",
 ) -> str:
     comp = get_components()
     try:
+        manifest = _mission_manifest_from_payload(
+            {
+                "requested_outcome": requested_outcome,
+                "allowed_resources": allowed_resources,
+                "authority_boundary": authority_boundary,
+                "output_type": output_type,
+                "stop_conditions": stop_conditions,
+                "retention_policy": retention_policy,
+                "quota_budget": quota_budget or {},
+                "analysis_policy": analysis_policy,
+            },
+            created_by=agent,
+        )
         mission = await comp["create_attention_mission_use_case"].execute(
             workspace_id=UUID(workspace_id),
             title=title,
+            manifest=manifest,
             keywords=keywords,
             seed=seed,
             agent=agent,
@@ -1286,6 +1348,11 @@ async def handle_create_attention_mission(
             geo=resolve_geo(geo),
             timeframe=timeframe,
         )
+        persisted_manifest = await comp["workspace_store"].get_mission_manifest(mission.id)
+        if persisted_manifest is None:
+            raise InvalidMissionManifestError(
+                f"Mission {mission.id} was created without a readable persisted manifest."
+            )
     except ValueError:
         return _invalid_timeframe(timeframe)
     except IgnisDomainException as exc:
@@ -1302,6 +1369,7 @@ async def handle_create_attention_mission(
             "keywords": mission.keywords,
             "geo": mission.geo_code.value,
             "timeframe": mission.timeframe,
+            "manifest_digest": persisted_manifest.manifest_digest,
             "requires_market_brief": False,
             "emits_opportunity_index": False,
             "note": (
@@ -1324,6 +1392,7 @@ async def handle_confirm_market_brief(
     geo: str,
     timeframe: str,
     hypothesis: str,
+    mission_manifest: Dict[str, Any],
     falsifiers: Optional[List[str]] = None,
     confirmed_by: str = "",
     title: Optional[str] = None,
@@ -1337,6 +1406,11 @@ async def handle_confirm_market_brief(
 ) -> str:
     comp = get_components()
     try:
+        manifest = _mission_manifest_from_payload(
+            mission_manifest,
+            created_by=confirmed_by or agent,
+            decision_context=decision,
+        )
         mission, revision = await comp["create_market_revision_use_case"].execute(
             workspace_id=UUID(workspace_id),
             decision=decision,
@@ -1347,6 +1421,7 @@ async def handle_confirm_market_brief(
             hypothesis=hypothesis,
             falsifiers=falsifiers or [],
             confirmed_by=confirmed_by,
+            manifest=manifest,
             title=title,
             keywords=keywords,
             # None when the caller named no parent, which is not the same request as a lineage
@@ -1368,6 +1443,11 @@ async def handle_confirm_market_brief(
             session_id=session_id,
             platforms=[resolve_platform(p) for p in platforms] if platforms else None,
         )
+        persisted_manifest = await comp["workspace_store"].get_mission_manifest(mission.id)
+        if persisted_manifest is None:
+            raise InvalidMissionManifestError(
+                f"Mission {mission.id} was created without a readable persisted manifest."
+            )
     except IncompleteMarketBriefError as exc:
         return json.dumps(
             {
@@ -1400,6 +1480,7 @@ async def handle_confirm_market_brief(
             "confirmed_by": revision.confirmed_by,
             "confirmed_at": revision.confirmed_at.isoformat(),
             "falsifiers": list(revision.falsifiers),
+            "manifest_digest": persisted_manifest.manifest_digest,
             # Read back off the stored mission, not echoed from the request: what the next
             # Agent host will find in the database is the only lineage worth reporting.
             "lineage": MissionLineage.of_mission(mission).to_payload(),
@@ -1631,6 +1712,50 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
 
     try:
         result = await comp["execute_mission_use_case"].execute(mission_id=mission.id)
+    except InvalidMissionAuthorizationError as exc:
+        return json.dumps(
+            {
+                "status": "BLOCKED",
+                "operation": "execute_mission_ingress",
+                "mission_id": str(mission.id),
+                "shortcode": mission.shortcode,
+                "reason_code": exc.reason_code,
+                "missing_authority": list(exc.missing_authority),
+                "out_of_scope_resources": list(exc.out_of_scope_resources),
+                "quota_overruns": exc.quota_overruns,
+                "error": str(exc),
+                "note": "No connector session was opened and no run journal was created.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except InvalidMissionManifestError as exc:
+        return json.dumps(
+            {
+                "status": "BLOCKED",
+                "operation": "execute_mission_ingress",
+                "mission_id": str(mission.id),
+                "reason_code": "MANIFEST_REQUIRED_OR_INVALID",
+                "error": str(exc),
+                "note": "No connector session was opened and no run journal was created.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except MissionTerminalStateError as exc:
+        return json.dumps(
+            {
+                "status": "TERMINAL",
+                "operation": "execute_mission_ingress",
+                "mission_id": str(mission.id),
+                "terminal_state": exc.status,
+                "reason_code": "MISSION_ALREADY_TERMINAL",
+                "error": str(exc),
+                "note": "No connector session was opened and no artifact was generated.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
     except WorkspaceScopeMismatchError as exc:
         # Raised before the writer claim and before any connector call, so there is nothing to
         # undo -- only something to tell the Agent.
@@ -2227,13 +2352,87 @@ async def list_research_workspaces(limit: int = 20) -> str:
 
 
 @mcp.tool(name="create_attention_mission", description="Start an ATTENTION mission inside a confirmed research workspace: exploratory discovery of what is gaining attention. Needs no hypothesis and no Market Brief, and never returns an Opportunity Index.")
-async def create_attention_mission(workspace_id: str, title: str, geo: str = "VN", timeframe: str = "7d", seed: Optional[str] = None, keywords: Optional[list[str]] = None, platforms: Optional[list[str]] = None, agent: str = "claude", session_id: Optional[str] = None) -> str:
-    return await handle_create_attention_mission(workspace_id, title, geo, timeframe, seed, keywords, platforms, agent, session_id)
+async def create_attention_mission(
+    workspace_id: str,
+    title: str,
+    requested_outcome: str,
+    allowed_resources: list[str],
+    authority_boundary: dict,
+    output_type: str,
+    stop_conditions: list[str],
+    retention_policy: str,
+    geo: str = "VN",
+    timeframe: str = "7d",
+    seed: Optional[str] = None,
+    keywords: Optional[list[str]] = None,
+    platforms: Optional[list[str]] = None,
+    agent: str = "claude",
+    session_id: Optional[str] = None,
+    quota_budget: Optional[dict[str, int]] = None,
+    analysis_policy: str = "evidence-gated-v1",
+) -> str:
+    return await handle_create_attention_mission(
+        workspace_id=workspace_id,
+        title=title,
+        requested_outcome=requested_outcome,
+        allowed_resources=allowed_resources,
+        authority_boundary=authority_boundary,
+        output_type=output_type,
+        stop_conditions=stop_conditions,
+        retention_policy=retention_policy,
+        geo=geo,
+        timeframe=timeframe,
+        seed=seed,
+        keywords=keywords,
+        platforms=platforms,
+        agent=agent,
+        session_id=session_id,
+        quota_budget=quota_budget,
+        analysis_policy=analysis_policy,
+    )
 
 
 @mcp.tool(name="confirm_market_brief", description="Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, one question at a time, show the draft for editing, and call this only with the complete confirmed payload -- drafts and abandoned Q&A are never sent or stored. Requires decision, target_user, problem, geo, timeframe, hypothesis and at least one falsifier. Pass parent_attention_mission_id (and optionally parent_cluster_id) to record the Attention result the question came from, or previous_mission_id to revise a confirmed Brief -- a revision opens a new immutable revision and a new mission instead of editing the earlier one.")
-async def confirm_market_brief(workspace_id: str, decision: str, target_user: str, problem: str, geo: str, timeframe: str, hypothesis: str, falsifiers: Optional[list[str]] = None, confirmed_by: str = "", title: Optional[str] = None, keywords: Optional[list[str]] = None, parent_attention_mission_id: Optional[str] = None, parent_cluster_id: Optional[str] = None, previous_mission_id: Optional[str] = None, platforms: Optional[list[str]] = None, agent: str = "claude", session_id: Optional[str] = None) -> str:
-    return await handle_confirm_market_brief(workspace_id, decision, target_user, problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, title, keywords, parent_attention_mission_id, parent_cluster_id, previous_mission_id, platforms, agent, session_id)
+async def confirm_market_brief(
+    workspace_id: str,
+    decision: str,
+    target_user: str,
+    problem: str,
+    geo: str,
+    timeframe: str,
+    hypothesis: str,
+    mission_manifest: dict,
+    falsifiers: Optional[list[str]] = None,
+    confirmed_by: str = "",
+    title: Optional[str] = None,
+    keywords: Optional[list[str]] = None,
+    parent_attention_mission_id: Optional[str] = None,
+    parent_cluster_id: Optional[str] = None,
+    previous_mission_id: Optional[str] = None,
+    platforms: Optional[list[str]] = None,
+    agent: str = "claude",
+    session_id: Optional[str] = None,
+) -> str:
+    return await handle_confirm_market_brief(
+        workspace_id=workspace_id,
+        decision=decision,
+        target_user=target_user,
+        problem=problem,
+        geo=geo,
+        timeframe=timeframe,
+        hypothesis=hypothesis,
+        mission_manifest=mission_manifest,
+        falsifiers=falsifiers,
+        confirmed_by=confirmed_by,
+        title=title,
+        keywords=keywords,
+        parent_attention_mission_id=parent_attention_mission_id,
+        parent_cluster_id=parent_cluster_id,
+        previous_mission_id=previous_mission_id,
+        platforms=platforms,
+        agent=agent,
+        session_id=session_id,
+    )
 
 
 @mcp.tool(name="create_research_mission", description="Create a targeted cross-platform trend research mission with specified keywords, platforms, geo, and timeframe.")
@@ -3338,7 +3537,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-

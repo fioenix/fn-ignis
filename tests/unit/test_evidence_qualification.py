@@ -16,12 +16,15 @@ import pytest
 from ignis.domain.entities import ResearchMission
 from ignis.domain.harness_models import ChannelHealthStatus, QualityScorecard
 from ignis.domain.research_workspace import (
+    AuthorityBoundary,
     EvidenceDirection,
     EvidencePurpose,
     EvidenceQualification,
     EvidenceSufficiency,
     InvalidEvidenceQualificationError,
     MarketBriefRevision,
+    MissionManifest,
+    MissionOutputType,
     MissionProbeOutcome,
     QualificationProgress,
     QualificationReason,
@@ -448,6 +451,28 @@ BRIEF = dict(
 )
 
 
+def _manifest(output_type):
+    return MissionManifest(
+        outcome="Test one bounded evidence frame",
+        decision_context=(BRIEF["decision"] if output_type is MissionOutputType.MARKET_ANALYSIS else None),
+        required_channels=("youtube",),
+        optional_channels=(),
+        authority_boundary=AuthorityBoundary(
+            public_http=True,
+            official_api=False,
+            browser_session=False,
+            paid_quota=False,
+        ),
+        quota_budget={},
+        output_type=output_type,
+        stop_conditions=("one run completed",),
+        analysis_policy="evidence-gated-v1",
+        retention_policy="test-only",
+        created_by="unit-test",
+        confirmed_at=NOW,
+    )
+
+
 @pytest_asyncio.fixture
 async def research(tmp_path):
     repository = SqliteTrendRepository(str(tmp_path / "qualification.sqlite"))
@@ -462,7 +487,10 @@ async def research(tmp_path):
 
 async def _market(repository, store, workspace, titles=("AI quản lý kho cho shop nhỏ",)):
     mission, brief = await ConfirmMarketBriefUseCase(repository, store).execute(
-        workspace_id=workspace.workspace_id, keywords=["ai cho cửa hàng"], **BRIEF
+        workspace_id=workspace.workspace_id,
+        keywords=["ai cho cửa hàng"],
+        manifest=_manifest(MissionOutputType.MARKET_ANALYSIS),
+        **BRIEF,
     )
     return mission, brief, await _hold(repository, mission, titles)
 
@@ -578,6 +606,7 @@ async def test_an_attention_frame_is_its_declared_scope_and_carries_no_brief(res
     mission = await CreateAttentionMissionUseCase(repository, store).execute(
         workspace_id=workspace.workspace_id, title="What is gaining attention", seed="ai bán lẻ",
         keywords=["pos"],
+        manifest=_manifest(MissionOutputType.COLLECTION_FRAME),
     )
     await _hold(repository, mission, ("x",))
     read, _submit = _use_cases(repository, store)

@@ -18,10 +18,18 @@ from ignis.application.use_cases.create_research_workspace import (
     CreateResearchWorkspaceUseCase,
 )
 from ignis.domain.entities import ResearchMission
-from ignis.domain.research_workspace import MissionWriterConflictError, ResearchSurface
+from ignis.domain.harness_models import ChannelHealthStatus
+from ignis.domain.research_workspace import (
+    AuthorityBoundary,
+    MissionManifest,
+    MissionOutputType,
+    MissionTerminalStateError,
+    MissionWriterConflictError,
+    ResearchSurface,
+)
 from ignis.infrastructure.persistence import workspace_repository
 from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
-from ignis.infrastructure.connectors.registry import SearchPassResult
+from ignis.infrastructure.connectors.registry import SearchPassResult, SurfaceProbeResult
 
 
 @pytest.fixture
@@ -113,6 +121,28 @@ COMPLETE_BRIEF = {
 }
 
 
+def _manifest(output_type=MissionOutputType.COLLECTION_FRAME):
+    return MissionManifest(
+        outcome="Run one bounded YouTube probe",
+        decision_context=(COMPLETE_BRIEF["decision"] if output_type is MissionOutputType.MARKET_ANALYSIS else None),
+        required_channels=("youtube",),
+        optional_channels=(),
+        authority_boundary=AuthorityBoundary(
+            public_http=True,
+            official_api=False,
+            browser_session=False,
+            paid_quota=False,
+        ),
+        quota_budget={},
+        output_type=output_type,
+        stop_conditions=("one run completed", "new authority required"),
+        analysis_policy="evidence-gated-v1",
+        retention_policy="mission-only",
+        created_by="contract-test",
+        confirmed_at=datetime.now(timezone.utc),
+    )
+
+
 class GatedRegistry:
     """A connector pass that can be held open, so two runs genuinely overlap.
 
@@ -127,9 +157,28 @@ class GatedRegistry:
         self.started = asyncio.Event()
         self.calls = 0
 
+    async def resolve_execution_requirements(self, **kwargs):
+        return {
+            "resources": tuple(kwargs["allowed_surfaces"]),
+            "authority": ("public_http",),
+            "quota_costs": {},
+        }
+
     async def search_with_outcomes(self, **kwargs):
-        # The mission executor asks for per-surface outcomes; this double reports none.
-        return SearchPassResult(signals=await self.search_across_all(**kwargs))
+        signals = await self.search_across_all(**kwargs)
+        return SearchPassResult(
+            signals=signals,
+            outcomes=[
+                SurfaceProbeResult(
+                    platform="youtube",
+                    connector_surface="youtube",
+                    status=ChannelHealthStatus.HEALTHY,
+                    signals_collected=len(signals),
+                    queried_keywords=tuple(kwargs["keywords"]),
+                    queried_window=kwargs.get("custom_timeframe"),
+                )
+            ],
+        )
 
     async def search_across_all(self, keywords=None, **_kwargs):
         self.calls += 1
@@ -187,7 +236,10 @@ async def _attention_mission(repository, workspace, title, seed):
 
     store = WorkspaceRepository(repository=repository)
     return await CreateAttentionMissionUseCase(repository, store).execute(
-        workspace_id=workspace.workspace_id, title=title, seed=seed
+        workspace_id=workspace.workspace_id,
+        title=title,
+        seed=seed,
+        manifest=_manifest(),
     )
 
 
@@ -270,10 +322,10 @@ async def test_a_second_run_of_one_mission_is_refused_while_the_first_is_writing
 
 
 @pytest.mark.asyncio
-async def test_a_failed_run_frees_the_mission_and_keeps_the_evidence_it_had(
+async def test_a_completed_mission_refuses_another_run_and_keeps_its_evidence(
     repository_case, host_workspace
 ):
-    """The mission is not locked out by the run that broke, and keeps what it already held."""
+    """A terminal mission is immutable: a retry cannot open a connector or a journal."""
     repository = repository_case.repository
     store, workspace = await _confirmed_workspace(repository, host_workspace)
     mission = await _attention_mission(repository, workspace, "One question", "ai chatbot")
@@ -284,29 +336,18 @@ async def test_a_failed_run_frees_the_mission_and_keeps_the_evidence_it_had(
     }
     assert evidence_before
 
-    class _Exploding:
-        async def search_with_outcomes(self, **kwargs):
-            # The mission executor asks for per-surface outcomes; this double reports none.
-            return SearchPassResult(signals=await self.search_across_all(**kwargs))
+    retry = GatedRegistry(_signals_for)
+    with pytest.raises(MissionTerminalStateError):
+        await _executor(repository, store, retry).execute(mission.id)
 
-        async def search_across_all(self, **_kwargs):
-            raise RuntimeError("connector pass failed")
-
-    with pytest.raises(RuntimeError):
-        await _executor(repository, store, _Exploding()).execute(mission.id)
-
-    assert (await repository.get_mission(mission.id)).status == "FAILED"
+    assert retry.calls == 0
+    assert (await repository.get_mission(mission.id)).status == "COMPLETED"
     assert await store.get_mission_writer_claim(mission.id) is None
     journals = await store.list_run_journals(mission.id)
-    assert [j.status for j in journals] == ["FAILED", "COMPLETED"]
-    # The failed pass wrote nothing over the evidence the mission already had.
+    assert [j.status for j in journals] == ["COMPLETED"]
     assert {
         str(s.observation_id) for s in await repository.get_mission_signals(mission.id)
     } == evidence_before
-    # And the mission can be run again.
-    assert (
-        await _executor(repository, store, GatedRegistry(_signals_for)).execute(mission.id)
-    )["status"] == "COMPLETED"
 
 
 @pytest.mark.asyncio
@@ -354,6 +395,7 @@ async def test_a_market_run_is_refused_a_second_writer_through_the_mcp_contract(
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         keywords=["ai customer service"],
+        manifest=_manifest(MissionOutputType.MARKET_ANALYSIS),
         **COMPLETE_BRIEF,
     )
 

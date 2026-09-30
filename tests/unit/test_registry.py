@@ -399,6 +399,21 @@ class BrokenGridPlugin(VideoGridPlugin):
         raise ConnectorExecutionException("selector changed")
 
 
+class CredentialLeakingGridPlugin(VideoGridPlugin):
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        raise ConnectorExecutionException(
+            "GET https://api.example.test/search?key=live-google-key-123&access_token=live-meta-token-456"
+        )
+
+
+class CapturingAuditRepository:
+    def __init__(self):
+        self.events = []
+
+    async def log_event(self, **event):
+        self.events.append(event)
+
+
 def _by_surface(result):
     return {o.connector_surface: (o.status, o.signals_collected) for o in result.outcomes}
 
@@ -435,6 +450,24 @@ async def test_a_failed_probe_is_never_reported_as_an_empty_one():
         "youtube": (ChannelHealthStatus.EMPTY_NO_DATA, 0),
     }
     assert _by_surface(failed) == {"tiktok_video_grid": (ChannelHealthStatus.DEGRADED, 0)}
+
+
+@pytest.mark.asyncio
+async def test_connector_failures_redact_credentials_from_outcome_log_and_audit(caplog):
+    repository = CapturingAuditRepository()
+    registry = ConnectorPluginRegistry(repository=repository)
+    registry.register(CredentialLeakingGridPlugin())
+
+    with caplog.at_level("ERROR"):
+        result = await registry.search_with_outcomes(keywords=["ai agent"])
+
+    rendered = " ".join(
+        [result.outcomes[0].note or "", caplog.text]
+        + [str(event) for event in repository.events]
+    )
+    assert "live-google-key-123" not in rendered
+    assert "live-meta-token-456" not in rendered
+    assert "[REDACTED_SECRET]" in rendered
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ scope and the surface that keeps its results from being read as a market verdict
 """
 
 import logging
+from dataclasses import replace
 from typing import List, Optional
 from uuid import UUID
 
@@ -14,7 +15,12 @@ from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.domain.entities import ResearchMission
 from ignis.domain.research_workspace import ResearchSurface, WorkspaceScopeMismatchError
-from ignis.domain.value_objects import GeoCode, PlatformType, timeframe_to_days
+from ignis.domain.research_workspace import (
+    InvalidMissionManifestError,
+    MissionManifest,
+    MissionOutputType,
+)
+from ignis.domain.value_objects import GeoCode, PlatformType, resolve_platform, timeframe_to_days
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +36,7 @@ class CreateAttentionMissionUseCase:
         self,
         workspace_id: UUID,
         title: str,
+        manifest: MissionManifest,
         keywords: Optional[List[str]] = None,
         seed: Optional[str] = None,
         agent: str = "claude",
@@ -59,25 +66,39 @@ class CreateAttentionMissionUseCase:
         if not probe_terms:
             probe_terms = [title]
 
+        if manifest.mission_id is not None:
+            raise InvalidMissionManifestError(
+                "A new Attention assignment must not pre-assign its mission_id."
+            )
+        if manifest.output_type not in (
+            MissionOutputType.COLLECTION_FRAME,
+            MissionOutputType.ATTENTION_REPORT,
+        ):
+            raise InvalidMissionManifestError(
+                "An Attention mission can produce only COLLECTION_FRAME or ATTENTION_REPORT."
+            )
+
+        selected_platforms = platforms or _platforms_from_resources(manifest.allowed_resources)
+        resource_platforms = set(_platforms_from_resources(manifest.allowed_resources))
+        if set(selected_platforms) != resource_platforms:
+            raise InvalidMissionManifestError(
+                "The selected platforms must match the connector surfaces allowed by the manifest."
+            )
+
         mission = ResearchMission(
             title=title,
             keywords=probe_terms,
             agent=agent,
             session_id=session_id,
-            platforms=platforms or [
-                PlatformType.GOOGLE_TRENDS,
-                PlatformType.YOUTUBE,
-                PlatformType.TIKTOK,
-                PlatformType.THREADS,
-                PlatformType.REELS,
-            ],
+            platforms=selected_platforms,
             geo_code=geo,
             timeframe=timeframe,
             status="PENDING",
             workspace_id=workspace_id,
             surface=ResearchSurface.ATTENTION.value,
         )
-        await self._repo.create_mission(mission)
+        manifest = replace(manifest, mission_id=mission.id)
+        await self._store.create_attention_mission_with_manifest(mission, manifest)
         logger.info(
             "Created ATTENTION mission %s (%s) in research workspace %s.",
             mission.id,
@@ -85,3 +106,14 @@ class CreateAttentionMissionUseCase:
             workspace_id,
         )
         return mission
+
+
+def _platforms_from_resources(resources) -> List[PlatformType]:
+    """Map built-in exact connector surfaces to their public platform identities."""
+    platforms: List[PlatformType] = []
+    for resource in resources:
+        platform_name = "tiktok" if resource.startswith("tiktok_") else resource
+        platform = resolve_platform(platform_name)
+        if platform not in platforms:
+            platforms.append(platform)
+    return platforms

@@ -7,6 +7,7 @@ that evidence has already been attached to.
 
 import asyncio
 import dataclasses
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -16,10 +17,13 @@ from ignis.application.use_cases.create_market_revision import CreateMarketRevis
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.research_workspace import (
     REQUIRED_BRIEF_FIELDS,
+    AuthorityBoundary,
     IncompleteMarketBriefError,
     InvalidMissionLineageError,
     MarketBriefRevision,
     MissionLineage,
+    MissionManifest,
+    MissionOutputType,
     ResearchSurface,
     ResearchWorkspace,
     SurfaceViolationError,
@@ -44,6 +48,28 @@ COMPLETE_PAYLOAD = {
 def _revision(**overrides):
     payload = {**COMPLETE_PAYLOAD, **overrides}
     return MarketBriefRevision(confirmed_by="requester@example.com", **payload)
+
+
+def _market_manifest():
+    return MissionManifest(
+        outcome="Test one bounded market question",
+        decision_context=COMPLETE_PAYLOAD["decision"],
+        required_channels=("youtube",),
+        optional_channels=(),
+        authority_boundary=AuthorityBoundary(
+            public_http=True,
+            official_api=False,
+            browser_session=False,
+            paid_quota=False,
+        ),
+        quota_budget={},
+        output_type=MissionOutputType.MARKET_ANALYSIS,
+        stop_conditions=("one run completed",),
+        analysis_policy="evidence-gated-v1",
+        retention_policy="test-only",
+        created_by="unit-test",
+        confirmed_at=datetime.now(timezone.utc),
+    )
 
 
 def test_required_field_list_is_the_seven_the_specification_names():
@@ -182,7 +208,14 @@ async def _attention_mission(repository, workspace, cluster_id=None):
 
 
 def _revision_use_case(repository, store):
-    return CreateMarketRevisionUseCase(repository=repository, store=store)
+    use_case = CreateMarketRevisionUseCase(repository=repository, store=store)
+
+    class _ManifestedRevisionUseCase:
+        async def execute(self, **kwargs):
+            kwargs.setdefault("manifest", _market_manifest())
+            return await use_case.execute(**kwargs)
+
+    return _ManifestedRevisionUseCase()
 
 
 @pytest_asyncio.fixture

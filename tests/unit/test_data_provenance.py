@@ -1,5 +1,6 @@
 """Epic 2 — Data Provenance, Ingress Health Audit & Citation Attribution Engine."""
 import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -16,7 +17,10 @@ from ignis.domain.harness_models import (
 from ignis.domain.research_workspace import (
     JOURNAL_DIRNAME,
     MANIFEST_FILENAME,
+    AuthorityBoundary,
     IncompleteMarketBriefError,
+    MissionManifest,
+    MissionOutputType,
     ResearchSurface,
 )
 from ignis.domain.value_objects import GeoCode, PlatformType
@@ -38,6 +42,28 @@ ALL_PLATFORMS = [
     PlatformType.THREADS,
     PlatformType.REELS,
 ]
+
+
+def _market_manifest(decision):
+    return MissionManifest(
+        outcome="Test one bounded market question",
+        decision_context=decision,
+        required_channels=("youtube",),
+        optional_channels=(),
+        authority_boundary=AuthorityBoundary(
+            public_http=True,
+            official_api=False,
+            browser_session=False,
+            paid_quota=False,
+        ),
+        quota_budget={},
+        output_type=MissionOutputType.MARKET_ANALYSIS,
+        stop_conditions=("one run completed",),
+        analysis_policy="evidence-gated-v1",
+        retention_policy="test-only",
+        created_by="unit-test",
+        confirmed_at=datetime.now(timezone.utc),
+    )
 
 
 def _mission(**kwargs) -> ResearchMission:
@@ -736,7 +762,9 @@ async def test_a_confirmed_research_folder_carries_no_database_of_its_own(tmp_pa
         workspace = await _confirmed_workspace(store, host)
 
         mission, revision = await CreateMarketRevisionUseCase(repository, store).execute(
-            workspace_id=workspace.workspace_id, **CONFIRMED_BRIEF
+            workspace_id=workspace.workspace_id,
+            manifest=_market_manifest(CONFIRMED_BRIEF["decision"]),
+            **CONFIRMED_BRIEF,
         )
         async with store.mission_run(workspace, mission.id) as journal:
             assert journal.journal_path.is_file()
@@ -781,7 +809,9 @@ async def test_an_abandoned_framing_leaves_no_mission_revision_or_journal(tmp_pa
         incomplete = {**CONFIRMED_BRIEF, "hypothesis": "   ", "falsifiers": []}
         with pytest.raises(IncompleteMarketBriefError) as raised:
             await CreateMarketRevisionUseCase(repository, store).execute(
-                workspace_id=workspace.workspace_id, **incomplete
+                workspace_id=workspace.workspace_id,
+                manifest=_market_manifest(incomplete["decision"]),
+                **incomplete,
             )
         assert set(raised.value.missing_fields) == {"hypothesis", "falsifiers"}
 

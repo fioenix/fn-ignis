@@ -41,6 +41,35 @@ def test_sanitize_pii_data_recursive():
     assert "[REDACTED_PHONE]" in cleaned_data["meta"]["nested_phone"]
 
 
+def test_sanitize_query_string_and_structured_credentials():
+    raw = (
+        "GET https://api.example.test/search?q=retail&key=live-google-key-123 "
+        "access_token=live-meta-token-456 Authorization: Bearer live-bearer-token-789"
+    )
+
+    cleaned = sanitize_pii_text(raw)
+    structured = sanitize_pii_data(
+        {
+            "error": raw,
+            "api_key": "unstructured-secret-value",
+            "nested": {"client_secret": "another-unstructured-value"},
+        }
+    )
+
+    for secret in (
+        "live-google-key-123",
+        "live-meta-token-456",
+        "live-bearer-token-789",
+        "unstructured-secret-value",
+        "another-unstructured-value",
+    ):
+        assert secret not in cleaned
+        assert secret not in str(structured)
+    assert cleaned.count("[REDACTED_SECRET]") == 3
+    assert structured["api_key"] == "[REDACTED_SECRET]"
+    assert structured["nested"]["client_secret"] == "[REDACTED_SECRET]"
+
+
 def test_tracked_reference_reports_have_zero_pii():
     reports_dir = Path(__file__).resolve().parents[2] / "examples" / "case-studies"
     if not reports_dir.exists():

@@ -143,6 +143,18 @@ class IResearchWorkspaceStore(ABC):
         """
 
     @abstractmethod
+    async def create_attention_mission_with_manifest(
+        self, mission, manifest: MissionManifest
+    ):
+        """Write one Attention mission and its immutable manifest, or write neither."""
+
+    @abstractmethod
+    async def create_market_mission_with_brief_and_manifest(
+        self, mission, revision, manifest: MissionManifest
+    ):
+        """Write one Market mission, its Brief, and its manifest in one transaction."""
+
+    @abstractmethod
     async def get_brief_revision(
         self, workspace_id: UUID, brief_revision_id: UUID
     ) -> Optional[MarketBriefRevision]:

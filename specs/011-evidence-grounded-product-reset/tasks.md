@@ -81,20 +81,20 @@ bounded task. Verify zero idle calls/artifacts and zero post-terminal continuati
 
 ### Tests for User Story 1
 
-- [ ] T022 [P] [US1] Add RED idle-state assertions for zero connector calls, journals, alerts, reports, scheduled jobs, and LLM work in `tests/integration/test_mission_bound_idle.py`
-- [ ] T023 [P] [US1] Add RED manifest-authority and terminal-state continuation cases, including browser, token, paid-quota, retry, and material-scope boundaries, in `tests/unit/test_mission_manifest.py`
-- [ ] T024 [P] [US1] Add RED bootstrap and Compose assertions that no resident worker or recurring schedule is installed or started in `tests/integration/test_compose_init.py` and `tests/unit/test_env_file_provisioning.py`
+- [x] T022 [P] [US1] Add RED idle-state assertions for zero connector calls, journals, alerts, reports, scheduled jobs, and LLM work in `tests/integration/test_mission_bound_idle.py`
+- [x] T023 [P] [US1] Add RED manifest-authority and terminal-state continuation cases, including browser, token, paid-quota, retry, and material-scope boundaries, in `tests/unit/test_mission_manifest.py`
+- [x] T024 [P] [US1] Add RED bootstrap and Compose assertions that no resident worker or recurring schedule is installed or started in `tests/integration/test_compose_init.py` and `tests/unit/test_env_file_provisioning.py`
 
 ### Implementation for User Story 1
 
-- [ ] T025 [US1] Persist and validate a confirmed Mission Manifest when creating an Attention mission in `src/ignis/application/use_cases/create_attention_mission.py`
-- [ ] T026 [US1] Persist and validate the Mission Manifest for a confirmed Market Brief in `src/ignis/application/use_cases/confirm_market_brief.py`
-- [ ] T027 [US1] Enforce allowed resources, authority boundaries, one-run execution, and terminal stop conditions in `src/ignis/application/use_cases/execute_mission.py`
-- [ ] T028 [US1] Return explicit missing-authority and out-of-scope results without opening a connector session in `src/ignis/application/use_cases/execute_mission.py` and `src/ignis/interfaces/mcp/server.py`
-- [ ] T029 [US1] Remove scheduler CLI entrypoints and worker services from `pyproject.toml`, `docker-compose.yml`, and `docker-compose.prod.yml`
-- [ ] T030 [US1] Remove scheduled-worker environment settings, image guidance, bootstrap registration, and release acceptance from `env.example`, `src/ignis/config.py`, `Dockerfile`, `src/ignis/interfaces/cli/setup_bundle.py`, `scripts/bootstrap.sh`, and `scripts/public_release_acceptance.py`
-- [ ] T031 [US1] Delete the now-unreachable scheduler module and update direct consumers in `src/ignis/interfaces/cli/scheduler.py`, `tests/unit/test_scheduler.py`, and `tests/unit/test_worker_connector_selection.py`
-- [ ] T032 [US1] Prove idle-zero-work, explicit start, bounded autonomy, terminal stop, and clean bootstrap through `tests/integration/test_mission_bound_idle.py` and record results in `.handoff/011-us1.handoff.md`
+- [x] T025 [US1] Persist and validate a confirmed Mission Manifest when creating an Attention mission in `src/ignis/application/use_cases/create_attention_mission.py`
+- [x] T026 [US1] Persist and validate the Mission Manifest for a confirmed Market Brief in `src/ignis/application/use_cases/confirm_market_brief.py`
+- [x] T027 [US1] Enforce allowed resources, authority boundaries, one-run execution, and terminal stop conditions in `src/ignis/application/use_cases/execute_mission.py`
+- [x] T028 [US1] Return explicit missing-authority and out-of-scope results without opening a connector session in `src/ignis/application/use_cases/execute_mission.py` and `src/ignis/interfaces/mcp/server.py`
+- [x] T029 [US1] Remove scheduler CLI entrypoints and worker services from `pyproject.toml`, `docker-compose.yml`, and `docker-compose.prod.yml`
+- [x] T030 [US1] Remove scheduled-worker environment settings, image guidance, bootstrap registration, and release acceptance from `env.example`, `src/ignis/config.py`, `Dockerfile`, `src/ignis/interfaces/cli/setup_bundle.py`, `scripts/bootstrap.sh`, and `scripts/public_release_acceptance.py`
+- [x] T031 [US1] Delete the now-unreachable scheduler module and update direct consumers in `src/ignis/interfaces/cli/scheduler.py`, `tests/unit/test_scheduler.py`, and `tests/unit/test_worker_connector_selection.py`
+- [x] T032 [US1] Prove idle-zero-work, explicit start, bounded autonomy, terminal stop, and clean bootstrap through `tests/integration/test_mission_bound_idle.py` and record results in `.handoff/011-us1.handoff.md`
 
 **Checkpoint**: US1 is independently demonstrable without invoking strategic analysis or a report.
 

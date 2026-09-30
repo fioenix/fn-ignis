@@ -142,8 +142,7 @@ def _fresh_init(tmp_path: Path) -> dict:
         f"    container_name: {container}\n"
         "    ports: !reset []\n"
         '    restart: "no"\n'
-        "  worker:\n"
-        "    env_file: !reset []\n",
+        "",
         encoding="utf-8",
     )
     env_file = run_dir / "compose.env"

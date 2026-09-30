@@ -41,10 +41,6 @@ def ensure_environment_file(project_root: Path) -> Tuple[bool, str]:
             "YOUTUBE_SEARCH_DAILY_LIMIT=100\n"
             "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT=70\n"
             "YOUTUBE_OTHER_DAILY_UNIT_LIMIT=10000\n"
-            # The shared database ledger enforces quota across worker and MCP processes. Keep the
-            # established cadence here; reservations, rather than cadence, are the hard boundary.
-            "SCHEDULER_INTERVAL_SECONDS=8640\n"
-            "DISCOVERY_INTERVAL_HOURS=24\n"
         )
         env_file.write_text(default_env, encoding="utf-8")
         return True, "Created .env with SQLite default & generated Fernet key."

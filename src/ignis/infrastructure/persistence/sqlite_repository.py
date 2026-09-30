@@ -3088,6 +3088,75 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_create)
 
+    async def create_attention_mission_with_manifest(
+        self, mission: ResearchMission, manifest: MissionManifest
+    ) -> Tuple[ResearchMission, MissionManifest]:
+        """Write the surfaced mission and its authority contract in one transaction."""
+        if manifest.mission_id != mission.id:
+            raise InvalidMissionManifestError(
+                "The persisted manifest must carry the mission it authorizes."
+            )
+        await self._ensure_schema()
+
+        def _sync_create():
+            conn = self._get_connection()
+            try:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                cur = conn.cursor()
+                self._write_mission_row(cur, mission)
+                self._write_manifest_row(cur, manifest)
+                conn.commit()
+                return mission, manifest
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_create)
+
+    async def create_market_mission_with_brief_and_manifest(
+        self,
+        mission: ResearchMission,
+        revision: MarketBriefRevision,
+        manifest: MissionManifest,
+    ) -> Tuple[ResearchMission, MarketBriefRevision, MissionManifest]:
+        """Write all three records that make one Market assignment executable."""
+        if manifest.mission_id != mission.id:
+            raise InvalidMissionManifestError(
+                "The persisted manifest must carry the mission it authorizes."
+            )
+        await self._ensure_schema()
+
+        def _sync_create():
+            conn = self._get_connection()
+            try:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                cur = conn.cursor()
+                numbered = dataclasses.replace(
+                    revision,
+                    revision_number=self._next_revision_number(cur, revision.workspace_id),
+                )
+                self._write_mission_row(cur, mission)
+                self._write_brief_revision_row(cur, numbered)
+                self._write_manifest_row(cur, manifest)
+                conn.commit()
+                return mission, numbered, manifest
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                raise RepositoryException(BRIEF_ALREADY_CONFIRMED) from exc
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_create)
+
     @staticmethod
     def _brief_from_row(row: Any) -> MarketBriefRevision:
         return MarketBriefRevision(
@@ -3255,6 +3324,32 @@ class SqliteTrendRepository(ITrendRepository):
             confirmed_at=datetime.fromisoformat(row["confirmed_at"]),
         )
 
+    @staticmethod
+    def _write_manifest_row(cur, manifest: MissionManifest) -> None:
+        cur.execute(
+            "INSERT INTO mission_manifests"
+            " (mission_id, outcome, decision_context, required_channels, optional_channels,"
+            " authority_boundary, quota_budget, output_type, stop_conditions,"
+            " analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(manifest.mission_id),
+                manifest.outcome,
+                manifest.decision_context,
+                json.dumps(list(manifest.required_channels), ensure_ascii=False),
+                json.dumps(list(manifest.optional_channels), ensure_ascii=False),
+                json.dumps(manifest.authority_boundary.to_payload(), sort_keys=True),
+                json.dumps(dict(manifest.quota_budget), sort_keys=True),
+                manifest.output_type.value,
+                json.dumps(list(manifest.stop_conditions), ensure_ascii=False),
+                manifest.analysis_policy,
+                manifest.retention_policy,
+                manifest.created_by,
+                manifest.confirmed_at.isoformat(),
+                manifest.manifest_digest,
+            ),
+        )
+
     async def save_mission_manifest(self, manifest: MissionManifest) -> MissionManifest:
         if manifest.mission_id is None:
             raise InvalidMissionManifestError("A persisted manifest requires mission_id.")
@@ -3263,30 +3358,13 @@ class SqliteTrendRepository(ITrendRepository):
         def _sync_save():
             conn = self._get_connection()
             try:
-                conn.execute(
-                    "INSERT INTO mission_manifests"
-                    " (mission_id, outcome, decision_context, required_channels, optional_channels,"
-                    " authority_boundary, quota_budget, output_type, stop_conditions,"
-                    " analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                    " ON CONFLICT (mission_id) DO NOTHING",
-                    (
-                        str(manifest.mission_id),
-                        manifest.outcome,
-                        manifest.decision_context,
-                        json.dumps(list(manifest.required_channels), ensure_ascii=False),
-                        json.dumps(list(manifest.optional_channels), ensure_ascii=False),
-                        json.dumps(manifest.authority_boundary.to_payload(), sort_keys=True),
-                        json.dumps(dict(manifest.quota_budget), sort_keys=True),
-                        manifest.output_type.value,
-                        json.dumps(list(manifest.stop_conditions), ensure_ascii=False),
-                        manifest.analysis_policy,
-                        manifest.retention_policy,
-                        manifest.created_by,
-                        manifest.confirmed_at.isoformat(),
-                        manifest.manifest_digest,
-                    ),
-                )
+                conn.execute("SAVEPOINT save_manifest")
+                try:
+                    self._write_manifest_row(conn.cursor(), manifest)
+                except sqlite3.IntegrityError:
+                    conn.execute("ROLLBACK TO save_manifest")
+                finally:
+                    conn.execute("RELEASE save_manifest")
                 row = conn.execute(
                     "SELECT * FROM mission_manifests WHERE mission_id = ?",
                     (str(manifest.mission_id),),

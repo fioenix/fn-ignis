@@ -31,8 +31,6 @@ ENV PYTHONUNBUFFERED=1
 LABEL org.opencontainers.image.source="https://github.com/fioenix/fn-ignis"
 LABEL io.modelcontextprotocol.server.name="io.github.fioenix/fn-ignis"
 
-# The image is the OCI package server.json advertises, with stdio transport and no command
-# override, so its default process must be the MCP server. The optional background worker is a
-# role Compose selects explicitly (`python -m ignis.interfaces.cli.scheduler`); run that command
-# yourself when starting the image directly as a worker.
+# The image is the OCI package server.json advertises, so its only default process is the
+# request-driven MCP server. An idle installation starts no collection process.
 CMD ["python", "-m", "ignis.interfaces.mcp.server"]

@@ -16,8 +16,16 @@ from ignis.domain.exceptions import (
 from ignis.domain.harness_models import ChannelHealthStatus
 from ignis.domain.self_content import SelfIdentity, partition_self_authored
 from ignis.domain.entities import TrendSignal
-from ignis.domain.value_objects import GeoCode, IngressScope, IngressTrigger, PlatformType, Timeframe
+from ignis.domain.value_objects import (
+    GeoCode,
+    IngestRuntime,
+    IngressScope,
+    IngressTrigger,
+    PlatformType,
+    Timeframe,
+)
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +54,7 @@ class CircuitBreaker:
         self.last_failure_time = datetime.now(timezone.utc)
         if error is not None:
             self.last_error_type = type(error).__name__
-            self.last_error_message = str(error)[:500]
+            self.last_error_message = sanitize_pii_text(str(error))[:500]
         if self.failure_count >= self.failure_threshold:
             self.state = "OPEN"
             logger.warning(f"Circuit Breaker TRIPPED to OPEN after {self.failure_count} consecutive failures.")
@@ -167,6 +175,46 @@ class ConnectorPluginRegistry:
 
     def list_plugins(self) -> List[IConnectorPlugin]:
         return list(self._plugins.values())
+
+    async def resolve_execution_requirements(
+        self,
+        *,
+        target_platforms: List[PlatformType],
+        allowed_surfaces: Tuple[str, ...],
+        keywords: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Resolve policy requirements without opening a connector session or spending quota."""
+        allowed = set(allowed_surfaces)
+        selected = [
+            plugin
+            for plugin in self._plugins.values()
+            if plugin.supports_search
+            and plugin.platform in target_platforms
+            and plugin.plugin_id in allowed
+        ]
+        selected_ids = {plugin.plugin_id for plugin in selected}
+        unavailable = tuple(surface for surface in allowed_surfaces if surface not in selected_ids)
+        authority: List[str] = []
+        quota_costs: Dict[str, int] = {}
+        for plugin in selected:
+            runtime = await plugin.resolve_ingest_runtime()
+            required = (
+                "browser_session"
+                if runtime is IngestRuntime.BROWSER
+                else plugin.http_authority
+            )
+            if required not in authority:
+                authority.append(required)
+            if plugin.requires_paid_quota and "paid_quota" not in authority:
+                authority.append("paid_quota")
+            if plugin.platform is PlatformType.YOUTUBE:
+                quota_costs["youtube_search_calls"] = max(1, len(keywords or []))
+        return {
+            "resources": tuple(plugin.plugin_id for plugin in selected),
+            "authority": tuple(authority),
+            "quota_costs": quota_costs,
+            "unavailable_resources": unavailable,
+        }
 
     def get_health_status(self) -> Dict[str, dict]:
         """Report health and circuit breaker state independently for every registered plugin."""
@@ -443,6 +491,7 @@ class ConnectorPluginRegistry:
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         target_platforms: Optional[List[PlatformType]] = None,
+        target_surfaces: Optional[Tuple[str, ...]] = None,
         custom_timeframe: Optional[str] = None,
         scope: IngressScope = IngressScope.PUBLIC_MARKET,
         limit: int = 20,
@@ -468,6 +517,8 @@ class ConnectorPluginRegistry:
 
         for plugin_id, plugin in self._plugins.items():
             if target_platforms and plugin.platform not in target_platforms:
+                continue
+            if target_surfaces is not None and plugin_id not in target_surfaces:
                 continue
 
             if not plugin.supports_search:
@@ -517,21 +568,26 @@ class ConnectorPluginRegistry:
 
         for plugin, result in zip(enabled_plugins, results):
             if isinstance(result, Exception):
+                safe_error = sanitize_pii_text(str(result))
                 outcomes[plugin.plugin_id] = SurfaceProbeResult(
                     platform=plugin.platform.value,
                     connector_surface=plugin.plugin_id,
                     status=_failure_status(result),
                     signals_collected=0,
-                    note=str(result)[:200],
+                    note=safe_error[:200],
                 )
-                logger.error(f"Plugin [{plugin.name}] encountered exception during search: {result}")
+                logger.error(
+                    "Plugin [%s] encountered exception during search: %s",
+                    plugin.name,
+                    safe_error,
+                )
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
                         event_type="SEARCH_FAILURE",
-                        message=f"Error searching {plugin.name} with keywords {keywords}: {str(result)}",
+                        message=f"Error searching {plugin.name} with keywords {keywords}: {safe_error}",
                         level="ERROR",
-                        details={"keywords": keywords, "error": str(result)}
+                        details={"keywords": keywords, "error": safe_error}
                     )
             elif isinstance(result, list):
                 outcomes[plugin.plugin_id] = self._search_outcome(
@@ -811,6 +867,9 @@ class ConnectorPluginRegistry:
                 if sugs:
                     all_suggestions.extend(sugs)
             except Exception as e:
-                logger.warning(f"Error fetching suggestions from {plugin.name}: {e}")
+                logger.warning(
+                    "Error fetching suggestions from %s: %s",
+                    plugin.name,
+                    sanitize_pii_text(str(e)),
+                )
         return all_suggestions
-

@@ -146,6 +146,37 @@ class InvalidMissionManifestError(IgnisDomainException):
     """A mission authority boundary is incomplete, contradictory, or credential-shaped."""
 
 
+class InvalidMissionAuthorizationError(IgnisDomainException):
+    """A requested run exceeds the immutable authority recorded in its manifest."""
+
+    def __init__(
+        self,
+        reason_code: str,
+        message: str,
+        *,
+        missing_authority: Sequence[str] = (),
+        out_of_scope_resources: Sequence[str] = (),
+        quota_overruns: Optional[Mapping[str, Mapping[str, int]]] = None,
+    ):
+        self.reason_code = reason_code
+        self.missing_authority = tuple(missing_authority)
+        self.out_of_scope_resources = tuple(out_of_scope_resources)
+        self.quota_overruns = dict(quota_overruns or {})
+        super().__init__(message)
+
+
+class MissionTerminalStateError(IgnisDomainException):
+    """A one-run mission reached a terminal state and cannot continue itself."""
+
+    def __init__(self, mission_id: UUID, status: str):
+        self.mission_id = mission_id
+        self.status = status
+        super().__init__(
+            f"Mission {mission_id} is terminal ({status}) and cannot run again. "
+            "Create a new mission or confirmed revision for an explicit continuation."
+        )
+
+
 class InvalidMissionClaimError(IgnisDomainException):
     """A claim or evidence binding cannot be traced to one valid evidence frame."""
 
@@ -255,6 +286,85 @@ class MissionManifest:
     @property
     def manifest_digest(self) -> str:
         return _digest(self.to_payload())
+
+    @property
+    def allowed_resources(self) -> Tuple[str, ...]:
+        """Every exact connector surface this mission may invoke, in confirmed order."""
+        return self.required_channels + self.optional_channels
+
+    def require_execution_authority(
+        self,
+        *,
+        resources: Sequence[str],
+        authority: Sequence[str] = (),
+        quota_costs: Optional[Mapping[str, int]] = None,
+        material_scope_change: bool = False,
+    ) -> None:
+        """Fail closed when a proposed run would cross the confirmed mission boundary.
+
+        This method is deliberately deterministic. It does not discover credentials, open a
+        browser, consume quota, or mutate a retry counter; callers resolve the proposed connector
+        plan first and present only its policy requirements here.
+        """
+        requested_resources = _clean_unique_strings(
+            resources, "execution resources", allow_empty=True
+        )
+        out_of_scope = tuple(
+            resource for resource in requested_resources if resource not in self.allowed_resources
+        )
+        if out_of_scope:
+            raise InvalidMissionAuthorizationError(
+                "OUT_OF_SCOPE_RESOURCE",
+                "The run requested connector surfaces outside the confirmed mission manifest: "
+                + ", ".join(out_of_scope),
+                out_of_scope_resources=out_of_scope,
+            )
+
+        if material_scope_change:
+            raise InvalidMissionAuthorizationError(
+                "MATERIAL_SCOPE_CHANGE",
+                "The proposed run changes the confirmed material scope and requires a new mission.",
+            )
+
+        valid_authority = set(self.authority_boundary.to_payload())
+        requested_authority = _clean_unique_strings(
+            authority, "execution authority", allow_empty=True
+        )
+        unknown = tuple(name for name in requested_authority if name not in valid_authority)
+        if unknown:
+            raise InvalidMissionAuthorizationError(
+                "UNKNOWN_AUTHORITY",
+                "The connector plan declared unknown authority requirements: " + ", ".join(unknown),
+                missing_authority=unknown,
+            )
+        missing = tuple(
+            name
+            for name in requested_authority
+            if not getattr(self.authority_boundary, name)
+        )
+        if missing:
+            raise InvalidMissionAuthorizationError(
+                "MISSING_AUTHORITY",
+                "The mission has not authorized: " + ", ".join(missing),
+                missing_authority=missing,
+            )
+
+        overruns: Dict[str, Dict[str, int]] = {}
+        for name, requested in dict(quota_costs or {}).items():
+            if isinstance(requested, bool) or not isinstance(requested, int) or requested < 0:
+                raise InvalidMissionAuthorizationError(
+                    "INVALID_QUOTA_REQUEST",
+                    f"The connector plan supplied an invalid quota cost for {name}.",
+                )
+            budget = self.quota_budget.get(name)
+            if budget is not None and requested > budget:
+                overruns[name] = {"budget": budget, "requested": requested}
+        if overruns:
+            raise InvalidMissionAuthorizationError(
+                "QUOTA_BUDGET_EXCEEDED",
+                "The connector plan exceeds the confirmed quota budget.",
+                quota_overruns=overruns,
+            )
 
 
 def _clean_unique_strings(

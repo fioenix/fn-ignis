@@ -93,11 +93,6 @@ class Settings(BaseSettings):
         description="Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) secret key for encrypting stored credentials in DB"
     )
 
-    # Scheduler Configuration
-    SCHEDULER_INTERVAL_SECONDS: int = Field(default=8640, description="Daemon scheduler tick interval in seconds; the shared quota ledger refuses YouTube calls beyond configured daily allocations")
-    DISCOVERY_INTERVAL_HOURS: int = Field(default=24, description="Interval in hours between autonomous discovery runs")
-    SYNC_INTERVAL_MINUTES: int = Field(default=0, description="Optional override for ingress sync interval in minutes; 0 = fallback to SCHEDULER_INTERVAL_SECONDS")
-
     # Ingress Defaults
 
     DEFAULT_GEO: str = Field(default="VN", description="Default ISO geographic region code")

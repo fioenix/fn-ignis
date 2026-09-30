@@ -109,3 +109,86 @@ def test_manifest_is_immutable_after_confirmation():
     with pytest.raises(TypeError):
         manifest.quota_budget["youtube_search_calls"] = 999
     assert manifest.manifest_digest == digest
+
+
+def test_manifest_authorizes_only_declared_connector_surfaces():
+    InvalidMissionAuthorizationError = _contract("InvalidMissionAuthorizationError")
+    manifest = _manifest(required_channels=("youtube",), optional_channels=("threads",))
+
+    manifest.require_execution_authority(
+        resources=("youtube",),
+        authority=("public_http",),
+    )
+
+    with pytest.raises(InvalidMissionAuthorizationError) as excinfo:
+        manifest.require_execution_authority(
+            resources=("tiktok_video_grid",),
+            authority=("browser_session",),
+        )
+
+    assert excinfo.value.reason_code == "OUT_OF_SCOPE_RESOURCE"
+    assert excinfo.value.out_of_scope_resources == ("tiktok_video_grid",)
+
+
+@pytest.mark.parametrize(
+    ("required_authority", "reason_code"),
+    [
+        (("browser_session",), "MISSING_AUTHORITY"),
+        (("official_api",), "MISSING_AUTHORITY"),
+        (("paid_quota",), "MISSING_AUTHORITY"),
+    ],
+)
+def test_manifest_refuses_browser_token_and_paid_quota_outside_boundary(
+    required_authority, reason_code
+):
+    InvalidMissionAuthorizationError = _contract("InvalidMissionAuthorizationError")
+    manifest = _manifest(required_channels=("youtube",), optional_channels=())
+
+    with pytest.raises(InvalidMissionAuthorizationError) as excinfo:
+        manifest.require_execution_authority(
+            resources=("youtube",),
+            authority=required_authority,
+        )
+
+    assert excinfo.value.reason_code == reason_code
+    assert excinfo.value.missing_authority == required_authority
+
+
+def test_manifest_refuses_material_scope_change_and_budget_overrun():
+    InvalidMissionAuthorizationError = _contract("InvalidMissionAuthorizationError")
+    manifest = _manifest(
+        required_channels=("youtube",),
+        optional_channels=(),
+        quota_budget={"youtube_search_calls": 2},
+    )
+
+    with pytest.raises(InvalidMissionAuthorizationError) as scope_exc:
+        manifest.require_execution_authority(
+            resources=("youtube",),
+            authority=("public_http",),
+            material_scope_change=True,
+        )
+    assert scope_exc.value.reason_code == "MATERIAL_SCOPE_CHANGE"
+
+    with pytest.raises(InvalidMissionAuthorizationError) as quota_exc:
+        manifest.require_execution_authority(
+            resources=("youtube",),
+            authority=("public_http",),
+            quota_costs={"youtube_search_calls": 3},
+        )
+    assert quota_exc.value.reason_code == "QUOTA_BUDGET_EXCEEDED"
+    assert quota_exc.value.quota_overruns == {"youtube_search_calls": {"budget": 2, "requested": 3}}
+
+
+def test_manifest_authority_check_is_retry_stable_and_never_mutates_the_boundary():
+    manifest = _manifest(required_channels=("youtube",), optional_channels=())
+    original_digest = manifest.manifest_digest
+
+    for _ in range(2):
+        manifest.require_execution_authority(
+            resources=("youtube",),
+            authority=("public_http",),
+            quota_costs={"youtube_search_calls": 1},
+        )
+
+    assert manifest.manifest_digest == original_digest
