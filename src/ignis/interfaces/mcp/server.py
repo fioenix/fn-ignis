@@ -1,7 +1,7 @@
 import json
 import logging
 import tempfile
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import uuid
@@ -19,7 +19,6 @@ from fastmcp import FastMCP
 from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
 from ignis.application.use_cases.create_market_revision import CreateMarketRevisionUseCase
 from ignis.application.use_cases.create_attention_mission import CreateAttentionMissionUseCase
-from ignis.application.use_cases.create_mission import CreateMissionUseCase
 from ignis.application.use_cases.create_research_workspace import (
     CreateResearchWorkspaceUseCase,
 )
@@ -37,10 +36,8 @@ from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaim
 from ignis.application.use_cases.submit_evidence_qualifications import (
     SubmitEvidenceQualificationsUseCase,
 )
-from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
-from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS, IngestTrendsUseCase
-from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
+from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.youtube_quota import YouTubeQuotaManager
 from ignis.domain.entities import TopicCluster
@@ -73,14 +70,11 @@ from ignis.domain.token_rotation import (
     plan_staggered_refresh,
 )
 from ignis.domain.value_objects import (
-    IngressTrigger,
     GeoCode,
-    IngressScope,
     PlatformType,
     Timeframe,
     resolve_geo,
     resolve_platform,
-    resolve_timeframe,
     timeframe_to_days,
 )
 from ignis.domain.youtube_quota import YouTubeQuotaPolicy
@@ -101,7 +95,6 @@ from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPl
 from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
-from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
 from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
@@ -216,14 +209,6 @@ def _init_components():
     quality_evaluator = QualityEvaluator(detector=language_detector)
     strategic_reasoner = StrategicMarketReasoner(detector=language_detector)
 
-    harness_orchestrator = AutonomousRefinementOrchestrator(
-        repository=repository,
-        registry=registry,
-        clusterer=clusterer,
-        quality_evaluator=quality_evaluator,
-        strategic_reasoner=strategic_reasoner,
-    )
-
     workspace_store = WorkspaceRepository(repository=repository)
     # One synchronizer for every entry point, so the first mission after startup registers the
     # same persisted vocabulary a process warmed by an analysis call would already hold.
@@ -238,7 +223,6 @@ def _init_components():
         registry=registry,
     )
 
-    create_mission_use_case = CreateMissionUseCase(repository=repository)
     execute_mission_use_case = ExecuteMissionUseCase(
         repository=repository,
         registry=registry,
@@ -280,15 +264,6 @@ def _init_components():
     )
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
     ingest_use_case = IngestTrendsUseCase(registry=registry, repository=repository)
-    cluster_use_case = ClusterSignalsUseCase(clusterer=clusterer, repository=repository)
-    autonomous_discovery_use_case = AutonomousDiscoveryUseCase(
-        repository=repository,
-        registry=registry,
-        clusterer=clusterer,
-        quality_evaluator=quality_evaluator,
-        strategic_reasoner=strategic_reasoner,
-        artifact_builder=artifact_builder,
-    )
 
     return {
         "repository": repository,
@@ -305,14 +280,12 @@ def _init_components():
         "artifact_builder": artifact_builder,
         "quality_evaluator": quality_evaluator,
         "strategic_reasoner": strategic_reasoner,
-        "harness_orchestrator": harness_orchestrator,
         "workspace_store": workspace_store,
         "vocabulary_synchronizer": vocabulary_synchronizer,
         "create_research_workspace_use_case": create_research_workspace_use_case,
         "create_attention_mission_use_case": create_attention_mission_use_case,
         "confirm_market_brief_use_case": confirm_market_brief_use_case,
         "create_market_revision_use_case": create_market_revision_use_case,
-        "create_mission_use_case": create_mission_use_case,
         "execute_mission_use_case": execute_mission_use_case,
         "get_mission_analysis_use_case": get_mission_analysis_use_case,
         "get_evidence_qualification_batch_use_case": get_evidence_qualification_batch_use_case,
@@ -321,8 +294,6 @@ def _init_components():
         "get_mission_claims_use_case": get_mission_claims_use_case,
         "top_clusters_use_case": top_clusters_use_case,
         "ingest_use_case": ingest_use_case,
-        "cluster_use_case": cluster_use_case,
-        "autonomous_discovery_use_case": autonomous_discovery_use_case,
         "runtime_config_manager": runtime_config_manager,
     }
 
@@ -742,79 +713,6 @@ def _invalid_timeframe(value: object) -> str:
         },
         ensure_ascii=False,
         indent=2,
-    )
-
-
-async def handle_run_autonomous_research_mission(
-    topic: str,
-    keywords: List[str],
-    geo: str = "VN",
-    timeframe: str = "7d",
-    min_signals: int = 15,
-    agent: str = "claude",
-    session_id: Optional[str] = None,
-) -> str:
-    """Run end-to-end Harness: Mission initialization, refinement loop, quality evaluation, and strategic analysis."""
-    comp = get_components()
-    await _sync_lexicons_from_db(comp)
-    geo_val = resolve_geo(geo)
-
-
-
-    # 1. Initialize Mission
-    try:
-        mission = await comp["create_mission_use_case"].execute(
-            title=topic,
-            keywords=keywords,
-            agent=agent,
-            session_id=session_id,
-            geo=geo_val,
-            timeframe=timeframe,
-        )
-    except ValueError:
-        return _invalid_timeframe(timeframe)
-
-    # 2. Execute Harness Orchestrator
-    report = await comp["harness_orchestrator"].run_mission_harness(
-
-        mission_id=mission.id,
-        min_signals=min_signals,
-    )
-
-    return json.dumps(
-        {
-            "status": "COMPLETED",
-            "mission_id": str(mission.id),
-            "title": mission.title,
-            "scorecard": {
-                "coverage_score": report.scorecard.coverage_score,
-                "language_precision": report.scorecard.language_precision,
-                "data_freshness_score": report.scorecard.data_freshness_score,
-                "creator_diversity_score": report.scorecard.creator_diversity_score,
-                "overall_confidence": report.scorecard.overall_confidence,
-                "confidence_level": report.scorecard.confidence_level.value,
-                "flaws": report.scorecard.flaws_detected,
-                "strengths": report.scorecard.strengths_detected,
-            },
-            "maturity_stage": report.maturity_stage.value,
-            "market_opportunities": [
-                {
-                    "topic": opp.topic,
-                    "type": opp.opportunity_type,
-                    "demand_score": opp.search_interest_score,
-                    "supply_score": opp.content_supply_score,
-                    "opportunity_index": opp.opportunity_index,
-                    "recommendation": opp.strategic_recommendation,
-                }
-                for opp in report.market_opportunities
-            ],
-            "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
-            "strategic_insights": _serialize_insights(report.strategic_insights),
-            "actionable_takeaways": _serialize_insights(report.actionable_takeaways),
-            "next_step": f"Call generate_mission_artifact(mission_id='{mission.id}') to render the full interactive HTML dossier."
-        },
-        ensure_ascii=False,
-        indent=2
     )
 
 
@@ -1603,56 +1501,6 @@ async def handle_confirm_market_brief(
 
 # --- Handlers for Research Missions ---
 
-async def handle_create_research_mission(
-    title: Optional[str] = None,
-    keywords: Optional[List[str]] = None,
-    topic: Optional[str] = None,
-    agent: str = "claude",
-    session_id: Optional[str] = None,
-    platforms: Optional[List[str]] = None,
-    geo: str = "VN",
-    timeframe: str = "7d",
-) -> str:
-    comp = get_components()
-    geo_val = resolve_geo(geo)
-    final_title = title or topic or "Untitled Mission"
-    final_keywords = keywords or []
-    
-    target_platforms = [resolve_platform(p) for p in platforms] if platforms else None
-
-
-    try:
-        mission = await comp["create_mission_use_case"].execute(
-            title=final_title,
-            keywords=final_keywords,
-            agent=agent,
-            session_id=session_id,
-            platforms=target_platforms,
-            geo=geo_val,
-            timeframe=timeframe,
-        )
-    except ValueError:
-        return _invalid_timeframe(timeframe)
-
-    return json.dumps(
-        {
-            "status": "CREATED",
-            "mission_id": str(mission.id),
-            "shortcode": mission.shortcode,
-            "display_label": f"[{mission.shortcode}] {mission.title}",
-            "title": mission.title,
-            "keywords": mission.keywords,
-            "platforms": [p.value for p in mission.platforms],
-            "geo": mission.geo_code.value,
-            "timeframe": mission.timeframe,
-            "tip": f"You can reference shortcode '{mission.shortcode}' or ID '{str(mission.id)[:8]}' in subsequent commands.",
-            "next_step": f"Call execute_mission_ingress(mission_id='{mission.shortcode}') to trigger data ingress."
-        },
-        ensure_ascii=False,
-        indent=2
-    )
-
-
 async def _mission_writer_conflict(comp: Dict[str, Any], mission: Any, detail: str) -> str:
     """The one refusal a second writer gets, naming the run it is waiting for.
 
@@ -2263,239 +2111,6 @@ async def handle_list_research_missions(limit: int = 10) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-# --- Legacy Handlers ---
-
-async def handle_get_trending_topics(
-    geo: str = "VN",
-    timeframe: str = "24h",
-    limit: int = 10,
-) -> str:
-    comp = get_components()
-    geo_val = resolve_geo(geo)
-    tf_val = resolve_timeframe(timeframe)
-    # Same refusal the ingress tool gives, for the same reason: Timeframe._missing_ manufactures
-    # a member for any string, so an unrecognised value reaches the reader looking valid.
-    if tf_val not in tuple(Timeframe):
-        return _invalid_timeframe(timeframe)
-
-    now = datetime.now(timezone.utc)
-    tf_days = timeframe_to_days(tf_val)
-    window_start = now - timedelta(days=tf_days)
-
-    safe_limit = max(1, min(limit, 30))
-    clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, timeframe=tf_val, limit=safe_limit)
-    topics = []
-    for c in clusters:
-        signal_count = len(c.signals)
-        plat_count = len({s.platform for s in c.signals})
-        # Summary is rendered from the signals actually returned for this timeframe (BUG-07).
-        dynamic_summary = c.summary_text or f"Aggregated topic from {signal_count} signals across {plat_count} platforms."
-        topics.append({
-            "id": str(c.id),
-            "topic_name": c.topic_label,
-            "summary": dynamic_summary,
-            "category": c.category,
-            "cross_platform_score": c.cross_platform_score,
-            "momentum": c.momentum_category.value,
-            "signal_count": signal_count,
-        })
-    envelope = {
-        "status": "SUCCESS",
-        "geo": geo_val.value,
-        "timeframe_used": tf_val.value,
-        "window_start": window_start.isoformat(),
-        "window_end": now.isoformat(),
-        "total_topics": len(topics),
-        "topics": topics,
-    }
-    return json.dumps(envelope, ensure_ascii=False, indent=2)
-
-
-async def handle_get_topic_detail(topic_id: str, limit: int = 20) -> str:
-    comp = get_components()
-    try:
-        cluster_uuid = UUID(topic_id.strip())
-    except (ValueError, AttributeError):
-        return json.dumps({"error": f"Invalid UUID: {topic_id}"}, ensure_ascii=False)
-
-    all_signals = await comp["repository"].get_cluster_signals(cluster_id=cluster_uuid)
-    safe_limit = max(1, min(limit, 50))
-    top_signals = all_signals[:safe_limit]
-
-    result = {
-        "topic_id": str(cluster_uuid),
-        "total_signals": len(all_signals),
-        "returned_signals": len(top_signals),
-        "signals": [
-            {
-                "platform": s.platform.value if hasattr(s.platform, "value") else str(s.platform),
-                "title": s.raw_title,
-                "metric_value": s.metric_value,
-                "growth_velocity": s.growth_velocity,
-                "source_url": s.source_url,
-                "captured_at": s.captured_at.isoformat() if s.captured_at else None,
-                # When the platform says the content was posted, where it says so at all.
-                # Distinct from captured_at, which is when this harness pulled it.
-                "published_at": s.published_at.isoformat() if s.published_at else None,
-                "metadata": {
-                    k: v for k, v in s.metadata.items() if k in ["channel_title", "channel", "views", "likes", "published_at"]
-                },
-            }
-            for s in top_signals
-        ]
-    }
-    return json.dumps(result, ensure_ascii=False, indent=2)
-
-
-async def handle_generate_trend_artifact(
-    topic_id: str = "",
-    geo: str = "VN",
-    format: str = "dashboard",
-) -> str:
-    comp = get_components()
-    builder = comp["artifact_builder"]
-    geo_val = resolve_geo(geo)
-    reports_dir = _get_secure_reports_dir()
-
-    if format.strip().lower() == "graph" and not topic_id.strip():
-        await _sync_lexicons_from_db(comp)
-        clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=150)
-        html_content = builder.build_graph_artifact(clusters, geo=geo_val, clusterer=comp.get("clusterer"))
-        report_file = reports_dir / f"trend_graph_{geo_val.value.lower()}.html"
-        report_file.write_text(html_content, encoding="utf-8")
-        abs_path = str(report_file.resolve())
-        return json.dumps(
-            {
-                "status": "SUCCESS",
-                "type": "GRAPH",
-                "total_clusters": len(clusters),
-                "total_signals": sum(len(c.signals) for c in clusters),
-                "artifact_file": abs_path,
-                "file_url": f"file://{abs_path}",
-                "message": (
-                    f"Interactive trend graph exported to: file://{abs_path}. "
-                    "Clusters are navigable; signals are aggregated into density halos."
-                ),
-            },
-            ensure_ascii=False,
-            indent=2
-        )
-
-    if not topic_id.strip():
-        clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=10)
-        html_content = builder.build_dashboard_artifact(clusters, geo=geo_val)
-        report_file = reports_dir / f"trend_dashboard_{geo_val.value.lower()}.html"
-        report_file.write_text(html_content, encoding="utf-8")
-        abs_path = str(report_file.resolve())
-        return json.dumps(
-            {
-                "status": "SUCCESS",
-                "type": "DASHBOARD",
-                "total_clusters": len(clusters),
-                "artifact_file": abs_path,
-                "file_url": f"file://{abs_path}",
-                "message": f"Trend dashboard exported to: file://{abs_path}",
-            },
-            ensure_ascii=False,
-            indent=2
-        )
-    else:
-        try:
-            cluster_uuid = UUID(topic_id.strip())
-        except (ValueError, AttributeError):
-            return json.dumps({"error": "Invalid Topic ID format."}, ensure_ascii=False)
-
-        signals = await comp["repository"].get_cluster_signals(cluster_id=cluster_uuid)
-        cluster_info = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=50)
-        target_cluster = next((c for c in cluster_info if c.id == cluster_uuid), None)
-        if not target_cluster and signals:
-            formed = await comp["clusterer"].cluster_signals(signals)
-            target_cluster = formed[0] if formed else None
-
-        if target_cluster:
-            html_content = builder.build_topic_card_artifact(target_cluster, signals)
-            report_file = reports_dir / f"topic_{str(cluster_uuid)[:8]}.html"
-            report_file.write_text(html_content, encoding="utf-8")
-            abs_path = str(report_file.resolve())
-            return json.dumps(
-                {
-                    "status": "SUCCESS",
-                    "type": "TOPIC_CARD",
-                    "topic_name": target_cluster.topic_label,
-                    "artifact_file": abs_path,
-                    "file_url": f"file://{abs_path}",
-                    "message": f"Topic card exported to: file://{abs_path}",
-                },
-                ensure_ascii=False,
-                indent=2
-            )
-        return json.dumps({"error": "Requested topic not found."}, ensure_ascii=False)
-
-
-async def handle_trigger_ingress_refresh(
-    geo: str = "VN",
-    scope: str = "public_market",
-    timeframe: str = "24h",
-) -> str:
-    comp = get_components()
-    await _sync_lexicons_from_db(comp)
-    geo_val = resolve_geo(geo)
-    # The window the connectors themselves search. Without this the pass always ran at 24h no
-    # matter what the caller asked for, and the timeframe only narrowed the later read.
-    #
-    # Timeframe._missing_ builds a member out of any string it is handed, so an unknown value
-    # would reach the connectors as a live enum and then be silently mapped to a default. Check
-    # it here instead, the same way an unknown scope is refused below.
-    timeframe_val = resolve_timeframe(timeframe)
-    if timeframe_val not in tuple(Timeframe):
-        return _invalid_timeframe(timeframe)
-
-    scope_val = IngressScope(scope)
-    if scope_val is None:
-        return json.dumps(
-            {
-                "status": "INVALID_SCOPE",
-                "message": (
-                    f"Unknown scope '{scope}'. Use 'public_market' (default, market listening), "
-                    "'own_profile' (only the connected account's own posts) or 'both'."
-                ),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    # A public pass seeds the keyword probes from the persisted lexicon, because the connectors
-    # whose only feed is the operator's own account are reached that way instead.
-    seeds = await comp["ingest_use_case"].load_seed_keywords() if scope_val.includes_public else []
-    # REQUESTED: somebody typed this, so the pass is not script-filtered -- see IngressTrigger.
-    # The keyword cap still applies: this path spends the same YouTube search quota as the worker.
-    signals = await comp["registry"].fetch_from_all(
-        geo=geo_val,
-        timeframe=timeframe_val,
-        scope=scope_val,
-        seed_keywords=seeds,
-        max_probe_keywords=MAX_TOPIC_KEYWORDS,
-        trigger=IngressTrigger.REQUESTED,
-    )
-    clusters = await comp["cluster_use_case"].execute(signals)
-    guard = dict(getattr(comp["registry"], "last_pass_report", {}) or {})
-
-    return json.dumps(
-        {
-            "status": "success",
-            "geo": geo_val.value,
-            "scope": scope_val.value,
-            "timeframe": timeframe_val.value,
-            "total_signals_fetched": len(signals),
-            "total_clusters_formed": len(clusters),
-            "seed_keywords_used": len(seeds),
-            "scope_guard": guard,
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
-
-
 async def handle_get_current_session_mission(session_id: str) -> str:
     comp = get_components()
     mission = await comp["repository"].get_mission(session_id)
@@ -2520,17 +2135,6 @@ async def handle_get_current_session_mission(session_id: str) -> str:
 
 
 # --- MCP Tools Exposure ---
-
-@mcp.tool(name="run_autonomous_research_mission", description="Run an end-to-end autonomous research mission: create mission, execute refinement loop, evaluate quality scorecard, and discover market white spaces.")
-async def run_autonomous_research_mission(
-    topic: str,
-    keywords: List[str],
-    geo: str = "VN",
-    timeframe: str = "7d",
-    min_signals: int = 15,
-) -> str:
-    return await handle_run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)
-
 
 @mcp.tool(name="evaluate_mission_quality", description="Evaluate multi-dimensional data quality and integrity (Coverage, Freshness, Language Accuracy, Confidence Score) for a research mission.")
 async def evaluate_mission_quality(mission_id: str) -> str:
@@ -2649,17 +2253,6 @@ async def confirm_market_brief(
     )
 
 
-@mcp.tool(name="create_research_mission", description="Create a targeted cross-platform trend research mission with specified keywords, platforms, geo, and timeframe.")
-async def create_research_mission(
-    topic: str,
-    keywords: List[str],
-    platforms: Optional[List[str]] = None,
-    geo: str = "VN",
-    timeframe: str = "7d",
-) -> str:
-    return await handle_create_research_mission(topic, keywords, platforms, geo, timeframe)
-
-
 @mcp.tool(name="execute_mission_ingress", description="Trigger deep multi-platform data collection and clustering for a research mission (idempotent replace mode).")
 async def execute_mission_ingress(mission_id: str) -> str:
     return await handle_execute_mission_ingress(mission_id)
@@ -2685,7 +2278,23 @@ async def get_mission_evidence_qualification_batch(mission_id: str, cursor: Opti
     return await handle_get_mission_evidence_qualification_batch(mission_id=mission_id, cursor=cursor, limit=limit)
 
 
-@mcp.tool(name="submit_mission_evidence_qualifications", description="Record 1-50 typed evidence judgments for one mission, atomically. Each assessment names an observation_id; relation (QUALIFIED_SUPPORT, QUALIFIED_CONTRADICTION, CONTEXT_ONLY, EXCLUDED_IRRELEVANT, UNASSESSED); purpose (DEMAND, SUPPLY, VOC, CONTEXT); hypothesis_target; evidence_role (SUPPORT, CONTRADICTION, CONTEXT); confidence; reason_code; judged_by; and optional model identifier. Support and contradiction use the same validation rules and require a named hypothesis target. A stale frame, foreign or duplicate observation, role mismatch, or invalid assessment refuses the whole batch; identical replay is idempotent and a changed judgment is refused. Never send a prompt, transcript, or credential.")
+@mcp.tool(
+    name="submit_mission_evidence_qualifications",
+    description=(
+        "Record 1-50 typed evidence judgments for one mission, atomically. Each assessment names "
+        "an observation_id; relation (QUALIFIED_SUPPORT, QUALIFIED_CONTRADICTION, CONTEXT_ONLY, "
+        "EXCLUDED_IRRELEVANT, UNASSESSED); purpose (DEMAND, SUPPLY, VOC, CONTEXT); "
+        "hypothesis_target; evidence_role (SUPPORT, CONTRADICTION, CONTEXT); confidence; "
+        "reason_code (DIRECT_TO_FRAME, ADJACENT_ONLY, KEYWORD_ONLY, WRONG_AUDIENCE_OR_PROBLEM, "
+        "FICTION_NEWS_OR_ENTERTAINMENT, INSUFFICIENT_CONTENT, EVALUATOR_UNAVAILABLE); judged_by; "
+        "and optional model identifier. Support and contradiction use the same validation rules "
+        "and require a named hypothesis target. A stale frame, foreign or duplicate observation, "
+        "role mismatch, or invalid assessment refuses the whole batch; identical replay is "
+        "idempotent and a changed judgment is refused. The response's qualification_status, "
+        "qualification_reason_code, and next_step describe the state produced by this write. "
+        "Never send a prompt, transcript, or credential."
+    ),
+)
 async def submit_mission_evidence_qualifications(mission_id: str, frame_fingerprint: str, assessments: list[dict]) -> str:
     return await handle_submit_mission_evidence_qualifications(mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments)
 
@@ -2720,30 +2329,6 @@ async def diagnose_system_health() -> str:
 @mcp.tool(name="get_system_logs", description="Query recent system audit logs and error traces from the database for debugging.")
 async def get_system_logs(level: Optional[str] = "ERROR", component: Optional[str] = None, limit: int = 20) -> str:
     return await handle_get_system_logs(level=level, component=component, limit=limit)
-
-
-@mcp.tool(name="get_trending_topics", description="Fetch top cross-platform trending topic clusters ranked by momentum velocity.")
-async def get_trending_topics(geo: str = "VN", timeframe: str = "24h", limit: int = 10) -> str:
-    return await handle_get_trending_topics(geo=geo, timeframe=timeframe, limit=limit)
-
-
-@mcp.tool(name="get_topic_detail", description="Retrieve time-series signals and engagement metrics for a specific topic cluster (token-optimized).")
-async def get_topic_detail(topic_id: str, limit: int = 20) -> str:
-    return await handle_get_topic_detail(topic_id=topic_id, limit=limit)
-
-
-@mcp.tool(name="generate_trend_artifact", description="Generate a standalone single-file HTML artifact: a trend dashboard, a single topic card (pass topic_id), or an interactive force-directed trend graph (pass format='graph').")
-async def generate_trend_artifact(topic_id: str = "", geo: str = "VN", format: str = "dashboard") -> str:
-    return await handle_generate_trend_artifact(topic_id=topic_id, geo=geo, format=format)
-
-
-@mcp.tool(name="trigger_ingress_refresh", description="Trigger immediate multi-platform ETL trend ingestion and clustering. `timeframe` is the window the connectors search (24h, 7d, 30d, 90d, 12m), not a filter applied afterwards. Reads public market surfaces only by default; pass scope='own_profile' to read the connected account's own posts instead, or scope='both' for the union.")
-async def trigger_ingress_refresh(
-    geo: str = "VN",
-    scope: str = "public_market",
-    timeframe: str = "24h",
-) -> str:
-    return await handle_trigger_ingress_refresh(geo=geo, scope=scope, timeframe=timeframe)
 
 
 @mcp.tool(name="get_current_session_mission", description="Automatically retrieve the research mission associated with the current session ID or chat thread.")
@@ -3141,41 +2726,6 @@ async def extract_customer_pain_points(
         inquiry_patterns=inquiry_patterns,
     )
 
-
-
-async def handle_trigger_autonomous_discovery(geo: str = "VN") -> str:
-    comp = get_components()
-    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
-    try:
-        result = await comp["autonomous_discovery_use_case"].execute(geo=geo_code)
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Error during autonomous discovery cycle: {e}")
-        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
-
-
-@mcp.tool(name="trigger_autonomous_discovery", description="Trigger an on-demand end-to-end autonomous discovery cycle to uncover top daily white space opportunities.")
-async def trigger_autonomous_discovery(geo: str = "VN") -> str:
-    return await handle_trigger_autonomous_discovery(geo=geo)
-
-
-async def handle_get_latest_daily_discovery(geo: str = "VN") -> str:
-    comp = get_components()
-    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
-    missions = await comp["repository"].list_missions(limit=30)
-    
-    # Filter for discovery missions
-    discovery_missions = [m for m in missions if m.shortcode and m.shortcode.startswith(f"DISCOVERY-{geo_code.value}")]
-    if not discovery_missions:
-        return json.dumps({"status": "INFO", "message": f"No autonomous discovery runs recorded yet for {geo_code.value}."}, ensure_ascii=False)
-
-    latest = discovery_missions[0]
-    return await handle_get_mission_analysis(str(latest.id))
-
-
-@mcp.tool(name="get_latest_daily_discovery", description="Retrieve the latest daily automated market discovery digest and opportunity rankings.")
-async def get_latest_daily_discovery(geo: str = "VN") -> str:
-    return await handle_get_latest_daily_discovery(geo=geo)
 
 
 async def handle_register_domain_lexicon(

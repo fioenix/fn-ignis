@@ -156,19 +156,13 @@ async def test_an_agent_probe_fetches_foreign_language_content_freely():
 
 
 @pytest.mark.asyncio
-async def test_an_explicitly_requested_pass_is_not_script_gated():
-    """The gate keys on who asked for the pass, not on which code path served it.
-
-    `trigger_ingress_refresh` runs `fetch_from_all`, the same function the unattended worker
-    uses, but somebody typed it. An explicit request is the operator asking a question, and the
-    answer may legitimately be in another language -- the same reasoning that leaves agent probes
-    ungated. Only a scheduled sweep, whose corpus nobody is watching, is filtered.
-    """
+async def test_a_requested_pass_preserves_the_languages_it_found():
+    """Requested collection preserves source language for downstream qualification."""
     from unittest.mock import AsyncMock
 
     from ignis.application.ports.connector_port import IConnectorPlugin
     from ignis.domain.entities import TrendSignal
-    from ignis.domain.value_objects import IngressScope, IngressTrigger, PlatformType, Timeframe
+    from ignis.domain.value_objects import IngressScope, PlatformType, Timeframe
     from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 
     class MixedLanguageFeed(IConnectorPlugin):
@@ -203,15 +197,8 @@ async def test_an_explicitly_requested_pass_is_not_script_gated():
         registry.register(MixedLanguageFeed())
         return registry
 
-    scheduled = await _registry().fetch_from_all(
-        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET
-    )
-    assert [s.raw_title for s in scheduled] == ["giá vàng hôm nay"], (
-        "An unattended sweep still drops a script the region does not use"
-    )
-
     requested = await _registry().fetch_from_all(
-        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET, trigger=IngressTrigger.REQUESTED
+        geo=GeoCode.VN, scope=IngressScope.PUBLIC_MARKET
     )
     assert len(requested) == 2, (
         f"An explicitly requested pass keeps what it found: {[s.raw_title for s in requested]}"

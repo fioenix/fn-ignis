@@ -272,12 +272,8 @@ class ForeignLanguagePlugin(IConnectorPlugin):
 
 
 @pytest.mark.asyncio
-async def test_a_vn_pass_does_not_store_titles_from_another_language():
-    """A live VN pass stored Ukrainian and Arabic video titles: `q=` is not a region filter.
-
-    The language detector already existed but was only wired into mission analysis, so nothing
-    checked the signals the always-on radar wrote to the corpus.
-    """
+async def test_a_requested_vn_pass_preserves_foreign_language_results():
+    """A geographic probe may find relevant titles in other languages."""
     repo = _repository(["mau toc"])
     registry = ConnectorPluginRegistry(repository=repo)
     registry.register(DiscoveryFeedPlugin(["mau toc"]))
@@ -297,9 +293,8 @@ async def test_a_vn_pass_does_not_store_titles_from_another_language():
 
     titles = [s.raw_title for s in signals]
     assert "Nhuom mau toc tai nha khong can den salon" in titles
-    assert not [t for t in titles if "погода" in t or "شعره" in t], (
-        f"Foreign-language titles reached the corpus: {titles}"
-    )
+    assert any("погода" in title for title in titles)
+    assert any("شعره" in title for title in titles)
 
 
 @pytest.mark.asyncio
@@ -374,5 +369,7 @@ async def test_ingress_stores_an_off_topic_local_title_and_leaves_relevance_down
     assert "Best hair colour tools for salons 2026" in titles, (
         "English titles are ordinary in the VN tech and fashion markets"
     )
-    assert "워터밤 안가도 흠뻑 젖는 한강런" not in titles
-    assert registry.last_pass_report["foreign_script_filtered"] == 1
+    assert "워터밤 안가도 흠뻑 젖는 한강런" in titles, (
+        "Requested collection preserves the source language for downstream qualification"
+    )
+    assert "foreign_script_filtered" not in registry.last_pass_report

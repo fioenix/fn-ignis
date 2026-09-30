@@ -591,6 +591,13 @@ CONFIRMED_BRIEF = {
     "timeframe": "30d",
     "hypothesis": "VN retailers will pay for an assistant that answers in under a minute",
     "falsifiers": ["No retailer reports reply latency as a top-three cost"],
+    "alternative_hypotheses": [
+        "Response speed is a training issue",
+        "Retailers prefer human support despite slower replies",
+    ],
+    "null_hypothesis": "Faster replies do not change purchase decisions",
+    "kill_criteria": ["No qualified retailer reports lost sales from reply latency"],
+    "revision_rule": "Reframe when the target retailer segment changes",
     "confirmed_by": "requester@example.com",
 }
 

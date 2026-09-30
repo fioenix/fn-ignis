@@ -77,6 +77,14 @@
   from the analysis, opportunity, and artifact boundaries before opening runtime components;
   preserve their existing signatures and require mission-scoped provenance and qualification
   before primary Market use (agent decided; basis: FR-007/FR-008 and the approved public contract).
+- Q: How are the two Hermes tool catalogs kept in sync after the approved breaking MCP removal?
+  → A: Derive both from the live FastMCP schema with a deterministic checked script, retaining
+  the order of surviving operations and appending new ones by name (agent decided; basis: the
+  public runtime is the contract and hand-maintained schema copies had drifted).
+- Q: Does the removed unattended script filter apply to explicitly requested collection?
+  → A: No. Requested collection preserves returned languages for downstream evidence
+  qualification; the historical scheduled quota ledger remains audit data, not authority to run
+  a scheduled sweep (agent decided; basis: no always-on collection survives the approved cutover).
 
 ## User Scenarios & Testing
 

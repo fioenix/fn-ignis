@@ -31,7 +31,7 @@ import sys
 import threading
 from dataclasses import dataclass
 
-EXPECTED_TOOL_COUNT = 47
+EXPECTED_TOOL_COUNT = 41
 PROTOCOL_VERSION = "2024-11-05"
 RESPONSE_TIMEOUT_SECONDS = 120.0
 # A stdio server has nothing left to do once its client hangs up. One that keeps running holds a

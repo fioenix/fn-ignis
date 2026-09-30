@@ -2,6 +2,7 @@
 
 import pytest
 
+from ignis.interfaces.mcp import server
 from ignis.interfaces.mcp.server import mcp
 
 
@@ -68,3 +69,17 @@ async def test_public_mcp_inventory_is_the_mission_bound_contract():
 
     assert actual == EXPECTED_TOOLS
     assert actual.isdisjoint(REMOVED_TOOLS)
+
+
+def test_removed_operations_have_no_python_alias_or_handler():
+    for name in REMOVED_TOOLS:
+        assert not hasattr(server, name), name
+        assert not hasattr(server, f"handle_{name}"), name
+
+
+@pytest.mark.asyncio
+async def test_no_public_tool_translates_recurring_work_into_a_mission():
+    tools = await mcp.list_tools()
+    forbidden = ("monitor", "daily", "schedule", "continuous")
+    for tool in tools:
+        assert not any(word in tool.name for word in forbidden), tool.name

@@ -7,7 +7,6 @@ from itertools import zip_longest
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
-from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.exceptions import (
     ConnectorAuthenticationException,
@@ -130,7 +129,6 @@ class ConnectorPluginRegistry:
         self._breakers: Dict[str, CircuitBreaker] = {}
         self._repository = repository
         self._self_identities: List[SelfIdentity] = []
-        self._detector: Optional[ILanguageDetector] = None
         self.last_pass_report: Dict[str, Any] = {}
 
     def register_self_identities(self, identities: List[SelfIdentity]) -> None:
@@ -277,7 +275,7 @@ class ConnectorPluginRegistry:
         scope: IngressScope = IngressScope.PUBLIC_MARKET,
         seed_keywords: Optional[List[str]] = None,
         max_probe_keywords: Optional[int] = None,
-        trigger: IngressTrigger = IngressTrigger.SCHEDULED,
+        trigger: IngressTrigger = IngressTrigger.REQUESTED,
     ) -> List[TrendSignal]:
         """Run one ingress pass across every healthy connector, in two stages.
 
@@ -289,9 +287,8 @@ class ConnectorPluginRegistry:
         national popularity chart. `max_probe_keywords` caps the fan-out, because a keyword probe
         costs far more API quota than an untargeted feed pull.
 
-        `trigger` says who asked. A scheduled sweep is filtered down to the scripts the region
-        uses, because it accumulates a corpus nobody reviews; an explicitly requested pass keeps
-        whatever it found, the same way an agent's keyword probe does.
+        `trigger` identifies the requester for connector quota accounting. Requested collection
+        preserves the returned language; relevance is assessed after ingress.
 
         `scope` decides which surfaces may be read. Under PUBLIC_MARKET a connector that declares
         an account-scoped feed is not asked for its feed at all; it joins stage 2 instead. Whatever
@@ -406,10 +403,8 @@ class ConnectorPluginRegistry:
                     "lexicon nor the discovery feeds produced one this pass."
                 )
 
-        all_signals, foreign = await self._apply_regional_script_guard(all_signals, geo, trigger)
         kept = await self._apply_scope_guard(all_signals, scope, account_scoped_skipped)
         self.last_pass_report["untargeted_feed_skipped"] = no_probe_skipped
-        self.last_pass_report["foreign_script_filtered"] = foreign
         return kept
 
     @staticmethod
@@ -745,70 +740,6 @@ class ConnectorPluginRegistry:
         except Exception as exc:
             logger.debug(f"Could not ask [{plugin.name}] whether keyword search is blocked: {exc}")
             return None
-
-    async def _apply_regional_script_guard(
-        self,
-        signals: List[TrendSignal],
-        geo: GeoCode,
-        trigger: IngressTrigger = IngressTrigger.SCHEDULED,
-    ) -> Tuple[List[TrendSignal], int]:
-        """Drop signals written in a script the target region does not use.
-
-        Applies to a scheduled sweep only. A keyword probe queries the whole platform -- `q=` is
-        a search term, not a region filter -- so a Vietnam pass legitimately returns Korean,
-        Cyrillic and Arabic titles, and the radar used to write them straight to the corpus it
-        accumulates unattended. An explicitly requested pass keeps them: somebody is reading the
-        answer and may well want it. Latin script always passes either way, so the English that
-        runs through Vietnamese social content is never in question here.
-
-        It deliberately does not judge relevance. An earlier version asked `is_localized` with
-        the persisted vocabulary, which weighs language, domain terms and the noise blacklist
-        together; on the live corpus that rejected 67.8% of rows, including "Khoa hoc AI cho
-        nguoi moi bat dau". Worse, judging relevance against `market_lexicons` meant the radar
-        could only store topics somebody had already seeded, which is the opposite of its job.
-        Relevance is decided downstream by `QualityEvaluator`, which already holds that
-        vocabulary and runs on the analysis path.
-        """
-        if not signals:
-            return signals, 0
-        if trigger != IngressTrigger.SCHEDULED:
-            # Somebody asked for this pass, so they get what it found, in whatever language.
-            # See IngressTrigger: the distinction is the requester, not the code path.
-            return signals, 0
-        if self._detector is None:
-            from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
-
-            self._detector = HeuristicLanguageDetector()
-
-        kept: List[TrendSignal] = []
-        dropped: List[TrendSignal] = []
-        for signal in signals:
-            if self._detector.uses_regional_script(signal.raw_title or "", geo=geo):
-                kept.append(signal)
-            else:
-                dropped.append(signal)
-
-        if dropped:
-            platforms = sorted({
-                (s.platform.value if hasattr(s.platform, "value") else str(s.platform))
-                for s in dropped
-            })
-            logger.info(
-                f"Filtered {len(dropped)} signals written in a script {geo.value} does not use "
-                f"({', '.join(platforms)})."
-            )
-            if self._repository:
-                await self._repository.log_event(
-                    component="ingress",
-                    event_type="FOREIGN_SCRIPT_FILTERED",
-                    message=(
-                        f"Dropped {len(dropped)} signals written in a script {geo.value} does "
-                        f"not use; a keyword probe reaches the whole platform, not one region."
-                    ),
-                    level="INFO",
-                    details={"count": len(dropped), "platforms": platforms, "geo": geo.value},
-                )
-        return kept, len(dropped)
 
     async def _apply_scope_guard(
         self,

@@ -34,6 +34,7 @@ def test_rehearsal_probes_constraints_instead_of_reading_only_schema_text():
         "foreign_observation_binding_refused": True,
         "inference_without_limitations_refused": True,
         "overlapping_manifest_channels_refused": True,
+        "permitted_measurement_without_basis_refused": True,
     }
 
 
