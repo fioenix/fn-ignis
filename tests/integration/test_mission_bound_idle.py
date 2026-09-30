@@ -80,6 +80,51 @@ class BoundaryRegistry:
         raise AssertionError("authority refusal must happen before a connector session opens")
 
 
+class OptionalBrowserRegistry:
+    def __init__(self):
+        self.target_surfaces = None
+
+    async def resolve_execution_requirements(self, **_kwargs):
+        return {
+            "resources": ("youtube", "threads"),
+            "authority": ("official_api", "browser_session"),
+            "quota_costs": {},
+            "surface_requirements": {
+                "youtube": {
+                    "authority_tier": "official_api",
+                    "requires_paid_quota": False,
+                    "quota_costs": {},
+                    "connector_path": "youtube.search",
+                    "connector_revision": "v3",
+                    "sampling": {"limit": 20, "ordering": "platform_default"},
+                },
+                "threads": {
+                    "authority_tier": "browser_session",
+                    "requires_paid_quota": False,
+                    "quota_costs": {},
+                    "connector_path": "threads.search",
+                    "connector_revision": "browser-v1",
+                    "sampling": {"limit": 20, "ordering": "platform_default"},
+                },
+            },
+        }
+
+    async def search_with_outcomes(self, **kwargs):
+        self.target_surfaces = kwargs["target_surfaces"]
+        return SearchPassResult(
+            outcomes=[
+                SurfaceProbeResult(
+                    platform="youtube",
+                    connector_surface="youtube",
+                    status=ChannelHealthStatus.EMPTY_NO_DATA,
+                    signals_collected=0,
+                    queried_keywords=tuple(kwargs["keywords"]),
+                    queried_window=kwargs["custom_timeframe"],
+                )
+            ]
+        )
+
+
 class CredentialLeakingRegistry(CountingRegistry):
     async def search_with_outcomes(self, **_kwargs):
         self.connector_calls += 1
@@ -176,6 +221,21 @@ def _mixed_manifest():
         _manifest(),
         required_channels=MixedStateRegistry.required,
         optional_channels=MixedStateRegistry.optional,
+        quota_budget={},
+    )
+
+
+def _optional_browser_manifest():
+    return replace(
+        _manifest(),
+        required_channels=("youtube",),
+        optional_channels=("threads",),
+        authority_boundary=AuthorityBoundary(
+            public_http=False,
+            official_api=True,
+            browser_session=False,
+            paid_quota=False,
+        ),
         quota_budget={},
     )
 
@@ -344,6 +404,43 @@ async def test_mixed_channel_states_are_complete_and_match_persisted_outcomes(
     assert result["redaction_policy"] == "credentials-and-personal-data-redacted"
     assert result["platform_policy"] == "authorized-surface-terms-apply"
     assert "explicitly associate" in result["reuse_limit"]
+    await repository.close()
+
+
+@pytest.mark.asyncio
+async def test_unauthorized_optional_surface_does_not_block_required_collection(tmp_path):
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+
+    repository = SqliteTrendRepository(db_path=str(tmp_path / "optional-browser.db"))
+    store = WorkspaceRepository(repository=repository)
+    registry = OptionalBrowserRegistry()
+    executor = ExecuteMissionUseCase(
+        repository=repository,
+        registry=registry,
+        clusterer=CountingClusterer(),
+        workspace_store=store,
+    )
+    host = tmp_path / "optional-browser-host"
+    host.mkdir()
+    workspace_case = CreateResearchWorkspaceUseCase(store=store)
+    workspace = await workspace_case.confirm(
+        await workspace_case.propose(host, "Optional browser"), confirmation=True
+    )
+    mission = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        title="Required API with optional browser",
+        keywords=["retail setup friction"],
+        manifest=_optional_browser_manifest(),
+    )
+
+    result = await executor.execute(mission.id)
+
+    assert result["status"] == "COMPLETED"
+    assert registry.target_surfaces == ("youtube",)
+    assert [item["status"] for item in result["channel_outcomes"]] == [
+        "EMPTY_NO_DATA",
+        "NOT_REQUESTED",
+    ]
     await repository.close()
 
 

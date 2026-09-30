@@ -1254,20 +1254,54 @@ def derive_collection_plan(
     expanded_queries: Sequence[str] = (),
     exclusion_queries: Sequence[str] = (),
     falsification_queries: Sequence[str] = (),
+    probe_intents: Sequence[Mapping[str, Any]] = (),
 ) -> Dict[str, Any]:
     """Project one readable, deterministic probe plan from immutable mission authority."""
     if manifest.mission_id != _coerce_uuid(mission_id, "mission_id"):
         raise InvalidMissionManifestError(
             "A collection plan must belong to the mission named by its manifest."
         )
-    targets = tuple(str(target).strip() for target in evidence_targets if str(target).strip())
-    if not targets:
-        raise InvalidMissionManifestError("A collection plan needs at least one evidence target.")
-    role = str(expected_role).strip().upper()
-    if role not in {"SUPPORT", "CONTRADICTION", "CONTEXT"}:
-        raise InvalidMissionManifestError(
-            "expected_role must be SUPPORT, CONTRADICTION, or CONTEXT."
+    base_families = {
+        "root": [str(value) for value in keywords],
+        "expanded": [str(value) for value in expanded_queries],
+        "exclusions": [str(value) for value in exclusion_queries],
+        "falsification": [str(value) for value in falsification_queries],
+    }
+    raw_intents = list(probe_intents) or [
+        {
+            "evidence_targets": evidence_targets,
+            "expected_role": expected_role,
+            "query_families": base_families,
+        }
+    ]
+    intents = []
+    for intent in raw_intents:
+        targets = tuple(
+            str(target).strip()
+            for target in intent.get("evidence_targets", ())
+            if str(target).strip()
         )
+        if not targets:
+            raise InvalidMissionManifestError(
+                "A collection-plan probe needs at least one evidence target."
+            )
+        role = str(intent.get("expected_role", "")).strip().upper()
+        if role not in {"SUPPORT", "CONTRADICTION", "CONTEXT"}:
+            raise InvalidMissionManifestError(
+                "expected_role must be SUPPORT, CONTRADICTION, or CONTEXT."
+            )
+        raw_families = intent.get("query_families", base_families)
+        if not isinstance(raw_families, Mapping):
+            raise InvalidMissionManifestError("query_families must be a mapping.")
+        families = {
+            name: [str(value) for value in raw_families.get(name, ())]
+            for name in ("root", "expanded", "exclusions", "falsification")
+        }
+        if not any(families[name] for name in ("root", "expanded", "falsification")):
+            raise InvalidMissionManifestError(
+                "A collection-plan probe needs at least one executable query."
+            )
+        intents.append((targets, role, families))
 
     probes: List[Dict[str, Any]] = []
     for surface in manifest.allowed_resources:
@@ -1286,29 +1320,25 @@ def derive_collection_plan(
                 raise InvalidMissionManifestError(
                     f"Collection-plan {field_name} is missing for connector surface '{surface}'."
                 )
-        probes.append(
-            {
-                "connector_surface": surface,
-                "query_families": {
-                    "root": [str(value) for value in keywords],
-                    "expanded": [str(value) for value in expanded_queries],
-                    "exclusions": [str(value) for value in exclusion_queries],
-                    "falsification": [str(value) for value in falsification_queries],
-                },
-                "evidence_targets": list(targets),
-                "expected_role": role,
-                "scope": {
-                    "geo": _plain(geo),
-                    "audience": audience,
-                    "language": language,
-                    "timeframe": _plain(timeframe),
-                },
-                "sampling": dict(sampling),
-                "authority_tier": str(requirement["authority_tier"]),
-                "connector_path": str(requirement["connector_path"]),
-                "connector_revision": str(requirement["connector_revision"]),
-            }
-        )
+        for targets, role, families in intents:
+            probes.append(
+                {
+                    "connector_surface": surface,
+                    "query_families": families,
+                    "evidence_targets": list(targets),
+                    "expected_role": role,
+                    "scope": {
+                        "geo": _plain(geo),
+                        "audience": audience,
+                        "language": language,
+                        "timeframe": _plain(timeframe),
+                    },
+                    "sampling": dict(sampling),
+                    "authority_tier": str(requirement["authority_tier"]),
+                    "connector_path": str(requirement["connector_path"]),
+                    "connector_revision": str(requirement["connector_revision"]),
+                }
+            )
 
     projection: Dict[str, Any] = {
         "version": "collection-plan/v1",

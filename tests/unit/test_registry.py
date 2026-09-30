@@ -406,6 +406,25 @@ class CredentialLeakingGridPlugin(VideoGridPlugin):
         )
 
 
+class CredentialLeakingBlockedPlugin(VideoGridPlugin):
+    async def keyword_search_blocked_reason(self):
+        return "Missing session?access_token=live-blocked-token-123"
+
+    async def search_signals(
+        self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20, attestation=None
+    ):
+        attestation.blocked("Missing session?access_token=live-blocked-token-123")
+        return []
+
+
+class CredentialLeakingAttestationPlugin(VideoGridPlugin):
+    async def search_signals(
+        self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20, attestation=None
+    ):
+        attestation.failed(keywords[0], "request?key=live-attestation-key-123")
+        return []
+
+
 class CapturingAuditRepository:
     def __init__(self):
         self.events = []
@@ -485,6 +504,23 @@ async def test_connector_failures_redact_credentials_from_outcome_log_and_audit(
     assert "live-google-key-123" not in rendered
     assert "live-meta-token-456" not in rendered
     assert "[REDACTED_SECRET]" in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "plugin, leaked",
+    [
+        (CredentialLeakingBlockedPlugin(), "live-blocked-token-123"),
+        (CredentialLeakingAttestationPlugin(), "live-attestation-key-123"),
+    ],
+)
+async def test_connector_attestation_notes_are_redacted_before_the_outcome_boundary(
+    plugin, leaked
+):
+    result = await _registry(plugin).search_with_outcomes(keywords=["ai agent"])
+
+    assert leaked not in result.outcomes[0].note
+    assert "[REDACTED_SECRET]" in result.outcomes[0].note
 
 
 @pytest.mark.asyncio

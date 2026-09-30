@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.domain.harness_models import ChannelHealthStatus
 from ignis.domain.research_workspace import (
     AuthorityBoundary,
@@ -109,6 +110,64 @@ def test_collection_plan_projects_every_surface_scope_role_authority_and_samplin
     assert len(plan["plan_digest"]) == 64
 
 
+def test_market_collection_plan_separates_support_counterevidence_and_context_probes():
+    manifest = _manifest()
+    common_families = {"root": (), "expanded": (), "exclusions": ()}
+
+    plan = derive_collection_plan(
+        mission_id=manifest.mission_id,
+        manifest=manifest,
+        keywords=("retail setup friction",),
+        geo="VN",
+        timeframe="7d",
+        surface_requirements={
+            surface: {
+                "authority_tier": "official_api",
+                "connector_path": f"{surface}.search",
+                "connector_revision": "v1",
+                "sampling": {"limit": 20, "ordering": "platform_default"},
+            }
+            for surface in manifest.allowed_resources
+        },
+        evidence_targets=("core",),
+        expected_role="SUPPORT",
+        probe_intents=(
+            {
+                "evidence_targets": ("core",),
+                "expected_role": "SUPPORT",
+                "query_families": {**common_families, "root": ("retail setup friction",)},
+            },
+            {
+                "evidence_targets": ("core",),
+                "expected_role": "CONTRADICTION",
+                "query_families": {
+                    **common_families,
+                    "falsification": ("operators reject setup tools",),
+                },
+            },
+            {
+                "evidence_targets": ("neutral",),
+                "expected_role": "CONTEXT",
+                "query_families": {**common_families, "root": ("retail setup friction",)},
+            },
+        ),
+    )
+
+    youtube = [probe for probe in plan["probes"] if probe["connector_surface"] == "youtube"]
+    assert [(probe["evidence_targets"], probe["expected_role"]) for probe in youtube] == [
+        (["core"], "SUPPORT"),
+        (["core"], "CONTRADICTION"),
+        (["neutral"], "CONTEXT"),
+    ]
+    assert youtube[1]["query_families"]["falsification"] == [
+        "operators reject setup tools"
+    ]
+    assert ExecuteMissionUseCase._collection_queries(plan) == [
+        "retail setup friction",
+        "operators reject setup tools",
+    ]
+
+
 @pytest.mark.parametrize(
     "status",
     [
@@ -194,7 +253,38 @@ def test_evidence_frame_digest_is_order_stable_but_changes_on_association_or_req
             ],
         }
     )
+    provenance_changed = build_evidence_frame(
+        **{
+            **common,
+            "observations": [
+                {**common["observations"][0], "metadata": {"probe_keyword": "changed"}},
+                common["observations"][1],
+            ],
+        }
+    )
+    evaluator_changed = build_evidence_frame(
+        **{
+            **common,
+            "qualifications": [
+                {**common["qualifications"][0], "judged_by": "different-evaluator"}
+            ],
+        }
+    )
+    outcome_scope_changed = build_evidence_frame(
+        **{
+            **common,
+            "channel_outcomes": [
+                {
+                    **common["channel_outcomes"][0],
+                    "queried_keywords": ["different query"],
+                }
+            ],
+        }
+    )
 
     assert baseline.frame_digest == reordered.frame_digest
     assert baseline.frame_digest != reassessed.frame_digest
     assert baseline.frame_digest != reassociated.frame_digest
+    assert baseline.frame_digest != provenance_changed.frame_digest
+    assert baseline.frame_digest != evaluator_changed.frame_digest
+    assert baseline.frame_digest != outcome_scope_changed.frame_digest

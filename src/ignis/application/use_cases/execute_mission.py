@@ -117,6 +117,7 @@ class ExecuteMissionUseCase:
             optional_surfaces=manifest.optional_channels,
             keywords=mission.keywords,
         )
+        requirements = self._scope_optional_execution(manifest, requirements)
         unavailable = tuple(requirements.get("unavailable_resources", ()))
         if unavailable:
             mission.status = "BLOCKED"
@@ -143,6 +144,62 @@ class ExecuteMissionUseCase:
             await self._repo.update_mission(mission)
             raise
         return manifest, requirements
+
+    @staticmethod
+    def _scope_optional_execution(manifest, requirements):
+        """Keep unauthorized optional probes out of the run without weakening required gates."""
+        scoped = dict(requirements or {})
+        selected = tuple(scoped.get("resources", ()))
+        per_surface = dict(scoped.get("surface_requirements", {}))
+        optional = set(manifest.optional_channels)
+        authority_boundary = manifest.authority_boundary.to_payload()
+        approved_resources = []
+        approved_authority = []
+        approved_quota: Dict[str, int] = {}
+        not_requested = list(scoped.get("not_requested_resources", ()))
+
+        # Required surfaces consume their declared authority and quota first. An overrun remains
+        # a hard refusal. Optional surfaces are then admitted only while they still fit the same
+        # confirmed boundary; otherwise they become explicit NOT_REQUESTED outcomes.
+        ordered = tuple(surface for surface in selected if surface not in optional) + tuple(
+            surface for surface in selected if surface in optional
+        )
+        fallback_authority = tuple(scoped.get("authority", ()))
+        fallback_quota = dict(scoped.get("quota_costs", {}))
+        for surface in ordered:
+            surface_requirement = dict(per_surface.get(surface, {}))
+            authority = surface_requirement.get("authority_tier")
+            authorities = [authority] if authority else list(fallback_authority)
+            if surface_requirement.get("requires_paid_quota"):
+                authorities.append("paid_quota")
+            surface_quota = dict(surface_requirement.get("quota_costs", {}))
+            if not surface_quota and surface not in optional:
+                surface_quota = fallback_quota
+
+            proposed_quota = dict(approved_quota)
+            for name, cost in surface_quota.items():
+                proposed_quota[name] = proposed_quota.get(name, 0) + int(cost)
+            fits_authority = all(authority_boundary.get(name, False) for name in authorities)
+            fits_quota = all(
+                proposed_quota.get(name, 0) <= int(manifest.quota_budget.get(name, 0))
+                for name in surface_quota
+            )
+            if surface in optional and (not fits_authority or not fits_quota):
+                if surface not in not_requested:
+                    not_requested.append(surface)
+                continue
+
+            approved_resources.append(surface)
+            approved_quota = proposed_quota
+            for name in authorities:
+                if name not in approved_authority:
+                    approved_authority.append(name)
+
+        scoped["resources"] = tuple(approved_resources)
+        scoped["authority"] = tuple(approved_authority)
+        scoped["quota_costs"] = approved_quota
+        scoped["not_requested_resources"] = tuple(not_requested)
+        return scoped
 
     async def _run_workspace(self, mission):
         """The research this run writes into, or None when the mission belongs to none.
@@ -262,15 +319,12 @@ class ExecuteMissionUseCase:
         )
         for surface in manifest.allowed_resources:
             if surface in not_requested:
-                requirements.setdefault(
-                    surface,
-                    {
-                        "authority_tier": "not-requested",
-                        "connector_path": "unavailable",
-                        "connector_revision": "unavailable",
-                        "sampling": {"limit": 0, "ordering": "not_requested"},
-                    },
-                )
+                requirements[surface] = {
+                    "authority_tier": "not-requested",
+                    "connector_path": "unavailable",
+                    "connector_revision": "unavailable",
+                    "sampling": {"limit": 0, "ordering": "not_requested"},
+                }
                 continue
             requirements.setdefault(
                 surface,
@@ -286,11 +340,30 @@ class ExecuteMissionUseCase:
             expected_role = "CONTEXT"
             audience = None
             falsifiers = ()
+            probe_intents = ()
         else:
             targets = ("core",)
             expected_role = "SUPPORT"
             audience = brief.target_user
             falsifiers = brief.falsifiers
+            empty_families = {"root": (), "expanded": (), "exclusions": ()}
+            probe_intents = (
+                {
+                    "evidence_targets": ("core",),
+                    "expected_role": "SUPPORT",
+                    "query_families": {**empty_families, "root": mission.keywords},
+                },
+                {
+                    "evidence_targets": ("core",),
+                    "expected_role": "CONTRADICTION",
+                    "query_families": {**empty_families, "falsification": falsifiers},
+                },
+                {
+                    "evidence_targets": ("neutral",),
+                    "expected_role": "CONTEXT",
+                    "query_families": {**empty_families, "root": mission.keywords},
+                },
+            )
         return derive_collection_plan(
             mission_id=mission.id,
             manifest=manifest,
@@ -303,7 +376,19 @@ class ExecuteMissionUseCase:
             audience=audience,
             language=None,
             falsification_queries=falsifiers,
+            probe_intents=probe_intents,
         )
+
+    @staticmethod
+    def _collection_queries(collection_plan) -> List[str]:
+        queries = []
+        for probe in collection_plan.get("probes", ()):
+            families = probe.get("query_families", {})
+            for family in ("root", "expanded", "falsification"):
+                for query in families.get(family, ()):
+                    if query not in queries:
+                        queries.append(query)
+        return queries
 
     @staticmethod
     def _surface_platform(surface: str) -> str:
@@ -368,33 +453,54 @@ class ExecuteMissionUseCase:
                 ),
                 "raw_title": signal.raw_title,
                 "metric_value": signal.metric_value,
+                "growth_velocity": signal.growth_velocity,
                 "source_url": signal.source_url,
+                "geo_code": (
+                    signal.geo_code.value
+                    if hasattr(signal.geo_code, "value")
+                    else str(signal.geo_code)
+                ),
+                "cluster_id": str(signal.cluster_id) if signal.cluster_id else None,
+                "identity_source": signal.identity_source,
+                "time_provenance": signal.time_provenance,
+                "metadata": dict(signal.metadata or {}),
                 "captured_at": signal.captured_at,
                 "published_at": signal.published_at,
-                "connector_surface": (signal.metadata or {}).get("connector_surface"),
             }
             for signal in signals
         ]
         qualification_records = [
             {
+                "mission_id": str(item.mission_id),
                 "observation_id": str(item.observation_id),
                 "frame_fingerprint": item.frame_fingerprint,
+                "brief_revision_id": (
+                    str(item.brief_revision_id) if item.brief_revision_id else None
+                ),
                 "relation": item.relation.value,
                 "purpose": item.purpose.value,
                 "confidence": item.confidence,
                 "reason_code": item.reason_code.value,
+                "judged_by": item.judged_by,
+                "model": item.model,
+                "created_at": item.created_at,
                 "hypothesis_target": item.hypothesis_target,
                 "evidence_role": item.evidence_role.value if item.evidence_role else None,
+                "evidence_contract_version": item.evidence_contract_version,
             }
             for item in qualifications
         ]
         outcome_records = [
             {
                 "run_id": str(item.run_id),
+                "platform": item.platform,
                 "connector_surface": item.connector_surface,
                 "status": item.status.value,
                 "signals_collected": item.signals_collected,
+                "queried_keywords": list(item.queried_keywords),
+                "queried_window": item.queried_window,
                 "query_fingerprint": item.query_fingerprint,
+                "completed_at": item.completed_at,
                 "scope_attestation": item.scope_attestation,
                 "note": item.note,
                 "collection_plan_digest": item.collection_plan_digest,
@@ -509,13 +615,21 @@ class ExecuteMissionUseCase:
             # surface it reached: a workspace run records them, so a reopened report can tell a
             # measured zero from a probe that never measured.
             search = await self._registry.search_with_outcomes(
-                keywords=mission.keywords,
+                keywords=(
+                    self._collection_queries(collection_plan)
+                    if collection_plan is not None
+                    else mission.keywords
+                ),
                 geo=mission.geo_code,
                 # Both forms of the window: some connectors read only `timeframe`, and left at
                 # its 24h default they searched a different window from the mission's.
                 timeframe=resolve_timeframe(mission.timeframe),
                 target_platforms=mission.platforms,
-                target_surfaces=manifest.allowed_resources if manifest is not None else None,
+                target_surfaces=(
+                    tuple(execution_requirements.get("resources", ()))
+                    if manifest is not None
+                    else None
+                ),
                 custom_timeframe=mission.timeframe,
             )
             surface_outcomes = search.outcomes

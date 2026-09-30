@@ -228,8 +228,15 @@ class ConnectorPluginRegistry:
                 authority.append("paid_quota")
             if plugin.platform is PlatformType.YOUTUBE:
                 quota_costs["youtube_search_calls"] = max(1, len(keywords or []))
+            plugin_quota = (
+                {"youtube_search_calls": max(1, len(keywords or []))}
+                if plugin.platform is PlatformType.YOUTUBE
+                else {}
+            )
             surface_requirements[plugin.plugin_id] = {
                 "authority_tier": required,
+                "requires_paid_quota": plugin.requires_paid_quota,
+                "quota_costs": plugin_quota,
                 "connector_path": (
                     f"{plugin.__class__.__module__}.{plugin.__class__.__qualname__}.search_signals"
                 ),
@@ -698,6 +705,7 @@ class ConnectorPluginRegistry:
                 if attestation.failures
                 else "Probe completed for the attested scope and returned no qualifying observations."
             )
+        note = sanitize_pii_text(note) if note else note
         measured = status in (ChannelHealthStatus.HEALTHY, ChannelHealthStatus.EMPTY_NO_DATA)
         return SurfaceProbeResult(
             platform=plugin.platform.value,
