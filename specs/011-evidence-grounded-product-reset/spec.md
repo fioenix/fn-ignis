@@ -72,6 +72,11 @@
   `MEASUREMENT` claim and withhold that claim when either is absent; no batch-level option may
   decide whether metric validation applies (agent decided; basis: every claimed calculation must
   carry its own auditable basis, and caller-controlled validation would fail open).
+- Q: How should a dataset path, URL, or raw JSON supplied in place of a Market mission ID be
+  handled without adding an unapproved MCP parameter? → A: Return a typed `CONTEXT_ONLY` refusal
+  from the analysis, opportunity, and artifact boundaries before opening runtime components;
+  preserve their existing signatures and require mission-scoped provenance and qualification
+  before primary Market use (agent decided; basis: FR-007/FR-008 and the approved public contract).
 
 ## User Scenarios & Testing
 

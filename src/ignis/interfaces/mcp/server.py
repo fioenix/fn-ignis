@@ -517,6 +517,33 @@ def _missing_market_analysis_contract() -> Dict[str, Any]:
     }
 
 
+def _external_context_only_refusal(mission_id: str) -> Optional[str]:
+    """Refuse file and URL inputs before they can be mistaken for a Market mission."""
+    if not isinstance(mission_id, str):
+        return None
+    value = mission_id.strip()
+    lower = value.lower()
+    if not (
+        value.startswith(("{", "["))
+        or lower.startswith(("http://", "https://", "file://"))
+        or lower.endswith((".csv", ".tsv", ".json", ".xlsx", ".parquet"))
+    ):
+        return None
+    return json.dumps(
+        {
+            "status": "CONTEXT_ONLY",
+            "reason_code": "MISSION_SCOPED_PROVENANCE_REQUIRED",
+            "primary_market_evidence": False,
+            "next_step": (
+                "Use the supplied material to frame a question, then collect or verify its "
+                "evidence through an authorized mission and qualify it against the current frame."
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 def _serialize_opportunity(opp: Any, include_supporting: int = 0) -> Dict[str, Any]:
     payload = {
         "topic": opp.topic,
@@ -836,6 +863,9 @@ async def handle_evaluate_mission_quality(mission_id: str) -> str:
 
 
 async def handle_discover_market_opportunities(mission_id: str) -> str:
+    external_refusal = _external_context_only_refusal(mission_id)
+    if external_refusal is not None:
+        return external_refusal
     comp = get_components()
     await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
@@ -1877,6 +1907,9 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
 
 
 async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
+    external_refusal = _external_context_only_refusal(mission_id)
+    if external_refusal is not None:
+        return external_refusal
     comp = get_components()
     await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
@@ -2002,6 +2035,9 @@ def _get_secure_reports_dir() -> Path:
 
 
 async def handle_generate_mission_artifact(mission_id: str) -> str:
+    external_refusal = _external_context_only_refusal(mission_id)
+    if external_refusal is not None:
+        return external_refusal
     comp = get_components()
     await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)

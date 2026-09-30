@@ -180,16 +180,16 @@ claim, and the external dataset cannot become primary Market evidence.
 
 ### Tests for User Story 4
 
-- [ ] T062 [P] [US4] Add RED static skill-contract checks for thin shared-policy packages, exact MCP names, no credentials, no thresholds, no templates, and no arbitrary-dataset bypass in `tests/unit/test_ignis_skills.py`
-- [ ] T063 [P] [US4] Add RED misuse scenarios for auth-blocked collection, all-confirmatory queries, unsupported external data, and narration around insufficiency in `tests/integration/test_capability_skills.py`
+- [X] T062 [P] [US4] Add RED static skill-contract checks for thin shared-policy packages, exact MCP names, no credentials, no thresholds, no templates, and no arbitrary-dataset bypass in `tests/unit/test_ignis_skills.py`
+- [X] T063 [P] [US4] Add RED misuse scenarios for auth-blocked collection, all-confirmatory queries, unsupported external data, and narration around insufficiency in `tests/integration/test_capability_skills.py`
 
 ### Implementation for User Story 4
 
-- [ ] T064 [US4] Create the bounded collection instruction surface in `.agents/skills/ignis-collect/SKILL.md`
-- [ ] T065 [US4] Create the Senior Market Analytics instruction surface in `.agents/skills/ignis-analyze/SKILL.md`
-- [ ] T066 [US4] Add shared evidence-frame examples without duplicating policy in `.agents/skills/ignis-collect/examples/collection-frame.md` and `.agents/skills/ignis-analyze/examples/claim-ledger.md`
-- [ ] T067 [US4] Return a typed context-only refusal when arbitrary uploaded or purchased data lacks mission-scoped provenance and qualification in `src/ignis/interfaces/mcp/server.py`
-- [ ] T068 [US4] Prove independent collection, eligible analysis, and all misuse controls through `tests/integration/test_capability_skills.py` and record results in `.handoff/011-us4.handoff.md`
+- [X] T064 [US4] Create the bounded collection instruction surface in `.agents/skills/ignis-collect/SKILL.md`
+- [X] T065 [US4] Create the Senior Market Analytics instruction surface in `.agents/skills/ignis-analyze/SKILL.md`
+- [X] T066 [US4] Add shared evidence-frame examples without duplicating policy in `.agents/skills/ignis-collect/examples/collection-frame.md` and `.agents/skills/ignis-analyze/examples/claim-ledger.md`
+- [X] T067 [US4] Return a typed context-only refusal when arbitrary uploaded or purchased data lacks mission-scoped provenance and qualification in `src/ignis/interfaces/mcp/server.py`
+- [X] T068 [US4] Prove independent collection, eligible analysis, and all misuse controls through `tests/integration/test_capability_skills.py` and record results in `.handoff/011-us4.handoff.md`
 
 **Checkpoint**: Both capability families are independently usable and cannot diverge from the shared
 evidence contract.
