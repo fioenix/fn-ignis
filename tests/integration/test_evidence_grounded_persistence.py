@@ -710,6 +710,8 @@ async def test_exact_empty_outcome_can_bind_measured_absence_for_its_mission(
         claim_type=ClaimType.MEASUREMENT,
         wording="The declared query returned no qualifying observations.",
         inference_method="exact-empty-v1",
+        metric_denominator="all qualifying observations returned by the declared query",
+        metric_timeframe="30d",
         status=ClaimStatus.PERMITTED,
         created_by="contract-test",
     )
@@ -764,6 +766,8 @@ async def test_an_empty_outcome_from_a_superseded_collection_run_cannot_bind(
         claim_type=ClaimType.MEASUREMENT,
         wording="An old measured absence must not bind to the current collection frame.",
         inference_method="exact-empty-v1",
+        metric_denominator="all qualifying observations returned by the declared query",
+        metric_timeframe="30d",
         status=ClaimStatus.PERMITTED,
         created_by="contract-test",
     )

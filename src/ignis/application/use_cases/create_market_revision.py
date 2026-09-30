@@ -71,6 +71,10 @@ class CreateMarketRevisionUseCase:
         agent: str = "claude",
         session_id: Optional[str] = None,
         platforms: Optional[List[PlatformType]] = None,
+        alternative_hypotheses: Optional[Sequence[str]] = None,
+        null_hypothesis: Optional[str] = None,
+        kill_criteria: Optional[Sequence[str]] = None,
+        revision_rule: Optional[str] = None,
     ) -> Tuple[ResearchMission, MarketBriefRevision]:
         workspace = await self._store.get_research_workspace(workspace_id)
         if workspace is None:
@@ -119,6 +123,10 @@ class CreateMarketRevisionUseCase:
             agent=agent,
             session_id=session_id,
             platforms=platforms,
+            alternative_hypotheses=alternative_hypotheses,
+            null_hypothesis=null_hypothesis,
+            kill_criteria=kill_criteria,
+            revision_rule=revision_rule,
         )
         logger.info(
             "Opened MARKET mission %s at Brief revision #%s in workspace %s "

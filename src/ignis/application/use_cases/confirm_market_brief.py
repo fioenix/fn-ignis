@@ -56,6 +56,10 @@ class ConfirmMarketBriefUseCase:
         agent: str = "claude",
         session_id: Optional[str] = None,
         platforms: Optional[List[PlatformType]] = None,
+        alternative_hypotheses: Optional[Sequence[str]] = None,
+        null_hypothesis: Optional[str] = None,
+        kill_criteria: Optional[Sequence[str]] = None,
+        revision_rule: Optional[str] = None,
     ) -> Tuple[ResearchMission, MarketBriefRevision]:
         workspace = await self._store.get_research_workspace(workspace_id)
         if workspace is None:
@@ -74,10 +78,20 @@ class ConfirmMarketBriefUseCase:
             "falsifiers": list(falsifiers or []),
         }
         missing = missing_brief_fields(payload)
+        alternatives = [value for value in (alternative_hypotheses or ()) if str(value).strip()]
+        kills = [value for value in (kill_criteria or ()) if str(value).strip()]
+        if len(alternatives) < 2:
+            missing.append("alternative_hypotheses")
+        if not str(null_hypothesis or "").strip():
+            missing.append("null_hypothesis")
+        if not kills:
+            missing.append("kill_criteria")
+        if not str(revision_rule or "").strip():
+            missing.append("revision_rule")
         if missing:
             # Refused before anything is written, so an incomplete framing leaves no mission,
             # no revision and no journal behind.
-            raise IncompleteMarketBriefError(missing)
+            raise IncompleteMarketBriefError(list(dict.fromkeys(missing)))
 
         timeframe_to_days(timeframe)
         lineage = lineage or MissionLineage()
@@ -116,6 +130,12 @@ class ConfirmMarketBriefUseCase:
             timeframe=timeframe,
             hypothesis=hypothesis,
             falsifiers=tuple(falsifiers),
+            alternative_hypotheses=(
+                tuple(alternative_hypotheses) if alternative_hypotheses is not None else None
+            ),
+            null_hypothesis=null_hypothesis,
+            kill_criteria=tuple(kill_criteria) if kill_criteria is not None else None,
+            revision_rule=revision_rule,
             confirmed_by=confirmed_by,
         )
 

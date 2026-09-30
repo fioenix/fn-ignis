@@ -1025,6 +1025,28 @@ def test_025_enforces_manifest_claim_and_binding_contracts(empty_postgres_dsn):
                 " 'WITHHELD', 'owner')",
                 (mission,),
             )
+    with pytest.raises(errors.CheckViolation):
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "INSERT INTO mission_claims"
+                " (mission_id, frame_digest, client_claim_key, claim_type, wording,"
+                " inference_method, status, created_by)"
+                " VALUES (%s, 'frame', 'measurement-without-basis', 'MEASUREMENT',"
+                " 'Twelve percent converted', 'ratio-v1', 'PERMITTED', 'owner')",
+                (mission,),
+            )
+    with psycopg.connect(dsn) as conn:
+        measured = conn.execute(
+            "INSERT INTO mission_claims"
+            " (mission_id, frame_digest, client_claim_key, claim_type, wording,"
+            " inference_method, metric_denominator, metric_timeframe, status, created_by)"
+            " VALUES (%s, 'frame', 'measurement-with-basis', 'MEASUREMENT',"
+            " 'Twelve percent converted', 'ratio-v1', 'all qualified observations',"
+            " '7d', 'PERMITTED', 'owner')"
+            " RETURNING metric_denominator, metric_timeframe",
+            (mission,),
+        ).fetchone()
+    assert measured == ("all qualified observations", "7d")
 
 
 def test_re_applying_025_and_the_whole_chain_preserves_claim_state(supabase_like_dsn):

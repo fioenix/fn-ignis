@@ -408,6 +408,26 @@ def constraint_probes(connection: sqlite3.Connection) -> Dict[str, bool]:
                 STAMP,
             ),
         ),
+        "permitted_measurement_without_basis_refused": _refused(
+            connection,
+            "INSERT INTO mission_claims"
+            " (id, mission_id, brief_revision_id, frame_digest, client_claim_key, claim_type,"
+            " wording, inference_method, status, created_by, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "00000000-0000-4000-8000-000000000120",
+                MARKET_MISSION,
+                BRIEF,
+                "e" * 64,
+                "measurement-without-basis",
+                "MEASUREMENT",
+                "Twelve percent converted.",
+                "ratio-v1",
+                "PERMITTED",
+                "schema-rehearsal",
+                STAMP,
+            ),
+        ),
     }
 
 

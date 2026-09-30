@@ -82,6 +82,101 @@ def test_build_mission_report_artifact_with_qualitative_sections(sample_trend_si
     assert "#golivegrowfast" in html
 
 
+def test_evidence_grounded_gap_artifact_omits_every_forbidden_verdict_section():
+    mission = _market_mission()
+    contract = {
+        "analysis_status": "INSUFFICIENT_EVIDENCE",
+        "evidence_frame": {"frame_digest": "f" * 64},
+        "gap_report": {
+            "withheld_outputs": [
+                "opportunity_index", "demand_gap", "whitespace", "saturation",
+                "commercial_recommendations",
+            ],
+            "failed_gates": ["MISSING_CONTRADICTION_COVERAGE"],
+            "missing_evidence": ["qualified counterevidence for a named hypothesis"],
+            "attempted_probes": [],
+            "safe_partial_conclusions": ["youtube returned 12 observations."],
+            "next_best_probe": "Run one bounded falsification probe.",
+            "required_authority": None,
+            "estimated_cost": None,
+        },
+        "withheld_claim_count": 1,
+        "withheld_reasons": ["MISSING_CONTRADICTION_COVERAGE"],
+    }
+    html = HtmlArtifactBuilder().build_mission_report_artifact(
+        mission=mission,
+        signals=[],
+        platform_breakdown={},
+        analysis_contract=contract,
+    )
+    body = _body(html)
+
+    assert 'data-analysis-status="INSUFFICIENT_EVIDENCE"' in body
+    assert "Evidence contract is not sufficient" in body
+    assert "MISSING_CONTRADICTION_COVERAGE" in body
+    assert "Run one bounded falsification probe." in body
+    assert "Market White Space Matrix" not in body
+    assert "Strategic Insights" not in body
+    assert "Action Blueprint" not in body
+    assert "Strategic Takeaway" not in body
+    assert "Opportunity Index" not in body
+
+
+def test_evidence_grounded_ready_artifact_renders_claims_and_counterevidence():
+    mission = _market_mission()
+    contract = {
+        "analysis_status": "READY",
+        "evidence_frame": {"frame_digest": "f" * 64},
+        "claim_ledger": {
+            "INFERENCE": [{
+                "wording": "Stockout pain is repeated across the qualified sample.",
+                "client_claim_key": "claim-1",
+                "evidence_bindings": [{
+                    "observation_id": "obs-1",
+                    "probe_outcome_id": None,
+                    "role": "SUPPORT",
+                    "hypothesis_target": "core",
+                }],
+                "limitations": ["The sample covers one seven-day window."],
+                "change_conditions": ["A broader sample finds no repeated pain."],
+            }]
+        },
+        "channel_outcomes": [{
+            "connector_surface": "youtube",
+            "status": "HEALTHY",
+            "signals_collected": 4,
+            "queried_window": "7d",
+        }],
+        "contradictory_evidence": [{
+            "observation_id": "obs-counter",
+            "hypothesis_target": "alternative:1",
+            "purpose": "VOC",
+        }],
+        "retention_policy": "mission-only",
+        "redaction_policy": "credentials-and-personal-data-redacted",
+        "platform_policy": "authorized-surface-terms-apply",
+        "reuse_limit": "Requalify against the receiving mission frame.",
+    }
+    html = HtmlArtifactBuilder().build_mission_report_artifact(
+        mission=mission,
+        signals=[],
+        platform_breakdown={},
+        analysis_contract=contract,
+    )
+
+    assert 'data-claim-ledger' in html
+    assert "Stockout pain is repeated across the qualified sample." in html
+    assert "obs-1 → SUPPORT / core" in html
+    assert "youtube → HEALTHY · 4 signal(s) · 7d" in html
+    assert "The sample covers one seven-day window." in html
+    assert "obs-counter" in html and "alternative:1" in html
+    assert "mission-report/evidence-grounded-v1" in html
+    assert "mission-only" in html
+    assert "credentials-and-personal-data-redacted" in html
+    assert "authorized-surface-terms-apply" in html
+    assert "Requalify against the receiving mission frame." in html
+
+
 def test_html_builder_multi_currency_and_number_filters():
     builder = HtmlArtifactBuilder()
     currency_fn = builder._env.filters["format_currency"]

@@ -621,6 +621,13 @@ REQUIRED_BRIEF_FIELDS: Tuple[str, ...] = (
     "hypothesis",
     "falsifiers",
 )
+EVIDENCE_GROUNDED_BRIEF_FIELDS: Tuple[str, ...] = REQUIRED_BRIEF_FIELDS + (
+    "alternative_hypotheses",
+    "null_hypothesis",
+    "kill_criteria",
+    "revision_rule",
+)
+MAX_BRIEF_TEXT_LENGTH = 2000
 
 
 def _is_blank(value: Any) -> bool:
@@ -690,8 +697,10 @@ class MarketBriefRevision:
         alternatives: Optional[Tuple[str, ...]] = None
         kill_criteria: Optional[Tuple[str, ...]] = None
         if uses_evidence_contract:
-            alternatives = _clean_brief_entries(self.alternative_hypotheses)
-            kill_criteria = _clean_brief_entries(self.kill_criteria)
+            alternatives = _clean_brief_entries(
+                self.alternative_hypotheses, "alternative_hypotheses"
+            )
+            kill_criteria = _clean_brief_entries(self.kill_criteria, "kill_criteria")
             object.__setattr__(self, "alternative_hypotheses", alternatives)
             object.__setattr__(self, "kill_criteria", kill_criteria)
 
@@ -719,8 +728,28 @@ class MarketBriefRevision:
                 missing.append("kill_criteria")
             if _is_blank(self.revision_rule):
                 missing.append("revision_rule")
+            normalized_hypotheses = {
+                str(self.hypothesis).strip().casefold(),
+                str(self.null_hypothesis).strip().casefold(),
+            }
+            if alternatives and any(
+                alternative.casefold() in normalized_hypotheses for alternative in alternatives
+            ):
+                missing.append("alternative_hypotheses")
+            if str(self.hypothesis).strip().casefold() == str(
+                self.null_hypothesis
+            ).strip().casefold():
+                missing.append("null_hypothesis")
+            bounded_values = (
+                *(alternatives or ()),
+                str(self.null_hypothesis or ""),
+                *(kill_criteria or ()),
+                str(self.revision_rule or ""),
+            )
+            if any(len(value) > MAX_BRIEF_TEXT_LENGTH for value in bounded_values):
+                missing.append("bounded_hypothesis_register")
         if missing:
-            raise IncompleteMarketBriefError(missing)
+            raise IncompleteMarketBriefError(list(dict.fromkeys(missing)))
 
     @property
     def core_hypothesis(self) -> str:
@@ -758,14 +787,16 @@ class MarketBriefRevision:
         }
 
 
-def _clean_brief_entries(values: Optional[Sequence[Any]]) -> Optional[Tuple[str, ...]]:
+def _clean_brief_entries(
+    values: Optional[Sequence[Any]], field_name: str
+) -> Optional[Tuple[str, ...]]:
     if values is None:
         return None
     if isinstance(values, str):
         values = (values,)
     cleaned = tuple(str(value).strip() for value in values if not _is_blank(value))
-    if len(cleaned) != len(set(cleaned)):
-        raise IncompleteMarketBriefError(["alternative_hypotheses"])
+    if len({value.casefold() for value in cleaned}) != len(cleaned):
+        raise IncompleteMarketBriefError([field_name])
     return cleaned
 
 
@@ -1110,8 +1141,10 @@ class MissionProbeOutcome:
     scope_attestation: Optional[Mapping[str, Any]] = None
     note: Optional[str] = None
     collection_plan_digest: Optional[str] = None
+    outcome_id: UUID = field(default_factory=uuid4)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "outcome_id", _coerce_uuid(self.outcome_id, "outcome_id"))
         object.__setattr__(self, "run_id", _coerce_uuid(self.run_id, "run_id"))
         object.__setattr__(
             self, "queried_keywords", tuple(str(k) for k in (self.queried_keywords or ()))
@@ -1554,6 +1587,8 @@ class MissionClaim:
     created_by: str
     evidence_bindings: Tuple[MissionClaimEvidence, ...] = ()
     inference_method: Optional[str] = None
+    metric_denominator: Optional[str] = None
+    metric_timeframe: Optional[str] = None
     confidence: Optional[float] = None
     limitations: Tuple[str, ...] = ()
     change_conditions: Tuple[str, ...] = ()
@@ -1591,6 +1626,11 @@ class MissionClaim:
                 raise InvalidMissionClaimError(
                     f"{claim_type.value} requires an inference_method."
                 )
+        if claim_type is ClaimType.MEASUREMENT and status is ClaimStatus.PERMITTED:
+            if _is_blank(self.metric_denominator) or _is_blank(self.metric_timeframe):
+                raise InvalidMissionClaimError(
+                    "A permitted MEASUREMENT requires metric_denominator and metric_timeframe."
+                )
         if claim_type in (ClaimType.INFERENCE, ClaimType.RECOMMENDATION):
             if not self.limitations or not self.change_conditions:
                 raise InvalidMissionClaimError(
@@ -1618,6 +1658,8 @@ class MissionClaim:
             "claim_type": self.claim_type.value,
             "wording": self.wording,
             "inference_method": self.inference_method,
+            "metric_denominator": self.metric_denominator,
+            "metric_timeframe": self.metric_timeframe,
             "confidence": self.confidence,
             "limitations": list(self.limitations),
             "change_conditions": list(self.change_conditions),
@@ -1661,6 +1703,8 @@ class MissionClaim:
             "claim_type": self.claim_type.value,
             "wording": self.wording,
             "inference_method": self.inference_method,
+            "metric_denominator": self.metric_denominator,
+            "metric_timeframe": self.metric_timeframe,
             "confidence": self.confidence,
             "limitations": list(self.limitations),
             "change_conditions": list(self.change_conditions),
@@ -1693,6 +1737,241 @@ class GapReport:
             "required_authority": self.required_authority,
             "estimated_cost": self.estimated_cost,
         }
+
+
+FORBIDDEN_STRATEGIC_OUTPUTS = (
+    "opportunity_index",
+    "demand_gap",
+    "whitespace",
+    "saturation",
+    "commercial_recommendations",
+)
+
+
+@dataclass(frozen=True)
+class StrategicSufficiencyDecision:
+    """Deterministic permission to accept strategic claims for one exact evidence frame."""
+
+    ready: bool
+    frame_digest: str
+    support_count: int
+    contradiction_count: int
+    gap_report: Optional[GapReport] = None
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "status": "READY" if self.ready else "INSUFFICIENT_EVIDENCE",
+            "frame_digest": self.frame_digest,
+            "support_count": self.support_count,
+            "contradiction_count": self.contradiction_count,
+            "gap_report": self.gap_report.to_payload() if self.gap_report else None,
+        }
+
+
+def assess_strategic_sufficiency(
+    *,
+    manifest: MissionManifest,
+    brief: MarketBriefRevision,
+    qualifications: Sequence[EvidenceQualification],
+    probe_outcomes: Sequence[MissionProbeOutcome],
+    assessment_state: QualificationStatus,
+    current_frame_digest: str,
+    submitted_frame_digest: str,
+    required_metrics: Sequence[Mapping[str, Any]] = (),
+    observations: Sequence[Any] = (),
+    query_topics: Sequence[str] = (),
+) -> StrategicSufficiencyDecision:
+    """Apply the fail-closed Market-analysis gates before candidate prose is accepted.
+
+    Semantic judgment stays with the host. This policy only evaluates persisted typed facts:
+    channel completion, assessment coverage, evidence direction, frame identity, and any metric
+    basis the caller says a calculation requires.
+    """
+
+    failed: List[str] = []
+    missing: List[str] = []
+    outcomes_by_surface: Dict[str, MissionProbeOutcome] = {}
+    for outcome in probe_outcomes:
+        if outcome.connector_surface in outcomes_by_surface:
+            failed.append(f"DUPLICATE_CHANNEL_OUTCOME:{outcome.connector_surface}")
+            continue
+        outcomes_by_surface[outcome.connector_surface] = outcome
+
+    if brief.evidence_contract_version < 2:
+        failed.append("LEGACY_BRIEF_CONTRACT")
+        missing.append("expanded hypothesis register")
+    if current_frame_digest != submitted_frame_digest:
+        failed.append("STALE_EVIDENCE_FRAME")
+
+    measured_states = {
+        ChannelHealthStatus.HEALTHY,
+        ChannelHealthStatus.EMPTY_NO_DATA,
+    }
+    for surface in manifest.required_channels:
+        outcome = outcomes_by_surface.get(surface)
+        if outcome is None:
+            failed.append(f"MISSING_REQUIRED_CHANNEL:{surface}")
+            missing.append(f"required channel outcome: {surface}")
+        elif outcome.status not in measured_states:
+            failed.append(f"REQUIRED_CHANNEL_NOT_MEASURED:{surface}:{outcome.status.value}")
+            missing.append(f"completed measurement: {surface}")
+
+    if assessment_state is QualificationStatus.UNAVAILABLE:
+        failed.append("QUALIFIER_UNAVAILABLE")
+        missing.append("reliable assessment for every current observation")
+    elif assessment_state is not QualificationStatus.READY:
+        failed.append("ASSESSMENT_INCOMPLETE")
+        missing.append("assessment for every current observation")
+
+    support = [
+        item
+        for item in qualifications
+        if item.relation is QualificationRelation.QUALIFIED_SUPPORT
+        and item.evidence_role is EvidenceDirection.SUPPORT
+    ]
+    contradiction = [
+        item
+        for item in qualifications
+        if item.relation is QualificationRelation.QUALIFIED_CONTRADICTION
+        and item.evidence_role is EvidenceDirection.CONTRADICTION
+    ]
+    valid_targets = {
+        "core",
+        "null",
+        *(
+            f"alternative:{index}"
+            for index, _value in enumerate(brief.alternative_hypotheses or (), start=1)
+        ),
+    }
+    qualified_targets = {
+        item.hypothesis_target
+        for item in support + contradiction
+        if item.hypothesis_target in valid_targets
+    }
+    invalid_targets = sorted(
+        {
+            str(item.hypothesis_target)
+            for item in support + contradiction
+            if item.hypothesis_target not in valid_targets
+        }
+    )
+    for target in invalid_targets:
+        failed.append(f"INVALID_HYPOTHESIS_TARGET:{target}")
+    for target in sorted(valid_targets - qualified_targets):
+        failed.append(f"MISSING_HYPOTHESIS_COVERAGE:{target}")
+        missing.append(f"qualified evidence addressing hypothesis target: {target}")
+    if not support:
+        failed.append("MISSING_SUPPORT_COVERAGE")
+        missing.append("qualified support for a named hypothesis")
+    if not contradiction:
+        failed.append("MISSING_CONTRADICTION_COVERAGE")
+        missing.append("qualified counterevidence for a named hypothesis")
+
+    observation_by_id = {
+        str(getattr(item, "observation_id", "")): item for item in observations
+    }
+    demand_support = [item for item in support if item.purpose is EvidencePurpose.DEMAND]
+    supply_support = [item for item in support if item.purpose is EvidencePurpose.SUPPLY]
+    supply_sources = {
+        str(getattr(observation_by_id.get(str(item.observation_id)), "source_id", ""))
+        for item in supply_support
+        if getattr(observation_by_id.get(str(item.observation_id)), "source_id", None)
+    }
+    zero_supply_surfaces = {
+        outcome.connector_surface
+        for outcome in probe_outcomes
+        if outcome.platform in SUPPLY_SURFACE_PLATFORMS
+        and outcome.scope_attestation is not None
+        and any(
+            outcome.measured_zero_for(topic, brief.geo, brief.timeframe)
+            for topic in query_topics
+        )
+    }
+    if len(demand_support) < QUALIFIED_DEMAND_MINIMUM:
+        failed.append("MISSING_DEMAND_EVIDENCE")
+        missing.append("qualified demand evidence")
+    if not (
+        len(supply_support) >= POSITIVE_SUPPLY_OBSERVATIONS
+        and len(supply_sources) >= POSITIVE_SUPPLY_SOURCES
+    ) and len(zero_supply_surfaces) < MEASURED_ZERO_SURFACES:
+        failed.append("MISSING_SUPPLY_EVIDENCE")
+        missing.append("qualified supply evidence or two attested empty supply surfaces")
+
+    for requirement in required_metrics:
+        name = str(requirement.get("name") or "unnamed metric").strip()
+        if not requirement.get("denominator"):
+            failed.append(f"MISSING_METRIC_DENOMINATOR:{name}")
+            missing.append(f"denominator for {name}")
+        if not requirement.get("timeframe"):
+            failed.append(f"MISSING_METRIC_TIMEFRAME:{name}")
+            missing.append(f"timeframe for {name}")
+
+    failed = list(dict.fromkeys(failed))
+    missing = list(dict.fromkeys(missing))
+    if not failed:
+        return StrategicSufficiencyDecision(
+            ready=True,
+            frame_digest=current_frame_digest,
+            support_count=len(support),
+            contradiction_count=len(contradiction),
+        )
+
+    attempted = tuple(
+        {
+            "connector_surface": outcome.connector_surface,
+            "status": outcome.status.value,
+            "signals_collected": outcome.signals_collected,
+            "queried_window": outcome.queried_window,
+            "query_fingerprint": outcome.query_fingerprint,
+        }
+        for outcome in sorted(probe_outcomes, key=lambda item: item.connector_surface)
+    )
+    safe_partial = tuple(
+        f"{outcome.connector_surface} returned {outcome.signals_collected} observations."
+        for outcome in sorted(probe_outcomes, key=lambda item: item.connector_surface)
+        if outcome.status is ChannelHealthStatus.HEALTHY
+    )
+    authority_surfaces = [
+        outcome.connector_surface
+        for outcome in probe_outcomes
+        if outcome.connector_surface in manifest.required_channels
+        and outcome.status is ChannelHealthStatus.AUTH_REQUIRED
+    ]
+    if authority_surfaces:
+        next_probe = f"Authorize and rerun the required surface: {authority_surfaces[0]}."
+        required_authority = f"authorized access for {', '.join(sorted(authority_surfaces))}"
+    elif any(gate.startswith("MISSING_METRIC_") for gate in failed):
+        next_probe = "Run the smallest bounded probe that records the missing denominator and timeframe."
+        required_authority = None
+    elif "MISSING_CONTRADICTION_COVERAGE" in failed:
+        next_probe = "Run one bounded falsification probe against the strongest alternative or null hypothesis."
+        required_authority = None
+    elif "MISSING_SUPPORT_COVERAGE" in failed:
+        next_probe = "Run one bounded probe capable of directly supporting a named hypothesis."
+        required_authority = None
+    elif "ASSESSMENT_INCOMPLETE" in failed or "QUALIFIER_UNAVAILABLE" in failed:
+        next_probe = "Complete reliable qualification for every current observation in a new eligible frame."
+        required_authority = None
+    else:
+        next_probe = "Rerun the smallest missing required channel inside the confirmed mission boundary."
+        required_authority = None
+
+    return StrategicSufficiencyDecision(
+        ready=False,
+        frame_digest=current_frame_digest,
+        support_count=len(support),
+        contradiction_count=len(contradiction),
+        gap_report=GapReport(
+            withheld_outputs=FORBIDDEN_STRATEGIC_OUTPUTS,
+            failed_gates=tuple(failed),
+            missing_evidence=tuple(missing),
+            attempted_probes=attempted,
+            safe_partial_conclusions=safe_partial,
+            next_best_probe=next_probe,
+            required_authority=required_authority,
+            estimated_cost=None,
+        ),
+    )
 
 
 # What a batch read or an analysis tells the Agent when recorded judgments leave the frame

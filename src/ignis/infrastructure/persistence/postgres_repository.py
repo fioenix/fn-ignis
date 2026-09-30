@@ -2307,13 +2307,14 @@ class PostgresTimescaleRepository(ITrendRepository):
                     elif not rows:
                         return 0
                     await cur.executemany(
-                        "INSERT INTO mission_probe_outcomes (run_id, platform, connector_surface,"
+                        "INSERT INTO mission_probe_outcomes (id, run_id, platform, connector_surface,"
                         " status, signals_collected, queried_keywords, queried_window,"
                         " query_fingerprint, scope_attestation, note, collection_plan_digest,"
                         " evidence_contract_version, completed_at)"
-                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s);",
+                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s);",
                         [
                             (
+                                str(o.outcome_id),
                                 str(o.run_id),
                                 o.platform,
                                 o.connector_surface,
@@ -2348,7 +2349,7 @@ class PostgresTimescaleRepository(ITrendRepository):
         async with pool.connection() as conn:
             async with conn.cursor(row_factory=tuple_row) as cur:
                 await cur.execute(
-                    "SELECT o.run_id, o.platform, o.connector_surface, o.status,"
+                    "SELECT o.id, o.run_id, o.platform, o.connector_surface, o.status,"
                     " o.signals_collected, o.query_fingerprint, o.completed_at,"
                     " o.queried_keywords, o.queried_window, o.scope_attestation, o.note,"
                     " o.collection_plan_digest"
@@ -2363,18 +2364,19 @@ class PostgresTimescaleRepository(ITrendRepository):
                 rows = await cur.fetchall()
         return [
             MissionProbeOutcome(
-                run_id=UUID(str(r[0])),
-                platform=r[1],
-                connector_surface=r[2],
-                status=r[3],
-                signals_collected=int(r[4]),
-                query_fingerprint=r[5],
-                completed_at=r[6],
-                queried_keywords=tuple(r[7] or ()),
-                queried_window=r[8],
-                scope_attestation=r[9],
-                note=r[10],
-                collection_plan_digest=r[11],
+                outcome_id=UUID(str(r[0])),
+                run_id=UUID(str(r[1])),
+                platform=r[2],
+                connector_surface=r[3],
+                status=r[4],
+                signals_collected=int(r[5]),
+                query_fingerprint=r[6],
+                completed_at=r[7],
+                queried_keywords=tuple(r[8] or ()),
+                queried_window=r[9],
+                scope_attestation=r[10],
+                note=r[11],
+                collection_plan_digest=r[12],
             )
             for r in rows
         ]
@@ -2506,19 +2508,22 @@ class PostgresTimescaleRepository(ITrendRepository):
             claim_type=ClaimType(row[5]),
             wording=row[6],
             inference_method=row[7],
-            confidence=row[8],
-            limitations=tuple(row[9] or ()),
-            change_conditions=tuple(row[10] or ()),
-            status=ClaimStatus(row[11]),
-            withheld_reasons=tuple(row[12] or ()),
-            created_by=row[13],
-            created_at=row[14],
+            metric_denominator=row[8],
+            metric_timeframe=row[9],
+            confidence=row[10],
+            limitations=tuple(row[11] or ()),
+            change_conditions=tuple(row[12] or ()),
+            status=ClaimStatus(row[13]),
+            withheld_reasons=tuple(row[14] or ()),
+            created_by=row[15],
+            created_at=row[16],
             evidence_bindings=bindings,
         )
 
     _CLAIM_COLUMNS = (
         "SELECT id, mission_id, brief_revision_id, frame_digest, client_claim_key, claim_type,"
-        " wording, inference_method, confidence, limitations, change_conditions, status,"
+        " wording, inference_method, metric_denominator, metric_timeframe, confidence,"
+        " limitations, change_conditions, status,"
         " withheld_reasons, created_by, created_at FROM mission_claims"
     )
     _BINDING_COLUMNS = (
@@ -2576,9 +2581,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                         await cur.execute(
                             "INSERT INTO mission_claims"
                             " (id, mission_id, brief_revision_id, frame_digest, client_claim_key,"
-                            " claim_type, wording, inference_method, confidence, limitations,"
+                            " claim_type, wording, inference_method, metric_denominator,"
+                            " metric_timeframe, confidence, limitations,"
                             " change_conditions, status, withheld_reasons, created_by, created_at)"
-                            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                             " ON CONFLICT (mission_id, frame_digest, client_claim_key) DO NOTHING;",
                             (
                                 str(claim.claim_id),
@@ -2589,6 +2595,8 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 claim.claim_type.value,
                                 claim.wording,
                                 claim.inference_method,
+                                claim.metric_denominator,
+                                claim.metric_timeframe,
                                 claim.confidence,
                                 list(claim.limitations),
                                 list(claim.change_conditions),

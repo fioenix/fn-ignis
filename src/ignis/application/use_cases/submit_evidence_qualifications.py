@@ -15,6 +15,7 @@ from ignis.domain.research_workspace import (
     EvidenceQualificationConflictError,
     InvalidEvidenceQualificationError,
     QualificationProgress,
+    QualificationRelation,
     ResearchSurface,
     compute_frame_fingerprint,
     decide_qualification,
@@ -91,6 +92,43 @@ class SubmitEvidenceQualificationsUseCase:
         except (InvalidEvidenceQualificationError, TypeError, AttributeError) as exc:
             return self._refused(base, "INVALID", "INVALID_JUDGMENT", str(exc))
 
+        if brief is not None:
+            valid_targets = {
+                "core",
+                "null",
+                "neutral",
+                *(
+                    f"alternative:{index}"
+                    for index, _value in enumerate(
+                        brief.alternative_hypotheses or (), start=1
+                    )
+                ),
+            }
+            invalid_targets = [
+                str(judgment.hypothesis_target)
+                for judgment in judgments
+                if judgment.hypothesis_target is not None
+                and judgment.hypothesis_target not in valid_targets
+            ]
+            neutral_conclusions = [
+                judgment
+                for judgment in judgments
+                if judgment.relation
+                in (
+                    QualificationRelation.QUALIFIED_SUPPORT,
+                    QualificationRelation.QUALIFIED_CONTRADICTION,
+                )
+                and judgment.hypothesis_target == "neutral"
+            ]
+            if invalid_targets or neutral_conclusions:
+                detail = ", ".join(sorted(set(invalid_targets))) or "neutral"
+                return self._refused(
+                    base,
+                    "INVALID",
+                    "INVALID_HYPOTHESIS_TARGET",
+                    f"The hypothesis target is not present in the confirmed Brief: {detail}.",
+                )
+
         observation_ids = [str(j.observation_id) for j in judgments]
         if len(set(observation_ids)) != len(observation_ids):
             return self._refused(
@@ -158,6 +196,11 @@ class SubmitEvidenceQualificationsUseCase:
             reason_code=item["reason_code"],
             judged_by=item["judged_by"],
             model=item.get("model"),
+            hypothesis_target=item.get("hypothesis_target"),
+            evidence_role=item.get("evidence_role"),
+            evidence_contract_version=(
+                brief.evidence_contract_version if brief is not None else None
+            ),
         )
 
     @staticmethod

@@ -62,6 +62,16 @@
   validates it before persisting and superseding claims (agent decided; basis: repository storage
   lacks the complete derived frame, and persisting a second current-frame truth would contradict
   the approved data model).
+- Q: How should the expanded strategic sufficiency policy relate to the existing deterministic
+  demand and supply minimums? → A: Extend the existing policy in place: retain its current demand
+  and supply minimums, then add required-channel completion, contradiction coverage,
+  current-frame identity, and metric denominator/timeframe gates; every failure derives a typed
+  Gap Report (agent decided; basis: preserve the already tested product-safety floor while adding
+  the missing Spec 011 gates without creating a second policy authority).
+- Q: Where should a calculated claim's denominator and timeframe live? → A: Persist both on each
+  `MEASUREMENT` claim and withhold that claim when either is absent; no batch-level option may
+  decide whether metric validation applies (agent decided; basis: every claimed calculation must
+  carry its own auditable basis, and caller-controlled validation would fail open).
 
 ## User Scenarios & Testing
 

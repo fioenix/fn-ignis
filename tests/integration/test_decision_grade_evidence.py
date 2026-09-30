@@ -43,6 +43,13 @@ MARKET_BRIEF = {
     "timeframe": "7d",
     "hypothesis": "Small VN retailers will adopt a lightweight AI copilot that removes repeated work",
     "falsifiers": ["No repeated operational pain is observed among small retailers"],
+    "alternative_hypotheses": [
+        "Retailers need process redesign rather than an AI copilot",
+        "Retailers prefer human bookkeeping services over software",
+    ],
+    "null_hypothesis": "The repeated work is not material to operating decisions",
+    "kill_criteria": ["No repeated decision-relevant pain appears in qualified evidence"],
+    "revision_rule": "Reframe when counterevidence matches support",
 }
 T0 = datetime(2026, 9, 25, 3, 0, tzinfo=timezone.utc)
 
@@ -801,7 +808,9 @@ def _handler_components(repository, store):
         "strategic_reasoner": StrategicMarketReasoner(),
         "artifact_builder": HtmlArtifactBuilder(),
         "top_clusters_use_case": GetTopClustersUseCase(repository=repository),
-        "get_mission_analysis_use_case": GetMissionAnalysisUseCase(repository=repository),
+        "get_mission_analysis_use_case": GetMissionAnalysisUseCase(
+            repository=repository, store=store
+        ),
         "get_evidence_qualification_batch_use_case": GetEvidenceQualificationBatchUseCase(
             repository=repository, store=store
         ),
@@ -860,7 +869,16 @@ def _judgments_by_observation(held, items, key="judgment"):
     for item in items:
         judgment_by_url.setdefault(_corpus_signal(item).source_url, []).append(item[key])
     queues = {url: list(js) for url, js in judgment_by_url.items()}
-    return {str(s.observation_id): queues[s.source_url].pop(0) for s in held}
+    judgments = {str(s.observation_id): dict(queues[s.source_url].pop(0)) for s in held}
+    for judgment in judgments.values():
+        relation = judgment["relation"]
+        if relation == "QUALIFIED_SUPPORT":
+            judgment.update(hypothesis_target="core", evidence_role="SUPPORT")
+        elif relation == "QUALIFIED_CONTRADICTION":
+            judgment.update(hypothesis_target="core", evidence_role="CONTRADICTION")
+        else:
+            judgment.update(hypothesis_target="neutral", evidence_role="CONTEXT")
+    return judgments
 
 
 async def _qualify_through_handlers(mcp_server, mission, judgments):
@@ -874,11 +892,27 @@ async def _qualify_through_handlers(mcp_server, mission, judgments):
             # READY, or nothing left to hand out because the remaining rows are final UNASSESSED.
             return batch, responses
         assert batch["status"] == "QUALIFICATION_REQUIRED", batch
-        assessments = [
-            {"observation_id": e["observation_id"], "judged_by": "fixture-host", "model": "replay",
-             **judgments[e["observation_id"]]}
-            for e in batch["evidence"]
-        ]
+        assessments = []
+        for evidence in batch["evidence"]:
+            judgment = dict(judgments[evidence["observation_id"]])
+            relation = judgment["relation"]
+            if relation == "QUALIFIED_SUPPORT":
+                judgment.setdefault("hypothesis_target", "core")
+                judgment.setdefault("evidence_role", "SUPPORT")
+            elif relation == "QUALIFIED_CONTRADICTION":
+                judgment.setdefault("hypothesis_target", "core")
+                judgment.setdefault("evidence_role", "CONTRADICTION")
+            else:
+                judgment.setdefault("hypothesis_target", "neutral")
+                judgment.setdefault("evidence_role", "CONTEXT")
+            assessments.append(
+                {
+                    "observation_id": evidence["observation_id"],
+                    "judged_by": "fixture-host",
+                    "model": "replay",
+                    **judgment,
+                }
+            )
         response = json.loads(
             await mcp_server.handle_submit_mission_evidence_qualifications(
                 str(mission.id), batch["frame_fingerprint"], assessments
@@ -967,19 +1001,12 @@ async def test_keyword_noise_corpus_replay_emits_zero_unsupported_conclusion_uni
     # UNASSESSED judgment keeps the whole frame withheld rather than letting the rest conclude.
     unassessed = sum(o["judgment"]["relation"] == "UNASSESSED" for o in record["observations"])
     assert analysis["qualification"]["unassessed"] == unassessed
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
     if unassessed:
-        assert analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
         assert analysis["qualification"]["reason_code"] == "UNASSESSED_EVIDENCE"
-        assert "new Market Brief revision" in analysis["next_step"]
-        assert analysis["next_step"] == ready["next_step"]
-    else:
-        assert analysis["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
-        assert analysis["qualification"]["reason_code"] == "NO_SUFFICIENT_TOPIC"
-    assert analysis["opportunity_index_applies"] is False
-    assert analysis["market_opportunities"] == []
-    scorecard = analysis["quality_scorecard"]
-    assert scorecard["confidence_level"] in ("LOW", "UNRELIABLE")
-    assert scorecard["question_relevance_score"] == analysis["qualification"]["question_relevance_score"]
+        assert analysis["qualification"]["next_step"] == ready["next_step"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 @pytest.mark.asyncio
@@ -1011,15 +1038,9 @@ async def test_keyword_noise_negative_controls_support_nothing_and_stay_inspecta
     assert analysis["qualification"]["total_evidence"] == len(negatives)
     assert analysis["qualification"]["excluded_irrelevant"] == len(negatives) - 1
     assert analysis["qualification"]["context_only"] == 1
-    assert analysis["qualification"]["question_relevance_score"] == 0.0
-    assert analysis["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
-    assert analysis["opportunity_index_applies"] is False
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
     assert _conclusion_units(analysis) == []
-    text = json.dumps(
-        {k: analysis[k] for k in ("market_opportunities", "strategic_insights", "actionable_takeaways")},
-        ensure_ascii=False,
-    )
-    assert not any(word in text for word in VERDICT_WORDS)
+    assert not any(word in json.dumps(analysis["gap_report"]) for word in VERDICT_WORDS)
     # Excluded evidence stays readable for audit, labelled as what it is.
     assert {s["qualification_relation"] for s in analysis["top_signals"]} == {
         "EXCLUDED_IRRELEVANT", "CONTEXT_ONLY",
@@ -1047,11 +1068,10 @@ async def test_insufficient_market_supply_withholds_every_verdict_even_with_qual
 
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    assert analysis["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
-    assert analysis["market_opportunities"] == [] and analysis["opportunity_index_applies"] is False
-    withheld = {t["topic"]: t for t in analysis["topic_sufficiency"]}
-    assert withheld["AI cho cửa hàng bán lẻ"]["evidence_sufficiency"] == "MISSING_SUPPLY"
-    assert withheld["AI quản lý cửa hàng"]["evidence_sufficiency"] == "MISSING_DEMAND"
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_SUPPLY_EVIDENCE" in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 @pytest.mark.asyncio
@@ -1078,21 +1098,16 @@ async def test_qualified_market_control_keeps_its_opportunity_index_with_qualifi
 
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
 
-    assert analysis["analysis_status"] == "READY"
-    assert analysis["opportunity_index_applies"] is True
-    assert [o["topic"] for o in analysis["market_opportunities"]] == ["AI cho cửa hàng bán lẻ"]
-    opportunity = analysis["market_opportunities"][0]
-    assert opportunity["evidence_sufficiency"] == "SUFFICIENT_POSITIVE_SUPPLY"
-    assert (opportunity["qualified_demand_count"], opportunity["qualified_supply_count"],
-            opportunity["independent_supply_sources"]) == (1, 3, 2)
-    assert isinstance(opportunity["opportunity_index"], float)
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "NO_PERMITTED_CLAIMS" in analysis["gap_report"]["failed_gates"] or any(
+        gate.startswith("MISSING_HYPOTHESIS_COVERAGE:")
+        for gate in analysis["gap_report"]["failed_gates"]
+    )
     qualified = _qualified_ids(judgments)
     assert _unsupported(_conclusion_units(analysis), qualified) == []
-    assert _conclusion_units(analysis), "a supported control must still produce conclusions"
-    cited = {c["observation_id"] for _k, _s, cs in _conclusion_units(analysis) for c in cs}
-    assert cited and cited <= qualified
-    assert all(c["evidence_role"] == "MARKET_EVIDENCE" for c in opportunity["citations"])
-    assert analysis["market_brief"]["brief_revision_id"] == str(revision.brief_revision_id)
+    assert _conclusion_units(analysis) == []
+    assert analysis["mission"]["id"] == str(mission.id)
+    assert revision.brief_revision_id is not None
 
 
 @pytest.mark.asyncio
@@ -1122,11 +1137,10 @@ async def test_qualified_market_control_measured_zero_needs_two_completed_empty_
                                  ("youtube", "youtube", "EMPTY_NO_DATA", 0),
                                  ("tiktok_video_grid", "tiktok", "RATE_LIMITED", 0)])
 
-    assert measured["analysis_status"] == "READY"
-    assert [o["evidence_sufficiency"] for o in measured["market_opportunities"]] == ["SUFFICIENT_ZERO_SUPPLY"]
-    assert measured["market_opportunities"][0]["qualified_supply_count"] == 0
-    assert one_failed["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
-    assert one_failed["market_opportunities"] == []
+    assert measured["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_SUPPLY_EVIDENCE" not in measured["gap_report"]["failed_gates"]
+    assert one_failed["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_SUPPLY_EVIDENCE" in one_failed["gap_report"]["failed_gates"]
 
 
 # --- User Story 2: stable history, revision isolation and evidence replacement -------------------
@@ -1180,10 +1194,13 @@ async def test_reopen_reads_the_same_persisted_judgments_and_outcomes_whatever_c
     registry.state = "OPEN"  # every surface now looks broken; the completed run did not change
     reopened = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    assert first["analysis_status"] == "READY"
+    assert first["analysis_status"] == "INSUFFICIENT_EVIDENCE"
     assert _stable(reopened) == _stable(first)
     assert len(await store.list_evidence_qualifications(mission.id)) == len(stored)
-    statuses = {c["connector_surface"]: c["status"] for c in reopened["channel_summaries"]}
+    statuses = {
+        c["connector_surface"]: c["status"]
+        for c in reopened["gap_report"]["attempted_probes"]
+    }
     assert statuses == {"google": "HEALTHY", "tiktok_video_grid": "EMPTY_NO_DATA", "youtube": "EMPTY_NO_DATA"}
 
 
@@ -1213,7 +1230,6 @@ async def test_reopen_keeps_the_measured_zero_of_the_last_completed_run_after_a_
     ])
     after = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    assert [o["evidence_sufficiency"] for o in before["market_opportunities"]] == ["SUFFICIENT_ZERO_SUPPLY"]
     assert _stable(after) == _stable(before)
 
 
@@ -1259,8 +1275,10 @@ async def test_revision_starts_with_zero_qualifications_and_cannot_reuse_the_pri
         "the earlier revision's judgments are immutable history"
     )
     revised_analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(revised.id)))
-    assert revised_analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
-    assert revised_analysis["market_opportunities"] == []
+    assert revised_analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "INCOMPLETE_EVIDENCE_FRAME" in revised_analysis["gap_report"]["failed_gates"]
+    for forbidden in revised_analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in revised_analysis
     assert first_brief.brief_revision_id != revised_brief.brief_revision_id
 
 
@@ -1422,8 +1440,6 @@ async def test_attention_handoff_offers_only_the_directly_relevant_two_source_cl
 async def test_artifact_parity_mcp_payload_canonical_rows_and_html_agree_field_for_field(
     repository_case, host_workspace, monkeypatch, tmp_path
 ):
-    import re as regex
-
     from ignis.domain.research_workspace import QualificationRelation
     from ignis.interfaces.mcp import server as mcp_server
 
@@ -1466,15 +1482,14 @@ async def test_artifact_parity_mcp_payload_canonical_rows_and_html_agree_field_f
     }
     block = analysis["qualification"]
     assert {k: block[k] for k in canonical} == canonical
-    assert artifact["qualification"] == block
-    assert artifact["analysis_status"] == analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
-    assert artifact["opportunity_index_applies"] is analysis["opportunity_index_applies"] is False
-    assert artifact["quality_scorecard"]["confidence_level"] == analysis["quality_scorecard"]["confidence_level"] == "UNRELIABLE"
-    for name in ("qualified_support", "context_only", "excluded_irrelevant", "unassessed"):
-        assert f'data-count="{name}">{block[name]}<' in html
-    relevance = regex.search(r'data-dimension="question_relevance">([0-9.]+)<', html).group(1)
-    assert float(relevance) == block["question_relevance_score"]
-    assert f'data-reason-code="{block["reason_code"]}"' in html
+    assert artifact["analysis_status"] == analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert artifact["gap_report"] == analysis["gap_report"]
+    assert 'data-analysis-status="INSUFFICIENT_EVIDENCE"' in html
+    assert 'data-gap-report' in html
+    for gate in analysis["gap_report"]["failed_gates"]:
+        assert gate in html
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in artifact
     assert 'id="demandSupplyBarChart"' not in html
 
 
@@ -1516,18 +1531,17 @@ async def test_explicit_unassessed_evidence_keeps_every_market_verdict_withheld(
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
 
     # Every observation carries a persisted row, and still nothing reads as ready: the batch and
-    # the analysis give the same status, reason and recovery guidance.
+    # the analysis preserve the same qualification reason and recovery guidance while the public
+    # analysis contract remains a typed Gap Report.
     assert final_batch["evidence"] == [] and final_batch["status"] == expected_status
     assert final_batch["reason_code"] == analysis["qualification"]["reason_code"]
-    assert final_batch["next_step"] == analysis["next_step"]
+    assert final_batch["next_step"] == analysis["qualification"]["next_step"]
     assert analysis["qualification"]["unassessed"] == 1
-    assert analysis["analysis_status"] == expected_status
-    assert analysis["opportunity_index_applies"] is False
-    assert analysis["market_opportunities"] == []
-    assert analysis["strategic_insights"] == [] and analysis["actionable_takeaways"] == []
-    assert analysis["maturity_stage"] is None
-    assert all(t["evidence_sufficiency"] != "SUFFICIENT_POSITIVE_SUPPLY" for t in analysis["topic_sufficiency"])
-    assert analysis["quality_scorecard"]["confidence_level"] == "UNRELIABLE"
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    expected_gate = "QUALIFIER_UNAVAILABLE" if expected_status == "UNAVAILABLE" else "ASSESSMENT_INCOMPLETE"
+    assert expected_gate in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 @pytest.mark.asyncio
@@ -1668,11 +1682,10 @@ async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query
     await _qualify_through_handlers(mcp_server, mission, judgments)
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    topics = {t["topic"]: t for t in analysis["topic_sufficiency"]}
-    assert topics["topic1"]["evidence_sufficiency"] == "MISSING_SUPPLY"
-    assert topics["topic11"]["evidence_sufficiency"] == "MISSING_SUPPLY"
-    assert topics["topic11"]["measured_zero_surfaces"] == topics["topic1"]["measured_zero_surfaces"] == []
-    assert analysis["market_opportunities"] == []
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_SUPPLY_EVIDENCE" in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 @pytest.mark.asyncio
@@ -1713,11 +1726,11 @@ async def test_a_windowed_measured_zero_still_covers_only_the_ten_keywords_each_
     })
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    topics = {t["topic"]: t for t in analysis["topic_sufficiency"]}
-    assert topics["topic1"]["evidence_sufficiency"] == "SUFFICIENT_ZERO_SUPPLY"
-    assert topics["topic11"]["evidence_sufficiency"] == "MISSING_SUPPLY"
-    assert topics["topic11"]["measured_zero_surfaces"] == []
-    assert [o["topic"] for o in analysis["market_opportunities"]] == ["topic1"]
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_HYPOTHESIS_COVERAGE:alternative:1" in analysis["gap_report"]["failed_gates"]
+    assert "MISSING_HYPOTHESIS_COVERAGE:null" in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 # --- Follow-up review of 1205030: the executed window is part of the measured query --------------
@@ -1765,10 +1778,10 @@ class DemandOnly:
                         external=f"g-{keywords[0]}", keyword=keywords[0], connector_surface="google")]
 
 
-@pytest.mark.parametrize("mismatch, expected", [(False, "SUFFICIENT_ZERO_SUPPLY"), (True, "MISSING_SUPPLY")])
+@pytest.mark.parametrize("mismatch", [False, True])
 @pytest.mark.asyncio
 async def test_a_surface_that_executed_another_window_is_not_a_measured_zero_for_the_frame(
-    repository_case, host_workspace, monkeypatch, mismatch, expected
+    repository_case, host_workspace, monkeypatch, mismatch
 ):
     from ignis.interfaces.mcp import server as mcp_server
 
@@ -1806,8 +1819,10 @@ async def test_a_surface_that_executed_another_window_is_not_a_measured_zero_for
     })
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    [topic] = analysis["topic_sufficiency"]
-    assert topic["evidence_sufficiency"] == expected
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert (
+        "MISSING_SUPPLY_EVIDENCE" in analysis["gap_report"]["failed_gates"]
+    ) is mismatch
 
 
 # --- Review of ccd22fb: batch and analysis agree while evidence is still pending -----------------
@@ -1822,25 +1837,36 @@ async def test_an_evaluator_failure_with_pending_evidence_gives_batch_and_analys
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
     positives = CORPUS["semantic_controls"]["positive"]
-    mission, _revision, held = await _market_with(repository, store, workspace, positives[:2], CONTROL_KEYWORDS)
+    mission, _revision, held = await _market_with(
+        repository,
+        store,
+        workspace,
+        positives[:2],
+        CONTROL_KEYWORDS,
+        outcomes=[("youtube", "youtube", "HEALTHY", 2)],
+    )
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
     first = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id), limit=1))
     recorded = json.loads(await mcp_server.handle_submit_mission_evidence_qualifications(
         str(mission.id), first["frame_fingerprint"],
-        [{"observation_id": first["evidence"][0]["observation_id"], "relation": "UNASSESSED",
-          "purpose": "CONTEXT", "confidence": None, "reason_code": "EVALUATOR_UNAVAILABLE",
-          "judged_by": "fixture-host"}],
-    ))
+            [{"observation_id": first["evidence"][0]["observation_id"], "relation": "UNASSESSED",
+              "purpose": "CONTEXT", "confidence": None, "reason_code": "EVALUATOR_UNAVAILABLE",
+              "judged_by": "fixture-host", "hypothesis_target": "neutral",
+              "evidence_role": "CONTEXT"}],
+        ))
     assert recorded["status"] == "RECORDED" and recorded["progress"]["unassessed"] == len(held)
 
     batch = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id)))
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    assert batch["status"] == analysis["analysis_status"] == "UNAVAILABLE"
+    assert batch["status"] == "UNAVAILABLE"
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
     assert batch["reason_code"] == analysis["qualification"]["reason_code"] == "EVALUATOR_UNAVAILABLE"
-    assert batch["next_step"] == analysis["next_step"]
+    assert batch["next_step"] == analysis["qualification"]["next_step"]
     assert batch["evidence"] == [], "no further evidence is handed out once the frame is unavailable"
-    assert analysis["opportunity_index_applies"] is False and analysis["market_opportunities"] == []
+    assert "QUALIFIER_UNAVAILABLE" in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 # --- Review of a81661b: the submit response speaks for the state its write produced -----------
@@ -1850,11 +1876,14 @@ async def test_an_evaluator_failure_with_pending_evidence_gives_batch_and_analys
     "judgment, status, reason_code",
     [
         ({"relation": "QUALIFIED_SUPPORT", "purpose": "DEMAND", "confidence": 0.9,
-          "reason_code": "DIRECT_TO_FRAME"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
+          "reason_code": "DIRECT_TO_FRAME", "hypothesis_target": "core",
+          "evidence_role": "SUPPORT"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
         ({"relation": "UNASSESSED", "purpose": "CONTEXT", "confidence": None,
-          "reason_code": "EVALUATOR_UNAVAILABLE"}, "UNAVAILABLE", "EVALUATOR_UNAVAILABLE"),
+          "reason_code": "EVALUATOR_UNAVAILABLE", "hypothesis_target": "neutral",
+          "evidence_role": "CONTEXT"}, "UNAVAILABLE", "EVALUATOR_UNAVAILABLE"),
         ({"relation": "UNASSESSED", "purpose": "CONTEXT", "confidence": None,
-          "reason_code": "INSUFFICIENT_CONTENT"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
+          "reason_code": "INSUFFICIENT_CONTENT", "hypothesis_target": "neutral",
+          "evidence_role": "CONTEXT"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
     ],
 )
 @pytest.mark.asyncio
@@ -1866,7 +1895,14 @@ async def test_submit_batch_and_analysis_give_one_next_step_while_evidence_is_pe
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
     positives = CORPUS["semantic_controls"]["positive"]
-    mission, _revision, held = await _market_with(repository, store, workspace, positives[:2], CONTROL_KEYWORDS)
+    mission, _revision, held = await _market_with(
+        repository,
+        store,
+        workspace,
+        positives[:2],
+        CONTROL_KEYWORDS,
+        outcomes=[("youtube", "youtube", "HEALTHY", 2)],
+    )
     assert len(held) >= 2, "the regression needs evidence still pending after the submission"
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
     first = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id), limit=1))
@@ -1879,11 +1915,13 @@ async def test_submit_batch_and_analysis_give_one_next_step_while_evidence_is_pe
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
     assert recorded["status"] == "RECORDED"
-    assert recorded["next_step"] == batch["next_step"] == analysis["next_step"], (
+    assert recorded["next_step"] == batch["next_step"] == analysis["qualification"]["next_step"], (
         "consecutive tool answers must not give conflicting instructions"
     )
-    assert recorded["qualification_status"] == batch["status"] == analysis["analysis_status"] == status
+    assert recorded["qualification_status"] == batch["status"] == status
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
     assert (recorded["qualification_reason_code"] == batch["reason_code"]
             == analysis["qualification"]["reason_code"] == reason_code)
     assert bool(batch["evidence"]) is (reason_code == "QUALIFICATION_INCOMPLETE")
-    assert analysis["opportunity_index_applies"] is False and analysis["market_opportunities"] == []
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis

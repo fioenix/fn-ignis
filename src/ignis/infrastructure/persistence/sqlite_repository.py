@@ -1184,6 +1184,8 @@ class SqliteTrendRepository(ITrendRepository):
                 ),
                 wording TEXT NOT NULL,
                 inference_method TEXT,
+                metric_denominator TEXT,
+                metric_timeframe TEXT,
                 confidence REAL,
                 limitations TEXT NOT NULL DEFAULT '[]',
                 change_conditions TEXT NOT NULL DEFAULT '[]',
@@ -1195,6 +1197,9 @@ class SqliteTrendRepository(ITrendRepository):
                 CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
                 CHECK (claim_type NOT IN ('MEASUREMENT', 'INFERENCE', 'RECOMMENDATION')
                        OR (inference_method IS NOT NULL AND trim(inference_method) <> '')),
+                CHECK (claim_type <> 'MEASUREMENT' OR status <> 'PERMITTED'
+                       OR ((metric_denominator IS NOT NULL AND trim(metric_denominator) <> '')
+                           AND (metric_timeframe IS NOT NULL AND trim(metric_timeframe) <> ''))),
                 CHECK (claim_type NOT IN ('INFERENCE', 'RECOMMENDATION')
                        OR (limitations <> '[]' AND change_conditions <> '[]'))
             );
@@ -1446,6 +1451,8 @@ class SqliteTrendRepository(ITrendRepository):
             claim_type=ClaimType(row["claim_type"]),
             wording=row["wording"],
             inference_method=row["inference_method"],
+            metric_denominator=row["metric_denominator"],
+            metric_timeframe=row["metric_timeframe"],
             confidence=row["confidence"],
             limitations=tuple(json.loads(row["limitations"] or "[]")),
             change_conditions=tuple(json.loads(row["change_conditions"] or "[]")),
@@ -1500,9 +1507,10 @@ class SqliteTrendRepository(ITrendRepository):
                     inserted = conn.execute(
                         "INSERT INTO mission_claims"
                         " (id, mission_id, brief_revision_id, frame_digest, client_claim_key,"
-                        " claim_type, wording, inference_method, confidence, limitations,"
+                        " claim_type, wording, inference_method, metric_denominator,"
+                        " metric_timeframe, confidence, limitations,"
                         " change_conditions, status, withheld_reasons, created_by, created_at)"
-                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                         " ON CONFLICT (mission_id, frame_digest, client_claim_key) DO NOTHING",
                         (
                             str(claim.claim_id),
@@ -1513,6 +1521,8 @@ class SqliteTrendRepository(ITrendRepository):
                             claim.claim_type.value,
                             claim.wording,
                             claim.inference_method,
+                            claim.metric_denominator,
+                            claim.metric_timeframe,
                             claim.confidence,
                             json.dumps(list(claim.limitations), ensure_ascii=False),
                             json.dumps(list(claim.change_conditions), ensure_ascii=False),
@@ -3583,7 +3593,7 @@ class SqliteTrendRepository(ITrendRepository):
                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [
                         (
-                            str(uuid4()),
+                            str(o.outcome_id),
                             str(o.run_id),
                             o.platform,
                             o.connector_surface,
@@ -3630,7 +3640,7 @@ class SqliteTrendRepository(ITrendRepository):
             conn = self._get_connection()
             try:
                 rows = conn.execute(
-                    "SELECT o.run_id, o.platform, o.connector_surface, o.status,"
+                    "SELECT o.id, o.run_id, o.platform, o.connector_surface, o.status,"
                     " o.signals_collected, o.query_fingerprint, o.completed_at,"
                     " o.queried_keywords, o.queried_window, o.scope_attestation, o.note,"
                     " o.collection_plan_digest"
@@ -3644,6 +3654,7 @@ class SqliteTrendRepository(ITrendRepository):
                 ).fetchall()
                 return [
                     MissionProbeOutcome(
+                        outcome_id=UUID(r["id"]),
                         run_id=UUID(r["run_id"]),
                         platform=r["platform"],
                         connector_surface=r["connector_surface"],

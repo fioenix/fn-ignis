@@ -480,11 +480,17 @@ from datetime import datetime, timezone  # noqa: E402
 from uuid import uuid4  # noqa: E402
 
 from ignis.domain.research_workspace import (  # noqa: E402
+    EvidenceDirection,
+    EvidenceQualification,
     EvidencePurpose,
     EvidenceSufficiency,
+    MarketBriefRevision,
     MissionProbeOutcome,
+    QualificationReason,
+    QualificationRelation,
     QualificationStatus,
     QualifiedObservation,
+    assess_strategic_sufficiency,
     assess_topic_sufficiency,
     compute_query_fingerprint,
 )
@@ -506,12 +512,13 @@ GEO, TIMEFRAME = "VN", "7d"
 
 
 def _probe(surface, status="EMPTY_NO_DATA", platform=None, queried=(TOPIC,), fingerprint=None, count=0,
-           window=TIMEFRAME):
+           window=TIMEFRAME, scope=None):
     """One surface outcome naming the exact keywords and window it attested to having queried."""
     return MissionProbeOutcome(
         run_id=RUN, platform=platform or surface, connector_surface=surface, status=status,
         signals_collected=count, queried_keywords=tuple(queried), queried_window=window,
         query_fingerprint=fingerprint or compute_query_fingerprint(queried, GEO, window),
+        scope_attestation=scope or {"geo": GEO, "timeframe": window},
         completed_at=datetime(2026, 9, 27, tzinfo=timezone.utc),
     )
 
@@ -667,6 +674,226 @@ def test_every_withheld_state_carries_a_reason():
         assert result.reason, result.state
 
 
+def _strategic_manifest(required=("google", "youtube")):
+    return MissionManifest(
+        mission_id=uuid4(),
+        outcome="Decide whether to enter the market",
+        decision_context="A founder must choose whether to fund an MVP",
+        required_channels=required,
+        optional_channels=(),
+        authority_boundary=AuthorityBoundary(
+            public_http=True,
+            official_api=True,
+            browser_session=False,
+            paid_quota=False,
+        ),
+        quota_budget={},
+        output_type=MissionOutputType.MARKET_ANALYSIS,
+        stop_conditions=("one frame completed",),
+        analysis_policy="evidence-gated-v1",
+        retention_policy="test-only",
+        created_by="unit-test",
+        confirmed_at=datetime(2026, 9, 30, tzinfo=timezone.utc),
+    )
+
+
+def _strategic_brief(mission_id):
+    return MarketBriefRevision(
+        mission_id=mission_id,
+        confirmed_by="requester",
+        decision="Should the founder fund the MVP?",
+        target_user="Independent retailers",
+        problem="Manual stock decisions create lost sales",
+        geo="VN",
+        timeframe="7d",
+        hypothesis="Retailers will adopt an assistant that reduces stockouts",
+        falsifiers=("Retailers report no material stockout cost",),
+        alternative_hypotheses=(
+            "Retailers need process redesign rather than software",
+            "Retailers prefer outsourced inventory services",
+        ),
+        null_hypothesis="Stockout assistance does not change retailer decisions",
+        kill_criteria=("No repeated decision-relevant stockout pain appears",),
+        revision_rule="Reframe when contradiction is at least as strong as support",
+    )
+
+
+def _strategic_judgment(mission_id, relation, role, target="core", purpose="DEMAND",
+                        observation_id=None):
+    return EvidenceQualification(
+        mission_id=mission_id,
+        observation_id=observation_id or uuid4(),
+        frame_fingerprint="f" * 64,
+        relation=relation,
+        purpose=EvidencePurpose(purpose),
+        confidence=0.85,
+        reason_code=QualificationReason.DIRECT_TO_FRAME,
+        judged_by="unit-test",
+        hypothesis_target=target,
+        evidence_role=role,
+        evidence_contract_version=2,
+    )
+
+
+def _strategic_decision(*, statuses=None, contradiction=True, submitted="c" * 64,
+                        metrics=(), assessment_state=QualificationStatus.READY):
+    manifest = _strategic_manifest()
+    statuses = statuses or {"google": "HEALTHY", "youtube": "HEALTHY"}
+    outcomes = [
+        _probe(surface, status=status, count=1 if status == "HEALTHY" else 0)
+        for surface, status in statuses.items()
+    ]
+    qualifications = [
+        _strategic_judgment(
+            manifest.mission_id,
+            QualificationRelation.QUALIFIED_SUPPORT,
+            EvidenceDirection.SUPPORT,
+            observation_id=(demand_id := uuid4()),
+        ),
+        _strategic_judgment(
+            manifest.mission_id,
+            QualificationRelation.QUALIFIED_SUPPORT,
+            EvidenceDirection.SUPPORT,
+            purpose="SUPPLY",
+            observation_id=(supply_one_id := uuid4()),
+        ),
+        _strategic_judgment(
+            manifest.mission_id,
+            QualificationRelation.QUALIFIED_SUPPORT,
+            EvidenceDirection.SUPPORT,
+            purpose="SUPPLY",
+            observation_id=(supply_two_id := uuid4()),
+        ),
+    ]
+    if contradiction:
+        qualifications.extend(
+            [
+                _strategic_judgment(
+                    manifest.mission_id,
+                    QualificationRelation.QUALIFIED_CONTRADICTION,
+                    EvidenceDirection.CONTRADICTION,
+                    target=target,
+                )
+                for target in ("alternative:1", "alternative:2", "null")
+            ]
+        )
+    observations = [
+        _market_signal("Demand evidence", observation_id=demand_id),
+        _market_signal("Supply evidence one", observation_id=supply_one_id),
+        _market_signal("Supply evidence two", observation_id=supply_two_id),
+    ]
+    for observation in observations:
+        observation.source_id = uuid4()
+    return assess_strategic_sufficiency(
+        manifest=manifest,
+        brief=_strategic_brief(manifest.mission_id),
+        qualifications=qualifications,
+        probe_outcomes=outcomes,
+        assessment_state=assessment_state,
+        current_frame_digest="c" * 64,
+        submitted_frame_digest=submitted,
+        required_metrics=metrics,
+        observations=observations,
+        query_topics=(TOPIC,),
+    )
+
+
+def test_strategic_sufficiency_requires_measured_channels_and_counterevidence():
+    ready = _strategic_decision()
+    blocked = _strategic_decision(statuses={"google": "HEALTHY", "youtube": "AUTH_REQUIRED"})
+    confirmatory_only = _strategic_decision(contradiction=False)
+
+    assert ready.ready is True and ready.gap_report is None
+    assert "REQUIRED_CHANNEL_NOT_MEASURED:youtube:AUTH_REQUIRED" in (
+        blocked.gap_report.failed_gates
+    )
+    assert blocked.gap_report.required_authority == "authorized access for youtube"
+    assert "MISSING_CONTRADICTION_COVERAGE" in confirmatory_only.gap_report.failed_gates
+
+
+def test_strategic_sufficiency_rejects_stale_frames_and_incomplete_assessment():
+    stale = _strategic_decision(submitted="s" * 64)
+    pending = _strategic_decision(
+        assessment_state=QualificationStatus.QUALIFICATION_REQUIRED
+    )
+
+    assert stale.ready is False
+    assert "STALE_EVIDENCE_FRAME" in stale.gap_report.failed_gates
+    assert "ASSESSMENT_INCOMPLETE" in pending.gap_report.failed_gates
+
+
+def test_missing_metric_basis_yields_a_typed_gap_report_and_no_placeholder_verdicts():
+    decision = _strategic_decision(
+        metrics=({"name": "conversion_rate", "denominator": None, "timeframe": None},)
+    )
+    payload = decision.to_payload()
+
+    assert payload["status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_METRIC_DENOMINATOR:conversion_rate" in payload["gap_report"]["failed_gates"]
+    assert "MISSING_METRIC_TIMEFRAME:conversion_rate" in payload["gap_report"]["failed_gates"]
+    assert payload["gap_report"]["withheld_outputs"] == [
+        "opportunity_index",
+        "demand_gap",
+        "whitespace",
+        "saturation",
+        "commercial_recommendations",
+    ]
+    assert not any(name in payload for name in payload["gap_report"]["withheld_outputs"])
+
+
+def test_strategic_measured_absence_requires_the_exact_query_scope():
+    manifest = _strategic_manifest(required=("google", "youtube", "reels"))
+    brief = _strategic_brief(manifest.mission_id)
+    demand_id = uuid4()
+    demand = _market_signal("Demand evidence", observation_id=demand_id)
+    demand.source_id = uuid4()
+    qualifications = [
+        _strategic_judgment(
+            manifest.mission_id,
+            QualificationRelation.QUALIFIED_SUPPORT,
+            EvidenceDirection.SUPPORT,
+            observation_id=demand_id,
+        ),
+        *[
+            _strategic_judgment(
+                manifest.mission_id,
+                QualificationRelation.QUALIFIED_CONTRADICTION,
+                EvidenceDirection.CONTRADICTION,
+                target=target,
+            )
+            for target in ("alternative:1", "alternative:2", "null")
+        ],
+    ]
+    exact = [
+        _probe("google", status="HEALTHY", platform="google", count=1),
+        _probe("youtube"),
+        _probe("reels"),
+    ]
+    wrong_query = [
+        exact[0],
+        exact[1],
+        _probe("reels", queried=("some other market",)),
+    ]
+
+    def decide(outcomes):
+        return assess_strategic_sufficiency(
+            manifest=manifest,
+            brief=brief,
+            qualifications=qualifications,
+            probe_outcomes=outcomes,
+            assessment_state=QualificationStatus.READY,
+            current_frame_digest="c" * 64,
+            submitted_frame_digest="c" * 64,
+            observations=[demand],
+            query_topics=(TOPIC,),
+        )
+
+    assert decide(exact).ready is True
+    refused = decide(wrong_query)
+    assert refused.ready is False
+    assert "MISSING_SUPPLY_EVIDENCE" in refused.gap_report.failed_gates
+
+
 # --- User Story 3: an Attention handoff candidate must be qualified, never a fallback -----------
 #
 # Attention ranks what is being looked at; a ranked list is not evidence that any item clears a
@@ -676,7 +903,6 @@ def test_every_withheld_state_carries_a_reason():
 from ignis.domain.entities import ResearchMission, TrendSignal  # noqa: E402
 from ignis.domain.harness_models import QualityScorecard  # noqa: E402
 from ignis.domain.research_workspace import (  # noqa: E402
-    EvidenceQualification,
     HandoffStatus,
     QualificationContext,
     select_handoff_candidates,

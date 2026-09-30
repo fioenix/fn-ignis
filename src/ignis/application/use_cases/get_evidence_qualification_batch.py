@@ -69,6 +69,11 @@ def market_frame_payload(brief: Any) -> Dict[str, Any]:
         "problem": brief.problem,
         "hypothesis": brief.hypothesis,
         "falsifiers": list(brief.falsifiers),
+        "alternative_hypotheses": list(brief.alternative_hypotheses or ()),
+        "null_hypothesis": brief.null_hypothesis,
+        "kill_criteria": list(brief.kill_criteria or ()),
+        "revision_rule": brief.revision_rule,
+        "evidence_contract_version": brief.evidence_contract_version,
         "geo": brief.geo,
         "timeframe": brief.timeframe,
     }
@@ -154,6 +159,12 @@ class GetEvidenceQualificationBatchUseCase:
 
         signals = await self._repo.get_mission_signals(mission.id)
         qualifications = await self._store.list_evidence_qualifications(mission.id)
+        outcomes = await self._store.get_latest_completed_probe_outcomes(mission.id)
+        plan_digests = {
+            outcome.collection_plan_digest
+            for outcome in outcomes
+            if outcome.collection_plan_digest is not None
+        }
         progress = QualificationProgress.from_evidence(
             [s.observation_id for s in signals if s.observation_id], qualifications
         )
@@ -166,6 +177,9 @@ class GetEvidenceQualificationBatchUseCase:
             **base,
             "surface": surface.value,
             "frame_fingerprint": frame_fingerprint,
+            "collection_plan_digest": (
+                next(iter(plan_digests)) if len(plan_digests) == 1 else None
+            ),
             "progress": progress.to_payload(),
         }
         # One authority decides the state before any paging, the same one the submit response and
@@ -198,6 +212,19 @@ class GetEvidenceQualificationBatchUseCase:
             "recommended_judgment": {
                 "relation": [r.value for r in QualificationRelation],
                 "purpose": [p.value for p in EvidencePurpose],
+                "evidence_role": ["SUPPORT", "CONTRADICTION", "CONTEXT"],
+                "hypothesis_target": (
+                    ["core"]
+                    + [
+                        f"alternative:{index}"
+                        for index, _value in enumerate(
+                            brief.alternative_hypotheses or (), start=1
+                        )
+                    ]
+                    + ["null", "neutral"]
+                    if brief is not None
+                    else ["attention_question", "neutral"]
+                ),
             },
         }
 

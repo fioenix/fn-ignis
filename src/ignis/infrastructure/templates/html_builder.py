@@ -249,33 +249,43 @@ class HtmlArtifactBuilder(IArtifactBuilder):
         customer_inquiries: Optional[List[Dict[str, Any]]] = None,
         search_suggestions: Optional[List[Dict[str, Any]]] = None,
         macro_trends: Optional[List[Dict[str, Any]]] = None,
+        analysis_contract: Optional[Dict[str, Any]] = None,
+        scorecard_override: Optional[QualityScorecard] = None,
+        market_brief_override: Optional[Dict[str, Any]] = None,
     ) -> str:
         template = self._env.get_template("mission_report.html")
+        if analysis_contract is not None:
+            analysis_contract = dict(analysis_contract)
+            analysis_contract.setdefault(
+                "template_revision", "mission-report/evidence-grounded-v1"
+            )
         
         # If report is omitted, generate default scorecard baseline
-        scorecard = report.scorecard if report else QualityScorecard(
+        scorecard = scorecard_override or (report.scorecard if report else QualityScorecard(
             coverage_score=round((len(platform_breakdown) / 5.0) * 100.0, 1),
             language_precision=90.0,
             data_freshness_score=95.0,
             creator_diversity_score=85.0,
             overall_confidence=82.5,
-        )
+        ))
         channel_summaries: List[ChannelDataSummary] = list(report.channel_summaries) if report else []
         maturity = report.maturity_stage if report else TrendMaturityStage.EMERGING
         opportunities = report.market_opportunities if report else []
-        insights = _normalize_insights(report.strategic_insights if report else [
+        insights = _normalize_insights(report.strategic_insights if report else ([] if analysis_contract else [
             "Multi-platform verified market signals collected.",
             "Analyzing search demand velocity and content engagement distribution in target market."
-        ])
+        ]))
         # Normalised the same way insights are, so a dossier stored before takeaways carried
         # their evidence still renders instead of printing a dataclass into the page.
-        actionables = _normalize_insights(report.actionable_takeaways if report else [
+        actionables = _normalize_insights(report.actionable_takeaways if report else ([] if analysis_contract else [
             "Capitalize on high-demand, low-supply content white spaces.",
             "Establish recurring ingress monitoring to capture emerging trend momentum."
-        ])
+        ]))
 
         qualification = getattr(report, "qualification", None) if report else None
-        surface = getattr(report, "surface", None) if report else None
+        surface = getattr(report, "surface", None) if report else (
+            "MARKET" if analysis_contract else None
+        )
         return template.render(
             mission=mission,
             signals=signals,
@@ -298,10 +308,13 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             channel_summaries=channel_summaries,
             actionable_takeaways=actionables,
             surface=surface,
-            market_brief=getattr(report, "market_brief", None) if report else None,
+            market_brief=(
+                getattr(report, "market_brief", None) if report else market_brief_override
+            ),
             customer_inquiries=customer_inquiries or [],
             search_suggestions=search_suggestions or [],
             macro_trends=macro_trends or [],
+            analysis_contract=analysis_contract,
+            channel_outcomes=(analysis_contract or {}).get("channel_outcomes", []),
             generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         )
-

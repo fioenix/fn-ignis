@@ -747,7 +747,16 @@
           "The probes find only generic AI content and no repeated retailer operating pain or adoption intent.",
           "Affordable existing products already satisfy the operating job with strong positive user evidence.",
           "Available evidence shows retailers reject sharing operating data or reject paying for this outcome."
-        ]
+        ],
+        "alternative_hypotheses": [
+          "Retailers need operating-process redesign rather than an AI copilot.",
+          "Retailers prefer human bookkeeping and agency services over software."
+        ],
+        "null_hypothesis": "The observed operating pain does not create material adoption or payment intent.",
+        "kill_criteria": [
+          "No repeated decision-relevant pain or adoption intent appears in qualified evidence."
+        ],
+        "revision_rule": "Reframe or stop when contradiction is at least as strong as support."
       },
       "channels": [
         {
@@ -1708,7 +1717,16 @@
           "The evidence is mostly creator tutorials or affiliate supply with no retailer questions or adoption intent.",
           "Observed demand is confined to one-off website creation and does not extend to ongoing shop operations.",
           "The selected topic has no localized or cross-platform support beyond the Attention cluster."
-        ]
+        ],
+        "alternative_hypotheses": [
+          "Website interest is a one-off content trend rather than an operating-workflow entry point.",
+          "Retailers prefer agencies to build isolated sales assets instead of adopting software."
+        ],
+        "null_hypothesis": "Interest in AI-built websites has no relationship to ongoing operations-copilot adoption.",
+        "kill_criteria": [
+          "Qualified evidence shows only creator supply and no retailer operating intent."
+        ],
+        "revision_rule": "Reframe or stop when contradiction is at least as strong as support."
       },
       "channels": [
         {

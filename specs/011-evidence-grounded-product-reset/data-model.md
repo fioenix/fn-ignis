@@ -164,6 +164,8 @@ One persisted analytical statement permitted for one exact evidence frame.
 | `claim_type` | `OBSERVATION`, `MEASUREMENT`, `INFERENCE`, `ASSUMPTION`, `RECOMMENDATION`, or `UNKNOWN` | Required enum |
 | `wording` | Exact text approved for rendering | Required bounded text |
 | `inference_method` | Bounded method identifier and version | Required for measurement/inference/recommendation |
+| `metric_denominator` | Population or event basis for a calculated metric | Required for a permitted measurement |
+| `metric_timeframe` | Time window represented by a calculated metric | Required for a permitted measurement |
 | `confidence` | Claim-level uncertainty | Decimal 0–1 or absent for assumption/unknown |
 | `limitations` | Constraints on use | Required list; may be empty only for direct observation |
 | `change_conditions` | Evidence or threshold that could change the claim | Required for inference/recommendation |

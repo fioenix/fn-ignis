@@ -5,11 +5,17 @@ from collections import defaultdict
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
+from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
 from ignis.domain.research_workspace import (
+    ClaimStatus,
     EvidenceRole,
+    GapReport,
+    InvalidMissionClaimError,
     MissionLineage,
     QualificationContext,
+    QualificationRelation,
     ResearchSurface,
+    assess_strategic_sufficiency,
     resolve_surface,
 )
 
@@ -41,8 +47,13 @@ class GetMissionAnalysisUseCase:
     Condenses datasets, extracts top signals, and strips redundant metadata to prevent LLM context bloat.
     """
 
-    def __init__(self, repository: ITrendRepository):
+    def __init__(
+        self,
+        repository: ITrendRepository,
+        store: Optional[IResearchWorkspaceStore] = None,
+    ):
         self._repo = repository
+        self._store = store
 
     async def execute(
         self,
@@ -127,7 +138,7 @@ class GetMissionAnalysisUseCase:
         # Top 5 most active creators
         top_channels = sorted(channel_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
-        return {
+        result = {
             "mission": {
                 "id": str(mission.id),
                 "title": mission.title,
@@ -150,4 +161,196 @@ class GetMissionAnalysisUseCase:
             },
             "top_signals": compact_signals,
         }
+        if surface is ResearchSurface.MARKET and self._store is not None:
+            result.update(await self._market_contract(mission))
+        return result
 
+    async def _market_contract(self, mission) -> Dict[str, Any]:
+        """Return only current-frame persisted claims, or a typed Gap Report."""
+        manifest = await self._store.get_mission_manifest(mission.id)
+        brief = await self._store.get_brief_revision_for_mission(mission.id)
+        signals = await self._repo.get_mission_signals(mission.id)
+        qualifications = await self._store.list_evidence_qualifications(mission.id)
+        outcomes = await self._store.get_latest_completed_probe_outcomes(mission.id)
+        if manifest is None or brief is None:
+            return self._gap_payload(
+                None,
+                self._gap(
+                    ("INCOMPLETE_MISSION_FRAME",),
+                    ("Mission Manifest and confirmed Market Brief",),
+                    "Confirm a complete Market mission frame.",
+                ),
+                (),
+            )
+        try:
+            frame = await load_current_evidence_frame(self._repo, self._store, mission, manifest)
+        except InvalidMissionClaimError as exc:
+            return self._gap_payload(
+                None,
+                self._gap(
+                    ("INCOMPLETE_EVIDENCE_FRAME",),
+                    (str(exc),),
+                    "Complete one bounded collection frame.",
+                ),
+                (),
+            )
+        context = QualificationContext.build(
+            [signal.observation_id for signal in signals if signal.observation_id],
+            qualifications,
+            outcomes,
+            geo=mission.geo_code,
+            timeframe=mission.timeframe,
+        )
+        qualification_payload = {
+            **context.progress.to_payload(),
+            "status": context.decision.status.value,
+            "reason_code": context.decision.reason_code,
+            "next_step": context.decision.next_step,
+        }
+        sufficiency = assess_strategic_sufficiency(
+            manifest=manifest,
+            brief=brief,
+            qualifications=qualifications,
+            probe_outcomes=outcomes,
+            assessment_state=context.assessment_state,
+            current_frame_digest=frame.frame_digest,
+            submitted_frame_digest=frame.frame_digest,
+            observations=signals,
+            query_topics=mission.keywords,
+        )
+        await self._store.supersede_mission_claims(mission.id, frame.frame_digest)
+        current = [
+            claim
+            for claim in await self._store.list_mission_claims(mission.id)
+            if claim.frame_digest == frame.frame_digest
+        ]
+        permitted = [claim for claim in current if claim.status is ClaimStatus.PERMITTED]
+        withheld = [claim for claim in current if claim.status is ClaimStatus.WITHHELD]
+        if not sufficiency.ready:
+            return self._gap_payload(
+                frame,
+                sufficiency.gap_report,
+                withheld,
+                qualification=qualification_payload,
+            )
+        if not permitted:
+            reasons = tuple(
+                dict.fromkeys(reason for claim in withheld for reason in claim.withheld_reasons)
+            ) or ("NO_PERMITTED_CLAIMS",)
+            return self._gap_payload(
+                frame,
+                GapReport(
+                    withheld_outputs=self._forbidden_outputs(),
+                    failed_gates=reasons,
+                    missing_evidence=("current-frame permitted Claim Ledger entries",),
+                    attempted_probes=tuple(self._outcome_payload(item) for item in outcomes),
+                    safe_partial_conclusions=(),
+                    next_best_probe=(
+                        "Record evidence-bound candidate claims, including any required metric "
+                        "denominator and timeframe."
+                    ),
+                    required_authority=None,
+                    estimated_cost=None,
+                ),
+                withheld,
+                qualification=qualification_payload,
+            )
+
+        grouped: Dict[str, list] = defaultdict(list)
+        for claim in permitted:
+            grouped[claim.claim_type.value].append(claim.to_payload())
+        contradictions = [
+            {
+                "observation_id": str(item.observation_id),
+                "hypothesis_target": item.hypothesis_target,
+                "purpose": item.purpose.value,
+                "confidence": item.confidence,
+            }
+            for item in qualifications
+            if item.relation is QualificationRelation.QUALIFIED_CONTRADICTION
+        ]
+        return {
+            "analysis_status": "READY",
+            "evidence_frame": frame.to_payload(),
+            "manifest_digest": manifest.manifest_digest,
+            "brief_revision_id": str(brief.brief_revision_id),
+            "collection_plan_digest": frame.collection_plan_digest,
+            "channel_outcomes": [self._outcome_payload(item) for item in outcomes],
+            "qualification": qualification_payload,
+            "claim_ledger": dict(grouped),
+            "contradictory_evidence": contradictions,
+            "material_limitations": list(
+                dict.fromkeys(
+                    limitation for claim in permitted for limitation in claim.limitations
+                )
+            ),
+            "decision_conditions": list(
+                dict.fromkeys(
+                    condition for claim in permitted for condition in claim.change_conditions
+                )
+            ),
+            "withheld_claim_count": len(withheld),
+            "withheld_reasons": list(
+                dict.fromkeys(reason for claim in withheld for reason in claim.withheld_reasons)
+            ),
+            "retention_policy": manifest.retention_policy,
+            "redaction_policy": "credentials-and-personal-data-redacted",
+            "platform_policy": "authorized-surface-terms-apply",
+            "reuse_limit": (
+                "Another mission may use these records only after it explicitly associates and "
+                "requalifies them against its own current frame."
+            ),
+        }
+
+    @classmethod
+    def _gap_payload(
+        cls, frame, gap: GapReport, claims, qualification: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        payload = {
+            "analysis_status": "INSUFFICIENT_EVIDENCE",
+            **({"evidence_frame": frame.to_payload()} if frame is not None else {}),
+            "gap_report": gap.to_payload(),
+            "withheld_claim_count": len(claims),
+            "withheld_reasons": list(
+                dict.fromkeys(reason for claim in claims for reason in claim.withheld_reasons)
+            ),
+            "next_step": gap.next_best_probe,
+        }
+        if qualification is not None:
+            payload["qualification"] = qualification
+        return payload
+
+    @classmethod
+    def _gap(cls, gates, missing, next_probe) -> GapReport:
+        return GapReport(
+            withheld_outputs=cls._forbidden_outputs(),
+            failed_gates=gates,
+            missing_evidence=missing,
+            attempted_probes=(),
+            safe_partial_conclusions=(),
+            next_best_probe=next_probe,
+            required_authority=None,
+            estimated_cost=None,
+        )
+
+    @staticmethod
+    def _forbidden_outputs():
+        return (
+            "opportunity_index",
+            "demand_gap",
+            "whitespace",
+            "saturation",
+            "commercial_recommendations",
+        )
+
+    @staticmethod
+    def _outcome_payload(outcome) -> Dict[str, Any]:
+        return {
+            "outcome_id": str(outcome.outcome_id),
+            "connector_surface": outcome.connector_surface,
+            "platform": outcome.platform,
+            "status": outcome.status.value,
+            "signals_collected": outcome.signals_collected,
+            "query_fingerprint": outcome.query_fingerprint,
+            "queried_window": outcome.queried_window,
+        }

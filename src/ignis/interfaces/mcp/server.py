@@ -32,6 +32,8 @@ from ignis.application.use_cases.get_mission_analysis import (
     GetMissionAnalysisUseCase,
     load_qualification_context,
 )
+from ignis.application.use_cases.get_mission_claims import GetMissionClaimsUseCase
+from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaimsUseCase
 from ignis.application.use_cases.submit_evidence_qualifications import (
     SubmitEvidenceQualificationsUseCase,
 )
@@ -261,11 +263,19 @@ def _init_components():
         store=workspace_store,
         confirm_use_case=confirm_market_brief_use_case,
     )
-    get_mission_analysis_use_case = GetMissionAnalysisUseCase(repository=repository)
+    get_mission_analysis_use_case = GetMissionAnalysisUseCase(
+        repository=repository, store=workspace_store
+    )
     get_evidence_qualification_batch_use_case = GetEvidenceQualificationBatchUseCase(
         repository=repository, store=workspace_store
     )
     submit_evidence_qualifications_use_case = SubmitEvidenceQualificationsUseCase(
+        repository=repository, store=workspace_store
+    )
+    submit_mission_claims_use_case = SubmitMissionClaimsUseCase(
+        repository=repository, store=workspace_store
+    )
+    get_mission_claims_use_case = GetMissionClaimsUseCase(
         repository=repository, store=workspace_store
     )
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
@@ -307,6 +317,8 @@ def _init_components():
         "get_mission_analysis_use_case": get_mission_analysis_use_case,
         "get_evidence_qualification_batch_use_case": get_evidence_qualification_batch_use_case,
         "submit_evidence_qualifications_use_case": submit_evidence_qualifications_use_case,
+        "submit_mission_claims_use_case": submit_mission_claims_use_case,
+        "get_mission_claims_use_case": get_mission_claims_use_case,
         "top_clusters_use_case": top_clusters_use_case,
         "ingest_use_case": ingest_use_case,
         "cluster_use_case": cluster_use_case,
@@ -475,6 +487,34 @@ async def _refuse_unauthorized_market(comp: Dict[str, Any], mission: Any, operat
     if brief is None:
         return None, _market_brief_blocked(mission, operation)
     return brief, None
+
+
+def _missing_market_analysis_contract() -> Dict[str, Any]:
+    """Fail closed when a Market boundary cannot read the persisted verdict contract."""
+    return {
+        "analysis_status": "INSUFFICIENT_EVIDENCE",
+        "gap_report": {
+            "withheld_outputs": [
+                "opportunity_index",
+                "demand_gap",
+                "whitespace",
+                "saturation",
+                "commercial_recommendations",
+            ],
+            "failed_gates": ["PERSISTED_ANALYSIS_CONTRACT_UNAVAILABLE"],
+            "missing_evidence": ["current-frame persisted sufficiency and Claim Ledger"],
+            "attempted_probes": [],
+            "safe_partial_conclusions": [],
+            "next_best_probe": (
+                "Restore the mission evidence frame and read persisted sufficiency before "
+                "requesting analysis again."
+            ),
+            "required_authority": None,
+            "estimated_cost": None,
+        },
+        "withheld_claim_count": 0,
+        "withheld_reasons": ["PERSISTED_ANALYSIS_CONTRACT_UNAVAILABLE"],
+    }
 
 
 def _serialize_opportunity(opp: Any, include_supporting: int = 0) -> Dict[str, Any]:
@@ -815,18 +855,37 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
     tf_days = timeframe_to_days(mission.timeframe)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
     
-    auth_status, connector_health = await _collect_channel_context(comp)
-    report = comp["strategic_reasoner"].analyze_mission(
-        mission=mission,
-        signals=signals,
-        clusters=clusters,
-        scorecard=scorecard,
-        auth_status=auth_status,
-        connector_health=connector_health,
-        market_brief=brief,
-        qualification=await _qualification_for(comp, mission, signals),
-    )
-    comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
+    analysis_contract = None
+    report = None
+    if resolve_surface(mission.surface) is ResearchSurface.MARKET:
+        candidate = await comp["get_mission_analysis_use_case"].execute(m_id)
+        analysis_contract = (
+            candidate if "analysis_status" in candidate else _missing_market_analysis_contract()
+        )
+    if analysis_contract is None:
+        auth_status, connector_health = await _collect_channel_context(comp)
+        report = comp["strategic_reasoner"].analyze_mission(
+            mission=mission,
+            signals=signals,
+            clusters=clusters,
+            scorecard=scorecard,
+            auth_status=auth_status,
+            connector_health=connector_health,
+            market_brief=brief,
+            qualification=await _qualification_for(comp, mission, signals),
+        )
+        comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
+
+    if analysis_contract is not None:
+        return json.dumps(
+            {
+                "mission_id": str(mission.id),
+                "shortcode": mission.shortcode,
+                **analysis_contract,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     return json.dumps(
         {
@@ -1394,6 +1453,10 @@ async def handle_confirm_market_brief(
     hypothesis: str,
     mission_manifest: Dict[str, Any],
     falsifiers: Optional[List[str]] = None,
+    alternative_hypotheses: Optional[List[str]] = None,
+    null_hypothesis: Optional[str] = None,
+    kill_criteria: Optional[List[str]] = None,
+    revision_rule: Optional[str] = None,
     confirmed_by: str = "",
     title: Optional[str] = None,
     keywords: Optional[List[str]] = None,
@@ -1420,6 +1483,10 @@ async def handle_confirm_market_brief(
             timeframe=timeframe,
             hypothesis=hypothesis,
             falsifiers=falsifiers or [],
+            alternative_hypotheses=alternative_hypotheses,
+            null_hypothesis=null_hypothesis,
+            kill_criteria=kill_criteria,
+            revision_rule=revision_rule,
             confirmed_by=confirmed_by,
             manifest=manifest,
             title=title,
@@ -1480,6 +1547,13 @@ async def handle_confirm_market_brief(
             "confirmed_by": revision.confirmed_by,
             "confirmed_at": revision.confirmed_at.isoformat(),
             "falsifiers": list(revision.falsifiers),
+            "hypothesis_register": {
+                "core": revision.core_hypothesis,
+                "alternatives": list(revision.alternative_hypotheses or ()),
+                "null": revision.null_hypothesis,
+                "kill_criteria": list(revision.kill_criteria or ()),
+                "revision_rule": revision.revision_rule,
+            },
             "manifest_digest": persisted_manifest.manifest_digest,
             # Read back off the stored mission, not echoed from the request: what the next
             # Agent host will find in the database is the only lineage worth reporting.
@@ -1823,6 +1897,30 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     analysis["mission"]["shortcode"] = mission.shortcode
     analysis["mission"]["display_label"] = f"[{mission.shortcode}] {mission.title}" 
 
+    if resolve_surface(mission.surface) is ResearchSurface.MARKET:
+        if "analysis_status" not in analysis:
+            analysis.update(_missing_market_analysis_contract())
+        signals = await comp["repository"].get_mission_signals(mission.id)
+        qualification = await _qualification_for(comp, mission, signals)
+        if qualification is not None:
+            for item in analysis["top_signals"]:
+                judged = qualification.judgment_of(item.get("observation_id"))
+                item["qualification_relation"] = (
+                    judged.relation.value if judged else "UNASSESSED"
+                )
+                item["qualification_reason"] = judged.reason_code.value if judged else None
+                item["hypothesis_target"] = judged.hypothesis_target if judged else None
+                item["analytical_role"] = (
+                    judged.evidence_role.value
+                    if judged and judged.evidence_role is not None
+                    else None
+                )
+        analysis["native_artifact_guideline"] = (
+            "Render only the persisted current-frame Claim Ledger. If analysis_status is "
+            "INSUFFICIENT_EVIDENCE, render the Gap Report and do not invent a verdict."
+        )
+        return json.dumps(analysis, ensure_ascii=False, indent=2)
+
     # Enrich with Scorecard & White Space discovery for in-chat Native Artifact rendering
     signals = await comp["repository"].get_mission_signals(mission.id)
     clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
@@ -1926,18 +2024,26 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
 
     
-    auth_status, connector_health = await _collect_channel_context(comp)
-    report = comp["strategic_reasoner"].analyze_mission(
-        mission=mission,
-        signals=signals,
-        clusters=clusters,
-        scorecard=scorecard,
-        auth_status=auth_status,
-        connector_health=connector_health,
-        market_brief=brief,
-        qualification=await _qualification_for(comp, mission, signals),
-    )
-    comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
+    analysis_contract = None
+    report = None
+    if resolve_surface(mission.surface) is ResearchSurface.MARKET:
+        candidate = await comp["get_mission_analysis_use_case"].execute(m_id)
+        analysis_contract = (
+            candidate if "analysis_status" in candidate else _missing_market_analysis_contract()
+        )
+    if analysis_contract is None:
+        auth_status, connector_health = await _collect_channel_context(comp)
+        report = comp["strategic_reasoner"].analyze_mission(
+            mission=mission,
+            signals=signals,
+            clusters=clusters,
+            scorecard=scorecard,
+            auth_status=auth_status,
+            connector_health=connector_health,
+            market_brief=brief,
+            qualification=await _qualification_for(comp, mission, signals),
+        )
+        comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
     
     platform_breakdown = {}
     macro_trends = []
@@ -1964,6 +2070,9 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         customer_inquiries=customer_inquiries,
         search_suggestions=[],
         macro_trends=macro_trends,
+        analysis_contract=analysis_contract,
+        scorecard_override=scorecard,
+        market_brief_override=brief,
     )
 
     # Securely save HTML report artifact to disk
@@ -1973,6 +2082,41 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
     report_path = reports_dir / report_filename
     report_path.write_text(html_content, encoding="utf-8")
     abs_path = str(report_path.resolve())
+
+    if analysis_contract is not None:
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "mission_id": str(mission.id),
+                "shortcode": mission.shortcode,
+                "display_label": f"[{mission.shortcode}] {mission.title}",
+                "title": mission.title,
+                "total_signals": len(signals),
+                "artifact_file": abs_path,
+                "file_url": f"file://{abs_path}",
+                "analysis_status": analysis_contract["analysis_status"],
+                "template_revision": "mission-report/evidence-grounded-v1",
+                **(
+                    {"gap_report": analysis_contract["gap_report"]}
+                    if analysis_contract["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+                    else {
+                        "evidence_frame": analysis_contract["evidence_frame"],
+                        "claim_ledger": analysis_contract["claim_ledger"],
+                        "contradictory_evidence": analysis_contract["contradictory_evidence"],
+                        "retention_policy": analysis_contract["retention_policy"],
+                        "redaction_policy": analysis_contract["redaction_policy"],
+                        "platform_policy": analysis_contract["platform_policy"],
+                        "reuse_limit": analysis_contract["reuse_limit"],
+                    }
+                ),
+                "note": (
+                    "The artifact renders only persisted current-frame claims, or the Gap "
+                    "Report when the evidence contract withholds a verdict."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     return json.dumps(
         {
@@ -2033,6 +2177,32 @@ async def handle_submit_mission_evidence_qualifications(
     comp = get_components()
     result = await comp["submit_evidence_qualifications_use_case"].execute(
         mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def handle_submit_mission_claims(
+    mission_id: str,
+    frame_digest: str,
+    candidates: List[Dict[str, Any]],
+    created_by: str,
+) -> str:
+    comp = get_components()
+    result = await comp["submit_mission_claims_use_case"].execute(
+        mission_id=mission_id,
+        frame_digest=frame_digest,
+        candidates=candidates,
+        created_by=created_by,
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def handle_get_mission_claims(
+    mission_id: str, include_superseded: bool = False
+) -> str:
+    comp = get_components()
+    result = await comp["get_mission_claims_use_case"].execute(
+        mission_id=mission_id, include_superseded=include_superseded
     )
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -2392,7 +2562,7 @@ async def create_attention_mission(
     )
 
 
-@mcp.tool(name="confirm_market_brief", description="Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, one question at a time, show the draft for editing, and call this only with the complete confirmed payload -- drafts and abandoned Q&A are never sent or stored. Requires decision, target_user, problem, geo, timeframe, hypothesis and at least one falsifier. Pass parent_attention_mission_id (and optionally parent_cluster_id) to record the Attention result the question came from, or previous_mission_id to revise a confirmed Brief -- a revision opens a new immutable revision and a new mission instead of editing the earlier one.")
+@mcp.tool(name="confirm_market_brief", description="Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, show the complete draft for editing, and call this only with the confirmed decision frame: core hypothesis, two alternatives, null, falsifiers, kill criteria, and revision rule. Drafts and abandoned Q&A are never sent or stored. Pass parent_attention_mission_id (and optionally parent_cluster_id) to record the Attention result the question came from, or previous_mission_id to revise a confirmed Brief -- a revision opens a new immutable revision and mission.")
 async def confirm_market_brief(
     workspace_id: str,
     decision: str,
@@ -2403,6 +2573,10 @@ async def confirm_market_brief(
     hypothesis: str,
     mission_manifest: dict,
     falsifiers: Optional[list[str]] = None,
+    alternative_hypotheses: Optional[list[str]] = None,
+    null_hypothesis: Optional[str] = None,
+    kill_criteria: Optional[list[str]] = None,
+    revision_rule: Optional[str] = None,
     confirmed_by: str = "",
     title: Optional[str] = None,
     keywords: Optional[list[str]] = None,
@@ -2423,6 +2597,10 @@ async def confirm_market_brief(
         hypothesis=hypothesis,
         mission_manifest=mission_manifest,
         falsifiers=falsifiers,
+        alternative_hypotheses=alternative_hypotheses,
+        null_hypothesis=null_hypothesis,
+        kill_criteria=kill_criteria,
+        revision_rule=revision_rule,
         confirmed_by=confirmed_by,
         title=title,
         keywords=keywords,
@@ -2471,9 +2649,26 @@ async def get_mission_evidence_qualification_batch(mission_id: str, cursor: Opti
     return await handle_get_mission_evidence_qualification_batch(mission_id=mission_id, cursor=cursor, limit=limit)
 
 
-@mcp.tool(name="submit_mission_evidence_qualifications", description="Record 1-50 typed evidence judgments for one mission, atomically: each assessment names an observation_id from the batch, a relation (QUALIFIED_SUPPORT, CONTEXT_ONLY, EXCLUDED_IRRELEVANT, UNASSESSED), a purpose (DEMAND, SUPPLY, VOC, CONTEXT), a confidence from 0.0 to 1.0 (null only for UNASSESSED), a reason_code (DIRECT_TO_FRAME, ADJACENT_ONLY, KEYWORD_ONLY, WRONG_AUDIENCE_OR_PROBLEM, FICTION_NEWS_OR_ENTERTAINMENT, INSUFFICIENT_CONTENT, EVALUATOR_UNAVAILABLE), judged_by and an optional model identifier. A stale frame, a foreign or duplicate observation, or any invalid assessment refuses the whole batch; an identical replay is idempotent and a different judgment for an already judged observation is refused. The response reports the state the write produced (qualification_status, qualification_reason_code) and a next_step from the same decision the batch read and the analysis use: the next batch while evidence is pending, reassessment under a new mission or Market Brief revision once recorded judgments make the frame terminal, or the analysis once everything is assessed. Never send a prompt, transcript or credential.")
+@mcp.tool(name="submit_mission_evidence_qualifications", description="Record 1-50 typed evidence judgments for one mission, atomically. Each assessment names an observation_id; relation (QUALIFIED_SUPPORT, QUALIFIED_CONTRADICTION, CONTEXT_ONLY, EXCLUDED_IRRELEVANT, UNASSESSED); purpose (DEMAND, SUPPLY, VOC, CONTEXT); hypothesis_target; evidence_role (SUPPORT, CONTRADICTION, CONTEXT); confidence; reason_code; judged_by; and optional model identifier. Support and contradiction use the same validation rules and require a named hypothesis target. A stale frame, foreign or duplicate observation, role mismatch, or invalid assessment refuses the whole batch; identical replay is idempotent and a changed judgment is refused. Never send a prompt, transcript, or credential.")
 async def submit_mission_evidence_qualifications(mission_id: str, frame_fingerprint: str, assessments: list[dict]) -> str:
     return await handle_submit_mission_evidence_qualifications(mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments)
+
+
+@mcp.tool(name="submit_mission_claims", description="Submit 1-50 candidate Market claims against the exact current evidence-frame digest. Each candidate names its type, exact wording, inference method where required, confidence, limitations, change conditions, and observation or measured-absence bindings with SUPPORT, CONTRADICTION, or CONTEXT roles. A MEASUREMENT candidate also carries its metric_denominator and metric_timeframe; omission withholds it. Ignis deterministically checks required channels, complete qualification, hypothesis coverage, evidence bindings, demand and supply minimums, and frame currency before persisting PERMITTED or WITHHELD candidates. A stale frame or invalid binding refuses the whole batch; identical replay is idempotent.")
+async def submit_mission_claims(mission_id: str, frame_digest: str, candidates: list[dict], created_by: str) -> str:
+    return await handle_submit_mission_claims(
+        mission_id=mission_id,
+        frame_digest=frame_digest,
+        candidates=candidates,
+        created_by=created_by,
+    )
+
+
+@mcp.tool(name="get_mission_claims", description="Read the current Market Claim Ledger and render permission for the mission's canonical evidence frame. By default stale claims are excluded; include_superseded=true returns the immutable audit history without making old claims renderable.")
+async def get_mission_claims(mission_id: str, include_superseded: bool = False) -> str:
+    return await handle_get_mission_claims(
+        mission_id=mission_id, include_superseded=include_superseded
+    )
 
 
 @mcp.tool(name="list_research_missions", description="List recent trend research missions and tracking campaigns.")

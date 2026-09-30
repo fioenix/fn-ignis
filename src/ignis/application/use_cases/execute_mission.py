@@ -6,6 +6,7 @@ from uuid import UUID
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
+from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
 from ignis.domain.entities import TrendSignal
 from ignis.domain.harness_models import ChannelHealthStatus
 from ignis.domain.value_objects import resolve_platform, resolve_timeframe
@@ -19,7 +20,6 @@ from ignis.domain.research_workspace import (
     MissionProbeOutcome,
     ResearchSurface,
     WorkspaceScopeMismatchError,
-    build_evidence_frame,
     compute_query_fingerprint,
     derive_collection_plan,
     resolve_surface,
@@ -438,90 +438,20 @@ class ExecuteMissionUseCase:
         return complete
 
     async def _build_current_evidence_frame(self, mission, manifest, collection_plan_digest):
-        brief = await self._workspace_store.get_brief_revision_for_mission(mission.id)
-        signals = await self._repo.get_mission_signals(mission.id)
-        qualifications = await self._workspace_store.list_evidence_qualifications(mission.id)
-        outcomes = await self._workspace_store.get_latest_completed_probe_outcomes(mission.id)
-        observation_records = [
-            {
-                "observation_id": str(signal.observation_id),
-                "source_id": str(signal.source_id) if signal.source_id else None,
-                "platform": (
-                    signal.platform.value
-                    if hasattr(signal.platform, "value")
-                    else str(signal.platform)
-                ),
-                "raw_title": signal.raw_title,
-                "metric_value": signal.metric_value,
-                "growth_velocity": signal.growth_velocity,
-                "source_url": signal.source_url,
-                "geo_code": (
-                    signal.geo_code.value
-                    if hasattr(signal.geo_code, "value")
-                    else str(signal.geo_code)
-                ),
-                "cluster_id": str(signal.cluster_id) if signal.cluster_id else None,
-                "identity_source": signal.identity_source,
-                "time_provenance": signal.time_provenance,
-                "metadata": dict(signal.metadata or {}),
-                "captured_at": signal.captured_at,
-                "published_at": signal.published_at,
-            }
-            for signal in signals
-        ]
-        qualification_records = [
-            {
-                "mission_id": str(item.mission_id),
-                "observation_id": str(item.observation_id),
-                "frame_fingerprint": item.frame_fingerprint,
-                "brief_revision_id": (
-                    str(item.brief_revision_id) if item.brief_revision_id else None
-                ),
-                "relation": item.relation.value,
-                "purpose": item.purpose.value,
-                "confidence": item.confidence,
-                "reason_code": item.reason_code.value,
-                "judged_by": item.judged_by,
-                "model": item.model,
-                "created_at": item.created_at,
-                "hypothesis_target": item.hypothesis_target,
-                "evidence_role": item.evidence_role.value if item.evidence_role else None,
-                "evidence_contract_version": item.evidence_contract_version,
-            }
-            for item in qualifications
-        ]
-        outcome_records = [
-            {
-                "run_id": str(item.run_id),
-                "platform": item.platform,
-                "connector_surface": item.connector_surface,
-                "status": item.status.value,
-                "signals_collected": item.signals_collected,
-                "queried_keywords": list(item.queried_keywords),
-                "queried_window": item.queried_window,
-                "query_fingerprint": item.query_fingerprint,
-                "completed_at": item.completed_at,
-                "scope_attestation": item.scope_attestation,
-                "note": item.note,
-                "collection_plan_digest": item.collection_plan_digest,
-            }
-            for item in outcomes
-        ]
-        return build_evidence_frame(
-            mission_id=mission.id,
-            brief_revision_id=brief.brief_revision_id if brief else None,
-            manifest_digest=manifest.manifest_digest,
-            collection_plan_digest=collection_plan_digest,
-            observations=observation_records,
-            qualifications=qualification_records,
-            channel_outcomes=outcome_records,
-            analysis_policy=manifest.analysis_policy,
+        frame = await load_current_evidence_frame(
+            self._repo, self._workspace_store, mission, manifest
         )
+        if frame.collection_plan_digest != collection_plan_digest:
+            raise InvalidMissionManifestError(
+                "The completed run's persisted collection plan differs from the executed plan."
+            )
+        return frame
 
     @staticmethod
     def _probe_outcome_payload(outcome: MissionProbeOutcome) -> Dict[str, Any]:
         """Return the same complete outcome contract that was accepted by persistence."""
         return {
+            "outcome_id": str(outcome.outcome_id),
             "run_id": str(outcome.run_id),
             "connector_surface": outcome.connector_surface,
             "platform": outcome.platform,

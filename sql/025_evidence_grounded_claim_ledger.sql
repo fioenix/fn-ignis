@@ -182,6 +182,8 @@ CREATE TABLE IF NOT EXISTS mission_claims (
     claim_type VARCHAR(30) NOT NULL,
     wording TEXT NOT NULL,
     inference_method VARCHAR(128),
+    metric_denominator TEXT,
+    metric_timeframe VARCHAR(128),
     confidence DOUBLE PRECISION,
     limitations TEXT[] NOT NULL DEFAULT '{}',
     change_conditions TEXT[] NOT NULL DEFAULT '{}',
@@ -203,6 +205,13 @@ CREATE TABLE IF NOT EXISTS mission_claims (
     CONSTRAINT mission_claims_method_check CHECK (
         claim_type NOT IN ('MEASUREMENT', 'INFERENCE', 'RECOMMENDATION')
         OR NULLIF(btrim(inference_method), '') IS NOT NULL
+    ),
+    CONSTRAINT mission_claims_metric_basis_check CHECK (
+        claim_type <> 'MEASUREMENT' OR status <> 'PERMITTED'
+        OR (
+            NULLIF(btrim(metric_denominator), '') IS NOT NULL
+            AND NULLIF(btrim(metric_timeframe), '') IS NOT NULL
+        )
     ),
     CONSTRAINT mission_claims_change_conditions_check CHECK (
         claim_type NOT IN ('INFERENCE', 'RECOMMENDATION')

@@ -14,6 +14,7 @@ import pytest
 import pytest_asyncio
 
 from ignis.application.use_cases.create_market_revision import CreateMarketRevisionUseCase
+from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.research_workspace import (
     REQUIRED_BRIEF_FIELDS,
@@ -42,6 +43,13 @@ COMPLETE_PAYLOAD = {
     "timeframe": "30d",
     "hypothesis": "VN retailers will pay for an assistant that answers in under a minute",
     "falsifiers": ["No retailer reports reply latency as a top-three cost"],
+    "alternative_hypotheses": [
+        "Retailers need workflow redesign rather than automated replies",
+        "Retailers prefer staffing changes over a software assistant",
+    ],
+    "null_hypothesis": "Reply latency does not materially affect purchase conversion",
+    "kill_criteria": ["Qualified evidence finds no repeated latency-related lost sale"],
+    "revision_rule": "Reframe when contradiction is as strong as support",
 }
 
 
@@ -131,6 +139,46 @@ def test_confirmation_metadata_is_recorded_on_the_revision():
     assert revision.confirmed_by == "requester@example.com"
     assert revision.confirmed_at.tzinfo is not None
     assert revision.revision_number == 1
+    assert revision.evidence_contract_version == 2
+
+
+def test_two_alternatives_must_be_distinct_from_each_other_core_and_null():
+    with pytest.raises(IncompleteMarketBriefError) as duplicate:
+        _revision(alternative_hypotheses=["Same mechanism", "same mechanism"])
+    assert duplicate.value.missing_fields == ["alternative_hypotheses"]
+
+    with pytest.raises(IncompleteMarketBriefError) as core_copy:
+        _revision(
+            alternative_hypotheses=[
+                COMPLETE_PAYLOAD["hypothesis"],
+                "A genuinely different mechanism",
+            ]
+        )
+    assert core_copy.value.missing_fields == ["alternative_hypotheses"]
+
+    with pytest.raises(IncompleteMarketBriefError) as null_copy:
+        _revision(null_hypothesis=COMPLETE_PAYLOAD["hypothesis"])
+    assert null_copy.value.missing_fields == ["null_hypothesis"]
+
+
+def test_legacy_brief_remains_readable_but_has_a_distinct_immutable_fingerprint():
+    from ignis.domain.research_workspace import compute_frame_fingerprint
+
+    mission = ResearchMission(
+        title="Legacy Market frame",
+        keywords=["reply latency"],
+        surface=ResearchSurface.MARKET.value,
+    )
+    legacy = MarketBriefRevision(
+        confirmed_by="legacy-requester",
+        **{key: COMPLETE_PAYLOAD[key] for key in REQUIRED_BRIEF_FIELDS},
+    )
+    current = _revision(mission_id=mission.id)
+    legacy = dataclasses.replace(legacy, mission_id=mission.id)
+
+    assert legacy.evidence_contract_version == 1
+    assert current.evidence_contract_version == 2
+    assert compute_frame_fingerprint(mission, legacy) != compute_frame_fingerprint(mission, current)
 
 
 def test_a_revision_confirms_without_a_requester_identity_being_optional():
@@ -163,6 +211,34 @@ def test_an_edit_before_confirmation_is_just_a_different_payload():
     edited = _revision(hypothesis="VN retailers will pay only when latency costs them a sale")
     assert edited.hypothesis.endswith("costs them a sale")
     assert edited.revision_number == 1
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("alternative_hypotheses", ["Only one alternative"]),
+        ("null_hypothesis", "  "),
+        ("kill_criteria", []),
+        ("revision_rule", None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_incomplete_hypothesis_register_writes_nothing(
+    sqlite_repository, tmp_path, field_name, invalid_value
+):
+    store, workspace = await _open_workspace(sqlite_repository, tmp_path)
+    payload = {**COMPLETE_PAYLOAD, field_name: invalid_value}
+
+    with pytest.raises(IncompleteMarketBriefError) as excinfo:
+        await ConfirmMarketBriefUseCase(sqlite_repository, store).execute(
+            workspace_id=workspace.workspace_id,
+            confirmed_by="requester",
+            manifest=_market_manifest(),
+            **payload,
+        )
+
+    assert field_name in excinfo.value.missing_fields
+    assert await store.list_workspace_missions(workspace.workspace_id) == []
 
 
 # --- User Story 4: handoff lineage and immutable revisions -------------------

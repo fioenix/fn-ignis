@@ -46,6 +46,13 @@ COMPLETE_BRIEF = {
     "timeframe": "30d",
     "hypothesis": "VN fashion retailers will pay for sub-minute automated support replies",
     "falsifiers": ["No retailer names reply latency among their top three costs"],
+    "alternative_hypotheses": [
+        "Retailers need workflow redesign rather than automation",
+        "Retailers prefer staffing changes over assistant software",
+    ],
+    "null_hypothesis": "Reply latency does not materially affect conversion",
+    "kill_criteria": ["No repeated latency-linked lost sale appears in qualified evidence"],
+    "revision_rule": "Reframe when contradiction matches support",
 }
 
 
@@ -488,7 +495,9 @@ def _mcp_components(repository, store, registry):
         "strategic_reasoner": StrategicMarketReasoner(),
         "artifact_builder": HtmlArtifactBuilder(),
         "top_clusters_use_case": GetTopClustersUseCase(repository=repository),
-        "get_mission_analysis_use_case": GetMissionAnalysisUseCase(repository=repository),
+        "get_mission_analysis_use_case": GetMissionAnalysisUseCase(
+            repository=repository, store=store
+        ),
         "get_evidence_qualification_batch_use_case": GetEvidenceQualificationBatchUseCase(
             repository=repository, store=store
         ),
@@ -638,11 +647,12 @@ async def test_the_gate_does_not_block_a_confirmed_brief_or_an_attention_mission
 
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(market.id)))
     assert analysis.get("status") != "BLOCKED", "the Brief gate must let a confirmed Brief through"
-    assert analysis["surface"] == "MARKET"
-    assert analysis["market_brief"]["falsifiers"] == COMPLETE_BRIEF["falsifiers"]
-    # Past the Brief gate, the evidence gate: an index waits until the evidence is qualified.
-    assert analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
-    assert analysis["opportunity_index_applies"] is False
+    assert analysis["mission"]["surface"] == "MARKET"
+    # Past the Brief gate, the evidence gate withholds every verdict until the frame is qualified.
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "ASSESSMENT_INCOMPLETE" in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
     artifact = json.loads(await mcp_server.handle_generate_mission_artifact(str(market.id)))
     assert artifact["status"] == "SUCCESS"
@@ -907,17 +917,15 @@ async def test_the_analysis_response_separates_attention_context_from_market_evi
 
     payload = json.loads(await mcp_server.handle_get_mission_analysis(str(market.id)))
 
-    assert payload["surface"] == "MARKET"
-    assert payload["lineage"]["parent_attention_mission_id"] == str(attention.id)
+    assert payload["mission"]["surface"] == "MARKET"
+    assert payload["mission"]["lineage"]["parent_attention_mission_id"] == str(attention.id)
     market_ids = {
         str(s.observation_id) for s in await repository.get_mission_signals(market.id)
     }
-    for opportunity in payload["market_opportunities"]:
-        for citation in opportunity["citations"]:
-            assert citation["evidence_role"] == "MARKET_EVIDENCE"
-            assert citation["observation_id"] in market_ids
-    assert payload["attention_context"]
-    assert all(c["evidence_role"] == "ATTENTION_CONTEXT" for c in payload["attention_context"])
+    assert payload["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert all(item["evidence_role"] == "MARKET_EVIDENCE" for item in payload["top_signals"])
+    assert {item["observation_id"] for item in payload["top_signals"]} <= market_ids
+    assert "attention_context" not in payload
 
 
 @pytest.mark.asyncio
@@ -1039,7 +1047,7 @@ async def test_the_brief_tool_revises_a_confirmed_brief_into_a_new_mission(
     assert revised.revises_mission_id is None
 
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(second["mission_id"]))
-    assert analysis["lineage"]["revises_mission_id"] == first["mission_id"]
+    assert analysis["mission"]["lineage"]["revises_mission_id"] == first["mission_id"]
     assert analysis["mission"]["lineage"]["revises_mission_id"] == first["mission_id"]
 
 

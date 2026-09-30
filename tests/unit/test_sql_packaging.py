@@ -102,6 +102,10 @@ def test_the_migration_inventory_ends_at_025_and_both_backends_state_its_tables(
         assert f"CREATE TABLE IF NOT EXISTS {table}" in migration, table
         assert f"CREATE TABLE IF NOT EXISTS {table}" in sqlite_source, f"SQLite does not restate {table}"
     assert "ENABLE ROW LEVEL SECURITY" in migration
+    for field in ("metric_denominator", "metric_timeframe"):
+        assert field in migration
+        assert field in sqlite_source
+    assert "mission_claims_metric_basis_check" in migration
 
     quota_migration = (directory / "024_youtube_quota_ledger.sql").read_text(encoding="utf-8")
     assert "PRIMARY KEY (quota_day, bucket)" in quota_migration

@@ -16,6 +16,8 @@ The host submits 1–50 candidate claims against the current `frame_digest`:
   "claim_type": "OBSERVATION | MEASUREMENT | INFERENCE | ASSUMPTION | RECOMMENDATION | UNKNOWN",
   "wording": "exact wording to render",
   "inference_method": "method identifier and version",
+  "metric_denominator": "required for MEASUREMENT or null",
+  "metric_timeframe": "required for MEASUREMENT or null",
   "confidence": 0.0,
   "limitations": ["string"],
   "change_conditions": ["string"],
@@ -37,6 +39,8 @@ support measured absence only when its state is `EMPTY_NO_DATA` for the exact fr
 
 - `OBSERVATION` binds to at least one current observation and needs no invented confidence.
 - `MEASUREMENT`, `INFERENCE`, and `RECOMMENDATION` name their method and evidence bindings.
+- `MEASUREMENT` carries its own denominator and timeframe; these are persisted with the claim and
+  cannot be enabled or bypassed through a batch-level option.
 - `INFERENCE` and `RECOMMENDATION` include limitations and change conditions.
 - Support and contradiction bindings agree with persisted qualification roles.
 - A strategic claim cannot be `PERMITTED` when the mission sufficiency decision is not ready.
@@ -81,4 +85,3 @@ and templates under `src/ignis/infrastructure/templates/html/`.
 - An Attention artifact may rank attention signals but contains no Market verdict.
 - Artifact text never becomes the canonical claim source; persisted claims remain authoritative.
 - The artifact records the frame digest and template revision needed for reproduction.
-

@@ -447,6 +447,13 @@ BRIEF = dict(
     timeframe="7d",
     hypothesis="Independent retailers want affordable AI help with daily operating data",
     falsifiers=["Probes find only generic AI content"],
+    alternative_hypotheses=[
+        "Retailers need process redesign instead of an AI copilot",
+        "Retailers prefer outsourced operations support",
+    ],
+    null_hypothesis="The manual work is not decision-relevant",
+    kill_criteria=["No repeated operational pain appears in qualified evidence"],
+    revision_rule="Reframe when contradiction matches support",
     confirmed_by="requester",
 )
 
@@ -524,6 +531,16 @@ def _assessment(observation_id, **overrides):
         "model": "claude-opus-5-5",
     }
     values.update(overrides)
+    relation = values["relation"]
+    if relation == "QUALIFIED_SUPPORT":
+        values.setdefault("hypothesis_target", "core")
+        values.setdefault("evidence_role", "SUPPORT")
+    elif relation == "QUALIFIED_CONTRADICTION":
+        values.setdefault("hypothesis_target", "core")
+        values.setdefault("evidence_role", "CONTRADICTION")
+    else:
+        values.setdefault("hypothesis_target", "neutral")
+        values.setdefault("evidence_role", "CONTEXT")
     return values
 
 
@@ -548,6 +565,11 @@ async def test_a_market_batch_carries_the_frame_the_brief_revision_and_only_unju
     assert batch["frame"]["brief_revision_id"] == str(brief.brief_revision_id)
     assert batch["frame"]["target_user"] == BRIEF["target_user"]
     assert batch["frame"]["falsifiers"] == BRIEF["falsifiers"]
+    assert batch["frame"]["alternative_hypotheses"] == BRIEF["alternative_hypotheses"]
+    assert batch["frame"]["null_hypothesis"] == BRIEF["null_hypothesis"]
+    assert batch["recommended_judgment"]["hypothesis_target"] == [
+        "core", "alternative:1", "alternative:2", "null", "neutral"
+    ]
     assert batch["progress"] == {"total_evidence": 3, "qualified_support": 0, "context_only": 0,
                                  "excluded_irrelevant": 0, "unassessed": 3}
     assert [e["observation_id"] for e in batch["evidence"]] == [str(s.observation_id) for s in held]
@@ -661,6 +683,12 @@ async def test_a_submission_against_a_stale_frame_writes_nothing(research):
          "INVALID_JUDGMENT"),
         (lambda held: [_assessment(held[0].observation_id, judged_by="an agent that thought hard")],
          "INVALID_JUDGMENT"),
+        (lambda held: [_assessment(
+            held[0].observation_id, hypothesis_target="alternative:99"
+        )], "INVALID_HYPOTHESIS_TARGET"),
+        (lambda held: [_assessment(
+            held[0].observation_id, hypothesis_target="neutral"
+        )], "INVALID_HYPOTHESIS_TARGET"),
         (lambda held: [], "INVALID_BATCH_SIZE"),
         (lambda held: [_assessment(held[0].observation_id)] * 51, "INVALID_BATCH_SIZE"),
     ],
