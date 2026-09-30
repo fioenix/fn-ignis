@@ -85,6 +85,11 @@ class SurfaceProbeResult:
     queried_keywords: Tuple[str, ...] = ()
     # The window the platform attested to filtering by, or None when it applied none.
     queried_window: Optional[str] = None
+    scope_attestation: Optional[Dict[str, Any]] = None
+    authority_tier: Optional[str] = None
+    connector_path: Optional[str] = None
+    connector_revision: Optional[str] = None
+    completed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass(frozen=True)
@@ -181,6 +186,8 @@ class ConnectorPluginRegistry:
         *,
         target_platforms: List[PlatformType],
         allowed_surfaces: Tuple[str, ...],
+        required_surfaces: Optional[Tuple[str, ...]] = None,
+        optional_surfaces: Optional[Tuple[str, ...]] = None,
         keywords: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Resolve policy requirements without opening a connector session or spending quota."""
@@ -193,9 +200,21 @@ class ConnectorPluginRegistry:
             and plugin.plugin_id in allowed
         ]
         selected_ids = {plugin.plugin_id for plugin in selected}
-        unavailable = tuple(surface for surface in allowed_surfaces if surface not in selected_ids)
+        required = set(required_surfaces or allowed_surfaces)
+        optional = set(optional_surfaces or ())
+        unavailable = tuple(
+            surface
+            for surface in allowed_surfaces
+            if surface in required and surface not in selected_ids
+        )
+        not_requested = tuple(
+            surface
+            for surface in allowed_surfaces
+            if surface in optional and surface not in selected_ids
+        )
         authority: List[str] = []
         quota_costs: Dict[str, int] = {}
+        surface_requirements: Dict[str, Dict[str, Any]] = {}
         for plugin in selected:
             runtime = await plugin.resolve_ingest_runtime()
             required = (
@@ -209,11 +228,21 @@ class ConnectorPluginRegistry:
                 authority.append("paid_quota")
             if plugin.platform is PlatformType.YOUTUBE:
                 quota_costs["youtube_search_calls"] = max(1, len(keywords or []))
+            surface_requirements[plugin.plugin_id] = {
+                "authority_tier": required,
+                "connector_path": (
+                    f"{plugin.__class__.__module__}.{plugin.__class__.__qualname__}.search_signals"
+                ),
+                "connector_revision": getattr(plugin, "connector_revision", "unversioned"),
+                "sampling": {"limit": 20, "ordering": "platform_default"},
+            }
         return {
             "resources": tuple(plugin.plugin_id for plugin in selected),
             "authority": tuple(authority),
             "quota_costs": quota_costs,
             "unavailable_resources": unavailable,
+            "not_requested_resources": not_requested,
+            "surface_requirements": surface_requirements,
         }
 
     def get_health_status(self) -> Dict[str, dict]:
@@ -514,6 +543,7 @@ class ConnectorPluginRegistry:
         outcomes: Dict[str, SurfaceProbeResult] = {}
         blocked_reasons: Dict[str, Optional[str]] = {}
         attestations: Dict[str, Optional[SearchAttestation]] = {}
+        provenance: Dict[str, Dict[str, str]] = {}
 
         for plugin_id, plugin in self._plugins.items():
             if target_platforms and plugin.platform not in target_platforms:
@@ -526,6 +556,18 @@ class ConnectorPluginRegistry:
                 # signals unrelated to the requested keywords.
                 logger.debug(f"Skipping search on [{plugin.name}]: no keyword search probe.")
                 continue
+
+            runtime = await plugin.resolve_ingest_runtime()
+            authority_tier = (
+                "browser_session" if runtime is IngestRuntime.BROWSER else plugin.http_authority
+            )
+            provenance[plugin_id] = {
+                "authority_tier": authority_tier,
+                "connector_path": (
+                    f"{plugin.__class__.__module__}.{plugin.__class__.__qualname__}.search_signals"
+                ),
+                "connector_revision": getattr(plugin, "connector_revision", "unversioned"),
+            }
 
             breaker = self._breakers[plugin_id]
             if not breaker.can_execute():
@@ -549,6 +591,9 @@ class ConnectorPluginRegistry:
                     ),
                     signals_collected=0,
                     note=f"Circuit Breaker is OPEN after {breaker.failure_count} consecutive failures.",
+                    authority_tier=provenance[plugin_id]["authority_tier"],
+                    connector_path=provenance[plugin_id]["connector_path"],
+                    connector_revision=provenance[plugin_id]["connector_revision"],
                 )
                 continue
 
@@ -575,6 +620,9 @@ class ConnectorPluginRegistry:
                     status=_failure_status(result),
                     signals_collected=0,
                     note=safe_error[:200],
+                    authority_tier=provenance[plugin.plugin_id]["authority_tier"],
+                    connector_path=provenance[plugin.plugin_id]["connector_path"],
+                    connector_revision=provenance[plugin.plugin_id]["connector_revision"],
                 )
                 logger.error(
                     "Plugin [%s] encountered exception during search: %s",
@@ -593,6 +641,9 @@ class ConnectorPluginRegistry:
                 outcomes[plugin.plugin_id] = self._search_outcome(
                     plugin, result, blocked_reasons.get(plugin.plugin_id),
                     attestations.get(plugin.plugin_id),
+                    geo=geo,
+                    requested_window=custom_timeframe,
+                    provenance=provenance[plugin.plugin_id],
                 )
                 all_signals.extend(result)
                 logger.info(f"Plugin [{plugin.name}] retrieved {len(result)} signals for keywords {keywords}.")
@@ -623,6 +674,10 @@ class ConnectorPluginRegistry:
         result: List[TrendSignal],
         blocked: Optional[str],
         attestation: Optional[SearchAttestation],
+        *,
+        geo: GeoCode,
+        requested_window: Optional[str],
+        provenance: Dict[str, str],
     ) -> SurfaceProbeResult:
         """Classify one surface's returned list without trusting an unattested silence."""
         queried = tuple(attestation.queried) if attestation else ()
@@ -638,7 +693,12 @@ class ConnectorPluginRegistry:
             note = "; ".join(attestation.failures)[:200] or "No query was executed."
         else:
             status = ChannelHealthStatus.EMPTY_NO_DATA
-            note = ("Partial: " + "; ".join(attestation.failures))[:200] if attestation.failures else None
+            note = (
+                ("Partial: " + "; ".join(attestation.failures))[:200]
+                if attestation.failures
+                else "Probe completed for the attested scope and returned no qualifying observations."
+            )
+        measured = status in (ChannelHealthStatus.HEALTHY, ChannelHealthStatus.EMPTY_NO_DATA)
         return SurfaceProbeResult(
             platform=plugin.platform.value,
             connector_surface=plugin.plugin_id,
@@ -647,6 +707,18 @@ class ConnectorPluginRegistry:
             note=note,
             queried_keywords=queried,
             queried_window=attestation.window if attestation else None,
+            scope_attestation=(
+                {
+                    "geo": geo.value,
+                    "timeframe": (attestation.window if attestation else requested_window),
+                    "keywords": list(queried),
+                }
+                if measured
+                else None
+            ),
+            authority_tier=provenance["authority_tier"],
+            connector_path=provenance["connector_path"],
+            connector_revision=provenance["connector_revision"],
         )
 
     @staticmethod

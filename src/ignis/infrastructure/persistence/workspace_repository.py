@@ -61,7 +61,9 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _journal_payload(journal: RunJournal) -> str:
+def _journal_payload(
+    journal: RunJournal, collection_plan: Optional[Dict[str, Any]] = None
+) -> str:
     """What one run writes about itself, in one place so start and finish agree.
 
     `completed_at` is omitted rather than nulled while the run is open, and the status is the
@@ -78,6 +80,9 @@ def _journal_payload(journal: RunJournal) -> str:
     }
     if journal.completed_at is not None:
         payload["completed_at"] = journal.completed_at.isoformat()
+    if collection_plan is not None:
+        payload["collection_plan"] = collection_plan
+        payload["collection_plan_digest"] = collection_plan.get("plan_digest")
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
@@ -257,7 +262,11 @@ class WorkspaceRepository(IResearchWorkspaceStore):
             journal, status=status, completed_at=_utc_now()
         )
         try:
-            journal.journal_path.write_text(_journal_payload(finished), encoding="utf-8")
+            existing = json.loads(journal.journal_path.read_text(encoding="utf-8"))
+            journal.journal_path.write_text(
+                _journal_payload(finished, collection_plan=existing.get("collection_plan")),
+                encoding="utf-8",
+            )
             return await self.record_run_journal(finished)
         except Exception:
             logger.exception(
@@ -357,6 +366,22 @@ class WorkspaceRepository(IResearchWorkspaceStore):
 
     async def record_run_journal(self, journal: RunJournal) -> RunJournal:
         return await self._repo.record_run_journal(journal)
+
+    async def record_collection_plan(
+        self, journal: RunJournal, plan: Dict[str, Any]
+    ) -> None:
+        """Add the readable projection without changing the journal's canonical database row."""
+        digest = plan.get("plan_digest") if isinstance(plan, dict) else None
+        if not isinstance(digest, str) or len(digest) != 64:
+            raise ValueError("A run journal collection plan needs its canonical plan_digest.")
+        current = json.loads(journal.journal_path.read_text(encoding="utf-8"))
+        current["collection_plan"] = plan
+        current["collection_plan_digest"] = digest
+        temporary = journal.journal_path.with_suffix(journal.journal_path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        temporary.replace(journal.journal_path)
 
     async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
         return await self._repo.list_run_journals(mission_id, limit)

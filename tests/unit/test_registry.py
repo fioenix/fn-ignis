@@ -419,6 +419,23 @@ def _by_surface(result):
 
 
 @pytest.mark.asyncio
+async def test_requirement_preflight_blocks_missing_required_but_marks_missing_optional_unrequested():
+    registry = _registry(EmptyYouTubePlugin())
+
+    requirements = await registry.resolve_execution_requirements(
+        target_platforms=[PlatformType.YOUTUBE, PlatformType.THREADS, PlatformType.REELS],
+        allowed_surfaces=("youtube", "threads", "reels"),
+        required_surfaces=("youtube", "threads"),
+        optional_surfaces=("reels",),
+        keywords=["ai agent"],
+    )
+
+    assert requirements["resources"] == ("youtube",)
+    assert requirements["unavailable_resources"] == ("threads",)
+    assert requirements["not_requested_resources"] == ("reels",)
+
+
+@pytest.mark.asyncio
 async def test_every_eligible_surface_reports_exactly_what_it_did():
     registry = _registry(GooglePlugin(), EmptyYouTubePlugin(), CreativeCenterPlugin())
 

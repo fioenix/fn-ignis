@@ -194,7 +194,7 @@ def _outcome(run_id, surface, status="EMPTY_NO_DATA", count=0, platform="youtube
             if measured
             else None
         ),
-        note=None if measured else f"Fixture operational outcome: {status}",
+        note=None if status == "HEALTHY" else f"Fixture operational outcome: {status}",
         collection_plan_digest="p" * 64,
     )
 
@@ -846,11 +846,7 @@ async def _market_with(repository, store, workspace, items, keywords, brief=None
                 if status in ("HEALTHY", "EMPTY_NO_DATA")
                 else None
             ),
-            note=(
-                None
-                if status in ("HEALTHY", "EMPTY_NO_DATA")
-                else f"Fixture operational outcome: {status}"
-            ),
+            note=(None if status == "HEALTHY" else f"Fixture operational outcome: {status}"),
             collection_plan_digest="p" * 64,
         )
         for surface, platform, status, count in outcomes

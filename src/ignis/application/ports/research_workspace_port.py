@@ -212,6 +212,12 @@ class IResearchWorkspaceStore(ABC):
         """Record the run journal identity that the filesystem has already granted exclusively."""
 
     @abstractmethod
+    async def record_collection_plan(
+        self, journal: RunJournal, plan: Dict[str, Any]
+    ) -> None:
+        """Write the readable plan projection into this run's collision-safe journal."""
+
+    @abstractmethod
     async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
         """The runs of one mission, newest first.
 

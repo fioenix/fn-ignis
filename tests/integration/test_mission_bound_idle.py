@@ -10,13 +10,14 @@ import pytest
 from ignis.application.use_cases.create_attention_mission import CreateAttentionMissionUseCase
 from ignis.application.use_cases.create_research_workspace import CreateResearchWorkspaceUseCase
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
+from ignis.domain.entities import TrendSignal
 from ignis.domain.research_workspace import (
     AuthorityBoundary,
     MissionManifest,
     MissionOutputType,
     MissionTerminalStateError,
 )
-from ignis.domain.value_objects import PlatformType
+from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
 from ignis.domain.harness_models import ChannelHealthStatus
@@ -87,6 +88,67 @@ class CredentialLeakingRegistry(CountingRegistry):
         )
 
 
+class MixedStateRegistry:
+    required = (
+        "youtube",
+        "google",
+        "tiktok_video_grid",
+        "tiktok_creative_center",
+        "threads",
+        "reels",
+    )
+    optional = ("tiktok_optional",)
+
+    async def resolve_execution_requirements(self, **_kwargs):
+        return {
+            "resources": self.required,
+            "authority": ("public_http",),
+            "quota_costs": {},
+            "unavailable_resources": (),
+            "not_requested_resources": self.optional,
+        }
+
+    async def search_with_outcomes(self, **kwargs):
+        keywords = tuple(kwargs["keywords"])
+        window = kwargs["custom_timeframe"]
+        statuses = (
+            ("youtube", "youtube", ChannelHealthStatus.HEALTHY, 1),
+            ("google", "google", ChannelHealthStatus.EMPTY_NO_DATA, 0),
+            ("tiktok", "tiktok_video_grid", ChannelHealthStatus.AUTH_REQUIRED, 0),
+            ("tiktok", "tiktok_creative_center", ChannelHealthStatus.RATE_LIMITED, 0),
+            ("threads", "threads", ChannelHealthStatus.DEGRADED, 0),
+            ("reels", "reels", ChannelHealthStatus.FAILED, 0),
+        )
+        outcomes = [
+            SurfaceProbeResult(
+                platform=platform,
+                connector_surface=surface,
+                status=status,
+                signals_collected=count,
+                note=(None if status is ChannelHealthStatus.HEALTHY else f"{status.value} test"),
+                queried_keywords=keywords if status in {
+                    ChannelHealthStatus.HEALTHY,
+                    ChannelHealthStatus.EMPTY_NO_DATA,
+                } else (),
+                queried_window=window if status in {
+                    ChannelHealthStatus.HEALTHY,
+                    ChannelHealthStatus.EMPTY_NO_DATA,
+                } else None,
+            )
+            for platform, surface, status, count in statuses
+        ]
+        signal = TrendSignal(
+            platform=PlatformType.YOUTUBE,
+            raw_title="One bounded observation",
+            metric_value=1,
+            source_url="https://youtube.example/watch?v=mixed-state",
+            geo_code=GeoCode.VN,
+            captured_at=NOW,
+            metadata={"connector_surface": "youtube"},
+        )
+        return SearchPassResult(signals=[signal], outcomes=outcomes)
+
+
 def _manifest():
     return MissionManifest(
         outcome="Collect one bounded evidence frame",
@@ -106,6 +168,15 @@ def _manifest():
         retention_policy="mission-only",
         created_by="contract-test",
         confirmed_at=NOW,
+    )
+
+
+def _mixed_manifest():
+    return replace(
+        _manifest(),
+        required_channels=MixedStateRegistry.required,
+        optional_channels=MixedStateRegistry.optional,
+        quota_budget={},
     )
 
 
@@ -160,6 +231,42 @@ async def test_idle_install_does_no_research_work_until_an_explicit_manifested_t
     assert registry.authority_checks == 1
     assert registry.connector_calls == 1
     assert len(await store.list_run_journals(mission.id)) == 1
+    journal_payload = json.loads(Path(result["run"]["journal_path"]).read_text(encoding="utf-8"))
+    assert journal_payload["collection_plan"] == result["collection_plan"]
+    assert journal_payload["collection_plan_digest"] == result["collection_plan_digest"]
+    assert result["evidence_frame"]["collection_plan_digest"] == result["collection_plan_digest"]
+    assert result["evidence_frame"]["manifest_digest"] == stored_manifest.manifest_digest
+    assert len(result["channel_outcomes"]) == 1
+    response_outcome = result["channel_outcomes"][0]
+    assert response_outcome["connector_surface"] == "youtube"
+    assert response_outcome["status"] == "EMPTY_NO_DATA"
+    assert response_outcome["signals_collected"] == 0
+    assert response_outcome["queried_keywords"] == ["retail setup friction"]
+    assert response_outcome["queried_window"] == "7d"
+    assert response_outcome["scope_attestation"] == {
+        "geo": "VN",
+        "timeframe": "7d",
+        "keywords": ["retail setup friction"],
+    }
+    assert response_outcome["note"] == (
+        "The attested scope returned no qualifying observations."
+    )
+    assert response_outcome["collection_plan_digest"] == result["collection_plan_digest"]
+    assert len(response_outcome["query_fingerprint"]) == 64
+    persisted_outcomes = await store.get_latest_completed_probe_outcomes(mission.id)
+    assert persisted_outcomes[0].scope_attestation == {
+        "geo": "VN",
+        "timeframe": "7d",
+        "keywords": ["retail setup friction"],
+    }
+    assert persisted_outcomes[0].note == (
+        "The attested scope returned no qualifying observations."
+    )
+    assert result["channel_outcomes"] == [
+        executor._probe_outcome_payload(persisted_outcomes[0])
+    ]
+    assert result["retention_policy"] == "mission-only"
+    assert "Another mission" in result["reuse_limit"]
 
     with pytest.raises(MissionTerminalStateError):
         await executor.execute(mission.id)
@@ -167,6 +274,76 @@ async def test_idle_install_does_no_research_work_until_an_explicit_manifested_t
     assert registry.authority_checks == 1
     assert registry.connector_calls == 1
     assert len(await store.list_run_journals(mission.id)) == 1
+    await repository.close()
+
+
+@pytest.mark.asyncio
+async def test_mixed_channel_states_are_complete_and_match_persisted_outcomes(
+    tmp_path, monkeypatch
+):
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = SqliteTrendRepository(db_path=str(tmp_path / "mixed-states.db"))
+    store = WorkspaceRepository(repository=repository)
+    executor = ExecuteMissionUseCase(
+        repository=repository,
+        registry=MixedStateRegistry(),
+        clusterer=CountingClusterer(),
+        workspace_store=store,
+    )
+    host = tmp_path / "mixed-state-host"
+    host.mkdir()
+    workspace_case = CreateResearchWorkspaceUseCase(store=store)
+    workspace = await workspace_case.confirm(
+        await workspace_case.propose(host, "Mixed channel states"), confirmation=True
+    )
+    mission = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        title="Mixed channel states",
+        keywords=["retail setup friction"],
+        manifest=_mixed_manifest(),
+    )
+
+    monkeypatch.setattr(
+        mcp_server,
+        "get_components",
+        lambda: {
+            "repository": repository,
+            "workspace_store": store,
+            "execute_mission_use_case": executor,
+        },
+    )
+    result = json.loads(await mcp_server.handle_execute_mission_ingress(str(mission.id)))
+    persisted = await store.get_latest_completed_probe_outcomes(mission.id)
+
+    assert [item["connector_surface"] for item in result["channel_outcomes"]] == list(
+        _mixed_manifest().allowed_resources
+    )
+    assert {item["status"] for item in result["channel_outcomes"]} == {
+        status.value for status in ChannelHealthStatus
+    }
+    persisted_by_surface = {item.connector_surface: item for item in persisted}
+    assert result["channel_outcomes"] == [
+        executor._probe_outcome_payload(persisted_by_surface[surface])
+        for surface in _mixed_manifest().allowed_resources
+    ]
+    by_surface = {item.connector_surface: item for item in persisted}
+    assert by_surface["google"].measures_zero is True
+    assert by_surface["tiktok_optional"].status is ChannelHealthStatus.NOT_REQUESTED
+    optional_plan = result["collection_plan"]["probes"][-1]
+    assert optional_plan["connector_surface"] == "tiktok_optional"
+    assert optional_plan["authority_tier"] == "not-requested"
+    assert optional_plan["connector_path"] == "unavailable"
+    assert optional_plan["sampling"] == {"limit": 0, "ordering": "not_requested"}
+    assert all(item.collection_plan_digest == result["collection_plan_digest"] for item in persisted)
+    stored_manifest = await store.get_mission_manifest(mission.id)
+    assert result["manifest_digest"] == stored_manifest.manifest_digest
+    assert len(result["evidence_frame"]["frame_digest"]) == 64
+    assert result["retention_policy"] == "mission-only"
+    assert result["redaction_policy"] == "credentials-and-personal-data-redacted"
+    assert result["platform_policy"] == "authorized-surface-terms-apply"
+    assert "explicitly associate" in result["reuse_limit"]
     await repository.close()
 
 

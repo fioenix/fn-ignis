@@ -9,6 +9,9 @@ import pytest
 
 from ignis.application.use_cases.create_attention_mission import CreateAttentionMissionUseCase
 from ignis.application.use_cases.create_research_workspace import CreateResearchWorkspaceUseCase
+from ignis.application.use_cases.get_evidence_qualification_batch import (
+    GetEvidenceQualificationBatchUseCase,
+)
 from ignis.application.ports.research_workspace_port import RunJournal
 from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.research_workspace import (
@@ -30,6 +33,7 @@ from ignis.domain.research_workspace import (
     QualificationReason,
     QualificationRelation,
     ResearchSurface,
+    compute_frame_fingerprint,
     compute_query_fingerprint,
 )
 from ignis.domain.harness_models import ChannelHealthStatus
@@ -108,6 +112,56 @@ async def _qualify_observation(store, mission_id, observation_id, frame_digest):
     await store.save_evidence_qualifications(mission_id, [qualification])
 
 
+@pytest.mark.asyncio
+async def test_prior_mission_observation_needs_current_association_and_requalification(
+    repository_case, tmp_path
+):
+    repository = repository_case.repository
+    store, workspace, first = await _mission(repository, tmp_path)
+    second = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        title="Reassess the same source",
+        keywords=["retail setup friction"],
+        manifest=_manifest(None),
+    )
+    signal = TrendSignal(
+        platform=PlatformType.YOUTUBE,
+        raw_title="A source observed in the first mission",
+        metric_value=12,
+        source_url="https://youtube.example/watch?v=shared-observation",
+        geo_code=GeoCode.VN,
+        captured_at=NOW,
+        mission_id=first.id,
+        metadata={"connector_surface": "youtube"},
+    )
+    await repository.save_signals([signal])
+    first_frame = compute_frame_fingerprint(first, None)
+    await _qualify_observation(store, first.id, signal.observation_id, first_frame)
+    reader = GetEvidenceQualificationBatchUseCase(repository, store)
+
+    before_association = await reader.execute(str(second.id))
+    assert before_association["evidence"] == []
+    assert await store.list_evidence_qualifications(second.id) == []
+
+    await repository.attach_mission_evidence(second.id, [signal])
+    after_association = await reader.execute(str(second.id))
+    assert [item["observation_id"] for item in after_association["evidence"]] == [
+        str(signal.observation_id)
+    ]
+    assert after_association["progress"]["unassessed"] == 1
+    assert after_association["frame_fingerprint"] != first_frame
+    assert await store.list_evidence_qualifications(second.id) == []
+
+    await _qualify_observation(
+        store,
+        second.id,
+        signal.observation_id,
+        after_association["frame_fingerprint"],
+    )
+    assert len(await store.list_evidence_qualifications(first.id)) == 1
+    assert len(await store.list_evidence_qualifications(second.id)) == 1
+
+
 def _delete_mission(repository_case, mission_id):
     if repository_case.name == "sqlite":
         import sqlite3
@@ -152,8 +206,10 @@ async def _completed_outcome(
         ),
         scope_attestation={"geo": "VN", "timeframe": "30d"},
         note=(
-            "measurement unavailable"
-            if status not in (ChannelHealthStatus.HEALTHY, ChannelHealthStatus.EMPTY_NO_DATA)
+            "No qualifying observations were returned for the attested scope."
+            if status is ChannelHealthStatus.EMPTY_NO_DATA
+            else "measurement unavailable"
+            if status is not ChannelHealthStatus.HEALTHY
             else None
         ),
         collection_plan_digest="p" * 64,
@@ -214,6 +270,7 @@ async def test_manifest_declared_channels_require_one_complete_outcome_set(
         queried_window="30d",
         query_fingerprint="f" * 64,
         scope_attestation={"geo": "VN", "timeframe": "30d"},
+        note="No qualifying observations were returned for the attested scope.",
         collection_plan_digest="p" * 64,
         completed_at=NOW,
     )

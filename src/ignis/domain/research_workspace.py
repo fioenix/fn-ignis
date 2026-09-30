@@ -1151,7 +1151,7 @@ class MissionProbeOutcome:
                     raise InvalidEvidenceQualificationError(
                         f"{status.value} requires a scope_attestation."
                     )
-            elif _is_blank(self.note):
+            if status is not ChannelHealthStatus.HEALTHY and _is_blank(self.note):
                 raise InvalidEvidenceQualificationError(
                     f"{status.value} requires an operational note."
                 )
@@ -1237,6 +1237,121 @@ def compute_collection_plan_digest(plan: Mapping[str, Any]) -> str:
     if not isinstance(plan, Mapping) or not plan:
         raise InvalidMissionManifestError("A collection plan must be a non-empty mapping.")
     return _digest(plan)
+
+
+def derive_collection_plan(
+    *,
+    mission_id: Any,
+    manifest: MissionManifest,
+    keywords: Sequence[str],
+    geo: Any,
+    timeframe: Any,
+    surface_requirements: Mapping[str, Mapping[str, Any]],
+    evidence_targets: Sequence[str],
+    expected_role: str,
+    audience: Optional[str] = None,
+    language: Optional[str] = None,
+    expanded_queries: Sequence[str] = (),
+    exclusion_queries: Sequence[str] = (),
+    falsification_queries: Sequence[str] = (),
+) -> Dict[str, Any]:
+    """Project one readable, deterministic probe plan from immutable mission authority."""
+    if manifest.mission_id != _coerce_uuid(mission_id, "mission_id"):
+        raise InvalidMissionManifestError(
+            "A collection plan must belong to the mission named by its manifest."
+        )
+    targets = tuple(str(target).strip() for target in evidence_targets if str(target).strip())
+    if not targets:
+        raise InvalidMissionManifestError("A collection plan needs at least one evidence target.")
+    role = str(expected_role).strip().upper()
+    if role not in {"SUPPORT", "CONTRADICTION", "CONTEXT"}:
+        raise InvalidMissionManifestError(
+            "expected_role must be SUPPORT, CONTRADICTION, or CONTEXT."
+        )
+
+    probes: List[Dict[str, Any]] = []
+    for surface in manifest.allowed_resources:
+        requirement = surface_requirements.get(surface)
+        if not isinstance(requirement, Mapping):
+            raise InvalidMissionManifestError(
+                f"Collection-plan requirements are missing for connector surface '{surface}'."
+            )
+        sampling = requirement.get("sampling")
+        if not isinstance(sampling, Mapping) or not sampling.get("ordering"):
+            raise InvalidMissionManifestError(
+                f"Collection-plan sampling is incomplete for connector surface '{surface}'."
+            )
+        for field_name in ("authority_tier", "connector_path", "connector_revision"):
+            if _is_blank(requirement.get(field_name)):
+                raise InvalidMissionManifestError(
+                    f"Collection-plan {field_name} is missing for connector surface '{surface}'."
+                )
+        probes.append(
+            {
+                "connector_surface": surface,
+                "query_families": {
+                    "root": [str(value) for value in keywords],
+                    "expanded": [str(value) for value in expanded_queries],
+                    "exclusions": [str(value) for value in exclusion_queries],
+                    "falsification": [str(value) for value in falsification_queries],
+                },
+                "evidence_targets": list(targets),
+                "expected_role": role,
+                "scope": {
+                    "geo": _plain(geo),
+                    "audience": audience,
+                    "language": language,
+                    "timeframe": _plain(timeframe),
+                },
+                "sampling": dict(sampling),
+                "authority_tier": str(requirement["authority_tier"]),
+                "connector_path": str(requirement["connector_path"]),
+                "connector_revision": str(requirement["connector_revision"]),
+            }
+        )
+
+    projection: Dict[str, Any] = {
+        "version": "collection-plan/v1",
+        "mission_id": str(manifest.mission_id),
+        "manifest_digest": manifest.manifest_digest,
+        "probes": probes,
+    }
+    projection["plan_digest"] = compute_collection_plan_digest(projection)
+    return projection
+
+
+def _records_digest(label: str, records: Sequence[Mapping[str, Any]]) -> str:
+    canonical = [_canonicalize(record) for record in records]
+    canonical.sort(
+        key=lambda record: json.dumps(
+            record, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
+    )
+    return _digest({label: canonical})
+
+
+def build_evidence_frame(
+    *,
+    mission_id: Any,
+    brief_revision_id: Optional[Any],
+    manifest_digest: str,
+    collection_plan_digest: str,
+    observations: Sequence[Mapping[str, Any]],
+    qualifications: Sequence[Mapping[str, Any]],
+    channel_outcomes: Sequence[Mapping[str, Any]],
+    analysis_policy: str,
+) -> "EvidenceFrame":
+    """Derive one order-stable frame identity from the exact persisted mission corpus."""
+    return EvidenceFrame(
+        mission_id=mission_id,
+        brief_revision_id=brief_revision_id,
+        manifest_digest=manifest_digest,
+        collection_plan_digest=collection_plan_digest,
+        observations_digest=_records_digest("observations", observations),
+        qualifications_digest=_records_digest("qualifications", qualifications),
+        channel_outcomes_digest=_records_digest("channel_outcomes", channel_outcomes),
+        analysis_policy=analysis_policy,
+    )
 
 
 def compute_evidence_frame_digest(

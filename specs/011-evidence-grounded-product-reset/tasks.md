@@ -111,20 +111,20 @@ provenance and frame identity.
 
 ### Tests for User Story 2
 
-- [ ] T033 [P] [US2] Add RED exact channel-state, scope-attestation, operational-note, and measured-zero cases in `tests/unit/test_mission_probe_outcomes.py`
-- [ ] T034 [P] [US2] Add RED tactical collection cases proving query/source/time/path/revision provenance and no Market side effects in `tests/integration/test_tactical_collection_contract.py`
-- [ ] T035 [P] [US2] Add RED full-frame digest and prior-mission evidence-requalification cases in `tests/integration/test_evidence_grounded_persistence.py`
+- [X] T033 [P] [US2] Add RED exact channel-state, scope-attestation, operational-note, and measured-zero cases in `tests/unit/test_mission_probe_outcomes.py`
+- [X] T034 [P] [US2] Add RED tactical collection cases proving query/source/time/path/revision provenance and no Market side effects in `tests/integration/test_tactical_collection_contract.py`
+- [X] T035 [P] [US2] Add RED full-frame digest and prior-mission evidence-requalification cases in `tests/integration/test_evidence_grounded_persistence.py`
 
 ### Implementation for User Story 2
 
-- [ ] T036 [US2] Return typed per-surface results for healthy, empty, auth, rate-limit, degraded, failed, and not-requested paths in `src/ignis/infrastructure/connectors/registry.py`
-- [ ] T037 [US2] Derive the versioned collection-plan projection with hypothesis targets, evidence roles, sampling, scope, authority tier, and digest in `src/ignis/domain/research_workspace.py`
-- [ ] T038 [US2] Persist one outcome for every manifest-declared channel and refuse a completed frame with a missing outcome row in `src/ignis/application/use_cases/execute_mission.py`
-- [ ] T039 [US2] Persist the readable collection-plan projection in the collision-safe run journal and its digest on each surfaced outcome in `src/ignis/infrastructure/persistence/workspace_repository.py` and `src/ignis/application/use_cases/execute_mission.py`
-- [ ] T040 [US2] Derive the canonical evidence-frame digest from the current manifest, Brief, plan, mission evidence, qualifications, and channel outcomes in `src/ignis/domain/research_workspace.py`
-- [ ] T041 [US2] Expose manifest, plan, provenance, complete channel states, frame digest, retention, redaction, policy, and reuse limits in `src/ignis/interfaces/mcp/server.py`
-- [ ] T042 [US2] Reject silent reuse of prior-mission observations until a current mission association and qualification exist in `src/ignis/application/use_cases/execute_mission.py` and `src/ignis/application/use_cases/get_evidence_qualification_batch.py`
-- [ ] T043 [US2] Prove tactical independence and transparent mixed-state collection with `tests/integration/test_tactical_collection_contract.py` and record results in `.handoff/011-us2.handoff.md`
+- [X] T036 [US2] Return typed per-surface results for healthy, empty, auth, rate-limit, degraded, failed, and not-requested paths in `src/ignis/infrastructure/connectors/registry.py`
+- [X] T037 [US2] Derive the versioned collection-plan projection with hypothesis targets, evidence roles, sampling, scope, authority tier, and digest in `src/ignis/domain/research_workspace.py`
+- [X] T038 [US2] Persist one outcome for every manifest-declared channel and refuse a completed frame with a missing outcome row in `src/ignis/application/use_cases/execute_mission.py`
+- [X] T039 [US2] Persist the readable collection-plan projection in the collision-safe run journal and its digest on each surfaced outcome in `src/ignis/infrastructure/persistence/workspace_repository.py` and `src/ignis/application/use_cases/execute_mission.py`
+- [X] T040 [US2] Derive the canonical evidence-frame digest from the current manifest, Brief, plan, mission evidence, qualifications, and channel outcomes in `src/ignis/domain/research_workspace.py`
+- [X] T041 [US2] Expose manifest, plan, provenance, complete channel states, frame digest, retention, redaction, policy, and reuse limits in `src/ignis/interfaces/mcp/server.py`
+- [X] T042 [US2] Reject silent reuse of prior-mission observations until a current mission association and qualification exist in `src/ignis/application/use_cases/execute_mission.py` and `src/ignis/application/use_cases/get_evidence_qualification_batch.py`
+- [X] T043 [US2] Prove tactical independence and transparent mixed-state collection with `tests/integration/test_tactical_collection_contract.py` and record results in `.handoff/011-us2.handoff.md`
 
 **Checkpoint**: US2 produces a complete, auditable collection frame without requiring a strategic
 verdict.

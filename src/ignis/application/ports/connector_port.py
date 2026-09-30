@@ -106,6 +106,11 @@ class IConnectorPlugin(ABC):
         return False
 
     @property
+    def connector_revision(self) -> str:
+        """Version label for provenance when the upstream surface exposes no schema version."""
+        return "unversioned"
+
+    @property
     def feed_yields_candidate_topics(self) -> bool:
         """Whether an untargeted `fetch_signals` returns a surface that can discover topics.
 
@@ -163,4 +168,3 @@ class IConnectorPlugin(ABC):
     ) -> List[dict]:
         """Fetch real-world search suggestions and query autocomplete terms."""
         return []
-
