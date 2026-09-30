@@ -44,6 +44,12 @@
   `MARKET_EVIDENCE`/`ATTENTION_CONTEXT`, add the internal enum `EvidenceDirection`, and serialize it
   through the public field `evidence_role` (agent decided; basis: preserve the existing contract
   while giving analytical direction a distinct type).
+- Q: How should pytest prevent an inherited shell credential from reaching code or failure output?
+  → A: Quarantine production credential variables at the top of `tests/conftest.py`, before any
+  `ignis` import; use inert SQLite/empty connector values, remove host/release credentials, and
+  preserve only the explicit isolated `IGNIS_TEST_POSTGRES_DSN` integration-test channel (agent
+  decided; basis: tests must neither call live services nor print ambient credentials, while the
+  dedicated throwaway PostgreSQL contract remains usable).
 
 ## User Scenarios & Testing
 

@@ -27,8 +27,10 @@ SENTINELS = {name: f"sentinel-value-for-{name.lower()}" for name in SECRET_SETTI
 
 
 @pytest.fixture
-def loaded(tmp_path):
+def loaded(tmp_path, monkeypatch):
     """A Settings built from a .env holding a distinct sentinel per secret."""
+    for name in SECRET_SETTINGS:
+        monkeypatch.delenv(name)
     env_file = tmp_path / ".env"
     env_file.write_text(
         "\n".join(f"{name}={value}" for name, value in SENTINELS.items()) + "\n",
@@ -62,8 +64,10 @@ def test_model_dump_carries_no_secret_value(loaded):
     assert not leaked, f"model_dump() leaked: {leaked}"
 
 
-def test_validation_error_message_carries_no_secret_value(tmp_path):
+def test_validation_error_message_carries_no_secret_value(tmp_path, monkeypatch):
     """A bad value in one field must not print the other fields' values in the error."""
+    for name in SECRET_SETTINGS:
+        monkeypatch.delenv(name)
     env_file = tmp_path / ".env"
     env_file.write_text(
         "\n".join(f"{name}={value}" for name, value in SENTINELS.items())
