@@ -34,6 +34,8 @@ from ignis.domain.research_workspace import (
     EvidenceQualification,
     InvalidWorkspaceManifestError,
     MarketBriefRevision,
+    MissionClaim,
+    MissionManifest,
     MissionProbeOutcome,
     MissionWriterConflictError,
     ResearchWorkspace,
@@ -137,6 +139,12 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         self, workspace_id: UUID, limit: int = 50
     ) -> List[ResearchMission]:
         return await self._repo.list_workspace_missions(workspace_id, limit)
+
+    async def save_mission_manifest(self, manifest: MissionManifest) -> MissionManifest:
+        return await self._repo.save_mission_manifest(manifest)
+
+    async def get_mission_manifest(self, mission_id: UUID) -> Optional[MissionManifest]:
+        return await self._repo.get_mission_manifest(mission_id)
 
     async def get_scoped_mission(
         self, workspace_id: UUID, mission_id: Any
@@ -366,3 +374,21 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]
     ) -> int:
         return await self._repo.save_evidence_qualifications(mission_id, qualifications)
+
+    async def save_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
+    ) -> List[MissionClaim]:
+        return await self._repo.save_mission_claims(mission_id, frame_digest, claims)
+
+    async def list_mission_claims(
+        self, mission_id: UUID, *, include_superseded: bool = False
+    ) -> List[MissionClaim]:
+        return await self._repo.list_mission_claims(
+            mission_id, include_superseded=include_superseded
+        )
+
+    async def supersede_mission_claims(self, mission_id: UUID, current_frame_digest: str) -> int:
+        return await self._repo.supersede_mission_claims(mission_id, current_frame_digest)
+
+    async def inventory_legacy_baseline(self) -> List[Dict[str, Any]]:
+        return await self._repo.inventory_legacy_baseline()

@@ -1,6 +1,7 @@
 """Typed contracts shared by collection, qualification, claims, and gap outputs."""
 
 import inspect
+from datetime import datetime
 from uuid import uuid4
 
 import pytest
@@ -147,6 +148,32 @@ def test_claim_binding_accepts_exactly_one_evidence_identity():
             role=EvidenceDirection.SUPPORT,
             hypothesis_target="core",
         )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"created_by": "x" * 129},
+        {"created_at": datetime(2026, 9, 30, 10, 0)},
+    ],
+)
+def test_claim_identity_and_clock_match_the_persistence_contract(overrides):
+    MissionClaim = _contract("MissionClaim")
+    InvalidMissionClaimError = _contract("InvalidMissionClaimError")
+
+    values = {
+        "mission_id": uuid4(),
+        "frame_digest": "a" * 64,
+        "client_claim_key": "claim-1",
+        "claim_type": "ASSUMPTION",
+        "wording": "A bounded assumption.",
+        "status": "WITHHELD",
+        "withheld_reasons": ("NO_EVIDENCE",),
+        "created_by": "contract-test",
+        **overrides,
+    }
+    with pytest.raises(InvalidMissionClaimError):
+        MissionClaim(**values)
 
 
 def test_gap_report_is_structured_and_contains_no_placeholder_verdict():

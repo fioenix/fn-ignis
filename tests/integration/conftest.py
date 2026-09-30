@@ -55,6 +55,8 @@ SCHEMA_MIGRATIONS = (
     "023_evidence_qualification.sql",
     # Shared YouTube quota admission. Both repository adapters must see one persistent ledger.
     "024_youtube_quota_ledger.sql",
+    # Mission authority, complete evidence-frame metadata, and the Claim Ledger.
+    "025_evidence_grounded_claim_ledger.sql",
 )
 
 

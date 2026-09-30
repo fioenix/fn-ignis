@@ -50,6 +50,18 @@
   preserve only the explicit isolated `IGNIS_TEST_POSTGRES_DSN` integration-test channel (agent
   decided; basis: tests must neither call live services nor print ambient credentials, while the
   dedicated throwaway PostgreSQL contract remains usable).
+- Q: May implementation write migration `025` and remove the exact eight public MCP operations
+  enumerated by this feature? → A: Yes. Write and test migration `025` locally without applying it
+  to a persistent database; remove exactly the approved eight MCP operations without aliases, but
+  do not release or publish the cutover yet (owner decided; basis: explicit "Tiếp tục đi" in
+  direct response to the two named owner gates on 2026-09-30).
+- Q: Where does authority to declare a `frame_digest` current belong? → A: Keep `EvidenceFrame`
+  derived as designed. Repositories enforce mission ownership, compatible qualifications, latest
+  completed measured-absence outcomes, idempotency, and explicit supersession, but they do not
+  promote an arbitrary caller digest to current. T040 derives the canonical frame and T054
+  validates it before persisting and superseding claims (agent decided; basis: repository storage
+  lacks the complete derived frame, and persisting a second current-frame truth would contradict
+  the approved data model).
 
 ## User Scenarios & Testing
 

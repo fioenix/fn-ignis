@@ -18,14 +18,24 @@ from ignis.resources import sql_seed_file
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.cross_platform_score import cluster_rank_key, cross_platform_score
 from ignis.domain.research_workspace import (
+    AuthorityBoundary,
+    ClaimStatus,
+    ClaimType,
+    EvidenceDirection,
     EvidenceQualification,
     EvidenceQualificationConflictError,
     InvalidEvidenceQualificationError,
+    InvalidMissionClaimError,
+    InvalidMissionManifestError,
     MarketBriefRevision,
+    MissionClaim,
+    MissionClaimEvidence,
+    MissionManifest,
     MissionProbeOutcome,
     ResearchWorkspace,
     WorkspaceScopeMismatchError,
     WorkspaceStatus,
+    require_complete_channel_outcomes,
 )
 from ignis.application.ports.research_workspace_port import (
     MissionWriterClaim,
@@ -321,6 +331,403 @@ class SqliteTrendRepository(ITrendRepository):
         if is_unbackfilled(row[0], row[1]):
             raise RepositoryException(UNBACKFILLED_CORPUS)
 
+    @staticmethod
+    def _upgrade_evidence_grounded_schema(conn: sqlite3.Connection) -> None:
+        """Rebuild legacy SQLite tables whose CHECK constraints changed in contract v2."""
+        cur = conn.cursor()
+
+        def _table_sql(table: str) -> str:
+            row = cur.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+            ).fetchone()
+            return (row[0] or "") if row else ""
+
+        brief_sql = _table_sql("market_brief_revisions")
+        outcome_sql = _table_sql("mission_probe_outcomes")
+        qualification_sql = _table_sql("mission_evidence_qualifications")
+        rebuild_briefs = "market_brief_revisions_evidence_contract" not in brief_sql
+        rebuild_outcomes = (
+            "collection_plan_digest" not in outcome_sql or "'NOT_REQUESTED'" not in outcome_sql
+        )
+        rebuild_qualifications = (
+            "evidence_role" not in qualification_sql
+            or "'QUALIFIED_CONTRADICTION'" not in qualification_sql
+        )
+        if not any((rebuild_briefs, rebuild_outcomes, rebuild_qualifications)):
+            return
+
+        def _columns(table: str) -> set[str]:
+            return {row[1] for row in cur.execute(f"PRAGMA table_info({table})")}
+
+        def _select(existing: set[str], name: str, fallback: str) -> str:
+            return name if name in existing else f"{fallback} AS {name}"
+
+        # Changing PRAGMA foreign_keys inside a transaction is a no-op. Commit the schema script
+        # first, then perform each table swap in one explicit transaction while references are
+        # disabled. The replacement keeps the same table names, so dependent foreign keys resolve
+        # again before enforcement is restored.
+        conn.commit()
+        cur.execute("PRAGMA foreign_keys = OFF")
+        try:
+            cur.execute("BEGIN IMMEDIATE")
+            if rebuild_briefs:
+                existing = _columns("market_brief_revisions")
+                cur.execute("DROP TABLE IF EXISTS market_brief_revisions_rebuilt")
+                cur.execute(
+                    """
+                    CREATE TABLE market_brief_revisions_rebuilt (
+                        id TEXT PRIMARY KEY,
+                        workspace_id TEXT NOT NULL REFERENCES research_workspaces(id) ON DELETE CASCADE,
+                        mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                        revision_number INTEGER NOT NULL,
+                        decision TEXT NOT NULL,
+                        target_user TEXT NOT NULL,
+                        problem TEXT NOT NULL,
+                        geo TEXT NOT NULL,
+                        timeframe TEXT NOT NULL,
+                        hypothesis TEXT NOT NULL,
+                        falsifiers TEXT NOT NULL,
+                        alternative_hypotheses TEXT,
+                        null_hypothesis TEXT,
+                        kill_criteria TEXT,
+                        revision_rule TEXT,
+                        evidence_contract_version INTEGER NOT NULL DEFAULT 1,
+                        confirmed_by TEXT NOT NULL,
+                        confirmed_at TEXT NOT NULL,
+                        UNIQUE (mission_id),
+                        UNIQUE (workspace_id, revision_number),
+                        CHECK (falsifiers <> '[]'),
+                        CONSTRAINT market_brief_revisions_evidence_contract CHECK (
+                            (evidence_contract_version = 1
+                                AND alternative_hypotheses IS NULL
+                                AND null_hypothesis IS NULL
+                                AND kill_criteria IS NULL
+                                AND revision_rule IS NULL)
+                            OR
+                            (evidence_contract_version = 2
+                                AND json_array_length(alternative_hypotheses) >= 2
+                                AND null_hypothesis IS NOT NULL
+                                AND trim(null_hypothesis) <> ''
+                                AND json_array_length(kill_criteria) >= 1
+                                AND revision_rule IS NOT NULL
+                                AND trim(revision_rule) <> '')
+                        )
+                    )
+                    """
+                )
+                selections = [
+                    _select(existing, "id", "NULL"),
+                    _select(existing, "workspace_id", "NULL"),
+                    _select(existing, "mission_id", "NULL"),
+                    _select(existing, "revision_number", "NULL"),
+                    _select(existing, "decision", "NULL"),
+                    _select(existing, "target_user", "NULL"),
+                    _select(existing, "problem", "NULL"),
+                    _select(existing, "geo", "NULL"),
+                    _select(existing, "timeframe", "NULL"),
+                    _select(existing, "hypothesis", "NULL"),
+                    _select(existing, "falsifiers", "'[]'"),
+                    _select(existing, "alternative_hypotheses", "NULL"),
+                    _select(existing, "null_hypothesis", "NULL"),
+                    _select(existing, "kill_criteria", "NULL"),
+                    _select(existing, "revision_rule", "NULL"),
+                    _select(existing, "evidence_contract_version", "1"),
+                    _select(existing, "confirmed_by", "NULL"),
+                    _select(existing, "confirmed_at", "NULL"),
+                ]
+                cur.execute(
+                    "INSERT INTO market_brief_revisions_rebuilt SELECT " + ", ".join(selections)
+                    + " FROM market_brief_revisions"
+                )
+                cur.execute("DROP TABLE market_brief_revisions")
+                cur.execute(
+                    "ALTER TABLE market_brief_revisions_rebuilt RENAME TO market_brief_revisions"
+                )
+                cur.execute(
+                    "CREATE INDEX idx_market_brief_revisions_workspace"
+                    " ON market_brief_revisions (workspace_id, revision_number DESC)"
+                )
+
+            if rebuild_outcomes:
+                existing = _columns("mission_probe_outcomes")
+                cur.execute("DROP TABLE IF EXISTS mission_probe_outcomes_rebuilt")
+                cur.execute(
+                    """
+                    CREATE TABLE mission_probe_outcomes_rebuilt (
+                        id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL REFERENCES mission_run_journals(id) ON DELETE CASCADE,
+                        platform TEXT NOT NULL,
+                        connector_surface TEXT NOT NULL,
+                        status TEXT NOT NULL CHECK (
+                            status IN ('HEALTHY', 'EMPTY_NO_DATA', 'AUTH_REQUIRED', 'RATE_LIMITED',
+                                       'DEGRADED', 'FAILED', 'NOT_REQUESTED')
+                        ),
+                        signals_collected INTEGER NOT NULL,
+                        queried_keywords TEXT NOT NULL DEFAULT '[]',
+                        queried_window TEXT,
+                        query_fingerprint TEXT NOT NULL,
+                        scope_attestation TEXT,
+                        note TEXT,
+                        collection_plan_digest TEXT,
+                        evidence_contract_version INTEGER NOT NULL DEFAULT 1,
+                        completed_at TEXT NOT NULL,
+                        UNIQUE (run_id, connector_surface),
+                        CHECK (signals_collected >= 0
+                               AND (status = 'HEALTHY') = (signals_collected > 0)),
+                        CHECK (status <> 'EMPTY_NO_DATA' OR queried_keywords <> '[]'),
+                        CHECK (evidence_contract_version = 1 OR (
+                            evidence_contract_version = 2
+                            AND collection_plan_digest IS NOT NULL
+                            AND ((status IN ('HEALTHY', 'EMPTY_NO_DATA')
+                                  AND scope_attestation IS NOT NULL)
+                                 OR (status NOT IN ('HEALTHY', 'EMPTY_NO_DATA')
+                                     AND note IS NOT NULL AND trim(note) <> ''))
+                        ))
+                    )
+                    """
+                )
+                names = (
+                    "id",
+                    "run_id",
+                    "platform",
+                    "connector_surface",
+                    "status",
+                    "signals_collected",
+                    "queried_keywords",
+                    "queried_window",
+                    "query_fingerprint",
+                    "scope_attestation",
+                    "note",
+                    "collection_plan_digest",
+                    "evidence_contract_version",
+                    "completed_at",
+                )
+                fallbacks = {
+                    "queried_keywords": "'[]'",
+                    "scope_attestation": "NULL",
+                    "note": "NULL",
+                    "collection_plan_digest": "NULL",
+                    "evidence_contract_version": "1",
+                }
+                selections = [_select(existing, name, fallbacks.get(name, "NULL")) for name in names]
+                cur.execute(
+                    "INSERT INTO mission_probe_outcomes_rebuilt SELECT "
+                    + ", ".join(selections)
+                    + " FROM mission_probe_outcomes"
+                )
+                cur.execute("DROP TABLE mission_probe_outcomes")
+                cur.execute(
+                    "ALTER TABLE mission_probe_outcomes_rebuilt RENAME TO mission_probe_outcomes"
+                )
+
+            if rebuild_qualifications:
+                existing = _columns("mission_evidence_qualifications")
+                cur.execute("DROP TABLE IF EXISTS mission_evidence_qualifications_rebuilt")
+                cur.execute(
+                    """
+                    CREATE TABLE mission_evidence_qualifications_rebuilt (
+                        id TEXT PRIMARY KEY,
+                        mission_id TEXT NOT NULL,
+                        observation_id TEXT NOT NULL,
+                        brief_revision_id TEXT REFERENCES market_brief_revisions(id) ON DELETE CASCADE,
+                        frame_fingerprint TEXT NOT NULL,
+                        relation TEXT NOT NULL CHECK (
+                            relation IN ('QUALIFIED_SUPPORT', 'QUALIFIED_CONTRADICTION',
+                                         'CONTEXT_ONLY', 'EXCLUDED_IRRELEVANT', 'UNASSESSED')
+                        ),
+                        purpose TEXT NOT NULL CHECK (
+                            purpose IN ('DEMAND', 'SUPPLY', 'VOC', 'CONTEXT')
+                        ),
+                        confidence REAL,
+                        reason_code TEXT NOT NULL CHECK (
+                            reason_code IN ('DIRECT_TO_FRAME', 'ADJACENT_ONLY', 'KEYWORD_ONLY',
+                                            'WRONG_AUDIENCE_OR_PROBLEM',
+                                            'FICTION_NEWS_OR_ENTERTAINMENT',
+                                            'INSUFFICIENT_CONTENT', 'EVALUATOR_UNAVAILABLE')
+                        ),
+                        judged_by TEXT NOT NULL,
+                        model TEXT,
+                        hypothesis_target TEXT,
+                        evidence_role TEXT,
+                        evidence_contract_version INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        UNIQUE (mission_id, observation_id),
+                        FOREIGN KEY (mission_id, observation_id)
+                            REFERENCES mission_evidence (mission_id, observation_id) ON DELETE CASCADE,
+                        CHECK ((relation NOT IN ('QUALIFIED_SUPPORT', 'QUALIFIED_CONTRADICTION')
+                               OR purpose <> 'CONTEXT')
+                               AND (relation <> 'CONTEXT_ONLY' OR purpose = 'CONTEXT')),
+                        CHECK (CASE
+                            WHEN relation = 'UNASSESSED' THEN
+                                confidence IS NULL
+                                AND reason_code IN ('INSUFFICIENT_CONTENT',
+                                                    'EVALUATOR_UNAVAILABLE')
+                            ELSE confidence IS NOT NULL AND confidence >= 0 AND confidence <= 1
+                        END),
+                        CHECK ((evidence_contract_version = 1
+                            AND relation <> 'QUALIFIED_CONTRADICTION'
+                            AND evidence_role IS NULL
+                            AND hypothesis_target IS NULL) OR (
+                            evidence_contract_version = 2
+                            AND evidence_role IN ('SUPPORT', 'CONTRADICTION', 'CONTEXT')
+                            AND ((relation = 'QUALIFIED_SUPPORT' AND evidence_role = 'SUPPORT'
+                                  AND hypothesis_target IS NOT NULL
+                                  AND trim(hypothesis_target) <> '')
+                                 OR (relation = 'QUALIFIED_CONTRADICTION'
+                                     AND evidence_role = 'CONTRADICTION'
+                                     AND hypothesis_target IS NOT NULL
+                                     AND trim(hypothesis_target) <> '')
+                                 OR relation NOT IN ('QUALIFIED_SUPPORT',
+                                                     'QUALIFIED_CONTRADICTION'))
+                        ))
+                    )
+                    """
+                )
+                names = (
+                    "id",
+                    "mission_id",
+                    "observation_id",
+                    "brief_revision_id",
+                    "frame_fingerprint",
+                    "relation",
+                    "purpose",
+                    "confidence",
+                    "reason_code",
+                    "judged_by",
+                    "model",
+                    "hypothesis_target",
+                    "evidence_role",
+                    "evidence_contract_version",
+                    "created_at",
+                )
+                fallbacks = {
+                    "hypothesis_target": "NULL",
+                    "evidence_role": "NULL",
+                    "evidence_contract_version": "1",
+                }
+                selections = [_select(existing, name, fallbacks.get(name, "NULL")) for name in names]
+                cur.execute(
+                    "INSERT INTO mission_evidence_qualifications_rebuilt SELECT "
+                    + ", ".join(selections)
+                    + " FROM mission_evidence_qualifications"
+                )
+                cur.execute("DROP TABLE mission_evidence_qualifications")
+                cur.execute(
+                    "ALTER TABLE mission_evidence_qualifications_rebuilt"
+                    " RENAME TO mission_evidence_qualifications"
+                )
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            cur.execute("PRAGMA foreign_keys = ON")
+
+    @staticmethod
+    def _ensure_evidence_grounded_triggers(conn: sqlite3.Connection) -> None:
+        """Install cross-table evidence rules after every legacy table rebuild is complete."""
+        conn.executescript(
+            """
+            DROP TRIGGER IF EXISTS validate_manifest_channel_sets;
+            CREATE TRIGGER IF NOT EXISTS validate_manifest_channel_sets
+            BEFORE INSERT ON mission_manifests
+            WHEN EXISTS (
+                SELECT 1
+                FROM json_each(NEW.required_channels) required
+                JOIN json_each(NEW.optional_channels) optional
+                  ON required.value = optional.value
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'required and optional manifest channels must be disjoint');
+            END;
+
+            DROP TRIGGER IF EXISTS validate_claim_observation_binding;
+            CREATE TRIGGER IF NOT EXISTS validate_claim_observation_binding
+            BEFORE INSERT ON mission_claim_evidence
+            WHEN NEW.observation_id IS NOT NULL
+                 AND NOT EXISTS (
+                     SELECT 1
+                     FROM mission_claims c
+                     JOIN mission_evidence e
+                       ON e.mission_id = c.mission_id
+                      AND e.observation_id = NEW.observation_id
+                     JOIN mission_evidence_qualifications q
+                       ON q.mission_id = e.mission_id
+                      AND q.observation_id = e.observation_id
+                     WHERE c.id = NEW.claim_id
+                       AND q.evidence_contract_version = 2
+                       AND (
+                           (NEW.role = 'SUPPORT'
+                            AND q.relation = 'QUALIFIED_SUPPORT'
+                            AND q.evidence_role = 'SUPPORT'
+                            AND q.hypothesis_target = NEW.hypothesis_target)
+                           OR (NEW.role = 'CONTRADICTION'
+                               AND q.relation = 'QUALIFIED_CONTRADICTION'
+                               AND q.evidence_role = 'CONTRADICTION'
+                               AND q.hypothesis_target = NEW.hypothesis_target)
+                           OR (NEW.role = 'CONTEXT'
+                               AND q.relation = 'CONTEXT_ONLY'
+                               AND q.evidence_role = 'CONTEXT')
+                       )
+                 )
+            BEGIN
+                SELECT RAISE(ABORT, 'claim observation lacks a compatible mission qualification');
+            END;
+
+            DROP TRIGGER IF EXISTS validate_claim_measured_absence_binding;
+            CREATE TRIGGER IF NOT EXISTS validate_claim_measured_absence_binding
+            BEFORE INSERT ON mission_claim_evidence
+            WHEN NEW.probe_outcome_id IS NOT NULL
+                 AND NOT EXISTS (
+                     SELECT 1
+                     FROM mission_claims c
+                     JOIN mission_probe_outcomes o ON o.id = NEW.probe_outcome_id
+                     JOIN mission_run_journals j ON j.id = o.run_id
+                     WHERE c.id = NEW.claim_id
+                       AND j.mission_id = c.mission_id
+                       AND o.status = 'EMPTY_NO_DATA'
+                       AND o.collection_plan_digest IS NOT NULL
+                       AND NEW.role = 'SUPPORT'
+                       AND o.run_id = (
+                           SELECT latest.id
+                           FROM mission_run_journals latest
+                           WHERE latest.mission_id = c.mission_id
+                             AND latest.status = 'COMPLETED'
+                           ORDER BY latest.started_at DESC, latest.sequence DESC
+                           LIMIT 1
+                       )
+                 )
+            BEGIN
+                SELECT RAISE(ABORT, 'claim outcome is not same-mission measured absence');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS prune_claim_binding_with_mission_evidence
+            AFTER DELETE ON mission_evidence
+            BEGIN
+                DELETE FROM mission_claim_evidence
+                WHERE observation_id = OLD.observation_id
+                  AND claim_id IN (
+                      SELECT id FROM mission_claims WHERE mission_id = OLD.mission_id
+                  );
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS withhold_claim_without_support
+            AFTER DELETE ON mission_claim_evidence
+            WHEN OLD.role = 'SUPPORT'
+            BEGIN
+                UPDATE mission_claims
+                SET status = 'WITHHELD',
+                    withheld_reasons = '["EVIDENCE_BINDING_INVALIDATED"]'
+                WHERE id = OLD.claim_id
+                  AND status = 'PERMITTED'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM mission_claim_evidence
+                      WHERE claim_id = OLD.claim_id AND role = 'SUPPORT'
+                  );
+            END;
+            """
+        )
+
     def _create_tables_and_seed(self) -> None:
         if self._db_path != ":memory:":
             p = Path(self._db_path)
@@ -583,6 +990,11 @@ class SqliteTrendRepository(ITrendRepository):
                 -- JSON list, and never empty: a Brief with no disconfirming condition is a
                 -- hypothesis that cannot lose, which is not a hypothesis.
                 falsifiers TEXT NOT NULL,
+                alternative_hypotheses TEXT,
+                null_hypothesis TEXT,
+                kill_criteria TEXT,
+                revision_rule TEXT,
+                evidence_contract_version INTEGER NOT NULL DEFAULT 1,
                 confirmed_by TEXT NOT NULL,
                 confirmed_at TEXT NOT NULL,
                 -- One confirmed revision per Market mission. Changing a confirmed Brief
@@ -590,7 +1002,22 @@ class SqliteTrendRepository(ITrendRepository):
                 -- mission, which is the whole point.
                 UNIQUE (mission_id),
                 UNIQUE (workspace_id, revision_number),
-                CHECK (falsifiers <> '[]')
+                CHECK (falsifiers <> '[]'),
+                CONSTRAINT market_brief_revisions_evidence_contract CHECK (
+                    (evidence_contract_version = 1
+                        AND alternative_hypotheses IS NULL
+                        AND null_hypothesis IS NULL
+                        AND kill_criteria IS NULL
+                        AND revision_rule IS NULL)
+                    OR
+                    (evidence_contract_version = 2
+                        AND json_array_length(alternative_hypotheses) >= 2
+                        AND null_hypothesis IS NOT NULL
+                        AND trim(null_hypothesis) <> ''
+                        AND json_array_length(kill_criteria) >= 1
+                        AND revision_rule IS NOT NULL
+                        AND trim(revision_rule) <> '')
+                )
             );
             CREATE INDEX IF NOT EXISTS idx_market_brief_revisions_workspace
                 ON market_brief_revisions (workspace_id, revision_number DESC);
@@ -633,18 +1060,30 @@ class SqliteTrendRepository(ITrendRepository):
                 connector_surface TEXT NOT NULL,
                 status TEXT NOT NULL CHECK (
                     status IN ('HEALTHY', 'EMPTY_NO_DATA', 'AUTH_REQUIRED', 'RATE_LIMITED',
-                               'DEGRADED')
+                               'DEGRADED', 'FAILED', 'NOT_REQUESTED')
                 ),
                 signals_collected INTEGER NOT NULL,
                 -- JSON list of the keywords the surface attested to querying.
                 queried_keywords TEXT NOT NULL DEFAULT '[]',
                 queried_window TEXT,
                 query_fingerprint TEXT NOT NULL,
+                scope_attestation TEXT,
+                note TEXT,
+                collection_plan_digest TEXT,
+                evidence_contract_version INTEGER NOT NULL DEFAULT 1,
                 completed_at TEXT NOT NULL,
                 UNIQUE (run_id, connector_surface),
                 CHECK (signals_collected >= 0
                        AND (status = 'HEALTHY') = (signals_collected > 0)),
-                CHECK (status <> 'EMPTY_NO_DATA' OR queried_keywords <> '[]')
+                CHECK (status <> 'EMPTY_NO_DATA' OR queried_keywords <> '[]'),
+                CHECK (evidence_contract_version = 1 OR (
+                    evidence_contract_version = 2
+                    AND collection_plan_digest IS NOT NULL
+                    AND ((status IN ('HEALTHY', 'EMPTY_NO_DATA')
+                          AND scope_attestation IS NOT NULL)
+                         OR (status NOT IN ('HEALTHY', 'EMPTY_NO_DATA')
+                             AND note IS NOT NULL AND trim(note) <> ''))
+                ))
             );
 
             -- Keyed to the mission_evidence pair, so a mission cannot judge an observation it
@@ -656,8 +1095,8 @@ class SqliteTrendRepository(ITrendRepository):
                 brief_revision_id TEXT REFERENCES market_brief_revisions(id) ON DELETE CASCADE,
                 frame_fingerprint TEXT NOT NULL,
                 relation TEXT NOT NULL CHECK (
-                    relation IN ('QUALIFIED_SUPPORT', 'CONTEXT_ONLY', 'EXCLUDED_IRRELEVANT',
-                                 'UNASSESSED')
+                    relation IN ('QUALIFIED_SUPPORT', 'QUALIFIED_CONTRADICTION', 'CONTEXT_ONLY',
+                                 'EXCLUDED_IRRELEVANT', 'UNASSESSED')
                 ),
                 purpose TEXT NOT NULL CHECK (purpose IN ('DEMAND', 'SUPPLY', 'VOC', 'CONTEXT')),
                 confidence REAL,
@@ -668,20 +1107,122 @@ class SqliteTrendRepository(ITrendRepository):
                 ),
                 judged_by TEXT NOT NULL,
                 model TEXT,
+                hypothesis_target TEXT,
+                evidence_role TEXT,
+                evidence_contract_version INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 UNIQUE (mission_id, observation_id),
                 FOREIGN KEY (mission_id, observation_id)
                     REFERENCES mission_evidence (mission_id, observation_id) ON DELETE CASCADE,
-                CHECK ((relation <> 'QUALIFIED_SUPPORT' OR purpose <> 'CONTEXT')
+                CHECK ((relation NOT IN ('QUALIFIED_SUPPORT', 'QUALIFIED_CONTRADICTION')
+                       OR purpose <> 'CONTEXT')
                        AND (relation <> 'CONTEXT_ONLY' OR purpose = 'CONTEXT')),
                 CHECK (CASE
                     WHEN relation = 'UNASSESSED' THEN
                         confidence IS NULL
                         AND reason_code IN ('INSUFFICIENT_CONTENT', 'EVALUATOR_UNAVAILABLE')
                     ELSE confidence IS NOT NULL AND confidence >= 0 AND confidence <= 1
-                END)
+                END),
+                CHECK ((evidence_contract_version = 1
+                    AND relation <> 'QUALIFIED_CONTRADICTION'
+                    AND evidence_role IS NULL
+                    AND hypothesis_target IS NULL) OR (
+                    evidence_contract_version = 2
+                    AND evidence_role IN ('SUPPORT', 'CONTRADICTION', 'CONTEXT')
+                    AND ((relation = 'QUALIFIED_SUPPORT' AND evidence_role = 'SUPPORT'
+                          AND hypothesis_target IS NOT NULL AND trim(hypothesis_target) <> '')
+                         OR (relation = 'QUALIFIED_CONTRADICTION'
+                             AND evidence_role = 'CONTRADICTION'
+                             AND hypothesis_target IS NOT NULL AND trim(hypothesis_target) <> '')
+                         OR relation NOT IN ('QUALIFIED_SUPPORT', 'QUALIFIED_CONTRADICTION'))
+                ))
             );
+
+            -- The evidence-grounded control plane from sql/025, restated because SQLite never
+            -- executes PostgreSQL migrations.
+            CREATE TABLE IF NOT EXISTS mission_manifests (
+                mission_id TEXT PRIMARY KEY REFERENCES research_missions(id) ON DELETE CASCADE,
+                outcome TEXT NOT NULL,
+                decision_context TEXT,
+                required_channels TEXT NOT NULL,
+                optional_channels TEXT NOT NULL DEFAULT '[]',
+                authority_boundary TEXT NOT NULL,
+                quota_budget TEXT NOT NULL DEFAULT '{}',
+                output_type TEXT NOT NULL CHECK (
+                    output_type IN ('COLLECTION_FRAME', 'ATTENTION_REPORT', 'MARKET_ANALYSIS',
+                                    'STRATEGIC_ARTIFACT')
+                ),
+                stop_conditions TEXT NOT NULL,
+                analysis_policy TEXT NOT NULL,
+                retention_policy TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                confirmed_at TEXT NOT NULL,
+                manifest_digest TEXT NOT NULL UNIQUE,
+                CHECK (json_array_length(required_channels) >= 1),
+                CHECK (json_array_length(stop_conditions) >= 1),
+                CHECK (json_valid(required_channels)
+                       AND json_type(required_channels) = 'array'),
+                CHECK (json_valid(optional_channels)
+                       AND json_type(optional_channels) = 'array'),
+                CHECK (json_valid(stop_conditions) AND json_type(stop_conditions) = 'array'),
+                CHECK (json_valid(authority_boundary)
+                       AND json_type(authority_boundary) = 'object'),
+                CHECK (json_valid(quota_budget) AND json_type(quota_budget) = 'object'),
+                CHECK (output_type NOT IN ('MARKET_ANALYSIS', 'STRATEGIC_ARTIFACT')
+                       OR (decision_context IS NOT NULL AND trim(decision_context) <> ''))
+            );
+
+            CREATE TABLE IF NOT EXISTS mission_claims (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                brief_revision_id TEXT REFERENCES market_brief_revisions(id) ON DELETE CASCADE,
+                frame_digest TEXT NOT NULL,
+                client_claim_key TEXT NOT NULL,
+                claim_type TEXT NOT NULL CHECK (
+                    claim_type IN ('OBSERVATION', 'MEASUREMENT', 'INFERENCE', 'ASSUMPTION',
+                                   'RECOMMENDATION', 'UNKNOWN')
+                ),
+                wording TEXT NOT NULL,
+                inference_method TEXT,
+                confidence REAL,
+                limitations TEXT NOT NULL DEFAULT '[]',
+                change_conditions TEXT NOT NULL DEFAULT '[]',
+                status TEXT NOT NULL CHECK (status IN ('PERMITTED', 'WITHHELD', 'SUPERSEDED')),
+                withheld_reasons TEXT NOT NULL DEFAULT '[]',
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE (mission_id, frame_digest, client_claim_key),
+                CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+                CHECK (claim_type NOT IN ('MEASUREMENT', 'INFERENCE', 'RECOMMENDATION')
+                       OR (inference_method IS NOT NULL AND trim(inference_method) <> '')),
+                CHECK (claim_type NOT IN ('INFERENCE', 'RECOMMENDATION')
+                       OR (limitations <> '[]' AND change_conditions <> '[]'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_mission_claims_current
+                ON mission_claims (mission_id, frame_digest, status, created_at);
+
+            CREATE TABLE IF NOT EXISTS mission_claim_evidence (
+                id TEXT PRIMARY KEY,
+                claim_id TEXT NOT NULL REFERENCES mission_claims(id) ON DELETE CASCADE,
+                observation_id TEXT REFERENCES observations(id) ON DELETE CASCADE,
+                probe_outcome_id TEXT REFERENCES mission_probe_outcomes(id) ON DELETE CASCADE,
+                role TEXT NOT NULL CHECK (role IN ('SUPPORT', 'CONTRADICTION', 'CONTEXT')),
+                hypothesis_target TEXT,
+                CHECK ((observation_id IS NOT NULL) + (probe_outcome_id IS NOT NULL) = 1),
+                CHECK (role = 'CONTEXT'
+                       OR (hypothesis_target IS NOT NULL AND trim(hypothesis_target) <> ''))
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_claim_evidence_observation
+                ON mission_claim_evidence (claim_id, observation_id)
+                WHERE observation_id IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_claim_evidence_outcome
+                ON mission_claim_evidence (claim_id, probe_outcome_id)
+                WHERE probe_outcome_id IS NOT NULL;
+
         """)
+
+        self._upgrade_evidence_grounded_schema(conn)
+        self._ensure_evidence_grounded_triggers(conn)
 
         # CREATE TABLE IF NOT EXISTS leaves an existing database untouched, so columns added
         # after a user's file was created have to be applied here.
@@ -882,6 +1423,226 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.close()
 
         return await asyncio.to_thread(_sync_save)
+
+    @staticmethod
+    def _claim_from_row(row: Any, binding_rows: Sequence[Any]) -> MissionClaim:
+        bindings = tuple(
+            MissionClaimEvidence(
+                binding_id=UUID(binding["id"]),
+                claim_id=UUID(binding["claim_id"]),
+                observation_id=_uuid_or_none(binding["observation_id"]),
+                probe_outcome_id=_uuid_or_none(binding["probe_outcome_id"]),
+                role=EvidenceDirection(binding["role"]),
+                hypothesis_target=binding["hypothesis_target"],
+            )
+            for binding in binding_rows
+        )
+        return MissionClaim(
+            claim_id=UUID(row["id"]),
+            mission_id=UUID(row["mission_id"]),
+            brief_revision_id=_uuid_or_none(row["brief_revision_id"]),
+            frame_digest=row["frame_digest"],
+            client_claim_key=row["client_claim_key"],
+            claim_type=ClaimType(row["claim_type"]),
+            wording=row["wording"],
+            inference_method=row["inference_method"],
+            confidence=row["confidence"],
+            limitations=tuple(json.loads(row["limitations"] or "[]")),
+            change_conditions=tuple(json.loads(row["change_conditions"] or "[]")),
+            status=ClaimStatus(row["status"]),
+            withheld_reasons=tuple(json.loads(row["withheld_reasons"] or "[]")),
+            created_by=row["created_by"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            evidence_bindings=bindings,
+        )
+
+    @classmethod
+    def _read_claims_sync(
+        cls, conn: sqlite3.Connection, mission_id: UUID, *, include_superseded: bool
+    ) -> List[MissionClaim]:
+        where = "WHERE mission_id = ?"
+        params: List[Any] = [str(mission_id)]
+        if not include_superseded:
+            where += " AND status <> 'SUPERSEDED'"
+        rows = conn.execute(
+            "SELECT * FROM mission_claims " + where + " ORDER BY created_at, id", params
+        ).fetchall()
+        claims: List[MissionClaim] = []
+        for row in rows:
+            bindings = conn.execute(
+                "SELECT * FROM mission_claim_evidence WHERE claim_id = ? ORDER BY id",
+                (row["id"],),
+            ).fetchall()
+            claims.append(cls._claim_from_row(row, bindings))
+        return claims
+
+    async def save_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
+    ) -> List[MissionClaim]:
+        batch = list(claims)
+        if any(
+            str(claim.mission_id) != str(mission_id) or claim.frame_digest != frame_digest
+            for claim in batch
+        ):
+            raise InvalidMissionClaimError(
+                "Every claim in a batch must name the requested mission and evidence frame."
+            )
+        if not batch:
+            return []
+        await self._ensure_schema()
+
+        def _sync_save():
+            conn = self._get_connection()
+            try:
+                if not conn.in_transaction:
+                    conn.execute("BEGIN IMMEDIATE")
+                for claim in batch:
+                    inserted = conn.execute(
+                        "INSERT INTO mission_claims"
+                        " (id, mission_id, brief_revision_id, frame_digest, client_claim_key,"
+                        " claim_type, wording, inference_method, confidence, limitations,"
+                        " change_conditions, status, withheld_reasons, created_by, created_at)"
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                        " ON CONFLICT (mission_id, frame_digest, client_claim_key) DO NOTHING",
+                        (
+                            str(claim.claim_id),
+                            str(claim.mission_id),
+                            str(claim.brief_revision_id) if claim.brief_revision_id else None,
+                            claim.frame_digest,
+                            claim.client_claim_key,
+                            claim.claim_type.value,
+                            claim.wording,
+                            claim.inference_method,
+                            claim.confidence,
+                            json.dumps(list(claim.limitations), ensure_ascii=False),
+                            json.dumps(list(claim.change_conditions), ensure_ascii=False),
+                            claim.status.value,
+                            json.dumps(list(claim.withheld_reasons), ensure_ascii=False),
+                            claim.created_by,
+                            claim.created_at.isoformat(),
+                        ),
+                    ).rowcount
+                    if inserted:
+                        for binding in claim.evidence_bindings:
+                            if binding.claim_id != claim.claim_id:
+                                raise InvalidMissionClaimError(
+                                    "Every evidence binding must name the claim carrying it."
+                                )
+                            conn.execute(
+                                "INSERT INTO mission_claim_evidence"
+                                " (id, claim_id, observation_id, probe_outcome_id, role,"
+                                " hypothesis_target) VALUES (?, ?, ?, ?, ?, ?)",
+                                (
+                                    str(binding.binding_id),
+                                    str(binding.claim_id),
+                                    str(binding.observation_id) if binding.observation_id else None,
+                                    (
+                                        str(binding.probe_outcome_id)
+                                        if binding.probe_outcome_id
+                                        else None
+                                    ),
+                                    binding.role.value,
+                                    binding.hypothesis_target,
+                                ),
+                            )
+                        continue
+                    existing = conn.execute(
+                        "SELECT * FROM mission_claims WHERE mission_id = ?"
+                        " AND frame_digest = ? AND client_claim_key = ?",
+                        (str(mission_id), frame_digest, claim.client_claim_key),
+                    ).fetchone()
+                    bindings = conn.execute(
+                        "SELECT * FROM mission_claim_evidence WHERE claim_id = ? ORDER BY id",
+                        (existing["id"],),
+                    ).fetchall()
+                    stored = self._claim_from_row(existing, bindings)
+                    if stored.idempotency_payload() != claim.idempotency_payload():
+                        raise InvalidMissionClaimError(
+                            f"client_claim_key {claim.client_claim_key!r} already names a different claim."
+                        )
+                conn.commit()
+                return self._read_claims_sync(
+                    conn, mission_id, include_superseded=True
+                )
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                raise InvalidMissionClaimError(
+                    f"The claim batch violates its evidence binding contract: {exc}"
+                ) from exc
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        stored = await asyncio.to_thread(_sync_save)
+        by_identity = {
+            (claim.frame_digest, claim.client_claim_key): claim for claim in stored
+        }
+        return [
+            by_identity[(claim.frame_digest, claim.client_claim_key)] for claim in batch
+        ]
+
+    async def list_mission_claims(
+        self, mission_id: UUID, *, include_superseded: bool = False
+    ) -> List[MissionClaim]:
+        await self._ensure_schema()
+
+        def _sync_list():
+            conn = self._get_connection()
+            try:
+                return self._read_claims_sync(
+                    conn, mission_id, include_superseded=include_superseded
+                )
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_list)
+
+    async def supersede_mission_claims(self, mission_id: UUID, current_frame_digest: str) -> int:
+        await self._ensure_schema()
+
+        def _sync_supersede():
+            conn = self._get_connection()
+            try:
+                changed = conn.execute(
+                    "UPDATE mission_claims SET status = 'SUPERSEDED'"
+                    " WHERE mission_id = ? AND frame_digest <> ? AND status <> 'SUPERSEDED'",
+                    (str(mission_id), current_frame_digest),
+                ).rowcount
+                conn.commit()
+                return changed
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_supersede)
+
+    async def inventory_legacy_baseline(self) -> List[Dict[str, Any]]:
+        await self._ensure_schema()
+
+        def _sync_inventory():
+            conn = self._get_connection()
+            try:
+                result = []
+                for table in ("trend_signals", "signal_metrics"):
+                    count = conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+                    result.append(
+                        {
+                            "table": table,
+                            "row_count": int(count),
+                            "classification": "LEGACY_BASELINE",
+                            "promoted_to_mission_evidence": False,
+                        }
+                    )
+                return result
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_inventory)
 
     # One observation per source, the most recent in the window, and only observations whose
     # collection time is known. published_at is not a substitute clock: for the 17,118 legacy
@@ -2230,8 +2991,10 @@ class SqliteTrendRepository(ITrendRepository):
             """
             INSERT INTO market_brief_revisions
             (id, workspace_id, mission_id, revision_number, decision, target_user,
-             problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             problem, geo, timeframe, hypothesis, falsifiers, alternative_hypotheses,
+             null_hypothesis, kill_criteria, revision_rule, evidence_contract_version,
+             confirmed_by, confirmed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(revision.brief_revision_id),
@@ -2245,6 +3008,19 @@ class SqliteTrendRepository(ITrendRepository):
                 revision.timeframe,
                 revision.hypothesis,
                 json.dumps(list(revision.falsifiers), ensure_ascii=False),
+                (
+                    json.dumps(list(revision.alternative_hypotheses), ensure_ascii=False)
+                    if revision.alternative_hypotheses is not None
+                    else None
+                ),
+                revision.null_hypothesis,
+                (
+                    json.dumps(list(revision.kill_criteria), ensure_ascii=False)
+                    if revision.kill_criteria is not None
+                    else None
+                ),
+                revision.revision_rule,
+                revision.evidence_contract_version,
                 revision.confirmed_by,
                 revision.confirmed_at.isoformat(),
             ),
@@ -2326,13 +3102,26 @@ class SqliteTrendRepository(ITrendRepository):
             timeframe=row["timeframe"],
             hypothesis=row["hypothesis"],
             falsifiers=tuple(json.loads(row["falsifiers"])),
+            alternative_hypotheses=(
+                tuple(json.loads(row["alternative_hypotheses"]))
+                if row["alternative_hypotheses"] is not None
+                else None
+            ),
+            null_hypothesis=row["null_hypothesis"],
+            kill_criteria=(
+                tuple(json.loads(row["kill_criteria"]))
+                if row["kill_criteria"] is not None
+                else None
+            ),
+            revision_rule=row["revision_rule"],
             confirmed_by=row["confirmed_by"],
             confirmed_at=datetime.fromisoformat(row["confirmed_at"]),
         )
 
     _BRIEF_COLUMNS = (
         "SELECT id, workspace_id, mission_id, revision_number, decision, target_user, problem,"
-        " geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at"
+        " geo, timeframe, hypothesis, falsifiers, alternative_hypotheses, null_hypothesis,"
+        " kill_criteria, revision_rule, evidence_contract_version, confirmed_by, confirmed_at"
         " FROM market_brief_revisions"
     )
 
@@ -2446,6 +3235,93 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.close()
 
         return await asyncio.to_thread(_sync_list)
+
+    @staticmethod
+    def _manifest_from_row(row: Any) -> MissionManifest:
+        authority = json.loads(row["authority_boundary"])
+        return MissionManifest(
+            mission_id=UUID(row["mission_id"]),
+            outcome=row["outcome"],
+            decision_context=row["decision_context"],
+            required_channels=tuple(json.loads(row["required_channels"])),
+            optional_channels=tuple(json.loads(row["optional_channels"])),
+            authority_boundary=AuthorityBoundary(**authority),
+            quota_budget=json.loads(row["quota_budget"]),
+            output_type=row["output_type"],
+            stop_conditions=tuple(json.loads(row["stop_conditions"])),
+            analysis_policy=row["analysis_policy"],
+            retention_policy=row["retention_policy"],
+            created_by=row["created_by"],
+            confirmed_at=datetime.fromisoformat(row["confirmed_at"]),
+        )
+
+    async def save_mission_manifest(self, manifest: MissionManifest) -> MissionManifest:
+        if manifest.mission_id is None:
+            raise InvalidMissionManifestError("A persisted manifest requires mission_id.")
+        await self._ensure_schema()
+
+        def _sync_save():
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    "INSERT INTO mission_manifests"
+                    " (mission_id, outcome, decision_context, required_channels, optional_channels,"
+                    " authority_boundary, quota_budget, output_type, stop_conditions,"
+                    " analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    " ON CONFLICT (mission_id) DO NOTHING",
+                    (
+                        str(manifest.mission_id),
+                        manifest.outcome,
+                        manifest.decision_context,
+                        json.dumps(list(manifest.required_channels), ensure_ascii=False),
+                        json.dumps(list(manifest.optional_channels), ensure_ascii=False),
+                        json.dumps(manifest.authority_boundary.to_payload(), sort_keys=True),
+                        json.dumps(dict(manifest.quota_budget), sort_keys=True),
+                        manifest.output_type.value,
+                        json.dumps(list(manifest.stop_conditions), ensure_ascii=False),
+                        manifest.analysis_policy,
+                        manifest.retention_policy,
+                        manifest.created_by,
+                        manifest.confirmed_at.isoformat(),
+                        manifest.manifest_digest,
+                    ),
+                )
+                row = conn.execute(
+                    "SELECT * FROM mission_manifests WHERE mission_id = ?",
+                    (str(manifest.mission_id),),
+                ).fetchone()
+                stored = self._manifest_from_row(row)
+                if stored.manifest_digest != manifest.manifest_digest:
+                    raise InvalidMissionManifestError(
+                        f"Mission {manifest.mission_id} already has a different immutable manifest."
+                    )
+                conn.commit()
+                return stored
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_save)
+
+    async def get_mission_manifest(self, mission_id: UUID) -> Optional[MissionManifest]:
+        await self._ensure_schema()
+
+        def _sync_get():
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM mission_manifests WHERE mission_id = ?", (str(mission_id),)
+                ).fetchone()
+                return self._manifest_from_row(row) if row else None
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_get)
 
     async def claim_mission_writer(self, mission_id: UUID, run_id: UUID) -> bool:
         await self._ensure_schema()
@@ -2598,8 +3474,6 @@ class SqliteTrendRepository(ITrendRepository):
             raise InvalidEvidenceQualificationError(
                 f"Every probe outcome recorded for run {run_id} must belong to that run."
             )
-        if not rows:
-            return 0
         await self._ensure_schema()
 
         def _sync_record():
@@ -2607,10 +3481,28 @@ class SqliteTrendRepository(ITrendRepository):
             try:
                 if not conn.in_transaction:
                     conn.execute("BEGIN IMMEDIATE")
+                manifest_row = conn.execute(
+                    "SELECT m.required_channels, m.optional_channels"
+                    " FROM mission_run_journals j"
+                    " JOIN mission_manifests m ON m.mission_id = j.mission_id"
+                    " WHERE j.id = ?",
+                    (str(run_id),),
+                ).fetchone()
+                if manifest_row is not None:
+                    require_complete_channel_outcomes(
+                        json.loads(manifest_row["required_channels"]),
+                        json.loads(manifest_row["optional_channels"]),
+                        rows,
+                    )
+                elif not rows:
+                    conn.commit()
+                    return 0
                 conn.executemany(
                     "INSERT INTO mission_probe_outcomes (id, run_id, platform, connector_surface,"
                     " status, signals_collected, queried_keywords, queried_window,"
-                    " query_fingerprint, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " query_fingerprint, scope_attestation, note, collection_plan_digest,"
+                    " evidence_contract_version, completed_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [
                         (
                             str(uuid4()),
@@ -2622,6 +3514,14 @@ class SqliteTrendRepository(ITrendRepository):
                             json.dumps(list(o.queried_keywords), ensure_ascii=False),
                             o.queried_window,
                             o.query_fingerprint,
+                            (
+                                json.dumps(dict(o.scope_attestation), sort_keys=True)
+                                if o.scope_attestation is not None
+                                else None
+                            ),
+                            o.note,
+                            o.collection_plan_digest,
+                            2 if o.collection_plan_digest is not None else 1,
                             o.completed_at.isoformat(),
                         )
                         for o in rows
@@ -2654,7 +3554,8 @@ class SqliteTrendRepository(ITrendRepository):
                 rows = conn.execute(
                     "SELECT o.run_id, o.platform, o.connector_surface, o.status,"
                     " o.signals_collected, o.query_fingerprint, o.completed_at,"
-                    " o.queried_keywords, o.queried_window"
+                    " o.queried_keywords, o.queried_window, o.scope_attestation, o.note,"
+                    " o.collection_plan_digest"
                     " FROM mission_probe_outcomes o"
                     " WHERE o.run_id = ("
                     "   SELECT j.id FROM mission_run_journals j"
@@ -2674,6 +3575,13 @@ class SqliteTrendRepository(ITrendRepository):
                         completed_at=datetime.fromisoformat(r["completed_at"]),
                         queried_keywords=tuple(json.loads(r["queried_keywords"] or "[]")),
                         queried_window=r["queried_window"],
+                        scope_attestation=(
+                            json.loads(r["scope_attestation"])
+                            if r["scope_attestation"] is not None
+                            else None
+                        ),
+                        note=r["note"],
+                        collection_plan_digest=r["collection_plan_digest"],
                     )
                     for r in rows
                 ]
@@ -2685,7 +3593,8 @@ class SqliteTrendRepository(ITrendRepository):
 
     _QUALIFICATION_COLUMNS = (
         "SELECT mission_id, observation_id, brief_revision_id, frame_fingerprint, relation,"
-        " purpose, confidence, reason_code, judged_by, model, created_at"
+        " purpose, confidence, reason_code, judged_by, model, hypothesis_target, evidence_role,"
+        " evidence_contract_version, created_at"
         " FROM mission_evidence_qualifications"
     )
 
@@ -2702,6 +3611,9 @@ class SqliteTrendRepository(ITrendRepository):
             reason_code=row["reason_code"],
             judged_by=row["judged_by"],
             model=row["model"],
+            hypothesis_target=row["hypothesis_target"],
+            evidence_role=row["evidence_role"],
+            evidence_contract_version=row["evidence_contract_version"],
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 
@@ -2749,8 +3661,9 @@ class SqliteTrendRepository(ITrendRepository):
                     inserted = conn.execute(
                         "INSERT INTO mission_evidence_qualifications (id, mission_id,"
                         " observation_id, brief_revision_id, frame_fingerprint, relation, purpose,"
-                        " confidence, reason_code, judged_by, model, created_at)"
-                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                        " confidence, reason_code, judged_by, model, hypothesis_target,"
+                        " evidence_role, evidence_contract_version, created_at)"
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                         " ON CONFLICT (mission_id, observation_id) DO NOTHING",
                         (
                             str(uuid4()),
@@ -2764,6 +3677,9 @@ class SqliteTrendRepository(ITrendRepository):
                             q.reason_code.value,
                             q.judged_by,
                             q.model,
+                            q.hypothesis_target,
+                            q.evidence_role.value if q.evidence_role else None,
+                            q.evidence_contract_version,
                             now,
                         ),
                     ).rowcount

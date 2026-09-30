@@ -34,8 +34,8 @@ change before modifying runtime contracts or persisted evidence.
 - [X] T002 Add the expected retained, removed, changed, and new MCP operation inventory as a RED contract in `tests/unit/test_public_mcp_contract.py`
 - [X] T003 Add RED packaging assertions for the absent worker entrypoints, absent scheduler service, migration `025`, and the two planned skill packages in `tests/unit/test_sql_packaging.py` and `tests/integration/test_compose_init.py`
 - [X] T004 Reconcile the eight-operation removal set against every consumer found by T001 and record any discrepancy in `specs/011-evidence-grounded-product-reset/consumer-inventory.md`
-- [ ] T005 OWNER GATE: obtain explicit approval to change/remove the exact existing MCP signatures in `contracts/mission-bound-public-surface.md` and record the owner answer under the current session in `specs/011-evidence-grounded-product-reset/spec.md`
-- [ ] T006 OWNER GATE: obtain explicit approval to write migration `sql/025_evidence_grounded_claim_ledger.sql` and record the owner answer under the current session in `specs/011-evidence-grounded-product-reset/spec.md`
+- [X] T005 OWNER GATE: obtain explicit approval to change/remove the exact existing MCP signatures in `contracts/mission-bound-public-surface.md` and record the owner answer under the current session in `specs/011-evidence-grounded-product-reset/spec.md`
+- [X] T006 OWNER GATE: obtain explicit approval to write migration `sql/025_evidence_grounded_claim_ledger.sql` and record the owner answer under the current session in `specs/011-evidence-grounded-product-reset/spec.md`
 
 **Checkpoint**: The old and new surfaces are enumerated, RED contracts exist, and implementation may
 proceed only through the owner gates that have actually been granted.
@@ -52,19 +52,19 @@ foundation passes on SQLite and PostgreSQL.
 
 - [X] T007 [P] Add RED validation cases for `MissionManifest`, authority boundaries, stop conditions, immutable digests, and invalid resource combinations in `tests/unit/test_mission_manifest.py`
 - [X] T008 [P] Add RED validation cases for expanded Brief hypotheses, channel states, collection-plan identity, evidence roles, frame digests, claim types, bindings, and Gap Reports in `tests/unit/test_evidence_grounded_contracts.py`
-- [ ] T009 Create approved migration `sql/025_evidence_grounded_claim_ledger.sql` with manifests, expanded Brief fields, probe-outcome extensions, qualification extensions, claims, claim-evidence bindings, indexes, constraints, RLS, ACLs, UUID defaults, and no baseline-data promotion
-- [ ] T010 Add migration `025` ordering, packaging, schema, RLS, owner-only ACL, UUID-default, and negative-control assertions in `tests/unit/test_sql_packaging.py`, `tests/integration/test_postgres_migration_contract.py`, and `tests/integration/test_postgres_rls_coverage.py`
-- [ ] T011 Implement typed manifest, authority, channel-state, hypothesis-target, evidence-role, frame, claim, claim-binding, and Gap Report records in `src/ignis/domain/research_workspace.py` and `src/ignis/domain/value_objects.py`
-- [ ] T012 Add canonical serialization and digest helpers for manifests, collection plans, evidence frames, and candidate-claim idempotency keys in `src/ignis/domain/research_workspace.py`
-- [ ] T013 Extend `IResearchWorkspaceStore` with manifest, expanded Brief, complete outcome, claim, claim-binding, frame-invalidation, and read-only legacy-inventory contracts in `src/ignis/application/ports/research_workspace_port.py`
-- [ ] T014 Add RED dual-backend contract cases for all new records, uniqueness, foreign keys, cascades, idempotent replay, conflicting replay, legacy Brief readback, and frame supersession in `tests/integration/test_evidence_grounded_persistence.py`
-- [ ] T015 Implement the SQLite schema restatement and persistence methods for the new contracts in `src/ignis/infrastructure/persistence/sqlite_repository.py`
-- [ ] T016 Implement PostgreSQL persistence and row decoding for the new contracts in `src/ignis/infrastructure/persistence/postgres_repository.py`
-- [ ] T017 Add RED repository parity cases for exact-frame `EMPTY_NO_DATA`, missing outcome rows, stale frame claims, measured-absence bindings, and claim invalidation after evidence pruning in `tests/integration/test_evidence_grounded_persistence.py`
-- [ ] T018 Make SQLite and PostgreSQL enforce identical channel-state, binding, current-frame, and cascade semantics in `src/ignis/infrastructure/persistence/sqlite_repository.py` and `src/ignis/infrastructure/persistence/postgres_repository.py`
-- [ ] T019 Add a synthetic migration projection, count, constraint, and digest rehearsal in `scripts/rehearse_evidence_grounded_schema.py`
-- [ ] T020 Add deterministic rehearsal and negative-control tests for migration `025` in `tests/unit/test_evidence_grounded_schema_rehearsal.py`
-- [ ] T021 Run the Phase 1–2 targeted unit and dual-backend integration suites and record exact pass, fail, and skip evidence in `.handoff/011-foundation.handoff.md`
+- [X] T009 Create approved migration `sql/025_evidence_grounded_claim_ledger.sql` with manifests, expanded Brief fields, probe-outcome extensions, qualification extensions, claims, claim-evidence bindings, indexes, constraints, RLS, ACLs, UUID defaults, and no baseline-data promotion
+- [X] T010 Add migration `025` ordering, packaging, schema, RLS, owner-only ACL, UUID-default, and negative-control assertions in `tests/unit/test_sql_packaging.py`, `tests/integration/test_postgres_migration_contract.py`, and `tests/integration/test_postgres_rls_coverage.py`
+- [X] T011 Implement typed manifest, authority, channel-state, hypothesis-target, evidence-role, frame, claim, claim-binding, and Gap Report records in `src/ignis/domain/research_workspace.py` and `src/ignis/domain/value_objects.py`
+- [X] T012 Add canonical serialization and digest helpers for manifests, collection plans, evidence frames, and candidate-claim idempotency keys in `src/ignis/domain/research_workspace.py`
+- [X] T013 Extend `IResearchWorkspaceStore` with manifest, expanded Brief, complete outcome, claim, claim-binding, frame-invalidation, and read-only legacy-inventory contracts in `src/ignis/application/ports/research_workspace_port.py`
+- [X] T014 Add RED dual-backend contract cases for all new records, uniqueness, foreign keys, cascades, idempotent replay, conflicting replay, legacy Brief readback, and frame supersession in `tests/integration/test_evidence_grounded_persistence.py`
+- [X] T015 Implement the SQLite schema restatement and persistence methods for the new contracts in `src/ignis/infrastructure/persistence/sqlite_repository.py`
+- [X] T016 Implement PostgreSQL persistence and row decoding for the new contracts in `src/ignis/infrastructure/persistence/postgres_repository.py`
+- [X] T017 Add RED repository parity cases for latest-completed-plan `EMPTY_NO_DATA`, missing outcome rows, composite frame-scoped claim identity, measured-absence bindings, and claim invalidation after evidence pruning in `tests/integration/test_evidence_grounded_persistence.py`; canonical current-frame authority remains T040/T054
+- [X] T018 Make SQLite and PostgreSQL enforce identical channel-state, qualification-compatible binding, explicit supersession, and cascade semantics in `src/ignis/infrastructure/persistence/sqlite_repository.py` and `src/ignis/infrastructure/persistence/postgres_repository.py`; neither backend may promote a caller-supplied digest to current
+- [X] T019 Add a synthetic migration projection, count, constraint, and digest rehearsal in `scripts/rehearse_evidence_grounded_schema.py`
+- [X] T020 Add deterministic rehearsal and negative-control tests for migration `025` in `tests/unit/test_evidence_grounded_schema_rehearsal.py`
+- [X] T021 Run the Phase 1–2 targeted unit and dual-backend integration suites and record exact pass, fail, and skip evidence in `.handoff/011-foundation.handoff.md`
 
 **Checkpoint**: The evidence-control plane is representable and behaviorally equivalent on both
 backends; no production database has been migrated.

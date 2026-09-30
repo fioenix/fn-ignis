@@ -331,6 +331,8 @@ UUID_DEFAULT_TABLES = (
 BUILTIN_SINCE_003 = ("industry_taxonomies", "market_lexicons")
 # 023 creates its two tables with the built-in generator from the start.
 BUILTIN_SINCE_023 = ("mission_evidence_qualifications", "mission_probe_outcomes")
+# 025 creates two surrogate UUID keys. mission_manifests is keyed by its parent mission_id.
+BUILTIN_SINCE_025 = ("mission_claim_evidence", "mission_claims")
 UUID_DEFAULTS = (
     "SELECT c.relname, a.attname, pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d"
     " JOIN pg_class c ON c.oid = d.adrelid"
@@ -469,7 +471,9 @@ def test_a_fresh_install_defaults_every_uuid_key_to_the_builtin_generator(empty_
 
     assert _all(dsn, UUID_DEFAULTS) == [
         (table, "id", "gen_random_uuid()")
-        for table in sorted(UUID_DEFAULT_TABLES + BUILTIN_SINCE_003 + BUILTIN_SINCE_023)
+        for table in sorted(
+            UUID_DEFAULT_TABLES + BUILTIN_SINCE_003 + BUILTIN_SINCE_023 + BUILTIN_SINCE_025
+        )
     ]
     assert _one(dsn, UUID_OSSP_DEPENDENT_DEFAULTS)[0] == 0, "a default still calls uuid-ossp"
     # Left installed, in place, for anything outside Ignis that calls it.
@@ -867,4 +871,198 @@ def test_re_applying_024_and_the_whole_chain_changes_no_quota_state(supabase_lik
         dsn,
         "SELECT quota_day, bucket, used, scheduled_used, exhausted"
         " FROM youtube_quota_buckets WHERE quota_day = DATE '2026-09-29'",
+    ) == settled
+
+
+# --- F. 025: evidence-grounded authority and Claim Ledger --------------------------------------
+
+EVIDENCE_GROUNDED_MIGRATION = "025_evidence_grounded_claim_ledger.sql"
+EVIDENCE_GROUNDED_TABLES = ("mission_claim_evidence", "mission_claims", "mission_manifests")
+EVIDENCE_GROUNDED_FUNCTIONS = (
+    "validate_mission_claim_evidence_binding()",
+    "prune_claim_binding_with_mission_evidence()",
+    "withhold_claim_without_support()",
+)
+
+
+def test_025_creates_owner_only_constrained_tables_without_promoting_baseline(supabase_like_dsn):
+    dsn = supabase_like_dsn
+    _apply(dsn, *all_postgres_migrations()[:-1])
+    with psycopg.connect(dsn) as conn:
+        conn.execute("INSERT INTO trend_signals (platform, raw_title) VALUES ('youtube', 'legacy baseline')")
+        baseline_before = conn.execute("SELECT count(*) FROM trend_signals").fetchone()[0]
+        mission_evidence_before = conn.execute("SELECT count(*) FROM mission_evidence").fetchone()[0]
+
+    _apply(dsn, EVIDENCE_GROUNDED_MIGRATION)
+
+    assert _one(dsn, "SELECT count(*) FROM trend_signals")[0] == baseline_before
+    assert _one(dsn, "SELECT count(*) FROM mission_evidence")[0] == mission_evidence_before
+    for table in EVIDENCE_GROUNDED_TABLES:
+        assert _one(
+            dsn,
+            "SELECT relrowsecurity, relforcerowsecurity FROM pg_class"
+            " WHERE oid = to_regclass(%s)",
+            (f"public.{table}",),
+        ) == (True, False)
+        assert _all(
+            dsn,
+            "SELECT grantee, privilege_type FROM information_schema.role_table_grants"
+            " WHERE table_schema = 'public' AND table_name = %s"
+            " AND grantee IN ('anon', 'authenticated', 'PUBLIC')",
+            (table,),
+        ) == []
+    for function in EVIDENCE_GROUNDED_FUNCTIONS:
+        public_execute = _one(
+            dsn,
+            "SELECT count(*) FROM pg_proc p, aclexplode(p.proacl) a"
+            " WHERE p.oid = to_regprocedure(%s)"
+            " AND a.grantee = 0 AND a.privilege_type = 'EXECUTE'",
+            (function,),
+        )[0]
+        assert public_execute == 0
+        for role in SUPABASE_ROLES:
+            assert _one(
+                dsn,
+                "SELECT has_function_privilege(%s, %s, 'EXECUTE')",
+                (role, function),
+            )[0] is False
+
+
+def test_025_enforces_manifest_claim_and_binding_contracts(empty_postgres_dsn):
+    dsn = empty_postgres_dsn
+    _apply(dsn, *all_postgres_migrations())
+    workspace = "00000000-0000-4000-8000-000000000501"
+    mission = "00000000-0000-4000-8000-000000000502"
+    bad_mission = "00000000-0000-4000-8000-000000000505"
+    source = "00000000-0000-4000-8000-000000000503"
+    observation = "00000000-0000-4000-8000-000000000504"
+    with psycopg.connect(dsn) as conn:
+        conn.execute(
+            "INSERT INTO research_workspaces (id, slug, root_path) VALUES (%s, 't025', '/t025')",
+            (workspace,),
+        )
+        conn.execute(
+            "INSERT INTO research_missions (id, title, workspace_id, surface)"
+            " VALUES (%s, 't025 mission', %s, 'MARKET')",
+            (mission, workspace),
+        )
+        conn.execute(
+            "INSERT INTO research_missions (id, title, workspace_id, surface)"
+            " VALUES (%s, 't025 invalid control', %s, 'ATTENTION')",
+            (bad_mission, workspace),
+        )
+        conn.execute(
+            "INSERT INTO sources (id, platform, external_id) VALUES (%s, 'threads', 'post:t025')",
+            (source,),
+        )
+        conn.execute(
+            "INSERT INTO observations"
+            " (id, source_id, observed_at, time_provenance, identity_source)"
+            " VALUES (%s, %s, now(), 'exact_ingestion', 'metadata_external_id')",
+            (observation, source),
+        )
+        conn.execute(
+            "INSERT INTO mission_evidence (mission_id, observation_id) VALUES (%s, %s)",
+            (mission, observation),
+        )
+        conn.execute(
+            "INSERT INTO mission_evidence_qualifications"
+            " (mission_id, observation_id, frame_fingerprint, relation, purpose, confidence,"
+            " reason_code, judged_by, hypothesis_target, evidence_role,"
+            " evidence_contract_version)"
+            " VALUES (%s, %s, 'frame', 'QUALIFIED_SUPPORT', 'VOC', 0.9,"
+            " 'DIRECT_TO_FRAME', 'owner', 'core', 'SUPPORT', 2)",
+            (mission, observation),
+        )
+        conn.execute(
+            "INSERT INTO mission_manifests"
+            " (mission_id, outcome, decision_context, required_channels, authority_boundary,"
+            " output_type, stop_conditions, analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest)"
+            " VALUES (%s, 'decide', 'owner decision', ARRAY['threads'], '{}', 'MARKET_ANALYSIS',"
+            " ARRAY['completed'], 'evidence-v1', 'mission-only', 'owner', now(), 'manifest-digest')",
+            (mission,),
+        )
+        claim_id = conn.execute(
+            "INSERT INTO mission_claims"
+            " (mission_id, frame_digest, client_claim_key, claim_type, wording, status, created_by)"
+            " VALUES (%s, 'frame', 'claim-1', 'OBSERVATION', 'Observed signal', 'PERMITTED', 'owner')"
+            " RETURNING id",
+            (mission,),
+        ).fetchone()[0]
+        binding_id = conn.execute(
+            "INSERT INTO mission_claim_evidence"
+            " (claim_id, observation_id, role, hypothesis_target)"
+            " VALUES (%s, %s, 'SUPPORT', 'core') RETURNING id",
+            (claim_id, observation),
+        ).fetchone()[0]
+
+    assert claim_id.version == 4 and binding_id.version == 4
+    with pytest.raises(errors.CheckViolation):
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "INSERT INTO mission_manifests"
+                " (mission_id, outcome, required_channels, optional_channels, authority_boundary,"
+                " output_type, stop_conditions, analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest)"
+                " VALUES (%s, 'bad', ARRAY['threads'], ARRAY['threads'], '{}', 'COLLECTION_FRAME',"
+                " ARRAY['completed'], 'evidence-v1', 'mission-only', 'owner', now(), 'bad-manifest')",
+                (bad_mission,),
+            )
+    with pytest.raises(errors.CheckViolation):
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "INSERT INTO mission_claim_evidence"
+                " (claim_id, role) VALUES (%s, 'CONTEXT')",
+                (claim_id,),
+            )
+    with pytest.raises(errors.CheckViolation):
+        with psycopg.connect(dsn) as conn:
+            conn.execute(
+                "INSERT INTO mission_claims"
+                " (mission_id, frame_digest, client_claim_key, claim_type, wording,"
+                " inference_method, change_conditions, status, created_by)"
+                " VALUES (%s, 'frame', 'claim-without-limitations', 'INFERENCE',"
+                " 'Unsupported inference', 'method-v1', ARRAY['new evidence'],"
+                " 'WITHHELD', 'owner')",
+                (mission,),
+            )
+
+
+def test_re_applying_025_and_the_whole_chain_preserves_claim_state(supabase_like_dsn):
+    dsn = supabase_like_dsn
+    _apply_with_rpc_probe(dsn)
+    settled = (
+        _all(
+            dsn,
+            "SELECT table_name, column_name FROM information_schema.columns"
+            " WHERE table_schema = 'public'"
+            " AND table_name IN ('mission_manifests', 'mission_claims', 'mission_claim_evidence')"
+            " ORDER BY table_name, ordinal_position",
+        ),
+        _security_state(dsn),
+        _uuid_state(dsn),
+    )
+
+    _apply(dsn, EVIDENCE_GROUNDED_MIGRATION)
+    assert (
+        _all(
+            dsn,
+            "SELECT table_name, column_name FROM information_schema.columns"
+            " WHERE table_schema = 'public'"
+            " AND table_name IN ('mission_manifests', 'mission_claims', 'mission_claim_evidence')"
+            " ORDER BY table_name, ordinal_position",
+        ),
+        _security_state(dsn),
+        _uuid_state(dsn),
+    ) == settled
+    _apply(dsn, *all_postgres_migrations())
+    assert (
+        _all(
+            dsn,
+            "SELECT table_name, column_name FROM information_schema.columns"
+            " WHERE table_schema = 'public'"
+            " AND table_name IN ('mission_manifests', 'mission_claims', 'mission_claim_evidence')"
+            " ORDER BY table_name, ordinal_position",
+        ),
+        _security_state(dsn),
+        _uuid_state(dsn),
     ) == settled

@@ -16,6 +16,7 @@ import pytest
 from ignis.domain.entities import ResearchMission
 from ignis.domain.harness_models import ChannelHealthStatus, QualityScorecard
 from ignis.domain.research_workspace import (
+    EvidenceDirection,
     EvidencePurpose,
     EvidenceQualification,
     EvidenceSufficiency,
@@ -69,7 +70,8 @@ def _brief(**overrides) -> MarketBriefRevision:
 
 def test_every_relation_purpose_and_reason_named_by_the_contract_exists():
     assert {r.value for r in QualificationRelation} == {
-        "QUALIFIED_SUPPORT", "CONTEXT_ONLY", "EXCLUDED_IRRELEVANT", "UNASSESSED",
+        "QUALIFIED_SUPPORT", "QUALIFIED_CONTRADICTION", "CONTEXT_ONLY",
+        "EXCLUDED_IRRELEVANT", "UNASSESSED",
     }
     assert {p.value for p in EvidencePurpose} == {"DEMAND", "SUPPLY", "VOC", "CONTEXT"}
     assert {r.value for r in QualificationReason} == {
@@ -105,6 +107,29 @@ def test_values_submitted_as_strings_are_read_into_the_enums():
 def test_a_value_outside_the_contract_is_refused(overrides):
     with pytest.raises(InvalidEvidenceQualificationError):
         _qualification(**overrides)
+
+
+def test_a_v2_contradiction_requires_its_role_and_hypothesis_target():
+    with pytest.raises(InvalidEvidenceQualificationError, match="evidence_role"):
+        _qualification(
+            relation=QualificationRelation.QUALIFIED_CONTRADICTION,
+            purpose=EvidencePurpose.DEMAND,
+        )
+    with pytest.raises(InvalidEvidenceQualificationError, match="contract v1"):
+        _qualification(
+            relation=QualificationRelation.QUALIFIED_CONTRADICTION,
+            purpose=EvidencePurpose.DEMAND,
+            evidence_contract_version=1,
+        )
+
+    contradiction = _qualification(
+        relation=QualificationRelation.QUALIFIED_CONTRADICTION,
+        purpose=EvidencePurpose.DEMAND,
+        evidence_role=EvidenceDirection.CONTRADICTION,
+        hypothesis_target="alternative:1",
+    )
+
+    assert contradiction.evidence_contract_version == 2
 
 
 def test_qualified_support_must_measure_something():
@@ -275,6 +300,42 @@ def test_a_market_frame_changes_with_any_confirmed_brief_field_and_nothing_else(
     assert compute_frame_fingerprint(mission, brief) == fingerprint, (
         "run state is not part of the question"
     )
+
+
+@pytest.mark.parametrize(
+    "field_name, replacement",
+    [
+        ("alternative_hypotheses", ("A different mechanism", "A second mechanism")),
+        ("null_hypothesis", "The observed problem is not material"),
+        ("kill_criteria", ("No repeated pain in qualified evidence",)),
+        ("revision_rule", "Revise when contradiction exceeds support"),
+        ("confirmed_by", "a-different-requester"),
+    ],
+)
+def test_a_v2_market_frame_fingerprints_every_confirmed_brief_field(
+    field_name, replacement
+):
+    mission = ResearchMission(title="Retail copilot", keywords=["ai retail"], surface="MARKET")
+    base = _brief(
+        mission_id=mission.id,
+        alternative_hypotheses=("Training solves the pain", "A process change solves it"),
+        null_hypothesis="The pain is not decision-relevant",
+        kill_criteria=("No repeated pain appears",),
+        revision_rule="Revise after material counterevidence",
+    )
+    changed_values = {
+        "mission_id": mission.id,
+        "brief_revision_id": base.brief_revision_id,
+        "confirmed_at": base.confirmed_at,
+        "alternative_hypotheses": ("Training solves the pain", "A process change solves it"),
+        "null_hypothesis": "The pain is not decision-relevant",
+        "kill_criteria": ("No repeated pain appears",),
+        "revision_rule": "Revise after material counterevidence",
+        field_name: replacement,
+    }
+    changed = _brief(**changed_values)
+
+    assert compute_frame_fingerprint(mission, base) != compute_frame_fingerprint(mission, changed)
 
 
 def test_an_attention_frame_is_its_declared_scope():

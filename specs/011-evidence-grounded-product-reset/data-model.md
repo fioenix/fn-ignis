@@ -253,7 +253,7 @@ CANDIDATE
 
 ## Migration and legacy behavior
 
-- Migration `024` is additive except for broadening enum/check constraints.
+- Migration `025` is additive except for broadening enum/check constraints.
 - Existing Briefs are never assigned invented alternatives, null hypotheses, or kill criteria.
   They remain readable and require a new revision for the new analysis contract.
 - Existing unscoped missions remain readable for audit but cannot run new collection or generate a

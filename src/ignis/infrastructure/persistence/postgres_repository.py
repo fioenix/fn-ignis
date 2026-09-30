@@ -18,14 +18,24 @@ from ignis.application.ports.repository_port import (
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
 from ignis.domain.research_workspace import (
+    AuthorityBoundary,
+    ClaimStatus,
+    ClaimType,
+    EvidenceDirection,
     EvidenceQualification,
     EvidenceQualificationConflictError,
     InvalidEvidenceQualificationError,
+    InvalidMissionClaimError,
+    InvalidMissionManifestError,
     MarketBriefRevision,
+    MissionClaim,
+    MissionClaimEvidence,
+    MissionManifest,
     MissionProbeOutcome,
     ResearchWorkspace,
     WorkspaceScopeMismatchError,
     WorkspaceStatus,
+    require_complete_channel_outcomes,
 )
 from ignis.application.ports.research_workspace_port import (
     MissionWriterClaim,
@@ -1681,7 +1691,8 @@ class PostgresTimescaleRepository(ITrendRepository):
 
     _BRIEF_COLUMNS = (
         "SELECT id, workspace_id, mission_id, revision_number, decision, target_user, problem,"
-        " geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at"
+        " geo, timeframe, hypothesis, falsifiers, alternative_hypotheses, null_hypothesis,"
+        " kill_criteria, revision_rule, evidence_contract_version, confirmed_by, confirmed_at"
         " FROM market_brief_revisions"
     )
 
@@ -1702,7 +1713,8 @@ class PostgresTimescaleRepository(ITrendRepository):
     def _brief_from_row(row) -> MarketBriefRevision:
         (
             rev_id, ws_id, mission_id, revision_number, decision, target_user, problem,
-            geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at,
+            geo, timeframe, hypothesis, falsifiers, alternative_hypotheses, null_hypothesis,
+            kill_criteria, revision_rule, _contract_version, confirmed_by, confirmed_at,
         ) = row
         return MarketBriefRevision(
             brief_revision_id=UUID(str(rev_id)),
@@ -1716,6 +1728,12 @@ class PostgresTimescaleRepository(ITrendRepository):
             timeframe=timeframe,
             hypothesis=hypothesis,
             falsifiers=tuple(falsifiers or ()),
+            alternative_hypotheses=(
+                tuple(alternative_hypotheses) if alternative_hypotheses is not None else None
+            ),
+            null_hypothesis=null_hypothesis,
+            kill_criteria=tuple(kill_criteria) if kill_criteria is not None else None,
+            revision_rule=revision_rule,
             confirmed_by=confirmed_by,
             confirmed_at=confirmed_at,
         )
@@ -1810,8 +1828,9 @@ class PostgresTimescaleRepository(ITrendRepository):
             """
             INSERT INTO market_brief_revisions
             (id, workspace_id, mission_id, revision_number, decision, target_user, problem,
-             geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+             geo, timeframe, hypothesis, falsifiers, alternative_hypotheses, null_hypothesis,
+             kill_criteria, revision_rule, evidence_contract_version, confirmed_by, confirmed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """,
             (
                 str(revision.brief_revision_id),
@@ -1825,6 +1844,15 @@ class PostgresTimescaleRepository(ITrendRepository):
                 revision.timeframe,
                 revision.hypothesis,
                 list(revision.falsifiers),
+                (
+                    list(revision.alternative_hypotheses)
+                    if revision.alternative_hypotheses is not None
+                    else None
+                ),
+                revision.null_hypothesis,
+                list(revision.kill_criteria) if revision.kill_criteria is not None else None,
+                revision.revision_rule,
+                revision.evidence_contract_version,
                 revision.confirmed_by,
                 revision.confirmed_at,
             ),
@@ -1982,6 +2010,82 @@ class PostgresTimescaleRepository(ITrendRepository):
             )
         return missions
 
+    @staticmethod
+    def _manifest_from_row(row) -> MissionManifest:
+        return MissionManifest(
+            mission_id=UUID(str(row[0])),
+            outcome=row[1],
+            decision_context=row[2],
+            required_channels=tuple(row[3]),
+            optional_channels=tuple(row[4]),
+            authority_boundary=AuthorityBoundary(**row[5]),
+            quota_budget=dict(row[6]),
+            output_type=row[7],
+            stop_conditions=tuple(row[8]),
+            analysis_policy=row[9],
+            retention_policy=row[10],
+            created_by=row[11],
+            confirmed_at=row[12],
+        )
+
+    _MANIFEST_COLUMNS = (
+        "SELECT mission_id, outcome, decision_context, required_channels, optional_channels,"
+        " authority_boundary, quota_budget, output_type, stop_conditions, analysis_policy,"
+        " retention_policy, created_by, confirmed_at, manifest_digest FROM mission_manifests"
+    )
+
+    async def save_mission_manifest(self, manifest: MissionManifest) -> MissionManifest:
+        if manifest.mission_id is None:
+            raise InvalidMissionManifestError("A persisted manifest requires mission_id.")
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    "INSERT INTO mission_manifests"
+                    " (mission_id, outcome, decision_context, required_channels, optional_channels,"
+                    " authority_boundary, quota_budget, output_type, stop_conditions,"
+                    " analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest)"
+                    " VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)"
+                    " ON CONFLICT (mission_id) DO NOTHING;",
+                    (
+                        str(manifest.mission_id),
+                        manifest.outcome,
+                        manifest.decision_context,
+                        list(manifest.required_channels),
+                        list(manifest.optional_channels),
+                        json.dumps(manifest.authority_boundary.to_payload(), sort_keys=True),
+                        json.dumps(dict(manifest.quota_budget), sort_keys=True),
+                        manifest.output_type.value,
+                        list(manifest.stop_conditions),
+                        manifest.analysis_policy,
+                        manifest.retention_policy,
+                        manifest.created_by,
+                        manifest.confirmed_at,
+                        manifest.manifest_digest,
+                    ),
+                )
+                await cur.execute(
+                    self._MANIFEST_COLUMNS + " WHERE mission_id = %s;",
+                    (str(manifest.mission_id),),
+                )
+                row = await cur.fetchone()
+                stored = self._manifest_from_row(row)
+                if row[13] != manifest.manifest_digest or stored.manifest_digest != manifest.manifest_digest:
+                    raise InvalidMissionManifestError(
+                        f"Mission {manifest.mission_id} already has a different immutable manifest."
+                    )
+        return stored
+
+    async def get_mission_manifest(self, mission_id: UUID) -> Optional[MissionManifest]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    self._MANIFEST_COLUMNS + " WHERE mission_id = %s;", (str(mission_id),)
+                )
+                row = await cur.fetchone()
+        return self._manifest_from_row(row) if row else None
+
     async def claim_mission_writer(self, mission_id: UUID, run_id: UUID) -> bool:
         pool = await self._get_pool()
         # One statement, and the primary key is what decides. A SELECT followed by an INSERT
@@ -2090,19 +2194,32 @@ class PostgresTimescaleRepository(ITrendRepository):
             raise InvalidEvidenceQualificationError(
                 f"Every probe outcome recorded for run {run_id} must belong to that run."
             )
-        if not rows:
-            return 0
         pool = await self._get_pool()
         try:
             # One connection block is one transaction: psycopg commits it on a clean exit and
             # rolls it back on any exception, so a refused row takes the whole run with it.
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT m.required_channels, m.optional_channels"
+                        " FROM mission_run_journals j"
+                        " JOIN mission_manifests m ON m.mission_id = j.mission_id"
+                        " WHERE j.id = %s;",
+                        (str(run_id),),
+                    )
+                    manifest_row = await cur.fetchone()
+                    if manifest_row is not None:
+                        require_complete_channel_outcomes(
+                            manifest_row[0], manifest_row[1], rows
+                        )
+                    elif not rows:
+                        return 0
                     await cur.executemany(
                         "INSERT INTO mission_probe_outcomes (run_id, platform, connector_surface,"
                         " status, signals_collected, queried_keywords, queried_window,"
-                        " query_fingerprint, completed_at)"
-                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);",
+                        " query_fingerprint, scope_attestation, note, collection_plan_digest,"
+                        " evidence_contract_version, completed_at)"
+                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s);",
                         [
                             (
                                 str(o.run_id),
@@ -2113,6 +2230,14 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 list(o.queried_keywords),
                                 o.queried_window,
                                 o.query_fingerprint,
+                                (
+                                    json.dumps(dict(o.scope_attestation), sort_keys=True)
+                                    if o.scope_attestation is not None
+                                    else None
+                                ),
+                                o.note,
+                                o.collection_plan_digest,
+                                2 if o.collection_plan_digest is not None else 1,
                                 o.completed_at,
                             )
                             for o in rows
@@ -2133,7 +2258,8 @@ class PostgresTimescaleRepository(ITrendRepository):
                 await cur.execute(
                     "SELECT o.run_id, o.platform, o.connector_surface, o.status,"
                     " o.signals_collected, o.query_fingerprint, o.completed_at,"
-                    " o.queried_keywords, o.queried_window"
+                    " o.queried_keywords, o.queried_window, o.scope_attestation, o.note,"
+                    " o.collection_plan_digest"
                     " FROM mission_probe_outcomes o"
                     " WHERE o.run_id = ("
                     "   SELECT j.id FROM mission_run_journals j"
@@ -2154,13 +2280,17 @@ class PostgresTimescaleRepository(ITrendRepository):
                 completed_at=r[6],
                 queried_keywords=tuple(r[7] or ()),
                 queried_window=r[8],
+                scope_attestation=r[9],
+                note=r[10],
+                collection_plan_digest=r[11],
             )
             for r in rows
         ]
 
     _QUALIFICATION_COLUMNS = (
         "SELECT mission_id, observation_id, brief_revision_id, frame_fingerprint, relation,"
-        " purpose, confidence, reason_code, judged_by, model, created_at"
+        " purpose, confidence, reason_code, judged_by, model, hypothesis_target, evidence_role,"
+        " evidence_contract_version, created_at"
         " FROM mission_evidence_qualifications"
     )
 
@@ -2177,7 +2307,10 @@ class PostgresTimescaleRepository(ITrendRepository):
             reason_code=row[7],
             judged_by=row[8],
             model=row[9],
-            created_at=row[10],
+            hypothesis_target=row[10],
+            evidence_role=row[11],
+            evidence_contract_version=row[12],
+            created_at=row[13],
         )
 
     async def list_evidence_qualifications(
@@ -2215,8 +2348,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                         await cur.execute(
                             "INSERT INTO mission_evidence_qualifications (mission_id,"
                             " observation_id, brief_revision_id, frame_fingerprint, relation,"
-                            " purpose, confidence, reason_code, judged_by, model)"
-                            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                            " purpose, confidence, reason_code, judged_by, model,"
+                            " hypothesis_target, evidence_role, evidence_contract_version)"
+                            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                             " ON CONFLICT (mission_id, observation_id) DO NOTHING;",
                             (
                                 str(q.mission_id),
@@ -2229,6 +2363,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 q.reason_code.value,
                                 q.judged_by,
                                 q.model,
+                                q.hypothesis_target,
+                                q.evidence_role.value if q.evidence_role else None,
+                                q.evidence_contract_version,
                             ),
                         )
                         if cur.rowcount:
@@ -2254,3 +2391,211 @@ class PostgresTimescaleRepository(ITrendRepository):
                 f"The batch names evidence mission {mission_id} does not hold, so none of it was "
                 f"recorded: {exc}"
             ) from exc
+
+    @staticmethod
+    def _claim_from_rows(row, binding_rows: Sequence[Any]) -> MissionClaim:
+        bindings = tuple(
+            MissionClaimEvidence(
+                binding_id=UUID(str(binding[0])),
+                claim_id=UUID(str(binding[1])),
+                observation_id=_uuid_or_none(binding[2]),
+                probe_outcome_id=_uuid_or_none(binding[3]),
+                role=EvidenceDirection(binding[4]),
+                hypothesis_target=binding[5],
+            )
+            for binding in binding_rows
+        )
+        return MissionClaim(
+            claim_id=UUID(str(row[0])),
+            mission_id=UUID(str(row[1])),
+            brief_revision_id=_uuid_or_none(row[2]),
+            frame_digest=row[3],
+            client_claim_key=row[4],
+            claim_type=ClaimType(row[5]),
+            wording=row[6],
+            inference_method=row[7],
+            confidence=row[8],
+            limitations=tuple(row[9] or ()),
+            change_conditions=tuple(row[10] or ()),
+            status=ClaimStatus(row[11]),
+            withheld_reasons=tuple(row[12] or ()),
+            created_by=row[13],
+            created_at=row[14],
+            evidence_bindings=bindings,
+        )
+
+    _CLAIM_COLUMNS = (
+        "SELECT id, mission_id, brief_revision_id, frame_digest, client_claim_key, claim_type,"
+        " wording, inference_method, confidence, limitations, change_conditions, status,"
+        " withheld_reasons, created_by, created_at FROM mission_claims"
+    )
+    _BINDING_COLUMNS = (
+        "SELECT id, claim_id, observation_id, probe_outcome_id, role, hypothesis_target"
+        " FROM mission_claim_evidence"
+    )
+
+    async def _read_claims(
+        self, mission_id: UUID, *, include_superseded: bool, conn=None
+    ) -> List[MissionClaim]:
+        pool = await self._get_pool()
+
+        async def _read(active_conn):
+            async with active_conn.cursor(row_factory=tuple_row) as cur:
+                where = " WHERE mission_id = %s"
+                if not include_superseded:
+                    where += " AND status <> 'SUPERSEDED'"
+                await cur.execute(
+                    self._CLAIM_COLUMNS + where + " ORDER BY created_at, id;",
+                    (str(mission_id),),
+                )
+                rows = await cur.fetchall()
+                result = []
+                for row in rows:
+                    await cur.execute(
+                        self._BINDING_COLUMNS + " WHERE claim_id = %s ORDER BY id;",
+                        (str(row[0]),),
+                    )
+                    result.append(self._claim_from_rows(row, await cur.fetchall()))
+                return result
+
+        if conn is not None:
+            return await _read(conn)
+        async with pool.connection() as active_conn:
+            return await _read(active_conn)
+
+    async def save_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
+    ) -> List[MissionClaim]:
+        batch = list(claims)
+        if any(
+            str(claim.mission_id) != str(mission_id) or claim.frame_digest != frame_digest
+            for claim in batch
+        ):
+            raise InvalidMissionClaimError(
+                "Every claim in a batch must name the requested mission and evidence frame."
+            )
+        if not batch:
+            return []
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    for claim in batch:
+                        await cur.execute(
+                            "INSERT INTO mission_claims"
+                            " (id, mission_id, brief_revision_id, frame_digest, client_claim_key,"
+                            " claim_type, wording, inference_method, confidence, limitations,"
+                            " change_conditions, status, withheld_reasons, created_by, created_at)"
+                            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                            " ON CONFLICT (mission_id, frame_digest, client_claim_key) DO NOTHING;",
+                            (
+                                str(claim.claim_id),
+                                str(claim.mission_id),
+                                str(claim.brief_revision_id) if claim.brief_revision_id else None,
+                                claim.frame_digest,
+                                claim.client_claim_key,
+                                claim.claim_type.value,
+                                claim.wording,
+                                claim.inference_method,
+                                claim.confidence,
+                                list(claim.limitations),
+                                list(claim.change_conditions),
+                                claim.status.value,
+                                list(claim.withheld_reasons),
+                                claim.created_by,
+                                claim.created_at,
+                            ),
+                        )
+                        if cur.rowcount:
+                            for binding in claim.evidence_bindings:
+                                if binding.claim_id != claim.claim_id:
+                                    raise InvalidMissionClaimError(
+                                        "Every evidence binding must name the claim carrying it."
+                                    )
+                                await cur.execute(
+                                    "INSERT INTO mission_claim_evidence"
+                                    " (id, claim_id, observation_id, probe_outcome_id, role,"
+                                    " hypothesis_target) VALUES (%s, %s, %s, %s, %s, %s);",
+                                    (
+                                        str(binding.binding_id),
+                                        str(binding.claim_id),
+                                        (
+                                            str(binding.observation_id)
+                                            if binding.observation_id
+                                            else None
+                                        ),
+                                        (
+                                            str(binding.probe_outcome_id)
+                                            if binding.probe_outcome_id
+                                            else None
+                                        ),
+                                        binding.role.value,
+                                        binding.hypothesis_target,
+                                    ),
+                                )
+                            continue
+                        await cur.execute(
+                            self._CLAIM_COLUMNS
+                            + " WHERE mission_id = %s AND frame_digest = %s"
+                            " AND client_claim_key = %s;",
+                            (str(mission_id), frame_digest, claim.client_claim_key),
+                        )
+                        existing = await cur.fetchone()
+                        await cur.execute(
+                            self._BINDING_COLUMNS + " WHERE claim_id = %s ORDER BY id;",
+                            (str(existing[0]),),
+                        )
+                        stored = self._claim_from_rows(existing, await cur.fetchall())
+                        if stored.idempotency_payload() != claim.idempotency_payload():
+                            raise InvalidMissionClaimError(
+                                f"client_claim_key {claim.client_claim_key!r} already names a different claim."
+                            )
+                stored = await self._read_claims(
+                    mission_id, include_superseded=True, conn=conn
+                )
+            by_identity = {
+                (claim.frame_digest, claim.client_claim_key): claim for claim in stored
+            }
+            return [
+                by_identity[(claim.frame_digest, claim.client_claim_key)] for claim in batch
+            ]
+        except pg_errors.IntegrityError as exc:
+            raise InvalidMissionClaimError(
+                f"The claim batch violates its evidence binding contract: {exc}"
+            ) from exc
+
+    async def list_mission_claims(
+        self, mission_id: UUID, *, include_superseded: bool = False
+    ) -> List[MissionClaim]:
+        return await self._read_claims(
+            mission_id, include_superseded=include_superseded
+        )
+
+    async def supersede_mission_claims(self, mission_id: UUID, current_frame_digest: str) -> int:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE mission_claims SET status = 'SUPERSEDED'"
+                    " WHERE mission_id = %s AND frame_digest <> %s AND status <> 'SUPERSEDED';",
+                    (str(mission_id), current_frame_digest),
+                )
+                return cur.rowcount
+
+    async def inventory_legacy_baseline(self) -> List[Dict[str, Any]]:
+        pool = await self._get_pool()
+        result = []
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                for table in ("trend_signals", "signal_metrics"):
+                    await cur.execute(f"SELECT count(*) FROM {table};")
+                    count = (await cur.fetchone())[0]
+                    result.append(
+                        {
+                            "table": table,
+                            "row_count": int(count),
+                            "classification": "LEGACY_BASELINE",
+                            "promoted_to_mission_evidence": False,
+                        }
+                    )
+        return result

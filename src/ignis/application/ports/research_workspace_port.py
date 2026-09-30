@@ -15,6 +15,8 @@ from uuid import UUID
 from ignis.domain.research_workspace import (
     EvidenceQualification,
     MarketBriefRevision,
+    MissionClaim,
+    MissionManifest,
     MissionProbeOutcome,
     ResearchWorkspace,
     WorkspaceStatus,
@@ -168,6 +170,14 @@ class IResearchWorkspaceStore(ABC):
         """List the missions this workspace owns, newest first."""
 
     @abstractmethod
+    async def save_mission_manifest(self, manifest: MissionManifest) -> MissionManifest:
+        """Persist the immutable authority boundary before any surfaced mission runs."""
+
+    @abstractmethod
+    async def get_mission_manifest(self, mission_id: UUID) -> Optional[MissionManifest]:
+        """Read the confirmed authority boundary for a surfaced mission."""
+
+    @abstractmethod
     async def claim_mission_writer(self, mission_id: UUID, run_id: UUID) -> bool:
         """Take the single writer slot for a mission. False when another run already holds it."""
 
@@ -236,3 +246,23 @@ class IResearchWorkspaceStore(ABC):
         `EvidenceQualificationConflictError`, and an observation outside the mission's evidence
         raises `InvalidEvidenceQualificationError`; either way no row of the batch is written.
         """
+
+    @abstractmethod
+    async def save_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
+    ) -> List[MissionClaim]:
+        """Persist one idempotent candidate-claim batch, including its evidence bindings."""
+
+    @abstractmethod
+    async def list_mission_claims(
+        self, mission_id: UUID, *, include_superseded: bool = False
+    ) -> List[MissionClaim]:
+        """Return current claims, or the full audit history when explicitly requested."""
+
+    @abstractmethod
+    async def supersede_mission_claims(self, mission_id: UUID, current_frame_digest: str) -> int:
+        """Mark claims from older evidence frames non-renderable without rewriting their text."""
+
+    @abstractmethod
+    async def inventory_legacy_baseline(self) -> List[Dict[str, Any]]:
+        """Classify legacy baseline stores read-only; never promote or mutate their rows."""

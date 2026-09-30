@@ -26,6 +26,8 @@ class ChannelHealthStatus(str, Enum):
     AUTH_REQUIRED = "AUTH_REQUIRED"  # No token / browser session bound to the channel
     RATE_LIMITED = "RATE_LIMITED"    # Quota or HTTP 429 ceiling reached
     DEGRADED = "DEGRADED"            # Network error / soft-block (Circuit Breaker OPEN)
+    FAILED = "FAILED"                # Declared measurement could not complete
+    NOT_REQUESTED = "NOT_REQUESTED"  # Known surface was outside this run's requested plan
 
 
 @dataclass
@@ -198,4 +200,3 @@ class HarnessResearchReport:
     qualified_handoff_candidates: List[Dict[str, Any]] = field(default_factory=list)
     cluster_qualification: List[Dict[str, Any]] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-

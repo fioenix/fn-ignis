@@ -56,14 +56,15 @@ pilot mission conditions for the Vietnam consumer-market beachhead
 | III. Evidence-First Research and Falsification | Mission evidence, hypothesis alternatives, counterevidence, missingness, sufficiency, and claims are persisted against one immutable frame | PASS |
 | IV. Deterministic Artifact Builders | Only maintained builders and templates under `src/ignis/infrastructure/templates/html/` render runtime reports | PASS |
 | V. Simplicity, Surgical Changes, and Type Safety | Extend Spec 008 records and repository ports; add no AI provider or parallel workflow engine; use typed enums and payloads | PASS |
-| VI. Evidence-Gated Migration and Release | Migration 025 is planned but not written or applied; removal, deletion, version, and release remain explicit owner gates | PASS |
+| VI. Evidence-Gated Migration and Release | The owner approved writing and locally rehearsing migration 025; it is written but not applied to a persistent database. Removal is approved for the local breaking cutover, while deletion, version, and release remain explicit owner gates | PASS |
 | Outcome thinking | Success is zero idle work plus either traceable current-frame claims or an explicit Gap Report | PASS |
 | Design thinking | Founder/operator/analyst workflows expose friction, cost, missing authority, and the next useful probe | PASS |
 | Critical thinking | Every Market mission records alternatives and null, seeks contradiction, and separates observation from inference | PASS |
 
-No constitutional exception is requested. The plan deliberately stops before four owner-controlled
-actions: writing or applying migration 025, changing/removing existing MCP signatures, deleting
-baseline data, and preparing a version/tag/release.
+No constitutional exception is requested. The owner has approved writing and locally testing
+migration 025 and changing/removing the enumerated MCP signatures. The plan still stops before
+applying migration 025 to a persistent database, deleting baseline data, and preparing or shipping
+a version/tag/release.
 
 ## Project Structure
 
@@ -84,7 +85,7 @@ specs/011-evidence-grounded-product-reset/
     └── claim-ledger-and-analysis-output.md
 ```
 
-`tasks.md` is intentionally absent. It belongs to the subsequent `/speckit-tasks` phase.
+`tasks.md` was generated in the subsequent `/speckit-tasks` phase and is the implementation ledger.
 
 ### Source code affected by implementation
 
@@ -120,7 +121,7 @@ src/ignis/
     └── cli/                                # scheduler removal and retained bootstrap/diagnostics
 
 sql/
-└── 024_evidence_grounded_claim_ledger.sql  # planned; owner gate before creation/application
+└── 025_evidence_grounded_claim_ledger.sql  # approved for local implementation, not persistent apply
 
 tests/
 ├── unit/

@@ -48,6 +48,9 @@ OWNER_ONLY = {
     "market_brief_revisions": "Market Brief",
     "mission_evidence": "mission evidence",
     "mission_evidence_qualifications": "evidence qualification",
+    "mission_claim_evidence": "claim evidence binding",
+    "mission_claims": "mission claim",
+    "mission_manifests": "mission manifest",
     "mission_probe_outcomes": "probe outcome",
     "mission_run_journals": "run journal",
     "mission_writer_claims": "writer claim",
@@ -133,6 +136,24 @@ OWNER_ROWS_SINCE_024 = (
     "INSERT INTO youtube_quota_buckets (quota_day, bucket, used, scheduled_used)"
     " VALUES ('2026-09-29', 'search_list', 2, 1)",
 )
+T025_CLAIM = "00000000-0000-4000-8000-000000000009"
+T025_BINDING = "00000000-0000-4000-8000-000000000010"
+OWNER_ROWS_SINCE_025 = (
+    "INSERT INTO mission_manifests"
+    " (mission_id, outcome, decision_context, required_channels, authority_boundary, output_type,"
+    " stop_conditions, analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest) VALUES"
+    f" ('{MISSION}', 'decide', 'owner decision', ARRAY['threads'], '{{}}', 'MARKET_ANALYSIS',"
+    " ARRAY['completed'], 'evidence-v1', 'mission-only', 'owner', now(), 't018-manifest')",
+    "UPDATE mission_evidence_qualifications SET relation = 'QUALIFIED_SUPPORT', purpose = 'VOC',"
+    " hypothesis_target = 'core', evidence_role = 'SUPPORT', evidence_contract_version = 2"
+    f" WHERE mission_id = '{MISSION}' AND observation_id = '{OBSERVATION}'",
+    "INSERT INTO mission_claims"
+    " (id, mission_id, frame_digest, client_claim_key, claim_type, wording, status, created_by) VALUES"
+    f" ('{T025_CLAIM}', '{MISSION}', 't018-frame', 'claim-1', 'OBSERVATION', 'observed', 'PERMITTED', 'owner')",
+    "INSERT INTO mission_claim_evidence"
+    " (id, claim_id, observation_id, role, hypothesis_target) VALUES"
+    f" ('{T025_BINDING}', '{T025_CLAIM}', '{OBSERVATION}', 'SUPPORT', 'core')",
+)
 # A valid row a client could write to each table, so an INSERT that is allowed actually lands.
 # Ids are supplied rather than defaulted, so the outcome turns only on the table privilege and RLS
 # under test; a client that wants to write can always send its own id.
@@ -148,6 +169,14 @@ CLIENT_ROWS = {
     " relation, purpose, confidence, reason_code, judged_by) VALUES"
     f" ('{uuid4()}', '{SPARE_MISSION}', '{SPARE_OBSERVATION}', 'frame', 'CONTEXT_ONLY', 'CONTEXT', 0.5,"
     " 'ADJACENT_ONLY', 'client')",
+    "mission_claim_evidence": "(id, claim_id, observation_id, role, hypothesis_target) VALUES"
+    f" ('{uuid4()}', '{T025_CLAIM}', '{SPARE_OBSERVATION}', 'SUPPORT', 'core')",
+    "mission_claims": "(id, mission_id, frame_digest, client_claim_key, claim_type, wording, status, created_by) VALUES"
+    f" ('{uuid4()}', '{SPARE_MISSION}', 'client-frame', 'client-claim', 'OBSERVATION', 'client', 'PERMITTED', 'client')",
+    "mission_manifests": "(mission_id, outcome, required_channels, authority_boundary, output_type,"
+    " stop_conditions, analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest) VALUES"
+    f" ('{SPARE_MISSION}', 'client', ARRAY['threads'], '{{}}', 'COLLECTION_FRAME',"
+    " ARRAY['completed'], 'evidence-v1', 'mission-only', 'client', now(), 'client-manifest')",
     "mission_probe_outcomes": "(id, run_id, platform, connector_surface, status,"
     " signals_collected, queried_keywords, query_fingerprint, completed_at) VALUES"
     f" ('{uuid4()}', '{RUN}', 'tiktok', 'tiktok', 'EMPTY_NO_DATA', 0, ARRAY['t018'], 'fp', now())",
@@ -209,6 +238,9 @@ def _seed(dsn: str) -> None:
                 conn.execute(statement)
         if conn.execute("SELECT to_regclass('public.youtube_quota_buckets')").fetchone()[0]:
             for statement in OWNER_ROWS_SINCE_024:
+                conn.execute(statement)
+        if conn.execute("SELECT to_regclass('public.mission_manifests')").fetchone()[0]:
+            for statement in OWNER_ROWS_SINCE_025:
                 conn.execute(statement)
 
 

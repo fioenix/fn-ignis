@@ -64,7 +64,9 @@ def test_manifest_digest_is_stable_for_equivalent_ordered_payloads():
         {"required_channels": ("youtube",), "optional_channels": ("youtube",)},
         {"stop_conditions": ()},
         {"analysis_policy": ""},
+        {"analysis_policy": "x" * 129},
         {"created_by": ""},
+        {"created_by": "x" * 129},
         {"quota_budget": {"youtube_search_calls": -1}},
     ],
 )
@@ -103,3 +105,7 @@ def test_manifest_is_immutable_after_confirmation():
 
     with pytest.raises((AttributeError, TypeError)):
         manifest.outcome = "a different outcome"
+    digest = manifest.manifest_digest
+    with pytest.raises(TypeError):
+        manifest.quota_budget["youtube_search_calls"] = 999
+    assert manifest.manifest_digest == digest
