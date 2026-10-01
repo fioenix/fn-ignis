@@ -430,5 +430,5 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     async def supersede_mission_claims(self, mission_id: UUID, current_frame_digest: str) -> int:
         return await self._repo.supersede_mission_claims(mission_id, current_frame_digest)
 
-    async def inventory_legacy_baseline(self) -> List[Dict[str, Any]]:
+    async def inventory_legacy_baseline(self) -> Dict[str, Any]:
         return await self._repo.inventory_legacy_baseline()

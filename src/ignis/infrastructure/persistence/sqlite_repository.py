@@ -1630,26 +1630,58 @@ class SqliteTrendRepository(ITrendRepository):
 
         return await asyncio.to_thread(_sync_supersede)
 
-    async def inventory_legacy_baseline(self) -> List[Dict[str, Any]]:
-        await self._ensure_schema()
+    async def inventory_legacy_baseline(self) -> Dict[str, Any]:
+        """Open the existing database read-only; inventory is never a schema bootstrap."""
 
-        def _sync_inventory():
-            conn = self._get_connection()
+        def _sync_inventory() -> Dict[str, Any]:
+            if self._mem_conn is not None:
+                conn = self._mem_conn
+            else:
+                database = Path(self._db_path).resolve()
+                if not database.is_file():
+                    raise FileNotFoundError("The inventory database does not exist.")
+                conn = sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)
+                conn.row_factory = sqlite3.Row
+            previous_query_only = conn.execute("PRAGMA query_only").fetchone()[0]
             try:
-                result = []
-                for table in ("trend_signals", "signal_metrics"):
-                    count = conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-                    result.append(
+                conn.execute("PRAGMA query_only = ON")
+                signals = conn.execute(
+                    "SELECT id, captured_at, source_url, metadata FROM trend_signals"
+                    " WHERE mission_id IS NULL ORDER BY id"
+                ).fetchall()
+                metrics = conn.execute(
+                    "SELECT sm.id, sm.signal_id FROM signal_metrics sm"
+                    " JOIN trend_signals ts ON ts.id = sm.signal_id"
+                    " WHERE ts.mission_id IS NULL ORDER BY sm.signal_id, sm.id"
+                ).fetchall()
+                orphans = conn.execute(
+                    "SELECT sm.id FROM signal_metrics sm LEFT JOIN trend_signals ts"
+                    " ON ts.id = sm.signal_id WHERE ts.id IS NULL ORDER BY sm.id"
+                ).fetchall()
+                excluded = conn.execute(
+                    "SELECT count(*) FROM trend_signals WHERE mission_id IS NOT NULL"
+                ).fetchone()[0]
+                return {
+                    "signals": [
                         {
-                            "table": table,
-                            "row_count": int(count),
-                            "classification": "LEGACY_BASELINE",
-                            "promoted_to_mission_evidence": False,
+                            "id": str(row["id"]),
+                            "captured_at": row["captured_at"],
+                            "source_url_present": bool(row["source_url"]),
+                            "metadata_present": bool(row["metadata"] and row["metadata"] != "{}"),
                         }
-                    )
-                return result
+                        for row in signals
+                    ],
+                    "metrics": [
+                        {"id": int(row["id"]), "signal_id": str(row["signal_id"])}
+                        for row in metrics
+                    ],
+                    "orphan_metric_ids": [int(row["id"]) for row in orphans],
+                    "excluded_mission_rows": int(excluded),
+                }
             finally:
-                if self._mem_conn is None:
+                if self._mem_conn is not None:
+                    conn.execute(f"PRAGMA query_only = {int(previous_query_only)}")
+                else:
                     conn.close()
 
         return await asyncio.to_thread(_sync_inventory)

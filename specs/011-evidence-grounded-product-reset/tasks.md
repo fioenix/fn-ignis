@@ -209,7 +209,7 @@ absent while legacy baseline data remains separate and untouched.
 
 - [ ] T069 [P] [US5] Extend the RED public contract to reject aliases, redirects, legacy surface-null mission creation, and any monitor/daily/schedule translation in `tests/unit/test_public_mcp_contract.py`
 - [ ] T070 [P] [US5] Add RED clean-install and manifest-drift assertions for the retained, changed, removed, and new tools in `tests/integration/test_clean_user_journey.py`, `tests/unit/test_tool_manifests_drift.py`, and `scripts/wheel_mcp_smoke.py`
-- [ ] T071 [P] [US5] Add RED read-only classification, recoverable manifest, zero-write, and no-promotion cases in `tests/integration/test_legacy_baseline_inventory.py`
+- [x] T071 [P] [US5] Add RED read-only classification, recoverable manifest, zero-write, and no-promotion cases in `tests/integration/test_legacy_baseline_inventory.py`
 
 ### Implementation for User Story 5
 

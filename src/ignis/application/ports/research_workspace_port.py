@@ -282,5 +282,5 @@ class IResearchWorkspaceStore(ABC):
         """Mark claims from older evidence frames non-renderable without rewriting their text."""
 
     @abstractmethod
-    async def inventory_legacy_baseline(self) -> List[Dict[str, Any]]:
-        """Classify legacy baseline stores read-only; never promote or mutate their rows."""
+    async def inventory_legacy_baseline(self) -> Dict[str, Any]:
+        """Read exact unscoped legacy targets without initializing or mutating storage."""

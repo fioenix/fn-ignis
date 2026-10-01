@@ -86,6 +86,14 @@
   qualification; the historical scheduled quota ledger remains audit data, not authority to run
   a scheduled sweep (agent decided; basis: no always-on collection survives the approved cutover).
 
+### Session 2026-10-01
+
+- Q: How should a no-write baseline inventory classify unscoped rows without a documented
+  retention reason? → A: List them as exact deletion candidates, not deletion instructions;
+  archive candidates require a concrete reason, orphan metrics are held for investigation, and
+  every deletion requires a verified export and a later target-specific owner decision (agent
+  decided; basis: FR-026/FR-027 and the accepted legacy disposition design).
+
 ## User Scenarios & Testing
 
 ### User Story 1 - Start Only From an Explicit Research Task (Priority: P1)

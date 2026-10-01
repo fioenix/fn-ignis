@@ -2,13 +2,11 @@
 
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 
 import pytest
-
-import conftest as test_harness
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SENTINEL = "ambient-live-credential-must-never-reach-a-test-report"
@@ -25,7 +23,8 @@ def test_quarantine_replaces_live_credentials_without_retaining_their_values():
         "PATH": "/usr/bin",
     }
 
-    test_harness.quarantine_ambient_credentials(environment)
+    root_conftest = runpy.run_path(str(REPO_ROOT / "tests" / "conftest.py"))
+    root_conftest["quarantine_ambient_credentials"](environment)
 
     assert environment["DATABASE_URL"] == "sqlite:///ignis.db"
     assert environment["YOUTUBE_API_KEY"] == ""
