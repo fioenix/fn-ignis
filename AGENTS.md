@@ -312,11 +312,15 @@ Every AI Agent modifying this repository or preparing a release must verify comp
 These boundaries hold for every contributor. Where the `noulmes` skill is installed, an agent applies them with its decision check (`jev.py check`) before acting and its gate (`jev.py gate`) before asking the owner.
 
 **The owner decides these; an agent asks before acting:**
-- An agent asks the owner before writing or applying a migration in `sql/` that transforms persisted evidence (Constitution VI).
+- An agent asks the owner before a migration transforms persisted evidence (Constitution VI),
+  unless the operation is covered by the explicit fn-ignis development authorization below.
 - An agent asks the owner before a version bump, a tag, or a release (Section 4).
 - An agent asks the owner before changing or removing an MCP tool's signature.
 - An agent asks the owner before moving a connector between the HTTP and browser tiers.
-- An agent asks the owner before writing to the Supabase development database; reading it needs no question.
+- The owner preauthorized in-scope development operations on the fn-ignis Supabase project
+  `jxbysxsovxjglgkgkkfu` on 2026-10-02. Apply, test, and verify dev database changes without
+  repeated permission requests; preserve recovery evidence before destructive data operations.
+  This delegation covers neither other databases nor release or real social-session authority.
 - An agent asks the owner before using a real TikTok, Threads, or Instagram session or token.
 
 **The agent decides these alone and records the decision:** vocabulary seeded in `sql/`, test fixtures, internal refactors that keep every contract, `.handoff/` notes, and thresholds in a local SQLite `runtime_configs`.

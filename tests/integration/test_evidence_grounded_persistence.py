@@ -831,3 +831,17 @@ async def test_pruning_last_support_withholds_claim_and_removes_binding(reposito
     assert history[0].status is ClaimStatus.WITHHELD
     assert history[0].evidence_bindings == ()
     assert "EVIDENCE_BINDING_INVALIDATED" in history[0].withheld_reasons
+
+
+def test_claim_triggers_do_not_inherit_caller_search_path(repository_case):
+    if repository_case.name != "postgres":
+        pytest.skip("PostgreSQL function configuration contract")
+    row = repository_case.query_one(
+        "",
+        "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = 'public' AND p.proname IN "
+        "('validate_mission_claim_evidence_binding', 'prune_claim_binding_with_mission_evidence', "
+        "'withhold_claim_without_support') AND NOT p.prosecdef "
+        "AND 'search_path=public, pg_temp' = ANY(p.proconfig)",
+    )
+    assert row[0] == 3

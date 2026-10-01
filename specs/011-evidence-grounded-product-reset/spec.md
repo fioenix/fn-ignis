@@ -106,6 +106,16 @@
 
 ### Session 2026-10-02
 
+- Q: How should the new claim triggers resolve unqualified relation names? → A: Pin
+  `search_path = public, pg_temp` while retaining SECURITY INVOKER and revoked client execution;
+  update unpublished migration 025 and apply an equivalent ALTER FUNCTION repair on Supabase
+  dev (agent decided; basis: the advisor's mutable-search-path finding and the owner-authorized
+  development verification scope; no historical evidence transformation).
+- Q: Does the owner authorize writes and migration verification on the fn-ignis Supabase
+  PostgreSQL database? → A: Yes. The owner explicitly confirmed this is development-only and
+  authorized unrestricted in-scope development operations. Apply and verify the canonical
+  migrations without requesting the same database permission again; retain pre/post evidence
+  and recovery safeguards. This does not authorize Git release operations or real social sessions.
 - Q: How should the five Vietnam consumer-market pilot cases be defined before live-access
   authorization? → A: Pre-register reproducible scenario classes and measurement criteria,
   without naming live accounts, brands, exact queries, or invented outcomes; bind those only

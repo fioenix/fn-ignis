@@ -162,7 +162,7 @@ all-confirmatory, and missing-metric controls through the real MCP handlers and 
 - [X] T058 [US3] Make analysis and opportunity discovery read only persisted sufficiency and current-frame permitted claims in `src/ignis/application/use_cases/get_mission_analysis.py` and `src/ignis/infrastructure/harness/strategic_reasoner.py`
 - [X] T059 [US3] Omit Opportunity Index, demand-gap, whitespace, saturation, and commercial recommendations whenever the evidence contract fails in `src/ignis/application/use_cases/get_mission_analysis.py` and `src/ignis/interfaces/mcp/server.py`
 - [X] T060 [US3] Render the current Claim Ledger, contradiction, limitations, decision conditions, frame digest, and Gap Report through `src/ignis/infrastructure/templates/html_builder.py` and `src/ignis/infrastructure/templates/html/mission_report.html`
-- [ ] T061 [US3] Prove the mixed-evidence and fail-closed journeys on both backends with `tests/integration/test_evidence_grounded_market_mission.py` and record results in `.handoff/011-us3.handoff.md`
+- [x] T061 [US3] Prove the mixed-evidence and fail-closed journeys on both backends with `tests/integration/test_evidence_grounded_market_mission.py` and record results in `.handoff/011-us3.handoff.md`
 
 **Checkpoint**: US1–US3 form the minimum coherent MVP: explicit task, transparent evidence frame,
 and confirmation-bias-resistant verdict control.
@@ -218,8 +218,8 @@ absent while legacy baseline data remains separate and untouched.
 - [x] T074 [US5] Delete the autonomous-discovery use case and update direct consumers in `src/ignis/application/use_cases/autonomous_discovery.py`, `tests/unit/test_autonomous_discovery.py`, and `tests/unit/test_mission_flow.py`
 - [X] T075 [US5] Remove scheduled-only trigger/filter/config behavior while preserving requested atomic and mission collection in `src/ignis/domain/value_objects.py`, `src/ignis/application/use_cases/ingest_trends.py`, `src/ignis/infrastructure/connectors/registry.py`, and `tests/unit/test_regional_script_gate.py`
 - [X] T076 [US5] Trace the three trend-template consumers against T001 and delete only consumer-proven unreachable sources from `src/ignis/infrastructure/templates/html/trend_card.html`, `src/ignis/infrastructure/templates/html/trend_dashboard.html`, and `src/ignis/infrastructure/templates/html/trend_graph.html`
-- [ ] T077 [US5] Implement read-only legacy classification and recoverable target-manifest generation in `src/ignis/application/use_cases/inventory_legacy_baseline.py`
-- [ ] T078 [US5] Add a thin no-write inventory command in `scripts/inventory_legacy_baseline.py`
+- [x] T077 [US5] Implement read-only legacy classification and recoverable target-manifest generation in `src/ignis/application/use_cases/inventory_legacy_baseline.py`
+- [x] T078 [US5] Add a thin no-write inventory command in `scripts/inventory_legacy_baseline.py`
 - [X] T079 [US5] Update English product architecture, bootstrap, tool catalog, agent skills, and superseded-history guidance in `README.md`, `docs/USER_GUIDE.md`, `AGENTS.md`, `CLAUDE.md`, `.codexrules`, and `.agents/skills/fn-ignis-harness/SKILL.md`
 - [X] T080 [US5] Update Vietnamese market-facing product, capability, refusal, and migration guidance in `README.vi.md` and `docs/USER_GUIDE.vi.md`
 - [X] T081 [US5] Update package and marketplace descriptions without changing the version in `server.json`, `openclaw.json`, and `bundle/README.md`
@@ -249,6 +249,10 @@ separate implementation completion from owner-authorized migration, release, and
 - [X] T094 Update `BACKLOG.md` and this ledger with implementation evidence, unresolved owner gates, and explicit shipped/not-shipped state without claiming release from local tests
 - [ ] T095 OWNER GATE: obtain explicit decisions for persistent-database migration application, exact baseline archive/deletion targets, release version, tag, push, and GitHub Release; record each answer in `specs/011-evidence-grounded-product-reset/spec.md`
 - [ ] T096 Apply only the owner-approved persistent migration and baseline disposition with pre-action manifest, recovery path, post-action readback, and evidence in `.handoff/011-owner-authorized-operations.handoff.md`
+  - 2026-10-02: Supabase development operations explicitly authorized; canonical migrations
+    023–025 applied and verified with unchanged corpus counts/digests and owner-only RLS.
+    Baseline disposition remains parked for value assessment/recovery export, not database permission.
+    T095's release/version/tag/push questions remain separate from the settled dev authorization.
 - [ ] T097 Prepare the owner-approved breaking release by synchronizing `pyproject.toml`, `openclaw.json`, `server.json`, `CITATION.cff`, `.openclaw/config.yaml`, `BACKLOG.md`, and regenerated `uv.lock` in one atomic change
 - [ ] T098 Merge, tag, push, and publish only the owner-approved release, then record the PR, merge commit, tag, public package/container checks, and anonymous clean-install evidence in `BACKLOG.md` and `specs/011-evidence-grounded-product-reset/tasks.md`
 

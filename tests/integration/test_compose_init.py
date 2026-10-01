@@ -36,7 +36,8 @@ READBACK = {
         " 'public.mission_evidence', 'public.research_workspaces', 'public.mission_run_journals',"
         " 'public.source_identity_aliases', 'public.idx_observations_latest_per_source',"
         " 'public.mission_probe_outcomes', 'public.mission_evidence_qualifications',"
-        " 'public.youtube_quota_buckets']) AS o(name)"
+        " 'public.youtube_quota_buckets', 'public.mission_manifests',"
+        " 'public.mission_claims', 'public.mission_claim_evidence']) AS o(name)"
         " WHERE to_regclass(o.name) IS NOT NULL"
     ),
     "ui_noise_terms": "SELECT count(*) FROM market_lexicons WHERE domain = 'tiktok_ui_noise'",
@@ -222,15 +223,15 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
         assert NEWEST_MIGRATION in run["ran"], f"init never reached {NEWEST_MIGRATION}"
         assert run["errors"] == []
         assert run["readback"] == {
-            "later_objects": "10",
+            "later_objects": "13",
             "ui_noise_terms": "10",
             "retired_present": "0",
             "rls_market_lexicons": "t",
             "public_policies": "0",
-            "public_tables": "20",
+            "public_tables": "23",
             "public_tables_without_rls": "0",
             "supabase_roles": "0",
-            "builtin_uuid_defaults": "13",
+            "builtin_uuid_defaults": "15",
             "uuid_ossp_defaults": "0",
         }
         assert run["cleanup"]["returncode"] == 0, run["cleanup"]

@@ -253,6 +253,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mission_claim_evidence_outcome
 CREATE OR REPLACE FUNCTION validate_mission_claim_evidence_binding()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $$
 BEGIN
     IF NEW.observation_id IS NOT NULL AND NOT EXISTS (
@@ -321,6 +322,7 @@ FOR EACH ROW EXECUTE FUNCTION validate_mission_claim_evidence_binding();
 CREATE OR REPLACE FUNCTION prune_claim_binding_with_mission_evidence()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $$
 BEGIN
     DELETE FROM mission_claim_evidence b
@@ -342,6 +344,7 @@ FOR EACH ROW EXECUTE FUNCTION prune_claim_binding_with_mission_evidence();
 CREATE OR REPLACE FUNCTION withhold_claim_without_support()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = public, pg_temp
 AS $$
 BEGIN
     IF OLD.role = 'SUPPORT' THEN
