@@ -7,7 +7,6 @@ from itertools import zip_longest
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
-from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.exceptions import (
     ConnectorAuthenticationException,
@@ -16,8 +15,16 @@ from ignis.domain.exceptions import (
 from ignis.domain.harness_models import ChannelHealthStatus
 from ignis.domain.self_content import SelfIdentity, partition_self_authored
 from ignis.domain.entities import TrendSignal
-from ignis.domain.value_objects import GeoCode, IngressScope, IngressTrigger, PlatformType, Timeframe
+from ignis.domain.value_objects import (
+    GeoCode,
+    IngestRuntime,
+    IngressScope,
+    IngressTrigger,
+    PlatformType,
+    Timeframe,
+)
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +53,7 @@ class CircuitBreaker:
         self.last_failure_time = datetime.now(timezone.utc)
         if error is not None:
             self.last_error_type = type(error).__name__
-            self.last_error_message = str(error)[:500]
+            self.last_error_message = sanitize_pii_text(str(error))[:500]
         if self.failure_count >= self.failure_threshold:
             self.state = "OPEN"
             logger.warning(f"Circuit Breaker TRIPPED to OPEN after {self.failure_count} consecutive failures.")
@@ -77,6 +84,11 @@ class SurfaceProbeResult:
     queried_keywords: Tuple[str, ...] = ()
     # The window the platform attested to filtering by, or None when it applied none.
     queried_window: Optional[str] = None
+    scope_attestation: Optional[Dict[str, Any]] = None
+    authority_tier: Optional[str] = None
+    connector_path: Optional[str] = None
+    connector_revision: Optional[str] = None
+    completed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass(frozen=True)
@@ -117,7 +129,6 @@ class ConnectorPluginRegistry:
         self._breakers: Dict[str, CircuitBreaker] = {}
         self._repository = repository
         self._self_identities: List[SelfIdentity] = []
-        self._detector: Optional[ILanguageDetector] = None
         self.last_pass_report: Dict[str, Any] = {}
 
     def register_self_identities(self, identities: List[SelfIdentity]) -> None:
@@ -168,6 +179,77 @@ class ConnectorPluginRegistry:
     def list_plugins(self) -> List[IConnectorPlugin]:
         return list(self._plugins.values())
 
+    async def resolve_execution_requirements(
+        self,
+        *,
+        target_platforms: List[PlatformType],
+        allowed_surfaces: Tuple[str, ...],
+        required_surfaces: Optional[Tuple[str, ...]] = None,
+        optional_surfaces: Optional[Tuple[str, ...]] = None,
+        keywords: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Resolve policy requirements without opening a connector session or spending quota."""
+        allowed = set(allowed_surfaces)
+        selected = [
+            plugin
+            for plugin in self._plugins.values()
+            if plugin.supports_search
+            and plugin.platform in target_platforms
+            and plugin.plugin_id in allowed
+        ]
+        selected_ids = {plugin.plugin_id for plugin in selected}
+        required = set(required_surfaces or allowed_surfaces)
+        optional = set(optional_surfaces or ())
+        unavailable = tuple(
+            surface
+            for surface in allowed_surfaces
+            if surface in required and surface not in selected_ids
+        )
+        not_requested = tuple(
+            surface
+            for surface in allowed_surfaces
+            if surface in optional and surface not in selected_ids
+        )
+        authority: List[str] = []
+        quota_costs: Dict[str, int] = {}
+        surface_requirements: Dict[str, Dict[str, Any]] = {}
+        for plugin in selected:
+            runtime = await plugin.resolve_ingest_runtime()
+            required = (
+                "browser_session"
+                if runtime is IngestRuntime.BROWSER
+                else plugin.http_authority
+            )
+            if required not in authority:
+                authority.append(required)
+            if plugin.requires_paid_quota and "paid_quota" not in authority:
+                authority.append("paid_quota")
+            if plugin.platform is PlatformType.YOUTUBE:
+                quota_costs["youtube_search_calls"] = max(1, len(keywords or []))
+            plugin_quota = (
+                {"youtube_search_calls": max(1, len(keywords or []))}
+                if plugin.platform is PlatformType.YOUTUBE
+                else {}
+            )
+            surface_requirements[plugin.plugin_id] = {
+                "authority_tier": required,
+                "requires_paid_quota": plugin.requires_paid_quota,
+                "quota_costs": plugin_quota,
+                "connector_path": (
+                    f"{plugin.__class__.__module__}.{plugin.__class__.__qualname__}.search_signals"
+                ),
+                "connector_revision": getattr(plugin, "connector_revision", "unversioned"),
+                "sampling": {"limit": 20, "ordering": "platform_default"},
+            }
+        return {
+            "resources": tuple(plugin.plugin_id for plugin in selected),
+            "authority": tuple(authority),
+            "quota_costs": quota_costs,
+            "unavailable_resources": unavailable,
+            "not_requested_resources": not_requested,
+            "surface_requirements": surface_requirements,
+        }
+
     def get_health_status(self) -> Dict[str, dict]:
         """Report health and circuit breaker state independently for every registered plugin."""
         status = {}
@@ -193,7 +275,7 @@ class ConnectorPluginRegistry:
         scope: IngressScope = IngressScope.PUBLIC_MARKET,
         seed_keywords: Optional[List[str]] = None,
         max_probe_keywords: Optional[int] = None,
-        trigger: IngressTrigger = IngressTrigger.SCHEDULED,
+        trigger: IngressTrigger = IngressTrigger.REQUESTED,
     ) -> List[TrendSignal]:
         """Run one ingress pass across every healthy connector, in two stages.
 
@@ -205,15 +287,16 @@ class ConnectorPluginRegistry:
         national popularity chart. `max_probe_keywords` caps the fan-out, because a keyword probe
         costs far more API quota than an untargeted feed pull.
 
-        `trigger` says who asked. A scheduled sweep is filtered down to the scripts the region
-        uses, because it accumulates a corpus nobody reviews; an explicitly requested pass keeps
-        whatever it found, the same way an agent's keyword probe does.
+        `trigger` identifies the requester for connector quota accounting. Requested collection
+        preserves the returned language; relevance is assessed after ingress.
 
         `scope` decides which surfaces may be read. Under PUBLIC_MARKET a connector that declares
         an account-scoped feed is not asked for its feed at all; it joins stage 2 instead. Whatever
         the route, the pass ends by dropping content authored by the operator's own accounts, so a
         connector regressing to an account endpoint cannot quietly poison demand analysis.
         """
+        if trigger != IngressTrigger.REQUESTED:
+            raise ValueError("Ingress requires an explicit requested trigger.")
         seeds = [k.strip() for k in (seed_keywords or []) if k and k.strip()]
         discovery_plugins: List[IConnectorPlugin] = []
         probe_plugins: List[IConnectorPlugin] = []
@@ -322,10 +405,8 @@ class ConnectorPluginRegistry:
                     "lexicon nor the discovery feeds produced one this pass."
                 )
 
-        all_signals, foreign = await self._apply_regional_script_guard(all_signals, geo, trigger)
         kept = await self._apply_scope_guard(all_signals, scope, account_scoped_skipped)
         self.last_pass_report["untargeted_feed_skipped"] = no_probe_skipped
-        self.last_pass_report["foreign_script_filtered"] = foreign
         return kept
 
     @staticmethod
@@ -443,6 +524,7 @@ class ConnectorPluginRegistry:
         geo: GeoCode = GeoCode.VN,
         timeframe: Timeframe = Timeframe.LAST_24H,
         target_platforms: Optional[List[PlatformType]] = None,
+        target_surfaces: Optional[Tuple[str, ...]] = None,
         custom_timeframe: Optional[str] = None,
         scope: IngressScope = IngressScope.PUBLIC_MARKET,
         limit: int = 20,
@@ -460,14 +542,19 @@ class ConnectorPluginRegistry:
         that attests nothing, says it cannot search without a session, or ran no query at all
         measured nothing, and is recorded as DEGRADED or AUTH_REQUIRED.
         """
+        if trigger != IngressTrigger.REQUESTED:
+            raise ValueError("Ingress requires an explicit requested trigger.")
         tasks = []
         enabled_plugins = []
         outcomes: Dict[str, SurfaceProbeResult] = {}
         blocked_reasons: Dict[str, Optional[str]] = {}
         attestations: Dict[str, Optional[SearchAttestation]] = {}
+        provenance: Dict[str, Dict[str, str]] = {}
 
         for plugin_id, plugin in self._plugins.items():
             if target_platforms and plugin.platform not in target_platforms:
+                continue
+            if target_surfaces is not None and plugin_id not in target_surfaces:
                 continue
 
             if not plugin.supports_search:
@@ -475,6 +562,18 @@ class ConnectorPluginRegistry:
                 # signals unrelated to the requested keywords.
                 logger.debug(f"Skipping search on [{plugin.name}]: no keyword search probe.")
                 continue
+
+            runtime = await plugin.resolve_ingest_runtime()
+            authority_tier = (
+                "browser_session" if runtime is IngestRuntime.BROWSER else plugin.http_authority
+            )
+            provenance[plugin_id] = {
+                "authority_tier": authority_tier,
+                "connector_path": (
+                    f"{plugin.__class__.__module__}.{plugin.__class__.__qualname__}.search_signals"
+                ),
+                "connector_revision": getattr(plugin, "connector_revision", "unversioned"),
+            }
 
             breaker = self._breakers[plugin_id]
             if not breaker.can_execute():
@@ -498,6 +597,9 @@ class ConnectorPluginRegistry:
                     ),
                     signals_collected=0,
                     note=f"Circuit Breaker is OPEN after {breaker.failure_count} consecutive failures.",
+                    authority_tier=provenance[plugin_id]["authority_tier"],
+                    connector_path=provenance[plugin_id]["connector_path"],
+                    connector_revision=provenance[plugin_id]["connector_revision"],
                 )
                 continue
 
@@ -517,26 +619,37 @@ class ConnectorPluginRegistry:
 
         for plugin, result in zip(enabled_plugins, results):
             if isinstance(result, Exception):
+                safe_error = sanitize_pii_text(str(result))
                 outcomes[plugin.plugin_id] = SurfaceProbeResult(
                     platform=plugin.platform.value,
                     connector_surface=plugin.plugin_id,
                     status=_failure_status(result),
                     signals_collected=0,
-                    note=str(result)[:200],
+                    note=safe_error[:200],
+                    authority_tier=provenance[plugin.plugin_id]["authority_tier"],
+                    connector_path=provenance[plugin.plugin_id]["connector_path"],
+                    connector_revision=provenance[plugin.plugin_id]["connector_revision"],
                 )
-                logger.error(f"Plugin [{plugin.name}] encountered exception during search: {result}")
+                logger.error(
+                    "Plugin [%s] encountered exception during search: %s",
+                    plugin.name,
+                    safe_error,
+                )
                 if self._repository:
                     await self._repository.log_event(
                         component=plugin.name,
                         event_type="SEARCH_FAILURE",
-                        message=f"Error searching {plugin.name} with keywords {keywords}: {str(result)}",
+                        message=f"Error searching {plugin.name} with keywords {keywords}: {safe_error}",
                         level="ERROR",
-                        details={"keywords": keywords, "error": str(result)}
+                        details={"keywords": keywords, "error": safe_error}
                     )
             elif isinstance(result, list):
                 outcomes[plugin.plugin_id] = self._search_outcome(
                     plugin, result, blocked_reasons.get(plugin.plugin_id),
                     attestations.get(plugin.plugin_id),
+                    geo=geo,
+                    requested_window=custom_timeframe,
+                    provenance=provenance[plugin.plugin_id],
                 )
                 all_signals.extend(result)
                 logger.info(f"Plugin [{plugin.name}] retrieved {len(result)} signals for keywords {keywords}.")
@@ -567,6 +680,10 @@ class ConnectorPluginRegistry:
         result: List[TrendSignal],
         blocked: Optional[str],
         attestation: Optional[SearchAttestation],
+        *,
+        geo: GeoCode,
+        requested_window: Optional[str],
+        provenance: Dict[str, str],
     ) -> SurfaceProbeResult:
         """Classify one surface's returned list without trusting an unattested silence."""
         queried = tuple(attestation.queried) if attestation else ()
@@ -582,7 +699,13 @@ class ConnectorPluginRegistry:
             note = "; ".join(attestation.failures)[:200] or "No query was executed."
         else:
             status = ChannelHealthStatus.EMPTY_NO_DATA
-            note = ("Partial: " + "; ".join(attestation.failures))[:200] if attestation.failures else None
+            note = (
+                ("Partial: " + "; ".join(attestation.failures))[:200]
+                if attestation.failures
+                else "Probe completed for the attested scope and returned no qualifying observations."
+            )
+        note = sanitize_pii_text(note) if note else note
+        measured = status in (ChannelHealthStatus.HEALTHY, ChannelHealthStatus.EMPTY_NO_DATA)
         return SurfaceProbeResult(
             platform=plugin.platform.value,
             connector_surface=plugin.plugin_id,
@@ -591,6 +714,18 @@ class ConnectorPluginRegistry:
             note=note,
             queried_keywords=queried,
             queried_window=attestation.window if attestation else None,
+            scope_attestation=(
+                {
+                    "geo": geo.value,
+                    "timeframe": (attestation.window if attestation else requested_window),
+                    "keywords": list(queried),
+                }
+                if measured
+                else None
+            ),
+            authority_tier=provenance["authority_tier"],
+            connector_path=provenance["connector_path"],
+            connector_revision=provenance["connector_revision"],
         )
 
     @staticmethod
@@ -609,70 +744,6 @@ class ConnectorPluginRegistry:
         except Exception as exc:
             logger.debug(f"Could not ask [{plugin.name}] whether keyword search is blocked: {exc}")
             return None
-
-    async def _apply_regional_script_guard(
-        self,
-        signals: List[TrendSignal],
-        geo: GeoCode,
-        trigger: IngressTrigger = IngressTrigger.SCHEDULED,
-    ) -> Tuple[List[TrendSignal], int]:
-        """Drop signals written in a script the target region does not use.
-
-        Applies to a scheduled sweep only. A keyword probe queries the whole platform -- `q=` is
-        a search term, not a region filter -- so a Vietnam pass legitimately returns Korean,
-        Cyrillic and Arabic titles, and the radar used to write them straight to the corpus it
-        accumulates unattended. An explicitly requested pass keeps them: somebody is reading the
-        answer and may well want it. Latin script always passes either way, so the English that
-        runs through Vietnamese social content is never in question here.
-
-        It deliberately does not judge relevance. An earlier version asked `is_localized` with
-        the persisted vocabulary, which weighs language, domain terms and the noise blacklist
-        together; on the live corpus that rejected 67.8% of rows, including "Khoa hoc AI cho
-        nguoi moi bat dau". Worse, judging relevance against `market_lexicons` meant the radar
-        could only store topics somebody had already seeded, which is the opposite of its job.
-        Relevance is decided downstream by `QualityEvaluator`, which already holds that
-        vocabulary and runs on the analysis path.
-        """
-        if not signals:
-            return signals, 0
-        if trigger != IngressTrigger.SCHEDULED:
-            # Somebody asked for this pass, so they get what it found, in whatever language.
-            # See IngressTrigger: the distinction is the requester, not the code path.
-            return signals, 0
-        if self._detector is None:
-            from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
-
-            self._detector = HeuristicLanguageDetector()
-
-        kept: List[TrendSignal] = []
-        dropped: List[TrendSignal] = []
-        for signal in signals:
-            if self._detector.uses_regional_script(signal.raw_title or "", geo=geo):
-                kept.append(signal)
-            else:
-                dropped.append(signal)
-
-        if dropped:
-            platforms = sorted({
-                (s.platform.value if hasattr(s.platform, "value") else str(s.platform))
-                for s in dropped
-            })
-            logger.info(
-                f"Filtered {len(dropped)} signals written in a script {geo.value} does not use "
-                f"({', '.join(platforms)})."
-            )
-            if self._repository:
-                await self._repository.log_event(
-                    component="ingress",
-                    event_type="FOREIGN_SCRIPT_FILTERED",
-                    message=(
-                        f"Dropped {len(dropped)} signals written in a script {geo.value} does "
-                        f"not use; a keyword probe reaches the whole platform, not one region."
-                    ),
-                    level="INFO",
-                    details={"count": len(dropped), "platforms": platforms, "geo": geo.value},
-                )
-        return kept, len(dropped)
 
     async def _apply_scope_guard(
         self,
@@ -811,6 +882,9 @@ class ConnectorPluginRegistry:
                 if sugs:
                     all_suggestions.extend(sugs)
             except Exception as e:
-                logger.warning(f"Error fetching suggestions from {plugin.name}: {e}")
+                logger.warning(
+                    "Error fetching suggestions from %s: %s",
+                    plugin.name,
+                    sanitize_pii_text(str(e)),
+                )
         return all_suggestions
-

@@ -30,8 +30,7 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
     BARE_KEYWORD_TEMPLATE = "{}"
 
     def __init__(self) -> None:
-        # Both are filled from market_lexicons by whoever holds the repository: the worker in
-        # build_connector_registry, the MCP server in _sync_lexicons_from_db.
+        # Both are filled from market_lexicons by the requested-task runtime before probing.
         self._probe_templates: Dict[str, List[str]] = {}
         self._intent_keywords: List[str] = []
 

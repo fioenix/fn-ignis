@@ -1,9 +1,44 @@
-import pytest
+import os
+from collections.abc import MutableMapping
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from ignis.domain.entities import TrendSignal, TopicCluster
-from ignis.domain.value_objects import PlatformType, GeoCode
+import pytest
+
+
+# Pytest is an isolated verification process, never a production runtime. Quarantine credentials
+# before importing ignis because its settings singleton is created during module import. This both
+# prevents accidental real API/database calls and keeps assertion introspection from echoing an
+# inherited shell credential into a local or public CI transcript.
+PYTEST_CREDENTIAL_OVERRIDES = {
+    "DATABASE_URL": "sqlite:///ignis.db",
+    "YOUTUBE_API_KEY": "",
+    "IGNIS_ENCRYPTION_KEY": "",
+    "THREADS_APP_SECRET": "",
+    "INSTAGRAM_APP_SECRET": "",
+    "PLAYWRIGHT_PROXY_SERVER": "",
+}
+PYTEST_CREDENTIAL_REMOVALS = {
+    "IGNIS_ENV_FILE",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "DOCKER_AUTH_CONFIG",
+    "DOCKER_REGISTRY_PASSWORD",
+    "PGPASSWORD",
+}
+
+
+def quarantine_ambient_credentials(environment: MutableMapping[str, str]) -> None:
+    """Replace host credentials with inert test values without retaining plaintext copies."""
+    environment.update(PYTEST_CREDENTIAL_OVERRIDES)
+    for name in PYTEST_CREDENTIAL_REMOVALS:
+        environment.pop(name, None)
+
+
+quarantine_ambient_credentials(os.environ)
+
+from ignis.domain.entities import TrendSignal, TopicCluster  # noqa: E402
+from ignis.domain.value_objects import PlatformType, GeoCode  # noqa: E402
 
 
 @pytest.fixture

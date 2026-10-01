@@ -4,8 +4,6 @@ import json
 import re
 from uuid import uuid4
 
-import pytest
-
 from ignis.domain.entities import TopicCluster, TrendSignal
 from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
@@ -132,28 +130,3 @@ def test_graph_artifact_sanitizes_pii_in_labels():
     cluster = _cluster("Contact me at nguyen.van.a@example.com now", 50.0, "tech", _signals(PlatformType.THREADS, 1))
     payload = _graph_payload(HtmlArtifactBuilder().build_graph_artifact([cluster], geo=GeoCode.VN))
     assert "nguyen.van.a@example.com" not in payload["nodes"][0]["label"]
-
-
-@pytest.mark.asyncio
-async def test_generate_trend_artifact_supports_graph_format(tmp_path, monkeypatch):
-    from unittest.mock import AsyncMock, patch
-
-    from ignis.interfaces.mcp import server as srv
-
-    clusters = [_cluster("Topic", 50.0, "tech", _signals(PlatformType.YOUTUBE, 2))]
-    use_case = AsyncMock()
-    use_case.execute.return_value = clusters
-    components = {
-        "artifact_builder": HtmlArtifactBuilder(),
-        "top_clusters_use_case": use_case,
-    }
-
-    with patch.object(srv, "get_components", return_value=components), \
-         patch.object(srv, "_get_secure_reports_dir", return_value=tmp_path):
-        payload = json.loads(await srv.handle_generate_trend_artifact(geo="VN", format="graph"))
-
-    assert payload["status"] == "SUCCESS"
-    assert payload["type"] == "GRAPH"
-    assert payload["total_signals"] == 2
-    written = tmp_path / "trend_graph_vn.html"
-    assert written.exists() and "<canvas" in written.read_text(encoding="utf-8")

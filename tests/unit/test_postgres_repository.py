@@ -35,7 +35,7 @@ async def test_reserve_youtube_quota_uses_one_atomic_guarded_upsert():
         date(2026, 9, 29),
         YouTubeQuotaBucket.SEARCH_LIST.value,
         1,
-        1,
+        0,
         False,
         now,
     )
@@ -45,24 +45,23 @@ async def test_reserve_youtube_quota_uses_one_atomic_guarded_upsert():
         quota_day=date(2026, 9, 29),
         bucket=YouTubeQuotaBucket.SEARCH_LIST,
         cost=1,
-        trigger=IngressTrigger.SCHEDULED,
+        trigger=IngressTrigger.REQUESTED,
         daily_limit=100,
-        scheduled_limit=70,
         now=now,
     )
 
     assert result.admitted is True
     assert result.usage.used == 1
-    assert result.usage.scheduled_used == 1
+    assert result.usage.scheduled_used == 0
     assert mock_cursor.execute.await_count == 1
     query, params = mock_cursor.execute.await_args.args
     assert "INSERT INTO youtube_quota_buckets" in query
     assert "ON CONFLICT (quota_day, bucket) DO UPDATE" in query
     assert "WHERE NOT youtube_quota_buckets.exhausted" in query
     assert "RETURNING quota_day, bucket, used" in query
-    assert len(params) == 14
-    assert params[6:11] == (1, 100, 70, 1, 70)
-    assert params[11:] == (100, 70, 70)
+    assert len(params) == 9
+    assert params[3] == 0
+    assert params[6:] == (1, 100, 100)
 
 
 @pytest.mark.asyncio
@@ -85,9 +84,8 @@ async def test_reserve_youtube_quota_reads_current_usage_after_refusal():
         quota_day=date(2026, 9, 29),
         bucket=YouTubeQuotaBucket.SEARCH_LIST,
         cost=1,
-        trigger=IngressTrigger.SCHEDULED,
+        trigger=IngressTrigger.REQUESTED,
         daily_limit=100,
-        scheduled_limit=70,
         now=now,
     )
 

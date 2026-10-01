@@ -12,13 +12,30 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID
 
+from ignis.domain.entities import ResearchMission, TrendSignal
+
 from ignis.domain.research_workspace import (
     EvidenceQualification,
     MarketBriefRevision,
+    MissionClaim,
+    MissionManifest,
     MissionProbeOutcome,
     ResearchWorkspace,
     WorkspaceStatus,
 )
+
+
+@dataclass(frozen=True)
+class MissionEvidenceSnapshot:
+    """One transaction's evidence and candidate ledger, never a second canonical store."""
+
+    mission: Optional[ResearchMission]
+    manifest: Optional[MissionManifest]
+    brief: Optional[MarketBriefRevision]
+    signals: Sequence[TrendSignal]
+    qualifications: Sequence[EvidenceQualification]
+    outcomes: Sequence[MissionProbeOutcome]
+    claims: Sequence[MissionClaim]
 
 
 @dataclass(frozen=True)
@@ -141,6 +158,18 @@ class IResearchWorkspaceStore(ABC):
         """
 
     @abstractmethod
+    async def create_attention_mission_with_manifest(
+        self, mission, manifest: MissionManifest
+    ):
+        """Write one Attention mission and its immutable manifest, or write neither."""
+
+    @abstractmethod
+    async def create_market_mission_with_brief_and_manifest(
+        self, mission, revision, manifest: MissionManifest
+    ):
+        """Write one Market mission, its Brief, and its manifest in one transaction."""
+
+    @abstractmethod
     async def get_brief_revision(
         self, workspace_id: UUID, brief_revision_id: UUID
     ) -> Optional[MarketBriefRevision]:
@@ -168,6 +197,14 @@ class IResearchWorkspaceStore(ABC):
         """List the missions this workspace owns, newest first."""
 
     @abstractmethod
+    async def save_mission_manifest(self, manifest: MissionManifest) -> MissionManifest:
+        """Persist the immutable authority boundary before any surfaced mission runs."""
+
+    @abstractmethod
+    async def get_mission_manifest(self, mission_id: UUID) -> Optional[MissionManifest]:
+        """Read the confirmed authority boundary for a surfaced mission."""
+
+    @abstractmethod
     async def claim_mission_writer(self, mission_id: UUID, run_id: UUID) -> bool:
         """Take the single writer slot for a mission. False when another run already holds it."""
 
@@ -188,6 +225,12 @@ class IResearchWorkspaceStore(ABC):
     @abstractmethod
     async def record_run_journal(self, journal: RunJournal) -> RunJournal:
         """Record the run journal identity that the filesystem has already granted exclusively."""
+
+    @abstractmethod
+    async def record_collection_plan(
+        self, journal: RunJournal, plan: Dict[str, Any]
+    ) -> None:
+        """Write the readable plan projection into this run's collision-safe journal."""
 
     @abstractmethod
     async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
@@ -236,3 +279,27 @@ class IResearchWorkspaceStore(ABC):
         `EvidenceQualificationConflictError`, and an observation outside the mission's evidence
         raises `InvalidEvidenceQualificationError`; either way no row of the batch is written.
         """
+
+    @abstractmethod
+    async def save_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
+    ) -> List[MissionClaim]:
+        """Persist one idempotent candidate-claim batch, including its evidence bindings."""
+
+    @abstractmethod
+    async def list_mission_claims(
+        self, mission_id: UUID, *, include_superseded: bool = False
+    ) -> List[MissionClaim]:
+        """Return current claims, or the full audit history when explicitly requested."""
+
+    @abstractmethod
+    async def supersede_mission_claims(self, mission_id: UUID, current_frame_digest: str) -> int:
+        """Mark claims from older evidence frames non-renderable without rewriting their text."""
+
+    @abstractmethod
+    async def load_mission_evidence_snapshot(self, mission_id: UUID) -> MissionEvidenceSnapshot:
+        """Read the frame, sufficiency inputs and claim history in one database snapshot."""
+
+    @abstractmethod
+    async def inventory_legacy_baseline(self) -> Dict[str, Any]:
+        """Read exact unscoped legacy targets without initializing or mutating storage."""

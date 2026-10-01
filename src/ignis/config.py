@@ -63,11 +63,6 @@ class Settings(BaseSettings):
         ge=1,
         description="Daily search.list call allocation for the configured YouTube project",
     )
-    YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT: int = Field(
-        default=70,
-        ge=0,
-        description="Maximum daily search.list calls admitted for scheduled Track 1 work",
-    )
     YOUTUBE_OTHER_DAILY_UNIT_LIMIT: int = Field(
         default=10_000,
         ge=1,
@@ -92,11 +87,6 @@ class Settings(BaseSettings):
         default=SecretStr(""),
         description="Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) secret key for encrypting stored credentials in DB"
     )
-
-    # Scheduler Configuration
-    SCHEDULER_INTERVAL_SECONDS: int = Field(default=8640, description="Daemon scheduler tick interval in seconds; the shared quota ledger refuses YouTube calls beyond configured daily allocations")
-    DISCOVERY_INTERVAL_HOURS: int = Field(default=24, description="Interval in hours between autonomous discovery runs")
-    SYNC_INTERVAL_MINUTES: int = Field(default=0, description="Optional override for ingress sync interval in minutes; 0 = fallback to SCHEDULER_INTERVAL_SECONDS")
 
     # Ingress Defaults
 

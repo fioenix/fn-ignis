@@ -7,61 +7,7 @@ from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
-from ignis.interfaces.mcp.server import (
-    handle_create_research_mission,
-    handle_execute_mission_ingress,
-    handle_generate_mission_artifact,
-)
-
-
-@pytest.mark.asyncio
-async def test_create_and_execute_mission():
-    mission_id = uuid4()
-    sample_mission = ResearchMission(
-        id=mission_id,
-        title="Thị trường Thời trang Bền vững",
-        keywords=["thời trang bền vững", "vải linen", "local brand"],
-        geo_code=GeoCode.VN,
-    )
-
-    with patch("ignis.interfaces.mcp.server.get_components") as mock_get_comp:
-        mock_repo = AsyncMock()
-        mock_repo.get_mission = AsyncMock(return_value=sample_mission)
-
-        mock_create_uc = AsyncMock()
-        mock_create_uc.execute = AsyncMock(return_value=sample_mission)
-
-        mock_exec_uc = AsyncMock()
-        mock_exec_uc.execute = AsyncMock(return_value={
-            "mission_id": str(mission_id),
-            "status": "COMPLETED",
-            "total_signals": 12,
-            "total_clusters": 3,
-            "summary": "Success"
-        })
-
-        mock_get_comp.return_value = {
-            "repository": mock_repo,
-            "create_mission_use_case": mock_create_uc,
-            "execute_mission_use_case": mock_exec_uc,
-        }
-
-        # 1. Create Mission
-        res_create_str = await handle_create_research_mission(
-            topic="Thị trường Thời trang Bền vững",
-            keywords=["thời trang bền vững", "vải linen"],
-            geo="VN"
-        )
-        res_create = json.loads(res_create_str)
-        assert res_create["status"].upper() == "CREATED"
-        assert res_create["mission_id"] == str(mission_id)
-
-
-        # 2. Execute Mission
-        res_exec_str = await handle_execute_mission_ingress(str(mission_id))
-        res_exec = json.loads(res_exec_str)
-        assert res_exec["status"] == "COMPLETED"
-        assert res_exec["total_signals"] == 12
+from ignis.interfaces.mcp.server import handle_generate_mission_artifact
 
 
 @pytest.mark.asyncio

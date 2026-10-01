@@ -16,11 +16,15 @@ import pytest
 from ignis.domain.entities import ResearchMission
 from ignis.domain.harness_models import ChannelHealthStatus, QualityScorecard
 from ignis.domain.research_workspace import (
+    AuthorityBoundary,
+    EvidenceDirection,
     EvidencePurpose,
     EvidenceQualification,
     EvidenceSufficiency,
     InvalidEvidenceQualificationError,
     MarketBriefRevision,
+    MissionManifest,
+    MissionOutputType,
     MissionProbeOutcome,
     QualificationProgress,
     QualificationReason,
@@ -69,7 +73,8 @@ def _brief(**overrides) -> MarketBriefRevision:
 
 def test_every_relation_purpose_and_reason_named_by_the_contract_exists():
     assert {r.value for r in QualificationRelation} == {
-        "QUALIFIED_SUPPORT", "CONTEXT_ONLY", "EXCLUDED_IRRELEVANT", "UNASSESSED",
+        "QUALIFIED_SUPPORT", "QUALIFIED_CONTRADICTION", "CONTEXT_ONLY",
+        "EXCLUDED_IRRELEVANT", "UNASSESSED",
     }
     assert {p.value for p in EvidencePurpose} == {"DEMAND", "SUPPLY", "VOC", "CONTEXT"}
     assert {r.value for r in QualificationReason} == {
@@ -105,6 +110,29 @@ def test_values_submitted_as_strings_are_read_into_the_enums():
 def test_a_value_outside_the_contract_is_refused(overrides):
     with pytest.raises(InvalidEvidenceQualificationError):
         _qualification(**overrides)
+
+
+def test_a_v2_contradiction_requires_its_role_and_hypothesis_target():
+    with pytest.raises(InvalidEvidenceQualificationError, match="evidence_role"):
+        _qualification(
+            relation=QualificationRelation.QUALIFIED_CONTRADICTION,
+            purpose=EvidencePurpose.DEMAND,
+        )
+    with pytest.raises(InvalidEvidenceQualificationError, match="contract v1"):
+        _qualification(
+            relation=QualificationRelation.QUALIFIED_CONTRADICTION,
+            purpose=EvidencePurpose.DEMAND,
+            evidence_contract_version=1,
+        )
+
+    contradiction = _qualification(
+        relation=QualificationRelation.QUALIFIED_CONTRADICTION,
+        purpose=EvidencePurpose.DEMAND,
+        evidence_role=EvidenceDirection.CONTRADICTION,
+        hypothesis_target="alternative:1",
+    )
+
+    assert contradiction.evidence_contract_version == 2
 
 
 def test_qualified_support_must_measure_something():
@@ -277,6 +305,42 @@ def test_a_market_frame_changes_with_any_confirmed_brief_field_and_nothing_else(
     )
 
 
+@pytest.mark.parametrize(
+    "field_name, replacement",
+    [
+        ("alternative_hypotheses", ("A different mechanism", "A second mechanism")),
+        ("null_hypothesis", "The observed problem is not material"),
+        ("kill_criteria", ("No repeated pain in qualified evidence",)),
+        ("revision_rule", "Revise when contradiction exceeds support"),
+        ("confirmed_by", "a-different-requester"),
+    ],
+)
+def test_a_v2_market_frame_fingerprints_every_confirmed_brief_field(
+    field_name, replacement
+):
+    mission = ResearchMission(title="Retail copilot", keywords=["ai retail"], surface="MARKET")
+    base = _brief(
+        mission_id=mission.id,
+        alternative_hypotheses=("Training solves the pain", "A process change solves it"),
+        null_hypothesis="The pain is not decision-relevant",
+        kill_criteria=("No repeated pain appears",),
+        revision_rule="Revise after material counterevidence",
+    )
+    changed_values = {
+        "mission_id": mission.id,
+        "brief_revision_id": base.brief_revision_id,
+        "confirmed_at": base.confirmed_at,
+        "alternative_hypotheses": ("Training solves the pain", "A process change solves it"),
+        "null_hypothesis": "The pain is not decision-relevant",
+        "kill_criteria": ("No repeated pain appears",),
+        "revision_rule": "Revise after material counterevidence",
+        field_name: replacement,
+    }
+    changed = _brief(**changed_values)
+
+    assert compute_frame_fingerprint(mission, base) != compute_frame_fingerprint(mission, changed)
+
+
 def test_an_attention_frame_is_its_declared_scope():
     mission = ResearchMission(
         title="What is gaining attention", keywords=["ai retail", "pos"], surface="ATTENTION"
@@ -383,8 +447,37 @@ BRIEF = dict(
     timeframe="7d",
     hypothesis="Independent retailers want affordable AI help with daily operating data",
     falsifiers=["Probes find only generic AI content"],
+    alternative_hypotheses=[
+        "Retailers need process redesign instead of an AI copilot",
+        "Retailers prefer outsourced operations support",
+    ],
+    null_hypothesis="The manual work is not decision-relevant",
+    kill_criteria=["No repeated operational pain appears in qualified evidence"],
+    revision_rule="Reframe when contradiction matches support",
     confirmed_by="requester",
 )
+
+
+def _manifest(output_type):
+    return MissionManifest(
+        outcome="Test one bounded evidence frame",
+        decision_context=(BRIEF["decision"] if output_type is MissionOutputType.MARKET_ANALYSIS else None),
+        required_channels=("youtube",),
+        optional_channels=(),
+        authority_boundary=AuthorityBoundary(
+            public_http=True,
+            official_api=False,
+            browser_session=False,
+            paid_quota=False,
+        ),
+        quota_budget={},
+        output_type=output_type,
+        stop_conditions=("one run completed",),
+        analysis_policy="evidence-gated-v1",
+        retention_policy="test-only",
+        created_by="unit-test",
+        confirmed_at=NOW,
+    )
 
 
 @pytest_asyncio.fixture
@@ -401,7 +494,10 @@ async def research(tmp_path):
 
 async def _market(repository, store, workspace, titles=("AI quản lý kho cho shop nhỏ",)):
     mission, brief = await ConfirmMarketBriefUseCase(repository, store).execute(
-        workspace_id=workspace.workspace_id, keywords=["ai cho cửa hàng"], **BRIEF
+        workspace_id=workspace.workspace_id,
+        keywords=["ai cho cửa hàng"],
+        manifest=_manifest(MissionOutputType.MARKET_ANALYSIS),
+        **BRIEF,
     )
     return mission, brief, await _hold(repository, mission, titles)
 
@@ -435,6 +531,16 @@ def _assessment(observation_id, **overrides):
         "model": "claude-opus-5-5",
     }
     values.update(overrides)
+    relation = values["relation"]
+    if relation == "QUALIFIED_SUPPORT":
+        values.setdefault("hypothesis_target", "core")
+        values.setdefault("evidence_role", "SUPPORT")
+    elif relation == "QUALIFIED_CONTRADICTION":
+        values.setdefault("hypothesis_target", "core")
+        values.setdefault("evidence_role", "CONTRADICTION")
+    else:
+        values.setdefault("hypothesis_target", "neutral")
+        values.setdefault("evidence_role", "CONTEXT")
     return values
 
 
@@ -459,6 +565,11 @@ async def test_a_market_batch_carries_the_frame_the_brief_revision_and_only_unju
     assert batch["frame"]["brief_revision_id"] == str(brief.brief_revision_id)
     assert batch["frame"]["target_user"] == BRIEF["target_user"]
     assert batch["frame"]["falsifiers"] == BRIEF["falsifiers"]
+    assert batch["frame"]["alternative_hypotheses"] == BRIEF["alternative_hypotheses"]
+    assert batch["frame"]["null_hypothesis"] == BRIEF["null_hypothesis"]
+    assert batch["recommended_judgment"]["hypothesis_target"] == [
+        "core", "alternative:1", "alternative:2", "null", "neutral"
+    ]
     assert batch["progress"] == {"total_evidence": 3, "qualified_support": 0, "context_only": 0,
                                  "excluded_irrelevant": 0, "unassessed": 3}
     assert [e["observation_id"] for e in batch["evidence"]] == [str(s.observation_id) for s in held]
@@ -517,6 +628,7 @@ async def test_an_attention_frame_is_its_declared_scope_and_carries_no_brief(res
     mission = await CreateAttentionMissionUseCase(repository, store).execute(
         workspace_id=workspace.workspace_id, title="What is gaining attention", seed="ai bán lẻ",
         keywords=["pos"],
+        manifest=_manifest(MissionOutputType.COLLECTION_FRAME),
     )
     await _hold(repository, mission, ("x",))
     read, _submit = _use_cases(repository, store)
@@ -571,6 +683,12 @@ async def test_a_submission_against_a_stale_frame_writes_nothing(research):
          "INVALID_JUDGMENT"),
         (lambda held: [_assessment(held[0].observation_id, judged_by="an agent that thought hard")],
          "INVALID_JUDGMENT"),
+        (lambda held: [_assessment(
+            held[0].observation_id, hypothesis_target="alternative:99"
+        )], "INVALID_HYPOTHESIS_TARGET"),
+        (lambda held: [_assessment(
+            held[0].observation_id, hypothesis_target="neutral"
+        )], "INVALID_HYPOTHESIS_TARGET"),
         (lambda held: [], "INVALID_BATCH_SIZE"),
         (lambda held: [_assessment(held[0].observation_id)] * 51, "INVALID_BATCH_SIZE"),
     ],

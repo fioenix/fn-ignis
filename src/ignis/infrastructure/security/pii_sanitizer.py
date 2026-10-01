@@ -23,6 +23,38 @@ SECRET_PATTERN = re.compile(
     r"\b(?:sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|ey[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})\b"
 )
 
+# Operational errors often echo a request URL or an OAuth form. The value shape is provider-
+# specific, so the field name is the reliable signal; keeping the name makes diagnostics useful
+# while ensuring the credential itself never reaches logs, outcomes, or persisted audit details.
+NAMED_SECRET_PATTERN = re.compile(
+    r"(?i)(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|"
+    r"authorization|password|key)\s*[:=]\s*)(?!\[REDACTED_SECRET\])"
+    r"((?:Bearer\s+)?[^&\s,;]+)"
+)
+BEARER_SECRET_PATTERN = re.compile(r"(?i)(\bBearer\s+)(?!\[REDACTED_SECRET\])([^\s,;]+)")
+SENSITIVE_FIELD_NAMES = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "access_token",
+        "accesstoken",
+        "refresh_token",
+        "refreshtoken",
+        "client_secret",
+        "clientsecret",
+        "authorization",
+        "password",
+        "key",
+    }
+)
+
+# Evidence identities can resemble formatted phone numbers. Keep their exact bytes for
+# citation resolution, but only after secret-field and credential redaction has run.
+UUID_PATTERN = re.compile(
+    r"(\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b)",
+    re.IGNORECASE,
+)
+
 
 def sanitize_pii_text(text: str) -> str:
     """
@@ -39,12 +71,17 @@ def sanitize_pii_text(text: str) -> str:
     
     # 2. Redact Secrets
     sanitized = SECRET_PATTERN.sub("[REDACTED_SECRET]", sanitized)
+    sanitized = NAMED_SECRET_PATTERN.sub(r"\1[REDACTED_SECRET]", sanitized)
+    sanitized = BEARER_SECRET_PATTERN.sub(r"\1[REDACTED_SECRET]", sanitized)
 
-    # 3. Redact Vietnamese Phones
-    sanitized = VN_PHONE_PATTERN.sub("[REDACTED_PHONE]", sanitized)
-
-    # 4. Redact Structured International Formatted Phones
-    sanitized = INTERNATIONAL_FORMATTED_PHONE_PATTERN.sub("[REDACTED_PHONE]", sanitized)
+    # Phone matching must not consume a fragment of a canonical evidence UUID.
+    parts = UUID_PATTERN.split(sanitized)
+    for index in range(0, len(parts), 2):
+        parts[index] = VN_PHONE_PATTERN.sub("[REDACTED_PHONE]", parts[index])
+        parts[index] = INTERNATIONAL_FORMATTED_PHONE_PATTERN.sub(
+            "[REDACTED_PHONE]", parts[index]
+        )
+    sanitized = "".join(parts)
 
     return sanitized
 
@@ -54,7 +91,14 @@ def sanitize_pii_data(data: Union[Dict[str, Any], List[Any], str]) -> Union[Dict
     if isinstance(data, str):
         return sanitize_pii_text(data)
     elif isinstance(data, dict):
-        return {k: sanitize_pii_data(v) for k, v in data.items()}
+        return {
+            k: (
+                "[REDACTED_SECRET]"
+                if str(k).replace("-", "_").casefold() in SENSITIVE_FIELD_NAMES
+                else sanitize_pii_data(v)
+            )
+            for k, v in data.items()
+        }
     elif isinstance(data, list):
         return [sanitize_pii_data(item) for item in data]
     return data

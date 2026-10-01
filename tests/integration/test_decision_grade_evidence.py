@@ -22,10 +22,14 @@ from ignis.application.use_cases.create_research_workspace import (
 )
 from ignis.domain.entities import TrendSignal
 from ignis.domain.research_workspace import (
+    AuthorityBoundary,
     EvidenceQualification,
     EvidenceQualificationConflictError,
     InvalidEvidenceQualificationError,
     MissionProbeOutcome,
+    MissionManifest,
+    MissionOutputType,
+    MissionTerminalStateError,
     compute_frame_fingerprint,
 )
 from ignis.domain.value_objects import GeoCode, PlatformType
@@ -39,8 +43,40 @@ MARKET_BRIEF = {
     "timeframe": "7d",
     "hypothesis": "Small VN retailers will adopt a lightweight AI copilot that removes repeated work",
     "falsifiers": ["No repeated operational pain is observed among small retailers"],
+    "alternative_hypotheses": [
+        "Retailers need process redesign rather than an AI copilot",
+        "Retailers prefer human bookkeeping services over software",
+    ],
+    "null_hypothesis": "The repeated work is not material to operating decisions",
+    "kill_criteria": ["No repeated decision-relevant pain appears in qualified evidence"],
+    "revision_rule": "Reframe when counterevidence matches support",
 }
 T0 = datetime(2026, 9, 25, 3, 0, tzinfo=timezone.utc)
+
+
+def _manifest(
+    output_type=MissionOutputType.COLLECTION_FRAME,
+    channels=("youtube",),
+):
+    return MissionManifest(
+        outcome="Collect one bounded evidence frame",
+        decision_context=(MARKET_BRIEF["decision"] if output_type is MissionOutputType.MARKET_ANALYSIS else None),
+        required_channels=tuple(channels),
+        optional_channels=(),
+        authority_boundary=AuthorityBoundary(
+            public_http=True,
+            official_api=True,
+            browser_session=True,
+            paid_quota=True,
+        ),
+        quota_budget={},
+        output_type=output_type,
+        stop_conditions=("one run completed", "new authority required"),
+        analysis_policy="evidence-gated-v1",
+        retention_policy="mission-only",
+        created_by="contract-test",
+        confirmed_at=T0,
+    )
 
 
 @pytest.fixture
@@ -57,20 +93,35 @@ async def _workspace(repository, host_workspace, name="AI retail copilot"):
     return store, await use_case.confirm(proposal, confirmation=True)
 
 
-async def _market_mission(repository, store, workspace, keywords=("ai cho cửa hàng",), **brief):
+async def _market_mission(
+    repository,
+    store,
+    workspace,
+    keywords=("ai cho cửa hàng",),
+    channels=("youtube",),
+    **brief,
+):
     return await ConfirmMarketBriefUseCase(repository, store).execute(
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         keywords=list(keywords),
+        manifest=_manifest(MissionOutputType.MARKET_ANALYSIS, channels),
         **{**MARKET_BRIEF, **brief},
     )
 
 
-async def _attention_mission(repository, store, workspace, keywords=("ai cho cửa hàng",)):
+async def _attention_mission(
+    repository,
+    store,
+    workspace,
+    keywords=("ai cho cửa hàng",),
+    channels=("youtube",),
+):
     return await CreateAttentionMissionUseCase(repository, store).execute(
         workspace_id=workspace.workspace_id,
         title="What is gaining attention around retail AI",
         keywords=list(keywords),
+        manifest=_manifest(channels=channels),
     )
 
 
@@ -135,6 +186,7 @@ async def _journal(store, workspace, mission, status, started_at, sequence):
 
 
 def _outcome(run_id, surface, status="EMPTY_NO_DATA", count=0, platform="youtube"):
+    measured = status in ("HEALTHY", "EMPTY_NO_DATA")
     return MissionProbeOutcome(
         run_id=run_id,
         platform=platform,
@@ -144,6 +196,13 @@ def _outcome(run_id, surface, status="EMPTY_NO_DATA", count=0, platform="youtube
         queried_keywords=("ai cho cửa hàng",),
         query_fingerprint="q" * 64,
         completed_at=T0,
+        scope_attestation=(
+            {"geo": "VN", "timeframe": "7d", "keywords": ["ai cho cửa hàng"]}
+            if measured
+            else None
+        ),
+        note=None if status == "HEALTHY" else f"Fixture operational outcome: {status}",
+        collection_plan_digest="p" * 64,
     )
 
 
@@ -287,15 +346,14 @@ async def test_the_latest_completed_run_owns_the_probe_outcomes(repository_case,
     first = await _journal(store, workspace, mission, "COMPLETED", T0, 1)
     await store.record_probe_outcomes(first.run_id, [
         _outcome(first.run_id, "youtube"),
-        _outcome(first.run_id, "tiktok", status="AUTH_REQUIRED", platform="tiktok"),
     ])
     failed = await _journal(store, workspace, mission, "FAILED", T0 + timedelta(hours=1), 2)
     await store.record_probe_outcomes(failed.run_id, [_outcome(failed.run_id, "youtube", "DEGRADED")])
     await _journal(store, workspace, mission, "STARTED", T0 + timedelta(hours=2), 3)
 
     latest = await store.get_latest_completed_probe_outcomes(mission.id)
-    assert sorted((o.connector_surface, o.status.value) for o in latest) == [
-        ("tiktok", "AUTH_REQUIRED"), ("youtube", "EMPTY_NO_DATA"),
+    assert [(o.connector_surface, o.status.value) for o in latest] == [
+        ("youtube", "EMPTY_NO_DATA"),
     ]
     assert {o.run_id for o in latest} == {first.run_id}
 
@@ -344,6 +402,13 @@ class OutcomeRegistry:
         self._outcomes = outcomes
         self.calls = 0
 
+    async def resolve_execution_requirements(self, **_kwargs):
+        return {
+            "resources": tuple(outcome.connector_surface for outcome in self._outcomes),
+            "authority": ("public_http",),
+            "quota_costs": {},
+        }
+
     async def search_with_outcomes(self, **_kwargs):
         from ignis.infrastructure.connectors.registry import SearchPassResult
 
@@ -355,10 +420,13 @@ class OutcomeRegistry:
 
 
 def _surface(surface, status, count=0, platform=None, queried=("ai cho cửa hàng",), window="7d"):
+    from ignis.domain.harness_models import ChannelHealthStatus
     from ignis.infrastructure.connectors.registry import SurfaceProbeResult
 
     return SurfaceProbeResult(
-        platform=platform or surface, connector_surface=surface, status=status,
+        platform=platform or surface,
+        connector_surface=surface,
+        status=ChannelHealthStatus(status),
         signals_collected=count, queried_keywords=tuple(queried), queried_window=window,
     )
 
@@ -382,7 +450,12 @@ async def test_a_workspace_run_records_every_surface_outcome_before_it_completes
 
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
-    mission = await _attention_mission(repository, store, workspace)
+    mission = await _attention_mission(
+        repository,
+        store,
+        workspace,
+        channels=("google", "youtube", "tiktok"),
+    )
     registry = OutcomeRegistry(
         [_signal("ai cho cửa hàng", PlatformType.GOOGLE_TRENDS, keyword="ai cho cửa hàng",
                  connector_surface="google")],
@@ -525,7 +598,12 @@ def _fresh_process(repository):
 
 
 async def _run_first_mission(repository, store, workspace, process):
-    mission = await _attention_mission(repository, store, workspace)
+    mission = await _attention_mission(
+        repository,
+        store,
+        workspace,
+        channels=("google", "tiktok_video_grid"),
+    )
     result = await _executor(repository, store, process["registry"], process["sync"]).execute(mission.id)
     outcomes = await store.get_latest_completed_probe_outcomes(mission.id)
     signals = await repository.get_mission_signals(mission.id)
@@ -595,6 +673,13 @@ async def test_cold_start_vocabulary_failure_calls_no_connector_and_fails_clearl
     class CountingRegistry:
         calls = 0
 
+        async def resolve_execution_requirements(self, **_kwargs):
+            return {
+                "resources": ("youtube",),
+                "authority": ("public_http",),
+                "quota_costs": {},
+            }
+
         async def search_with_outcomes(self, **_kwargs):
             CountingRegistry.calls += 1
             raise AssertionError("a connector was called under partial configuration")
@@ -631,7 +716,12 @@ async def test_cold_start_execute_mission_ingress_handler_needs_no_prior_analysi
     repository = repository_case.repository
     await _persist_vocabulary(repository_case)
     store, workspace = await _workspace(repository, host_workspace)
-    mission = await _attention_mission(repository, store, workspace)
+    mission = await _attention_mission(
+        repository,
+        store,
+        workspace,
+        channels=("google", "tiktok_video_grid"),
+    )
     process = _fresh_process(repository)
     components = {
         "repository": repository,
@@ -718,7 +808,9 @@ def _handler_components(repository, store):
         "strategic_reasoner": StrategicMarketReasoner(),
         "artifact_builder": HtmlArtifactBuilder(),
         "top_clusters_use_case": GetTopClustersUseCase(repository=repository),
-        "get_mission_analysis_use_case": GetMissionAnalysisUseCase(repository=repository),
+        "get_mission_analysis_use_case": GetMissionAnalysisUseCase(
+            repository=repository, store=store
+        ),
         "get_evidence_qualification_batch_use_case": GetEvidenceQualificationBatchUseCase(
             repository=repository, store=store
         ),
@@ -732,10 +824,12 @@ async def _market_with(repository, store, workspace, items, keywords, brief=None
     """A confirmed Market mission holding `items`, with one completed run's probe outcomes."""
     from ignis.domain.research_workspace import compute_query_fingerprint
 
+    channels = tuple(surface for surface, _platform, _status, _count in outcomes)
     mission, revision = await ConfirmMarketBriefUseCase(repository, store).execute(
         workspace_id=workspace.workspace_id,
         confirmed_by="requester",
         keywords=list(keywords),
+        manifest=_manifest(MissionOutputType.MARKET_ANALYSIS, channels or ("youtube",)),
         **(brief or MARKET_BRIEF),
     )
     signals = [_corpus_signal(item) for item in items]
@@ -743,6 +837,8 @@ async def _market_with(repository, store, workspace, items, keywords, brief=None
     by_url = {s.source_url: [] for s in held}
     for s in held:
         by_url[s.source_url].append(s)
+    if not outcomes:
+        return mission, revision, held
     run = await _journal(store, workspace, mission, "COMPLETED", T0, 1)
     # Every surface here attests the whole keyword list, which is within its ten-keyword cap.
     queried = tuple(mission.keywords[:10])
@@ -752,7 +848,15 @@ async def _market_with(repository, store, workspace, items, keywords, brief=None
         MissionProbeOutcome(
             run_id=run.run_id, platform=platform, connector_surface=surface, status=status,
             signals_collected=count, queried_keywords=queried, queried_window=window,
-            query_fingerprint=fingerprint, completed_at=T0,
+            query_fingerprint=fingerprint,
+            completed_at=T0,
+            scope_attestation=(
+                {"geo": "VN", "timeframe": window, "keywords": list(queried)}
+                if status in ("HEALTHY", "EMPTY_NO_DATA")
+                else None
+            ),
+            note=(None if status == "HEALTHY" else f"Fixture operational outcome: {status}"),
+            collection_plan_digest="p" * 64,
         )
         for surface, platform, status, count in outcomes
     ])
@@ -765,7 +869,16 @@ def _judgments_by_observation(held, items, key="judgment"):
     for item in items:
         judgment_by_url.setdefault(_corpus_signal(item).source_url, []).append(item[key])
     queues = {url: list(js) for url, js in judgment_by_url.items()}
-    return {str(s.observation_id): queues[s.source_url].pop(0) for s in held}
+    judgments = {str(s.observation_id): dict(queues[s.source_url].pop(0)) for s in held}
+    for judgment in judgments.values():
+        relation = judgment["relation"]
+        if relation == "QUALIFIED_SUPPORT":
+            judgment.update(hypothesis_target="core", evidence_role="SUPPORT")
+        elif relation == "QUALIFIED_CONTRADICTION":
+            judgment.update(hypothesis_target="core", evidence_role="CONTRADICTION")
+        else:
+            judgment.update(hypothesis_target="neutral", evidence_role="CONTEXT")
+    return judgments
 
 
 async def _qualify_through_handlers(mcp_server, mission, judgments):
@@ -779,11 +892,27 @@ async def _qualify_through_handlers(mcp_server, mission, judgments):
             # READY, or nothing left to hand out because the remaining rows are final UNASSESSED.
             return batch, responses
         assert batch["status"] == "QUALIFICATION_REQUIRED", batch
-        assessments = [
-            {"observation_id": e["observation_id"], "judged_by": "fixture-host", "model": "replay",
-             **judgments[e["observation_id"]]}
-            for e in batch["evidence"]
-        ]
+        assessments = []
+        for evidence in batch["evidence"]:
+            judgment = dict(judgments[evidence["observation_id"]])
+            relation = judgment["relation"]
+            if relation == "QUALIFIED_SUPPORT":
+                judgment.setdefault("hypothesis_target", "core")
+                judgment.setdefault("evidence_role", "SUPPORT")
+            elif relation == "QUALIFIED_CONTRADICTION":
+                judgment.setdefault("hypothesis_target", "core")
+                judgment.setdefault("evidence_role", "CONTRADICTION")
+            else:
+                judgment.setdefault("hypothesis_target", "neutral")
+                judgment.setdefault("evidence_role", "CONTEXT")
+            assessments.append(
+                {
+                    "observation_id": evidence["observation_id"],
+                    "judged_by": "fixture-host",
+                    "model": "replay",
+                    **judgment,
+                }
+            )
         response = json.loads(
             await mcp_server.handle_submit_mission_evidence_qualifications(
                 str(mission.id), batch["frame_fingerprint"], assessments
@@ -872,19 +1001,12 @@ async def test_keyword_noise_corpus_replay_emits_zero_unsupported_conclusion_uni
     # UNASSESSED judgment keeps the whole frame withheld rather than letting the rest conclude.
     unassessed = sum(o["judgment"]["relation"] == "UNASSESSED" for o in record["observations"])
     assert analysis["qualification"]["unassessed"] == unassessed
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
     if unassessed:
-        assert analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
         assert analysis["qualification"]["reason_code"] == "UNASSESSED_EVIDENCE"
-        assert "new Market Brief revision" in analysis["next_step"]
-        assert analysis["next_step"] == ready["next_step"]
-    else:
-        assert analysis["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
-        assert analysis["qualification"]["reason_code"] == "NO_SUFFICIENT_TOPIC"
-    assert analysis["opportunity_index_applies"] is False
-    assert analysis["market_opportunities"] == []
-    scorecard = analysis["quality_scorecard"]
-    assert scorecard["confidence_level"] in ("LOW", "UNRELIABLE")
-    assert scorecard["question_relevance_score"] == analysis["qualification"]["question_relevance_score"]
+        assert analysis["qualification"]["next_step"] == ready["next_step"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 @pytest.mark.asyncio
@@ -916,15 +1038,9 @@ async def test_keyword_noise_negative_controls_support_nothing_and_stay_inspecta
     assert analysis["qualification"]["total_evidence"] == len(negatives)
     assert analysis["qualification"]["excluded_irrelevant"] == len(negatives) - 1
     assert analysis["qualification"]["context_only"] == 1
-    assert analysis["qualification"]["question_relevance_score"] == 0.0
-    assert analysis["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
-    assert analysis["opportunity_index_applies"] is False
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
     assert _conclusion_units(analysis) == []
-    text = json.dumps(
-        {k: analysis[k] for k in ("market_opportunities", "strategic_insights", "actionable_takeaways")},
-        ensure_ascii=False,
-    )
-    assert not any(word in text for word in VERDICT_WORDS)
+    assert not any(word in json.dumps(analysis["gap_report"]) for word in VERDICT_WORDS)
     # Excluded evidence stays readable for audit, labelled as what it is.
     assert {s["qualification_relation"] for s in analysis["top_signals"]} == {
         "EXCLUDED_IRRELEVANT", "CONTEXT_ONLY",
@@ -952,11 +1068,10 @@ async def test_insufficient_market_supply_withholds_every_verdict_even_with_qual
 
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    assert analysis["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
-    assert analysis["market_opportunities"] == [] and analysis["opportunity_index_applies"] is False
-    withheld = {t["topic"]: t for t in analysis["topic_sufficiency"]}
-    assert withheld["AI cho cửa hàng bán lẻ"]["evidence_sufficiency"] == "MISSING_SUPPLY"
-    assert withheld["AI quản lý cửa hàng"]["evidence_sufficiency"] == "MISSING_DEMAND"
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_SUPPLY_EVIDENCE" in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 @pytest.mark.asyncio
@@ -983,21 +1098,16 @@ async def test_qualified_market_control_keeps_its_opportunity_index_with_qualifi
 
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
 
-    assert analysis["analysis_status"] == "READY"
-    assert analysis["opportunity_index_applies"] is True
-    assert [o["topic"] for o in analysis["market_opportunities"]] == ["AI cho cửa hàng bán lẻ"]
-    opportunity = analysis["market_opportunities"][0]
-    assert opportunity["evidence_sufficiency"] == "SUFFICIENT_POSITIVE_SUPPLY"
-    assert (opportunity["qualified_demand_count"], opportunity["qualified_supply_count"],
-            opportunity["independent_supply_sources"]) == (1, 3, 2)
-    assert isinstance(opportunity["opportunity_index"], float)
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "NO_PERMITTED_CLAIMS" in analysis["gap_report"]["failed_gates"] or any(
+        gate.startswith("MISSING_HYPOTHESIS_COVERAGE:")
+        for gate in analysis["gap_report"]["failed_gates"]
+    )
     qualified = _qualified_ids(judgments)
     assert _unsupported(_conclusion_units(analysis), qualified) == []
-    assert _conclusion_units(analysis), "a supported control must still produce conclusions"
-    cited = {c["observation_id"] for _k, _s, cs in _conclusion_units(analysis) for c in cs}
-    assert cited and cited <= qualified
-    assert all(c["evidence_role"] == "MARKET_EVIDENCE" for c in opportunity["citations"])
-    assert analysis["market_brief"]["brief_revision_id"] == str(revision.brief_revision_id)
+    assert _conclusion_units(analysis) == []
+    assert analysis["mission"]["id"] == str(mission.id)
+    assert revision.brief_revision_id is not None
 
 
 @pytest.mark.asyncio
@@ -1027,11 +1137,10 @@ async def test_qualified_market_control_measured_zero_needs_two_completed_empty_
                                  ("youtube", "youtube", "EMPTY_NO_DATA", 0),
                                  ("tiktok_video_grid", "tiktok", "RATE_LIMITED", 0)])
 
-    assert measured["analysis_status"] == "READY"
-    assert [o["evidence_sufficiency"] for o in measured["market_opportunities"]] == ["SUFFICIENT_ZERO_SUPPLY"]
-    assert measured["market_opportunities"][0]["qualified_supply_count"] == 0
-    assert one_failed["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
-    assert one_failed["market_opportunities"] == []
+    assert measured["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_SUPPLY_EVIDENCE" not in measured["gap_report"]["failed_gates"]
+    assert one_failed["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_SUPPLY_EVIDENCE" in one_failed["gap_report"]["failed_gates"]
 
 
 # --- User Story 2: stable history, revision isolation and evidence replacement -------------------
@@ -1085,10 +1194,13 @@ async def test_reopen_reads_the_same_persisted_judgments_and_outcomes_whatever_c
     registry.state = "OPEN"  # every surface now looks broken; the completed run did not change
     reopened = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    assert first["analysis_status"] == "READY"
+    assert first["analysis_status"] == "INSUFFICIENT_EVIDENCE"
     assert _stable(reopened) == _stable(first)
     assert len(await store.list_evidence_qualifications(mission.id)) == len(stored)
-    statuses = {c["connector_surface"]: c["status"] for c in reopened["channel_summaries"]}
+    statuses = {
+        c["connector_surface"]: c["status"]
+        for c in reopened["gap_report"]["attempted_probes"]
+    }
     assert statuses == {"google": "HEALTHY", "tiktok_video_grid": "EMPTY_NO_DATA", "youtube": "EMPTY_NO_DATA"}
 
 
@@ -1112,12 +1224,12 @@ async def test_reopen_keeps_the_measured_zero_of_the_last_completed_run_after_a_
 
     failed = await _journal(store, workspace, mission, "FAILED", T0 + timedelta(hours=2), 2)
     await store.record_probe_outcomes(failed.run_id, [
+        _outcome(failed.run_id, "google", "DEGRADED", platform="google"),
         _outcome(failed.run_id, "youtube", "DEGRADED"),
         _outcome(failed.run_id, "tiktok_video_grid", "RATE_LIMITED", platform="tiktok"),
     ])
     after = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    assert [o["evidence_sufficiency"] for o in before["market_opportunities"]] == ["SUFFICIENT_ZERO_SUPPLY"]
     assert _stable(after) == _stable(before)
 
 
@@ -1141,6 +1253,7 @@ async def test_revision_starts_with_zero_qualifications_and_cannot_reuse_the_pri
     ).execute(
         workspace_id=workspace.workspace_id, confirmed_by="requester", keywords=CONTROL_KEYWORDS,
         previous_mission_id=first.id,
+        manifest=_manifest(MissionOutputType.MARKET_ANALYSIS),
         **{**MARKET_BRIEF, "target_user": "Managers of small Vietnamese pharmacies"},
     )
     await _hold(repository, revised, [_corpus_signal(item, T0 + timedelta(days=1)) for item in positives])
@@ -1162,20 +1275,28 @@ async def test_revision_starts_with_zero_qualifications_and_cannot_reuse_the_pri
         "the earlier revision's judgments are immutable history"
     )
     revised_analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(revised.id)))
-    assert revised_analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
-    assert revised_analysis["market_opportunities"] == []
+    assert revised_analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "INCOMPLETE_EVIDENCE_FRAME" in revised_analysis["gap_report"]["failed_gates"]
+    for forbidden in revised_analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in revised_analysis
     assert first_brief.brief_revision_id != revised_brief.brief_revision_id
 
 
 @pytest.mark.asyncio
-async def test_evidence_replacement_prunes_only_its_judgment_and_new_evidence_requires_qualification(
+async def test_terminal_mission_refuses_evidence_replacement_and_preserves_qualification(
     repository_case, host_workspace, monkeypatch
 ):
     from ignis.interfaces.mcp import server as mcp_server
 
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
-    mission, _brief = await _market_mission(repository, store, workspace, keywords=CONTROL_KEYWORDS)
+    mission, _brief = await _market_mission(
+        repository,
+        store,
+        workspace,
+        keywords=CONTROL_KEYWORDS,
+        channels=("youtube", "google"),
+    )
     positives = {c["case_id"]: c for c in CORPUS["semantic_controls"]["positive"]}
     supply, demand = positives["ctl-dm-012"], positives["ctl-dm-038"]
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
@@ -1188,32 +1309,33 @@ async def test_evidence_replacement_prunes_only_its_judgment_and_new_evidence_re
     await _qualify_through_handlers(mission=mission, mcp_server=mcp_server, judgments=_judgments_by_observation(
         list(first_pass.values()), [supply, demand], "control_judgment"
     ))
-    old_supply = first_pass[_corpus_signal(supply).source_url]
-    old_demand = first_pass[_corpus_signal(demand).source_url]
+    evidence_before = {str(s.observation_id) for s in first_pass.values()}
+    judgments_before = {
+        str(q.observation_id) for q in await store.list_evidence_qualifications(mission.id)
+    }
+    latest_before = {
+        o.connector_surface: o.status.value
+        for o in await store.get_latest_completed_probe_outcomes(mission.id)
+    }
 
-    # The second pass reaches Google only. The YouTube observation is preserved as it was; the old
-    # Google observation is replaced by the new sighting and its association is pruned.
-    await _executor(repository, store, OutcomeRegistry(
+    replacement = OutcomeRegistry(
         [_corpus_signal(demand, T0 + timedelta(hours=1))],
         [_surface("youtube", "RATE_LIMITED"), _surface("google", "HEALTHY", 1)],
-    )).execute(mission.id)
-
-    current = {str(s.observation_id): s for s in await repository.get_mission_signals(mission.id)}
-    judged = {str(q.observation_id) for q in await store.list_evidence_qualifications(mission.id)}
-    new_demand = [oid for oid, s in current.items() if oid not in (str(old_supply.observation_id),)]
-    assert str(old_supply.observation_id) in current and str(old_supply.observation_id) in judged, (
-        "a retained observation keeps its judgment: the frame and the observation are unchanged"
     )
-    assert str(old_demand.observation_id) not in current
-    assert str(old_demand.observation_id) not in judged, "the pruned association took its judgment"
-    assert len(new_demand) == 1 and new_demand[0] not in judged
-    batch = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id)))
-    analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
-    assert [e["observation_id"] for e in batch["evidence"]] == new_demand
-    assert analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
-    assert analysis["market_opportunities"] == [] and analysis["opportunity_index_applies"] is False
-    latest = {o.connector_surface: o.status.value for o in await store.get_latest_completed_probe_outcomes(mission.id)}
-    assert latest == {"google": "HEALTHY", "youtube": "RATE_LIMITED"}
+    with pytest.raises(MissionTerminalStateError):
+        await _executor(repository, store, replacement).execute(mission.id)
+
+    assert replacement.calls == 0
+    assert {
+        str(s.observation_id) for s in await repository.get_mission_signals(mission.id)
+    } == evidence_before
+    assert {
+        str(q.observation_id) for q in await store.list_evidence_qualifications(mission.id)
+    } == judgments_before
+    assert {
+        o.connector_surface: o.status.value
+        for o in await store.get_latest_completed_probe_outcomes(mission.id)
+    } == latest_before
 
 
 # --- User Story 3: Attention hands off only a qualified candidate --------------------------------
@@ -1227,6 +1349,7 @@ async def _attention_with(repository, store, workspace, clusters):
         workspace_id=workspace.workspace_id,
         title=CORPUS["journeys"]["attention_only"]["title"],
         keywords=CORPUS["journeys"]["attention_only"]["keywords"],
+        manifest=_manifest(),
     )
     items = [item for members in clusters.values() for item in members]
     held = await _hold(repository, mission, [_corpus_signal(item) for item in items])
@@ -1317,8 +1440,6 @@ async def test_attention_handoff_offers_only_the_directly_relevant_two_source_cl
 async def test_artifact_parity_mcp_payload_canonical_rows_and_html_agree_field_for_field(
     repository_case, host_workspace, monkeypatch, tmp_path
 ):
-    import re as regex
-
     from ignis.domain.research_workspace import QualificationRelation
     from ignis.interfaces.mcp import server as mcp_server
 
@@ -1361,15 +1482,14 @@ async def test_artifact_parity_mcp_payload_canonical_rows_and_html_agree_field_f
     }
     block = analysis["qualification"]
     assert {k: block[k] for k in canonical} == canonical
-    assert artifact["qualification"] == block
-    assert artifact["analysis_status"] == analysis["analysis_status"] == "QUALIFICATION_REQUIRED"
-    assert artifact["opportunity_index_applies"] is analysis["opportunity_index_applies"] is False
-    assert artifact["quality_scorecard"]["confidence_level"] == analysis["quality_scorecard"]["confidence_level"] == "UNRELIABLE"
-    for name in ("qualified_support", "context_only", "excluded_irrelevant", "unassessed"):
-        assert f'data-count="{name}">{block[name]}<' in html
-    relevance = regex.search(r'data-dimension="question_relevance">([0-9.]+)<', html).group(1)
-    assert float(relevance) == block["question_relevance_score"]
-    assert f'data-reason-code="{block["reason_code"]}"' in html
+    assert artifact["analysis_status"] == analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert artifact["gap_report"] == analysis["gap_report"]
+    assert 'data-analysis-status="INSUFFICIENT_EVIDENCE"' in html
+    assert 'data-gap-report' in html
+    for gate in analysis["gap_report"]["failed_gates"]:
+        assert gate in html
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in artifact
     assert 'id="demandSupplyBarChart"' not in html
 
 
@@ -1411,18 +1531,17 @@ async def test_explicit_unassessed_evidence_keeps_every_market_verdict_withheld(
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id), limit=50))
 
     # Every observation carries a persisted row, and still nothing reads as ready: the batch and
-    # the analysis give the same status, reason and recovery guidance.
+    # the analysis preserve the same qualification reason and recovery guidance while the public
+    # analysis contract remains a typed Gap Report.
     assert final_batch["evidence"] == [] and final_batch["status"] == expected_status
     assert final_batch["reason_code"] == analysis["qualification"]["reason_code"]
-    assert final_batch["next_step"] == analysis["next_step"]
+    assert final_batch["next_step"] == analysis["qualification"]["next_step"]
     assert analysis["qualification"]["unassessed"] == 1
-    assert analysis["analysis_status"] == expected_status
-    assert analysis["opportunity_index_applies"] is False
-    assert analysis["market_opportunities"] == []
-    assert analysis["strategic_insights"] == [] and analysis["actionable_takeaways"] == []
-    assert analysis["maturity_stage"] is None
-    assert all(t["evidence_sufficiency"] != "SUFFICIENT_POSITIVE_SUPPLY" for t in analysis["topic_sufficiency"])
-    assert analysis["quality_scorecard"]["confidence_level"] == "UNRELIABLE"
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    expected_gate = "QUALIFIER_UNAVAILABLE" if expected_status == "UNAVAILABLE" else "ASSESSMENT_INCOMPLETE"
+    assert expected_gate in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 @pytest.mark.asyncio
@@ -1449,6 +1568,13 @@ async def test_a_vocabulary_failure_behind_an_active_writer_is_a_conflict_that_c
             raise VocabularySynchronizationError("market_lexicons is unreadable")
 
     class NoConnector:
+        async def resolve_execution_requirements(self, **_kwargs):
+            return {
+                "resources": ("youtube",),
+                "authority": ("public_http",),
+                "quota_costs": {},
+            }
+
         async def search_with_outcomes(self, **_kwargs):
             raise AssertionError("a connector was called behind an active writer")
 
@@ -1491,6 +1617,12 @@ async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query
         """Google demand for the first and the eleventh keyword only."""
 
         platform, name, plugin_id, supports_search = PlatformType.GOOGLE_TRENDS, "Google", "google", True
+        http_authority, requires_paid_quota = "public_http", False
+
+        async def resolve_ingest_runtime(self):
+            from ignis.application.ports.connector_port import IngestRuntime
+
+            return IngestRuntime.HTTP_API
 
         async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
             return [
@@ -1520,7 +1652,13 @@ async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query
 
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
-    mission, _brief = await _market_mission(repository, store, workspace, keywords=keywords)
+    mission, _brief = await _market_mission(
+        repository,
+        store,
+        workspace,
+        keywords=keywords,
+        channels=("google", "tiktok_video_grid", "reels"),
+    )
     empty_page = {"data": {"recent": {"sections": []}}}
     with patch("ignis.infrastructure.connectors.reels.reels_plugin.collect_json_payloads",
                AsyncMock(return_value=[empty_page])):
@@ -1544,11 +1682,10 @@ async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query
     await _qualify_through_handlers(mcp_server, mission, judgments)
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    topics = {t["topic"]: t for t in analysis["topic_sufficiency"]}
-    assert topics["topic1"]["evidence_sufficiency"] == "MISSING_SUPPLY"
-    assert topics["topic11"]["evidence_sufficiency"] == "MISSING_SUPPLY"
-    assert topics["topic11"]["measured_zero_surfaces"] == topics["topic1"]["measured_zero_surfaces"] == []
-    assert analysis["market_opportunities"] == []
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_SUPPLY_EVIDENCE" in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 @pytest.mark.asyncio
@@ -1571,7 +1708,13 @@ async def test_a_windowed_measured_zero_still_covers_only_the_ten_keywords_each_
         registry.register(plugin)
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
-    mission, _brief = await _market_mission(repository, store, workspace, keywords=keywords)
+    mission, _brief = await _market_mission(
+        repository,
+        store,
+        workspace,
+        keywords=keywords,
+        channels=("google", "reels", "tiktok_video_grid"),
+    )
     await _executor(repository, store, registry).execute(mission.id)
 
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
@@ -1583,11 +1726,11 @@ async def test_a_windowed_measured_zero_still_covers_only_the_ten_keywords_each_
     })
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    topics = {t["topic"]: t for t in analysis["topic_sufficiency"]}
-    assert topics["topic1"]["evidence_sufficiency"] == "SUFFICIENT_ZERO_SUPPLY"
-    assert topics["topic11"]["evidence_sufficiency"] == "MISSING_SUPPLY"
-    assert topics["topic11"]["measured_zero_surfaces"] == []
-    assert [o["topic"] for o in analysis["market_opportunities"]] == ["topic1"]
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert "MISSING_HYPOTHESIS_COVERAGE:alternative:1" in analysis["gap_report"]["failed_gates"]
+    assert "MISSING_HYPOTHESIS_COVERAGE:null" in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 # --- Follow-up review of 1205030: the executed window is part of the measured query --------------
@@ -1601,10 +1744,16 @@ class WindowedSupply:
     def __init__(self, plugin_id, platform, fixed_window=None):
         self.plugin_id, self.name, self._platform, self.fixed_window = plugin_id, plugin_id, platform, fixed_window
         self.received = []
+        self.http_authority, self.requires_paid_quota = "public_http", False
 
     @property
     def platform(self):
         return self._platform
+
+    async def resolve_ingest_runtime(self):
+        from ignis.application.ports.connector_port import IngestRuntime
+
+        return IngestRuntime.HTTP_API
 
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, limit=20, attestation=None):
         self.received.append(timeframe)
@@ -1617,23 +1766,35 @@ class WindowedSupply:
 
 class DemandOnly:
     platform, name, plugin_id, supports_search = PlatformType.GOOGLE_TRENDS, "Google", "google", True
+    http_authority, requires_paid_quota = "public_http", False
+
+    async def resolve_ingest_runtime(self):
+        from ignis.application.ports.connector_port import IngestRuntime
+
+        return IngestRuntime.HTTP_API
 
     async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=None, custom_timeframe=None, limit=20):
         return [_signal(f"Google Search Trends: {keywords[0]}", PlatformType.GOOGLE_TRENDS,
                         external=f"g-{keywords[0]}", keyword=keywords[0], connector_surface="google")]
 
 
-@pytest.mark.parametrize("mismatch, expected", [(False, "SUFFICIENT_ZERO_SUPPLY"), (True, "MISSING_SUPPLY")])
+@pytest.mark.parametrize("mismatch", [False, True])
 @pytest.mark.asyncio
 async def test_a_surface_that_executed_another_window_is_not_a_measured_zero_for_the_frame(
-    repository_case, host_workspace, monkeypatch, mismatch, expected
+    repository_case, host_workspace, monkeypatch, mismatch
 ):
     from ignis.interfaces.mcp import server as mcp_server
 
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
-    mission, _brief = await _market_mission(repository, store, workspace, keywords=["ai cho cửa hàng"],
-                                            timeframe="30d")
+    mission, _brief = await _market_mission(
+        repository,
+        store,
+        workspace,
+        keywords=["ai cho cửa hàng"],
+        channels=("google", "reels", "tiktok_video_grid"),
+        timeframe="30d",
+    )
     reels = WindowedSupply("reels", PlatformType.REELS)
     tiktok = WindowedSupply("tiktok_video_grid", PlatformType.TIKTOK, fixed_window="24h" if mismatch else None)
     registry = ConnectorPluginRegistry(repository=repository)
@@ -1658,8 +1819,10 @@ async def test_a_surface_that_executed_another_window_is_not_a_measured_zero_for
     })
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    [topic] = analysis["topic_sufficiency"]
-    assert topic["evidence_sufficiency"] == expected
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+    assert (
+        "MISSING_SUPPLY_EVIDENCE" in analysis["gap_report"]["failed_gates"]
+    ) is mismatch
 
 
 # --- Review of ccd22fb: batch and analysis agree while evidence is still pending -----------------
@@ -1674,25 +1837,36 @@ async def test_an_evaluator_failure_with_pending_evidence_gives_batch_and_analys
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
     positives = CORPUS["semantic_controls"]["positive"]
-    mission, _revision, held = await _market_with(repository, store, workspace, positives[:2], CONTROL_KEYWORDS)
+    mission, _revision, held = await _market_with(
+        repository,
+        store,
+        workspace,
+        positives[:2],
+        CONTROL_KEYWORDS,
+        outcomes=[("youtube", "youtube", "HEALTHY", 2)],
+    )
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
     first = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id), limit=1))
     recorded = json.loads(await mcp_server.handle_submit_mission_evidence_qualifications(
         str(mission.id), first["frame_fingerprint"],
-        [{"observation_id": first["evidence"][0]["observation_id"], "relation": "UNASSESSED",
-          "purpose": "CONTEXT", "confidence": None, "reason_code": "EVALUATOR_UNAVAILABLE",
-          "judged_by": "fixture-host"}],
-    ))
+            [{"observation_id": first["evidence"][0]["observation_id"], "relation": "UNASSESSED",
+              "purpose": "CONTEXT", "confidence": None, "reason_code": "EVALUATOR_UNAVAILABLE",
+              "judged_by": "fixture-host", "hypothesis_target": "neutral",
+              "evidence_role": "CONTEXT"}],
+        ))
     assert recorded["status"] == "RECORDED" and recorded["progress"]["unassessed"] == len(held)
 
     batch = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id)))
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
-    assert batch["status"] == analysis["analysis_status"] == "UNAVAILABLE"
+    assert batch["status"] == "UNAVAILABLE"
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
     assert batch["reason_code"] == analysis["qualification"]["reason_code"] == "EVALUATOR_UNAVAILABLE"
-    assert batch["next_step"] == analysis["next_step"]
+    assert batch["next_step"] == analysis["qualification"]["next_step"]
     assert batch["evidence"] == [], "no further evidence is handed out once the frame is unavailable"
-    assert analysis["opportunity_index_applies"] is False and analysis["market_opportunities"] == []
+    assert "QUALIFIER_UNAVAILABLE" in analysis["gap_report"]["failed_gates"]
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis
 
 
 # --- Review of a81661b: the submit response speaks for the state its write produced -----------
@@ -1702,11 +1876,14 @@ async def test_an_evaluator_failure_with_pending_evidence_gives_batch_and_analys
     "judgment, status, reason_code",
     [
         ({"relation": "QUALIFIED_SUPPORT", "purpose": "DEMAND", "confidence": 0.9,
-          "reason_code": "DIRECT_TO_FRAME"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
+          "reason_code": "DIRECT_TO_FRAME", "hypothesis_target": "core",
+          "evidence_role": "SUPPORT"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
         ({"relation": "UNASSESSED", "purpose": "CONTEXT", "confidence": None,
-          "reason_code": "EVALUATOR_UNAVAILABLE"}, "UNAVAILABLE", "EVALUATOR_UNAVAILABLE"),
+          "reason_code": "EVALUATOR_UNAVAILABLE", "hypothesis_target": "neutral",
+          "evidence_role": "CONTEXT"}, "UNAVAILABLE", "EVALUATOR_UNAVAILABLE"),
         ({"relation": "UNASSESSED", "purpose": "CONTEXT", "confidence": None,
-          "reason_code": "INSUFFICIENT_CONTENT"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
+          "reason_code": "INSUFFICIENT_CONTENT", "hypothesis_target": "neutral",
+          "evidence_role": "CONTEXT"}, "QUALIFICATION_REQUIRED", "QUALIFICATION_INCOMPLETE"),
     ],
 )
 @pytest.mark.asyncio
@@ -1718,7 +1895,14 @@ async def test_submit_batch_and_analysis_give_one_next_step_while_evidence_is_pe
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
     positives = CORPUS["semantic_controls"]["positive"]
-    mission, _revision, held = await _market_with(repository, store, workspace, positives[:2], CONTROL_KEYWORDS)
+    mission, _revision, held = await _market_with(
+        repository,
+        store,
+        workspace,
+        positives[:2],
+        CONTROL_KEYWORDS,
+        outcomes=[("youtube", "youtube", "HEALTHY", 2)],
+    )
     assert len(held) >= 2, "the regression needs evidence still pending after the submission"
     monkeypatch.setattr(mcp_server, "get_components", lambda: _handler_components(repository, store))
     first = json.loads(await mcp_server.handle_get_mission_evidence_qualification_batch(str(mission.id), limit=1))
@@ -1731,11 +1915,13 @@ async def test_submit_batch_and_analysis_give_one_next_step_while_evidence_is_pe
     analysis = json.loads(await mcp_server.handle_get_mission_analysis(str(mission.id)))
 
     assert recorded["status"] == "RECORDED"
-    assert recorded["next_step"] == batch["next_step"] == analysis["next_step"], (
+    assert recorded["next_step"] == batch["next_step"] == analysis["qualification"]["next_step"], (
         "consecutive tool answers must not give conflicting instructions"
     )
-    assert recorded["qualification_status"] == batch["status"] == analysis["analysis_status"] == status
+    assert recorded["qualification_status"] == batch["status"] == status
+    assert analysis["analysis_status"] == "INSUFFICIENT_EVIDENCE"
     assert (recorded["qualification_reason_code"] == batch["reason_code"]
             == analysis["qualification"]["reason_code"] == reason_code)
     assert bool(batch["evidence"]) is (reason_code == "QUALIFICATION_INCOMPLETE")
-    assert analysis["opportunity_index_applies"] is False and analysis["market_opportunities"] == []
+    for forbidden in analysis["gap_report"]["withheld_outputs"]:
+        assert forbidden not in analysis

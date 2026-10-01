@@ -9,7 +9,7 @@ from ignis.interfaces.mcp.server import mcp
 @pytest.mark.asyncio
 async def test_all_tool_manifests_are_synchronized():
     """Verify that hermes_manifest.json, .hermes/tools.json, openclaw.json,
-    and FastMCP server expose exactly the same set of 47 tools.
+    and FastMCP server expose exactly the same set of 41 tools.
     """
     tools = await mcp.list_tools()
     server_tool_names = {t.name for t in tools}
@@ -26,14 +26,14 @@ async def test_all_tool_manifests_are_synchronized():
     hermes_manifest_names = {t["function"]["name"] for t in hermes_manifest}
     hermes_tools_names = {t["function"]["name"] for t in hermes_tools}
 
-    assert len(server_tool_names) == 47, f"Expected 47 tools in server, got {len(server_tool_names)}"
+    assert len(server_tool_names) == 41, f"Expected 41 tools in server, got {len(server_tool_names)}"
     assert hermes_manifest_names == server_tool_names, (
         f"hermes_manifest drift: {server_tool_names ^ hermes_manifest_names}"
     )
     assert hermes_tools_names == server_tool_names, (
         f".hermes/tools.json drift: {server_tool_names ^ hermes_tools_names}"
     )
-    assert openclaw.get("protocols", {}).get("tools_count") == 47
+    assert openclaw.get("protocols", {}).get("tools_count") == 41
 
 
 def test_wheel_smoke_uses_the_manifest_tool_count():
@@ -102,3 +102,18 @@ async def test_the_submit_tool_says_its_next_step_follows_the_state_it_produced(
 
     for required in ("qualification_status", "qualification_reason_code", "next_step"):
         assert required in description, required
+
+
+@pytest.mark.asyncio
+async def test_claim_ledger_tools_match_both_manifest_schemas():
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    expected_required = {
+        "submit_mission_claims": ["mission_id", "frame_digest", "candidates", "created_by"],
+        "get_mission_claims": ["mission_id"],
+    }
+    for name, required in expected_required.items():
+        assert tools[name].parameters["required"] == required
+        for manifest in ("hermes_manifest.json", ".hermes/tools.json"):
+            function = _manifest_function(manifest, name)
+            assert function["parameters"] == tools[name].parameters
+            assert function["description"] == tools[name].description

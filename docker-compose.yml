@@ -1,15 +1,1 @@
-services:
-  worker:
-    build: .
-    container_name: fn-ignis-worker
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-8640}
-      DEFAULT_GEO: ${DEFAULT_GEO:-VN}
-    command: ["python", "-m", "ignis.interfaces.cli.scheduler"]
-    volumes:
-      # The daily discovery digest is the worker's deliverable; without this mount it is written
-      # into the container filesystem and disappears with it.
-      - ./reports:/app/src/reports
+services: {}

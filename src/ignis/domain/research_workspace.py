@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
@@ -59,6 +60,38 @@ class EvidenceRole(str, Enum):
 
     MARKET_EVIDENCE = "MARKET_EVIDENCE"      # Collected for, and evaluated against, this Brief
     ATTENTION_CONTEXT = "ATTENTION_CONTEXT"  # Carried over as lineage; never counted as support
+
+
+class EvidenceDirection(str, Enum):
+    """How evidence affects a named hypothesis inside an analysis frame."""
+
+    SUPPORT = "SUPPORT"
+    CONTRADICTION = "CONTRADICTION"
+    CONTEXT = "CONTEXT"
+
+
+class MissionOutputType(str, Enum):
+    """The deliverable one explicit mission is allowed to produce."""
+
+    COLLECTION_FRAME = "COLLECTION_FRAME"
+    ATTENTION_REPORT = "ATTENTION_REPORT"
+    MARKET_ANALYSIS = "MARKET_ANALYSIS"
+    STRATEGIC_ARTIFACT = "STRATEGIC_ARTIFACT"
+
+
+class ClaimType(str, Enum):
+    OBSERVATION = "OBSERVATION"
+    MEASUREMENT = "MEASUREMENT"
+    INFERENCE = "INFERENCE"
+    ASSUMPTION = "ASSUMPTION"
+    RECOMMENDATION = "RECOMMENDATION"
+    UNKNOWN = "UNKNOWN"
+
+
+class ClaimStatus(str, Enum):
+    PERMITTED = "PERMITTED"
+    WITHHELD = "WITHHELD"
+    SUPERSEDED = "SUPERSEDED"
 
 
 class InvalidWorkspaceSlugError(IgnisDomainException):
@@ -107,6 +140,253 @@ class InvalidMissionLineageError(IgnisDomainException):
     at a topic nobody can find again, and recording the Market mission without it would leave a
     hypothesis whose origin is unrecoverable.
     """
+
+
+class InvalidMissionManifestError(IgnisDomainException):
+    """A mission authority boundary is incomplete, contradictory, or credential-shaped."""
+
+
+class InvalidMissionAuthorizationError(IgnisDomainException):
+    """A requested run exceeds the immutable authority recorded in its manifest."""
+
+    def __init__(
+        self,
+        reason_code: str,
+        message: str,
+        *,
+        missing_authority: Sequence[str] = (),
+        out_of_scope_resources: Sequence[str] = (),
+        quota_overruns: Optional[Mapping[str, Mapping[str, int]]] = None,
+    ):
+        self.reason_code = reason_code
+        self.missing_authority = tuple(missing_authority)
+        self.out_of_scope_resources = tuple(out_of_scope_resources)
+        self.quota_overruns = dict(quota_overruns or {})
+        super().__init__(message)
+
+
+class MissionTerminalStateError(IgnisDomainException):
+    """A one-run mission reached a terminal state and cannot continue itself."""
+
+    def __init__(self, mission_id: UUID, status: str):
+        self.mission_id = mission_id
+        self.status = status
+        super().__init__(
+            f"Mission {mission_id} is terminal ({status}) and cannot run again. "
+            "Create a new mission or confirmed revision for an explicit continuation."
+        )
+
+
+class InvalidMissionClaimError(IgnisDomainException):
+    """A claim or evidence binding cannot be traced to one valid evidence frame."""
+
+
+@dataclass(frozen=True)
+class AuthorityBoundary:
+    """Boolean authority only; credentials remain in their dedicated secure stores."""
+
+    public_http: bool
+    official_api: bool
+    browser_session: bool
+    paid_quota: bool
+
+    def __post_init__(self) -> None:
+        for name in ("public_http", "official_api", "browser_session", "paid_quota"):
+            if type(getattr(self, name)) is not bool:
+                raise InvalidMissionManifestError(f"authority_boundary.{name} must be boolean.")
+
+    def to_payload(self) -> Dict[str, bool]:
+        return {
+            "public_http": self.public_http,
+            "official_api": self.official_api,
+            "browser_session": self.browser_session,
+            "paid_quota": self.paid_quota,
+        }
+
+
+@dataclass(frozen=True)
+class MissionManifest:
+    """Immutable outcome, resource, authority, and stop boundary for one assigned task."""
+
+    outcome: str
+    decision_context: Optional[str]
+    required_channels: Tuple[str, ...]
+    optional_channels: Tuple[str, ...]
+    authority_boundary: AuthorityBoundary
+    quota_budget: Mapping[str, int]
+    output_type: MissionOutputType
+    stop_conditions: Tuple[str, ...]
+    analysis_policy: str
+    retention_policy: str
+    created_by: str
+    confirmed_at: datetime
+    mission_id: Optional[UUID] = None
+
+    def __post_init__(self) -> None:
+        required = _clean_unique_strings(self.required_channels, "required_channels")
+        optional = _clean_unique_strings(self.optional_channels, "optional_channels", allow_empty=True)
+        stops = _clean_unique_strings(self.stop_conditions, "stop_conditions")
+        object.__setattr__(self, "required_channels", required)
+        object.__setattr__(self, "optional_channels", optional)
+        object.__setattr__(self, "stop_conditions", stops)
+        if required and set(required) & set(optional):
+            raise InvalidMissionManifestError(
+                "required_channels and optional_channels must be disjoint."
+            )
+        if not isinstance(self.authority_boundary, AuthorityBoundary):
+            raise InvalidMissionManifestError("authority_boundary must be an AuthorityBoundary.")
+        for name in ("outcome", "analysis_policy", "retention_policy", "created_by"):
+            if _is_blank(getattr(self, name)):
+                raise InvalidMissionManifestError(f"{name} is required.")
+        for name in ("analysis_policy", "created_by"):
+            if not isinstance(getattr(self, name), str) or len(getattr(self, name)) > 128:
+                raise InvalidMissionManifestError(
+                    f"{name} must be a string of at most 128 characters."
+                )
+        output_type = _manifest_enum(MissionOutputType, self.output_type, "output_type")
+        object.__setattr__(self, "output_type", output_type)
+        if output_type in (MissionOutputType.MARKET_ANALYSIS, MissionOutputType.STRATEGIC_ARTIFACT):
+            if _is_blank(self.decision_context):
+                raise InvalidMissionManifestError(
+                    "decision_context is required for Market outputs."
+                )
+        budget = dict(self.quota_budget or {})
+        for name, value in budget.items():
+            if not isinstance(name, str) or not name.strip():
+                raise InvalidMissionManifestError("quota_budget keys must be non-empty strings.")
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise InvalidMissionManifestError(
+                    f"quota_budget.{name} must be a non-negative integer."
+                )
+        object.__setattr__(self, "quota_budget", MappingProxyType(budget))
+        if self.mission_id is not None:
+            object.__setattr__(self, "mission_id", _claim_uuid(self.mission_id, "mission_id"))
+        if not isinstance(self.confirmed_at, datetime) or self.confirmed_at.tzinfo is None:
+            raise InvalidMissionManifestError("confirmed_at must be a timezone-aware datetime.")
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "mission_id": str(self.mission_id) if self.mission_id else None,
+            "outcome": self.outcome.strip(),
+            "decision_context": (
+                self.decision_context.strip() if isinstance(self.decision_context, str) else None
+            ),
+            "required_channels": list(self.required_channels),
+            "optional_channels": list(self.optional_channels),
+            "authority_boundary": self.authority_boundary.to_payload(),
+            "quota_budget": dict(self.quota_budget),
+            "output_type": self.output_type.value,
+            "stop_conditions": list(self.stop_conditions),
+            "analysis_policy": self.analysis_policy.strip(),
+            "retention_policy": self.retention_policy.strip(),
+            "created_by": self.created_by.strip(),
+            "confirmed_at": self.confirmed_at.astimezone(timezone.utc).isoformat(),
+        }
+
+    @property
+    def manifest_digest(self) -> str:
+        return _digest(self.to_payload())
+
+    @property
+    def allowed_resources(self) -> Tuple[str, ...]:
+        """Every exact connector surface this mission may invoke, in confirmed order."""
+        return self.required_channels + self.optional_channels
+
+    def require_execution_authority(
+        self,
+        *,
+        resources: Sequence[str],
+        authority: Sequence[str] = (),
+        quota_costs: Optional[Mapping[str, int]] = None,
+        material_scope_change: bool = False,
+    ) -> None:
+        """Fail closed when a proposed run would cross the confirmed mission boundary.
+
+        This method is deliberately deterministic. It does not discover credentials, open a
+        browser, consume quota, or mutate a retry counter; callers resolve the proposed connector
+        plan first and present only its policy requirements here.
+        """
+        requested_resources = _clean_unique_strings(
+            resources, "execution resources", allow_empty=True
+        )
+        out_of_scope = tuple(
+            resource for resource in requested_resources if resource not in self.allowed_resources
+        )
+        if out_of_scope:
+            raise InvalidMissionAuthorizationError(
+                "OUT_OF_SCOPE_RESOURCE",
+                "The run requested connector surfaces outside the confirmed mission manifest: "
+                + ", ".join(out_of_scope),
+                out_of_scope_resources=out_of_scope,
+            )
+
+        if material_scope_change:
+            raise InvalidMissionAuthorizationError(
+                "MATERIAL_SCOPE_CHANGE",
+                "The proposed run changes the confirmed material scope and requires a new mission.",
+            )
+
+        valid_authority = set(self.authority_boundary.to_payload())
+        requested_authority = _clean_unique_strings(
+            authority, "execution authority", allow_empty=True
+        )
+        unknown = tuple(name for name in requested_authority if name not in valid_authority)
+        if unknown:
+            raise InvalidMissionAuthorizationError(
+                "UNKNOWN_AUTHORITY",
+                "The connector plan declared unknown authority requirements: " + ", ".join(unknown),
+                missing_authority=unknown,
+            )
+        missing = tuple(
+            name
+            for name in requested_authority
+            if not getattr(self.authority_boundary, name)
+        )
+        if missing:
+            raise InvalidMissionAuthorizationError(
+                "MISSING_AUTHORITY",
+                "The mission has not authorized: " + ", ".join(missing),
+                missing_authority=missing,
+            )
+
+        overruns: Dict[str, Dict[str, int]] = {}
+        for name, requested in dict(quota_costs or {}).items():
+            if isinstance(requested, bool) or not isinstance(requested, int) or requested < 0:
+                raise InvalidMissionAuthorizationError(
+                    "INVALID_QUOTA_REQUEST",
+                    f"The connector plan supplied an invalid quota cost for {name}.",
+                )
+            budget = self.quota_budget.get(name)
+            if budget is not None and requested > budget:
+                overruns[name] = {"budget": budget, "requested": requested}
+        if overruns:
+            raise InvalidMissionAuthorizationError(
+                "QUOTA_BUDGET_EXCEEDED",
+                "The connector plan exceeds the confirmed quota budget.",
+                quota_overruns=overruns,
+            )
+
+
+def _clean_unique_strings(
+    values: Sequence[Any], field_name: str, *, allow_empty: bool = False
+) -> Tuple[str, ...]:
+    if isinstance(values, str):
+        values = (values,)
+    cleaned = tuple(str(value).strip() for value in (values or ()) if not _is_blank(value))
+    if not cleaned and not allow_empty:
+        raise InvalidMissionManifestError(f"{field_name} must contain at least one value.")
+    if len(cleaned) != len(set(cleaned)):
+        raise InvalidMissionManifestError(f"{field_name} must not contain duplicates.")
+    return cleaned
+
+
+def _manifest_enum(enum_type, value: Any, field_name: str):
+    if isinstance(value, enum_type):
+        return value
+    try:
+        return enum_type(str(value).strip().upper())
+    except ValueError as exc:
+        raise InvalidMissionManifestError(f"{field_name} is invalid: {value!r}.") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +621,13 @@ REQUIRED_BRIEF_FIELDS: Tuple[str, ...] = (
     "hypothesis",
     "falsifiers",
 )
+EVIDENCE_GROUNDED_BRIEF_FIELDS: Tuple[str, ...] = REQUIRED_BRIEF_FIELDS + (
+    "alternative_hypotheses",
+    "null_hypothesis",
+    "kill_criteria",
+    "revision_rule",
+)
+MAX_BRIEF_TEXT_LENGTH = 2000
 
 
 def _is_blank(value: Any) -> bool:
@@ -383,6 +670,10 @@ class MarketBriefRevision:
     hypothesis: str
     falsifiers: Tuple[str, ...]
     confirmed_by: str
+    alternative_hypotheses: Optional[Tuple[str, ...]] = None
+    null_hypothesis: Optional[str] = None
+    kill_criteria: Optional[Tuple[str, ...]] = None
+    revision_rule: Optional[str] = None
     brief_revision_id: UUID = field(default_factory=uuid4)
     workspace_id: Optional[UUID] = None
     mission_id: Optional[UUID] = None
@@ -395,6 +686,23 @@ class MarketBriefRevision:
             falsifiers = [falsifiers]
         cleaned = tuple(f.strip() for f in (falsifiers or []) if not _is_blank(f))
         object.__setattr__(self, "falsifiers", cleaned)
+
+        extension_values = (
+            self.alternative_hypotheses,
+            self.null_hypothesis,
+            self.kill_criteria,
+            self.revision_rule,
+        )
+        uses_evidence_contract = any(value is not None for value in extension_values)
+        alternatives: Optional[Tuple[str, ...]] = None
+        kill_criteria: Optional[Tuple[str, ...]] = None
+        if uses_evidence_contract:
+            alternatives = _clean_brief_entries(
+                self.alternative_hypotheses, "alternative_hypotheses"
+            )
+            kill_criteria = _clean_brief_entries(self.kill_criteria, "kill_criteria")
+            object.__setattr__(self, "alternative_hypotheses", alternatives)
+            object.__setattr__(self, "kill_criteria", kill_criteria)
 
         missing = missing_brief_fields(
             {
@@ -411,8 +719,46 @@ class MarketBriefRevision:
         # so it is refused on the same path as an unanswered field.
         if _is_blank(self.confirmed_by):
             missing.append("confirmed_by")
+        if uses_evidence_contract:
+            if alternatives is None or len(alternatives) < 2:
+                missing.append("alternative_hypotheses")
+            if _is_blank(self.null_hypothesis):
+                missing.append("null_hypothesis")
+            if not kill_criteria:
+                missing.append("kill_criteria")
+            if _is_blank(self.revision_rule):
+                missing.append("revision_rule")
+            normalized_hypotheses = {
+                str(self.hypothesis).strip().casefold(),
+                str(self.null_hypothesis).strip().casefold(),
+            }
+            if alternatives and any(
+                alternative.casefold() in normalized_hypotheses for alternative in alternatives
+            ):
+                missing.append("alternative_hypotheses")
+            if str(self.hypothesis).strip().casefold() == str(
+                self.null_hypothesis
+            ).strip().casefold():
+                missing.append("null_hypothesis")
+            bounded_values = (
+                *(alternatives or ()),
+                str(self.null_hypothesis or ""),
+                *(kill_criteria or ()),
+                str(self.revision_rule or ""),
+            )
+            if any(len(value) > MAX_BRIEF_TEXT_LENGTH for value in bounded_values):
+                missing.append("bounded_hypothesis_register")
         if missing:
-            raise IncompleteMarketBriefError(missing)
+            raise IncompleteMarketBriefError(list(dict.fromkeys(missing)))
+
+    @property
+    def core_hypothesis(self) -> str:
+        """Public semantic name while the compatible storage column remains `hypothesis`."""
+        return self.hypothesis
+
+    @property
+    def evidence_contract_version(self) -> int:
+        return 2 if self.alternative_hypotheses is not None else 1
 
     def to_payload(self) -> Dict[str, Any]:
         return {
@@ -427,9 +773,31 @@ class MarketBriefRevision:
             "timeframe": self.timeframe,
             "hypothesis": self.hypothesis,
             "falsifiers": list(self.falsifiers),
+            "alternative_hypotheses": (
+                list(self.alternative_hypotheses)
+                if self.alternative_hypotheses is not None
+                else None
+            ),
+            "null_hypothesis": self.null_hypothesis,
+            "kill_criteria": list(self.kill_criteria) if self.kill_criteria is not None else None,
+            "revision_rule": self.revision_rule,
+            "evidence_contract_version": self.evidence_contract_version,
             "confirmed_by": self.confirmed_by,
             "confirmed_at": self.confirmed_at.isoformat(),
         }
+
+
+def _clean_brief_entries(
+    values: Optional[Sequence[Any]], field_name: str
+) -> Optional[Tuple[str, ...]]:
+    if values is None:
+        return None
+    if isinstance(values, str):
+        values = (values,)
+    cleaned = tuple(str(value).strip() for value in values if not _is_blank(value))
+    if len({value.casefold() for value in cleaned}) != len(cleaned):
+        raise IncompleteMarketBriefError([field_name])
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +814,7 @@ class QualificationRelation(str, Enum):
     """How one observation relates to the mission's question."""
 
     QUALIFIED_SUPPORT = "QUALIFIED_SUPPORT"      # Directly addresses the declared scope or Brief
+    QUALIFIED_CONTRADICTION = "QUALIFIED_CONTRADICTION"  # Weakens the target or supports a rival
     CONTEXT_ONLY = "CONTEXT_ONLY"                # Related, visible, never counted as support
     EXCLUDED_IRRELEVANT = "EXCLUDED_IRRELEVANT"  # Does not address the question at all
     UNASSESSED = "UNASSESSED"                    # No judgment was obtained
@@ -596,6 +965,9 @@ class EvidenceQualification:
     brief_revision_id: Optional[UUID] = None
     model: Optional[str] = None
     created_at: Optional[datetime] = None
+    hypothesis_target: Optional[str] = None
+    evidence_role: Optional[EvidenceDirection] = None
+    evidence_contract_version: Optional[int] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "mission_id", _coerce_uuid(self.mission_id, "mission_id"))
@@ -617,6 +989,51 @@ class EvidenceQualification:
         object.__setattr__(self, "relation", relation)
         object.__setattr__(self, "purpose", purpose)
         object.__setattr__(self, "reason_code", reason)
+        contract_version = self.evidence_contract_version
+        if contract_version is None:
+            contract_version = (
+                2
+                if relation is QualificationRelation.QUALIFIED_CONTRADICTION
+                or self.evidence_role is not None
+                or not _is_blank(self.hypothesis_target)
+                else 1
+            )
+        if isinstance(contract_version, bool) or contract_version not in (1, 2):
+            raise InvalidEvidenceQualificationError(
+                "evidence_contract_version must be 1 or 2."
+            )
+        if contract_version == 1 and (
+            relation is QualificationRelation.QUALIFIED_CONTRADICTION
+            or self.evidence_role is not None
+            or not _is_blank(self.hypothesis_target)
+        ):
+            raise InvalidEvidenceQualificationError(
+                "Evidence contract v1 cannot carry contradiction, evidence_role, or "
+                "hypothesis_target fields."
+            )
+        object.__setattr__(self, "evidence_contract_version", contract_version)
+        if contract_version == 2 and self.evidence_role is None:
+            raise InvalidEvidenceQualificationError(
+                "Evidence contract v2 requires an evidence_role."
+            )
+        if self.evidence_role is not None:
+            direction = _coerce_enum(EvidenceDirection, self.evidence_role, "evidence_role")
+            object.__setattr__(self, "evidence_role", direction)
+            expected = {
+                QualificationRelation.QUALIFIED_SUPPORT: EvidenceDirection.SUPPORT,
+                QualificationRelation.QUALIFIED_CONTRADICTION: EvidenceDirection.CONTRADICTION,
+            }.get(relation)
+            if expected is not None and direction is not expected:
+                raise InvalidEvidenceQualificationError(
+                    f"{relation.value} requires evidence_role {expected.value}."
+                )
+            if relation in (
+                QualificationRelation.QUALIFIED_SUPPORT,
+                QualificationRelation.QUALIFIED_CONTRADICTION,
+            ) and _is_blank(self.hypothesis_target):
+                raise InvalidEvidenceQualificationError(
+                    f"{relation.value} requires a hypothesis_target."
+                )
         object.__setattr__(
             self, "judged_by", _evaluator_identifier(self.judged_by, "judged_by", required=True)
         )
@@ -624,9 +1041,12 @@ class EvidenceQualification:
             self, "model", _evaluator_identifier(self.model, "model", required=False)
         )
 
-        if relation is QualificationRelation.QUALIFIED_SUPPORT and purpose is EvidencePurpose.CONTEXT:
+        if relation in (
+            QualificationRelation.QUALIFIED_SUPPORT,
+            QualificationRelation.QUALIFIED_CONTRADICTION,
+        ) and purpose is EvidencePurpose.CONTEXT:
             raise InvalidEvidenceQualificationError(
-                "QUALIFIED_SUPPORT must name what it measures: DEMAND, SUPPLY or VOC, not CONTEXT."
+                f"{relation.value} must name what it measures: DEMAND, SUPPLY or VOC, not CONTEXT."
             )
         if relation is QualificationRelation.CONTEXT_ONLY and purpose is not EvidencePurpose.CONTEXT:
             raise InvalidEvidenceQualificationError(
@@ -677,6 +1097,9 @@ class EvidenceQualification:
             self.reason_code,
             self.judged_by,
             self.model,
+            self.hypothesis_target,
+            self.evidence_role,
+            self.evidence_contract_version,
         ) == (
             other.mission_id,
             other.observation_id,
@@ -688,6 +1111,9 @@ class EvidenceQualification:
             other.reason_code,
             other.judged_by,
             other.model,
+            other.hypothesis_target,
+            other.evidence_role,
+            other.evidence_contract_version,
         )
 
 
@@ -712,8 +1138,13 @@ class MissionProbeOutcome:
     # The window the platform attested to filtering by during the run, or None when it applied
     # none. A measured zero holds only for the frame's own window.
     queried_window: Optional[str] = None
+    scope_attestation: Optional[Mapping[str, Any]] = None
+    note: Optional[str] = None
+    collection_plan_digest: Optional[str] = None
+    outcome_id: UUID = field(default_factory=uuid4)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "outcome_id", _coerce_uuid(self.outcome_id, "outcome_id"))
         object.__setattr__(self, "run_id", _coerce_uuid(self.run_id, "run_id"))
         object.__setattr__(
             self, "queried_keywords", tuple(str(k) for k in (self.queried_keywords or ()))
@@ -742,6 +1173,21 @@ class MissionProbeOutcome:
                 "An EMPTY_NO_DATA outcome must name the keywords the surface attested to querying; "
                 "an empty answer to no known query measured nothing."
             )
+        if self.collection_plan_digest is not None:
+            object.__setattr__(
+                self,
+                "collection_plan_digest",
+                _fingerprint(self.collection_plan_digest, "collection_plan_digest"),
+            )
+            if status in (ChannelHealthStatus.HEALTHY, ChannelHealthStatus.EMPTY_NO_DATA):
+                if not isinstance(self.scope_attestation, Mapping):
+                    raise InvalidEvidenceQualificationError(
+                        f"{status.value} requires a scope_attestation."
+                    )
+            if status is not ChannelHealthStatus.HEALTHY and _is_blank(self.note):
+                raise InvalidEvidenceQualificationError(
+                    f"{status.value} requires an operational note."
+                )
 
     @property
     def measures_zero(self) -> bool:
@@ -766,12 +1212,50 @@ class MissionProbeOutcome:
         )
 
 
+def require_complete_channel_outcomes(
+    required_channels: Sequence[str],
+    optional_channels: Sequence[str],
+    outcomes: Sequence[MissionProbeOutcome],
+) -> None:
+    """Refuse a manifested run unless every declared surface has exactly one outcome."""
+    declared = tuple(required_channels) + tuple(optional_channels)
+    actual = tuple(outcome.connector_surface for outcome in outcomes)
+    if len(actual) != len(set(actual)) or set(actual) != set(declared):
+        missing = sorted(set(declared) - set(actual))
+        unexpected = sorted(set(actual) - set(declared))
+        raise InvalidEvidenceQualificationError(
+            "Probe outcomes must cover the manifest-declared channels exactly once; "
+            f"missing={missing}, unexpected={unexpected}."
+        )
+    plan_digests = {outcome.collection_plan_digest for outcome in outcomes}
+    if None in plan_digests or len(plan_digests) != 1:
+        raise InvalidEvidenceQualificationError(
+            "Every outcome of a manifested run must carry the same collection_plan_digest."
+        )
+
+
 def _normalized_keyword(keyword: str) -> str:
     return " ".join(str(keyword).split()).casefold()
 
 
+def _canonicalize(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat()
+    if isinstance(value, Mapping):
+        return {str(key): _canonicalize(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonicalize(item) for item in value]
+    return value
+
+
 def _digest(payload: Mapping[str, Any]) -> str:
-    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    canonical = json.dumps(
+        _canonicalize(payload), sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -779,6 +1263,715 @@ def _plain(value: Any) -> str:
     # A str-based Enum renders as "Timeframe.LAST_7D" under str(), and one backend reads the
     # value back as the enum while the other keeps the string, so the value is taken explicitly.
     return str(value.value if hasattr(value, "value") else value)
+
+
+def compute_collection_plan_digest(plan: Mapping[str, Any]) -> str:
+    """Bind the exact query, target, role, scope, sampling, and authority projection."""
+    if not isinstance(plan, Mapping) or not plan:
+        raise InvalidMissionManifestError("A collection plan must be a non-empty mapping.")
+    return _digest(plan)
+
+
+def derive_collection_plan(
+    *,
+    mission_id: Any,
+    manifest: MissionManifest,
+    keywords: Sequence[str],
+    geo: Any,
+    timeframe: Any,
+    surface_requirements: Mapping[str, Mapping[str, Any]],
+    evidence_targets: Sequence[str],
+    expected_role: str,
+    audience: Optional[str] = None,
+    language: Optional[str] = None,
+    expanded_queries: Sequence[str] = (),
+    exclusion_queries: Sequence[str] = (),
+    falsification_queries: Sequence[str] = (),
+    probe_intents: Sequence[Mapping[str, Any]] = (),
+) -> Dict[str, Any]:
+    """Project one readable, deterministic probe plan from immutable mission authority."""
+    if manifest.mission_id != _coerce_uuid(mission_id, "mission_id"):
+        raise InvalidMissionManifestError(
+            "A collection plan must belong to the mission named by its manifest."
+        )
+    base_families = {
+        "root": [str(value) for value in keywords],
+        "expanded": [str(value) for value in expanded_queries],
+        "exclusions": [str(value) for value in exclusion_queries],
+        "falsification": [str(value) for value in falsification_queries],
+    }
+    raw_intents = list(probe_intents) or [
+        {
+            "evidence_targets": evidence_targets,
+            "expected_role": expected_role,
+            "query_families": base_families,
+        }
+    ]
+    intents = []
+    for intent in raw_intents:
+        targets = tuple(
+            str(target).strip()
+            for target in intent.get("evidence_targets", ())
+            if str(target).strip()
+        )
+        if not targets:
+            raise InvalidMissionManifestError(
+                "A collection-plan probe needs at least one evidence target."
+            )
+        role = str(intent.get("expected_role", "")).strip().upper()
+        if role not in {"SUPPORT", "CONTRADICTION", "CONTEXT"}:
+            raise InvalidMissionManifestError(
+                "expected_role must be SUPPORT, CONTRADICTION, or CONTEXT."
+            )
+        raw_families = intent.get("query_families", base_families)
+        if not isinstance(raw_families, Mapping):
+            raise InvalidMissionManifestError("query_families must be a mapping.")
+        families = {
+            name: [str(value) for value in raw_families.get(name, ())]
+            for name in ("root", "expanded", "exclusions", "falsification")
+        }
+        if not any(families[name] for name in ("root", "expanded", "falsification")):
+            raise InvalidMissionManifestError(
+                "A collection-plan probe needs at least one executable query."
+            )
+        intents.append((targets, role, families))
+
+    probes: List[Dict[str, Any]] = []
+    for surface in manifest.allowed_resources:
+        requirement = surface_requirements.get(surface)
+        if not isinstance(requirement, Mapping):
+            raise InvalidMissionManifestError(
+                f"Collection-plan requirements are missing for connector surface '{surface}'."
+            )
+        sampling = requirement.get("sampling")
+        if not isinstance(sampling, Mapping) or not sampling.get("ordering"):
+            raise InvalidMissionManifestError(
+                f"Collection-plan sampling is incomplete for connector surface '{surface}'."
+            )
+        for field_name in ("authority_tier", "connector_path", "connector_revision"):
+            if _is_blank(requirement.get(field_name)):
+                raise InvalidMissionManifestError(
+                    f"Collection-plan {field_name} is missing for connector surface '{surface}'."
+                )
+        for targets, role, families in intents:
+            probes.append(
+                {
+                    "connector_surface": surface,
+                    "query_families": families,
+                    "evidence_targets": list(targets),
+                    "expected_role": role,
+                    "scope": {
+                        "geo": _plain(geo),
+                        "audience": audience,
+                        "language": language,
+                        "timeframe": _plain(timeframe),
+                    },
+                    "sampling": dict(sampling),
+                    "authority_tier": str(requirement["authority_tier"]),
+                    "connector_path": str(requirement["connector_path"]),
+                    "connector_revision": str(requirement["connector_revision"]),
+                }
+            )
+
+    projection: Dict[str, Any] = {
+        "version": "collection-plan/v1",
+        "mission_id": str(manifest.mission_id),
+        "manifest_digest": manifest.manifest_digest,
+        "probes": probes,
+    }
+    projection["plan_digest"] = compute_collection_plan_digest(projection)
+    return projection
+
+
+def _records_digest(label: str, records: Sequence[Mapping[str, Any]]) -> str:
+    canonical = [_canonicalize(record) for record in records]
+    canonical.sort(
+        key=lambda record: json.dumps(
+            record, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
+    )
+    return _digest({label: canonical})
+
+
+def build_evidence_frame(
+    *,
+    mission_id: Any,
+    brief_revision_id: Optional[Any],
+    manifest_digest: str,
+    collection_plan_digest: str,
+    observations: Sequence[Mapping[str, Any]],
+    qualifications: Sequence[Mapping[str, Any]],
+    channel_outcomes: Sequence[Mapping[str, Any]],
+    analysis_policy: str,
+) -> "EvidenceFrame":
+    """Derive one order-stable frame identity from the exact persisted mission corpus."""
+    return EvidenceFrame(
+        mission_id=mission_id,
+        brief_revision_id=brief_revision_id,
+        manifest_digest=manifest_digest,
+        collection_plan_digest=collection_plan_digest,
+        observations_digest=_records_digest("observations", observations),
+        qualifications_digest=_records_digest("qualifications", qualifications),
+        channel_outcomes_digest=_records_digest("channel_outcomes", channel_outcomes),
+        analysis_policy=analysis_policy,
+    )
+
+
+def compute_evidence_frame_digest(
+    *,
+    mission_id: Any,
+    brief_revision_id: Optional[Any],
+    manifest_digest: str,
+    collection_plan_digest: str,
+    observations_digest: str,
+    qualifications_digest: str,
+    channel_outcomes_digest: str,
+    analysis_policy: str,
+) -> str:
+    """Derive the immutable identity consumed by qualification, claims, and rendering."""
+    return _digest(
+        {
+            "mission_id": str(mission_id),
+            "brief_revision_id": (
+                str(brief_revision_id) if brief_revision_id is not None else None
+            ),
+            "manifest_digest": manifest_digest,
+            "collection_plan_digest": collection_plan_digest,
+            "observations_digest": observations_digest,
+            "qualifications_digest": qualifications_digest,
+            "channel_outcomes_digest": channel_outcomes_digest,
+            "analysis_policy": analysis_policy,
+        }
+    )
+
+
+def compute_candidate_claim_key(claim: Mapping[str, Any]) -> str:
+    """Create a deterministic caller key when the host has not supplied one."""
+    if not isinstance(claim, Mapping) or not claim:
+        raise InvalidMissionClaimError("A candidate claim must be a non-empty mapping.")
+    return _digest(claim)
+
+
+def _claim_uuid(value: Any, field_name: str) -> UUID:
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError) as exc:
+        raise InvalidMissionClaimError(f"{field_name} '{value}' is not a UUID.") from exc
+
+
+@dataclass(frozen=True)
+class EvidenceFrame:
+    mission_id: UUID
+    brief_revision_id: Optional[UUID]
+    manifest_digest: str
+    collection_plan_digest: str
+    observations_digest: str
+    qualifications_digest: str
+    channel_outcomes_digest: str
+    analysis_policy: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mission_id", _claim_uuid(self.mission_id, "mission_id"))
+        if self.brief_revision_id is not None:
+            object.__setattr__(
+                self,
+                "brief_revision_id",
+                _claim_uuid(self.brief_revision_id, "brief_revision_id"),
+            )
+        for name in (
+            "manifest_digest",
+            "collection_plan_digest",
+            "observations_digest",
+            "qualifications_digest",
+            "channel_outcomes_digest",
+            "analysis_policy",
+        ):
+            if _is_blank(getattr(self, name)):
+                raise InvalidMissionClaimError(f"{name} is required for an evidence frame.")
+
+    @property
+    def frame_digest(self) -> str:
+        return compute_evidence_frame_digest(
+            mission_id=self.mission_id,
+            brief_revision_id=self.brief_revision_id,
+            manifest_digest=self.manifest_digest,
+            collection_plan_digest=self.collection_plan_digest,
+            observations_digest=self.observations_digest,
+            qualifications_digest=self.qualifications_digest,
+            channel_outcomes_digest=self.channel_outcomes_digest,
+            analysis_policy=self.analysis_policy,
+        )
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "mission_id": str(self.mission_id),
+            "brief_revision_id": (
+                str(self.brief_revision_id) if self.brief_revision_id is not None else None
+            ),
+            "manifest_digest": self.manifest_digest,
+            "collection_plan_digest": self.collection_plan_digest,
+            "observations_digest": self.observations_digest,
+            "qualifications_digest": self.qualifications_digest,
+            "channel_outcomes_digest": self.channel_outcomes_digest,
+            "analysis_policy": self.analysis_policy,
+            "frame_digest": self.frame_digest,
+        }
+
+
+@dataclass(frozen=True)
+class MissionClaimEvidence:
+    claim_id: UUID
+    observation_id: Optional[UUID]
+    probe_outcome_id: Optional[UUID]
+    role: EvidenceDirection
+    hypothesis_target: Optional[str]
+    binding_id: UUID = field(default_factory=uuid4)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "claim_id", _claim_uuid(self.claim_id, "claim_id"))
+        object.__setattr__(self, "binding_id", _claim_uuid(self.binding_id, "binding_id"))
+        identities = int(self.observation_id is not None) + int(self.probe_outcome_id is not None)
+        if identities != 1:
+            raise InvalidMissionClaimError(
+                "A claim binding must name exactly one observation_id or probe_outcome_id."
+            )
+        if self.observation_id is not None:
+            object.__setattr__(
+                self, "observation_id", _claim_uuid(self.observation_id, "observation_id")
+            )
+        if self.probe_outcome_id is not None:
+            object.__setattr__(
+                self,
+                "probe_outcome_id",
+                _claim_uuid(self.probe_outcome_id, "probe_outcome_id"),
+            )
+        role = _coerce_claim_enum(EvidenceDirection, self.role, "role")
+        object.__setattr__(self, "role", role)
+        if role is not EvidenceDirection.CONTEXT and _is_blank(self.hypothesis_target):
+            raise InvalidMissionClaimError(
+                f"{role.value} bindings require a hypothesis_target."
+            )
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "binding_id": str(self.binding_id),
+            "claim_id": str(self.claim_id),
+            "observation_id": str(self.observation_id) if self.observation_id else None,
+            "probe_outcome_id": (
+                str(self.probe_outcome_id) if self.probe_outcome_id else None
+            ),
+            "role": self.role.value,
+            "hypothesis_target": self.hypothesis_target,
+        }
+
+
+def _coerce_claim_enum(enum_type, value: Any, field_name: str):
+    if isinstance(value, enum_type):
+        return value
+    try:
+        return enum_type(str(value).strip().upper())
+    except ValueError as exc:
+        raise InvalidMissionClaimError(f"{field_name} is invalid: {value!r}.") from exc
+
+
+@dataclass(frozen=True)
+class MissionClaim:
+    mission_id: UUID
+    frame_digest: str
+    client_claim_key: str
+    claim_type: ClaimType
+    wording: str
+    status: ClaimStatus
+    created_by: str
+    evidence_bindings: Tuple[MissionClaimEvidence, ...] = ()
+    inference_method: Optional[str] = None
+    metric_denominator: Optional[str] = None
+    metric_timeframe: Optional[str] = None
+    confidence: Optional[float] = None
+    limitations: Tuple[str, ...] = ()
+    change_conditions: Tuple[str, ...] = ()
+    withheld_reasons: Tuple[str, ...] = ()
+    brief_revision_id: Optional[UUID] = None
+    claim_id: UUID = field(default_factory=uuid4)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mission_id", _claim_uuid(self.mission_id, "mission_id"))
+        object.__setattr__(self, "claim_id", _claim_uuid(self.claim_id, "claim_id"))
+        if self.brief_revision_id is not None:
+            object.__setattr__(
+                self,
+                "brief_revision_id",
+                _claim_uuid(self.brief_revision_id, "brief_revision_id"),
+            )
+        claim_type = _coerce_claim_enum(ClaimType, self.claim_type, "claim_type")
+        status = _coerce_claim_enum(ClaimStatus, self.status, "status")
+        object.__setattr__(self, "claim_type", claim_type)
+        object.__setattr__(self, "status", status)
+        for name in ("frame_digest", "client_claim_key", "wording", "created_by"):
+            if _is_blank(getattr(self, name)):
+                raise InvalidMissionClaimError(f"{name} is required.")
+        if not isinstance(self.created_by, str) or len(self.created_by) > 128:
+            raise InvalidMissionClaimError(
+                "created_by must be a string of at most 128 characters."
+            )
+        if not isinstance(self.created_at, datetime) or self.created_at.tzinfo is None:
+            raise InvalidMissionClaimError(
+                "created_at must be a timezone-aware datetime."
+            )
+        if claim_type in (ClaimType.MEASUREMENT, ClaimType.INFERENCE, ClaimType.RECOMMENDATION):
+            if _is_blank(self.inference_method):
+                raise InvalidMissionClaimError(
+                    f"{claim_type.value} requires an inference_method."
+                )
+        if claim_type is ClaimType.MEASUREMENT and status is ClaimStatus.PERMITTED:
+            if _is_blank(self.metric_denominator) or _is_blank(self.metric_timeframe):
+                raise InvalidMissionClaimError(
+                    "A permitted MEASUREMENT requires metric_denominator and metric_timeframe."
+                )
+        if claim_type in (ClaimType.INFERENCE, ClaimType.RECOMMENDATION):
+            if not self.limitations or not self.change_conditions:
+                raise InvalidMissionClaimError(
+                    f"{claim_type.value} requires limitations and change_conditions."
+                )
+        if self.confidence is not None:
+            if (
+                isinstance(self.confidence, bool)
+                or not isinstance(self.confidence, (int, float))
+                or math.isnan(self.confidence)
+                or not 0 <= float(self.confidence) <= 1
+            ):
+                raise InvalidMissionClaimError("confidence must be null or between 0 and 1.")
+            object.__setattr__(self, "confidence", float(self.confidence))
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "claim_id": str(self.claim_id),
+            "mission_id": str(self.mission_id),
+            "brief_revision_id": (
+                str(self.brief_revision_id) if self.brief_revision_id else None
+            ),
+            "frame_digest": self.frame_digest,
+            "client_claim_key": self.client_claim_key,
+            "claim_type": self.claim_type.value,
+            "wording": self.wording,
+            "inference_method": self.inference_method,
+            "metric_denominator": self.metric_denominator,
+            "metric_timeframe": self.metric_timeframe,
+            "confidence": self.confidence,
+            "limitations": list(self.limitations),
+            "change_conditions": list(self.change_conditions),
+            "status": self.status.value,
+            "withheld_reasons": list(self.withheld_reasons),
+            "created_by": self.created_by,
+            "created_at": self.created_at.astimezone(timezone.utc).isoformat(),
+            "evidence_bindings": [binding.to_payload() for binding in self.evidence_bindings],
+        }
+
+    def idempotency_payload(self) -> Dict[str, Any]:
+        """Semantic caller payload, excluding server identities and persistence clocks."""
+        bindings = [
+            {
+                "observation_id": (
+                    str(binding.observation_id) if binding.observation_id else None
+                ),
+                "probe_outcome_id": (
+                    str(binding.probe_outcome_id) if binding.probe_outcome_id else None
+                ),
+                "role": binding.role.value,
+                "hypothesis_target": binding.hypothesis_target,
+            }
+            for binding in self.evidence_bindings
+        ]
+        bindings.sort(
+            key=lambda item: (
+                item["observation_id"] or "",
+                item["probe_outcome_id"] or "",
+                item["role"],
+                item["hypothesis_target"] or "",
+            )
+        )
+        return {
+            "mission_id": str(self.mission_id),
+            "brief_revision_id": (
+                str(self.brief_revision_id) if self.brief_revision_id else None
+            ),
+            "frame_digest": self.frame_digest,
+            "client_claim_key": self.client_claim_key,
+            "claim_type": self.claim_type.value,
+            "wording": self.wording,
+            "inference_method": self.inference_method,
+            "metric_denominator": self.metric_denominator,
+            "metric_timeframe": self.metric_timeframe,
+            "confidence": self.confidence,
+            "limitations": list(self.limitations),
+            "change_conditions": list(self.change_conditions),
+            "status": self.status.value,
+            "withheld_reasons": list(self.withheld_reasons),
+            "created_by": self.created_by,
+            "evidence_bindings": bindings,
+        }
+
+
+@dataclass(frozen=True)
+class GapReport:
+    withheld_outputs: Tuple[str, ...]
+    failed_gates: Tuple[str, ...]
+    missing_evidence: Tuple[str, ...]
+    attempted_probes: Tuple[Mapping[str, Any], ...]
+    safe_partial_conclusions: Tuple[str, ...]
+    next_best_probe: str
+    required_authority: Optional[str]
+    estimated_cost: Optional[str]
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "withheld_outputs": list(self.withheld_outputs),
+            "failed_gates": list(self.failed_gates),
+            "missing_evidence": list(self.missing_evidence),
+            "attempted_probes": [dict(probe) for probe in self.attempted_probes],
+            "safe_partial_conclusions": list(self.safe_partial_conclusions),
+            "next_best_probe": self.next_best_probe,
+            "required_authority": self.required_authority,
+            "estimated_cost": self.estimated_cost,
+        }
+
+
+FORBIDDEN_STRATEGIC_OUTPUTS = (
+    "opportunity_index",
+    "demand_gap",
+    "whitespace",
+    "saturation",
+    "commercial_recommendations",
+)
+
+
+@dataclass(frozen=True)
+class StrategicSufficiencyDecision:
+    """Deterministic permission to accept strategic claims for one exact evidence frame."""
+
+    ready: bool
+    frame_digest: str
+    support_count: int
+    contradiction_count: int
+    gap_report: Optional[GapReport] = None
+
+    def to_payload(self) -> Dict[str, Any]:
+        return {
+            "status": "READY" if self.ready else "INSUFFICIENT_EVIDENCE",
+            "frame_digest": self.frame_digest,
+            "support_count": self.support_count,
+            "contradiction_count": self.contradiction_count,
+            "gap_report": self.gap_report.to_payload() if self.gap_report else None,
+        }
+
+
+def assess_strategic_sufficiency(
+    *,
+    manifest: MissionManifest,
+    brief: MarketBriefRevision,
+    qualifications: Sequence[EvidenceQualification],
+    probe_outcomes: Sequence[MissionProbeOutcome],
+    assessment_state: QualificationStatus,
+    current_frame_digest: str,
+    submitted_frame_digest: str,
+    required_metrics: Sequence[Mapping[str, Any]] = (),
+    observations: Sequence[Any] = (),
+    query_topics: Sequence[str] = (),
+) -> StrategicSufficiencyDecision:
+    """Apply the fail-closed Market-analysis gates before candidate prose is accepted.
+
+    Semantic judgment stays with the host. This policy only evaluates persisted typed facts:
+    channel completion, assessment coverage, evidence direction, frame identity, and any metric
+    basis the caller says a calculation requires.
+    """
+
+    failed: List[str] = []
+    missing: List[str] = []
+    outcomes_by_surface: Dict[str, MissionProbeOutcome] = {}
+    for outcome in probe_outcomes:
+        if outcome.connector_surface in outcomes_by_surface:
+            failed.append(f"DUPLICATE_CHANNEL_OUTCOME:{outcome.connector_surface}")
+            continue
+        outcomes_by_surface[outcome.connector_surface] = outcome
+
+    if brief.evidence_contract_version < 2:
+        failed.append("LEGACY_BRIEF_CONTRACT")
+        missing.append("expanded hypothesis register")
+    if current_frame_digest != submitted_frame_digest:
+        failed.append("STALE_EVIDENCE_FRAME")
+
+    measured_states = {
+        ChannelHealthStatus.HEALTHY,
+        ChannelHealthStatus.EMPTY_NO_DATA,
+    }
+    for surface in manifest.required_channels:
+        outcome = outcomes_by_surface.get(surface)
+        if outcome is None:
+            failed.append(f"MISSING_REQUIRED_CHANNEL:{surface}")
+            missing.append(f"required channel outcome: {surface}")
+        elif outcome.status not in measured_states:
+            failed.append(f"REQUIRED_CHANNEL_NOT_MEASURED:{surface}:{outcome.status.value}")
+            missing.append(f"completed measurement: {surface}")
+
+    if assessment_state is QualificationStatus.UNAVAILABLE:
+        failed.append("QUALIFIER_UNAVAILABLE")
+        missing.append("reliable assessment for every current observation")
+    elif assessment_state is not QualificationStatus.READY:
+        failed.append("ASSESSMENT_INCOMPLETE")
+        missing.append("assessment for every current observation")
+
+    support = [
+        item
+        for item in qualifications
+        if item.relation is QualificationRelation.QUALIFIED_SUPPORT
+        and item.evidence_role is EvidenceDirection.SUPPORT
+    ]
+    contradiction = [
+        item
+        for item in qualifications
+        if item.relation is QualificationRelation.QUALIFIED_CONTRADICTION
+        and item.evidence_role is EvidenceDirection.CONTRADICTION
+    ]
+    valid_targets = {
+        "core",
+        "null",
+        *(
+            f"alternative:{index}"
+            for index, _value in enumerate(brief.alternative_hypotheses or (), start=1)
+        ),
+    }
+    qualified_targets = {
+        item.hypothesis_target
+        for item in support + contradiction
+        if item.hypothesis_target in valid_targets
+    }
+    invalid_targets = sorted(
+        {
+            str(item.hypothesis_target)
+            for item in support + contradiction
+            if item.hypothesis_target not in valid_targets
+        }
+    )
+    for target in invalid_targets:
+        failed.append(f"INVALID_HYPOTHESIS_TARGET:{target}")
+    for target in sorted(valid_targets - qualified_targets):
+        failed.append(f"MISSING_HYPOTHESIS_COVERAGE:{target}")
+        missing.append(f"qualified evidence addressing hypothesis target: {target}")
+    if not support:
+        failed.append("MISSING_SUPPORT_COVERAGE")
+        missing.append("qualified support for a named hypothesis")
+    if not contradiction:
+        failed.append("MISSING_CONTRADICTION_COVERAGE")
+        missing.append("qualified counterevidence for a named hypothesis")
+
+    observation_by_id = {
+        str(getattr(item, "observation_id", "")): item for item in observations
+    }
+    demand_support = [item for item in support if item.purpose is EvidencePurpose.DEMAND]
+    supply_support = [item for item in support if item.purpose is EvidencePurpose.SUPPLY]
+    supply_sources = {
+        str(getattr(observation_by_id.get(str(item.observation_id)), "source_id", ""))
+        for item in supply_support
+        if getattr(observation_by_id.get(str(item.observation_id)), "source_id", None)
+    }
+    zero_supply_surfaces = {
+        outcome.connector_surface
+        for outcome in probe_outcomes
+        if outcome.platform in SUPPLY_SURFACE_PLATFORMS
+        and outcome.scope_attestation is not None
+        and any(
+            outcome.measured_zero_for(topic, brief.geo, brief.timeframe)
+            for topic in query_topics
+        )
+    }
+    if len(demand_support) < QUALIFIED_DEMAND_MINIMUM:
+        failed.append("MISSING_DEMAND_EVIDENCE")
+        missing.append("qualified demand evidence")
+    if not (
+        len(supply_support) >= POSITIVE_SUPPLY_OBSERVATIONS
+        and len(supply_sources) >= POSITIVE_SUPPLY_SOURCES
+    ) and len(zero_supply_surfaces) < MEASURED_ZERO_SURFACES:
+        failed.append("MISSING_SUPPLY_EVIDENCE")
+        missing.append("qualified supply evidence or two attested empty supply surfaces")
+
+    for requirement in required_metrics:
+        name = str(requirement.get("name") or "unnamed metric").strip()
+        if not requirement.get("denominator"):
+            failed.append(f"MISSING_METRIC_DENOMINATOR:{name}")
+            missing.append(f"denominator for {name}")
+        if not requirement.get("timeframe"):
+            failed.append(f"MISSING_METRIC_TIMEFRAME:{name}")
+            missing.append(f"timeframe for {name}")
+
+    failed = list(dict.fromkeys(failed))
+    missing = list(dict.fromkeys(missing))
+    if not failed:
+        return StrategicSufficiencyDecision(
+            ready=True,
+            frame_digest=current_frame_digest,
+            support_count=len(support),
+            contradiction_count=len(contradiction),
+        )
+
+    attempted = tuple(
+        {
+            "connector_surface": outcome.connector_surface,
+            "status": outcome.status.value,
+            "signals_collected": outcome.signals_collected,
+            "queried_window": outcome.queried_window,
+            "query_fingerprint": outcome.query_fingerprint,
+        }
+        for outcome in sorted(probe_outcomes, key=lambda item: item.connector_surface)
+    )
+    safe_partial = tuple(
+        f"{outcome.connector_surface} returned {outcome.signals_collected} observations."
+        for outcome in sorted(probe_outcomes, key=lambda item: item.connector_surface)
+        if outcome.status is ChannelHealthStatus.HEALTHY
+    )
+    authority_surfaces = [
+        outcome.connector_surface
+        for outcome in probe_outcomes
+        if outcome.connector_surface in manifest.required_channels
+        and outcome.status is ChannelHealthStatus.AUTH_REQUIRED
+    ]
+    if authority_surfaces:
+        next_probe = f"Authorize and rerun the required surface: {authority_surfaces[0]}."
+        required_authority = f"authorized access for {', '.join(sorted(authority_surfaces))}"
+    elif any(gate.startswith("MISSING_METRIC_") for gate in failed):
+        next_probe = "Run the smallest bounded probe that records the missing denominator and timeframe."
+        required_authority = None
+    elif "MISSING_CONTRADICTION_COVERAGE" in failed:
+        next_probe = "Run one bounded falsification probe against the strongest alternative or null hypothesis."
+        required_authority = None
+    elif "MISSING_SUPPORT_COVERAGE" in failed:
+        next_probe = "Run one bounded probe capable of directly supporting a named hypothesis."
+        required_authority = None
+    elif "ASSESSMENT_INCOMPLETE" in failed or "QUALIFIER_UNAVAILABLE" in failed:
+        next_probe = "Complete reliable qualification for every current observation in a new eligible frame."
+        required_authority = None
+    else:
+        next_probe = "Rerun the smallest missing required channel inside the confirmed mission boundary."
+        required_authority = None
+
+    return StrategicSufficiencyDecision(
+        ready=False,
+        frame_digest=current_frame_digest,
+        support_count=len(support),
+        contradiction_count=len(contradiction),
+        gap_report=GapReport(
+            withheld_outputs=FORBIDDEN_STRATEGIC_OUTPUTS,
+            failed_gates=tuple(failed),
+            missing_evidence=tuple(missing),
+            attempted_probes=attempted,
+            safe_partial_conclusions=safe_partial,
+            next_best_probe=next_probe,
+            required_authority=required_authority,
+            estimated_cost=None,
+        ),
+    )
 
 
 # What a batch read or an analysis tells the Agent when recorded judgments leave the frame
@@ -808,9 +2001,10 @@ def compute_query_fingerprint(keywords: Sequence[str], geo: Any, timeframe: Any)
 def compute_frame_fingerprint(mission: Any, brief: Optional[MarketBriefRevision]) -> str:
     """A digest of the immutable question a judgment answers.
 
-    Market: the exact confirmed Brief revision and all seven fields. Attention: the declared
-    scope -- title and keywords, which hold the seed -- plus geo and timeframe. Run state is not
-    part of the question, so a later run never invalidates a judgment of evidence it retained.
+    Market: the exact confirmed Brief revision and its complete legacy or evidence-contract
+    payload. Attention: the declared scope -- title and keywords, which hold the seed -- plus geo
+    and timeframe. Run state is not part of the question, so a later run never invalidates a
+    judgment of evidence it retained.
     """
     surface = resolve_surface(getattr(mission, "surface", None))
     payload: Dict[str, Any] = {"mission_id": str(mission.id), "surface": _plain(surface)}
@@ -820,11 +2014,7 @@ def compute_frame_fingerprint(mission: Any, brief: Optional[MarketBriefRevision]
                 f"Market mission {mission.id} has no readable confirmed Brief, so there is no "
                 "frame to judge its evidence against."
             )
-        payload["brief"] = {
-            "brief_revision_id": str(brief.brief_revision_id),
-            **{name: getattr(brief, name) for name in REQUIRED_BRIEF_FIELDS},
-        }
-        payload["brief"]["falsifiers"] = list(brief.falsifiers)
+        payload["brief"] = brief.to_payload()
     else:
         payload["scope"] = {
             "title": mission.title,

@@ -15,10 +15,6 @@ startCommand:
         type: integer
         description: "Total daily search.list calls available to this installation"
         default: 100
-      youtubeScheduledSearchDailyLimit:
-        type: integer
-        description: "Daily search.list ceiling for scheduled Track 1 work"
-        default: 70
       youtubeOtherDailyUnitLimit:
         type: integer
         description: "Shared daily units for YouTube endpoints other than search.list"
@@ -35,7 +31,6 @@ startCommand:
         DATABASE_URL: config.databaseUrl || "sqlite:///ignis.db",
         YOUTUBE_API_KEY: config.youtubeApiKey || "",
         YOUTUBE_SEARCH_DAILY_LIMIT: String(config.youtubeSearchDailyLimit ?? 100),
-        YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT: String(config.youtubeScheduledSearchDailyLimit ?? 70),
         YOUTUBE_OTHER_DAILY_UNIT_LIMIT: String(config.youtubeOtherDailyUnitLimit ?? 10000),
         DEFAULT_GEO: config.defaultGeo || "VN"
       }

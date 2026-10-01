@@ -1,7 +1,7 @@
 import json
 import logging
 import tempfile
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import uuid
@@ -19,7 +19,6 @@ from fastmcp import FastMCP
 from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
 from ignis.application.use_cases.create_market_revision import CreateMarketRevisionUseCase
 from ignis.application.use_cases.create_attention_mission import CreateAttentionMissionUseCase
-from ignis.application.use_cases.create_mission import CreateMissionUseCase
 from ignis.application.use_cases.create_research_workspace import (
     CreateResearchWorkspaceUseCase,
 )
@@ -32,22 +31,28 @@ from ignis.application.use_cases.get_mission_analysis import (
     GetMissionAnalysisUseCase,
     load_qualification_context,
 )
+from ignis.application.use_cases.get_mission_claims import GetMissionClaimsUseCase
+from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaimsUseCase
 from ignis.application.use_cases.submit_evidence_qualifications import (
     SubmitEvidenceQualificationsUseCase,
 )
-from ignis.application.use_cases.cluster_signals import ClusterSignalsUseCase
 from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
-from ignis.application.use_cases.ingest_trends import MAX_TOPIC_KEYWORDS, IngestTrendsUseCase
-from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
+from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.youtube_quota import YouTubeQuotaManager
 from ignis.domain.entities import TopicCluster
+from ignis.domain.harness_models import QualificationSummary
 from ignis.domain.exceptions import IgnisDomainException, VocabularySynchronizationError
 from ignis.domain.research_workspace import (
     RESEARCH_ROOT_SEGMENTS,
     REQUIRED_BRIEF_FIELDS,
+    AuthorityBoundary,
     IncompleteMarketBriefError,
+    InvalidMissionAuthorizationError,
+    InvalidMissionManifestError,
+    MissionManifest,
     MissionLineage,
+    MissionTerminalStateError,
     MissionWriterConflictError,
     QualificationStatus,
     ResearchSurface,
@@ -66,14 +71,11 @@ from ignis.domain.token_rotation import (
     plan_staggered_refresh,
 )
 from ignis.domain.value_objects import (
-    IngressTrigger,
     GeoCode,
-    IngressScope,
     PlatformType,
     Timeframe,
     resolve_geo,
     resolve_platform,
-    resolve_timeframe,
     timeframe_to_days,
 )
 from ignis.domain.youtube_quota import YouTubeQuotaPolicy
@@ -94,59 +96,43 @@ from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPl
 from ignis.infrastructure.connectors.tiktok.creative_center_plugin import TikTokCreativeCenterPlugin
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
-from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
 from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
+# Some official APIs authenticate in the query string. Keep HTTP client request URLs out of
+# operator logs even when the host application configures the root logger at INFO.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 logger = logging.getLogger("ignis.mcp")
 
 HARNESS_SYSTEM_INSTRUCTIONS = """
-fn-ignis is an Autonomous Social Intelligence & Market Opportunity Agent Harness.
-It equips AI agents with social listening connectors, mathematical methodologies, domain knowledge, and reporting scaffolds without constraining the agent's workflow or deliverables.
-
-Harness Capabilities:
-1. Multi-Platform Connectors & Probes: Atomic operations across Threads, TikTok, YouTube, Google Trends, and Instagram (autocomplete queries, comments, video cards, trending topics, dynamic config, auth tokens).
-2. Methodology & Scoring: Mathematical formulations including Opportunity Index (Demand vs. Supply), Quality Gate (Coverage, Precision, Freshness, Diversity >= 70%), and Voice of Customer pain-point clustering.
-3. Domain Knowledge & Lexicons: Dynamic domain lexicon registration, negative noise filtering, and localized language heuristics.
-4. Reporting Scaffolds: Data contracts and high-contrast interactive HTML Dashboard artifacts (`generate_mission_artifact`).
-
-Operational Flexibility:
-- Agents have full autonomy to select and compose tools as needed (e.g., ad-hoc social scanning, customer pain-point auditing, or end-to-end strategic dossiers).
-- The 6-Step Strategic Research Framework is provided as an analytical recipe/guideline (accessible via resource `fn-ignis://sop/market-research` or prompt `market_research_pipeline`) when a comprehensive market opportunity dossier is requested.
+fn-ignis is an evidence-grounded social market research agent. Start collection or analysis only
+for an explicit bounded task. Atomic source probes may answer a source question independently.
+For Market analysis, confirm a mission and Brief before ingress, qualify the current evidence
+frame, and render only claims permitted by the persisted Claim Ledger. Seek contrary evidence
+and preserve unavailable channel states. An unsupported strategic verdict becomes a Gap Report,
+not an Opportunity Index or a confident narrative. Stop work at the mission's terminal state.
+Collection and analysis are separate capabilities; choose only what the requester assigned.
 """
 
 SOP_FRAMEWORK_DOC = """
-# fn-ignis 6-Step Strategic Market Research Reference Framework
+# Mission-bound social market research reference
 
-This framework serves as a recommended analytical recipe when agents conduct comprehensive market opportunity and white-space discovery:
-
-1. Step 1 (Clarify Objectives & Core Hypothesis):
-   Establish clear, falsifiable hypotheses. Identify vertical (Fashion, Crypto, Healthcare, Logistics) and call `register_domain_lexicon(domain="...", terms=[...])` to expand the Quality Gate's domain vocabulary dynamically before deep crawling.
-
-2. Step 2 (Macro Scan & Real-World Keyword Expansion):
-   Call `get_tiktok_creative_center_trends`, `get_tiktok_search_suggestions`, or `get_threads_trending_topics` to uncover actual slang, tool names, and sub-niches being searched by users in target geo before deep crawling.
-
-3. Step 3 (Deep Ingress & Quality Gate):
-   Call `execute_mission_ingress` for deep multi-platform ingestion. Ensure strict date windowing and noise filtering (>=70% confidence).
-
-4. Step 4 (Single-Source 4-Lens Breakdown):
-   - Google Lens: Macro search demand velocity and growth.
-   - YouTube Lens: Long-form supply, case study and tutorial depth.
-   - TikTok / Threads Lens: Micro short-form intent, trending hashtags, and real-time discussions.
-   - Voice of Customer Lens: Real objections, pricing questions, unmet needs from comments via `extract_customer_pain_points`.
-
-5. Step 5 (Cross-Source Synthesis & White Space Matrix):
-   Correlate Demand vs. Supply, compute Opportunity Index (+100 to -100), identify HIGH_DEMAND_LOW_SUPPLY opportunities, and determine Trend Maturity Stage.
-
-6. Step 6 (Strategic Verdict, Risks & Fast MVP Blueprint):
-   Synthesize 3-5 market truths, evaluate entry risks/moats (why hasn't this been built?), formulate a 3-7 day low-cost MVP validation plan, and generate a full interactive Infographic HTML Dashboard via `generate_mission_artifact`.
+For a source-specific request, make a bounded atomic probe and report provenance and channel
+state; do not manufacture a Market conclusion. For a Market decision, confirm the mission and
+Brief, including alternatives, null hypothesis, falsifiers, kill criteria, and revision rule.
+Collect only the approved plan, qualify support and contradiction by the same standard, submit
+current-frame claim candidates, and read the Claim Ledger before rendering. If a gate fails,
+return the Gap Report and smallest next probe. An HTML report is optional and user-requested.
+The mission and Claim Ledger contracts, not this recipe, decide verdict eligibility.
 """
 
 # Initialize FastMCP Server with Non-Prescriptive Harness Instructions
-mcp = FastMCP("fn-ignis-trend-intelligence", instructions=HARNESS_SYSTEM_INSTRUCTIONS)
+mcp = FastMCP("fn-ignis-social-market-research", instructions=HARNESS_SYSTEM_INSTRUCTIONS)
 
 
 
@@ -188,9 +174,6 @@ def _init_components():
                     repository,
                     YouTubeQuotaPolicy(
                         search_daily_limit=settings.YOUTUBE_SEARCH_DAILY_LIMIT,
-                        scheduled_search_daily_limit=(
-                            settings.YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT
-                        ),
                         other_daily_unit_limit=settings.YOUTUBE_OTHER_DAILY_UNIT_LIMIT,
                     ),
                 ),
@@ -203,14 +186,6 @@ def _init_components():
     language_detector = HeuristicLanguageDetector()
     quality_evaluator = QualityEvaluator(detector=language_detector)
     strategic_reasoner = StrategicMarketReasoner(detector=language_detector)
-
-    harness_orchestrator = AutonomousRefinementOrchestrator(
-        repository=repository,
-        registry=registry,
-        clusterer=clusterer,
-        quality_evaluator=quality_evaluator,
-        strategic_reasoner=strategic_reasoner,
-    )
 
     workspace_store = WorkspaceRepository(repository=repository)
     # One synchronizer for every entry point, so the first mission after startup registers the
@@ -226,7 +201,6 @@ def _init_components():
         registry=registry,
     )
 
-    create_mission_use_case = CreateMissionUseCase(repository=repository)
     execute_mission_use_case = ExecuteMissionUseCase(
         repository=repository,
         registry=registry,
@@ -251,24 +225,23 @@ def _init_components():
         store=workspace_store,
         confirm_use_case=confirm_market_brief_use_case,
     )
-    get_mission_analysis_use_case = GetMissionAnalysisUseCase(repository=repository)
+    get_mission_analysis_use_case = GetMissionAnalysisUseCase(
+        repository=repository, store=workspace_store
+    )
     get_evidence_qualification_batch_use_case = GetEvidenceQualificationBatchUseCase(
         repository=repository, store=workspace_store
     )
     submit_evidence_qualifications_use_case = SubmitEvidenceQualificationsUseCase(
         repository=repository, store=workspace_store
     )
+    submit_mission_claims_use_case = SubmitMissionClaimsUseCase(
+        repository=repository, store=workspace_store
+    )
+    get_mission_claims_use_case = GetMissionClaimsUseCase(
+        repository=repository, store=workspace_store
+    )
     top_clusters_use_case = GetTopClustersUseCase(repository=repository)
     ingest_use_case = IngestTrendsUseCase(registry=registry, repository=repository)
-    cluster_use_case = ClusterSignalsUseCase(clusterer=clusterer, repository=repository)
-    autonomous_discovery_use_case = AutonomousDiscoveryUseCase(
-        repository=repository,
-        registry=registry,
-        clusterer=clusterer,
-        quality_evaluator=quality_evaluator,
-        strategic_reasoner=strategic_reasoner,
-        artifact_builder=artifact_builder,
-    )
 
     return {
         "repository": repository,
@@ -285,22 +258,20 @@ def _init_components():
         "artifact_builder": artifact_builder,
         "quality_evaluator": quality_evaluator,
         "strategic_reasoner": strategic_reasoner,
-        "harness_orchestrator": harness_orchestrator,
         "workspace_store": workspace_store,
         "vocabulary_synchronizer": vocabulary_synchronizer,
         "create_research_workspace_use_case": create_research_workspace_use_case,
         "create_attention_mission_use_case": create_attention_mission_use_case,
         "confirm_market_brief_use_case": confirm_market_brief_use_case,
         "create_market_revision_use_case": create_market_revision_use_case,
-        "create_mission_use_case": create_mission_use_case,
         "execute_mission_use_case": execute_mission_use_case,
         "get_mission_analysis_use_case": get_mission_analysis_use_case,
         "get_evidence_qualification_batch_use_case": get_evidence_qualification_batch_use_case,
         "submit_evidence_qualifications_use_case": submit_evidence_qualifications_use_case,
+        "submit_mission_claims_use_case": submit_mission_claims_use_case,
+        "get_mission_claims_use_case": get_mission_claims_use_case,
         "top_clusters_use_case": top_clusters_use_case,
         "ingest_use_case": ingest_use_case,
-        "cluster_use_case": cluster_use_case,
-        "autonomous_discovery_use_case": autonomous_discovery_use_case,
         "runtime_config_manager": runtime_config_manager,
     }
 
@@ -465,6 +436,61 @@ async def _refuse_unauthorized_market(comp: Dict[str, Any], mission: Any, operat
     if brief is None:
         return None, _market_brief_blocked(mission, operation)
     return brief, None
+
+
+def _missing_market_analysis_contract() -> Dict[str, Any]:
+    """Fail closed when a Market boundary cannot read the persisted verdict contract."""
+    return {
+        "analysis_status": "INSUFFICIENT_EVIDENCE",
+        "gap_report": {
+            "withheld_outputs": [
+                "opportunity_index",
+                "demand_gap",
+                "whitespace",
+                "saturation",
+                "commercial_recommendations",
+            ],
+            "failed_gates": ["PERSISTED_ANALYSIS_CONTRACT_UNAVAILABLE"],
+            "missing_evidence": ["current-frame persisted sufficiency and Claim Ledger"],
+            "attempted_probes": [],
+            "safe_partial_conclusions": [],
+            "next_best_probe": (
+                "Restore the mission evidence frame and read persisted sufficiency before "
+                "requesting analysis again."
+            ),
+            "required_authority": None,
+            "estimated_cost": None,
+        },
+        "withheld_claim_count": 0,
+        "withheld_reasons": ["PERSISTED_ANALYSIS_CONTRACT_UNAVAILABLE"],
+    }
+
+
+def _external_context_only_refusal(mission_id: str) -> Optional[str]:
+    """Refuse file and URL inputs before they can be mistaken for a Market mission."""
+    if not isinstance(mission_id, str):
+        return None
+    value = mission_id.strip()
+    lower = value.lower()
+    if not (
+        value.startswith(("{", "["))
+        or lower.startswith(("http://", "https://", "file://"))
+        or lower.endswith((".csv", ".tsv", ".json", ".xlsx", ".parquet"))
+    ):
+        return None
+    return json.dumps(
+        {
+            "status": "CONTEXT_ONLY",
+            "reason_code": "MISSION_SCOPED_PROVENANCE_REQUIRED",
+            "primary_market_evidence": False,
+            "next_step": (
+                "Use the supplied material to frame a question, then collect or verify its "
+                "evidence through an authorized mission and qualify it against the current frame."
+            ),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 def _serialize_opportunity(opp: Any, include_supporting: int = 0) -> Dict[str, Any]:
@@ -668,79 +694,6 @@ def _invalid_timeframe(value: object) -> str:
     )
 
 
-async def handle_run_autonomous_research_mission(
-    topic: str,
-    keywords: List[str],
-    geo: str = "VN",
-    timeframe: str = "7d",
-    min_signals: int = 15,
-    agent: str = "claude",
-    session_id: Optional[str] = None,
-) -> str:
-    """Run end-to-end Harness: Mission initialization, refinement loop, quality evaluation, and strategic analysis."""
-    comp = get_components()
-    await _sync_lexicons_from_db(comp)
-    geo_val = resolve_geo(geo)
-
-
-
-    # 1. Initialize Mission
-    try:
-        mission = await comp["create_mission_use_case"].execute(
-            title=topic,
-            keywords=keywords,
-            agent=agent,
-            session_id=session_id,
-            geo=geo_val,
-            timeframe=timeframe,
-        )
-    except ValueError:
-        return _invalid_timeframe(timeframe)
-
-    # 2. Execute Harness Orchestrator
-    report = await comp["harness_orchestrator"].run_mission_harness(
-
-        mission_id=mission.id,
-        min_signals=min_signals,
-    )
-
-    return json.dumps(
-        {
-            "status": "COMPLETED",
-            "mission_id": str(mission.id),
-            "title": mission.title,
-            "scorecard": {
-                "coverage_score": report.scorecard.coverage_score,
-                "language_precision": report.scorecard.language_precision,
-                "data_freshness_score": report.scorecard.data_freshness_score,
-                "creator_diversity_score": report.scorecard.creator_diversity_score,
-                "overall_confidence": report.scorecard.overall_confidence,
-                "confidence_level": report.scorecard.confidence_level.value,
-                "flaws": report.scorecard.flaws_detected,
-                "strengths": report.scorecard.strengths_detected,
-            },
-            "maturity_stage": report.maturity_stage.value,
-            "market_opportunities": [
-                {
-                    "topic": opp.topic,
-                    "type": opp.opportunity_type,
-                    "demand_score": opp.search_interest_score,
-                    "supply_score": opp.content_supply_score,
-                    "opportunity_index": opp.opportunity_index,
-                    "recommendation": opp.strategic_recommendation,
-                }
-                for opp in report.market_opportunities
-            ],
-            "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
-            "strategic_insights": _serialize_insights(report.strategic_insights),
-            "actionable_takeaways": _serialize_insights(report.actionable_takeaways),
-            "next_step": f"Call generate_mission_artifact(mission_id='{mission.id}') to render the full interactive HTML dossier."
-        },
-        ensure_ascii=False,
-        indent=2
-    )
-
-
 async def handle_evaluate_mission_quality(mission_id: str) -> str:
     comp = get_components()
     await _sync_lexicons_from_db(comp)
@@ -754,7 +707,37 @@ async def handle_evaluate_mission_quality(mission_id: str) -> str:
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
     qualification = await _qualification_for(comp, mission, signals)
     extra: Dict[str, Any] = {}
-    if qualification is not None:
+    if resolve_surface(mission.surface) is ResearchSurface.MARKET:
+        contract = await comp["get_mission_analysis_use_case"].execute(m_id)
+        if "analysis_status" not in contract:
+            contract = _missing_market_analysis_contract()
+        extra = {
+            "analysis_status": contract["analysis_status"],
+            **({"gap_report": contract["gap_report"]} if "gap_report" in contract else {}),
+            **({"qualification": contract["qualification"]} if "qualification" in contract else {}),
+        }
+        if qualification is not None:
+            progress = qualification.progress
+            status = (
+                QualificationStatus.READY
+                if contract["analysis_status"] == "READY"
+                else qualification.decision.status
+            )
+            if status is QualificationStatus.READY and contract["analysis_status"] != "READY":
+                status = QualificationStatus.INSUFFICIENT_RELEVANT_EVIDENCE
+            comp["quality_evaluator"].apply_qualification(
+                scorecard,
+                QualificationSummary(
+                    status=status.value,
+                    total_evidence=progress.total_evidence,
+                    qualified_support=progress.qualified_support,
+                    context_only=progress.context_only,
+                    excluded_irrelevant=progress.excluded_irrelevant,
+                    unassessed=progress.unassessed,
+                    question_relevance_score=progress.question_relevance_score,
+                ),
+            )
+    elif qualification is not None:
         # Whether a conclusion is permitted decides the confidence cap, so the same analysis that
         # every other boundary runs decides it here too.
         clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)
@@ -786,6 +769,9 @@ async def handle_evaluate_mission_quality(mission_id: str) -> str:
 
 
 async def handle_discover_market_opportunities(mission_id: str) -> str:
+    external_refusal = _external_context_only_refusal(mission_id)
+    if external_refusal is not None:
+        return external_refusal
     comp = get_components()
     await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
@@ -805,18 +791,37 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
     tf_days = timeframe_to_days(mission.timeframe)
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
     
-    auth_status, connector_health = await _collect_channel_context(comp)
-    report = comp["strategic_reasoner"].analyze_mission(
-        mission=mission,
-        signals=signals,
-        clusters=clusters,
-        scorecard=scorecard,
-        auth_status=auth_status,
-        connector_health=connector_health,
-        market_brief=brief,
-        qualification=await _qualification_for(comp, mission, signals),
-    )
-    comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
+    analysis_contract = None
+    report = None
+    if resolve_surface(mission.surface) is ResearchSurface.MARKET:
+        candidate = await comp["get_mission_analysis_use_case"].execute(m_id)
+        analysis_contract = (
+            candidate if "analysis_status" in candidate else _missing_market_analysis_contract()
+        )
+    if analysis_contract is None:
+        auth_status, connector_health = await _collect_channel_context(comp)
+        report = comp["strategic_reasoner"].analyze_mission(
+            mission=mission,
+            signals=signals,
+            clusters=clusters,
+            scorecard=scorecard,
+            auth_status=auth_status,
+            connector_health=connector_health,
+            market_brief=brief,
+            qualification=await _qualification_for(comp, mission, signals),
+        )
+        comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
+
+    if analysis_contract is not None:
+        return json.dumps(
+            {
+                "mission_id": str(mission.id),
+                "shortcode": mission.shortcode,
+                **analysis_contract,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     return json.dumps(
         {
@@ -1262,9 +1267,45 @@ async def handle_list_research_workspaces(limit: int = 20) -> str:
     )
 
 
+def _mission_manifest_from_payload(
+    payload: Dict[str, Any], *, created_by: str, decision_context: Optional[str] = None
+) -> MissionManifest:
+    """Build the immutable domain contract from one host-confirmed public request."""
+    authority = payload.get("authority_boundary")
+    if not isinstance(authority, dict):
+        raise InvalidMissionManifestError("authority_boundary must be an object of booleans.")
+    resources = payload.get("allowed_resources") or payload.get("required_channels") or ()
+    optional = payload.get("optional_resources") or payload.get("optional_channels") or ()
+    return MissionManifest(
+        outcome=payload.get("requested_outcome") or payload.get("outcome") or "",
+        decision_context=payload.get("decision_context") or decision_context,
+        required_channels=tuple(resources),
+        optional_channels=tuple(optional),
+        authority_boundary=AuthorityBoundary(
+            public_http=authority.get("public_http"),
+            official_api=authority.get("official_api"),
+            browser_session=authority.get("browser_session"),
+            paid_quota=authority.get("paid_quota"),
+        ),
+        quota_budget=payload.get("quota_budget") or {},
+        output_type=payload.get("output_type", ""),
+        stop_conditions=tuple(payload.get("stop_conditions") or ()),
+        analysis_policy=payload.get("analysis_policy") or "evidence-gated-v1",
+        retention_policy=payload.get("retention_policy") or "",
+        created_by=created_by,
+        confirmed_at=datetime.now(timezone.utc),
+    )
+
+
 async def handle_create_attention_mission(
     workspace_id: str,
     title: str,
+    requested_outcome: str,
+    allowed_resources: List[str],
+    authority_boundary: Dict[str, bool],
+    output_type: str,
+    stop_conditions: List[str],
+    retention_policy: str,
     geo: str = "VN",
     timeframe: str = "7d",
     seed: Optional[str] = None,
@@ -1272,12 +1313,28 @@ async def handle_create_attention_mission(
     platforms: Optional[List[str]] = None,
     agent: str = "claude",
     session_id: Optional[str] = None,
+    quota_budget: Optional[Dict[str, int]] = None,
+    analysis_policy: str = "evidence-gated-v1",
 ) -> str:
     comp = get_components()
     try:
+        manifest = _mission_manifest_from_payload(
+            {
+                "requested_outcome": requested_outcome,
+                "allowed_resources": allowed_resources,
+                "authority_boundary": authority_boundary,
+                "output_type": output_type,
+                "stop_conditions": stop_conditions,
+                "retention_policy": retention_policy,
+                "quota_budget": quota_budget or {},
+                "analysis_policy": analysis_policy,
+            },
+            created_by=agent,
+        )
         mission = await comp["create_attention_mission_use_case"].execute(
             workspace_id=UUID(workspace_id),
             title=title,
+            manifest=manifest,
             keywords=keywords,
             seed=seed,
             agent=agent,
@@ -1286,6 +1343,11 @@ async def handle_create_attention_mission(
             geo=resolve_geo(geo),
             timeframe=timeframe,
         )
+        persisted_manifest = await comp["workspace_store"].get_mission_manifest(mission.id)
+        if persisted_manifest is None:
+            raise InvalidMissionManifestError(
+                f"Mission {mission.id} was created without a readable persisted manifest."
+            )
     except ValueError:
         return _invalid_timeframe(timeframe)
     except IgnisDomainException as exc:
@@ -1302,6 +1364,7 @@ async def handle_create_attention_mission(
             "keywords": mission.keywords,
             "geo": mission.geo_code.value,
             "timeframe": mission.timeframe,
+            "manifest_digest": persisted_manifest.manifest_digest,
             "requires_market_brief": False,
             "emits_opportunity_index": False,
             "note": (
@@ -1324,7 +1387,12 @@ async def handle_confirm_market_brief(
     geo: str,
     timeframe: str,
     hypothesis: str,
+    mission_manifest: Dict[str, Any],
     falsifiers: Optional[List[str]] = None,
+    alternative_hypotheses: Optional[List[str]] = None,
+    null_hypothesis: Optional[str] = None,
+    kill_criteria: Optional[List[str]] = None,
+    revision_rule: Optional[str] = None,
     confirmed_by: str = "",
     title: Optional[str] = None,
     keywords: Optional[List[str]] = None,
@@ -1337,6 +1405,11 @@ async def handle_confirm_market_brief(
 ) -> str:
     comp = get_components()
     try:
+        manifest = _mission_manifest_from_payload(
+            mission_manifest,
+            created_by=confirmed_by or agent,
+            decision_context=decision,
+        )
         mission, revision = await comp["create_market_revision_use_case"].execute(
             workspace_id=UUID(workspace_id),
             decision=decision,
@@ -1346,7 +1419,12 @@ async def handle_confirm_market_brief(
             timeframe=timeframe,
             hypothesis=hypothesis,
             falsifiers=falsifiers or [],
+            alternative_hypotheses=alternative_hypotheses,
+            null_hypothesis=null_hypothesis,
+            kill_criteria=kill_criteria,
+            revision_rule=revision_rule,
             confirmed_by=confirmed_by,
+            manifest=manifest,
             title=title,
             keywords=keywords,
             # None when the caller named no parent, which is not the same request as a lineage
@@ -1368,6 +1446,11 @@ async def handle_confirm_market_brief(
             session_id=session_id,
             platforms=[resolve_platform(p) for p in platforms] if platforms else None,
         )
+        persisted_manifest = await comp["workspace_store"].get_mission_manifest(mission.id)
+        if persisted_manifest is None:
+            raise InvalidMissionManifestError(
+                f"Mission {mission.id} was created without a readable persisted manifest."
+            )
     except IncompleteMarketBriefError as exc:
         return json.dumps(
             {
@@ -1400,6 +1483,14 @@ async def handle_confirm_market_brief(
             "confirmed_by": revision.confirmed_by,
             "confirmed_at": revision.confirmed_at.isoformat(),
             "falsifiers": list(revision.falsifiers),
+            "hypothesis_register": {
+                "core": revision.core_hypothesis,
+                "alternatives": list(revision.alternative_hypotheses or ()),
+                "null": revision.null_hypothesis,
+                "kill_criteria": list(revision.kill_criteria or ()),
+                "revision_rule": revision.revision_rule,
+            },
+            "manifest_digest": persisted_manifest.manifest_digest,
             # Read back off the stored mission, not echoed from the request: what the next
             # Agent host will find in the database is the only lineage worth reporting.
             "lineage": MissionLineage.of_mission(mission).to_payload(),
@@ -1417,56 +1508,6 @@ async def handle_confirm_market_brief(
 
 
 # --- Handlers for Research Missions ---
-
-async def handle_create_research_mission(
-    title: Optional[str] = None,
-    keywords: Optional[List[str]] = None,
-    topic: Optional[str] = None,
-    agent: str = "claude",
-    session_id: Optional[str] = None,
-    platforms: Optional[List[str]] = None,
-    geo: str = "VN",
-    timeframe: str = "7d",
-) -> str:
-    comp = get_components()
-    geo_val = resolve_geo(geo)
-    final_title = title or topic or "Untitled Mission"
-    final_keywords = keywords or []
-    
-    target_platforms = [resolve_platform(p) for p in platforms] if platforms else None
-
-
-    try:
-        mission = await comp["create_mission_use_case"].execute(
-            title=final_title,
-            keywords=final_keywords,
-            agent=agent,
-            session_id=session_id,
-            platforms=target_platforms,
-            geo=geo_val,
-            timeframe=timeframe,
-        )
-    except ValueError:
-        return _invalid_timeframe(timeframe)
-
-    return json.dumps(
-        {
-            "status": "CREATED",
-            "mission_id": str(mission.id),
-            "shortcode": mission.shortcode,
-            "display_label": f"[{mission.shortcode}] {mission.title}",
-            "title": mission.title,
-            "keywords": mission.keywords,
-            "platforms": [p.value for p in mission.platforms],
-            "geo": mission.geo_code.value,
-            "timeframe": mission.timeframe,
-            "tip": f"You can reference shortcode '{mission.shortcode}' or ID '{str(mission.id)[:8]}' in subsequent commands.",
-            "next_step": f"Call execute_mission_ingress(mission_id='{mission.shortcode}') to trigger data ingress."
-        },
-        ensure_ascii=False,
-        indent=2
-    )
-
 
 async def _mission_writer_conflict(comp: Dict[str, Any], mission: Any, detail: str) -> str:
     """The one refusal a second writer gets, naming the run it is waiting for.
@@ -1631,6 +1672,50 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
 
     try:
         result = await comp["execute_mission_use_case"].execute(mission_id=mission.id)
+    except InvalidMissionAuthorizationError as exc:
+        return json.dumps(
+            {
+                "status": "BLOCKED",
+                "operation": "execute_mission_ingress",
+                "mission_id": str(mission.id),
+                "shortcode": mission.shortcode,
+                "reason_code": exc.reason_code,
+                "missing_authority": list(exc.missing_authority),
+                "out_of_scope_resources": list(exc.out_of_scope_resources),
+                "quota_overruns": exc.quota_overruns,
+                "error": str(exc),
+                "note": "No connector session was opened and no run journal was created.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except InvalidMissionManifestError as exc:
+        return json.dumps(
+            {
+                "status": "BLOCKED",
+                "operation": "execute_mission_ingress",
+                "mission_id": str(mission.id),
+                "reason_code": "MANIFEST_REQUIRED_OR_INVALID",
+                "error": str(exc),
+                "note": "No connector session was opened and no run journal was created.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    except MissionTerminalStateError as exc:
+        return json.dumps(
+            {
+                "status": "TERMINAL",
+                "operation": "execute_mission_ingress",
+                "mission_id": str(mission.id),
+                "terminal_state": exc.status,
+                "reason_code": "MISSION_ALREADY_TERMINAL",
+                "error": str(exc),
+                "note": "No connector session was opened and no artifact was generated.",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
     except WorkspaceScopeMismatchError as exc:
         # Raised before the writer claim and before any connector call, so there is nothing to
         # undo -- only something to tell the Agent.
@@ -1678,6 +1763,9 @@ async def handle_execute_mission_ingress(mission_id: str) -> str:
 
 
 async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
+    external_refusal = _external_context_only_refusal(mission_id)
+    if external_refusal is not None:
+        return external_refusal
     comp = get_components()
     await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
@@ -1697,6 +1785,30 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     )
     analysis["mission"]["shortcode"] = mission.shortcode
     analysis["mission"]["display_label"] = f"[{mission.shortcode}] {mission.title}" 
+
+    if resolve_surface(mission.surface) is ResearchSurface.MARKET:
+        if "analysis_status" not in analysis:
+            analysis.update(_missing_market_analysis_contract())
+        signals = await comp["repository"].get_mission_signals(mission.id)
+        qualification = await _qualification_for(comp, mission, signals)
+        if qualification is not None:
+            for item in analysis["top_signals"]:
+                judged = qualification.judgment_of(item.get("observation_id"))
+                item["qualification_relation"] = (
+                    judged.relation.value if judged else "UNASSESSED"
+                )
+                item["qualification_reason"] = judged.reason_code.value if judged else None
+                item["hypothesis_target"] = judged.hypothesis_target if judged else None
+                item["analytical_role"] = (
+                    judged.evidence_role.value
+                    if judged and judged.evidence_role is not None
+                    else None
+                )
+        analysis["native_artifact_guideline"] = (
+            "Render only the persisted current-frame Claim Ledger. If analysis_status is "
+            "INSUFFICIENT_EVIDENCE, render the Gap Report and do not invent a verdict."
+        )
+        return json.dumps(analysis, ensure_ascii=False, indent=2)
 
     # Enrich with Scorecard & White Space discovery for in-chat Native Artifact rendering
     signals = await comp["repository"].get_mission_signals(mission.id)
@@ -1779,6 +1891,9 @@ def _get_secure_reports_dir() -> Path:
 
 
 async def handle_generate_mission_artifact(mission_id: str) -> str:
+    external_refusal = _external_context_only_refusal(mission_id)
+    if external_refusal is not None:
+        return external_refusal
     comp = get_components()
     await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
@@ -1801,18 +1916,26 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
 
     
-    auth_status, connector_health = await _collect_channel_context(comp)
-    report = comp["strategic_reasoner"].analyze_mission(
-        mission=mission,
-        signals=signals,
-        clusters=clusters,
-        scorecard=scorecard,
-        auth_status=auth_status,
-        connector_health=connector_health,
-        market_brief=brief,
-        qualification=await _qualification_for(comp, mission, signals),
-    )
-    comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
+    analysis_contract = None
+    report = None
+    if resolve_surface(mission.surface) is ResearchSurface.MARKET:
+        candidate = await comp["get_mission_analysis_use_case"].execute(m_id)
+        analysis_contract = (
+            candidate if "analysis_status" in candidate else _missing_market_analysis_contract()
+        )
+    if analysis_contract is None:
+        auth_status, connector_health = await _collect_channel_context(comp)
+        report = comp["strategic_reasoner"].analyze_mission(
+            mission=mission,
+            signals=signals,
+            clusters=clusters,
+            scorecard=scorecard,
+            auth_status=auth_status,
+            connector_health=connector_health,
+            market_brief=brief,
+            qualification=await _qualification_for(comp, mission, signals),
+        )
+        comp["quality_evaluator"].apply_qualification(scorecard, report.qualification)
     
     platform_breakdown = {}
     macro_trends = []
@@ -1839,6 +1962,9 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         customer_inquiries=customer_inquiries,
         search_suggestions=[],
         macro_trends=macro_trends,
+        analysis_contract=analysis_contract,
+        scorecard_override=scorecard,
+        market_brief_override=brief,
     )
 
     # Securely save HTML report artifact to disk
@@ -1848,6 +1974,41 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
     report_path = reports_dir / report_filename
     report_path.write_text(html_content, encoding="utf-8")
     abs_path = str(report_path.resolve())
+
+    if analysis_contract is not None:
+        return json.dumps(
+            {
+                "status": "SUCCESS",
+                "mission_id": str(mission.id),
+                "shortcode": mission.shortcode,
+                "display_label": f"[{mission.shortcode}] {mission.title}",
+                "title": mission.title,
+                "total_signals": len(signals),
+                "artifact_file": abs_path,
+                "file_url": f"file://{abs_path}",
+                "analysis_status": analysis_contract["analysis_status"],
+                "template_revision": "mission-report/evidence-grounded-v1",
+                **(
+                    {"gap_report": analysis_contract["gap_report"]}
+                    if analysis_contract["analysis_status"] == "INSUFFICIENT_EVIDENCE"
+                    else {
+                        "evidence_frame": analysis_contract["evidence_frame"],
+                        "claim_ledger": analysis_contract["claim_ledger"],
+                        "contradictory_evidence": analysis_contract["contradictory_evidence"],
+                        "retention_policy": analysis_contract["retention_policy"],
+                        "redaction_policy": analysis_contract["redaction_policy"],
+                        "platform_policy": analysis_contract["platform_policy"],
+                        "reuse_limit": analysis_contract["reuse_limit"],
+                    }
+                ),
+                "note": (
+                    "The artifact renders only persisted current-frame claims, or the Gap "
+                    "Report when the evidence contract withholds a verdict."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     return json.dumps(
         {
@@ -1912,6 +2073,32 @@ async def handle_submit_mission_evidence_qualifications(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
+async def handle_submit_mission_claims(
+    mission_id: str,
+    frame_digest: str,
+    candidates: List[Dict[str, Any]],
+    created_by: str,
+) -> str:
+    comp = get_components()
+    result = await comp["submit_mission_claims_use_case"].execute(
+        mission_id=mission_id,
+        frame_digest=frame_digest,
+        candidates=candidates,
+        created_by=created_by,
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def handle_get_mission_claims(
+    mission_id: str, include_superseded: bool = False
+) -> str:
+    comp = get_components()
+    result = await comp["get_mission_claims_use_case"].execute(
+        mission_id=mission_id, include_superseded=include_superseded
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
 async def handle_list_research_missions(limit: int = 10) -> str:
     comp = get_components()
     safe_limit = max(1, min(limit, 30))
@@ -1930,239 +2117,6 @@ async def handle_list_research_missions(limit: int = 10) -> str:
         for m in missions
     ]
     return json.dumps(result, ensure_ascii=False, indent=2)
-
-
-# --- Legacy Handlers ---
-
-async def handle_get_trending_topics(
-    geo: str = "VN",
-    timeframe: str = "24h",
-    limit: int = 10,
-) -> str:
-    comp = get_components()
-    geo_val = resolve_geo(geo)
-    tf_val = resolve_timeframe(timeframe)
-    # Same refusal the ingress tool gives, for the same reason: Timeframe._missing_ manufactures
-    # a member for any string, so an unrecognised value reaches the reader looking valid.
-    if tf_val not in tuple(Timeframe):
-        return _invalid_timeframe(timeframe)
-
-    now = datetime.now(timezone.utc)
-    tf_days = timeframe_to_days(tf_val)
-    window_start = now - timedelta(days=tf_days)
-
-    safe_limit = max(1, min(limit, 30))
-    clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, timeframe=tf_val, limit=safe_limit)
-    topics = []
-    for c in clusters:
-        signal_count = len(c.signals)
-        plat_count = len({s.platform for s in c.signals})
-        # Summary is rendered from the signals actually returned for this timeframe (BUG-07).
-        dynamic_summary = c.summary_text or f"Aggregated topic from {signal_count} signals across {plat_count} platforms."
-        topics.append({
-            "id": str(c.id),
-            "topic_name": c.topic_label,
-            "summary": dynamic_summary,
-            "category": c.category,
-            "cross_platform_score": c.cross_platform_score,
-            "momentum": c.momentum_category.value,
-            "signal_count": signal_count,
-        })
-    envelope = {
-        "status": "SUCCESS",
-        "geo": geo_val.value,
-        "timeframe_used": tf_val.value,
-        "window_start": window_start.isoformat(),
-        "window_end": now.isoformat(),
-        "total_topics": len(topics),
-        "topics": topics,
-    }
-    return json.dumps(envelope, ensure_ascii=False, indent=2)
-
-
-async def handle_get_topic_detail(topic_id: str, limit: int = 20) -> str:
-    comp = get_components()
-    try:
-        cluster_uuid = UUID(topic_id.strip())
-    except (ValueError, AttributeError):
-        return json.dumps({"error": f"Invalid UUID: {topic_id}"}, ensure_ascii=False)
-
-    all_signals = await comp["repository"].get_cluster_signals(cluster_id=cluster_uuid)
-    safe_limit = max(1, min(limit, 50))
-    top_signals = all_signals[:safe_limit]
-
-    result = {
-        "topic_id": str(cluster_uuid),
-        "total_signals": len(all_signals),
-        "returned_signals": len(top_signals),
-        "signals": [
-            {
-                "platform": s.platform.value if hasattr(s.platform, "value") else str(s.platform),
-                "title": s.raw_title,
-                "metric_value": s.metric_value,
-                "growth_velocity": s.growth_velocity,
-                "source_url": s.source_url,
-                "captured_at": s.captured_at.isoformat() if s.captured_at else None,
-                # When the platform says the content was posted, where it says so at all.
-                # Distinct from captured_at, which is when this harness pulled it.
-                "published_at": s.published_at.isoformat() if s.published_at else None,
-                "metadata": {
-                    k: v for k, v in s.metadata.items() if k in ["channel_title", "channel", "views", "likes", "published_at"]
-                },
-            }
-            for s in top_signals
-        ]
-    }
-    return json.dumps(result, ensure_ascii=False, indent=2)
-
-
-async def handle_generate_trend_artifact(
-    topic_id: str = "",
-    geo: str = "VN",
-    format: str = "dashboard",
-) -> str:
-    comp = get_components()
-    builder = comp["artifact_builder"]
-    geo_val = resolve_geo(geo)
-    reports_dir = _get_secure_reports_dir()
-
-    if format.strip().lower() == "graph" and not topic_id.strip():
-        await _sync_lexicons_from_db(comp)
-        clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=150)
-        html_content = builder.build_graph_artifact(clusters, geo=geo_val, clusterer=comp.get("clusterer"))
-        report_file = reports_dir / f"trend_graph_{geo_val.value.lower()}.html"
-        report_file.write_text(html_content, encoding="utf-8")
-        abs_path = str(report_file.resolve())
-        return json.dumps(
-            {
-                "status": "SUCCESS",
-                "type": "GRAPH",
-                "total_clusters": len(clusters),
-                "total_signals": sum(len(c.signals) for c in clusters),
-                "artifact_file": abs_path,
-                "file_url": f"file://{abs_path}",
-                "message": (
-                    f"Interactive trend graph exported to: file://{abs_path}. "
-                    "Clusters are navigable; signals are aggregated into density halos."
-                ),
-            },
-            ensure_ascii=False,
-            indent=2
-        )
-
-    if not topic_id.strip():
-        clusters = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=10)
-        html_content = builder.build_dashboard_artifact(clusters, geo=geo_val)
-        report_file = reports_dir / f"trend_dashboard_{geo_val.value.lower()}.html"
-        report_file.write_text(html_content, encoding="utf-8")
-        abs_path = str(report_file.resolve())
-        return json.dumps(
-            {
-                "status": "SUCCESS",
-                "type": "DASHBOARD",
-                "total_clusters": len(clusters),
-                "artifact_file": abs_path,
-                "file_url": f"file://{abs_path}",
-                "message": f"Trend dashboard exported to: file://{abs_path}",
-            },
-            ensure_ascii=False,
-            indent=2
-        )
-    else:
-        try:
-            cluster_uuid = UUID(topic_id.strip())
-        except (ValueError, AttributeError):
-            return json.dumps({"error": "Invalid Topic ID format."}, ensure_ascii=False)
-
-        signals = await comp["repository"].get_cluster_signals(cluster_id=cluster_uuid)
-        cluster_info = await comp["top_clusters_use_case"].execute(geo=geo_val, limit=50)
-        target_cluster = next((c for c in cluster_info if c.id == cluster_uuid), None)
-        if not target_cluster and signals:
-            formed = await comp["clusterer"].cluster_signals(signals)
-            target_cluster = formed[0] if formed else None
-
-        if target_cluster:
-            html_content = builder.build_topic_card_artifact(target_cluster, signals)
-            report_file = reports_dir / f"topic_{str(cluster_uuid)[:8]}.html"
-            report_file.write_text(html_content, encoding="utf-8")
-            abs_path = str(report_file.resolve())
-            return json.dumps(
-                {
-                    "status": "SUCCESS",
-                    "type": "TOPIC_CARD",
-                    "topic_name": target_cluster.topic_label,
-                    "artifact_file": abs_path,
-                    "file_url": f"file://{abs_path}",
-                    "message": f"Topic card exported to: file://{abs_path}",
-                },
-                ensure_ascii=False,
-                indent=2
-            )
-        return json.dumps({"error": "Requested topic not found."}, ensure_ascii=False)
-
-
-async def handle_trigger_ingress_refresh(
-    geo: str = "VN",
-    scope: str = "public_market",
-    timeframe: str = "24h",
-) -> str:
-    comp = get_components()
-    await _sync_lexicons_from_db(comp)
-    geo_val = resolve_geo(geo)
-    # The window the connectors themselves search. Without this the pass always ran at 24h no
-    # matter what the caller asked for, and the timeframe only narrowed the later read.
-    #
-    # Timeframe._missing_ builds a member out of any string it is handed, so an unknown value
-    # would reach the connectors as a live enum and then be silently mapped to a default. Check
-    # it here instead, the same way an unknown scope is refused below.
-    timeframe_val = resolve_timeframe(timeframe)
-    if timeframe_val not in tuple(Timeframe):
-        return _invalid_timeframe(timeframe)
-
-    scope_val = IngressScope(scope)
-    if scope_val is None:
-        return json.dumps(
-            {
-                "status": "INVALID_SCOPE",
-                "message": (
-                    f"Unknown scope '{scope}'. Use 'public_market' (default, market listening), "
-                    "'own_profile' (only the connected account's own posts) or 'both'."
-                ),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-
-    # A public pass seeds the keyword probes from the persisted lexicon, because the connectors
-    # whose only feed is the operator's own account are reached that way instead.
-    seeds = await comp["ingest_use_case"].load_seed_keywords() if scope_val.includes_public else []
-    # REQUESTED: somebody typed this, so the pass is not script-filtered -- see IngressTrigger.
-    # The keyword cap still applies: this path spends the same YouTube search quota as the worker.
-    signals = await comp["registry"].fetch_from_all(
-        geo=geo_val,
-        timeframe=timeframe_val,
-        scope=scope_val,
-        seed_keywords=seeds,
-        max_probe_keywords=MAX_TOPIC_KEYWORDS,
-        trigger=IngressTrigger.REQUESTED,
-    )
-    clusters = await comp["cluster_use_case"].execute(signals)
-    guard = dict(getattr(comp["registry"], "last_pass_report", {}) or {})
-
-    return json.dumps(
-        {
-            "status": "success",
-            "geo": geo_val.value,
-            "scope": scope_val.value,
-            "timeframe": timeframe_val.value,
-            "total_signals_fetched": len(signals),
-            "total_clusters_formed": len(clusters),
-            "seed_keywords_used": len(seeds),
-            "scope_guard": guard,
-        },
-        ensure_ascii=False,
-        indent=2,
-    )
 
 
 async def handle_get_current_session_mission(session_id: str) -> str:
@@ -2190,17 +2144,6 @@ async def handle_get_current_session_mission(session_id: str) -> str:
 
 # --- MCP Tools Exposure ---
 
-@mcp.tool(name="run_autonomous_research_mission", description="Run an end-to-end autonomous research mission: create mission, execute refinement loop, evaluate quality scorecard, and discover market white spaces.")
-async def run_autonomous_research_mission(
-    topic: str,
-    keywords: List[str],
-    geo: str = "VN",
-    timeframe: str = "7d",
-    min_signals: int = 15,
-) -> str:
-    return await handle_run_autonomous_research_mission(topic, keywords, geo, timeframe, min_signals)
-
-
 @mcp.tool(name="evaluate_mission_quality", description="Evaluate multi-dimensional data quality and integrity (Coverage, Freshness, Language Accuracy, Confidence Score) for a research mission.")
 async def evaluate_mission_quality(mission_id: str) -> str:
     return await handle_evaluate_mission_quality(mission_id)
@@ -2227,24 +2170,95 @@ async def list_research_workspaces(limit: int = 20) -> str:
 
 
 @mcp.tool(name="create_attention_mission", description="Start an ATTENTION mission inside a confirmed research workspace: exploratory discovery of what is gaining attention. Needs no hypothesis and no Market Brief, and never returns an Opportunity Index.")
-async def create_attention_mission(workspace_id: str, title: str, geo: str = "VN", timeframe: str = "7d", seed: Optional[str] = None, keywords: Optional[list[str]] = None, platforms: Optional[list[str]] = None, agent: str = "claude", session_id: Optional[str] = None) -> str:
-    return await handle_create_attention_mission(workspace_id, title, geo, timeframe, seed, keywords, platforms, agent, session_id)
-
-
-@mcp.tool(name="confirm_market_brief", description="Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, one question at a time, show the draft for editing, and call this only with the complete confirmed payload -- drafts and abandoned Q&A are never sent or stored. Requires decision, target_user, problem, geo, timeframe, hypothesis and at least one falsifier. Pass parent_attention_mission_id (and optionally parent_cluster_id) to record the Attention result the question came from, or previous_mission_id to revise a confirmed Brief -- a revision opens a new immutable revision and a new mission instead of editing the earlier one.")
-async def confirm_market_brief(workspace_id: str, decision: str, target_user: str, problem: str, geo: str, timeframe: str, hypothesis: str, falsifiers: Optional[list[str]] = None, confirmed_by: str = "", title: Optional[str] = None, keywords: Optional[list[str]] = None, parent_attention_mission_id: Optional[str] = None, parent_cluster_id: Optional[str] = None, previous_mission_id: Optional[str] = None, platforms: Optional[list[str]] = None, agent: str = "claude", session_id: Optional[str] = None) -> str:
-    return await handle_confirm_market_brief(workspace_id, decision, target_user, problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, title, keywords, parent_attention_mission_id, parent_cluster_id, previous_mission_id, platforms, agent, session_id)
-
-
-@mcp.tool(name="create_research_mission", description="Create a targeted cross-platform trend research mission with specified keywords, platforms, geo, and timeframe.")
-async def create_research_mission(
-    topic: str,
-    keywords: List[str],
-    platforms: Optional[List[str]] = None,
+async def create_attention_mission(
+    workspace_id: str,
+    title: str,
+    requested_outcome: str,
+    allowed_resources: list[str],
+    authority_boundary: dict,
+    output_type: str,
+    stop_conditions: list[str],
+    retention_policy: str,
     geo: str = "VN",
     timeframe: str = "7d",
+    seed: Optional[str] = None,
+    keywords: Optional[list[str]] = None,
+    platforms: Optional[list[str]] = None,
+    agent: str = "claude",
+    session_id: Optional[str] = None,
+    quota_budget: Optional[dict[str, int]] = None,
+    analysis_policy: str = "evidence-gated-v1",
 ) -> str:
-    return await handle_create_research_mission(topic, keywords, platforms, geo, timeframe)
+    return await handle_create_attention_mission(
+        workspace_id=workspace_id,
+        title=title,
+        requested_outcome=requested_outcome,
+        allowed_resources=allowed_resources,
+        authority_boundary=authority_boundary,
+        output_type=output_type,
+        stop_conditions=stop_conditions,
+        retention_policy=retention_policy,
+        geo=geo,
+        timeframe=timeframe,
+        seed=seed,
+        keywords=keywords,
+        platforms=platforms,
+        agent=agent,
+        session_id=session_id,
+        quota_budget=quota_budget,
+        analysis_policy=analysis_policy,
+    )
+
+
+@mcp.tool(name="confirm_market_brief", description="Persist a requester-confirmed Market Brief and open the MARKET mission it authorizes. Run the adaptive Q&A in your own context, show the complete draft for editing, and call this only with the confirmed decision frame: core hypothesis, two alternatives, null, falsifiers, kill criteria, and revision rule. Drafts and abandoned Q&A are never sent or stored. Pass parent_attention_mission_id (and optionally parent_cluster_id) to record the Attention result the question came from, or previous_mission_id to revise a confirmed Brief -- a revision opens a new immutable revision and mission.")
+async def confirm_market_brief(
+    workspace_id: str,
+    decision: str,
+    target_user: str,
+    problem: str,
+    geo: str,
+    timeframe: str,
+    hypothesis: str,
+    mission_manifest: dict,
+    falsifiers: Optional[list[str]] = None,
+    alternative_hypotheses: Optional[list[str]] = None,
+    null_hypothesis: Optional[str] = None,
+    kill_criteria: Optional[list[str]] = None,
+    revision_rule: Optional[str] = None,
+    confirmed_by: str = "",
+    title: Optional[str] = None,
+    keywords: Optional[list[str]] = None,
+    parent_attention_mission_id: Optional[str] = None,
+    parent_cluster_id: Optional[str] = None,
+    previous_mission_id: Optional[str] = None,
+    platforms: Optional[list[str]] = None,
+    agent: str = "claude",
+    session_id: Optional[str] = None,
+) -> str:
+    return await handle_confirm_market_brief(
+        workspace_id=workspace_id,
+        decision=decision,
+        target_user=target_user,
+        problem=problem,
+        geo=geo,
+        timeframe=timeframe,
+        hypothesis=hypothesis,
+        mission_manifest=mission_manifest,
+        falsifiers=falsifiers,
+        alternative_hypotheses=alternative_hypotheses,
+        null_hypothesis=null_hypothesis,
+        kill_criteria=kill_criteria,
+        revision_rule=revision_rule,
+        confirmed_by=confirmed_by,
+        title=title,
+        keywords=keywords,
+        parent_attention_mission_id=parent_attention_mission_id,
+        parent_cluster_id=parent_cluster_id,
+        previous_mission_id=previous_mission_id,
+        platforms=platforms,
+        agent=agent,
+        session_id=session_id,
+    )
 
 
 @mcp.tool(name="execute_mission_ingress", description="Trigger deep multi-platform data collection and clustering for a research mission (idempotent replace mode).")
@@ -2272,12 +2286,45 @@ async def get_mission_evidence_qualification_batch(mission_id: str, cursor: Opti
     return await handle_get_mission_evidence_qualification_batch(mission_id=mission_id, cursor=cursor, limit=limit)
 
 
-@mcp.tool(name="submit_mission_evidence_qualifications", description="Record 1-50 typed evidence judgments for one mission, atomically: each assessment names an observation_id from the batch, a relation (QUALIFIED_SUPPORT, CONTEXT_ONLY, EXCLUDED_IRRELEVANT, UNASSESSED), a purpose (DEMAND, SUPPLY, VOC, CONTEXT), a confidence from 0.0 to 1.0 (null only for UNASSESSED), a reason_code (DIRECT_TO_FRAME, ADJACENT_ONLY, KEYWORD_ONLY, WRONG_AUDIENCE_OR_PROBLEM, FICTION_NEWS_OR_ENTERTAINMENT, INSUFFICIENT_CONTENT, EVALUATOR_UNAVAILABLE), judged_by and an optional model identifier. A stale frame, a foreign or duplicate observation, or any invalid assessment refuses the whole batch; an identical replay is idempotent and a different judgment for an already judged observation is refused. The response reports the state the write produced (qualification_status, qualification_reason_code) and a next_step from the same decision the batch read and the analysis use: the next batch while evidence is pending, reassessment under a new mission or Market Brief revision once recorded judgments make the frame terminal, or the analysis once everything is assessed. Never send a prompt, transcript or credential.")
+@mcp.tool(
+    name="submit_mission_evidence_qualifications",
+    description=(
+        "Record 1-50 typed evidence judgments for one mission, atomically. Each assessment names "
+        "an observation_id; relation (QUALIFIED_SUPPORT, QUALIFIED_CONTRADICTION, CONTEXT_ONLY, "
+        "EXCLUDED_IRRELEVANT, UNASSESSED); purpose (DEMAND, SUPPLY, VOC, CONTEXT); "
+        "hypothesis_target; evidence_role (SUPPORT, CONTRADICTION, CONTEXT); confidence; "
+        "reason_code (DIRECT_TO_FRAME, ADJACENT_ONLY, KEYWORD_ONLY, WRONG_AUDIENCE_OR_PROBLEM, "
+        "FICTION_NEWS_OR_ENTERTAINMENT, INSUFFICIENT_CONTENT, EVALUATOR_UNAVAILABLE); judged_by; "
+        "and optional model identifier. Support and contradiction use the same validation rules "
+        "and require a named hypothesis target. A stale frame, foreign or duplicate observation, "
+        "role mismatch, or invalid assessment refuses the whole batch; identical replay is "
+        "idempotent and a changed judgment is refused. The response's qualification_status, "
+        "qualification_reason_code, and next_step describe the state produced by this write. "
+        "Never send a prompt, transcript, or credential."
+    ),
+)
 async def submit_mission_evidence_qualifications(mission_id: str, frame_fingerprint: str, assessments: list[dict]) -> str:
     return await handle_submit_mission_evidence_qualifications(mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments)
 
 
-@mcp.tool(name="list_research_missions", description="List recent trend research missions and tracking campaigns.")
+@mcp.tool(name="submit_mission_claims", description="Submit 1-50 candidate Market claims against the exact current evidence-frame digest. Each candidate names its type, exact wording, inference method where required, confidence, limitations, change conditions, and observation or measured-absence bindings with SUPPORT, CONTRADICTION, or CONTEXT roles. A MEASUREMENT candidate also carries its metric_denominator and metric_timeframe; omission withholds it. Ignis deterministically checks required channels, complete qualification, hypothesis coverage, evidence bindings, demand and supply minimums, and frame currency before persisting PERMITTED or WITHHELD candidates. A stale input frame or invalid binding refuses the whole batch. A frame change detected after commit returns CONFLICT/STALE_FRAME with WITHHELD rendering and the actual recorded audit count; identical replay is idempotent. Outward projections redact personal data without rewriting canonical audit wording.")
+async def submit_mission_claims(mission_id: str, frame_digest: str, candidates: list[dict], created_by: str) -> str:
+    return await handle_submit_mission_claims(
+        mission_id=mission_id,
+        frame_digest=frame_digest,
+        candidates=candidates,
+        created_by=created_by,
+    )
+
+
+@mcp.tool(name="get_mission_claims", description="Read the current Market Claim Ledger and render permission for the mission's canonical evidence frame. By default stale claims are excluded; include_superseded=true returns the immutable audit history without making old claims renderable.")
+async def get_mission_claims(mission_id: str, include_superseded: bool = False) -> str:
+    return await handle_get_mission_claims(
+        mission_id=mission_id, include_superseded=include_superseded
+    )
+
+
+@mcp.tool(name="list_research_missions", description="List recent bounded research missions in the configured database.")
 async def list_research_missions(limit: int = 10) -> str:
     return await handle_list_research_missions(limit)
 
@@ -2290,30 +2337,6 @@ async def diagnose_system_health() -> str:
 @mcp.tool(name="get_system_logs", description="Query recent system audit logs and error traces from the database for debugging.")
 async def get_system_logs(level: Optional[str] = "ERROR", component: Optional[str] = None, limit: int = 20) -> str:
     return await handle_get_system_logs(level=level, component=component, limit=limit)
-
-
-@mcp.tool(name="get_trending_topics", description="Fetch top cross-platform trending topic clusters ranked by momentum velocity.")
-async def get_trending_topics(geo: str = "VN", timeframe: str = "24h", limit: int = 10) -> str:
-    return await handle_get_trending_topics(geo=geo, timeframe=timeframe, limit=limit)
-
-
-@mcp.tool(name="get_topic_detail", description="Retrieve time-series signals and engagement metrics for a specific topic cluster (token-optimized).")
-async def get_topic_detail(topic_id: str, limit: int = 20) -> str:
-    return await handle_get_topic_detail(topic_id=topic_id, limit=limit)
-
-
-@mcp.tool(name="generate_trend_artifact", description="Generate a standalone single-file HTML artifact: a trend dashboard, a single topic card (pass topic_id), or an interactive force-directed trend graph (pass format='graph').")
-async def generate_trend_artifact(topic_id: str = "", geo: str = "VN", format: str = "dashboard") -> str:
-    return await handle_generate_trend_artifact(topic_id=topic_id, geo=geo, format=format)
-
-
-@mcp.tool(name="trigger_ingress_refresh", description="Trigger immediate multi-platform ETL trend ingestion and clustering. `timeframe` is the window the connectors search (24h, 7d, 30d, 90d, 12m), not a filter applied afterwards. Reads public market surfaces only by default; pass scope='own_profile' to read the connected account's own posts instead, or scope='both' for the union.")
-async def trigger_ingress_refresh(
-    geo: str = "VN",
-    scope: str = "public_market",
-    timeframe: str = "24h",
-) -> str:
-    return await handle_trigger_ingress_refresh(geo=geo, scope=scope, timeframe=timeframe)
 
 
 @mcp.tool(name="get_current_session_mission", description="Automatically retrieve the research mission associated with the current session ID or chat thread.")
@@ -2711,41 +2734,6 @@ async def extract_customer_pain_points(
         inquiry_patterns=inquiry_patterns,
     )
 
-
-
-async def handle_trigger_autonomous_discovery(geo: str = "VN") -> str:
-    comp = get_components()
-    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
-    try:
-        result = await comp["autonomous_discovery_use_case"].execute(geo=geo_code)
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Error during autonomous discovery cycle: {e}")
-        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
-
-
-@mcp.tool(name="trigger_autonomous_discovery", description="Trigger an on-demand end-to-end autonomous discovery cycle to uncover top daily white space opportunities.")
-async def trigger_autonomous_discovery(geo: str = "VN") -> str:
-    return await handle_trigger_autonomous_discovery(geo=geo)
-
-
-async def handle_get_latest_daily_discovery(geo: str = "VN") -> str:
-    comp = get_components()
-    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
-    missions = await comp["repository"].list_missions(limit=30)
-    
-    # Filter for discovery missions
-    discovery_missions = [m for m in missions if m.shortcode and m.shortcode.startswith(f"DISCOVERY-{geo_code.value}")]
-    if not discovery_missions:
-        return json.dumps({"status": "INFO", "message": f"No autonomous discovery runs recorded yet for {geo_code.value}."}, ensure_ascii=False)
-
-    latest = discovery_missions[0]
-    return await handle_get_mission_analysis(str(latest.id))
-
-
-@mcp.tool(name="get_latest_daily_discovery", description="Retrieve the latest daily automated market discovery digest and opportunity rankings.")
-async def get_latest_daily_discovery(geo: str = "VN") -> str:
-    return await handle_get_latest_daily_discovery(geo=geo)
 
 
 async def handle_register_domain_lexicon(
@@ -3255,45 +3243,43 @@ async def verify_connectors_health() -> str:
 
 @mcp.resource("fn-ignis://sop/market-research")
 def get_market_research_sop_resource() -> str:
-    """Full documentation of the fn-ignis 6-Step Market Research Reference Framework."""
+    """Mission-bound social research reference without an automatic verdict."""
     return SOP_FRAMEWORK_DOC
 
 
 @mcp.resource("fn-ignis://methodology/opportunity-index")
 def get_opportunity_index_methodology() -> str:
-    """Methodology and mathematical formulation for the Opportunity Index (Demand vs. Supply Matrix)."""
+    """Historical score formula; Market use still requires a permitted current-frame claim."""
     return """
 # Opportunity Index Methodology
-Opportunity Index (OI) = Search Demand Score (0-100) - Localized Content Supply Score (0-100).
-- Range: -100 to +100.
-- OI >= +30: HIGH_DEMAND_LOW_SUPPLY (Prime White Space Opportunity).
-- OI between -20 and +29: MODERATE_COMPETITION / BALANCED_MARKET.
-- OI <= -30: SATURATED_SEGMENT / RED_OCEAN.
-- High Enterprise Search with 0 supply: ENTERPRISE_GAP.
+Historical formula: Search Demand Score (0-100) minus Localized Content Supply Score (0-100).
+Do not compute, display, or interpret this score for a Market decision unless the current
+mission frame is sufficient and a persisted Claim Ledger record explicitly permits the
+corresponding measurement. Missing channels and missing denominators are not zero.
 """
 
 
 @mcp.prompt(name="market_research_pipeline")
 def prompt_market_research_pipeline(topic: str = "AI Agent", geo: str = "VN") -> str:
-    """Guided prompt instructing Claude to execute the 6-Step Market Research SOP."""
+    """Draft a bounded Market assignment without starting collection or promising a verdict."""
     return f"""
-Please execute a rigorous market intelligence and white-space discovery workflow for the topic: '{topic}' in region '{geo}'.
-Strictly adhere to the 6-Step Standard Operating Procedure:
-1. Clarify the business model, target audience, and establish the Core Hypothesis to validate.
-2. Perform a Macro Scan using Creative Center benchmarks and real-world Autocomplete Search Suggestions to capture authentic search terms and slang.
-3. Ingest deep multi-platform data (Google Trends, YouTube, TikTok) with automated noise and spam rejection (Quality Gate).
-4. Conduct a Single-Source 4-Lens Breakdown (Macro Demand, Long-form Supply, Micro Intent, Voice of Customer / Pain Points).
-5. Synthesize the Cross-Source Demand vs. Supply Matrix, compute the Opportunity Index, and identify HIGH_DEMAND_LOW_SUPPLY white spaces.
-6. Deliver the Strategic Verdict, evaluate entry risks and competitive moats, formulate a 3-7 day fast MVP validation plan, and export the interactive Infographic HTML Dashboard Artifact.
+The requester is considering a Market question about '{topic}' in '{geo}'. First ask for the
+decision, target user, timeframe, core hypothesis, two alternatives, null hypothesis,
+falsifiers, kill criteria, revision rule, allowed sources, quota, and stop condition. Show a
+bounded Brief for confirmation before creating a mission or collecting. After authorization,
+qualify the current evidence frame, seek contradiction, and submit claim candidates. Render
+only permitted claims; otherwise return the Gap Report. Export HTML only if requested.
 """
 
 
 @mcp.prompt(name="voice_of_customer_audit")
 def prompt_voice_of_customer_audit(keywords: str = "Chatbot AI") -> str:
-    """Guided prompt to extract authentic customer voice, pain points, and objections from TikTok comments."""
+    """Frame a bounded source-specific customer-voice probe."""
     return f"""
-Please extract and analyze authentic customer voice, pricing objections, technical complaints, and unmet needs for the topic '{keywords}'.
-Use the `extract_customer_pain_points` tool across top market videos to synthesize the top 5 unresolved customer pain points.
+The requester wants customer-voice evidence about '{keywords}'. Confirm the source surface,
+geography, time window, sampling cap, and stop condition. Use an authorized atomic comments
+or pain-point tool, report provenance and unavailable states, and distinguish observations
+from inference. Do not claim market prevalence or a strategic verdict from this probe alone.
 """
 
 
@@ -3338,7 +3324,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-

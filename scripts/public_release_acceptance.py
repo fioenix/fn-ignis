@@ -84,7 +84,6 @@ REQUIRED_SURFACES = (
     "container_mcp_runtime",
     "container_provenance",
     "mcp_registry_validation",
-    "compose_worker_override",
 )
 DEFERRED_SURFACES = ("pypi_distribution",)
 
@@ -1122,14 +1121,8 @@ def observe_container(
     docker: str = "docker",
     passthrough_env: tuple[str, ...] = (),
     smoke_timeout: float = CONTAINER_SMOKE_TIMEOUT_SECONDS,
-    check_worker: bool = False,
 ) -> list[SurfaceRecord]:
-    """Pull the release image as a stranger would, check what it is, and talk MCP to it.
-
-    With `check_worker`, the Compose worker role is then started on the same pulled digest before
-    the image is cleaned up; without a verified anonymous pull there is nothing to run, and the
-    role is recorded as unread.
-    """
+    """Pull the release image as a stranger would, check what it is, and talk MCP to it."""
     subject = f"{image}:{version}"
     docker_config = root / "docker-config"
     docker_config.mkdir()
@@ -1141,8 +1134,6 @@ def observe_container(
 
     def downstream(why: str) -> list[SurfaceRecord]:
         unread = [_unread("container_digest", subject, why), _unread("container_mcp_runtime", subject, why)]
-        if check_worker:
-            unread.append(_unread("compose_worker_override", subject, why))
         return unread
 
     registry = AnonymousRegistry(image, fetch)
@@ -1219,191 +1210,10 @@ def observe_container(
             cwd=None,
             timeout=smoke_timeout,
         )
-        records = [pull_record, digest_record, runtime]
-        if check_worker:
-            records.append(
-                observe_compose_worker(
-                    image_ref=digest_subject,
-                    root=root,
-                    reference=reference,
-                    docker=docker,
-                    platform=selected,
-                    passthrough_env=passthrough_env,
-                )
-            )
-        return records
+        return [pull_record, digest_record, runtime]
     finally:
         if not preexisting and pulled.ok:
             _docker(docker, ["image", "rm", digest_subject], env, 120)
-
-
-# --------------------------------------------------------------------------------------------
-# The Compose worker role
-# --------------------------------------------------------------------------------------------
-
-COMPOSE_FILES = ("docker-compose.yml", "docker-compose.prod.yml")
-PRODUCTION_COMPOSE = "docker-compose.prod.yml"
-SCHEDULER_COMMAND = ["python", "-m", "ignis.interfaces.cli.scheduler"]
-SCHEDULER_STARTED_MARKER = "Starting fn-ignis Worker Scheduler"
-COMPOSE_UP_TIMEOUT_SECONDS = 900
-WORKER_OBSERVE_SECONDS = 90
-
-
-def _operator_cli_plugins() -> list[str]:
-    """Where the operator's Docker CLI plugins live. Compose is one of them.
-
-    The CLI finds user plugins under $DOCKER_CONFIG/cli-plugins, so an isolated DOCKER_CONFIG hides
-    `docker compose`. The directory holds executables, not credentials, so naming it is safe.
-    """
-    base = Path(os.environ.get("DOCKER_CONFIG") or Path.home() / ".docker")
-    plugins = base / "cli-plugins"
-    return [str(plugins)] if plugins.is_dir() else []
-
-
-def _compose_worker_command(docker: str, compose_file: Path, override: Path, env: dict) -> tuple[list | None, CommandOutcome]:
-    """The worker command Compose itself resolves, not a YAML reading of it."""
-    outcome = _docker(
-        docker,
-        ["compose", "-f", str(compose_file), "-f", str(override), "config", "--format", "json"],
-        env,
-        120,
-    )
-    if not outcome.ok:
-        return None, outcome
-    try:
-        worker = json.loads(outcome.stdout).get("services", {}).get("worker", {})
-    except json.JSONDecodeError:
-        return None, outcome
-    return worker.get("command"), outcome
-
-
-def observe_compose_worker(
-    *,
-    image_ref: str,
-    root: Path,
-    reference: Path = REFERENCE_TREE,
-    docker: str = "docker",
-    platform: str | None = None,
-    passthrough_env: tuple[str, ...] = (),
-    settle_seconds: float = 5,
-    observe_seconds: float = WORKER_OBSERVE_SECONDS,
-) -> SurfaceRecord:
-    """Both Compose files select the scheduler, and the production worker really runs it."""
-    import secrets
-    import time
-
-    subject = f"{PRODUCTION_COMPOSE} worker on {image_ref}"
-    run_dir = root / "compose"
-    run_dir.mkdir()
-    docker_config = root / "compose-docker-config"
-    docker_config.mkdir()
-    # No auths, no credsStore: only where the compose plugin is.
-    (docker_config / "config.json").write_text(
-        json.dumps({"cliPluginsExtraDirs": _operator_cli_plugins()}) + "\n", encoding="utf-8"
-    )
-    extra = {name: os.environ[name] for name in passthrough_env if name in os.environ}
-    env = isolated_env(root / "home", docker_config=docker_config, extra=extra)
-
-    # Only what isolation needs: a unique project and names, no published ports, no restart, no
-    # operator env file, and the image under test instead of the moving `latest`.
-    project = f"ignis-accept-{uuid.uuid4().hex[:8]}"
-    worker = f"{project}-worker"
-    override = run_dir / "override.yml"
-    override.write_text(
-        "services:\n"
-        "  db:\n"
-        f"    container_name: {project}-db\n"
-        "    ports: !reset []\n"
-        '    restart: "no"\n'
-        "  worker:\n"
-        f"    image: {image_ref}\n"
-        "    pull_policy: never\n"
-        f"    container_name: {worker}\n"
-        '    restart: "no"\n'
-        "    env_file: !reset []\n"
-        + (f"    platform: {platform}\n" if platform else "")
-        + "  reports:\n"
-        f"    container_name: {project}-reports\n"
-        "    ports: !reset []\n"
-        '    restart: "no"\n',
-        encoding="utf-8",
-    )
-
-    # Resolving the command needs only the worker, which is the one service both files define.
-    config_override = run_dir / "config-override.yml"
-    config_override.write_text("services:\n  worker:\n    env_file: !reset []\n", encoding="utf-8")
-    wrong = []
-    for name in COMPOSE_FILES:
-        command, outcome = _compose_worker_command(docker, reference / name, config_override, env)
-        failure = classify_failure(outcome)
-        if failure and failure[1] in ("network", "tool_unavailable"):
-            return SurfaceRecord("compose_worker_override", failure[0], subject,
-                                 f"docker compose config for {name}: {outcome.summary}", failure[1], outcome.returncode)
-        if not outcome.ok:
-            return SurfaceRecord("compose_worker_override", SurfaceState.FAILED, subject,
-                                 f"docker compose could not resolve {name}: {outcome.summary}",
-                                 "behavior_mismatch", outcome.returncode)
-        if command != SCHEDULER_COMMAND:
-            wrong.append(f"{name} worker command resolves to {command!r}")
-    if wrong:
-        return SurfaceRecord("compose_worker_override", SurfaceState.FAILED, subject,
-                             "; ".join(wrong) + f"; expected {SCHEDULER_COMMAND}", "behavior_mismatch")
-
-    env_file = run_dir / "compose.env"
-    env_file.write_text(
-        f"POSTGRES_USER=postgres\nPOSTGRES_DB=ignis\nPOSTGRES_PASSWORD={secrets.token_hex(24)}\n", encoding="utf-8"
-    )
-    env_file.chmod(0o600)
-    compose = [
-        "compose", "-p", project, "--env-file", str(env_file),
-        "-f", str(reference / PRODUCTION_COMPOSE), "-f", str(override),
-    ]
-    try:
-        up = _docker(docker, [*compose, "up", "-d", "worker"], env, COMPOSE_UP_TIMEOUT_SECONDS)
-        failure = classify_failure(up)
-        if failure:
-            state, failure_class = failure
-            if state == SurfaceState.MISSING or failure_class == "unclassified":
-                state, failure_class = SurfaceState.FAILED, "behavior_mismatch"
-            return SurfaceRecord("compose_worker_override", state, subject,
-                                 f"docker compose up worker: {up.summary}", failure_class, up.returncode)
-
-        time.sleep(settle_seconds)
-        deadline = time.monotonic() + observe_seconds
-        status = processes = logs = ""
-        while True:
-            status = _docker(docker, ["inspect", "-f", "{{.State.Status}}", worker], env, 30).stdout.strip()
-            processes = _docker(docker, ["top", worker], env, 30).stdout if status == "running" else ""
-            logged = _docker(docker, ["logs", worker], env, 30)
-            logs = f"{logged.stdout}\n{logged.stderr}"
-            if (SCHEDULER_STARTED_MARKER in logs and "ignis.interfaces.cli.scheduler" in processes) or status not in (
-                "running",
-                "created",
-                "restarting",
-            ):
-                break
-            if time.monotonic() > deadline:
-                break
-            time.sleep(min(3, observe_seconds))
-
-        if status == "running" and "ignis.interfaces.cli.scheduler" in processes and SCHEDULER_STARTED_MARKER in logs:
-            return SurfaceRecord(
-                "compose_worker_override",
-                SurfaceState.VERIFIED,
-                subject,
-                f"both Compose files resolve the worker command to {SCHEDULER_COMMAND}; the production worker "
-                f"is running `python -m ignis.interfaces.cli.scheduler` and logged '{SCHEDULER_STARTED_MARKER}'",
-            )
-        return SurfaceRecord(
-            "compose_worker_override",
-            SurfaceState.FAILED,
-            subject,
-            f"worker state {status!r}; processes: {processes.strip()[-400:]!r}; log tail: {logs.strip()[-800:]!r}",
-            "behavior_mismatch",
-        )
-    finally:
-        _docker(docker, [*compose, "down", "-v", "--remove-orphans"], env, 300)
-        env_file.unlink(missing_ok=True)
 
 
 # --------------------------------------------------------------------------------------------
@@ -1714,7 +1524,7 @@ def main(argv: list[str] | None = None) -> int:
             container_root = root.path / "container"
             container_root.mkdir()
             records += observe_container(
-                image=args.image, version=args.version, root=container_root, platform=args.platform, check_worker=True
+                image=args.image, version=args.version, root=container_root, platform=args.platform
             )
         if args.mode == "all":
             records += observe_github(

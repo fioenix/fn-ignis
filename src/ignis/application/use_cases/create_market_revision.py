@@ -28,6 +28,7 @@ from ignis.domain.research_workspace import (
     InvalidMissionLineageError,
     MarketBriefRevision,
     MissionLineage,
+    MissionManifest,
     ResearchSurface,
     SurfaceViolationError,
     WorkspaceScopeMismatchError,
@@ -62,6 +63,7 @@ class CreateMarketRevisionUseCase:
         hypothesis: str,
         falsifiers: Sequence[str],
         confirmed_by: str,
+        manifest: MissionManifest,
         title: Optional[str] = None,
         keywords: Optional[List[str]] = None,
         lineage: Optional[MissionLineage] = None,
@@ -69,6 +71,10 @@ class CreateMarketRevisionUseCase:
         agent: str = "claude",
         session_id: Optional[str] = None,
         platforms: Optional[List[PlatformType]] = None,
+        alternative_hypotheses: Optional[Sequence[str]] = None,
+        null_hypothesis: Optional[str] = None,
+        kill_criteria: Optional[Sequence[str]] = None,
+        revision_rule: Optional[str] = None,
     ) -> Tuple[ResearchMission, MarketBriefRevision]:
         workspace = await self._store.get_research_workspace(workspace_id)
         if workspace is None:
@@ -110,12 +116,17 @@ class CreateMarketRevisionUseCase:
             hypothesis=hypothesis,
             falsifiers=falsifiers,
             confirmed_by=confirmed_by,
+            manifest=manifest,
             title=title,
             keywords=keywords,
             lineage=lineage,
             agent=agent,
             session_id=session_id,
             platforms=platforms,
+            alternative_hypotheses=alternative_hypotheses,
+            null_hypothesis=null_hypothesis,
+            kill_criteria=kill_criteria,
+            revision_rule=revision_rule,
         )
         logger.info(
             "Opened MARKET mission %s at Brief revision #%s in workspace %s "

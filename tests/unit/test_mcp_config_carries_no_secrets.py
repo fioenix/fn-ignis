@@ -71,6 +71,7 @@ def test_a_stray_env_file_in_the_working_directory_does_not_outrank_the_project(
     decoy.mkdir()
     (decoy / ".env").write_text("YOUTUBE_API_KEY=the_decoy\n", encoding="utf-8")
     monkeypatch.chdir(decoy)
+    monkeypatch.delenv("YOUTUBE_API_KEY")
 
     assert _probe_env_files((".env", real), tmp_path) == "the_real_one"
     # The order the code used to have, kept here to show what it cost.
@@ -87,6 +88,7 @@ def test_an_explicit_env_file_wins_over_both(tmp_path, monkeypatch):
     elsewhere.mkdir()
     (elsewhere / ".env").write_text("YOUTUBE_API_KEY=from_cwd\n", encoding="utf-8")
     monkeypatch.chdir(elsewhere)
+    monkeypatch.delenv("YOUTUBE_API_KEY")
 
     assert _probe_env_files((".env", project, explicit), tmp_path) == "from_explicit"
 

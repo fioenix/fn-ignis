@@ -16,7 +16,7 @@ from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
-from conftest import YT_ID, YT_URL, OneSightingRegistry, SilentRegistry
+from conftest import YT_ID, YT_URL, SilentRegistry
 
 pytestmark = pytest.mark.asyncio
 
@@ -104,18 +104,21 @@ async def test_a_quota_fallback_pass_adds_no_observation(repository_case):
     """
     repository = repository_case.repository
     mission = await _mission(repository, title="Quota fallback")
-    first_pass = ExecuteMissionUseCase(
-        repository=repository,
-        registry=OneSightingRegistry(
-            source_url=YT_URL, raw_title="Polled once", metadata={"video_id": YT_ID}
-        ),
-        clusterer=SemanticClusterer(),
+    prior = TrendSignal(
+        platform=PlatformType.YOUTUBE,
+        raw_title="Polled once",
+        metric_value=100.0,
+        source_url=YT_URL,
+        geo_code=GeoCode.VN,
+        captured_at=datetime.now(timezone.utc),
+        metadata={"video_id": YT_ID},
     )
-    await first_pass.execute(mission.id)
+    await repository.save_signals([prior])
+    repository_case.attach_evidence(mission.id, str(prior.observation_id))
     after_first = repository_case.counts()
     assert after_first["observations"] == 1
 
-    # The connector returns nothing this time, which is exactly the quota case.
+    # The mission's one allowed execution sees the connector return nothing, as in a quota case.
     second_pass = ExecuteMissionUseCase(
         repository=repository, registry=SilentRegistry(), clusterer=SemanticClusterer()
     )

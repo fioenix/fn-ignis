@@ -162,6 +162,25 @@ def test_public_documents_do_not_point_at_ignored_handoff_notes():
     )
 
 
+def test_current_guides_explain_mission_bound_work_and_release_boundary():
+    for relative in ("README.md", "README.vi.md", "docs/USER_GUIDE.md", "docs/USER_GUIDE.vi.md"):
+        text = _read(relative)
+        assert "Spec 011" in text, relative
+        assert "025_evidence_grounded_claim_ledger.sql" in text, relative
+        assert "41 tools" in text, relative
+        assert "v0.7.0" in text, relative
+        assert "trigger_autonomous_discovery" not in text, relative
+        assert "get_latest_daily_discovery" not in text, relative
+
+
+def test_superseded_dual_track_diagrams_are_not_current_readme_embeds():
+    for relative in ("README.md", "README.vi.md"):
+        text = _read(relative)
+        assert "docs/assets/architecture." not in text, relative
+        assert "docs/diagrams/ignis-pipeline." not in text, relative
+        assert "docs/diagrams/ignis-source-map." not in text, relative
+
+
 # --- Claims the runtime does not implement -------------------------------------------------
 #
 # `key_version` is written into the ciphertext envelope on encrypt and echoed back in status

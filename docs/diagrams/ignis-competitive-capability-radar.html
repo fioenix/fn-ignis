@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ignis Competitive Capability Radar</title>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper: #F7F7FB;
+      --paper-2: #EEEEF5;
+      --ink: #0B0B17;
+      --muted: #5B5B79;
+      --soft: #8B8BA6;
+      --rule: rgba(11, 11, 23, 0.12);
+      --rule-solid: #BCBCD0;
+      --accent: #4B1E73;
+      --accent-tint: #EDDFF7;
+      --series-1: #156B58;
+      --series-3: #14627A;
+      --series-4: #2B2F66;
+      --white: #FFFFFF;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "Space Grotesk", sans-serif;
+    }
+
+    main {
+      width: min(1200px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 48px 0 40px;
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 920px;
+      margin: 0;
+      font-family: "Anton", sans-serif;
+      font-size: clamp(40px, 6vw, 72px);
+      font-weight: 400;
+      letter-spacing: -0.01em;
+      line-height: 0.96;
+      text-transform: uppercase;
+    }
+
+    .lede {
+      max-width: 800px;
+      margin: 20px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    .frame {
+      margin-top: 40px;
+      overflow-x: auto;
+      border: 1px solid var(--rule);
+      border-radius: 12px;
+      background: var(--paper-2);
+      padding: 16px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      min-width: 920px;
+      height: auto;
+    }
+
+    .grid-ring,
+    .spoke {
+      fill: none;
+      stroke: var(--rule-solid);
+      stroke-width: 0.8;
+    }
+
+    .grid-ring { opacity: 0.42; }
+    .grid-ring.outer { opacity: 0.72; stroke-width: 1.2; }
+    .spoke { opacity: 0.44; }
+
+    .axis-label {
+      fill: var(--ink);
+      font-family: "Space Grotesk", sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .scale-label,
+    .legend-label,
+    .legend-title {
+      fill: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 8px;
+    }
+
+    .legend-title {
+      font-weight: 700;
+      letter-spacing: 0.16em;
+    }
+
+    .legend-label { font-weight: 500; }
+
+    .series-general {
+      fill: rgba(20, 98, 122, 0.10);
+      stroke: var(--series-3);
+      stroke-width: 1.2;
+    }
+
+    .series-enterprise {
+      fill: rgba(21, 107, 88, 0.10);
+      stroke: var(--series-1);
+      stroke-width: 1.2;
+    }
+
+    .series-oss {
+      fill: rgba(43, 47, 102, 0.10);
+      stroke: var(--series-4);
+      stroke-width: 1.2;
+    }
+
+    .series-target {
+      fill: rgba(91, 91, 121, 0.04);
+      stroke: var(--muted);
+      stroke-width: 1.2;
+      stroke-dasharray: 8 8;
+    }
+
+    .series-ignis {
+      fill: rgba(75, 30, 115, 0.18);
+      stroke: var(--accent);
+      stroke-width: 1.8;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: 1.12fr 0.96fr 0.92fr;
+      gap: 16px;
+      margin-top: 24px;
+    }
+
+    .card {
+      min-height: 180px;
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      background: var(--white);
+      padding: 20px;
+    }
+
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 20px;
+      line-height: 1.2;
+    }
+
+    .card p,
+    .card li {
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.55;
+    }
+
+    .card ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .accent-line {
+      width: 40px;
+      height: 4px;
+      margin: 0 0 16px;
+      background: var(--accent);
+    }
+
+    .axis-key {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-top: 16px;
+      padding: 16px 0;
+      border-top: 1px solid var(--rule);
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .axis-key div { padding-right: 12px; }
+
+    .axis-key strong {
+      display: block;
+      margin-bottom: 4px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 8px;
+      letter-spacing: 0.12em;
+    }
+
+    .axis-key span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      margin-top: 32px;
+      padding-top: 16px;
+      border-top: 1px solid var(--rule);
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 8px;
+      line-height: 1.6;
+    }
+
+    @media (max-width: 880px) {
+      main { width: min(100% - 32px, 1200px); padding-top: 32px; }
+      .cards { grid-template-columns: 1fr; }
+      .axis-key { grid-template-columns: 1fr 1fr; }
+      footer { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">FINOLABS / MARKET POSITION / 29.09.2026</p>
+      <h1>Ignis Competitive Capability Radar</h1>
+      <p class="lede">Bản đồ năng lực cho beachhead consumer-market Việt Nam. Hình này so sánh cách các archetype giải quyết một nhiệm vụ nghiên cứu, không so market share, doanh thu hay hiệu năng thực tế.</p>
+    </header>
+
+    <section class="frame" aria-label="Radar năng lực cạnh tranh của Ignis">
+      <svg viewBox="0 0 1200 680" role="img" aria-labelledby="ignis-radar-title ignis-radar-desc">
+        <title id="ignis-radar-title">Ignis Competitive Capability Radar</title>
+        <desc id="ignis-radar-desc">Radar năm trục cho thấy Ignis bám sát nhu cầu mục tiêu ở khả năng audit và phản biện, còn yếu hơn enterprise social suites về độ phủ dữ liệu và còn khoảng trống về mức độ đưa ra hành động.</desc>
+
+        <rect width="1200" height="680" fill="#EEEEF5"/>
+
+        <!-- Five normalized rings: 1–5 from a true zero baseline. -->
+        <polygon class="grid-ring" points="600,280 640,308 624,352 576,352 560,308"/>
+        <polygon class="grid-ring" points="600,240 676,296 648,384 552,384 524,296"/>
+        <polygon class="grid-ring" points="600,200 716,284 672,416 528,416 484,284"/>
+        <polygon class="grid-ring" points="600,160 752,272 696,448 504,448 448,272"/>
+        <polygon class="grid-ring outer" points="600,120 792,260 720,480 480,480 408,260"/>
+
+        <!-- Axis spokes. -->
+        <line class="spoke" x1="600" y1="320" x2="600" y2="120"/>
+        <line class="spoke" x1="600" y1="320" x2="792" y2="260"/>
+        <line class="spoke" x1="600" y1="320" x2="720" y2="480"/>
+        <line class="spoke" x1="600" y1="320" x2="480" y2="480"/>
+        <line class="spoke" x1="600" y1="320" x2="408" y2="260"/>
+
+        <!-- Axis labels and top-axis scale. -->
+        <text class="axis-label" x="600" y="88" text-anchor="middle">SOCIAL</text>
+        <text class="axis-label" x="820" y="256" text-anchor="start">COVERAGE</text>
+        <text class="axis-label" x="744" y="520" text-anchor="start">AUDIT</text>
+        <text class="axis-label" x="456" y="520" text-anchor="end">CHALLENGE</text>
+        <text class="axis-label" x="380" y="256" text-anchor="end">ACTION</text>
+
+        <text class="scale-label" x="584" y="284" text-anchor="end">1</text>
+        <text class="scale-label" x="584" y="244" text-anchor="end">2</text>
+        <text class="scale-label" x="584" y="204" text-anchor="end">3</text>
+        <text class="scale-label" x="584" y="164" text-anchor="end">4</text>
+        <text class="scale-label" x="584" y="124" text-anchor="end">5</text>
+
+        <!-- Non-focal series, smallest visual footprint first. -->
+        <polygon class="series-general" points="600,240 752,272 648,384 576,352 408,260"/>
+        <polygon class="series-enterprise" points="600,120 792,260 648,384 576,352 448,272"/>
+        <polygon class="series-oss" points="600,160 716,284 696,448 552,384 524,296"/>
+        <polygon class="series-target" points="600,160 716,284 720,480 480,480 408,260"/>
+
+        <!-- Ignis is the only focal series. -->
+        <polygon class="series-ignis" points="600,160 676,296 720,480 480,480 448,272"/>
+        <circle cx="600" cy="160" r="4" fill="#4B1E73"/>
+        <circle cx="676" cy="296" r="4" fill="#4B1E73"/>
+        <circle cx="720" cy="480" r="4" fill="#4B1E73"/>
+        <circle cx="480" cy="480" r="4" fill="#4B1E73"/>
+        <circle cx="448" cy="272" r="4" fill="#4B1E73"/>
+
+        <!-- Horizontal legend strip. -->
+        <line x1="48" y1="568" x2="1152" y2="568" stroke="rgba(11,11,23,0.12)" stroke-width="0.8"/>
+        <text class="legend-title" x="48" y="596">LEGEND</text>
+
+        <rect x="128" y="588" width="16" height="8" fill="rgba(75,30,115,0.18)" stroke="#4B1E73" stroke-width="1.2"/>
+        <text class="legend-label" x="152" y="596">IGNIS TARGET</text>
+
+        <rect x="304" y="588" width="16" height="8" fill="rgba(91,91,121,0.04)" stroke="#5B5B79" stroke-width="1.2" stroke-dasharray="4 4"/>
+        <text class="legend-label" x="328" y="596">TARGET NEED</text>
+
+        <rect x="488" y="588" width="16" height="8" fill="rgba(21,107,88,0.10)" stroke="#156B58" stroke-width="1.2"/>
+        <text class="legend-label" x="512" y="596">ENTERPRISE SUITES</text>
+
+        <rect x="736" y="588" width="16" height="8" fill="rgba(20,98,122,0.10)" stroke="#14627A" stroke-width="1.2"/>
+        <text class="legend-label" x="760" y="596">GENERAL AGENTS</text>
+
+        <rect x="968" y="588" width="16" height="8" fill="rgba(43,47,102,0.10)" stroke="#2B2F66" stroke-width="1.2"/>
+        <text class="legend-label" x="992" y="596">OSS STACK</text>
+
+        <text class="scale-label" x="1152" y="644" text-anchor="end">SCALE 1–5 / QUALITATIVE CAPABILITY MATURITY</text>
+      </svg>
+    </section>
+
+    <section class="axis-key" aria-label="Định nghĩa năm trục năng lực">
+      <div><strong>SOCIAL</strong><span>Độ sâu của social-native signal và evidence.</span></div>
+      <div><strong>COVERAGE</strong><span>Độ rộng nguồn và chiều sâu lịch sử.</span></div>
+      <div><strong>AUDIT</strong><span>Provenance, khả năng tái lập và trace claim.</span></div>
+      <div><strong>CHALLENGE</strong><span>Phản chứng, giả thuyết thay thế và refusal gate.</span></div>
+      <div><strong>ACTION</strong><span>Mức độ biến evidence thành quyết định tiếp theo.</span></div>
+    </section>
+
+    <section class="cards" aria-label="Diễn giải chiến lược">
+      <article class="card">
+        <div class="accent-line" aria-hidden="true"></div>
+        <p class="eyebrow">WHERE IGNIS WINS</p>
+        <h2>Moat nằm ở phương pháp, không nằm ở số nguồn</h2>
+        <p>Ignis được thiết kế để mạnh nhất ở <strong>AUDIT</strong> và <strong>CHALLENGE</strong>: evidence contract, claim-level provenance, missingness, counterevidence và quyền từ chối verdict khi corpus chưa đủ.</p>
+      </article>
+
+      <article class="card">
+        <p class="eyebrow">WHERE IGNIS DOES NOT COMPETE</p>
+        <h2>Không chạy cuộc đua data firehose</h2>
+        <p>Enterprise social suites dẫn trước rõ ràng ở <strong>COVERAGE</strong>. Ignis không nên đốt nguồn lực để giả làm một Brandwatch mã nguồn mở; nó chỉ thu thập theo nhiệm vụ và giữ bằng chứng đủ để bảo vệ quyết định.</p>
+      </article>
+
+      <article class="card">
+        <p class="eyebrow">TARGET FIT / GAP</p>
+        <h2>Phương pháp khớp; trải nghiệm còn thiếu</h2>
+        <ul>
+          <li>Khớp nhu cầu cao ở audit và phản biện.</li>
+          <li>Coverage vừa đủ là chủ đích, không phải lời hứa toàn cảnh.</li>
+          <li>Khoảng trống cần kiểm chứng là <strong>ACTION</strong>: verdict có giúp user ra quyết định tốt hơn không.</li>
+        </ul>
+      </article>
+    </section>
+
+    <footer>
+      <span>RUBRIC / 1: KHÔNG PHẢI NĂNG LỰC CỐT LÕI · 3: NATIVE NHƯNG GIỚI HẠN · 5: NĂNG LỰC TÍCH HỢP, CÓ THỂ KIỂM TRA</span>
+      <span>SOURCE / IGNIS PRODUCT PROPOSAL + PUBLICLY DOCUMENTED CAPABILITIES · VERIFIED / 30/09/2026</span>
+    </footer>
+  </main>
+</body>
+</html>

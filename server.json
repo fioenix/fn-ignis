@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.fioenix/fn-ignis",
-  "title": "fnIgnis Trend Intelligence & Market Research",
-  "description": "Self-hosted autonomous trend intelligence & market opportunity discovery MCP server",
+  "title": "fnIgnis Mission-Bound Social Market Research",
+  "description": "Self-hosted social evidence collection and mission-grounded Market analysis MCP server",
   "repository": {
     "url": "https://github.com/fioenix/fn-ignis",
     "source": "github"
@@ -32,11 +32,6 @@
         {
           "name": "YOUTUBE_SEARCH_DAILY_LIMIT",
           "description": "Total daily search.list calls available to this fn-ignis installation. Defaults to 100.",
-          "isRequired": false
-        },
-        {
-          "name": "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT",
-          "description": "Daily search.list ceiling for scheduled Track 1 work. Defaults to 70; requested work can use the remaining capacity and borrow unused scheduled capacity.",
           "isRequired": false
         },
         {

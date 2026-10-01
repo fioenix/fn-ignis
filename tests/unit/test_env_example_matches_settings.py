@@ -8,20 +8,15 @@ import pytest
 import yaml
 
 from ignis.config import Settings
-from ignis.interfaces.cli.scheduler import resolve_ingress_interval
 
 ENV_EXAMPLE = Path(__file__).resolve().parents[2] / "env.example"
 
 # Settings a copied env.example must not silently move off their default. Credentials and
 # connection strings are excluded: those are placeholders and are meant to be edited.
 PINNED_TO_DEFAULT = [
-    "SYNC_INTERVAL_MINUTES",
-    "SCHEDULER_INTERVAL_SECONDS",
-    "DISCOVERY_INTERVAL_HOURS",
     "DEFAULT_GEO",
     "META_INSIGHTS_CACHE_TTL_SECONDS",
     "YOUTUBE_SEARCH_DAILY_LIMIT",
-    "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT",
     "YOUTUBE_OTHER_DAILY_UNIT_LIMIT",
 ]
 
@@ -30,14 +25,12 @@ def test_settings_expose_youtube_quota_policy_defaults():
     loaded = Settings(_env_file=None)
 
     assert loaded.YOUTUBE_SEARCH_DAILY_LIMIT == 100
-    assert loaded.YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT == 70
     assert loaded.YOUTUBE_OTHER_DAILY_UNIT_LIMIT == 10_000
 
 
 def test_public_launchers_expose_all_youtube_quota_overrides():
     expected_env = {
         "YOUTUBE_SEARCH_DAILY_LIMIT",
-        "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT",
         "YOUTUBE_OTHER_DAILY_UNIT_LIMIT",
     }
     repo = Path(__file__).resolve().parents[2]
@@ -48,7 +41,6 @@ def test_public_launchers_expose_all_youtube_quota_overrides():
     properties = set(smithery["startCommand"]["configSchema"]["properties"])
     assert {
         "youtubeSearchDailyLimit",
-        "youtubeScheduledSearchDailyLimit",
         "youtubeOtherDailyUnitLimit",
     } <= properties
 
@@ -90,11 +82,9 @@ def test_compose_only_keys_are_still_consumed_by_compose(env_example):
         assert f"${{{name}" in compose, f"{name} is exempted but no longer used by compose"
 
 
-def test_copied_example_keeps_the_quota_safe_ingress_interval(env_example):
-    # SYNC_INTERVAL_MINUTES overrides SCHEDULER_INTERVAL_SECONDS whenever it is above 0, so
-    # the two lines have to be read together to know what a copied file actually schedules.
-    resolved = resolve_ingress_interval(
-        sync_minutes=int(env_example["SYNC_INTERVAL_MINUTES"]),
-        scheduler_seconds=int(env_example["SCHEDULER_INTERVAL_SECONDS"]),
-    )
-    assert resolved == Settings.model_fields["SCHEDULER_INTERVAL_SECONDS"].default
+def test_copied_example_exposes_no_recurring_collection_cadence(env_example):
+    assert not {
+        "SYNC_INTERVAL_MINUTES",
+        "SCHEDULER_INTERVAL_SECONDS",
+        "DISCOVERY_INTERVAL_HOURS",
+    } & set(env_example)

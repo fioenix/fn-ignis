@@ -24,6 +24,25 @@ def test_sanitize_phone_numbers_and_emails():
     assert "[REDACTED_SECRET]" in cleaned
 
 
+def test_sanitize_pii_preserves_uuid_evidence_bindings():
+    identity = "11111111-2222-4333-8444-555555555555"
+    payload = {
+        "claim_id": identity,
+        "evidence_bindings": [{"observation_id": identity}],
+        "wording": f"Evidence {identity}; contact 0931405002 or support@example.invalid",
+        "access_token": identity,
+    }
+    cleaned = sanitize_pii_data(payload)
+    assert cleaned["claim_id"] == identity
+    assert cleaned["evidence_bindings"][0]["observation_id"] == identity
+    assert identity in cleaned["wording"]
+    assert "0931405002" not in cleaned["wording"]
+    assert "support@example.invalid" not in cleaned["wording"]
+    assert cleaned["access_token"] == "[REDACTED_SECRET]"
+    assert sanitize_pii_text(f"access_token={identity}") == "access_token=[REDACTED_SECRET]"
+    assert payload["access_token"] == identity
+
+
 def test_sanitize_pii_data_recursive():
     nested_data = {
         "title": "Áo thun hotline 0931405002",
@@ -39,6 +58,35 @@ def test_sanitize_pii_data_recursive():
     assert "[REDACTED_PHONE]" in cleaned_data["comments"][0]["text"]
     assert "[REDACTED_EMAIL]" in cleaned_data["comments"][1]["text"]
     assert "[REDACTED_PHONE]" in cleaned_data["meta"]["nested_phone"]
+
+
+def test_sanitize_query_string_and_structured_credentials():
+    raw = (
+        "GET https://api.example.test/search?q=retail&key=live-google-key-123 "
+        "access_token=live-meta-token-456 Authorization: Bearer live-bearer-token-789"
+    )
+
+    cleaned = sanitize_pii_text(raw)
+    structured = sanitize_pii_data(
+        {
+            "error": raw,
+            "api_key": "unstructured-secret-value",
+            "nested": {"client_secret": "another-unstructured-value"},
+        }
+    )
+
+    for secret in (
+        "live-google-key-123",
+        "live-meta-token-456",
+        "live-bearer-token-789",
+        "unstructured-secret-value",
+        "another-unstructured-value",
+    ):
+        assert secret not in cleaned
+        assert secret not in str(structured)
+    assert cleaned.count("[REDACTED_SECRET]") == 3
+    assert structured["api_key"] == "[REDACTED_SECRET]"
+    assert structured["nested"]["client_secret"] == "[REDACTED_SECRET]"
 
 
 def test_tracked_reference_reports_have_zero_pii():

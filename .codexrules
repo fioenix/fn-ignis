@@ -1,20 +1,14 @@
-# fn-ignis Operating Protocol for OpenAI Codex Agents 🤖
+# fn-ignis Operating Protocol for OpenAI Codex Agents
 
-## ⚡ Zero-Touch Setup
-If setting up this repo or starting afresh, execute `./scripts/bootstrap.sh` to auto-provision `.venv`, SQLite database, and MCP configurations.
+Read `AGENTS.md` for repository-wide boundaries and release gates. If explicitly asked to set
+up this repository, run `./scripts/bootstrap.sh`.
 
-## Context & Architecture
-`fn-ignis` operates on a Dual-Track Architecture:
-- Track 1 (Always-On Radar): 24/7 autonomous surveillance across Google Trends, YouTube, and TikTok (`fn-ignis-worker`).
-- Track 2 (Targeted Deep Probes): Interactive, hypothesis-driven market research missions.
+Ignis does not collect data in the background. Begin only an explicitly assigned source probe
+or research mission. Use `.agents/skills/ignis-collect/SKILL.md` for bounded collection and
+`.agents/skills/ignis-analyze/SKILL.md` for mission-grounded Market analysis. The two skills
+are independent: collection may end with an evidence frame, and analysis must return a Gap
+Report rather than an unsupported verdict when its gates fail.
 
-## Session Continuity
-When entering a conversation thread, extract the thread ID (e.g. `codex://threads/<thread_id>`) and call `get_current_session_mission(session_id)` to restore context.
-
-## 6-Step Market Research SOP
-1. **Clarify Objectives & Core Hypothesis**: Set target business model and falsifiable hypothesis. Call `register_domain_lexicon(domain, terms)` if the domain has niche slang or tool names.
-2. **Macro Scan & Keywords**: Call `get_tiktok_creative_center_trends(geo, period, limit, industry)` and `get_tiktok_search_suggestions(keywords, geo)`.
-3. **Deep Multi-Platform Ingress**: Call `create_research_mission` and `execute_mission_ingress`. Ensure Quality Scorecard confidence $\ge 70\%$.
-4. **4-Lens Breakdown**: Evaluate Google Search, YouTube long-form, TikTok short-form, and Voice of Customer pain points via `extract_customer_pain_points`.
-5. **Cross-Platform Synthesis**: Compute `Opportunity Index` (+100 to -100) and identify `HIGH_DEMAND_LOW_SUPPLY` gaps.
-6. **Strategic Verdict & Actionable Plan**: Summarize market truths, evaluate entry risks, formulate a 3-7 day MVP validation plan, and export the interactive dashboard via `generate_mission_artifact`.
+Use the current MCP tool catalog, not historical Dual-Track instructions. Do not treat a
+user-uploaded or purchased dataset as primary Market evidence without mission-scoped provenance
+and qualification. Do not run a worker, daily discovery, or recurring baseline.

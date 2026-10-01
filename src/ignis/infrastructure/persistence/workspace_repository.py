@@ -34,7 +34,10 @@ from ignis.domain.research_workspace import (
     EvidenceQualification,
     InvalidWorkspaceManifestError,
     MarketBriefRevision,
+    MissionClaim,
+    MissionManifest,
     MissionProbeOutcome,
+    MissionTerminalStateError,
     MissionWriterConflictError,
     ResearchWorkspace,
     WorkspaceScopeMismatchError,
@@ -59,7 +62,9 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _journal_payload(journal: RunJournal) -> str:
+def _journal_payload(
+    journal: RunJournal, collection_plan: Optional[Dict[str, Any]] = None
+) -> str:
     """What one run writes about itself, in one place so start and finish agree.
 
     `completed_at` is omitted rather than nulled while the run is open, and the status is the
@@ -76,6 +81,9 @@ def _journal_payload(journal: RunJournal) -> str:
     }
     if journal.completed_at is not None:
         payload["completed_at"] = journal.completed_at.isoformat()
+    if collection_plan is not None:
+        payload["collection_plan"] = collection_plan
+        payload["collection_plan_digest"] = collection_plan.get("plan_digest")
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
@@ -120,6 +128,21 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     ) -> Tuple[ResearchMission, MarketBriefRevision]:
         return await self._repo.create_market_mission_with_brief(mission, revision)
 
+    async def create_attention_mission_with_manifest(
+        self, mission: ResearchMission, manifest: MissionManifest
+    ) -> Tuple[ResearchMission, MissionManifest]:
+        return await self._repo.create_attention_mission_with_manifest(mission, manifest)
+
+    async def create_market_mission_with_brief_and_manifest(
+        self,
+        mission: ResearchMission,
+        revision: MarketBriefRevision,
+        manifest: MissionManifest,
+    ) -> Tuple[ResearchMission, MarketBriefRevision, MissionManifest]:
+        return await self._repo.create_market_mission_with_brief_and_manifest(
+            mission, revision, manifest
+        )
+
     async def get_brief_revision(
         self, workspace_id: UUID, brief_revision_id: UUID
     ) -> Optional[MarketBriefRevision]:
@@ -137,6 +160,12 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         self, workspace_id: UUID, limit: int = 50
     ) -> List[ResearchMission]:
         return await self._repo.list_workspace_missions(workspace_id, limit)
+
+    async def save_mission_manifest(self, manifest: MissionManifest) -> MissionManifest:
+        return await self._repo.save_mission_manifest(manifest)
+
+    async def get_mission_manifest(self, mission_id: UUID) -> Optional[MissionManifest]:
+        return await self._repo.get_mission_manifest(mission_id)
 
     async def get_scoped_mission(
         self, workspace_id: UUID, mission_id: Any
@@ -205,6 +234,14 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         run_id = run_id or uuid4()
         await self.require_mission_writer(mission_id, run_id)
         try:
+            # Preflight may have awaited while an earlier run completed. Recheck under the
+            # writer slot, before allocating a journal, so delayed admission cannot restart it.
+            mission = await self._repo.get_mission(mission_id)
+            if mission is None:
+                raise WorkspaceScopeMismatchError(f"Mission {mission_id} no longer exists.")
+            status = str(mission.status).upper()
+            if status in {"COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "INSUFFICIENT_EVIDENCE"}:
+                raise MissionTerminalStateError(mission_id, status)
             journal = await self.allocate_run_journal(workspace, mission_id, run_id=run_id)
         except BaseException:
             # No journal, so there is no run to record -- and holding the slot for a run that
@@ -234,7 +271,11 @@ class WorkspaceRepository(IResearchWorkspaceStore):
             journal, status=status, completed_at=_utc_now()
         )
         try:
-            journal.journal_path.write_text(_journal_payload(finished), encoding="utf-8")
+            existing = json.loads(journal.journal_path.read_text(encoding="utf-8"))
+            journal.journal_path.write_text(
+                _journal_payload(finished, collection_plan=existing.get("collection_plan")),
+                encoding="utf-8",
+            )
             return await self.record_run_journal(finished)
         except Exception:
             logger.exception(
@@ -335,6 +376,22 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     async def record_run_journal(self, journal: RunJournal) -> RunJournal:
         return await self._repo.record_run_journal(journal)
 
+    async def record_collection_plan(
+        self, journal: RunJournal, plan: Dict[str, Any]
+    ) -> None:
+        """Add the readable projection without changing the journal's canonical database row."""
+        digest = plan.get("plan_digest") if isinstance(plan, dict) else None
+        if not isinstance(digest, str) or len(digest) != 64:
+            raise ValueError("A run journal collection plan needs its canonical plan_digest.")
+        current = json.loads(journal.journal_path.read_text(encoding="utf-8"))
+        current["collection_plan"] = plan
+        current["collection_plan_digest"] = digest
+        temporary = journal.journal_path.with_suffix(journal.journal_path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        temporary.replace(journal.journal_path)
+
     async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
         return await self._repo.list_run_journals(mission_id, limit)
 
@@ -366,3 +423,24 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]
     ) -> int:
         return await self._repo.save_evidence_qualifications(mission_id, qualifications)
+
+    async def save_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
+    ) -> List[MissionClaim]:
+        return await self._repo.save_mission_claims(mission_id, frame_digest, claims)
+
+    async def list_mission_claims(
+        self, mission_id: UUID, *, include_superseded: bool = False
+    ) -> List[MissionClaim]:
+        return await self._repo.list_mission_claims(
+            mission_id, include_superseded=include_superseded
+        )
+
+    async def supersede_mission_claims(self, mission_id: UUID, current_frame_digest: str) -> int:
+        return await self._repo.supersede_mission_claims(mission_id, current_frame_digest)
+
+    async def load_mission_evidence_snapshot(self, mission_id: UUID):
+        return await self._repo.load_mission_evidence_snapshot(mission_id)
+
+    async def inventory_legacy_baseline(self) -> Dict[str, Any]:
+        return await self._repo.inventory_legacy_baseline()

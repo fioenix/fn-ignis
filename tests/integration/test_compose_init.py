@@ -17,10 +17,12 @@ import secrets
 import shutil
 import subprocess
 import time
+import tomllib
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import yaml
 
 from conftest import all_postgres_migrations
 
@@ -34,7 +36,8 @@ READBACK = {
         " 'public.mission_evidence', 'public.research_workspaces', 'public.mission_run_journals',"
         " 'public.source_identity_aliases', 'public.idx_observations_latest_per_source',"
         " 'public.mission_probe_outcomes', 'public.mission_evidence_qualifications',"
-        " 'public.youtube_quota_buckets']) AS o(name)"
+        " 'public.youtube_quota_buckets', 'public.mission_manifests',"
+        " 'public.mission_claims', 'public.mission_claim_evidence']) AS o(name)"
         " WHERE to_regclass(o.name) IS NOT NULL"
     ),
     "ui_noise_terms": "SELECT count(*) FROM market_lexicons WHERE domain = 'tiktok_ui_noise'",
@@ -70,12 +73,24 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "024_youtube_quota_ledger.sql"
+NEWEST_MIGRATION = "025_evidence_grounded_claim_ledger.sql"
 
-pytestmark = pytest.mark.skipif(
+compose_only = pytest.mark.skipif(
     os.environ.get("IGNIS_TEST_COMPOSE_INIT") != "1" or shutil.which("docker") is None,
     reason="IGNIS_TEST_COMPOSE_INIT=1 and a Docker CLI are required for the real init path",
 )
+
+
+def test_default_install_has_no_worker_service_or_scheduler_entrypoint():
+    """A clean install must not expose a resident process that can collect while idle."""
+    for path in (REPO / "docker-compose.yml", REPO / "docker-compose.prod.yml"):
+        compose = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert "worker" not in compose.get("services", {}), path.name
+
+    pyproject = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    scripts = pyproject["project"]["scripts"]
+    assert "fn-ignis-worker" not in scripts
+    assert "ignis-worker" not in scripts
 
 
 def _run(args: list, env: dict, check: bool = True) -> subprocess.CompletedProcess:
@@ -128,8 +143,7 @@ def _fresh_init(tmp_path: Path) -> dict:
         f"    container_name: {container}\n"
         "    ports: !reset []\n"
         '    restart: "no"\n'
-        "  worker:\n"
-        "    env_file: !reset []\n",
+        "",
         encoding="utf-8",
     )
     env_file = run_dir / "compose.env"
@@ -195,6 +209,7 @@ def _fresh_init(tmp_path: Path) -> dict:
     }
 
 
+@compose_only
 def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_path):
     first = _fresh_init(tmp_path)
     second = _fresh_init(tmp_path)
@@ -208,15 +223,15 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
         assert NEWEST_MIGRATION in run["ran"], f"init never reached {NEWEST_MIGRATION}"
         assert run["errors"] == []
         assert run["readback"] == {
-            "later_objects": "10",
+            "later_objects": "13",
             "ui_noise_terms": "10",
             "retired_present": "0",
             "rls_market_lexicons": "t",
             "public_policies": "0",
-            "public_tables": "20",
+            "public_tables": "23",
             "public_tables_without_rls": "0",
             "supabase_roles": "0",
-            "builtin_uuid_defaults": "13",
+            "builtin_uuid_defaults": "15",
             "uuid_ossp_defaults": "0",
         }
         assert run["cleanup"]["returncode"] == 0, run["cleanup"]

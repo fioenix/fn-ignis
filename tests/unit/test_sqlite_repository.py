@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 from ignis.domain.cross_platform_score import cross_platform_score
 from datetime import datetime, timezone
@@ -12,6 +14,45 @@ from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendReposi
 def sqlite_repo():
     # Use temporary file or in-memory sqlite for isolation
     return SqliteTrendRepository("sqlite:///:memory:")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("empty_field", ["required_channels", "stop_conditions"])
+async def test_manifest_json_array_constraints_reject_whitespace_empty_arrays(
+    sqlite_repo, empty_field
+):
+    mission = ResearchMission(title="Manifest constraint", keywords=["bounded"])
+    await sqlite_repo.save_mission(mission)
+    values = {
+        "required_channels": '["youtube"]',
+        "stop_conditions": '["frame complete"]',
+    }
+    values[empty_field] = "[ ]"
+
+    with pytest.raises(sqlite3.IntegrityError):
+        sqlite_repo._mem_conn.execute(
+            "INSERT INTO mission_manifests"
+            " (mission_id, outcome, required_channels, optional_channels, authority_boundary,"
+            " quota_budget, output_type, stop_conditions, analysis_policy, retention_policy,"
+            " created_by, confirmed_at, manifest_digest)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(mission.id),
+                "Collect bounded evidence",
+                values["required_channels"],
+                "[]",
+                '{"public_http":true,"official_api":false,"browser_session":false,'
+                '"paid_quota":false}',
+                "{}",
+                "COLLECTION_FRAME",
+                values["stop_conditions"],
+                "evidence-gated-v1",
+                "mission-only",
+                "contract-test",
+                datetime.now(timezone.utc).isoformat(),
+                "d" * 64,
+            ),
+        )
 
 
 @pytest.mark.asyncio
@@ -264,3 +305,268 @@ async def test_an_existing_database_stops_requiring_a_cluster_first_seen_time(tm
             await again.close()
     finally:
         await repository.close()
+
+
+@pytest.mark.asyncio
+async def test_an_existing_database_upgrades_evidence_contracts_without_losing_rows(tmp_path):
+    """Legacy SQLite checks must be rebuilt, not merely decorated with new columns."""
+    import sqlite3
+
+    db_path = tmp_path / "legacy_evidence.sqlite"
+    initial = SqliteTrendRepository(str(db_path))
+    await initial._ensure_schema()
+    await initial.close()
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.executescript(
+            """
+            DROP TABLE mission_claim_evidence;
+            DROP TABLE mission_claims;
+            DROP TABLE mission_manifests;
+            DROP TABLE mission_evidence_qualifications;
+            DROP TABLE mission_probe_outcomes;
+            DROP TABLE market_brief_revisions;
+
+            CREATE TABLE market_brief_revisions (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES research_workspaces(id) ON DELETE CASCADE,
+                mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                revision_number INTEGER NOT NULL,
+                decision TEXT NOT NULL,
+                target_user TEXT NOT NULL,
+                problem TEXT NOT NULL,
+                geo TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                hypothesis TEXT NOT NULL,
+                falsifiers TEXT NOT NULL,
+                confirmed_by TEXT NOT NULL,
+                confirmed_at TEXT NOT NULL,
+                UNIQUE (mission_id),
+                UNIQUE (workspace_id, revision_number),
+                CHECK (falsifiers <> '[]')
+            );
+
+            CREATE TABLE mission_probe_outcomes (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL REFERENCES mission_run_journals(id) ON DELETE CASCADE,
+                platform TEXT NOT NULL,
+                connector_surface TEXT NOT NULL,
+                status TEXT NOT NULL CHECK (
+                    status IN ('HEALTHY', 'EMPTY_NO_DATA', 'AUTH_REQUIRED', 'RATE_LIMITED',
+                               'DEGRADED')
+                ),
+                signals_collected INTEGER NOT NULL CHECK (signals_collected >= 0),
+                queried_keywords TEXT NOT NULL DEFAULT '[]',
+                queried_window TEXT,
+                query_fingerprint TEXT NOT NULL,
+                completed_at TEXT NOT NULL,
+                UNIQUE (run_id, connector_surface)
+            );
+
+            CREATE TABLE mission_evidence_qualifications (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL,
+                observation_id TEXT NOT NULL,
+                brief_revision_id TEXT REFERENCES market_brief_revisions(id) ON DELETE CASCADE,
+                frame_fingerprint TEXT NOT NULL,
+                relation TEXT NOT NULL CHECK (
+                    relation IN ('QUALIFIED_SUPPORT', 'CONTEXT_ONLY',
+                                 'EXCLUDED_IRRELEVANT', 'UNASSESSED')
+                ),
+                purpose TEXT NOT NULL CHECK (purpose IN ('DEMAND', 'SUPPLY', 'VOC', 'CONTEXT')),
+                confidence REAL,
+                reason_code TEXT NOT NULL,
+                judged_by TEXT NOT NULL,
+                model TEXT,
+                created_at TEXT NOT NULL,
+                UNIQUE (mission_id, observation_id),
+                FOREIGN KEY (mission_id, observation_id)
+                    REFERENCES mission_evidence (mission_id, observation_id) ON DELETE CASCADE
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO research_workspaces"
+            " (id, slug, root_path, status, created_at) VALUES (?, ?, ?, ?, ?)",
+            ("workspace", "legacy", "/tmp/legacy", "READY", "2026-09-01T00:00:00+00:00"),
+        )
+        conn.execute(
+            "INSERT INTO research_missions"
+            " (id, title, keywords, platforms, workspace_id, surface, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "mission",
+                "Legacy evidence",
+                '["legacy"]',
+                '["youtube"]',
+                "workspace",
+                "ATTENTION",
+                "2026-09-01T00:00:00+00:00",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO research_missions"
+            " (id, title, keywords, platforms, workspace_id, surface, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "market-mission",
+                "Legacy market question",
+                '["legacy"]',
+                '["youtube"]',
+                "workspace",
+                "MARKET",
+                "2026-09-01T00:00:00+00:00",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO market_brief_revisions"
+            " (id, workspace_id, mission_id, revision_number, decision, target_user,"
+            " problem, geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "brief-legacy",
+                "workspace",
+                "market-mission",
+                1,
+                "Decide whether to continue",
+                "Operators",
+                "Manual setup",
+                "VN",
+                "30d",
+                "Setup friction matters",
+                '["No repeated friction"]',
+                "owner",
+                "2026-09-01T00:00:00+00:00",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO mission_run_journals"
+            " (id, workspace_id, mission_id, journal_path, sequence, status, started_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "run",
+                "workspace",
+                "mission",
+                "/tmp/legacy/run.md",
+                1,
+                "COMPLETED",
+                "2026-09-01T00:00:00+00:00",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO mission_probe_outcomes"
+            " (id, run_id, platform, connector_surface, status, signals_collected,"
+            " queried_keywords, query_fingerprint, completed_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "outcome-legacy",
+                "run",
+                "youtube",
+                "youtube.search",
+                "HEALTHY",
+                1,
+                '["legacy"]',
+                "legacy-fingerprint",
+                "2026-09-01T00:01:00+00:00",
+            ),
+        )
+
+    upgraded = SqliteTrendRepository(str(db_path))
+    try:
+        await upgraded._ensure_schema()
+        with sqlite3.connect(db_path) as conn:
+            legacy = conn.execute(
+                "SELECT status, signals_collected, evidence_contract_version"
+                " FROM mission_probe_outcomes WHERE id = 'outcome-legacy'"
+            ).fetchone()
+            legacy_brief = conn.execute(
+                "SELECT decision, evidence_contract_version FROM market_brief_revisions"
+                " WHERE id = 'brief-legacy'"
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO mission_probe_outcomes"
+                " (id, run_id, platform, connector_surface, status, signals_collected,"
+                " queried_keywords, query_fingerprint, note, collection_plan_digest,"
+                " evidence_contract_version, completed_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "outcome-failed",
+                    "run",
+                    "threads",
+                    "threads.search",
+                    "FAILED",
+                    0,
+                    '["legacy"]',
+                    "failed-fingerprint",
+                    "connector error",
+                    "a" * 64,
+                    2,
+                    "2026-09-01T00:02:00+00:00",
+                ),
+            )
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(mission_probe_outcomes)")
+            }
+            conn.execute(
+                "INSERT INTO sources (id, platform, external_id) VALUES (?, ?, ?)",
+                ("source", "youtube", "video:legacy"),
+            )
+            conn.execute(
+                "INSERT INTO observations"
+                " (id, source_id, observed_at, time_provenance, identity_source, observed_title)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    "observation",
+                    "source",
+                    "2026-09-01T00:03:00+00:00",
+                    "exact_ingestion",
+                    "metadata_external_id",
+                    "Contradicting evidence",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at)"
+                " VALUES (?, ?, ?, ?)",
+                (
+                    "evidence",
+                    "mission",
+                    "observation",
+                    "2026-09-01T00:03:00+00:00",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO mission_evidence_qualifications"
+                " (id, mission_id, observation_id, frame_fingerprint, relation, purpose,"
+                " confidence, reason_code, judged_by, hypothesis_target, evidence_role,"
+                " evidence_contract_version, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "qualification",
+                    "mission",
+                    "observation",
+                    "frame",
+                    "QUALIFIED_CONTRADICTION",
+                    "VOC",
+                    0.8,
+                    "DIRECT_TO_FRAME",
+                    "contract-test",
+                    "core",
+                    "CONTRADICTION",
+                    2,
+                    "2026-09-01T00:04:00+00:00",
+                ),
+            )
+            foreign_key_failures = conn.execute("PRAGMA foreign_key_check").fetchall()
+
+        assert legacy == ("HEALTHY", 1, 1)
+        assert legacy_brief == ("Decide whether to continue", 1)
+        assert {
+            "scope_attestation",
+            "note",
+            "collection_plan_digest",
+            "evidence_contract_version",
+        } <= columns
+        assert foreign_key_failures == []
+    finally:
+        await upgraded.close()

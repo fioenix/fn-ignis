@@ -14,15 +14,12 @@ def read_key(project_root):
     return match.group(1).strip() if match else None
 
 
-def test_created_file_matches_the_scheduler_default_in_settings(tmp_path):
-    changed, message = ensure_environment_file(tmp_path)
+def test_created_file_has_no_recurring_collection_settings(tmp_path):
+    ensure_environment_file(tmp_path)
 
-    assert changed is True
-    assert "Created" in message
     text = (tmp_path / ".env").read_text(encoding="utf-8")
-    interval = int(re.search(r"^SCHEDULER_INTERVAL_SECONDS=(\d+)$", text, re.MULTILINE).group(1))
-    # A fresh install that ticks faster than this burns the free YouTube daily quota.
-    assert interval == Settings.model_fields["SCHEDULER_INTERVAL_SECONDS"].default
+    for setting in ("SCHEDULER_INTERVAL_SECONDS", "SYNC_INTERVAL_MINUTES", "DISCOVERY_INTERVAL_HOURS"):
+        assert setting not in text
 
 
 def test_created_file_carries_the_shared_youtube_quota_defaults(tmp_path):
@@ -31,7 +28,6 @@ def test_created_file_carries_the_shared_youtube_quota_defaults(tmp_path):
     text = (tmp_path / ".env").read_text(encoding="utf-8")
     for setting in (
         "YOUTUBE_SEARCH_DAILY_LIMIT",
-        "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT",
         "YOUTUBE_OTHER_DAILY_UNIT_LIMIT",
     ):
         expected = Settings.model_fields[setting].default

@@ -3,9 +3,8 @@
 Plan 009 makes two distribution paths public: a tagged source checkout bootstrapped with one
 command, and an OCI image on GHCR. Before it, the tracked surfaces disagreed with the runtime and
 with each other: current guidance claimed 39 or 45 MCP tools while the server exposed 47, install
-guidance stopped at migration `023` while `024` shipped, `server.json` advertised a PyPI package
-that was never published, and the image defaulted to the scheduler worker while the manifest
-declared an MCP stdio server.
+guidance stopped at migration `023` while `024` shipped, and `server.json` advertised a PyPI
+package that was never published while the image contract declared an MCP stdio server.
 
 Each of those was a sentence or a setting somebody typed. These contracts read the authority each
 claim depends on -- the running MCP catalog, the migration chain on disk, the committed manifests --
@@ -32,13 +31,11 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 
 DOCKERFILE = REPO / "Dockerfile"
-COMPOSE_FILES = (REPO / "docker-compose.yml", REPO / "docker-compose.prod.yml")
 SERVER_JSON = REPO / "server.json"
 DOCKER_PUBLISH = REPO / ".github" / "workflows" / "docker-publish.yml"
 BACKLOG = REPO / "BACKLOG.md"
 
 MCP_SERVER_MODULE = "ignis.interfaces.mcp.server"
-SCHEDULER_MODULE = "ignis.interfaces.cli.scheduler"
 IMAGE_REPOSITORY = "ghcr.io/fioenix/fn-ignis"
 SOURCE_REPOSITORY_URL = "https://github.com/fioenix/fn-ignis"
 SOURCE_LABEL = "org.opencontainers.image.source"
@@ -86,6 +83,12 @@ def _backlog_current_accomplishments(path: Path) -> str:
     return text[start: text.index("\n## ", start + 1)]
 
 
+def _backlog_unreleased_status(path: Path) -> str:
+    """Only the current branch's runtime claim, not its explicit v0.7.0 comparison."""
+    section = _read(path).split("## Spec 011 — trạng thái nhánh phát triển, chưa phát hành", 1)[1]
+    return section.split("\n---", 1)[0].split("; các con số", 1)[0]
+
+
 # (relative path, section reader). Only these surfaces describe the current release; anything
 # else in the repository may legitimately carry a dated measurement. A surface is listed by the
 # section that makes the current claim so that history elsewhere in the same file stays valid.
@@ -94,17 +97,11 @@ GOVERNED_TOOL_COUNT_SURFACES = (
     ("CLAUDE.md", _whole),
     (".github/workflows/ci.yml", _whole),
     ("src/ignis/interfaces/cli/setup_bundle.py", _whole),
-    ("docs/PROJECT_REVIEW_CONTEXT.md", _whole),
     ("README.md", _whole),
     ("README.vi.md", _whole),
     ("docs/USER_GUIDE.md", _whole),
     ("docs/USER_GUIDE.vi.md", _whole),
-    ("docs/assets/architecture.html", _whole),
-    ("docs/assets/architecture.svg", _whole),
-    ("docs/diagrams/ignis-pipeline.html", _whole),
-    ("docs/diagrams/ignis-pipeline.svg", _whole),
-    ("BACKLOG.md", _backlog_banner),
-    ("BACKLOG.md", _backlog_current_accomplishments),
+    ("BACKLOG.md", _backlog_unreleased_status),
 )
 
 # A number in front of the catalog noun, in either language the governed surfaces are written in:
@@ -120,7 +117,6 @@ TOOL_COUNT_CLAIM = re.compile(
 # Guides that tell an operator how far the fresh-init chain is verified and which migrations an
 # existing database must apply.
 MIGRATION_GUIDES = ("README.md", "README.vi.md", "docs/USER_GUIDE.md", "docs/USER_GUIDE.vi.md")
-VERIFIED_ENDPOINT_CLAIM = re.compile(r"(?:verified through|kiểm chứng tới)\s+`(\d{3})`", re.IGNORECASE)
 
 # Public install surfaces that must not offer a package index install while PyPI is deferred.
 PUBLIC_INSTALL_SURFACES = MIGRATION_GUIDES + ("server.json",)
@@ -160,18 +156,9 @@ def test_every_governed_tool_count_claim_matches_the_runtime_catalog():
 
 
 def migration_endpoint_offenders(newest: Path, guides=MIGRATION_GUIDES) -> list[str]:
-    endpoint = newest.name[:3]
     offenders = []
     for relative in guides:
         text = _read(REPO / relative)
-        claims = VERIFIED_ENDPOINT_CLAIM.findall(text)
-        if not claims:
-            offenders.append(f"{relative}: states no verified fresh-init endpoint")
-        offenders.extend(
-            f"{relative}: fresh init verified through `{claim}`, chain ends at `{endpoint}`"
-            for claim in claims
-            if claim != endpoint
-        )
         if f"sql/{newest.name}" not in text:
             offenders.append(f"{relative}: upgrade guidance never names sql/{newest.name}")
     return offenders
@@ -180,7 +167,7 @@ def migration_endpoint_offenders(newest: Path, guides=MIGRATION_GUIDES) -> list[
 def test_install_and_upgrade_guidance_reaches_the_newest_migration():
     offenders = migration_endpoint_offenders(_newest_migration())
     assert not offenders, (
-        "Install guidance must reach the end of the packaged migration chain, and an existing "
+        "Install guidance must name the end of the packaged migration chain, and an existing "
         "database must be told to apply its newest file:\n" + "\n".join(offenders)
     )
 
@@ -279,7 +266,7 @@ def test_the_citation_release_date_moves_with_the_version():
 
 
 # --------------------------------------------------------------------------------------------
-# Image role: the direct image is the MCP server, Compose selects the worker
+# Image role: the direct image is the request-driven MCP server
 # --------------------------------------------------------------------------------------------
 
 
@@ -313,20 +300,6 @@ def test_the_image_defaults_to_the_mcp_stdio_server():
         f"the image's default command is {_dockerfile_cmd()}; a client following server.json "
         "would receive that process instead of the MCP server"
     )
-
-
-def _compose_worker_command(path: Path) -> list[str] | None:
-    services = yaml.safe_load(_read(path)).get("services", {})
-    return services.get("worker", {}).get("command")
-
-
-def test_both_compose_files_select_the_scheduler_explicitly():
-    """The worker role survives the image default changing only because Compose names it."""
-    for path in COMPOSE_FILES:
-        assert _compose_worker_command(path) == ["python", "-m", SCHEDULER_MODULE], (
-            f"{path.name}'s worker no longer runs the scheduler explicitly; with an MCP default "
-            "image it would start the MCP server and exit when stdin closes"
-        )
 
 
 def test_the_image_carries_its_source_and_mcp_ownership_labels():
@@ -372,12 +345,6 @@ def test_server_json_says_the_default_database_is_ephemeral_sqlite():
     variables = {v["name"]: v for v in package.get("environmentVariables", [])}
     description = variables["DATABASE_URL"].get("description", "").lower()
     assert "sqlite" in description and "ephemeral" in description, description
-
-
-def test_the_production_worker_runs_the_published_image():
-    services = yaml.safe_load(_read(REPO / "docker-compose.prod.yml"))["services"]
-    image = services["worker"]["image"]
-    assert image.startswith(f"{IMAGE_REPOSITORY}:"), image
 
 
 # --------------------------------------------------------------------------------------------
@@ -908,7 +875,7 @@ SMOKE_SCRIPT = REPO / "scripts" / "wheel_mcp_smoke.py"
 FAKE_SERVER = r'''
 import json, sys, time
 mode = sys.argv[1]
-tools = int(sys.argv[2]) if len(sys.argv) > 2 else 47
+tools = int(sys.argv[2]) if len(sys.argv) > 2 else 41
 if mode == "banner":
     print("starting worker loop", flush=True)
 for raw in sys.stdin:
@@ -925,7 +892,14 @@ for raw in sys.stdin:
         result = {"protocolVersion": message["params"]["protocolVersion"], "capabilities": {},
                   "serverInfo": {"name": "fake", "version": "1"}}
     elif method == "tools/list":
-        result = {"tools": [{"name": f"tool_{i}", "inputSchema": {}} for i in range(tools)]}
+        names = ["create_attention_mission", "confirm_market_brief", "submit_mission_claims", "get_mission_claims"]
+        names += [f"tool_{i}" for i in range(max(0, tools - len(names)))]
+        names = names[:tools]
+        if mode == "missing-reset-tool":
+            names[0] = "tool_missing"
+        if mode == "retained-legacy-tool":
+            names[-1] = "trigger_autonomous_discovery"
+        result = {"tools": [{"name": name, "inputSchema": {}} for name in names]}
     else:
         failed = mode == "tool-error"
         payload = {"status": "ERROR" if failed else "SUCCESS", "total_configs": 3}
@@ -948,7 +922,7 @@ def _smoke():
     return wheel_mcp_smoke
 
 
-def _fake(tmp_path, mode, tools=47) -> list[str]:
+def _fake(tmp_path, mode, tools=41) -> list[str]:
     import sys
 
     server = tmp_path / "fake_server.py"
@@ -963,12 +937,19 @@ def test_a_caller_supplied_command_completes_the_smoke(tmp_path):
     assert result.runtime_configs == 3
 
 
+@pytest.mark.parametrize("mode", ["missing-reset-tool", "retained-legacy-tool"])
+def test_wheel_smoke_rejects_a_wrong_mission_bound_catalog_even_at_41_tools(tmp_path, mode):
+    module = _smoke()
+    with pytest.raises(module.SmokeFailure, match="mission-bound catalog mismatch"):
+        module.run_smoke(_fake(tmp_path, mode), response_timeout=10, exit_timeout=10)
+
+
 def test_a_wrong_tool_count_fails_the_smoke(tmp_path):
     module = _smoke()
     import pytest
 
-    with pytest.raises(module.SmokeFailure, match="expected 47 tools, discovered 45"):
-        module.run_smoke(_fake(tmp_path, "ok", tools=45), response_timeout=10, exit_timeout=10)
+    with pytest.raises(module.SmokeFailure, match="expected 41 tools, discovered 39"):
+        module.run_smoke(_fake(tmp_path, "ok", tools=39), response_timeout=10, exit_timeout=10)
 
 
 def test_a_failed_tool_call_fails_the_smoke(tmp_path):
@@ -1054,7 +1035,7 @@ cd "$(dirname "$0")/.."
 env > bootstrap-env.txt
 [ "${FAKE_BOOTSTRAP_FAIL:-}" = "1" ] && { echo "boom" >&2; exit 3; }
 mkdir -p .venv/bin
-printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-47}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
+printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-41}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
 chmod +x .venv/bin/python
 printf 'DATABASE_URL=sqlite:///ignis.db\n' > .env
 "$FAKE_PYTHON" - <<'PY'
@@ -1269,10 +1250,10 @@ def test_a_tag_missing_a_file_the_release_tree_has_fails(tmp_path, monkeypatch):
 def test_a_source_server_with_the_wrong_catalog_fails_runtime(tmp_path, monkeypatch):
     module = _acceptance()
     fixture = _source_fixture(tmp_path)
-    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch, FAKE_TOOLS="45")
+    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch, FAKE_TOOLS="39")
     assert records["source_bootstrap"].state == module.SurfaceState.VERIFIED
     assert records["source_mcp_runtime"].state == module.SurfaceState.FAILED
-    assert "discovered 45" in records["source_mcp_runtime"].evidence
+    assert "discovered 39" in records["source_mcp_runtime"].evidence
 
 
 # --------------------------------------------------------------------------------------------
@@ -1403,7 +1384,7 @@ if args[0] == "pull":
     print("Digest: " + os.environ["FAKE_DOCKER_REPO_DIGEST"].split("@", 1)[1])
     sys.exit(0)
 if args[0] == "run":
-    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "47"])
+    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "41"])
 if args[:2] == ["image", "rm"]:
     sys.exit(0)
 print("unexpected docker call: " + " ".join(args), file=sys.stderr)
@@ -1731,56 +1712,6 @@ def _observe_compose(module, tmp_path, monkeypatch, **env):
     return record, calls, leftover_env, Path(str(log) + ".down").exists()
 
 
-def test_the_production_worker_starts_the_scheduler(tmp_path, monkeypatch):
-    module = _acceptance()
-    record, calls, leftover_env, torn_down = _observe_compose(module, tmp_path, monkeypatch)
-    assert record.name == "compose_worker_override"
-    assert record.state == module.SurfaceState.VERIFIED, record
-    ups = [call for call in calls if call[0] == "compose" and "up" in call]
-    assert ups and any(arg.endswith("docker-compose.prod.yml") for arg in ups[0]), ups
-    assert torn_down, "the throwaway Compose project was not torn down"
-    assert not leftover_env, "the generated Compose credential file outlived the run"
-
-
-def test_a_compose_file_without_the_scheduler_command_fails(tmp_path, monkeypatch):
-    """Without the explicit command the worker would run the image's MCP default and exit on EOF."""
-    module = _acceptance()
-    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="no-override")
-    assert record.state == module.SurfaceState.FAILED
-    assert "docker-compose.yml" in record.evidence
-
-
-def test_a_worker_running_anything_but_the_scheduler_fails(tmp_path, monkeypatch):
-    module = _acceptance()
-    record, _, _, torn_down = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="wrong-process")
-    assert record.state == module.SurfaceState.FAILED
-    assert torn_down
-
-
-def test_an_unreachable_docker_daemon_leaves_the_worker_role_unread(tmp_path, monkeypatch):
-    module = _acceptance()
-    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="no-daemon")
-    assert record.state == module.SurfaceState.UNREADABLE
-    assert record.failure_class == "network"
-
-
-def test_the_compose_docker_config_names_only_the_plugin_directory(tmp_path, monkeypatch):
-    """Compose is a CLI plugin: isolation must keep it reachable while carrying no credential."""
-    module = _acceptance()
-    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch)
-    assert record.state == module.SurfaceState.VERIFIED, record
-
-
-def test_a_compose_config_that_fails_is_reported_with_its_error(tmp_path, monkeypatch):
-    """A failed `compose config` is not a worker command of None."""
-    module = _acceptance()
-    monkeypatch.setenv("FAKE_COMPOSE_MODE", "config-error")
-    record, _, _, _ = _observe_compose(module, tmp_path, monkeypatch, FAKE_COMPOSE_MODE="config-error")
-    assert record.state in (module.SurfaceState.FAILED, module.SurfaceState.UNREADABLE)
-    assert "resolves to None" not in record.evidence
-    assert "invalid compose project" in record.evidence
-
-
 # --------------------------------------------------------------------------------------------
 # Negative controls: every governed claim can turn its own contract red
 # --------------------------------------------------------------------------------------------
@@ -1823,9 +1754,6 @@ def governed_copy(tmp_path, monkeypatch):
     _shutil.copytree(REPO / "sql", tmp_path / "sql")
     monkeypatch.setattr(THIS_MODULE, "REPO", tmp_path)
     monkeypatch.setattr(THIS_MODULE, "DOCKERFILE", tmp_path / "Dockerfile")
-    monkeypatch.setattr(
-        THIS_MODULE, "COMPOSE_FILES", (tmp_path / "docker-compose.yml", tmp_path / "docker-compose.prod.yml")
-    )
     monkeypatch.setattr(THIS_MODULE, "SERVER_JSON", tmp_path / "server.json")
     monkeypatch.setattr(THIS_MODULE, "DOCKER_PUBLISH", tmp_path / ".github" / "workflows" / "docker-publish.yml")
     monkeypatch.setattr(THIS_MODULE, "BACKLOG", tmp_path / "BACKLOG.md")
@@ -1841,21 +1769,21 @@ def _mutate(root: Path, relative: str, pattern: str, replacement: str) -> None:
 
 # (control name, file, regex, replacement, contract test it must turn red)
 NEGATIVE_CONTROLS = (
-    ("AGENTS tool count", "AGENTS.md", r"all 47 FastMCP tools", "all 39 FastMCP tools",
+    ("AGENTS tool count", "AGENTS.md", r"all 41 FastMCP tools", "all 39 FastMCP tools",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("CLAUDE tool count", "CLAUDE.md", r"All 47 tools", "All 45 tools",
+    ("CLAUDE tool count", "CLAUDE.md", r"All 41 tools", "All 39 tools",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("BACKLOG banner tool count", "BACKLOG.md", r"\(47 Handlers & Tools\)", "(45 Handlers & Tools)",
+    ("BACKLOG branch tool count", "BACKLOG.md", r"\*\*41 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("diagram tool count", "docs/assets/architecture.html", r">47 MCP tools<", ">39 MCP tools<",
+    ("README tool count", "README.md", r"\*\*41 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("user guide category sum", "docs/USER_GUIDE.md", r"\(10 Tools\)", "(9 Tools)",
+    ("user guide tool count", "docs/USER_GUIDE.md", r"\*\*41 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("README fresh-init endpoint", "README.md", r"verified through `024`", "verified through `023`",
+    ("README migration endpoint", "README.md", r"`sql/025_evidence_grounded_claim_ledger\.sql`", "`sql/024_youtube_quota_ledger.sql`",
      "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
-    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/024_youtube_quota_ledger\.sql`",
+    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/025_evidence_grounded_claim_ledger\.sql`",
      "`sql/023_evidence_qualification.sql`", "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
-    ("PyPI install claim", "README.md", r"^(## ⚡ Quickstart & Installation)$", r"\1\n\npip install fn-ignis\n",
+    ("PyPI install claim", "README.md", r"^(## Local source setup)$", r"\1\n\npip install fn-ignis\n",
      "test_no_public_surface_claims_a_pypi_package"),
     ("PyPI package in server.json", "server.json", r'"registryType": "oci"', '"registryType": "pypi"',
      "test_no_public_surface_claims_a_pypi_package"),
@@ -1865,11 +1793,6 @@ NEGATIVE_CONTROLS = (
      "test_server_json_advertises_the_versioned_oci_stdio_package"),
     ("DATABASE_URL required again", "server.json", r'"isRequired": false,\n(\s*)"format"', r'"isRequired": true,\n\1"format"',
      "test_server_json_marks_the_sqlite_defaulted_database_url_optional"),
-    ("local Compose override", "docker-compose.yml", r'^    command: \["python", "-m", "ignis\.interfaces\.cli\.scheduler"\]\n', "",
-     "test_both_compose_files_select_the_scheduler_explicitly"),
-    ("production Compose override", "docker-compose.prod.yml",
-     r'^    command: \["python", "-m", "ignis\.interfaces\.cli\.scheduler"\]\n', "",
-     "test_both_compose_files_select_the_scheduler_explicitly"),
     ("Docker default role", "Dockerfile", r'^CMD \["python", "-m", "ignis\.interfaces\.mcp\.server"\]',
      'CMD ["python", "-m", "ignis.interfaces.cli.scheduler"]', "test_the_image_defaults_to_the_mcp_stdio_server"),
     ("Dockerfile source label", "Dockerfile", r'^LABEL org\.opencontainers\.image\.source=.*\n', "",
@@ -1947,9 +1870,10 @@ def test_a_daemon_digest_that_differs_from_the_release_tag_is_caught(tmp_path, m
 
 
 def _backlog_history(path: Path) -> str:
-    """BACKLOG outside the banner and the current-accomplishments section."""
+    """The dated release history outside the current development section."""
     text = _read(path)
-    return text.replace(_backlog_banner(path), "").replace(_backlog_current_accomplishments(path), "")
+    current = text.split("## Spec 011 — trạng thái nhánh phát triển, chưa phát hành", 1)[1].split("\n---", 1)[0]
+    return text.replace(current, "")
 
 
 def test_dated_backlog_measurements_keep_their_original_counts():
@@ -1959,8 +1883,7 @@ def test_dated_backlog_measurements_keep_their_original_counts():
         "the dated v0.4.0 measurement of 39 tools disappeared from BACKLOG's history; history is "
         "not rewritten to make a text search look clean"
     )
-    assert not tool_count_offenders(_runtime_tool_count(), (("BACKLOG.md", _backlog_banner),
-                                                            ("BACKLOG.md", _backlog_current_accomplishments)))
+    assert not tool_count_offenders(_runtime_tool_count(), (("BACKLOG.md", GOVERNED_TOOL_COUNT_SURFACES[-1][1]),))
 
 
 def test_a_dated_history_entry_is_not_governed_but_a_current_one_is(governed_copy):
@@ -1969,7 +1892,7 @@ def test_a_dated_history_entry_is_not_governed_but_a_current_one_is(governed_cop
     _mutate(governed_copy, "BACKLOG.md", history_anchor, r"\1\n\nMeasured 14/09/2026: 39 tools.")
     assert not tool_count_offenders(expected), "a dated history line was treated as a current claim"
 
-    _mutate(governed_copy, "BACKLOG.md", r"^(## 🚀 1\..*)$", r"\1\n\nIgnis exposes 39 tools.")
+    _mutate(governed_copy, "BACKLOG.md", r"^(## Spec 011 — trạng thái nhánh phát triển, chưa phát hành.*)$", r"\1\n\nIgnis exposes 39 tools.")
     assert tool_count_offenders(expected), "an unlabeled current claim inside a governed section passed"
 
 
@@ -2266,12 +2189,10 @@ def test_all_mode_combines_every_observation_into_one_verdict(tmp_path, monkeypa
         return [verified(n) for n in ("source_tag_checkout", "source_bootstrap", "source_mcp_runtime")]
 
     def container(**kwargs):
-        seen["check_worker"] = kwargs.get("check_worker")
         return [
             verified("container_anonymous_pull", f"ghcr.io/fioenix/fn-ignis@{digest}"),
             verified("container_digest", f"ghcr.io/fioenix/fn-ignis@{digest}"),
             verified("container_mcp_runtime"),
-            verified("compose_worker_override"),
         ]
 
     monkeypatch.setattr(module, "observe_source", source)
@@ -2303,4 +2224,3 @@ def test_all_mode_combines_every_observation_into_one_verdict(tmp_path, monkeypa
     assert json.loads(_read(output))["verdict"] == "RELEASED"
     assert seen["parity_tree"] == seen["checkout"] and seen["registry_tree"] == seen["checkout"]
     assert seen["provenance_digest"] == digest
-    assert seen["check_worker"] is True

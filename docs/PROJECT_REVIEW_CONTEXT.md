@@ -1,5 +1,9 @@
 # fn-ignis — Review Context
 
+> Historical v0.7.0 review context. The Dual-Track architecture and 47-tool catalog below
+> predate Spec 011; see `specs/011-evidence-grounded-product-reset/` for the current
+> unreleased mission-bound contract.
+
 Written for an engineer or agent asked to review this project and recommend what to do next.
 It states what the system is, what has actually been measured, what has not, and where the
 reasoning is thin. It is in English because it describes `src/` and is read alongside
@@ -91,7 +95,7 @@ did. See `AGENTS.md` § "Ingress Filtering Depends on Who Asked".
 
 ## 2. Reading the architecture
 
-Three diagrams, each answering a different question, all verified against code on the date in
+Four diagrams, each answering a different question, all verified against code on the date in
 their footers. The set is deliberately small: a reader choosing between six pictures reads none.
 The date is recorded here as well as in the footer, and a test fails when the two disagree —
 otherwise redrawing a diagram and leaving its footer alone dates the new picture to the day the
@@ -106,6 +110,9 @@ old one was checked.
   or answers keyword probes.
 - `docs/diagrams/ignis-pipeline.{png,svg,html}` — **how a signal becomes a dossier** (footer
   verified 29/09/2026; tool count re-verified 28/09/2026). Lane-scoped flow from discovery through the quality gate to the artifact.
+- `docs/diagrams/ignis-competitive-capability-radar.html` — **where Ignis competes** (footer
+  verified 30/09/2026). A multi-axis capability comparison that makes the intended moat in
+  evidence auditability and hypothesis challenge explicit without claiming data-firehose parity.
 
 A fourth diagram, a tool-by-tool call trace of one session, was retired on 14/09/2026. It
 documented a defect fixed on 10/09 — `trigger_ingress_refresh` took no timeframe, so every

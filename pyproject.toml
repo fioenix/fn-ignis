@@ -45,9 +45,7 @@ dependencies = [
 
 [project.scripts]
 fn-ignis = "ignis.interfaces.mcp.server:main"
-fn-ignis-worker = "ignis.interfaces.cli.scheduler:main"
 ignis-mcp = "ignis.interfaces.mcp.server:main"
-ignis-worker = "ignis.interfaces.cli.scheduler:main"
 ignis-setup = "ignis.interfaces.cli.setup_bundle:main"
 
 
@@ -116,4 +114,3 @@ exclude = [".venv", "dist", "build"]
 [tool.ruff.lint]
 select = ["E", "F", "W"]
 ignore = ["E501", "W293", "W291", "W292", "E741"]
-

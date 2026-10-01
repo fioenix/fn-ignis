@@ -1,4 +1,6 @@
+import asyncio
 import dataclasses
+import copy
 import json
 import logging
 from datetime import date, datetime, timezone
@@ -6,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
+import psycopg
 from psycopg import errors as pg_errors
 from psycopg.rows import tuple_row
 from psycopg_pool import AsyncConnectionPool
@@ -18,14 +21,24 @@ from ignis.application.ports.repository_port import (
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
 from ignis.domain.research_workspace import (
+    AuthorityBoundary,
+    ClaimStatus,
+    ClaimType,
+    EvidenceDirection,
     EvidenceQualification,
     EvidenceQualificationConflictError,
     InvalidEvidenceQualificationError,
+    InvalidMissionClaimError,
+    InvalidMissionManifestError,
     MarketBriefRevision,
+    MissionClaim,
+    MissionClaimEvidence,
+    MissionManifest,
     MissionProbeOutcome,
     ResearchWorkspace,
     WorkspaceScopeMismatchError,
     WorkspaceStatus,
+    require_complete_channel_outcomes,
 )
 from ignis.application.ports.research_workspace_port import (
     MissionWriterClaim,
@@ -140,10 +153,10 @@ class PostgresTimescaleRepository(ITrendRepository):
         cost: int,
         trigger: IngressTrigger,
         daily_limit: int,
-        scheduled_limit: Optional[int],
         now: datetime,
     ) -> YouTubeQuotaReservation:
-        scheduled_cost = cost if trigger == IngressTrigger.SCHEDULED else 0
+        if trigger != IngressTrigger.REQUESTED:
+            raise ValueError("YouTube quota can only be reserved for requested work.")
         pool = await self._get_pool()
         async with pool.connection() as conn:
             async with conn.cursor(row_factory=tuple_row) as cur:
@@ -151,31 +164,24 @@ class PostgresTimescaleRepository(ITrendRepository):
                     "INSERT INTO youtube_quota_buckets"
                     " (quota_day, bucket, used, scheduled_used, exhausted, created_at, updated_at)"
                     " SELECT %s, %s, %s, %s, FALSE, %s, %s"
-                    " WHERE %s <= %s AND (%s IS NULL OR %s <= %s)"
+                    " WHERE %s <= %s"
                     " ON CONFLICT (quota_day, bucket) DO UPDATE SET"
                     " used = youtube_quota_buckets.used + EXCLUDED.used,"
                     " scheduled_used = youtube_quota_buckets.scheduled_used + EXCLUDED.scheduled_used,"
                     " updated_at = EXCLUDED.updated_at"
                     " WHERE NOT youtube_quota_buckets.exhausted"
                     " AND youtube_quota_buckets.used + EXCLUDED.used <= %s"
-                    " AND (%s IS NULL OR youtube_quota_buckets.scheduled_used"
-                    "      + EXCLUDED.scheduled_used <= %s)"
                     " RETURNING quota_day, bucket, used, scheduled_used, exhausted, updated_at;",
                     (
                         quota_day,
                         bucket.value,
                         cost,
-                        scheduled_cost,
+                        0,
                         now,
                         now,
                         cost,
                         daily_limit,
-                        scheduled_limit,
-                        scheduled_cost,
-                        scheduled_limit,
                         daily_limit,
-                        scheduled_limit,
-                        scheduled_limit,
                     ),
                 )
                 row = await cur.fetchone()
@@ -1681,7 +1687,8 @@ class PostgresTimescaleRepository(ITrendRepository):
 
     _BRIEF_COLUMNS = (
         "SELECT id, workspace_id, mission_id, revision_number, decision, target_user, problem,"
-        " geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at"
+        " geo, timeframe, hypothesis, falsifiers, alternative_hypotheses, null_hypothesis,"
+        " kill_criteria, revision_rule, evidence_contract_version, confirmed_by, confirmed_at"
         " FROM market_brief_revisions"
     )
 
@@ -1702,7 +1709,8 @@ class PostgresTimescaleRepository(ITrendRepository):
     def _brief_from_row(row) -> MarketBriefRevision:
         (
             rev_id, ws_id, mission_id, revision_number, decision, target_user, problem,
-            geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at,
+            geo, timeframe, hypothesis, falsifiers, alternative_hypotheses, null_hypothesis,
+            kill_criteria, revision_rule, _contract_version, confirmed_by, confirmed_at,
         ) = row
         return MarketBriefRevision(
             brief_revision_id=UUID(str(rev_id)),
@@ -1716,6 +1724,12 @@ class PostgresTimescaleRepository(ITrendRepository):
             timeframe=timeframe,
             hypothesis=hypothesis,
             falsifiers=tuple(falsifiers or ()),
+            alternative_hypotheses=(
+                tuple(alternative_hypotheses) if alternative_hypotheses is not None else None
+            ),
+            null_hypothesis=null_hypothesis,
+            kill_criteria=tuple(kill_criteria) if kill_criteria is not None else None,
+            revision_rule=revision_rule,
             confirmed_by=confirmed_by,
             confirmed_at=confirmed_at,
         )
@@ -1810,8 +1824,9 @@ class PostgresTimescaleRepository(ITrendRepository):
             """
             INSERT INTO market_brief_revisions
             (id, workspace_id, mission_id, revision_number, decision, target_user, problem,
-             geo, timeframe, hypothesis, falsifiers, confirmed_by, confirmed_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+             geo, timeframe, hypothesis, falsifiers, alternative_hypotheses, null_hypothesis,
+             kill_criteria, revision_rule, evidence_contract_version, confirmed_by, confirmed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """,
             (
                 str(revision.brief_revision_id),
@@ -1825,6 +1840,15 @@ class PostgresTimescaleRepository(ITrendRepository):
                 revision.timeframe,
                 revision.hypothesis,
                 list(revision.falsifiers),
+                (
+                    list(revision.alternative_hypotheses)
+                    if revision.alternative_hypotheses is not None
+                    else None
+                ),
+                revision.null_hypothesis,
+                list(revision.kill_criteria) if revision.kill_criteria is not None else None,
+                revision.revision_rule,
+                revision.evidence_contract_version,
                 revision.confirmed_by,
                 revision.confirmed_at,
             ),
@@ -1888,6 +1912,72 @@ class PostgresTimescaleRepository(ITrendRepository):
             raise RepositoryException(
                 f"Market Brief confirmation failed and nothing was written: {e}"
             ) from e
+
+    async def create_attention_mission_with_manifest(
+        self, mission: ResearchMission, manifest: MissionManifest
+    ) -> Tuple[ResearchMission, MissionManifest]:
+        """Write the surfaced mission and its authority contract in one transaction."""
+        if manifest.mission_id != mission.id:
+            raise InvalidMissionManifestError(
+                "The persisted manifest must carry the mission it authorizes."
+            )
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await self._write_mission_row(cur, mission)
+                    await self._write_manifest_row(cur, manifest)
+            return mission, manifest
+        except Exception as exc:
+            logger.error(
+                "Error creating Attention mission %s with its manifest: %s",
+                mission.id,
+                exc,
+                exc_info=True,
+            )
+            raise RepositoryException(
+                f"Attention mission confirmation failed and nothing was written: {exc}"
+            ) from exc
+
+    async def create_market_mission_with_brief_and_manifest(
+        self,
+        mission: ResearchMission,
+        revision: MarketBriefRevision,
+        manifest: MissionManifest,
+    ) -> Tuple[ResearchMission, MarketBriefRevision, MissionManifest]:
+        """Write all three records that make one Market assignment executable."""
+        if manifest.mission_id != mission.id:
+            raise InvalidMissionManifestError(
+                "The persisted manifest must carry the mission it authorizes."
+            )
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT id FROM research_workspaces WHERE id = %s FOR UPDATE;",
+                        (str(revision.workspace_id),),
+                    )
+                    numbered = dataclasses.replace(
+                        revision,
+                        revision_number=await self._next_revision_number(
+                            cur, revision.workspace_id
+                        ),
+                    )
+                    await self._write_mission_row(cur, mission)
+                    await self._write_brief_revision_row(cur, numbered)
+                    await self._write_manifest_row(cur, manifest)
+            return mission, numbered, manifest
+        except Exception as exc:
+            logger.error(
+                "Error confirming Market mission %s with its manifest: %s",
+                mission.id,
+                exc,
+                exc_info=True,
+            )
+            raise RepositoryException(
+                f"Market mission confirmation failed and nothing was written: {exc}"
+            ) from exc
 
     async def get_brief_revision(
         self, workspace_id: UUID, brief_revision_id: UUID
@@ -1981,6 +2071,108 @@ class PostgresTimescaleRepository(ITrendRepository):
                 )
             )
         return missions
+
+    @staticmethod
+    def _manifest_from_row(row) -> MissionManifest:
+        return MissionManifest(
+            mission_id=UUID(str(row[0])),
+            outcome=row[1],
+            decision_context=row[2],
+            required_channels=tuple(row[3]),
+            optional_channels=tuple(row[4]),
+            authority_boundary=AuthorityBoundary(**row[5]),
+            quota_budget=dict(row[6]),
+            output_type=row[7],
+            stop_conditions=tuple(row[8]),
+            analysis_policy=row[9],
+            retention_policy=row[10],
+            created_by=row[11],
+            confirmed_at=row[12],
+        )
+
+    _MANIFEST_COLUMNS = (
+        "SELECT mission_id, outcome, decision_context, required_channels, optional_channels,"
+        " authority_boundary, quota_budget, output_type, stop_conditions, analysis_policy,"
+        " retention_policy, created_by, confirmed_at, manifest_digest FROM mission_manifests"
+    )
+
+    @staticmethod
+    async def _write_manifest_row(cur, manifest: MissionManifest) -> None:
+        await cur.execute(
+            "INSERT INTO mission_manifests"
+            " (mission_id, outcome, decision_context, required_channels, optional_channels,"
+            " authority_boundary, quota_budget, output_type, stop_conditions,"
+            " analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest)"
+            " VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s);",
+            (
+                str(manifest.mission_id),
+                manifest.outcome,
+                manifest.decision_context,
+                list(manifest.required_channels),
+                list(manifest.optional_channels),
+                json.dumps(manifest.authority_boundary.to_payload(), sort_keys=True),
+                json.dumps(dict(manifest.quota_budget), sort_keys=True),
+                manifest.output_type.value,
+                list(manifest.stop_conditions),
+                manifest.analysis_policy,
+                manifest.retention_policy,
+                manifest.created_by,
+                manifest.confirmed_at,
+                manifest.manifest_digest,
+            ),
+        )
+
+    async def save_mission_manifest(self, manifest: MissionManifest) -> MissionManifest:
+        if manifest.mission_id is None:
+            raise InvalidMissionManifestError("A persisted manifest requires mission_id.")
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    "INSERT INTO mission_manifests"
+                    " (mission_id, outcome, decision_context, required_channels, optional_channels,"
+                    " authority_boundary, quota_budget, output_type, stop_conditions,"
+                    " analysis_policy, retention_policy, created_by, confirmed_at, manifest_digest)"
+                    " VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)"
+                    " ON CONFLICT (mission_id) DO NOTHING;",
+                    (
+                        str(manifest.mission_id),
+                        manifest.outcome,
+                        manifest.decision_context,
+                        list(manifest.required_channels),
+                        list(manifest.optional_channels),
+                        json.dumps(manifest.authority_boundary.to_payload(), sort_keys=True),
+                        json.dumps(dict(manifest.quota_budget), sort_keys=True),
+                        manifest.output_type.value,
+                        list(manifest.stop_conditions),
+                        manifest.analysis_policy,
+                        manifest.retention_policy,
+                        manifest.created_by,
+                        manifest.confirmed_at,
+                        manifest.manifest_digest,
+                    ),
+                )
+                await cur.execute(
+                    self._MANIFEST_COLUMNS + " WHERE mission_id = %s;",
+                    (str(manifest.mission_id),),
+                )
+                row = await cur.fetchone()
+                stored = self._manifest_from_row(row)
+                if row[13] != manifest.manifest_digest or stored.manifest_digest != manifest.manifest_digest:
+                    raise InvalidMissionManifestError(
+                        f"Mission {manifest.mission_id} already has a different immutable manifest."
+                    )
+        return stored
+
+    async def get_mission_manifest(self, mission_id: UUID) -> Optional[MissionManifest]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    self._MANIFEST_COLUMNS + " WHERE mission_id = %s;", (str(mission_id),)
+                )
+                row = await cur.fetchone()
+        return self._manifest_from_row(row) if row else None
 
     async def claim_mission_writer(self, mission_id: UUID, run_id: UUID) -> bool:
         pool = await self._get_pool()
@@ -2090,21 +2282,35 @@ class PostgresTimescaleRepository(ITrendRepository):
             raise InvalidEvidenceQualificationError(
                 f"Every probe outcome recorded for run {run_id} must belong to that run."
             )
-        if not rows:
-            return 0
         pool = await self._get_pool()
         try:
             # One connection block is one transaction: psycopg commits it on a clean exit and
             # rolls it back on any exception, so a refused row takes the whole run with it.
             async with pool.connection() as conn:
                 async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT m.required_channels, m.optional_channels"
+                        " FROM mission_run_journals j"
+                        " JOIN mission_manifests m ON m.mission_id = j.mission_id"
+                        " WHERE j.id = %s;",
+                        (str(run_id),),
+                    )
+                    manifest_row = await cur.fetchone()
+                    if manifest_row is not None:
+                        require_complete_channel_outcomes(
+                            manifest_row[0], manifest_row[1], rows
+                        )
+                    elif not rows:
+                        return 0
                     await cur.executemany(
-                        "INSERT INTO mission_probe_outcomes (run_id, platform, connector_surface,"
+                        "INSERT INTO mission_probe_outcomes (id, run_id, platform, connector_surface,"
                         " status, signals_collected, queried_keywords, queried_window,"
-                        " query_fingerprint, completed_at)"
-                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);",
+                        " query_fingerprint, scope_attestation, note, collection_plan_digest,"
+                        " evidence_contract_version, completed_at)"
+                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s);",
                         [
                             (
+                                str(o.outcome_id),
                                 str(o.run_id),
                                 o.platform,
                                 o.connector_surface,
@@ -2113,6 +2319,14 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 list(o.queried_keywords),
                                 o.queried_window,
                                 o.query_fingerprint,
+                                (
+                                    json.dumps(dict(o.scope_attestation), sort_keys=True)
+                                    if o.scope_attestation is not None
+                                    else None
+                                ),
+                                o.note,
+                                o.collection_plan_digest,
+                                2 if o.collection_plan_digest is not None else 1,
                                 o.completed_at,
                             )
                             for o in rows
@@ -2131,9 +2345,10 @@ class PostgresTimescaleRepository(ITrendRepository):
         async with pool.connection() as conn:
             async with conn.cursor(row_factory=tuple_row) as cur:
                 await cur.execute(
-                    "SELECT o.run_id, o.platform, o.connector_surface, o.status,"
+                    "SELECT o.id, o.run_id, o.platform, o.connector_surface, o.status,"
                     " o.signals_collected, o.query_fingerprint, o.completed_at,"
-                    " o.queried_keywords, o.queried_window"
+                    " o.queried_keywords, o.queried_window, o.scope_attestation, o.note,"
+                    " o.collection_plan_digest"
                     " FROM mission_probe_outcomes o"
                     " WHERE o.run_id = ("
                     "   SELECT j.id FROM mission_run_journals j"
@@ -2145,22 +2360,27 @@ class PostgresTimescaleRepository(ITrendRepository):
                 rows = await cur.fetchall()
         return [
             MissionProbeOutcome(
-                run_id=UUID(str(r[0])),
-                platform=r[1],
-                connector_surface=r[2],
-                status=r[3],
-                signals_collected=int(r[4]),
-                query_fingerprint=r[5],
-                completed_at=r[6],
-                queried_keywords=tuple(r[7] or ()),
-                queried_window=r[8],
+                outcome_id=UUID(str(r[0])),
+                run_id=UUID(str(r[1])),
+                platform=r[2],
+                connector_surface=r[3],
+                status=r[4],
+                signals_collected=int(r[5]),
+                query_fingerprint=r[6],
+                completed_at=r[7],
+                queried_keywords=tuple(r[8] or ()),
+                queried_window=r[9],
+                scope_attestation=r[10],
+                note=r[11],
+                collection_plan_digest=r[12],
             )
             for r in rows
         ]
 
     _QUALIFICATION_COLUMNS = (
         "SELECT mission_id, observation_id, brief_revision_id, frame_fingerprint, relation,"
-        " purpose, confidence, reason_code, judged_by, model, created_at"
+        " purpose, confidence, reason_code, judged_by, model, hypothesis_target, evidence_role,"
+        " evidence_contract_version, created_at"
         " FROM mission_evidence_qualifications"
     )
 
@@ -2177,7 +2397,10 @@ class PostgresTimescaleRepository(ITrendRepository):
             reason_code=row[7],
             judged_by=row[8],
             model=row[9],
-            created_at=row[10],
+            hypothesis_target=row[10],
+            evidence_role=row[11],
+            evidence_contract_version=row[12],
+            created_at=row[13],
         )
 
     async def list_evidence_qualifications(
@@ -2215,8 +2438,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                         await cur.execute(
                             "INSERT INTO mission_evidence_qualifications (mission_id,"
                             " observation_id, brief_revision_id, frame_fingerprint, relation,"
-                            " purpose, confidence, reason_code, judged_by, model)"
-                            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                            " purpose, confidence, reason_code, judged_by, model,"
+                            " hypothesis_target, evidence_role, evidence_contract_version)"
+                            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                             " ON CONFLICT (mission_id, observation_id) DO NOTHING;",
                             (
                                 str(q.mission_id),
@@ -2229,6 +2453,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 q.reason_code.value,
                                 q.judged_by,
                                 q.model,
+                                q.hypothesis_target,
+                                q.evidence_role.value if q.evidence_role else None,
+                                q.evidence_contract_version,
                             ),
                         )
                         if cur.rowcount:
@@ -2254,3 +2481,254 @@ class PostgresTimescaleRepository(ITrendRepository):
                 f"The batch names evidence mission {mission_id} does not hold, so none of it was "
                 f"recorded: {exc}"
             ) from exc
+
+    @staticmethod
+    def _claim_from_rows(row, binding_rows: Sequence[Any]) -> MissionClaim:
+        bindings = tuple(
+            MissionClaimEvidence(
+                binding_id=UUID(str(binding[0])),
+                claim_id=UUID(str(binding[1])),
+                observation_id=_uuid_or_none(binding[2]),
+                probe_outcome_id=_uuid_or_none(binding[3]),
+                role=EvidenceDirection(binding[4]),
+                hypothesis_target=binding[5],
+            )
+            for binding in binding_rows
+        )
+        return MissionClaim(
+            claim_id=UUID(str(row[0])),
+            mission_id=UUID(str(row[1])),
+            brief_revision_id=_uuid_or_none(row[2]),
+            frame_digest=row[3],
+            client_claim_key=row[4],
+            claim_type=ClaimType(row[5]),
+            wording=row[6],
+            inference_method=row[7],
+            metric_denominator=row[8],
+            metric_timeframe=row[9],
+            confidence=row[10],
+            limitations=tuple(row[11] or ()),
+            change_conditions=tuple(row[12] or ()),
+            status=ClaimStatus(row[13]),
+            withheld_reasons=tuple(row[14] or ()),
+            created_by=row[15],
+            created_at=row[16],
+            evidence_bindings=bindings,
+        )
+
+    _CLAIM_COLUMNS = (
+        "SELECT id, mission_id, brief_revision_id, frame_digest, client_claim_key, claim_type,"
+        " wording, inference_method, metric_denominator, metric_timeframe, confidence,"
+        " limitations, change_conditions, status,"
+        " withheld_reasons, created_by, created_at FROM mission_claims"
+    )
+    _BINDING_COLUMNS = (
+        "SELECT id, claim_id, observation_id, probe_outcome_id, role, hypothesis_target"
+        " FROM mission_claim_evidence"
+    )
+
+    async def _read_claims(
+        self, mission_id: UUID, *, include_superseded: bool, conn=None
+    ) -> List[MissionClaim]:
+        pool = await self._get_pool()
+
+        async def _read(active_conn):
+            async with active_conn.cursor(row_factory=tuple_row) as cur:
+                where = " WHERE mission_id = %s"
+                if not include_superseded:
+                    where += " AND status <> 'SUPERSEDED'"
+                await cur.execute(
+                    self._CLAIM_COLUMNS + where + " ORDER BY created_at, id;",
+                    (str(mission_id),),
+                )
+                rows = await cur.fetchall()
+                result = []
+                for row in rows:
+                    await cur.execute(
+                        self._BINDING_COLUMNS + " WHERE claim_id = %s ORDER BY id;",
+                        (str(row[0]),),
+                    )
+                    result.append(self._claim_from_rows(row, await cur.fetchall()))
+                return result
+
+        if conn is not None:
+            return await _read(conn)
+        async with pool.connection() as active_conn:
+            return await _read(active_conn)
+
+    async def save_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
+    ) -> List[MissionClaim]:
+        batch = list(claims)
+        if any(
+            str(claim.mission_id) != str(mission_id) or claim.frame_digest != frame_digest
+            for claim in batch
+        ):
+            raise InvalidMissionClaimError(
+                "Every claim in a batch must name the requested mission and evidence frame."
+            )
+        if not batch:
+            return []
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    for claim in batch:
+                        await cur.execute(
+                            "INSERT INTO mission_claims"
+                            " (id, mission_id, brief_revision_id, frame_digest, client_claim_key,"
+                            " claim_type, wording, inference_method, metric_denominator,"
+                            " metric_timeframe, confidence, limitations,"
+                            " change_conditions, status, withheld_reasons, created_by, created_at)"
+                            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                            " ON CONFLICT (mission_id, frame_digest, client_claim_key) DO NOTHING;",
+                            (
+                                str(claim.claim_id),
+                                str(claim.mission_id),
+                                str(claim.brief_revision_id) if claim.brief_revision_id else None,
+                                claim.frame_digest,
+                                claim.client_claim_key,
+                                claim.claim_type.value,
+                                claim.wording,
+                                claim.inference_method,
+                                claim.metric_denominator,
+                                claim.metric_timeframe,
+                                claim.confidence,
+                                list(claim.limitations),
+                                list(claim.change_conditions),
+                                claim.status.value,
+                                list(claim.withheld_reasons),
+                                claim.created_by,
+                                claim.created_at,
+                            ),
+                        )
+                        if cur.rowcount:
+                            for binding in claim.evidence_bindings:
+                                if binding.claim_id != claim.claim_id:
+                                    raise InvalidMissionClaimError(
+                                        "Every evidence binding must name the claim carrying it."
+                                    )
+                                await cur.execute(
+                                    "INSERT INTO mission_claim_evidence"
+                                    " (id, claim_id, observation_id, probe_outcome_id, role,"
+                                    " hypothesis_target) VALUES (%s, %s, %s, %s, %s, %s);",
+                                    (
+                                        str(binding.binding_id),
+                                        str(binding.claim_id),
+                                        (
+                                            str(binding.observation_id)
+                                            if binding.observation_id
+                                            else None
+                                        ),
+                                        (
+                                            str(binding.probe_outcome_id)
+                                            if binding.probe_outcome_id
+                                            else None
+                                        ),
+                                        binding.role.value,
+                                        binding.hypothesis_target,
+                                    ),
+                                )
+                            continue
+                        await cur.execute(
+                            self._CLAIM_COLUMNS
+                            + " WHERE mission_id = %s AND frame_digest = %s"
+                            " AND client_claim_key = %s;",
+                            (str(mission_id), frame_digest, claim.client_claim_key),
+                        )
+                        existing = await cur.fetchone()
+                        await cur.execute(
+                            self._BINDING_COLUMNS + " WHERE claim_id = %s ORDER BY id;",
+                            (str(existing[0]),),
+                        )
+                        stored = self._claim_from_rows(existing, await cur.fetchall())
+                        if stored.idempotency_payload() != claim.idempotency_payload():
+                            raise InvalidMissionClaimError(
+                                f"client_claim_key {claim.client_claim_key!r} already names a different claim."
+                            )
+                stored = await self._read_claims(
+                    mission_id, include_superseded=True, conn=conn
+                )
+            by_identity = {
+                (claim.frame_digest, claim.client_claim_key): claim for claim in stored
+            }
+            return [
+                by_identity[(claim.frame_digest, claim.client_claim_key)] for claim in batch
+            ]
+        except pg_errors.IntegrityError as exc:
+            raise InvalidMissionClaimError(
+                f"The claim batch violates its evidence binding contract: {exc}"
+            ) from exc
+
+    async def list_mission_claims(
+        self, mission_id: UUID, *, include_superseded: bool = False
+    ) -> List[MissionClaim]:
+        return await self._read_claims(
+            mission_id, include_superseded=include_superseded
+        )
+
+    async def supersede_mission_claims(self, mission_id: UUID, current_frame_digest: str) -> int:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE mission_claims SET status = 'SUPERSEDED'"
+                    " WHERE mission_id = %s AND frame_digest <> %s AND status <> 'SUPERSEDED';",
+                    (str(mission_id), current_frame_digest),
+                )
+                return cur.rowcount
+
+    async def load_mission_evidence_snapshot(self, mission_id: UUID):
+        from ignis.infrastructure.persistence.evidence_snapshot import (
+            SnapshotConnectionPool,
+            read_evidence_snapshot,
+        )
+
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                reader = copy.copy(self)
+                reader._pool = SnapshotConnectionPool(conn)
+                return await read_evidence_snapshot(reader, mission_id)
+
+    async def inventory_legacy_baseline(self) -> Dict[str, Any]:
+        """Bypass runtime bootstrap guards with a dedicated read-only transaction."""
+
+        def _sync_inventory() -> Dict[str, Any]:
+            with psycopg.connect(self._dsn) as conn:
+                conn.execute("SET TRANSACTION READ ONLY")
+                signals = conn.execute(
+                    "SELECT id, captured_at, source_url, metadata FROM trend_signals"
+                    " WHERE mission_id IS NULL ORDER BY id"
+                ).fetchall()
+                metrics = conn.execute(
+                    "SELECT sm.id, sm.signal_id FROM signal_metrics sm"
+                    " JOIN trend_signals ts ON ts.id = sm.signal_id"
+                    " WHERE ts.mission_id IS NULL ORDER BY sm.signal_id, sm.id"
+                ).fetchall()
+                orphans = conn.execute(
+                    "SELECT sm.id FROM signal_metrics sm LEFT JOIN trend_signals ts"
+                    " ON ts.id = sm.signal_id WHERE ts.id IS NULL ORDER BY sm.id"
+                ).fetchall()
+                excluded = conn.execute(
+                    "SELECT count(*) FROM trend_signals WHERE mission_id IS NOT NULL"
+                ).fetchone()[0]
+                return {
+                    "signals": [
+                        {
+                            "id": str(row[0]),
+                            "captured_at": row[1].isoformat() if row[1] else None,
+                            "source_url_present": bool(row[2]),
+                            "metadata_present": bool(row[3]),
+                        }
+                        for row in signals
+                    ],
+                    "metrics": [
+                        {"id": int(row[0]), "signal_id": str(row[1])} for row in metrics
+                    ],
+                    "orphan_metric_ids": [int(row[0]) for row in orphans],
+                    "excluded_mission_rows": int(excluded),
+                }
+
+        return await asyncio.to_thread(_sync_inventory)

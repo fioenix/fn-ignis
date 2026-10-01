@@ -3,13 +3,12 @@
   "name": "fn-ignis",
   "title": "fnIgnis",
   "version": "0.7.0",
-  "description": "Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform by FINOLABS",
+  "description": "Self-hosted mission-bound social evidence collection and Market analysis by FINOLABS",
   "author": "FINOLABS",
   "capabilities": [
-    "trend_monitoring",
+    "social_listening",
     "voice_of_customer",
     "opportunity_scoring",
-    "autonomous_discovery",
     "mcp_server"
   ],
   "transport": {
@@ -24,13 +23,12 @@
       "DEFAULT_GEO": "${DEFAULT_GEO}",
       "YOUTUBE_API_KEY": "${YOUTUBE_API_KEY}",
       "YOUTUBE_SEARCH_DAILY_LIMIT": "${YOUTUBE_SEARCH_DAILY_LIMIT}",
-      "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT": "${YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT}",
       "YOUTUBE_OTHER_DAILY_UNIT_LIMIT": "${YOUTUBE_OTHER_DAILY_UNIT_LIMIT}"
     }
   },
   "protocols": {
     "sop": "6_step_market_research",
-    "tools_count": 47,
+    "tools_count": 41,
     "prompts": [
       "market_research_pipeline",
       "voice_of_customer_audit"

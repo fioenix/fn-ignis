@@ -202,16 +202,17 @@ async def test_search_across_all_reaches_the_tiktok_video_grid():
 
 
 @pytest.mark.asyncio
-async def test_fetch_from_all_forwards_scheduled_identity_to_keyword_probes():
+async def test_fetch_from_all_rejects_scheduled_identity_before_probing():
     plugin = TriggerAwareVideoGrid()
     registry = _registry(plugin)
 
-    await registry.fetch_from_all(
-        seed_keywords=["ai agent"],
-        trigger=IngressTrigger.SCHEDULED,
-    )
+    with pytest.raises(ValueError, match="explicit requested"):
+        await registry.fetch_from_all(
+            seed_keywords=["ai agent"],
+            trigger="scheduled",
+        )
 
-    assert plugin.triggers == [IngressTrigger.SCHEDULED]
+    assert plugin.triggers == []
 
 
 @pytest.mark.asyncio
@@ -399,8 +400,59 @@ class BrokenGridPlugin(VideoGridPlugin):
         raise ConnectorExecutionException("selector changed")
 
 
+class CredentialLeakingGridPlugin(VideoGridPlugin):
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20):
+        raise ConnectorExecutionException(
+            "GET https://api.example.test/search?key=live-google-key-123&access_token=live-meta-token-456"
+        )
+
+
+class CredentialLeakingBlockedPlugin(VideoGridPlugin):
+    async def keyword_search_blocked_reason(self):
+        return "Missing session?access_token=live-blocked-token-123"
+
+    async def search_signals(
+        self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20, attestation=None
+    ):
+        attestation.blocked("Missing session?access_token=live-blocked-token-123")
+        return []
+
+
+class CredentialLeakingAttestationPlugin(VideoGridPlugin):
+    async def search_signals(
+        self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20, attestation=None
+    ):
+        attestation.failed(keywords[0], "request?key=live-attestation-key-123")
+        return []
+
+
+class CapturingAuditRepository:
+    def __init__(self):
+        self.events = []
+
+    async def log_event(self, **event):
+        self.events.append(event)
+
+
 def _by_surface(result):
     return {o.connector_surface: (o.status, o.signals_collected) for o in result.outcomes}
+
+
+@pytest.mark.asyncio
+async def test_requirement_preflight_blocks_missing_required_but_marks_missing_optional_unrequested():
+    registry = _registry(EmptyYouTubePlugin())
+
+    requirements = await registry.resolve_execution_requirements(
+        target_platforms=[PlatformType.YOUTUBE, PlatformType.THREADS, PlatformType.REELS],
+        allowed_surfaces=("youtube", "threads", "reels"),
+        required_surfaces=("youtube", "threads"),
+        optional_surfaces=("reels",),
+        keywords=["ai agent"],
+    )
+
+    assert requirements["resources"] == ("youtube",)
+    assert requirements["unavailable_resources"] == ("threads",)
+    assert requirements["not_requested_resources"] == ("reels",)
 
 
 @pytest.mark.asyncio
@@ -435,6 +487,41 @@ async def test_a_failed_probe_is_never_reported_as_an_empty_one():
         "youtube": (ChannelHealthStatus.EMPTY_NO_DATA, 0),
     }
     assert _by_surface(failed) == {"tiktok_video_grid": (ChannelHealthStatus.DEGRADED, 0)}
+
+
+@pytest.mark.asyncio
+async def test_connector_failures_redact_credentials_from_outcome_log_and_audit(caplog):
+    repository = CapturingAuditRepository()
+    registry = ConnectorPluginRegistry(repository=repository)
+    registry.register(CredentialLeakingGridPlugin())
+
+    with caplog.at_level("ERROR"):
+        result = await registry.search_with_outcomes(keywords=["ai agent"])
+
+    rendered = " ".join(
+        [result.outcomes[0].note or "", caplog.text]
+        + [str(event) for event in repository.events]
+    )
+    assert "live-google-key-123" not in rendered
+    assert "live-meta-token-456" not in rendered
+    assert "[REDACTED_SECRET]" in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "plugin, leaked",
+    [
+        (CredentialLeakingBlockedPlugin(), "live-blocked-token-123"),
+        (CredentialLeakingAttestationPlugin(), "live-attestation-key-123"),
+    ],
+)
+async def test_connector_attestation_notes_are_redacted_before_the_outcome_boundary(
+    plugin, leaked
+):
+    result = await _registry(plugin).search_with_outcomes(keywords=["ai agent"])
+
+    assert leaked not in result.outcomes[0].note
+    assert "[REDACTED_SECRET]" in result.outcomes[0].note
 
 
 @pytest.mark.asyncio

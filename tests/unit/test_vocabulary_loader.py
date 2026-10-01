@@ -239,35 +239,3 @@ def test_the_machinery_list_is_not_duplicated_in_the_use_cases():
         "MACHINERY_DOMAINS in vocabulary_loader is the only list of non-topic domains. "
         f"Found a second one in: {offenders}"
     )
-
-
-@pytest.mark.asyncio
-async def test_discovery_reports_an_empty_scope_instead_of_inventing_keywords(tmp_path):
-    """An empty macro scan with no seeds must say so, not fall back to five compiled-in terms."""
-    from unittest.mock import AsyncMock, MagicMock
-
-    from ignis.application.use_cases.autonomous_discovery import AutonomousDiscoveryUseCase
-    from ignis.domain.value_objects import GeoCode
-
-    repository = AsyncMock()
-    repository.list_missions.return_value = []
-    repository.save_mission.return_value = None
-    # No Creative Center plugin registered, and an empty lexicon: nothing to probe with.
-    repository.get_domain_lexicons.return_value = []
-    registry = MagicMock()
-    registry._plugins = {}
-
-    use_case = AutonomousDiscoveryUseCase(
-        repository=repository,
-        registry=registry,
-        clusterer=MagicMock(),
-        quality_evaluator=MagicMock(),
-        strategic_reasoner=MagicMock(),
-        artifact_builder=MagicMock(),
-    )
-
-    result = await use_case.execute(geo=GeoCode.VN)
-
-    assert result["status"] == "NO_SCOPE"
-    assert result["keyword_source"] == "none"
-    assert "register_domain_lexicon" in result["message"]

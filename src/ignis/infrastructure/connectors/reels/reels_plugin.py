@@ -366,8 +366,8 @@ class ReelsPlugin(IConnectorPlugin):
         if not media_ids:
             return {}
 
-        # The 15-minute worker pass re-reads the same media; serving them from the TTL
-        # cache is what keeps this under Meta's 200 calls/user/hour budget.
+        # Repeated requested probes can revisit the same media; the TTL cache limits
+        # duplicate calls against Meta's 200 calls/user/hour budget.
         insights, pending = self._insights_cache.partition(
             PlatformType.REELS.value, media_ids, self.INSIGHT_METRICS
         )
@@ -691,3 +691,6 @@ class ReelsPlugin(IConnectorPlugin):
             )
 
         return signals
+    @property
+    def http_authority(self) -> str:
+        return "official_api"

@@ -12,6 +12,7 @@ scan is the form of them a later caller cannot work around at runtime.
 
 import ast
 import re
+import subprocess
 import unicodedata
 from pathlib import Path
 
@@ -156,6 +157,25 @@ def test_vocabulary_debt_allowlists_stay_accurate():
     stale = [rel for rel in SRC_NON_ASCII_ALLOWLIST if not (SRC / rel).exists()]
     stale += [f"{rel}:{name}" for rel, name in KNOWN_VOCABULARY_CONSTANTS if not (SRC / rel).exists()]
     assert not stale, f"Allowlist entries pointing at missing files: {stale}"
+
+
+def test_agent_guidance_routes_only_explicit_mission_bound_work():
+    for relative in ("AGENTS.md", "CLAUDE.md", ".codexrules", ".agents/skills/fn-ignis-harness/SKILL.md"):
+        text = (REPO / relative).read_text(encoding="utf-8")
+        assert "ignis-collect" in text or "collection" in text, relative
+        assert "ignis-analyze" in text or "analysis" in text, relative
+        for removed_tool in ("trigger_autonomous_discovery", "get_latest_daily_discovery", "create_research_mission"):
+            assert removed_tool not in text, f"{relative}: {removed_tool}"
+
+
+def test_report_templates_have_one_committed_source_directory():
+    template_root = REPO / "src/ignis/infrastructure/templates/html"
+    assert template_root.is_dir()
+    assert list(template_root.glob("*.html"))
+    tracked_reports = subprocess.check_output(
+        ["git", "ls-files", "--", "reports/*.html"], cwd=REPO, text=True
+    ).splitlines()
+    assert not tracked_reports, "runtime reports must not be committed as template code"
 
 
 # ---------------------------------------------------------------------------
