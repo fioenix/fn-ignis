@@ -17,7 +17,7 @@ async def test_requested_calls_never_admit_more_than_the_shared_limit(tmp_path):
     repo = SqliteTrendRepository(f"sqlite:///{tmp_path / 'quota.db'}")
     manager = YouTubeQuotaManager(
         repo,
-        policy=YouTubeQuotaPolicy(search_daily_limit=2, scheduled_search_daily_limit=1),
+        policy=YouTubeQuotaPolicy(search_daily_limit=2),
         now=lambda: datetime(2026, 9, 29, 12, tzinfo=timezone.utc),
     )
 
@@ -43,7 +43,7 @@ async def test_pacific_day_rollover_opens_a_fresh_bucket_without_restart(tmp_pat
     current = [datetime(2026, 9, 30, 6, 59, tzinfo=timezone.utc)]
     manager = YouTubeQuotaManager(
         SqliteTrendRepository(f"sqlite:///{tmp_path / 'rollover.db'}"),
-        policy=YouTubeQuotaPolicy(search_daily_limit=1, scheduled_search_daily_limit=1),
+        policy=YouTubeQuotaPolicy(search_daily_limit=1),
         now=lambda: current[0],
     )
 
@@ -66,7 +66,7 @@ async def test_provider_exhaustion_closes_only_the_named_bucket_until_reset(tmp_
 
     manager = YouTubeQuotaManager(
         SqliteTrendRepository(f"sqlite:///{tmp_path / 'exhausted.db'}"),
-        policy=YouTubeQuotaPolicy(search_daily_limit=5, scheduled_search_daily_limit=3),
+        policy=YouTubeQuotaPolicy(search_daily_limit=5),
         now=lambda: datetime(2026, 9, 29, 12, tzinfo=timezone.utc),
     )
     await manager.reserve(YouTubeQuotaBucket.SEARCH_LIST, IngressTrigger.REQUESTED)
@@ -89,7 +89,7 @@ async def test_admitted_reservation_is_not_refunded_when_the_caller_fails(tmp_pa
 
     manager = YouTubeQuotaManager(
         SqliteTrendRepository(f"sqlite:///{tmp_path / 'no-refund.db'}"),
-        policy=YouTubeQuotaPolicy(search_daily_limit=1, scheduled_search_daily_limit=1),
+        policy=YouTubeQuotaPolicy(search_daily_limit=1),
         now=lambda: datetime(2026, 9, 29, 12, tzinfo=timezone.utc),
     )
 
@@ -119,7 +119,7 @@ def test_pacific_reset_uses_daylight_saving_rules():
 
 @pytest.mark.asyncio
 async def test_separate_sqlite_repository_instances_cannot_overspend_concurrently(tmp_path):
-    """Removing BEGIN IMMEDIATE would let worker and MCP both take the final call."""
+    """Removing BEGIN IMMEDIATE would let two requested callers take the final call."""
     from ignis.application.youtube_quota import YouTubeQuotaManager
     from ignis.domain.exceptions import ConnectorQuotaExceededException
     from ignis.domain.value_objects import IngressTrigger
@@ -130,7 +130,7 @@ async def test_separate_sqlite_repository_instances_cannot_overspend_concurrentl
     def clock():
         return datetime(2026, 9, 29, 12, tzinfo=timezone.utc)
 
-    policy = YouTubeQuotaPolicy(search_daily_limit=3, scheduled_search_daily_limit=2)
+    policy = YouTubeQuotaPolicy(search_daily_limit=3)
     managers = [
         YouTubeQuotaManager(SqliteTrendRepository(dsn), policy=policy, now=clock)
         for _ in range(5)
@@ -156,40 +156,35 @@ async def test_separate_sqlite_repository_instances_cannot_overspend_concurrentl
 
 
 @pytest.mark.asyncio
-async def test_scheduled_cap_preserves_requested_capacity_and_requested_can_borrow(tmp_path):
-    """Using one undifferentiated cap would let the radar starve an explicit request."""
+async def test_scheduled_identity_cannot_reserve_quota(tmp_path):
+    """Historical scheduled usage is readable, but no new scheduled call may be admitted."""
     from ignis.application.youtube_quota import YouTubeQuotaManager
-    from ignis.domain.exceptions import ConnectorQuotaExceededException
     from ignis.domain.value_objects import IngressTrigger
     from ignis.domain.youtube_quota import YouTubeQuotaBucket, YouTubeQuotaPolicy
 
     manager = YouTubeQuotaManager(
         SqliteTrendRepository(f"sqlite:///{tmp_path / 'allocation.db'}"),
-        policy=YouTubeQuotaPolicy(search_daily_limit=4, scheduled_search_daily_limit=2),
+        policy=YouTubeQuotaPolicy(search_daily_limit=4),
         now=lambda: datetime(2026, 9, 29, 12, tzinfo=timezone.utc),
     )
-    await manager.reserve(YouTubeQuotaBucket.SEARCH_LIST, IngressTrigger.SCHEDULED)
-    await manager.reserve(YouTubeQuotaBucket.SEARCH_LIST, IngressTrigger.SCHEDULED)
+    with pytest.raises(ValueError, match="requested work"):
+        await manager.reserve(YouTubeQuotaBucket.SEARCH_LIST, "scheduled")
 
-    with pytest.raises(ConnectorQuotaExceededException):
-        await manager.reserve(YouTubeQuotaBucket.SEARCH_LIST, IngressTrigger.SCHEDULED)
-
-    third = await manager.reserve(YouTubeQuotaBucket.SEARCH_LIST, IngressTrigger.REQUESTED)
-    fourth = await manager.reserve(YouTubeQuotaBucket.SEARCH_LIST, IngressTrigger.REQUESTED)
-    assert (third.used, fourth.used) == (3, 4)
-    assert fourth.scheduled_used == 2
+    first = await manager.reserve(YouTubeQuotaBucket.SEARCH_LIST, IngressTrigger.REQUESTED)
+    assert first.used == 1
+    assert first.scheduled_used == 0
 
 
 @pytest.mark.asyncio
-async def test_requested_work_can_borrow_unused_scheduled_capacity(tmp_path):
-    """A rigid 30-call requested partition would strand unused daily capacity."""
+async def test_requested_work_can_use_the_full_shared_capacity(tmp_path):
+    """The former scheduled partition no longer reserves capacity."""
     from ignis.application.youtube_quota import YouTubeQuotaManager
     from ignis.domain.value_objects import IngressTrigger
     from ignis.domain.youtube_quota import YouTubeQuotaBucket, YouTubeQuotaPolicy
 
     manager = YouTubeQuotaManager(
         SqliteTrendRepository(f"sqlite:///{tmp_path / 'borrow.db'}"),
-        policy=YouTubeQuotaPolicy(search_daily_limit=4, scheduled_search_daily_limit=3),
+        policy=YouTubeQuotaPolicy(search_daily_limit=4),
         now=lambda: datetime(2026, 9, 29, 12, tzinfo=timezone.utc),
     )
 

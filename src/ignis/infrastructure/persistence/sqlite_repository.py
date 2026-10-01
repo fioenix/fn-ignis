@@ -166,7 +166,6 @@ class SqliteTrendRepository(ITrendRepository):
         cost: int,
         trigger: IngressTrigger,
         daily_limit: int,
-        scheduled_limit: Optional[int],
         now: datetime,
     ) -> YouTubeQuotaReservation:
         await self._ensure_schema()
@@ -181,16 +180,12 @@ class SqliteTrendRepository(ITrendRepository):
                     (quota_day.isoformat(), bucket.value),
                 ).fetchone()
                 used = int(row["used"]) if row else 0
-                scheduled_used = int(row["scheduled_used"]) if row else 0
                 exhausted = bool(row["exhausted"]) if row else False
-                scheduled_cost = cost if trigger == IngressTrigger.SCHEDULED else 0
+                if trigger != IngressTrigger.REQUESTED:
+                    raise ValueError("YouTube quota can only be reserved for requested work.")
                 admitted = (
                     not exhausted
                     and used + cost <= daily_limit
-                    and (
-                        scheduled_limit is None
-                        or scheduled_used + scheduled_cost <= scheduled_limit
-                    )
                 )
                 if admitted:
                     stamp = now.astimezone(timezone.utc).isoformat()
@@ -206,7 +201,7 @@ class SqliteTrendRepository(ITrendRepository):
                             quota_day.isoformat(),
                             bucket.value,
                             cost,
-                            scheduled_cost,
+                            0,
                             stamp,
                             stamp,
                         ),

@@ -611,8 +611,8 @@ class ThreadsPlugin(IConnectorPlugin):
         if not post_ids:
             return {}
 
-        # The 15-minute worker pass re-reads the same posts; serving them from the TTL
-        # cache is what keeps this under Meta's 200 calls/user/hour budget.
+        # Repeated requested probes can revisit the same posts; the TTL cache limits
+        # duplicate calls against Meta's 200 calls/user/hour budget.
         insights, pending = self._insights_cache.partition(
             PlatformType.THREADS.value, post_ids, self.INSIGHT_METRICS
         )

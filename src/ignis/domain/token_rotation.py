@@ -2,7 +2,7 @@
 
 Tier-1 sessions (Threads, Instagram Reels, TikTok) are captured by hand, so they tend to be
 created in one sitting and therefore expire in one sitting too. Planning refreshes apart from
-each other keeps the always-on radar from losing every authenticated channel on the same day.
+each other keeps future requested missions from losing every authenticated channel on the same day.
 """
 
 from datetime import datetime, timedelta, timezone

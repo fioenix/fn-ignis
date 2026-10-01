@@ -63,9 +63,6 @@ async def run_all_case_studies():
                     repo,
                     YouTubeQuotaPolicy(
                         search_daily_limit=settings.YOUTUBE_SEARCH_DAILY_LIMIT,
-                        scheduled_search_daily_limit=(
-                            settings.YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT
-                        ),
                         other_daily_unit_limit=settings.YOUTUBE_OTHER_DAILY_UNIT_LIMIT,
                     ),
                 ),

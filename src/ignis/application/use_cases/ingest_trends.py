@@ -18,28 +18,8 @@ logger = logging.getLogger(__name__)
 # function word, because ambiguous_unigrams sorts first alphabetically and filled the budget.
 # How many seed keywords a public pass hands to a connector that has no public feed of its own.
 MAX_SEED_KEYWORDS = 10
-# Total keywords one pass may probe with, lexicon seeds and freshly discovered topics combined.
-#
-# Each YouTube keyword consumes one `search.list` call. Google accounts for those calls in their
-# own 100-call daily bucket; fn-ignis reserves 70 of them for scheduled work and leaves at least
-# 30 for requested research. The persisted admission ledger is authoritative. The arithmetic
-# below is only an operator warning and intentionally does not change the existing cadence.
+# Total keywords one requested pass may probe with, lexicon seeds and discovered topics combined.
 MAX_TOPIC_KEYWORDS = 10
-
-YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT = 70
-
-
-def quota_safe_interval_seconds(
-    keywords_per_pass: int = MAX_TOPIC_KEYWORDS,
-    scheduled_search_daily_limit: int = YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT,
-) -> int:
-    """Shortest advisory cadence that fits the scheduled search-call allocation.
-
-    The database ledger remains the hard boundary because worker and MCP calls share one key and
-    a scheduler tick can land at any point in the provider's Pacific-Time quota day.
-    """
-    passes_per_day = max(1, scheduled_search_daily_limit // max(1, keywords_per_pass))
-    return 86_400 // passes_per_day
 
 
 class IngestTrendsUseCase:

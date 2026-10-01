@@ -152,10 +152,10 @@ class PostgresTimescaleRepository(ITrendRepository):
         cost: int,
         trigger: IngressTrigger,
         daily_limit: int,
-        scheduled_limit: Optional[int],
         now: datetime,
     ) -> YouTubeQuotaReservation:
-        scheduled_cost = cost if trigger == IngressTrigger.SCHEDULED else 0
+        if trigger != IngressTrigger.REQUESTED:
+            raise ValueError("YouTube quota can only be reserved for requested work.")
         pool = await self._get_pool()
         async with pool.connection() as conn:
             async with conn.cursor(row_factory=tuple_row) as cur:
@@ -163,31 +163,24 @@ class PostgresTimescaleRepository(ITrendRepository):
                     "INSERT INTO youtube_quota_buckets"
                     " (quota_day, bucket, used, scheduled_used, exhausted, created_at, updated_at)"
                     " SELECT %s, %s, %s, %s, FALSE, %s, %s"
-                    " WHERE %s <= %s AND (%s IS NULL OR %s <= %s)"
+                    " WHERE %s <= %s"
                     " ON CONFLICT (quota_day, bucket) DO UPDATE SET"
                     " used = youtube_quota_buckets.used + EXCLUDED.used,"
                     " scheduled_used = youtube_quota_buckets.scheduled_used + EXCLUDED.scheduled_used,"
                     " updated_at = EXCLUDED.updated_at"
                     " WHERE NOT youtube_quota_buckets.exhausted"
                     " AND youtube_quota_buckets.used + EXCLUDED.used <= %s"
-                    " AND (%s IS NULL OR youtube_quota_buckets.scheduled_used"
-                    "      + EXCLUDED.scheduled_used <= %s)"
                     " RETURNING quota_day, bucket, used, scheduled_used, exhausted, updated_at;",
                     (
                         quota_day,
                         bucket.value,
                         cost,
-                        scheduled_cost,
+                        0,
                         now,
                         now,
                         cost,
                         daily_limit,
-                        scheduled_limit,
-                        scheduled_cost,
-                        scheduled_limit,
                         daily_limit,
-                        scheduled_limit,
-                        scheduled_limit,
                     ),
                 )
                 row = await cur.fetchone()

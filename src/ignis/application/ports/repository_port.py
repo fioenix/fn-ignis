@@ -255,7 +255,6 @@ class ITrendRepository(ABC):
         cost: int,
         trigger: IngressTrigger,
         daily_limit: int,
-        scheduled_limit: Optional[int],
         now: datetime,
     ) -> YouTubeQuotaReservation:
         """Atomically admit and record one YouTube request, or return the current refusal state."""
@@ -275,5 +274,4 @@ class ITrendRepository(ABC):
     async def get_youtube_quota_usage(self, quota_day: date) -> List[YouTubeQuotaUsage]:
         """Return persisted usage for the named Pacific-Time quota day."""
         pass
-
 

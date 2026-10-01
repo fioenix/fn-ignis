@@ -63,11 +63,6 @@ class Settings(BaseSettings):
         ge=1,
         description="Daily search.list call allocation for the configured YouTube project",
     )
-    YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT: int = Field(
-        default=70,
-        ge=0,
-        description="Maximum daily search.list calls admitted for scheduled Track 1 work",
-    )
     YOUTUBE_OTHER_DAILY_UNIT_LIMIT: int = Field(
         default=10_000,
         ge=1,

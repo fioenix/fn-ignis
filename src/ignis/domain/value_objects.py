@@ -1,17 +1,8 @@
 from enum import Enum
 
 class IngressTrigger(str, Enum):
-    """Who asked for an ingress pass, which decides how strictly its content is filtered.
+    """An ingress pass exists only for an explicit person or agent request."""
 
-    SCHEDULED is the unattended radar: nobody is watching, and whatever it stores it keeps, so a
-    title written in a script the region does not use is noise the corpus carries forever.
-    REQUESTED is a person or an agent asking a specific question, and the answer may legitimately
-    be in another language -- a sourcing question reaching Chinese suppliers, say. The distinction
-    is the requester, not the code path: `trigger_ingress_refresh` runs the same function as the
-    worker and is still a request.
-    """
-
-    SCHEDULED = "scheduled"
     REQUESTED = "requested"
 
 
@@ -19,10 +10,8 @@ class IngestRuntime(str, Enum):
     """What a connector needs in order to pull right now.
 
     HTTP_API means an official endpoint reachable with plain HTTP. BROWSER means a headless
-    browser session — which cannot be assumed everywhere: shipping Playwright plus a Chromium
-    build turns the worker image from ~90MB into ~500MB, and driving that scraper unattended
-    around the clock is what gets an IP blocked. Deployments without a browser runtime simply
-    leave those connectors out instead of registering them to fail every cycle.
+    browser session, which cannot be assumed on every host. A connector without its required
+    runtime is reported unavailable for the requested task rather than started unattended.
     """
 
     HTTP_API = "http_api"
@@ -212,5 +201,4 @@ def timeframe_to_days(timeframe_input: object) -> int:
             f"Unknown timeframe {timeframe.value!r}. Use one of: "
             + ", ".join(t.value for t in Timeframe)
         ) from None
-
 

@@ -827,9 +827,8 @@ async def test_postgres_quota_reservation_never_overspends_under_concurrency(emp
                     quota_day=date(2026, 9, 29),
                     bucket=YouTubeQuotaBucket.SEARCH_LIST,
                     cost=1,
-                    trigger=IngressTrigger.SCHEDULED,
-                    daily_limit=100,
-                    scheduled_limit=7,
+                    trigger=IngressTrigger.REQUESTED,
+                    daily_limit=7,
                     now=now,
                 )
                 for _ in range(20)
@@ -842,7 +841,7 @@ async def test_postgres_quota_reservation_never_overspends_under_concurrency(emp
     assert sum(item.admitted for item in reservations) == 7
     assert len(usage) == 1
     assert usage[0].used == 7
-    assert usage[0].scheduled_used == 7
+    assert usage[0].scheduled_used == 0
 
 
 def test_re_applying_024_and_the_whole_chain_changes_no_quota_state(supabase_like_dsn):

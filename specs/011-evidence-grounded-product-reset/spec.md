@@ -88,6 +88,11 @@
 
 ### Session 2026-10-01
 
+- Q: What happens to the historical YouTube `scheduled_used` quota column after scheduled
+  collection is removed? → A: Keep it readable for audit and migration compatibility, but
+  admit only `REQUESTED` reservations, never increment scheduled usage, and remove the scheduled
+  cap from active policy, configuration, and manifests (agent decided; basis: FR-002 and the
+  approved no-unattended-collection cutover).
 - Q: May the synchronous strategic reasoner produce a Market opportunity from qualified raw
   observations without loading the persisted current-frame Claim Ledger? → A: No. The reasoner
   may expose channel audit observations but must not mint Market verdicts; Market analysis,

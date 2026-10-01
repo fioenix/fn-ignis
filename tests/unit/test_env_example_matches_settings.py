@@ -17,7 +17,6 @@ PINNED_TO_DEFAULT = [
     "DEFAULT_GEO",
     "META_INSIGHTS_CACHE_TTL_SECONDS",
     "YOUTUBE_SEARCH_DAILY_LIMIT",
-    "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT",
     "YOUTUBE_OTHER_DAILY_UNIT_LIMIT",
 ]
 
@@ -26,14 +25,12 @@ def test_settings_expose_youtube_quota_policy_defaults():
     loaded = Settings(_env_file=None)
 
     assert loaded.YOUTUBE_SEARCH_DAILY_LIMIT == 100
-    assert loaded.YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT == 70
     assert loaded.YOUTUBE_OTHER_DAILY_UNIT_LIMIT == 10_000
 
 
 def test_public_launchers_expose_all_youtube_quota_overrides():
     expected_env = {
         "YOUTUBE_SEARCH_DAILY_LIMIT",
-        "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT",
         "YOUTUBE_OTHER_DAILY_UNIT_LIMIT",
     }
     repo = Path(__file__).resolve().parents[2]
@@ -44,7 +41,6 @@ def test_public_launchers_expose_all_youtube_quota_overrides():
     properties = set(smithery["startCommand"]["configSchema"]["properties"])
     assert {
         "youtubeSearchDailyLimit",
-        "youtubeScheduledSearchDailyLimit",
         "youtubeOtherDailyUnitLimit",
     } <= properties
 

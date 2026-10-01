@@ -39,7 +39,6 @@ def ensure_environment_file(project_root: Path) -> Tuple[bool, str]:
             f"IGNIS_ENCRYPTION_KEY={Fernet.generate_key().decode()}\n"
             "YOUTUBE_API_KEY=\n"
             "YOUTUBE_SEARCH_DAILY_LIMIT=100\n"
-            "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT=70\n"
             "YOUTUBE_OTHER_DAILY_UNIT_LIMIT=10000\n"
         )
         env_file.write_text(default_env, encoding="utf-8")

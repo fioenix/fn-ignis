@@ -16,7 +16,7 @@ from ignis.domain.youtube_quota import (
 
 
 class YouTubeQuotaManager:
-    """Admit YouTube requests against the one ledger shared by worker and MCP processes."""
+    """Admit requested YouTube calls against the shared persisted quota ledger."""
 
     def __init__(
         self,
@@ -35,7 +35,6 @@ class YouTubeQuotaManager:
             used=usage.used,
             scheduled_used=usage.scheduled_used,
             limit=self._policy.daily_limit(usage.bucket),
-            scheduled_limit=self._policy.scheduled_limit(usage.bucket),
             exhausted=usage.exhausted,
             reset_at=reset_at,
         )
@@ -48,6 +47,8 @@ class YouTubeQuotaManager:
     ) -> YouTubeQuotaSnapshot:
         if cost < 1:
             raise ValueError("YouTube quota reservation cost must be positive.")
+        if trigger != IngressTrigger.REQUESTED:
+            raise ValueError("YouTube quota can only be reserved for requested work.")
         now = self._now()
         window = quota_window(now)
         result = await self._repository.reserve_youtube_quota(
@@ -56,7 +57,6 @@ class YouTubeQuotaManager:
             cost=cost,
             trigger=trigger,
             daily_limit=self._policy.daily_limit(bucket),
-            scheduled_limit=self._policy.scheduled_limit(bucket),
             now=now,
         )
         snapshot = self._snapshot(result.usage, window.reset_at)
@@ -107,7 +107,6 @@ class YouTubeQuotaManager:
                 "used": snapshot.used,
                 "scheduled_used": snapshot.scheduled_used,
                 "limit": snapshot.limit,
-                "scheduled_limit": snapshot.scheduled_limit,
                 "exhausted": snapshot.exhausted,
             }
         return {

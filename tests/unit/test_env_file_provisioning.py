@@ -28,7 +28,6 @@ def test_created_file_carries_the_shared_youtube_quota_defaults(tmp_path):
     text = (tmp_path / ".env").read_text(encoding="utf-8")
     for setting in (
         "YOUTUBE_SEARCH_DAILY_LIMIT",
-        "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT",
         "YOUTUBE_OTHER_DAILY_UNIT_LIMIT",
     ):
         expected = Settings.model_fields[setting].default

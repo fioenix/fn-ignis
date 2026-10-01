@@ -195,20 +195,11 @@ async def test_keyword_fan_out_stays_within_the_stated_api_unit_budget():
     )
 
 
-def test_quota_safe_interval_matches_the_scheduled_search_call_allocation():
-    """The advisory cadence must use the post-June-2026 search-call bucket."""
-    from ignis.application.use_cases.ingest_trends import (
-        MAX_TOPIC_KEYWORDS,
-        YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT,
-        quota_safe_interval_seconds,
-    )
+def test_requested_ingress_exposes_no_scheduled_cadence():
+    from ignis.application.use_cases import ingest_trends
 
-    interval = quota_safe_interval_seconds()
-    passes_per_day = 86_400 // interval
-    assert passes_per_day * MAX_TOPIC_KEYWORDS <= YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT
-
-    # A narrower fan-out buys back cadence, which is the knob an operator actually has.
-    assert quota_safe_interval_seconds(keywords_per_pass=1) < interval
+    assert not hasattr(ingest_trends, "quota_safe_interval_seconds")
+    assert not hasattr(ingest_trends, "YOUTUBE_SCHEDULED_SEARCH_DAILY_LIMIT")
 
 
 @pytest.mark.asyncio

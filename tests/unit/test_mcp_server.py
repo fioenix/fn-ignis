@@ -210,14 +210,12 @@ async def test_connector_health_exposes_secret_free_youtube_quota_state():
                         "used": 70,
                         "scheduled_used": 70,
                         "limit": 100,
-                        "scheduled_limit": 70,
                         "exhausted": False,
                     },
                     "default_units": {
                         "used": 4,
                         "scheduled_used": 0,
                         "limit": 10_000,
-                        "scheduled_limit": None,
                         "exhausted": False,
                     },
                 },
@@ -242,7 +240,6 @@ async def test_connector_health_exposes_secret_free_youtube_quota_state():
         "used": 70,
         "scheduled_used": 70,
         "limit": 100,
-        "scheduled_limit": 70,
         "exhausted": False,
     }
     assert "must-not-appear" not in raw

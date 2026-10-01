@@ -259,12 +259,12 @@ async def test_uncached_search_reserves_search_and_metrics_before_http():
         await plugin.search_signals(
             ["quota reservation"],
             geo=GeoCode.VN,
-            trigger=IngressTrigger.SCHEDULED,
+            trigger=IngressTrigger.REQUESTED,
         )
 
     assert quota.calls == [
-        (YouTubeQuotaBucket.SEARCH_LIST, IngressTrigger.SCHEDULED, 1),
-        (YouTubeQuotaBucket.DEFAULT_UNITS, IngressTrigger.SCHEDULED, 1),
+        (YouTubeQuotaBucket.SEARCH_LIST, IngressTrigger.REQUESTED, 1),
+        (YouTubeQuotaBucket.DEFAULT_UNITS, IngressTrigger.REQUESTED, 1),
     ]
     assert mock_get.call_count == 2
 
@@ -319,7 +319,7 @@ async def test_transport_failure_does_not_refund_an_admitted_search(tmp_path):
 
     manager = YouTubeQuotaManager(
         SqliteTrendRepository(f"sqlite:///{tmp_path / 'no-refund.db'}"),
-        policy=YouTubeQuotaPolicy(search_daily_limit=5, scheduled_search_daily_limit=3),
+        policy=YouTubeQuotaPolicy(search_daily_limit=5),
         now=lambda: datetime(2026, 9, 29, 12, tzinfo=timezone.utc),
     )
     plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=manager)

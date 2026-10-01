@@ -295,6 +295,8 @@ class ConnectorPluginRegistry:
         the route, the pass ends by dropping content authored by the operator's own accounts, so a
         connector regressing to an account endpoint cannot quietly poison demand analysis.
         """
+        if trigger != IngressTrigger.REQUESTED:
+            raise ValueError("Ingress requires an explicit requested trigger.")
         seeds = [k.strip() for k in (seed_keywords or []) if k and k.strip()]
         discovery_plugins: List[IConnectorPlugin] = []
         probe_plugins: List[IConnectorPlugin] = []
@@ -540,6 +542,8 @@ class ConnectorPluginRegistry:
         that attests nothing, says it cannot search without a session, or ran no query at all
         measured nothing, and is recorded as DEGRADED or AUTH_REQUIRED.
         """
+        if trigger != IngressTrigger.REQUESTED:
+            raise ValueError("Ingress requires an explicit requested trigger.")
         tasks = []
         enabled_plugins = []
         outcomes: Dict[str, SurfaceProbeResult] = {}

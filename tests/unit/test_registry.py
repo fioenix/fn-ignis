@@ -202,16 +202,17 @@ async def test_search_across_all_reaches_the_tiktok_video_grid():
 
 
 @pytest.mark.asyncio
-async def test_fetch_from_all_forwards_scheduled_identity_to_keyword_probes():
+async def test_fetch_from_all_rejects_scheduled_identity_before_probing():
     plugin = TriggerAwareVideoGrid()
     registry = _registry(plugin)
 
-    await registry.fetch_from_all(
-        seed_keywords=["ai agent"],
-        trigger=IngressTrigger.SCHEDULED,
-    )
+    with pytest.raises(ValueError, match="explicit requested"):
+        await registry.fetch_from_all(
+            seed_keywords=["ai agent"],
+            trigger="scheduled",
+        )
 
-    assert plugin.triggers == [IngressTrigger.SCHEDULED]
+    assert plugin.triggers == []
 
 
 @pytest.mark.asyncio
