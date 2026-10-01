@@ -1,8 +1,8 @@
 # Implementation Plan: Evidence-Grounded Product Reset
 
-**Branch label**: `011-evidence-grounded-product-reset`  
-**Date**: 2026-09-29  
-**Spec**: [spec.md](spec.md)  
+**Branch label**: `011-evidence-grounded-product-reset`
+**Date**: 2026-09-29
+**Spec**: [spec.md](spec.md)
 **Approved input**: [Product Proposal](../../docs/PRODUCT_PROPOSAL.vi.md)
 
 ## Summary
@@ -23,24 +23,24 @@ generic benchmark coverage or monetization.
 
 ## Technical Context
 
-**Language/Version**: Python 3.11+ under the repository's current `>=3.11` contract  
+**Language/Version**: Python 3.11+ under the repository's current `>=3.11` contract
 **Primary Dependencies**: FastMCP, Pydantic 2, Pydantic Settings, existing HTTP/browser connector
-stack; no new required runtime dependency  
+stack; no new required runtime dependency
 **Storage**: SQLite by default; PostgreSQL 16 as production backend; workspace run journals and
-generated HTML as projections, not competing canonical stores  
+generated HTML as projections, not competing canonical stores
 **Testing**: pytest and pytest-asyncio; unit, integration, SQLite/PostgreSQL parity, public MCP
-inventory, clean-install, deterministic artifact, and repository-convention gates  
+inventory, clean-install, deterministic artifact, and repository-convention gates
 **Target Platform**: self-hosted MCP server on supported macOS/Linux agent hosts; no resident worker
-process  
+process
 **Project Type**: Python package, FastMCP server, CLI/bootstrap integration, deterministic HTML
-artifact builders, and two host-agent skill packages  
+artifact builders, and two host-agent skill packages
 **Performance Goals**: zero connector or LLM work while idle; preserve existing non-I/O read-path
 latency targets; process semantic submissions in bounded batches of 1–50; reopen persisted missions
-without re-running AI judgments  
+without re-running AI judgments
 **Constraints**: zero-token deterministic ingress; explicit authority for browser sessions, tokens,
 paid quota, migration application, and data deletion; fail-closed strategic analysis; no arbitrary
 unverified dataset as primary evidence; no hidden scheduler; no second report source outside
-`src/ignis/infrastructure/templates/html/`; dual-backend behavioral parity  
+`src/ignis/infrastructure/templates/html/`; dual-backend behavioral parity
 **Scale/Scope**: one breaking product cutover, 47-operation starting MCP inventory, eight planned
 removals, two planned additions, mission evidence schema extensions, two capability skills, and five
 pilot mission conditions for the Vietnam consumer-market beachhead

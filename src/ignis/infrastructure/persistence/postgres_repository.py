@@ -1,5 +1,6 @@
 import asyncio
 import dataclasses
+import copy
 import json
 import logging
 from datetime import date, datetime, timezone
@@ -2676,6 +2677,20 @@ class PostgresTimescaleRepository(ITrendRepository):
                     (str(mission_id), current_frame_digest),
                 )
                 return cur.rowcount
+
+    async def load_mission_evidence_snapshot(self, mission_id: UUID):
+        from ignis.infrastructure.persistence.evidence_snapshot import (
+            SnapshotConnectionPool,
+            read_evidence_snapshot,
+        )
+
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                reader = copy.copy(self)
+                reader._pool = SnapshotConnectionPool(conn)
+                return await read_evidence_snapshot(reader, mission_id)
 
     async def inventory_legacy_baseline(self) -> Dict[str, Any]:
         """Bypass runtime bootstrap guards with a dedicated read-only transaction."""

@@ -1,5 +1,6 @@
 """End-to-end Market verdict controls through both persistence backends."""
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,6 +13,7 @@ from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefU
 from ignis.application.use_cases.create_research_workspace import CreateResearchWorkspaceUseCase
 from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
 from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
+from ignis.application.use_cases.get_mission_claims import GetMissionClaimsUseCase
 from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaimsUseCase
 from ignis.domain.entities import TrendSignal
 from ignis.domain.research_workspace import (
@@ -19,6 +21,7 @@ from ignis.domain.research_workspace import (
     EvidenceDirection,
     EvidencePurpose,
     EvidenceQualification,
+    InvalidMissionClaimError,
     MissionManifest,
     MissionOutputType,
     MissionProbeOutcome,
@@ -220,6 +223,172 @@ def _candidate(condition, signals):
     if condition == "missing_metric":
         candidate["inference_method"] = "conversion-ratio-v1"
     return candidate
+
+
+@pytest.mark.parametrize("reader", ["claims", "analysis"])
+@pytest.mark.asyncio
+async def test_market_readers_never_write_claim_supersession(
+    repository_case, tmp_path, monkeypatch, reader
+):
+    repository = repository_case.repository
+    store, mission, signals, frame = await _mission_case(repository, tmp_path, "sufficient")
+    await SubmitMissionClaimsUseCase(repository, store).execute(
+        str(mission.id), frame.frame_digest, [_candidate("sufficient", signals)],
+        created_by="integration-host",
+    )
+
+    async def forbidden_write(*_args):
+        raise AssertionError("A read must not invalidate another request's current claims")
+
+    monkeypatch.setattr(store, "supersede_mission_claims", forbidden_write)
+    if reader == "claims":
+        result = await GetMissionClaimsUseCase(repository, store).execute(str(mission.id))
+        assert result["render_status"] == "PERMITTED"
+    else:
+        result = await GetMissionAnalysisUseCase(repository, store).execute(mission.id)
+        assert result["analysis_status"] == "READY"
+
+
+@pytest.mark.asyncio
+async def test_stale_submission_withholds_permission_and_preserves_new_claims(
+    repository_case, tmp_path, monkeypatch
+):
+    repository = repository_case.repository
+    store, mission, signals, frame = await _mission_case(repository, tmp_path, "sufficient")
+    submitter = SubmitMissionClaimsUseCase(repository, store)
+    entered, resume = asyncio.Event(), asyncio.Event()
+    real_save = store.save_mission_claims
+
+    async def delayed_save(mission_id, digest, claims):
+        if digest == frame.frame_digest:
+            entered.set()
+            await resume.wait()
+        return await real_save(mission_id, digest, claims)
+
+    monkeypatch.setattr(store, "save_mission_claims", delayed_save)
+    delayed = asyncio.create_task(submitter.execute(
+        str(mission.id), frame.frame_digest, [_candidate("sufficient", signals)],
+        created_by="integration-host",
+    ))
+    await entered.wait()
+    try:
+        extra = TrendSignal(
+            platform=PlatformType.YOUTUBE, raw_title="New context", metric_value=1,
+            source_url="https://example.com/new-context", geo_code=GeoCode.VN,
+            captured_at=NOW, mission_id=mission.id,
+        )
+        await repository.save_signals([extra])
+        brief = await store.get_brief_revision_for_mission(mission.id)
+        extra = next(item for item in await repository.get_mission_signals(mission.id)
+                     if item.raw_title == "New context")
+        await store.save_evidence_qualifications(mission.id, [EvidenceQualification(
+            mission_id=mission.id, observation_id=extra.observation_id,
+            brief_revision_id=brief.brief_revision_id,
+            frame_fingerprint=compute_frame_fingerprint(mission, brief),
+            relation=QualificationRelation.CONTEXT_ONLY, purpose=EvidencePurpose.CONTEXT,
+            confidence=0.85, reason_code=QualificationReason.DIRECT_TO_FRAME,
+            judged_by="integration-host", hypothesis_target="neutral",
+            evidence_role=EvidenceDirection.CONTEXT, evidence_contract_version=2,
+        )])
+        newer = await load_current_evidence_frame(repository, store, mission)
+        current = await submitter.execute(
+            str(mission.id), newer.frame_digest, [_candidate("sufficient", signals)],
+            created_by="integration-host",
+        )
+        assert current["permitted"] == 1
+    finally:
+        resume.set()
+    stale = await delayed
+    assert stale["reason_code"] == "STALE_FRAME"
+    assert stale["render_status"] == "WITHHELD"
+    assert stale["permitted"] == 0
+    ledger = await GetMissionClaimsUseCase(repository, store).execute(
+        str(mission.id), include_superseded=True
+    )
+    assert ledger["counts"] == {"permitted": 1, "withheld": 0, "superseded": 1}
+
+
+@pytest.mark.asyncio
+async def test_snapshot_does_not_mix_a_concurrent_evidence_commit(
+    repository_case, tmp_path, monkeypatch
+):
+    repository = repository_case.repository
+    store, mission, _, _ = await _mission_case(repository, tmp_path, "sufficient")
+    if repository_case.name == "sqlite":
+        repository_case.query_one("PRAGMA journal_mode=WAL", "SELECT 1")
+    real_manifest = type(repository).get_mission_manifest
+    injected = False
+
+    async def concurrent_commit(reader, mission_id):
+        nonlocal injected
+        manifest = await real_manifest(reader, mission_id)
+        if reader is not repository and not injected:
+            injected = True
+            await repository.save_signals([TrendSignal(
+                platform=PlatformType.YOUTUBE, raw_title="Concurrent observation",
+                source_url="https://example.com/snapshot-race", geo_code=GeoCode.VN,
+                captured_at=NOW, mission_id=mission.id,
+            )])
+        return manifest
+
+    monkeypatch.setattr(type(repository), "get_mission_manifest", concurrent_commit)
+    snapshot = await store.load_mission_evidence_snapshot(mission.id)
+    assert injected
+    assert len(snapshot.signals) == 6
+    assert len(await repository.get_mission_signals(mission.id)) == 7
+    assert len(snapshot.qualifications) == 6
+
+
+@pytest.mark.asyncio
+async def test_post_save_frame_failure_never_returns_claim_permission(
+    repository_case, tmp_path, monkeypatch
+):
+    repository = repository_case.repository
+    store, mission, signals, frame = await _mission_case(repository, tmp_path, "sufficient")
+    real_snapshot = store.load_mission_evidence_snapshot
+    reads = 0
+
+    async def broken_final_read(mission_id):
+        nonlocal reads
+        reads += 1
+        if reads == 2:
+            raise InvalidMissionClaimError("Completed frame is no longer readable")
+        return await real_snapshot(mission_id)
+
+    monkeypatch.setattr(store, "load_mission_evidence_snapshot", broken_final_read)
+    result = await SubmitMissionClaimsUseCase(repository, store).execute(
+        str(mission.id), frame.frame_digest, [_candidate("sufficient", signals)],
+        created_by="integration-host",
+    )
+    assert result["render_status"] == "WITHHELD"
+    assert result["permitted"] == 0
+    assert result["recorded"] == 1
+    assert "audit history" in result["note"]
+
+
+@pytest.mark.asyncio
+async def test_claim_projections_redact_pii_without_rewriting_audit_wording(repository_case, tmp_path):
+    repository = repository_case.repository
+    store, mission, signals, frame = await _mission_case(repository, tmp_path, "sufficient")
+    candidate = {
+        **_candidate("sufficient", signals),
+        "wording": "Contact synthetic@example.test about the observed friction.",
+        "limitations": ["Synthetic participant phone: 0931405002"],
+        "change_conditions": ["access_token=synthetic-not-a-live-credential"],
+    }
+    submitted = await SubmitMissionClaimsUseCase(repository, store).execute(
+        str(mission.id), frame.frame_digest, [candidate], created_by="integration-host",
+    )
+    ledger = await GetMissionClaimsUseCase(repository, store).execute(str(mission.id))
+    analysis = await GetMissionAnalysisUseCase(repository, store).execute(mission.id)
+    for payload in (submitted, ledger, analysis):
+        rendered = json.dumps(payload)
+        assert "synthetic@example.test" not in rendered
+        assert "0931405002" not in rendered
+        assert "synthetic-not-a-live-credential" not in rendered
+        assert "[REDACTED_EMAIL]" in rendered
+    stored = await store.list_mission_claims(mission.id, include_superseded=True)
+    assert stored[0].wording == candidate["wording"]
 
 
 @pytest.mark.parametrize(

@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
-from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
+from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
 from ignis.domain.research_workspace import (
     ClaimStatus,
     EvidenceRole,
@@ -18,6 +18,7 @@ from ignis.domain.research_workspace import (
     assess_strategic_sufficiency,
     resolve_surface,
 )
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_data
 
 logger = logging.getLogger(__name__)
 
@@ -176,15 +177,13 @@ class GetMissionAnalysisUseCase:
                 )
             else:
                 result.update(await self._market_contract(mission))
-        return result
+        return sanitize_pii_data(result)
 
     async def _market_contract(self, mission) -> Dict[str, Any]:
         """Return only current-frame persisted claims, or a typed Gap Report."""
-        manifest = await self._store.get_mission_manifest(mission.id)
-        brief = await self._store.get_brief_revision_for_mission(mission.id)
-        signals = await self._repo.get_mission_signals(mission.id)
-        qualifications = await self._store.list_evidence_qualifications(mission.id)
-        outcomes = await self._store.get_latest_completed_probe_outcomes(mission.id)
+        snapshot = await self._store.load_mission_evidence_snapshot(mission.id)
+        manifest, brief = snapshot.manifest, snapshot.brief
+        signals, qualifications, outcomes = snapshot.signals, snapshot.qualifications, snapshot.outcomes
         if manifest is None or brief is None:
             return self._gap_payload(
                 None,
@@ -196,7 +195,7 @@ class GetMissionAnalysisUseCase:
                 (),
             )
         try:
-            frame = await load_current_evidence_frame(self._repo, self._store, mission, manifest)
+            frame = frame_from_snapshot(snapshot)
         except InvalidMissionClaimError as exc:
             return self._gap_payload(
                 None,
@@ -231,10 +230,9 @@ class GetMissionAnalysisUseCase:
             observations=signals,
             query_topics=mission.keywords,
         )
-        await self._store.supersede_mission_claims(mission.id, frame.frame_digest)
         current = [
             claim
-            for claim in await self._store.list_mission_claims(mission.id)
+            for claim in snapshot.claims
             if claim.frame_digest == frame.frame_digest
         ]
         permitted = [claim for claim in current if claim.status is ClaimStatus.PERMITTED]

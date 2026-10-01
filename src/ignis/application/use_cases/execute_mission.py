@@ -110,12 +110,17 @@ class ExecuteMissionUseCase:
                 "The connector registry cannot prove its authority requirements, so no connector "
                 "session was opened.",
             )
+        # Cost the same query union the connector will execute, including counterevidence.
+        # The manifest and per-mission Brief are immutable; connector metadata changes neither.
+        planned_queries = self._collection_queries(
+            await self._build_collection_plan(mission, manifest, {})
+        )
         requirements = await resolver(
             target_platforms=mission.platforms,
             allowed_surfaces=manifest.allowed_resources,
             required_surfaces=manifest.required_channels,
             optional_surfaces=manifest.optional_channels,
-            keywords=mission.keywords,
+            keywords=planned_queries,
         )
         requirements = self._scope_optional_execution(manifest, requirements)
         unavailable = tuple(requirements.get("unavailable_resources", ()))

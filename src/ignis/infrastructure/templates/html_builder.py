@@ -14,7 +14,7 @@ from ignis.domain.harness_models import (
     TrendMaturityStage,
 )
 from ignis.domain.value_objects import GeoCode
-from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_data, sanitize_pii_text
 
 
 def _normalize_insights(raw_insights: List[Any]) -> List[Dict[str, Any]]:
@@ -255,7 +255,9 @@ class HtmlArtifactBuilder(IArtifactBuilder):
     ) -> str:
         template = self._env.get_template("mission_report.html")
         if analysis_contract is not None:
-            analysis_contract = dict(analysis_contract)
+            # Defense at the export boundary also covers callers supplying raw audit claims.
+            # The sanitizer returns a projection and never rewrites canonical ledger wording.
+            analysis_contract = sanitize_pii_data(dict(analysis_contract))
             analysis_contract.setdefault(
                 "template_revision", "mission-report/evidence-grounded-v1"
             )

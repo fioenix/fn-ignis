@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 from uuid import UUID
 
+from ignis.domain.entities import ResearchMission, TrendSignal
+
 from ignis.domain.research_workspace import (
     EvidenceQualification,
     MarketBriefRevision,
@@ -21,6 +23,19 @@ from ignis.domain.research_workspace import (
     ResearchWorkspace,
     WorkspaceStatus,
 )
+
+
+@dataclass(frozen=True)
+class MissionEvidenceSnapshot:
+    """One transaction's evidence and candidate ledger, never a second canonical store."""
+
+    mission: Optional[ResearchMission]
+    manifest: Optional[MissionManifest]
+    brief: Optional[MarketBriefRevision]
+    signals: Sequence[TrendSignal]
+    qualifications: Sequence[EvidenceQualification]
+    outcomes: Sequence[MissionProbeOutcome]
+    claims: Sequence[MissionClaim]
 
 
 @dataclass(frozen=True)
@@ -280,6 +295,10 @@ class IResearchWorkspaceStore(ABC):
     @abstractmethod
     async def supersede_mission_claims(self, mission_id: UUID, current_frame_digest: str) -> int:
         """Mark claims from older evidence frames non-renderable without rewriting their text."""
+
+    @abstractmethod
+    async def load_mission_evidence_snapshot(self, mission_id: UUID) -> MissionEvidenceSnapshot:
+        """Read the frame, sufficiency inputs and claim history in one database snapshot."""
 
     @abstractmethod
     async def inventory_legacy_baseline(self) -> Dict[str, Any]:

@@ -1,7 +1,7 @@
 # Consumer Inventory: Evidence-Grounded Product Reset
 
-**Captured**: 2026-09-30  
-**Base commit**: `483308ca9106710e3b4bbc3792396626cf313a0b`  
+**Captured**: 2026-09-30
+**Base commit**: `483308ca9106710e3b4bbc3792396626cf313a0b`
 **Purpose**: Freeze the live public and runtime consumers before the breaking cutover. Historical
 specs and backlog entries remain historical records; they are not rewritten as current guidance.
 

@@ -121,12 +121,17 @@ demand-versus-supply conclusions. A host cannot enable them with a prose overrid
 
 Records 1–50 typed candidate claims for the exact current evidence frame. The operation validates
 claim type, evidence bindings, qualification roles, sufficiency, limitations, and change
-conditions. It returns each claim as `PERMITTED` or `WITHHELD`; it never rewrites wording.
+conditions. It returns each claim as `PERMITTED` or `WITHHELD`; canonical audit wording is never
+rewritten, while outward projections sanitize personal data. Frame identity, sufficiency, and
+claim selection use one read-only database snapshot. A frame change detected after committing
+the batch returns `CONFLICT` / `STALE_FRAME`, `WITHHELD` rendering, zero permitted claims, and
+the actual recorded count; retained candidates are audit history, not current findings.
 
 ### `get_mission_claims(mission_id)`
 
 Returns the current frame digest, persisted claims, evidence bindings, and render status. Claims
 bound to an older frame remain auditable but are `SUPERSEDED` and cannot render as current findings.
+Supersession is a non-mutating read projection, never a destructive write performed by a reader.
 
 ## Forbidden compatibility behavior
 
@@ -137,4 +142,3 @@ bound to an older frame remain auditable but are `SUPERSEDED` and cannot render 
 - No missing, failed, unauthenticated, or rate-limited channel may be translated into measured zero.
 - No external dataset may become primary Market evidence without mission-scoped verification and
   qualification.
-

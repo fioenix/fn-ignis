@@ -46,7 +46,11 @@ support measured absence only when its state is `EMPTY_NO_DATA` for the exact fr
 - A strategic claim cannot be `PERMITTED` when the mission sufficiency decision is not ready.
 - Submission is idempotent on `(mission_id, frame_digest, client_claim_key)`.
 - A replay that changes the payload for the same key is refused.
-- A new evidence frame does not mutate old claims; it marks them `SUPERSEDED` for current rendering.
+- A new evidence frame does not mutate old claims; read projections mark them `SUPERSEDED`
+  for current rendering using the same transaction snapshot as frame and sufficiency derivation.
+- A frame change detected after a batch commits returns `CONFLICT` / `STALE_FRAME` with
+  `WITHHELD` rendering and zero permitted claims. The response reports the actual recorded count;
+  the immutable audit candidates remain stored but cannot render for another frame.
 
 The repository persists both permitted and withheld candidates so an audit can distinguish “not
 considered” from “considered but blocked.”
@@ -85,3 +89,5 @@ and templates under `src/ignis/infrastructure/templates/html/`.
 - An Attention artifact may rank attention signals but contains no Market verdict.
 - Artifact text never becomes the canonical claim source; persisted claims remain authoritative.
 - The artifact records the frame digest and template revision needed for reproduction.
+- Canonical claim wording stays unchanged; outward claim/analysis projections and HTML exports
+  sanitize personal data in all nested fields, including limitations and change conditions.

@@ -48,6 +48,13 @@ SENSITIVE_FIELD_NAMES = frozenset(
     }
 )
 
+# Evidence identities can resemble formatted phone numbers. Keep their exact bytes for
+# citation resolution, but only after secret-field and credential redaction has run.
+UUID_PATTERN = re.compile(
+    r"(\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b)",
+    re.IGNORECASE,
+)
+
 
 def sanitize_pii_text(text: str) -> str:
     """
@@ -67,11 +74,14 @@ def sanitize_pii_text(text: str) -> str:
     sanitized = NAMED_SECRET_PATTERN.sub(r"\1[REDACTED_SECRET]", sanitized)
     sanitized = BEARER_SECRET_PATTERN.sub(r"\1[REDACTED_SECRET]", sanitized)
 
-    # 3. Redact Vietnamese Phones
-    sanitized = VN_PHONE_PATTERN.sub("[REDACTED_PHONE]", sanitized)
-
-    # 4. Redact Structured International Formatted Phones
-    sanitized = INTERNATIONAL_FORMATTED_PHONE_PATTERN.sub("[REDACTED_PHONE]", sanitized)
+    # Phone matching must not consume a fragment of a canonical evidence UUID.
+    parts = UUID_PATTERN.split(sanitized)
+    for index in range(0, len(parts), 2):
+        parts[index] = VN_PHONE_PATTERN.sub("[REDACTED_PHONE]", parts[index])
+        parts[index] = INTERNATIONAL_FORMATTED_PHONE_PATTERN.sub(
+            "[REDACTED_PHONE]", parts[index]
+        )
+    sanitized = "".join(parts)
 
     return sanitized
 

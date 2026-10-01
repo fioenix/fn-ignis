@@ -1,5 +1,6 @@
 """Mission-bound execution stays idle until one confirmed task is explicitly run."""
 
+import asyncio
 import json
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -335,6 +336,96 @@ async def test_idle_install_does_no_research_work_until_an_explicit_manifested_t
     assert registry.connector_calls == 1
     assert len(await store.list_run_journals(mission.id)) == 1
     await repository.close()
+
+
+@pytest.mark.asyncio
+async def test_delayed_preflight_cannot_restart_a_completed_mission(repository_case, tmp_path):
+    repository = repository_case.repository
+    store = WorkspaceRepository(repository=repository)
+    host = tmp_path / "delayed-preflight"
+    host.mkdir()
+    workspace_case = CreateResearchWorkspaceUseCase(store=store)
+    workspace = await workspace_case.confirm(
+        await workspace_case.propose(host, "Delayed preflight"), confirmation=True
+    )
+    mission = await CreateAttentionMissionUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        title="Single authorized run",
+        keywords=["retail setup friction"],
+        platforms=[PlatformType.YOUTUBE],
+        manifest=_manifest(),
+    )
+    entered = asyncio.Event()
+    resume = asyncio.Event()
+
+    class DelayedRegistry(CountingRegistry):
+        async def resolve_execution_requirements(self, **kwargs):
+            result = await super().resolve_execution_requirements(**kwargs)
+            if self.authority_checks == 1:
+                entered.set()
+                await resume.wait()
+            return result
+
+    registry = DelayedRegistry()
+    executor = ExecuteMissionUseCase(repository, registry, CountingClusterer(), store)
+    delayed = asyncio.create_task(executor.execute(mission.id))
+    await entered.wait()
+    try:
+        await executor.execute(mission.id)
+    finally:
+        resume.set()
+    with pytest.raises(MissionTerminalStateError):
+        await delayed
+    assert registry.connector_calls == 1
+    assert len(await store.list_run_journals(mission.id)) == 1
+    assert await store.get_mission_writer_claim(mission.id) is None
+
+
+@pytest.mark.asyncio
+async def test_market_quota_preflight_includes_falsification_queries(repository_case, tmp_path):
+    from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
+    from ignis.domain.research_workspace import InvalidMissionAuthorizationError
+
+    repository = repository_case.repository
+    store = WorkspaceRepository(repository=repository)
+    host = tmp_path / "quota-preflight"
+    host.mkdir()
+    workspace_case = CreateResearchWorkspaceUseCase(store=store)
+    workspace = await workspace_case.confirm(
+        await workspace_case.propose(host, "Quota preflight"), confirmation=True
+    )
+    mission, _ = await ConfirmMarketBriefUseCase(repository, store).execute(
+        workspace_id=workspace.workspace_id,
+        decision="Decide whether to validate retail assistance",
+        target_user="Independent retailers",
+        problem="Inventory setup friction",
+        geo="VN",
+        timeframe="7d",
+        hypothesis="Retailers need inventory assistance",
+        falsifiers=["Retailers report no inventory friction"],
+        alternative_hypotheses=["Training solves the problem", "Outsourcing solves the problem"],
+        null_hypothesis="Inventory assistance has no material effect",
+        kill_criteria=["No repeated purchase friction"],
+        revision_rule="Reframe when contradiction dominates",
+        confirmed_by="requester",
+        keywords=["retail setup friction"],
+        manifest=replace(_manifest(), output_type=MissionOutputType.MARKET_ANALYSIS,
+                         decision_context="Decide whether to validate retail assistance"),
+    )
+
+    class QueryCostRegistry(CountingRegistry):
+        async def resolve_execution_requirements(self, **kwargs):
+            result = await super().resolve_execution_requirements(**kwargs)
+            result["quota_costs"] = {"youtube_search_calls": len(kwargs["keywords"])}
+            return result
+
+    registry = QueryCostRegistry()
+    executor = ExecuteMissionUseCase(repository, registry, CountingClusterer(), store)
+    with pytest.raises(InvalidMissionAuthorizationError) as error:
+        await executor.execute(mission.id)
+    assert error.value.quota_overruns == {"youtube_search_calls": {"budget": 1, "requested": 2}}
+    assert registry.connector_calls == 0
+    assert await store.list_run_journals(mission.id) == []
 
 
 @pytest.mark.asyncio

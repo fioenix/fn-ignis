@@ -258,6 +258,20 @@ separate implementation completion from owner-authorized migration, release, and
 - [ ] T097 Prepare the owner-approved breaking release by synchronizing `pyproject.toml`, `openclaw.json`, `server.json`, `CITATION.cff`, `.openclaw/config.yaml`, `BACKLOG.md`, and regenerated `uv.lock` in one atomic change
 - [ ] T098 Merge, tag, push, and publish only the owner-approved release, then record the PR, merge commit, tag, public package/container checks, and anonymous clean-install evidence in `BACKLOG.md` and `specs/011-evidence-grounded-product-reset/tasks.md`
 
+### PR 43 review follow-up (owner requested 2026-10-02)
+
+- [X] T099 Reproduce and fix reviewed quota, terminal-admission, stale-frame Claim Ledger,
+  and PII projection defects; independently review the fixes and preserve exact UUID bindings.
+  Targeted dual-backend run: 87 passed; subsequent PII/HTML/Market run: 49 passed.
+  The original security scan has zero reportable findings but sealed partial coverage;
+  the independent patch follow-up does not promote it to full security clearance.
+- [X] T100 Run the existing SC-001 performance protocol after review fixes, without live services:
+  10,000 observations, 5 warm-ups and 50 measured calls per backend. SQLite P95 30.882 ms;
+  PostgreSQL P95 22.850 ms; both meet the unchanged P95 < 50 ms contract.
+  These are local read-path measurements, not RES-001 competitor research or pilot results.
+- [ ] T101 Rerun final full dual-backend/Compose verification, publish the reviewed fixes to PR 43,
+  and record the final commit and CI result without merging, tagging, or releasing.
+
 ---
 
 ## Dependencies & Execution Order

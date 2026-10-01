@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
-from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
+from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
 from ignis.domain.research_workspace import (
     ClaimStatus,
     ClaimType,
@@ -18,6 +18,7 @@ from ignis.domain.research_workspace import (
     compute_candidate_claim_key,
     resolve_surface,
 )
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_data
 
 MAX_CLAIMS_PER_BATCH = 50
 BOUND_CLAIM_TYPES = frozenset(
@@ -70,8 +71,8 @@ class SubmitMissionClaimsUseCase:
                 f"A claim batch carries from 1 to {MAX_CLAIMS_PER_BATCH} candidates.",
             )
 
-        manifest = await self._store.get_mission_manifest(mission.id)
-        brief = await self._store.get_brief_revision_for_mission(mission.id)
+        snapshot = await self._store.load_mission_evidence_snapshot(mission.id)
+        manifest, brief = snapshot.manifest, snapshot.brief
         if manifest is None or brief is None:
             return self._refused(
                 base,
@@ -79,9 +80,7 @@ class SubmitMissionClaimsUseCase:
                 "INCOMPLETE_MISSION_FRAME",
                 "The persisted Mission Manifest and confirmed Market Brief are both required.",
             )
-        signals = await self._repository.get_mission_signals(mission.id)
-        qualifications = await self._store.list_evidence_qualifications(mission.id)
-        outcomes = await self._store.get_latest_completed_probe_outcomes(mission.id)
+        signals, qualifications, outcomes = snapshot.signals, snapshot.qualifications, snapshot.outcomes
         context = QualificationContext.build(
             [signal.observation_id for signal in signals if signal.observation_id],
             qualifications,
@@ -90,9 +89,7 @@ class SubmitMissionClaimsUseCase:
             timeframe=mission.timeframe,
         )
         try:
-            frame = await load_current_evidence_frame(
-                self._repository, self._store, mission, manifest
-            )
+            frame = frame_from_snapshot(snapshot)
         except InvalidMissionClaimError as exc:
             return self._refused(base, "BLOCKED", "INCOMPLETE_EVIDENCE_FRAME", str(exc))
         if frame_digest != frame.frame_digest:
@@ -132,7 +129,30 @@ class SubmitMissionClaimsUseCase:
         except (InvalidMissionClaimError, TypeError, ValueError) as exc:
             return self._refused(base, "INVALID", "INVALID_CLAIM_BATCH", str(exc))
 
-        await self._store.supersede_mission_claims(mission.id, frame.frame_digest)
+        # A concurrent evidence writer may commit after validation but before this save.
+        # Retain the exact candidate for audit, but never return permission for a stale frame.
+        try:
+            current = frame_from_snapshot(
+                await self._store.load_mission_evidence_snapshot(mission.id)
+            )
+            unchanged = current.frame_digest == frame.frame_digest
+        except InvalidMissionClaimError:
+            unchanged = False
+        if not unchanged:
+            return {
+                **base,
+                "status": "CONFLICT",
+                "reason_code": "STALE_FRAME",
+                "analysis_status": "INSUFFICIENT_EVIDENCE",
+                "render_status": "WITHHELD",
+                "frame_digest": frame.frame_digest,
+                "recorded": len(stored),
+                "permitted": 0,
+                "withheld": len(stored),
+                "claims": [],
+                "note": "The frame changed during submission. Recorded candidates remain audit "
+                        "history only; read the current frame before submitting again.",
+            }
         permitted_count = sum(claim.status is ClaimStatus.PERMITTED for claim in stored)
         withheld_count = sum(claim.status is ClaimStatus.WITHHELD for claim in stored)
         return {
@@ -148,7 +168,7 @@ class SubmitMissionClaimsUseCase:
             "permitted": permitted_count,
             "withheld": withheld_count,
             "sufficiency": sufficiency.to_payload(),
-            "claims": [claim.to_payload() for claim in stored],
+            "claims": sanitize_pii_data([claim.to_payload() for claim in stored]),
         }
 
     @staticmethod

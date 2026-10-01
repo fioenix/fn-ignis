@@ -24,6 +24,25 @@ def test_sanitize_phone_numbers_and_emails():
     assert "[REDACTED_SECRET]" in cleaned
 
 
+def test_sanitize_pii_preserves_uuid_evidence_bindings():
+    identity = "11111111-2222-4333-8444-555555555555"
+    payload = {
+        "claim_id": identity,
+        "evidence_bindings": [{"observation_id": identity}],
+        "wording": f"Evidence {identity}; contact 0931405002 or support@example.invalid",
+        "access_token": identity,
+    }
+    cleaned = sanitize_pii_data(payload)
+    assert cleaned["claim_id"] == identity
+    assert cleaned["evidence_bindings"][0]["observation_id"] == identity
+    assert identity in cleaned["wording"]
+    assert "0931405002" not in cleaned["wording"]
+    assert "support@example.invalid" not in cleaned["wording"]
+    assert cleaned["access_token"] == "[REDACTED_SECRET]"
+    assert sanitize_pii_text(f"access_token={identity}") == "access_token=[REDACTED_SECRET]"
+    assert payload["access_token"] == identity
+
+
 def test_sanitize_pii_data_recursive():
     nested_data = {
         "title": "Áo thun hotline 0931405002",

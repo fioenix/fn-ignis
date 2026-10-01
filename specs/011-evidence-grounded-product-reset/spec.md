@@ -106,6 +106,19 @@
 
 ### Session 2026-10-02
 
+- Q: How do current-frame claim reads remain safe against concurrent commits? → A: Derive
+  frame identity, sufficiency, and claim selection from one read-only database snapshot;
+  project older claims as SUPERSEDED without mutating their audit rows. Revalidate the frame
+  after a claim batch commits: a concurrent frame change returns CONFLICT/STALE_FRAME with
+  WITHHELD rendering, zero permitted claims, and truthful counts for retained audit candidates.
+  This supersedes the earlier read-time persisted supersession implementation, not the rule
+  that old-frame claims cannot render (agent decided; basis: reproduced concurrent races,
+  immutable evidence history, and independent code review).
+- Q: Does preserving authored claim wording permit exposing personal data in reports? → A:
+  No. Preserve exact wording in the canonical audit ledger, but sanitize the entire outward
+  analysis/claim projection and HTML export, including limitations and change conditions;
+  never modify the caller's input object (agent decided; basis: existing PII sanitation policy
+  and reproduced synthetic email, telephone, and named-token disclosure).
 - Q: Is competitor benchmarking required to complete Spec 011 implementation? → A: No.
   Transfer T091 to a separate research backlog item. The five Ignis pilot conditions and their
   integrity/usefulness measurements remain in scope; an executable competitor benchmark requires

@@ -1,7 +1,7 @@
 # Decision: Mission-Bound Evidence-Grounded Ignis
 
-**Status:** Accepted  
-**Date:** 2026-09-29  
+**Status:** Accepted
+**Date:** 2026-09-29
 **Scope:** Product category, autonomy boundary, research method, and breaking runtime direction
 
 ## Context

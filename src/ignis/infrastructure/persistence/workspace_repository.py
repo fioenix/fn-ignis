@@ -37,6 +37,7 @@ from ignis.domain.research_workspace import (
     MissionClaim,
     MissionManifest,
     MissionProbeOutcome,
+    MissionTerminalStateError,
     MissionWriterConflictError,
     ResearchWorkspace,
     WorkspaceScopeMismatchError,
@@ -233,6 +234,14 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         run_id = run_id or uuid4()
         await self.require_mission_writer(mission_id, run_id)
         try:
+            # Preflight may have awaited while an earlier run completed. Recheck under the
+            # writer slot, before allocating a journal, so delayed admission cannot restart it.
+            mission = await self._repo.get_mission(mission_id)
+            if mission is None:
+                raise WorkspaceScopeMismatchError(f"Mission {mission_id} no longer exists.")
+            status = str(mission.status).upper()
+            if status in {"COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "INSUFFICIENT_EVIDENCE"}:
+                raise MissionTerminalStateError(mission_id, status)
             journal = await self.allocate_run_journal(workspace, mission_id, run_id=run_id)
         except BaseException:
             # No journal, so there is no run to record -- and holding the slot for a run that
@@ -429,6 +438,9 @@ class WorkspaceRepository(IResearchWorkspaceStore):
 
     async def supersede_mission_claims(self, mission_id: UUID, current_frame_digest: str) -> int:
         return await self._repo.supersede_mission_claims(mission_id, current_frame_digest)
+
+    async def load_mission_evidence_snapshot(self, mission_id: UUID):
+        return await self._repo.load_mission_evidence_snapshot(mission_id)
 
     async def inventory_legacy_baseline(self) -> Dict[str, Any]:
         return await self._repo.inventory_legacy_baseline()

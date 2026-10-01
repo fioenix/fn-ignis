@@ -3,7 +3,10 @@
 from typing import Optional
 
 from ignis.application.ports.repository_port import ITrendRepository
-from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
+from ignis.application.ports.research_workspace_port import (
+    IResearchWorkspaceStore,
+    MissionEvidenceSnapshot,
+)
 from ignis.domain.research_workspace import (
     EvidenceFrame,
     InvalidMissionClaimError,
@@ -20,15 +23,24 @@ async def load_current_evidence_frame(
 ) -> EvidenceFrame:
     """Build the one canonical current frame; never accept a caller-supplied digest as current."""
 
-    manifest = manifest or await store.get_mission_manifest(mission.id)
+    snapshot = await store.load_mission_evidence_snapshot(mission.id)
+    return frame_from_snapshot(snapshot)
+
+
+def frame_from_snapshot(snapshot: MissionEvidenceSnapshot) -> EvidenceFrame:
+    """Digest the same transaction bundle used for sufficiency and claim selection."""
+    mission = snapshot.mission
+    manifest = snapshot.manifest
+    if mission is None:
+        raise InvalidMissionClaimError("The mission no longer exists in the evidence snapshot.")
     if manifest is None:
         raise InvalidMissionClaimError(
             "A surfaced mission needs its persisted Mission Manifest before a frame can be derived."
         )
-    brief = await store.get_brief_revision_for_mission(mission.id)
-    signals = await repository.get_mission_signals(mission.id)
-    qualifications = await store.list_evidence_qualifications(mission.id)
-    outcomes = await store.get_latest_completed_probe_outcomes(mission.id)
+    brief = snapshot.brief
+    signals = snapshot.signals
+    qualifications = snapshot.qualifications
+    outcomes = snapshot.outcomes
     plan_digests = {
         outcome.collection_plan_digest
         for outcome in outcomes

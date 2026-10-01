@@ -90,4 +90,3 @@ is accepted and checks at minimum:
 If any required gate fails, the only permitted strategic output is a Gap Report. Safe direct
 observations may remain visible, but Opportunity Index, whitespace, saturation, demand-gap, and
 commercial recommendations are withheld.
-

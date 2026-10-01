@@ -177,6 +177,29 @@ def test_evidence_grounded_ready_artifact_renders_claims_and_counterevidence():
     assert "Requalify against the receiving mission frame." in html
 
 
+def test_claim_artifact_redacts_private_values_from_a_raw_ledger_projection():
+    contract = {
+        "analysis_status": "READY",
+        "evidence_frame": {"frame_digest": "f" * 64},
+        "claim_ledger": {"OBSERVATION": [{
+            "wording": "Participant synthetic@example.test reports a problem.",
+            "client_claim_key": "claim-1", "evidence_bindings": [],
+            "limitations": ["Call 0931405002"],
+            "change_conditions": ["access_token=synthetic-not-a-live-credential"],
+        }]},
+        "channel_outcomes": [], "contradictory_evidence": [],
+    }
+    html = HtmlArtifactBuilder().build_mission_report_artifact(
+        mission=_market_mission(), signals=[], platform_breakdown={}, analysis_contract=contract,
+    )
+    for private in ("synthetic@example.test", "0931405002", "synthetic-not-a-live-credential"):
+        assert private not in html
+    assert "[REDACTED_EMAIL]" in html
+    assert "[REDACTED_PHONE]" in html
+    assert "[REDACTED_SECRET]" in html
+    assert contract["claim_ledger"]["OBSERVATION"][0]["wording"].startswith("Participant synthetic@")
+
+
 def test_html_builder_multi_currency_and_number_filters():
     builder = HtmlArtifactBuilder()
     currency_fn = builder._env.filters["format_currency"]

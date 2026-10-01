@@ -1,5 +1,6 @@
 import asyncio
 import dataclasses
+import copy
 import json
 import logging
 import re
@@ -1624,6 +1625,32 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.close()
 
         return await asyncio.to_thread(_sync_supersede)
+
+    async def load_mission_evidence_snapshot(self, mission_id: UUID):
+        from ignis.infrastructure.persistence.evidence_snapshot import read_evidence_snapshot
+
+        await self._ensure_schema()
+
+        def _open_snapshot():
+            if self._mem_conn is not None:
+                # A transaction on the shared in-memory connection cannot isolate other
+                # threads using that connection. SQLite's backup captures a separate view.
+                conn = sqlite3.connect(":memory:", check_same_thread=False)
+                self._mem_conn.backup(conn)
+                conn.row_factory = sqlite3.Row
+            else:
+                conn = self._get_connection()
+            conn.execute("PRAGMA query_only = ON")
+            conn.execute("BEGIN")
+            return conn
+
+        conn = await asyncio.to_thread(_open_snapshot)
+        reader = copy.copy(self)
+        reader._mem_conn = conn
+        try:
+            return await read_evidence_snapshot(reader, mission_id)
+        finally:
+            await asyncio.to_thread(conn.close)
 
     async def inventory_legacy_baseline(self) -> Dict[str, Any]:
         """Open the existing database read-only; inventory is never a schema bootstrap."""

@@ -1,16 +1,18 @@
 """Read the current Claim Ledger without promoting stale claims to renderable output."""
 
+from dataclasses import replace
 from typing import Any, Dict
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
-from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
+from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
 from ignis.domain.research_workspace import (
     ClaimStatus,
     InvalidMissionClaimError,
     ResearchSurface,
     resolve_surface,
 )
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_data
 
 
 class GetMissionClaimsUseCase:
@@ -38,9 +40,8 @@ class GetMissionClaimsUseCase:
                 "claims": [],
             }
         try:
-            frame = await load_current_evidence_frame(
-                self._repository, self._store, mission
-            )
+            snapshot = await self._store.load_mission_evidence_snapshot(mission.id)
+            frame = frame_from_snapshot(snapshot)
         except InvalidMissionClaimError as exc:
             history = await self._store.list_mission_claims(
                 mission.id, include_superseded=True
@@ -51,13 +52,18 @@ class GetMissionClaimsUseCase:
                 "reason_code": "INCOMPLETE_EVIDENCE_FRAME",
                 "error": str(exc),
                 "render_status": "WITHHELD",
-                "claims": [claim.to_payload() for claim in history],
+                "claims": sanitize_pii_data([claim.to_payload() for claim in history]),
             }
 
-        await self._store.supersede_mission_claims(mission.id, frame.frame_digest)
-        claims = await self._store.list_mission_claims(
-            mission.id, include_superseded=include_superseded
-        )
+        # Supersession is a current-render projection, not a destructive write from a reader
+        # whose snapshot may already be older than a concurrent request's completed frame.
+        claims = [
+            replace(claim, status=ClaimStatus.SUPERSEDED)
+            if claim.frame_digest != frame.frame_digest else claim
+            for claim in snapshot.claims
+        ]
+        if not include_superseded:
+            claims = [claim for claim in claims if claim.status is not ClaimStatus.SUPERSEDED]
         permitted = [
             claim
             for claim in claims
@@ -81,5 +87,5 @@ class GetMissionClaimsUseCase:
                 "withheld": len(withheld),
                 "superseded": len(superseded),
             },
-            "claims": [claim.to_payload() for claim in claims],
+            "claims": sanitize_pii_data([claim.to_payload() for claim in claims]),
         }
