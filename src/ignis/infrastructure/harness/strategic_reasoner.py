@@ -21,9 +21,7 @@ from ignis.domain.harness_models import (
 )
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.infrastructure.harness.language_detector import HeuristicLanguageDetector
-from ignis.domain.probe_provenance import probe_keyword_of
 from ignis.domain.research_workspace import (
-    EvidencePurpose,
     EvidenceRole,
     HandoffStatus,
     MissionLineage,
@@ -33,8 +31,6 @@ from ignis.domain.research_workspace import (
     QualificationStatus,
     QualifiedObservation,
     ResearchSurface,
-    TopicSufficiency,
-    assess_topic_sufficiency,
     opportunity_index_is_allowed,
     resolve_surface,
     select_handoff_candidates,
@@ -134,22 +130,44 @@ class StrategicMarketReasoner:
     ) -> HarnessResearchReport:
         """Analyse one mission.
 
-        `qualification` is supplied for a mission that declared a surface. A Market mission then
-        concludes only from evidence qualified for its confirmed Brief; an Attention mission keeps
-        its exploratory view and gains a handoff answer with no fallback. None keeps the legacy
-        behaviour of a mission that declared no surface.
+        Market verdicts belong exclusively to the persisted current-frame Claim Ledger. This
+        synchronous reasoner has no ledger access, so it returns observations but no Market
+        conclusion. Attention keeps its exploratory view and handoff answer.
         """
-        if qualification is not None and resolve_surface(mission.surface) is ResearchSurface.MARKET:
-            return self._analyze_qualified_market(
-                mission=mission,
-                signals=signals,
-                clusters=clusters,
+        if resolve_surface(mission.surface) is ResearchSurface.MARKET:
+            registry: Dict[str, CitationEvidence] = {}
+            channels = self._channel_summaries(
+                mission, signals, auth_status, connector_health, registry, qualification
+            )
+            for citation in registry.values():
+                citation.evidence_role = EvidenceRole.MARKET_EVIDENCE.value
+            attention_context = self._carry_attention_context(
+                attention_context_signals, registry, geo=mission.geo_code
+            )
+            lineage = MissionLineage.of_mission(mission)
+            progress = qualification.progress if qualification is not None else None
+            return HarnessResearchReport(
+                mission_id=str(mission.id),
+                title=mission.title,
                 scorecard=scorecard,
-                auth_status=auth_status,
-                connector_health=connector_health,
+                maturity_stage=None,
+                channel_summaries=channels,
+                surface=ResearchSurface.MARKET.value,
                 market_brief=market_brief,
-                attention_context_signals=attention_context_signals,
-                qualification=qualification,
+                lineage=None if lineage.is_empty else lineage.to_payload(),
+                attention_context=attention_context,
+                qualification=QualificationSummary(
+                    status=QualificationStatus.INSUFFICIENT_RELEVANT_EVIDENCE.value,
+                    total_evidence=progress.total_evidence if progress else len(signals),
+                    qualified_support=progress.qualified_support if progress else 0,
+                    context_only=progress.context_only if progress else 0,
+                    excluded_irrelevant=progress.excluded_irrelevant if progress else 0,
+                    unassessed=progress.unassessed if progress else len(signals),
+                    question_relevance_score=progress.question_relevance_score if progress else 0.0,
+                    reason="Market conclusions require persisted current-frame permitted claims.",
+                    reason_code="CLAIM_LEDGER_REQUIRED",
+                    next_step="Read the current-frame Claim Ledger or Gap Report.",
+                ),
             )
         maturity_stage, maturity_reasons = self._assess_maturity(signals, clusters, geo=mission.geo_code)
         verified_trends = self._extract_verified_trends(signals, clusters, geo=mission.geo_code)
@@ -227,7 +245,7 @@ class StrategicMarketReasoner:
         )
 
     # ------------------------------------------------------------------
-    # Evidence qualification: Market conclusions and Attention handoff
+    # Evidence qualification: Attention handoff
     # ------------------------------------------------------------------
 
     # Reason text per withheld reason code. Which code applies, and what the Agent does next, is
@@ -278,20 +296,6 @@ class StrategicMarketReasoner:
             next_step=next_step,
         )
 
-    def _belongs_to_topic(self, signal: TrendSignal, topic: str) -> bool:
-        """Whether a qualified observation speaks to one mission topic.
-
-        The query that retrieved it is the strongest evidence of what it is about, so when there
-        is one it decides alone: the title matcher's acronym rule lets any title containing "AI"
-        match every AI topic, which would count one topic's demand as another's. A title match
-        (with the persisted synonyms) covers only evidence that arrived without a query.
-        Relevance itself was already decided by the judgment; this only routes support to a topic.
-        """
-        probe = probe_keyword_of(signal)
-        if probe is not None:
-            return probe == " ".join(topic.split()).casefold()
-        return self._matches_topic_strictly(signal.raw_title or "", topic.lower().strip())
-
     def _qualified_observation(
         self, signal: TrendSignal, qualification: QualificationContext
     ) -> QualifiedObservation:
@@ -301,159 +305,6 @@ class StrategicMarketReasoner:
             source_id=str(signal.source_id) if signal.source_id else None,
             purpose=judged.purpose,
             platform=self._platform_value(signal.platform),
-        )
-
-    def _analyze_qualified_market(
-        self,
-        mission: ResearchMission,
-        signals: List[TrendSignal],
-        clusters: List[TopicCluster],
-        scorecard: QualityScorecard,
-        auth_status: Optional[Dict[str, bool]],
-        connector_health: Optional[Dict[str, Any]],
-        market_brief: Optional[Dict[str, Any]],
-        attention_context_signals: Optional[List[TrendSignal]],
-        qualification: QualificationContext,
-    ) -> HarnessResearchReport:
-        """A Market analysis that concludes only from evidence qualified for its Brief.
-
-        Raw observations stay readable and every channel outcome is reported, but demand, supply,
-        maturity, insights, takeaways and citations draw on QUALIFIED_SUPPORT alone, and only a
-        topic that meets the evidence minimum carries an Opportunity Index.
-        """
-        geo = mission.geo_code
-        registry: Dict[str, CitationEvidence] = {}
-        state = qualification.assessment_state
-        qualified = [s for s in signals if qualification.support_of(s.observation_id)]
-        channel_summaries = self._channel_summaries(
-            mission, signals, auth_status, connector_health, registry, qualification
-        )
-
-        topics: List[TopicSufficiency] = []
-        opportunities: List[MarketOpportunity] = []
-        for raw_kw in mission.keywords or []:
-            topic_signals = [s for s in qualified if self._belongs_to_topic(s, raw_kw)]
-            sufficiency = assess_topic_sufficiency(
-                topic=raw_kw,
-                qualified=[self._qualified_observation(s, qualification) for s in topic_signals],
-                probe_outcomes=qualification.probe_outcomes,
-                geo=qualification.geo,
-                timeframe=qualification.timeframe,
-                assessment_state=state,
-            )
-            topics.append(sufficiency)
-            if sufficiency.state.permits_verdict:
-                opportunities.append(
-                    self._qualified_opportunity(
-                        raw_kw, topic_signals, qualification, sufficiency, registry, geo
-                    )
-                )
-        opportunities.sort(key=lambda o: o.opportunity_index, reverse=True)
-
-        withheld = self._withheld(qualification)
-        next_step: Optional[str] = None
-        if withheld:
-            status = state
-            reason, reason_code, next_step = withheld
-        elif opportunities:
-            status, reason, reason_code = QualificationStatus.READY, None, None
-        else:
-            status = QualificationStatus.INSUFFICIENT_RELEVANT_EVIDENCE
-            reason = "No topic has both qualified demand and qualified supply measurement."
-            reason_code = "NO_SUFFICIENT_TOPIC"
-
-        maturity_stage: Optional[TrendMaturityStage] = None
-        insights: List[StrategicInsight] = []
-        actionables: List[StrategicInsight] = []
-        if status is QualificationStatus.READY:
-            supply = [
-                s for s in qualified
-                if qualification.support_of(s.observation_id).purpose is EvidencePurpose.SUPPLY
-            ]
-            maturity_stage, maturity_reasons = self._assess_maturity(supply, clusters, geo=geo)
-            insights, actionables = self._synthesize_insights(
-                mission,
-                qualified,
-                opportunities,
-                maturity_stage,
-                maturity_reasons,
-                channel_summaries=channel_summaries,
-                citation_registry=registry,
-            )
-
-        for citation in registry.values():
-            citation.evidence_role = EvidenceRole.MARKET_EVIDENCE.value
-        attention_context = self._carry_attention_context(attention_context_signals, registry, geo=geo)
-        strip_context_citations(list(opportunities) + list(insights) + list(actionables))
-        lineage = MissionLineage.of_mission(mission)
-
-        return HarnessResearchReport(
-            mission_id=str(mission.id),
-            title=mission.title,
-            scorecard=scorecard,
-            maturity_stage=maturity_stage,
-            channel_summaries=channel_summaries,
-            verified_cross_platform_trends=self._extract_verified_trends(signals, clusters, geo=geo),
-            market_opportunities=opportunities,
-            strategic_insights=insights,
-            actionable_takeaways=actionables,
-            surface=ResearchSurface.MARKET.value,
-            market_brief=market_brief,
-            lineage=None if lineage.is_empty else lineage.to_payload(),
-            attention_context=attention_context,
-            qualification=self._summary(qualification, status, reason, reason_code, next_step),
-            topic_sufficiency=[
-                {
-                    "topic": t.topic,
-                    "evidence_sufficiency": t.state.value,
-                    "qualified_demand_count": t.qualified_demand_count,
-                    "qualified_supply_count": t.qualified_supply_count,
-                    "independent_supply_sources": t.independent_supply_sources,
-                    "measured_zero_surfaces": list(t.measured_zero_surfaces),
-                    "reason": t.reason,
-                }
-                for t in topics
-            ],
-        )
-
-    def _qualified_opportunity(
-        self,
-        raw_kw: str,
-        topic_signals: List[TrendSignal],
-        qualification: QualificationContext,
-        sufficiency: TopicSufficiency,
-        registry: Dict[str, CitationEvidence],
-        geo: GeoCode,
-    ) -> MarketOpportunity:
-        """Score one sufficient topic from its qualified evidence only.
-
-        The localization heuristic is not applied here: whether an observation addresses the
-        confirmed Brief -- its geography included -- is exactly what the judgment decided.
-        """
-        def purpose_of(signal: TrendSignal) -> EvidencePurpose:
-            return qualification.support_of(signal.observation_id).purpose
-
-        demand = [s for s in topic_signals if purpose_of(s) is EvidencePurpose.DEMAND]
-        supply = [s for s in topic_signals if purpose_of(s) is EvidencePurpose.SUPPLY]
-        demand_score = max(float(s.metric_value or 0.0) for s in demand)
-        supply_score, opportunity_index, opp_type, rec, support_sigs = self._score_topic(
-            raw_kw, demand_score, True, supply
-        )
-        return MarketOpportunity(
-            topic=raw_kw,
-            opportunity_type=opp_type,
-            search_interest_score=round(demand_score, 1),
-            content_supply_score=supply_score,
-            opportunity_index=opportunity_index,
-            strategic_recommendation=rec,
-            supporting_signals=support_sigs,
-            citations=[
-                self._mint_citation(s, registry, geo=geo) for s in (demand[:2] + supply[:3])
-            ],
-            evidence_sufficiency=sufficiency.state.value,
-            qualified_demand_count=sufficiency.qualified_demand_count,
-            qualified_supply_count=sufficiency.qualified_supply_count,
-            independent_supply_sources=sufficiency.independent_supply_sources,
         )
 
     def _qualified_handoff(

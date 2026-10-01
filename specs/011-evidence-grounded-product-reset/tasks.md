@@ -159,7 +159,7 @@ all-confirmatory, and missing-metric controls through the real MCP handlers and 
 - [X] T055 [US3] Implement current and superseded Claim Ledger retrieval with render status in `src/ignis/application/use_cases/get_mission_claims.py`
 - [X] T056 [US3] Export the two new claim use cases from `src/ignis/application/use_cases/__init__.py` and wire them into component construction in `src/ignis/interfaces/mcp/server.py`
 - [X] T057 [US3] Add `submit_mission_claims` and `get_mission_claims` handlers and MCP registrations in `src/ignis/interfaces/mcp/server.py`
-- [ ] T058 [US3] Make analysis and opportunity discovery read only persisted sufficiency and current-frame permitted claims in `src/ignis/application/use_cases/get_mission_analysis.py` and `src/ignis/infrastructure/harness/strategic_reasoner.py`
+- [X] T058 [US3] Make analysis and opportunity discovery read only persisted sufficiency and current-frame permitted claims in `src/ignis/application/use_cases/get_mission_analysis.py` and `src/ignis/infrastructure/harness/strategic_reasoner.py`
 - [X] T059 [US3] Omit Opportunity Index, demand-gap, whitespace, saturation, and commercial recommendations whenever the evidence contract fails in `src/ignis/application/use_cases/get_mission_analysis.py` and `src/ignis/interfaces/mcp/server.py`
 - [X] T060 [US3] Render the current Claim Ledger, contradiction, limitations, decision conditions, frame digest, and Gap Report through `src/ignis/infrastructure/templates/html_builder.py` and `src/ignis/infrastructure/templates/html/mission_report.html`
 - [ ] T061 [US3] Prove the mixed-evidence and fail-closed journeys on both backends with `tests/integration/test_evidence_grounded_market_mission.py` and record results in `.handoff/011-us3.handoff.md`

@@ -644,22 +644,23 @@ def _cited_observation_ids(report) -> set:
     return {c["observation_id"] for p in payloads for c in p["citations"]}
 
 
-def test_market_conclusions_are_serialized_with_canonical_observation_ids():
-    """A Market citation is traced through the observation, not through a title or a URL."""
+def test_direct_market_observations_are_serialized_with_canonical_observation_ids():
+    """A direct Market reasoner provides audit citations but cannot mint conclusions."""
     signals = [
         _stored_signal("ai customer service", "google_rss"),
         _stored_signal("chatbot vn", "youtube", platform=PlatformType.YOUTUBE, metric=50000.0),
     ]
     _, report = _market_report(signals)
 
-    from ignis.interfaces.mcp.server import _serialize_insights, _serialize_opportunity
+    from ignis.interfaces.mcp.server import _serialize_channel_summaries
 
-    cited = (
-        _serialize_insights(report.strategic_insights)
-        + [_serialize_opportunity(o) for o in report.market_opportunities]
-    )
-    citations = [c for payload in cited for c in payload["citations"]]
-    assert citations, "A Market analysis of stored observations must cite at least one of them."
+    citations = [
+        item["top_citation"]
+        for item in _serialize_channel_summaries(report.channel_summaries)
+        if item["top_citation"]
+    ]
+    assert citations
+    assert _cited_observation_ids(report) == set()
 
     known = {str(s.observation_id) for s in signals}
     for citation in citations:
@@ -684,7 +685,11 @@ def test_carried_attention_observations_are_serialized_only_as_context():
 
     # The same observation must not also appear under an opportunity, an insight or a takeaway.
     assert str(carried[0].observation_id) not in _cited_observation_ids(report)
-    assert str(own[0].observation_id) in _cited_observation_ids(report)
+    assert _cited_observation_ids(report) == set()
+    assert any(
+        channel.top_citation.observation_id == str(own[0].observation_id)
+        for channel in report.channel_summaries if channel.top_citation
+    )
 
 
 def test_an_attention_analysis_is_serialized_without_any_market_verdict():
@@ -894,26 +899,27 @@ def test_the_qualification_block_carries_all_four_counts_and_relevance():
     mission, report, _signals = _qualified_market()
     payload = _surface_payload(report, mission)
 
-    assert payload["analysis_status"] == "READY"
+    assert payload["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
     assert payload["qualification"] == {
-        "status": "READY", "total_evidence": 6, "qualified_support": 3, "context_only": 1,
+        "status": "INSUFFICIENT_RELEVANT_EVIDENCE", "total_evidence": 6,
+        "qualified_support": 3, "context_only": 1,
         "excluded_irrelevant": 2, "unassessed": 0, "question_relevance_score": 50.0,
-        "reason": None, "reason_code": None,
+        "reason": "Market conclusions require persisted current-frame permitted claims.",
+        "reason_code": "CLAIM_LEDGER_REQUIRED",
     }
-    assert payload["opportunity_index_applies"] is True
+    assert report.market_opportunities == []
 
 
 def test_a_withheld_verdict_carries_a_machine_readable_reason_and_a_next_step():
-    from ignis.domain.research_workspace import QUALIFICATION_STEP
     from ignis.interfaces.mcp.server import _surface_payload
 
     mission, report, _signals = _qualified_market(assess_all=False)
     payload = _surface_payload(report, mission)
 
-    assert payload["analysis_status"] == "QUALIFICATION_REQUIRED"
-    assert payload["qualification"]["reason_code"] == "QUALIFICATION_INCOMPLETE"
+    assert payload["analysis_status"] == "INSUFFICIENT_RELEVANT_EVIDENCE"
+    assert payload["qualification"]["reason_code"] == "CLAIM_LEDGER_REQUIRED"
     assert payload["qualification"]["reason"]
-    assert payload["next_step"] == QUALIFICATION_STEP, "the step the batch and submit tools give too"
+    assert payload["next_step"] == "Read the current-frame Claim Ledger or Gap Report."
     assert payload["opportunity_index_applies"] is False
     assert report.market_opportunities == [] and report.strategic_insights == []
     assert report.maturity_stage is None
@@ -923,22 +929,17 @@ def test_only_qualified_support_is_ever_cited_and_always_as_market_evidence():
     from ignis.interfaces.mcp.server import _serialize_channel_summaries
 
     mission, report, signals = _qualified_market()
-    qualified = {str(s.observation_id) for s in signals[:3]}
-
     cited = _cited_observation_ids(report)
-    assert cited and cited <= qualified
+    assert cited == set()
     audit = [c["top_citation"] for c in _serialize_channel_summaries(report.channel_summaries) if c["top_citation"]]
-    assert {c["observation_id"] for c in audit} <= qualified, "the channel audit cited noise"
+    assert {c["observation_id"] for c in audit} <= {str(s.observation_id) for s in signals}
     roles = {
         c.evidence_role
         for item in list(report.market_opportunities) + report.strategic_insights + report.actionable_takeaways
         for c in item.citations
     }
-    assert roles == {"MARKET_EVIDENCE"}
-    [opportunity] = report.market_opportunities
-    assert opportunity.evidence_sufficiency == "SUFFICIENT_POSITIVE_SUPPLY"
-    assert (opportunity.qualified_demand_count, opportunity.qualified_supply_count,
-            opportunity.independent_supply_sources) == (1, 2, 2)
+    assert roles == set()
+    assert report.market_opportunities == []
 
 
 def test_the_artifact_and_the_analysis_serialize_one_qualification_block():

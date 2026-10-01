@@ -161,8 +161,21 @@ class GetMissionAnalysisUseCase:
             },
             "top_signals": compact_signals,
         }
-        if surface is ResearchSurface.MARKET and self._store is not None:
-            result.update(await self._market_contract(mission))
+        if surface is ResearchSurface.MARKET:
+            if self._store is None:
+                result.update(
+                    self._gap_payload(
+                        None,
+                        self._gap(
+                            ("INCOMPLETE_MISSION_FRAME",),
+                            ("Persisted mission workspace and Claim Ledger",),
+                            "Open the mission with its persisted research workspace.",
+                        ),
+                        (),
+                    )
+                )
+            else:
+                result.update(await self._market_contract(mission))
         return result
 
     async def _market_contract(self, mission) -> Dict[str, Any]:

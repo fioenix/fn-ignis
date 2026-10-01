@@ -41,6 +41,7 @@ from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.youtube_quota import YouTubeQuotaManager
 from ignis.domain.entities import TopicCluster
+from ignis.domain.harness_models import QualificationSummary
 from ignis.domain.exceptions import IgnisDomainException, VocabularySynchronizationError
 from ignis.domain.research_workspace import (
     RESEARCH_ROOT_SEGMENTS,
@@ -729,7 +730,37 @@ async def handle_evaluate_mission_quality(mission_id: str) -> str:
     scorecard = comp["quality_evaluator"].evaluate_quality(signals, geo=mission.geo_code, timeframe_days=tf_days)
     qualification = await _qualification_for(comp, mission, signals)
     extra: Dict[str, Any] = {}
-    if qualification is not None:
+    if resolve_surface(mission.surface) is ResearchSurface.MARKET:
+        contract = await comp["get_mission_analysis_use_case"].execute(m_id)
+        if "analysis_status" not in contract:
+            contract = _missing_market_analysis_contract()
+        extra = {
+            "analysis_status": contract["analysis_status"],
+            **({"gap_report": contract["gap_report"]} if "gap_report" in contract else {}),
+            **({"qualification": contract["qualification"]} if "qualification" in contract else {}),
+        }
+        if qualification is not None:
+            progress = qualification.progress
+            status = (
+                QualificationStatus.READY
+                if contract["analysis_status"] == "READY"
+                else qualification.decision.status
+            )
+            if status is QualificationStatus.READY and contract["analysis_status"] != "READY":
+                status = QualificationStatus.INSUFFICIENT_RELEVANT_EVIDENCE
+            comp["quality_evaluator"].apply_qualification(
+                scorecard,
+                QualificationSummary(
+                    status=status.value,
+                    total_evidence=progress.total_evidence,
+                    qualified_support=progress.qualified_support,
+                    context_only=progress.context_only,
+                    excluded_irrelevant=progress.excluded_irrelevant,
+                    unassessed=progress.unassessed,
+                    question_relevance_score=progress.question_relevance_score,
+                ),
+            )
+    elif qualification is not None:
         # Whether a conclusion is permitted decides the confidence cap, so the same analysis that
         # every other boundary runs decides it here too.
         clusters = await comp["top_clusters_use_case"].execute(geo=mission.geo_code, limit=20)

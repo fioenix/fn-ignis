@@ -62,7 +62,7 @@ def test_attention_lineage_is_context_and_is_empty_by_default():
 
 
 @pytest.mark.asyncio
-async def test_an_attention_report_carries_no_opportunity_and_a_market_one_does():
+async def test_an_attention_and_direct_market_report_carry_no_opportunity():
     """The boundary is enforced where the number is produced, not where it is rendered.
 
     Computing the index and suppressing it in a serializer would leave it on the report object
@@ -93,7 +93,7 @@ async def test_an_attention_report_carries_no_opportunity_and_a_market_one_does(
         return reasoner.analyze_mission(mission, signals, [], QualityScorecard())
 
     assert _report(ResearchSurface.ATTENTION.value).market_opportunities == []
-    assert _report(ResearchSurface.MARKET.value).market_opportunities != []
+    assert _report(ResearchSurface.MARKET.value).market_opportunities == []
     # A mission created outside a workspace declared no surface and keeps what it had.
     assert _report(None).market_opportunities != []
 
@@ -167,9 +167,10 @@ def test_a_market_report_labels_its_own_observations_as_market_evidence():
     report = StrategicMarketReasoner().analyze_mission(
         mission, [_market_signal()], [], QualityScorecard()
     )
-    cited = [c for opp in report.market_opportunities for c in opp.citations]
+    cited = [ch.top_citation for ch in report.channel_summaries if ch.top_citation]
     assert cited
     assert all(c.evidence_role == EvidenceRole.MARKET_EVIDENCE.value for c in cited)
+    assert report.market_opportunities == []
 
 
 def test_carried_attention_observations_are_labelled_context_and_never_become_support():
@@ -213,7 +214,7 @@ def test_carried_attention_observations_are_labelled_context_and_never_become_su
         + list(report.actionable_takeaways)
         for c in item.citations
     ]
-    assert supporting
+    assert supporting == []
     assert not any(c.observation_id in context_ids for c in supporting)
 
 

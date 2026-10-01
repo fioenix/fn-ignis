@@ -343,6 +343,48 @@ async def test_ready_artifact_returns_and_renders_evidence_policy(
 
 
 @pytest.mark.asyncio
+async def test_quality_boundary_uses_persisted_market_contract(
+    repository_case, tmp_path, monkeypatch
+):
+    from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
+    from ignis.interfaces.mcp import server as mcp_server
+
+    repository = repository_case.repository
+    store, mission, signals, frame = await _mission_case(
+        repository, tmp_path, "sufficient"
+    )
+    await SubmitMissionClaimsUseCase(repository, store).execute(
+        str(mission.id), frame.frame_digest, [_candidate("sufficient", signals)],
+        created_by="integration-host",
+    )
+
+    class _ForbiddenReasoner:
+        def analyze_mission(self, **_kwargs):
+            raise AssertionError("Market quality reached the legacy strategic reasoner")
+
+    async def _skip_lexicon_sync(_components):
+        return None
+
+    monkeypatch.setattr(mcp_server, "_sync_lexicons_from_db", _skip_lexicon_sync)
+    monkeypatch.setattr(
+        mcp_server, "get_components",
+        lambda: {
+            "repository": repository,
+            "workspace_store": store,
+            "get_mission_analysis_use_case": GetMissionAnalysisUseCase(repository, store),
+            "quality_evaluator": QualityEvaluator(),
+            "strategic_reasoner": _ForbiddenReasoner(),
+        },
+    )
+
+    result = json.loads(await mcp_server.handle_evaluate_mission_quality(str(mission.id)))
+
+    assert result["analysis_status"] == "READY"
+    assert result["qualification_counts"]["qualified_support"] > 0
+    assert result["question_relevance_score"] > 0
+
+
+@pytest.mark.asyncio
 async def test_every_public_market_boundary_fails_closed_without_a_persisted_contract(
     repository_case, tmp_path, monkeypatch
 ):
@@ -393,7 +435,7 @@ async def test_every_public_market_boundary_fails_closed_without_a_persisted_con
     for result in (analysis, discovery, artifact):
         assert result["analysis_status"] == "INSUFFICIENT_EVIDENCE"
         assert result["gap_report"]["failed_gates"] == [
-            "PERSISTED_ANALYSIS_CONTRACT_UNAVAILABLE"
+            "INCOMPLETE_MISSION_FRAME"
         ]
         assert "market_opportunities" not in result
     rendered = Path(artifact["artifact_file"]).read_text(encoding="utf-8")

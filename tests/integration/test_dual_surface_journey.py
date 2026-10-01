@@ -379,7 +379,7 @@ async def test_a_confirmed_brief_authorizes_the_run_and_stays_immutable(
 
 
 @pytest.mark.asyncio
-async def test_market_conclusions_are_traceable_to_canonical_observations(
+async def test_direct_market_reasoner_exposes_audit_not_unpersisted_conclusions(
     repository_case, host_workspace
 ):
     repository = repository_case.repository
@@ -409,20 +409,15 @@ async def test_market_conclusions_are_traceable_to_canonical_observations(
 
     assert report.surface == ResearchSurface.MARKET.value
     assert report.market_brief["falsifiers"] == COMPLETE_BRIEF["falsifiers"]
-    assert report.market_opportunities, "A Market mission must produce its opportunity matrix."
+    assert report.market_opportunities == []
+    assert report.strategic_insights == []
+    assert report.qualification.reason_code == "CLAIM_LEDGER_REQUIRED"
 
     observation_ids = {str(s.observation_id) for s in signals}
-    cited = [c for opp in report.market_opportunities for c in opp.citations]
-    assert cited, "An opportunity backed by collected evidence must cite the observations."
-    for opportunity in report.market_opportunities:
-        for citation in opportunity.citations:
-            assert citation.observation_id in observation_ids
-            # The URL is display payload, so it must never be the only handle on the evidence.
-            assert citation.observation_id != citation.url
-
-    for insight in list(report.strategic_insights) + list(report.actionable_takeaways):
-        for citation in insight.citations:
-            assert citation.observation_id in observation_ids
+    cited = [channel.top_citation for channel in report.channel_summaries if channel.top_citation]
+    assert cited
+    assert all(citation.observation_id in observation_ids for citation in cited)
+    assert all(citation.observation_id != citation.url for citation in cited)
 
 
 @pytest.mark.asyncio
@@ -828,7 +823,7 @@ async def test_a_revised_brief_opens_a_new_evidence_line_and_leaves_the_old_one_
 
 
 @pytest.mark.asyncio
-async def test_a_market_conclusion_cites_only_the_evidence_of_its_own_brief(
+async def test_a_direct_market_report_keeps_context_separate_without_a_verdict(
     repository_case, host_workspace
 ):
     """Attention lineage travels with the mission; Attention observations do not become proof."""
@@ -877,9 +872,11 @@ async def test_a_market_conclusion_cites_only_the_evidence_of_its_own_brief(
         + list(report.actionable_takeaways)
         for c in item.citations
     ]
-    assert supporting
-    assert all(c.observation_id in market_ids for c in supporting)
-    assert all(c.evidence_role == "MARKET_EVIDENCE" for c in supporting)
+    assert supporting == []
+    audit = [channel.top_citation for channel in report.channel_summaries if channel.top_citation]
+    assert audit
+    assert all(c.observation_id in market_ids for c in audit)
+    assert all(c.evidence_role == "MARKET_EVIDENCE" for c in audit)
     # The carried observations are reported, and reported as context.
     carried = {c.observation_id for c in report.attention_context}
     assert context_only <= carried

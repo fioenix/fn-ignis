@@ -88,6 +88,11 @@
 
 ### Session 2026-10-01
 
+- Q: May the synchronous strategic reasoner produce a Market opportunity from qualified raw
+  observations without loading the persisted current-frame Claim Ledger? → A: No. The reasoner
+  may expose channel audit observations but must not mint Market verdicts; Market analysis,
+  opportunity, artifact, and quality boundaries read the persisted analysis contract instead
+  (agent decided; basis: FR-015/FR-016 and T058, avoiding a second verdict authority).
 - Q: How should a no-write baseline inventory classify unscoped rows without a documented
   retention reason? → A: List them as exact deletion candidates, not deletion instructions;
   archive candidates require a concrete reason, orphan metrics are held for investigation, and
