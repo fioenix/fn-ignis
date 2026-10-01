@@ -317,6 +317,9 @@ bootstrap readback.
 ### Slice E — Pilot and release gate
 
 - Run the five authorized pilot conditions and record mission/frame identities, not only screenshots.
+- Measure Ignis evidence integrity and decision usefulness. Competitor benchmarking is separate
+  research item RES-001, transferred from T091 by owner approval on 2026-10-02; it is not an
+  implementation-completion prerequisite.
 - Decide separately whether legacy baseline candidates are archived or deleted.
 - Prepare the formal breaking release only after owner authorization and all repository release gates.
 
@@ -349,5 +352,6 @@ would erase authorship, frame binding, and auditability.
 - A bundled AI provider or hidden automatic prose generator.
 - Universal industry or geography claims from the Vietnam beachhead pilot.
 - Monetization, hosted multi-tenancy, or enterprise administration in this feature.
+- Executable competitor benchmarking or claims of superiority; these belong to separate RES-001.
 - Actual migration creation/application, baseline deletion, version bump, tag, or release without
   their separate owner decisions.

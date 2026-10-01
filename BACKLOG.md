@@ -40,6 +40,17 @@ xác minh bản phục hồi, không còn chờ quyền thao tác database dev.
 
 ---
 
+## Nghiên cứu riêng — benchmark đối thủ
+
+- [ ] **RES-001 — thiết kế và thực hiện benchmark có thể tái lập.** Chuyển từ T091 của
+  Spec 011 theo quyết định chủ sở hữu ngày 02/10/2026; chưa thực hiện và không chặn hoàn tất
+  implementation của Spec 011. Năm pilot Ignis vẫn giữ nguyên phạm vi và tiêu chí.
+  Trước khi chạy, xác nhận comparator cài/chạy được, cố định phiên bản và model, đăng ký
+  câu hỏi cùng tiêu chí chấm, tách phép đo thu thập khỏi phép đo phân tích, kiểm soát nguồn
+  và ngân sách, ghi rõ mọi giới hạn so sánh. Đối chiếu tài liệu không được gọi là benchmark
+  thực nghiệm; không có kết quả thì không tuyên bố Ignis vượt trội. Mục này chưa cho phép
+  sử dụng tài khoản, session hoặc quota có phí ngoài phạm vi đã duyệt.
+
 ## 0. Chất Lượng Corpus (Epic Đang Mở)
 
 Đo trực tiếp trên Postgres ngày 09/09/2026. Bản đo chi tiết giữ ngoài repository.

@@ -106,6 +106,10 @@
 
 ### Session 2026-10-02
 
+- Q: Is competitor benchmarking required to complete Spec 011 implementation? → A: No.
+  Transfer T091 to a separate research backlog item. The five Ignis pilot conditions and their
+  integrity/usefulness measurements remain in scope; an executable competitor benchmark requires
+  its own reproducible protocol and accessible comparators (owner approved).
 - Q: How should the new claim triggers resolve unqualified relation names? → A: Pin
   `search_path = public, pg_temp` while retaining SECURITY INVOKER and revoked client execution;
   update unpublished migration 025 and apply an equivalent ALTER FUNCTION repair on Supabase
@@ -425,6 +429,7 @@ silent compatibility alias remains while an on-demand tactical and Market missio
   time, user recall of supporting and contradicting evidence, decision-confidence change, repeat
   intent, and willingness-to-pay without converting those first measurements into unsupported
   growth claims.
+  Competitor comparisons are separate research and do not gate implementation completion.
 - **SC-012**: Every strategic artifact records the exact evidence-frame identity, Brief revision,
   analysis policy, source distribution, missingness, and conditions that could change its verdict.
 

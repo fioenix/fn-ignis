@@ -34,7 +34,7 @@ channel names do not authorize access. If a required channel cannot be approved 
 record that limitation rather than silently replacing it. Exact products, queries, source
 accounts, quota costs, and observed outcomes belong in the executed results.
 
-## Measurements and comparison
+## Pilot measurements
 
 For each case measure time from confirmed Brief to qualified frame, manual analyst minutes,
 percentage of rendered claims with exact eligible bindings, unsupported-verdict escapes,
@@ -43,10 +43,12 @@ owner can recall one supporting and one contradicting observation. Ask the owner
 confidence before and after, next action, repeat-use intent, and willingness to pay; preserve
 raw answers without extrapolating adoption or revenue.
 
-Run the same frozen question and source constraints through one generic research-agent workflow
-and one composable OSS workflow if both are accessible. Compare provenance, falsifier handling,
-missingness, claim traceability, analyst effort, and decision usefulness. Record unavailable
-comparators as unavailable; do not fabricate scores or equalize them by changing the question.
+Competitor benchmarking was transferred from T091 to the separate `RES-001` research item in
+`BACKLOG.md` by owner approval on 2026-10-02. It does not gate Spec 011 implementation completion
+or these five pilot results. No comparative performance or superiority claim is made here.
+That research must first establish executable, version-pinned comparators and a pre-registered
+protocol that separates collection from analysis, controls resource budgets, and records
+unavailable comparisons honestly.
 
 Pilot results go in `pilot-results.md` with mission IDs and exact frame identities. A safe
 partial result or refusal can satisfy the evidence-integrity criteria; it is not a successful

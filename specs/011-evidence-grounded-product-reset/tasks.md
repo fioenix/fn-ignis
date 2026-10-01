@@ -243,7 +243,9 @@ separate implementation completion from owner-authorized migration, release, and
 - [ ] T088 [P] Run the authorized high-volume low-relevance pilot and record qualification and refusal evidence in `specs/011-evidence-grounded-product-reset/pilot-results.md`
 - [ ] T089 [P] Run the authorized contradictory-signals pilot and record how counterevidence changes or conditions the claims in `specs/011-evidence-grounded-product-reset/pilot-results.md`
 - [ ] T090 [P] Run the authorized missing decision-critical metric pilot and record the absent forbidden outputs and next-best probe in `specs/011-evidence-grounded-product-reset/pilot-results.md`
-- [ ] T091 Compare the five pilot outcomes against one generic research-agent workflow and one composable OSS workflow without inventing unavailable metrics in `specs/011-evidence-grounded-product-reset/pilot-results.md`
+- T091 **TRANSFERRED, NOT EXECUTED** (owner approved 2026-10-02): competitor comparison is now
+  `RES-001` in `BACKLOG.md`, outside Spec 011's implementation-completion gate. T085–T090 and
+  the pilot's integrity/usefulness measurements remain required; no benchmark result is claimed.
 - [ ] T092 Run `quickstart.md`, the full unit suite, full dual-backend integration suite, ruff, `git diff --check`, `uv lock --check`, package build, wheel smoke, and fresh Compose init; record exact commands, skips, negative controls, and cleanup in `.handoff/011-final-verification.handoff.md`
 - [ ] T093 Run the read-only legacy inventory, present explicit archive/deletion candidates, and record the owner's disposition decision without changing data in `specs/011-evidence-grounded-product-reset/legacy-disposition.md`
 - [X] T094 Update `BACKLOG.md` and this ledger with implementation evidence, unresolved owner gates, and explicit shipped/not-shipped state without claiming release from local tests

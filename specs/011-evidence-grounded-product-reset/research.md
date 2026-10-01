@@ -192,9 +192,11 @@ authority after the fact.
 ## Decision 10: Pilot validates the wedge before monetization
 
 **Decision**: Run five Vietnam consumer-market missions covering sufficient evidence, auth block,
-high-volume low relevance, contradiction, and missing metric. Compare decision usefulness and
-auditability against a generic research agent and a composable OSS workflow. Capture baselines;
-do not invent adoption or revenue targets.
+high-volume low relevance, contradiction, and missing metric. Capture Ignis integrity and
+decision-usefulness baselines; do not invent adoption or revenue targets. By owner approval on
+2026-10-02, competitor benchmarking moves to separate research item RES-001 in BACKLOG.md and
+does not gate Spec 011 implementation completion. This supersedes the earlier T091 comparison
+requirement, without removing the five real pilot conditions.
 
 **Rationale**: The architectural wedge is not product-market fit. The pilot must show that users
 value custody, counterevidence, and refusal enough to accept the added friction.
