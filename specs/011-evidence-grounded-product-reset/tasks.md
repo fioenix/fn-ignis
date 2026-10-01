@@ -207,8 +207,8 @@ absent while legacy baseline data remains separate and untouched.
 
 ### Tests for User Story 5
 
-- [ ] T069 [P] [US5] Extend the RED public contract to reject aliases, redirects, legacy surface-null mission creation, and any monitor/daily/schedule translation in `tests/unit/test_public_mcp_contract.py`
-- [ ] T070 [P] [US5] Add RED clean-install and manifest-drift assertions for the retained, changed, removed, and new tools in `tests/integration/test_clean_user_journey.py`, `tests/unit/test_tool_manifests_drift.py`, and `scripts/wheel_mcp_smoke.py`
+- [X] T069 [P] [US5] Extend the RED public contract to reject aliases, redirects, legacy surface-null mission creation, and any monitor/daily/schedule translation in `tests/unit/test_public_mcp_contract.py`
+- [X] T070 [P] [US5] Add RED clean-install and manifest-drift assertions for the retained, changed, removed, and new tools in `tests/integration/test_clean_user_journey.py`, `tests/unit/test_tool_manifests_drift.py`, and `scripts/wheel_mcp_smoke.py`
 - [x] T071 [P] [US5] Add RED read-only classification, recoverable manifest, zero-write, and no-promotion cases in `tests/integration/test_legacy_baseline_inventory.py`
 
 ### Implementation for User Story 5
@@ -217,14 +217,14 @@ absent while legacy baseline data remains separate and untouched.
 - [x] T073 [US5] Remove the approved obsolete operation definitions and add the two Claim Ledger operations in `hermes_manifest.json`, `.hermes/tools.json`, and `openclaw.json`
 - [x] T074 [US5] Delete the autonomous-discovery use case and update direct consumers in `src/ignis/application/use_cases/autonomous_discovery.py`, `tests/unit/test_autonomous_discovery.py`, and `tests/unit/test_mission_flow.py`
 - [X] T075 [US5] Remove scheduled-only trigger/filter/config behavior while preserving requested atomic and mission collection in `src/ignis/domain/value_objects.py`, `src/ignis/application/use_cases/ingest_trends.py`, `src/ignis/infrastructure/connectors/registry.py`, and `tests/unit/test_regional_script_gate.py`
-- [ ] T076 [US5] Trace the three trend-template consumers against T001 and delete only consumer-proven unreachable sources from `src/ignis/infrastructure/templates/html/trend_card.html`, `src/ignis/infrastructure/templates/html/trend_dashboard.html`, and `src/ignis/infrastructure/templates/html/trend_graph.html`
+- [X] T076 [US5] Trace the three trend-template consumers against T001 and delete only consumer-proven unreachable sources from `src/ignis/infrastructure/templates/html/trend_card.html`, `src/ignis/infrastructure/templates/html/trend_dashboard.html`, and `src/ignis/infrastructure/templates/html/trend_graph.html`
 - [ ] T077 [US5] Implement read-only legacy classification and recoverable target-manifest generation in `src/ignis/application/use_cases/inventory_legacy_baseline.py`
 - [ ] T078 [US5] Add a thin no-write inventory command in `scripts/inventory_legacy_baseline.py`
-- [ ] T079 [US5] Update English product architecture, bootstrap, tool catalog, agent skills, and superseded-history guidance in `README.md`, `docs/USER_GUIDE.md`, `AGENTS.md`, `CLAUDE.md`, `.codexrules`, and `.agents/skills/fn-ignis-harness/SKILL.md`
-- [ ] T080 [US5] Update Vietnamese market-facing product, capability, refusal, and migration guidance in `README.vi.md` and `docs/USER_GUIDE.vi.md`
-- [ ] T081 [US5] Update package and marketplace descriptions without changing the version in `server.json`, `openclaw.json`, and `bundle/README.md`
-- [ ] T082 [US5] Update repository convention gates for the mission-bound category, absent worker language, English developer guidance, and canonical template boundary in `tests/unit/test_repo_conventions.py` and `tests/unit/test_public_doc_conventions.py`
-- [ ] T083 [US5] Run the clean-install public inventory, tactical probe, Market journey, and legacy inventory tests and record exact results in `.handoff/011-us5.handoff.md`
+- [X] T079 [US5] Update English product architecture, bootstrap, tool catalog, agent skills, and superseded-history guidance in `README.md`, `docs/USER_GUIDE.md`, `AGENTS.md`, `CLAUDE.md`, `.codexrules`, and `.agents/skills/fn-ignis-harness/SKILL.md`
+- [X] T080 [US5] Update Vietnamese market-facing product, capability, refusal, and migration guidance in `README.vi.md` and `docs/USER_GUIDE.vi.md`
+- [X] T081 [US5] Update package and marketplace descriptions without changing the version in `server.json`, `openclaw.json`, and `bundle/README.md`
+- [X] T082 [US5] Update repository convention gates for the mission-bound category, absent worker language, English developer guidance, and canonical template boundary in `tests/unit/test_repo_conventions.py` and `tests/unit/test_public_doc_conventions.py`
+- [X] T083 [US5] Run the clean-install public inventory, tactical probe, Market journey, and legacy inventory tests and record exact results in `.handoff/011-us5.handoff.md`
 
 **Checkpoint**: The implementation is cut over locally, but no baseline record has been archived or
 deleted and no release has been prepared.
@@ -236,7 +236,7 @@ deleted and no release has been prepared.
 **Purpose**: Validate the Vietnam consumer-market wedge, close documentation and backlog state, and
 separate implementation completion from owner-authorized migration, release, and deletion actions.
 
-- [ ] T084 Add five reproducible pilot case definitions, decision outcomes, stop conditions, required channels, and comparison criteria in `specs/011-evidence-grounded-product-reset/pilot-protocol.md`
+- [X] T084 Add five reproducible pilot case definitions, decision outcomes, stop conditions, required channels, and comparison criteria in `specs/011-evidence-grounded-product-reset/pilot-protocol.md`
 - [ ] T085 OWNER GATE: obtain explicit bounded authorization before using any real TikTok, Threads, or Instagram session/token and record allowed accounts, surfaces, quotas, and expiry in `specs/011-evidence-grounded-product-reset/pilot-protocol.md`
 - [ ] T086 [P] Run the authorized sufficient multi-source Vietnam consumer-market pilot and record mission, Brief, frame, claims, limitations, and decision usefulness in `specs/011-evidence-grounded-product-reset/pilot-results.md`
 - [ ] T087 [P] Run the authorized required-channel authentication-block pilot and record the Gap Report and smallest next probe in `specs/011-evidence-grounded-product-reset/pilot-results.md`
@@ -246,7 +246,7 @@ separate implementation completion from owner-authorized migration, release, and
 - [ ] T091 Compare the five pilot outcomes against one generic research-agent workflow and one composable OSS workflow without inventing unavailable metrics in `specs/011-evidence-grounded-product-reset/pilot-results.md`
 - [ ] T092 Run `quickstart.md`, the full unit suite, full dual-backend integration suite, ruff, `git diff --check`, `uv lock --check`, package build, wheel smoke, and fresh Compose init; record exact commands, skips, negative controls, and cleanup in `.handoff/011-final-verification.handoff.md`
 - [ ] T093 Run the read-only legacy inventory, present explicit archive/deletion candidates, and record the owner's disposition decision without changing data in `specs/011-evidence-grounded-product-reset/legacy-disposition.md`
-- [ ] T094 Update `BACKLOG.md` and this ledger with implementation evidence, unresolved owner gates, and explicit shipped/not-shipped state without claiming release from local tests
+- [X] T094 Update `BACKLOG.md` and this ledger with implementation evidence, unresolved owner gates, and explicit shipped/not-shipped state without claiming release from local tests
 - [ ] T095 OWNER GATE: obtain explicit decisions for persistent-database migration application, exact baseline archive/deletion targets, release version, tag, push, and GitHub Release; record each answer in `specs/011-evidence-grounded-product-reset/spec.md`
 - [ ] T096 Apply only the owner-approved persistent migration and baseline disposition with pre-action manifest, recovery path, post-action readback, and evidence in `.handoff/011-owner-authorized-operations.handoff.md`
 - [ ] T097 Prepare the owner-approved breaking release by synchronizing `pyproject.toml`, `openclaw.json`, `server.json`, `CITATION.cff`, `.openclaw/config.yaml`, `BACKLOG.md`, and regenerated `uv.lock` in one atomic change

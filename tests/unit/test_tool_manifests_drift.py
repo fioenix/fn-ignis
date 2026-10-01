@@ -102,3 +102,18 @@ async def test_the_submit_tool_says_its_next_step_follows_the_state_it_produced(
 
     for required in ("qualification_status", "qualification_reason_code", "next_step"):
         assert required in description, required
+
+
+@pytest.mark.asyncio
+async def test_claim_ledger_tools_match_both_manifest_schemas():
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    expected_required = {
+        "submit_mission_claims": ["mission_id", "frame_digest", "candidates", "created_by"],
+        "get_mission_claims": ["mission_id"],
+    }
+    for name, required in expected_required.items():
+        assert tools[name].parameters["required"] == required
+        for manifest in ("hermes_manifest.json", ".hermes/tools.json"):
+            function = _manifest_function(manifest, name)
+            assert function["parameters"] == tools[name].parameters
+            assert function["description"] == tools[name].description

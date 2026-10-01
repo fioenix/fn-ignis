@@ -83,3 +83,42 @@ async def test_no_public_tool_translates_recurring_work_into_a_mission():
     forbidden = ("monitor", "daily", "schedule", "continuous")
     for tool in tools:
         assert not any(word in tool.name for word in forbidden), tool.name
+
+
+@pytest.mark.asyncio
+async def test_new_mission_operations_require_explicit_scope_in_the_public_schema():
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    attention = tools["create_attention_mission"].parameters
+    market = tools["confirm_market_brief"].parameters
+
+    assert {"workspace_id", "requested_outcome", "allowed_resources", "authority_boundary",
+            "output_type", "stop_conditions", "retention_policy"} <= set(attention["required"])
+    assert {"workspace_id", "mission_manifest", "decision", "hypothesis"} <= set(market["required"])
+    assert attention["properties"]["allowed_resources"]["type"] == "array"
+    assert market["properties"]["mission_manifest"]["type"] == "object"
+
+
+@pytest.mark.asyncio
+async def test_no_legacy_unscoped_creation_alias_or_redirect_is_discoverable():
+    names = {tool.name for tool in await mcp.list_tools()}
+    assert names.isdisjoint(REMOVED_TOOLS)
+    for removed in REMOVED_TOOLS:
+        assert not hasattr(server, removed), removed
+        assert not hasattr(server, f"handle_{removed}"), removed
+
+
+def test_mcp_instructions_resources_and_prompts_respect_the_claim_gate():
+    public_guidance = (
+        server.HARNESS_SYSTEM_INSTRUCTIONS,
+        server.get_market_research_sop_resource(),
+        server.get_opportunity_index_methodology(),
+        server.prompt_market_research_pipeline(),
+        server.prompt_voice_of_customer_audit(),
+    )
+    assert "Claim Ledger" in public_guidance[0]
+    assert "Gap Report" in public_guidance[0]
+    assert "Strictly adhere to the 6-Step" not in "\n".join(public_guidance)
+    assert "daily discovery" not in "\n".join(public_guidance).lower()
+    assert "without changing" not in public_guidance[0]
+    assert "before creating a mission or collecting" in public_guidance[3]
+    assert "Do not compute, display, or interpret" in public_guidance[2]

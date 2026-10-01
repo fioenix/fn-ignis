@@ -1,5 +1,9 @@
 # fn-ignis — Review Context
 
+> Historical v0.7.0 review context. The Dual-Track architecture and 47-tool catalog below
+> predate Spec 011; see `specs/011-evidence-grounded-product-reset/` for the current
+> unreleased mission-bound contract.
+
 Written for an engineer or agent asked to review this project and recommend what to do next.
 It states what the system is, what has actually been measured, what has not, and where the
 reasoning is thin. It is in English because it describes `src/` and is read alongside

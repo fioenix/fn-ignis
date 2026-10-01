@@ -104,6 +104,18 @@
   every deletion requires a verified export and a later target-specific owner decision (agent
   decided; basis: FR-026/FR-027 and the accepted legacy disposition design).
 
+### Session 2026-10-02
+
+- Q: How should the five Vietnam consumer-market pilot cases be defined before live-access
+  authorization? → A: Pre-register reproducible scenario classes and measurement criteria,
+  without naming live accounts, brands, exact queries, or invented outcomes; bind those only
+  after the owner approves the restricted surfaces, quotas, and expiry (agent decided; basis:
+  FR-030 and the separate T085 authorization gate).
+- Q: Should the FastMCP server display name retain the historical trend-intelligence category?
+  → A: No. Name the unreleased runtime `fn-ignis-social-market-research`, without changing
+  tool signatures or release identifiers (agent decided; basis: FR-032 and the breaking
+  product-category cutover).
+
 ## User Scenarios & Testing
 
 ### User Story 1 - Start Only From an Explicit Research Task (Priority: P1)

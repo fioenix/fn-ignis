@@ -1043,14 +1043,12 @@ def test_every_exported_diagram_matches_its_html(html):
     )
 
 
-def test_a_diagram_a_readme_embeds_has_exports():
-    """The convention's own condition: embedding as an image is what earns a diagram its exports."""
+def test_any_diagram_a_readme_embeds_has_exports():
+    """A current README image needs exports; historical diagrams need not remain embedded."""
     embedded = set()
     for readme in (REPO / "README.md", REPO / "README.vi.md"):
         for match in re.finditer(r'<img src="(docs/[^"]+\.png)"', _read(readme)):
             embedded.add(match.group(1))
-    assert embedded, "neither README embeds a diagram; the convention has nothing to enforce"
-
     missing = [
         path
         for path in sorted(embedded)

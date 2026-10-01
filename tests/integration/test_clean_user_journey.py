@@ -28,6 +28,12 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXPECTED_TOOL_COUNT = 41
+REQUIRED_RESET_TOOLS = {"create_attention_mission", "confirm_market_brief", "submit_mission_claims", "get_mission_claims"}
+REMOVED_RESET_TOOLS = {
+    "create_research_mission", "run_autonomous_research_mission", "get_trending_topics",
+    "get_topic_detail", "generate_trend_artifact", "trigger_ingress_refresh",
+    "trigger_autonomous_discovery", "get_latest_daily_discovery",
+}
 PROTOCOL_VERSION = "2024-11-05"
 
 # Bootstrap builds a virtual environment and installs 155 locked packages. Warm uv cache makes
@@ -373,6 +379,9 @@ def test_a_client_can_handshake_discover_and_call(bootstrapped):
         assert len(tools) == EXPECTED_TOOL_COUNT, (
             f"expected {EXPECTED_TOOL_COUNT} tools, discovered {len(tools)}"
         )
+        names = {tool["name"] for tool in tools}
+        assert REQUIRED_RESET_TOOLS <= names
+        assert names.isdisjoint(REMOVED_RESET_TOOLS)
 
         called = session.request(
             {

@@ -1,6 +1,6 @@
-# CLAUDE.md — Instructions for Claude Code & Claude Desktop 🤖
+# CLAUDE.md — Instructions for Claude Code & Claude Desktop
 
-Welcome to **fnIgnis** (`fn-ignis`) — Unified Self-Hosted Autonomous Trend Intelligence & Market Opportunity Platform by FINOLABS.
+Welcome to **fnIgnis** (`fn-ignis`) — mission-bound social market research by FINOLABS.
 
 ---
 
@@ -50,42 +50,24 @@ If the user gives you this repository link or asks you to set up `fn-ignis`, exe
 
 ---
 
-## 🏛️ Architecture: The Dual-Track Model
+## Architecture: Mission-Bound Research
 
-1. **Track 1: Always-On Autonomous Radar (Optional, Continuous Baseline)**
-   - Operated by the Docker daemon (`fn-ignis-worker`) — optional, not required. On-demand research works without it.
-   - Ingests through **official HTTP APIs only**: Google Trends RSS and the YouTube Data API. The default tick is
-     `SCHEDULER_INTERVAL_SECONDS=8640` (~2.4h), not a fixed 15 minutes: one pass probes up to 10 keywords and a
-     YouTube `search.list` costs 100 units, so 10 passes a day is what fits inside the 10,000-unit daily quota.
-   - The worker image ships no browser runtime, so connectors that can only reach their data by driving a browser (TikTok, and Threads/Instagram without a Graph token) are left out of its registry and handled by Track 2 instead. Each connector decides this itself via `resolve_ingest_runtime()`.
-2. **Track 2: On-Demand Targeted Deep Research (Active Strategic Probes)**
-   - Deployed directly by you (the Agent) upon user prompt.
-   - Deploys active probes: Google search trends, TikTok autocomplete suggestions, video grid supply, and raw customer comment pain points.
-   - Synthesizes mathematical **Opportunity Index** (+100 to -100) and exports interactive HTML dossiers.
+Ignis starts collection only for a user-requested mission or explicit atomic probe. There is no
+always-on worker, daily discovery, or background baseline. Its two capability families are source
+connectors for collecting inspectable social evidence and an analysis skill for testing a market
+hypothesis against that evidence. A raw signal or score is not a market verdict. Persist claims,
+counterevidence, evidence gaps, and provenance before returning a strategic conclusion. See
+`AGENTS.md` and `specs/011-evidence-grounded-product-reset/` for the governing contract.
 
 ---
 
-## 🧭 Operational Framework & Modes
+## Operational Boundary
 
-`fn-ignis` is a modular Agent Harness providing tools, mathematical methodologies, domain knowledge, and reporting scaffolds. It does NOT enforce rigid pipelines:
-
-1. **Tactical Ad-Hoc Mode**: Agents freely invoke atomic FastMCP tools (`get_threads_trending_topics`, `extract_customer_pain_points`, `get_tiktok_search_suggestions`, `get_runtime_config`) to address ad-hoc queries without overhead.
-2. **Strategic Research Mode (6-Step Reference Framework)**: When conducting comprehensive market opportunity or white-space discovery, agents are recommended to follow the 6-Step analytical blueprint below:
-
-```
-Step 1: Clarify Research Objectives & Formulate Core Hypothesis
-   ↓ (Call register_domain_lexicon(domain="...", terms=[...]) to expand Quality Gate)
-Step 2: Macro Scan & Real-World Keyword Expansion (Creative Center & Autocomplete Suggestions)
-   ↓
-Step 3: Deep Multi-Platform Ingress & Quality Gate (Spam rejection, Confidence >= 70%)
-   ↓ (Surfaced missions: judge evidence via get_mission_evidence_qualification_batch
-   ↓  and submit_mission_evidence_qualifications before reading a verdict)
-Step 4: Single-Source 4-Lens Breakdown (Demand, Supply, Intent, Voice of Customer)
-   ↓
-Step 5: Cross-Source Synthesis & Opportunity Index Matrix (Identify White Spaces)
-   ↓
-Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation (3-7 day test plan + HTML Dashboard)
-```
+Atomic connector tools remain independently callable. A strategic market verdict requires a
+mission, qualified evidence, a persisted claim ledger, explicit contrary evidence and unresolved
+gaps. The agent may autonomously pursue the specified mission, but cannot silently broaden the
+research question or launch recurring collection. See the `ignis-collect` and `ignis-analyze`
+skills for the separate workflows.
 
 ---
 
@@ -101,9 +83,7 @@ python -m ignis.interfaces.cli.setup_bundle --json
 # Run FastMCP server directly via stdio
 ignis-mcp
 
-# Trigger one ingress pass (through the MCP tool, or the worker for the continuous baseline)
-#   trigger_ingress_refresh(geo="VN")   -- an ingress pass exists to answer a question; there is
-#                                          no standalone "listen to everything once" command.
+# Run a requested mission through the current MCP mission operations; do not start a worker.
 ```
 
 ---
@@ -134,7 +114,7 @@ Before completing changes or cutting a release, verify these three checklist gat
 
 ### Checklist B: Harness Autonomy & Decoupling
 - [ ] FastMCP server instructions and tool definitions do NOT dictate mandatory agent workflows.
-- [ ] All 47 tools are callable independently for ad-hoc queries.
+- [ ] All 41 tools remain callable according to their independent contracts.
 - [ ] Output formatting is adapted to conversational context, not forced into rigid report templates.
 
 ### Checklist C: Pre-Release & Version Bump Gate

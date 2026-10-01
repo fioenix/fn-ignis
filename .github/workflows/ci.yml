@@ -107,7 +107,7 @@ jobs:
           uv build
 
       # The clean-user journey -- bootstrap from a clean checkout, registration, stdio handshake,
-      # 47-tool discovery, a real tool call -- runs inside the suite above as
+      # 41-tool discovery, a real tool call -- runs inside the suite above as
       # tests/integration/test_clean_user_journey.py, against the source tree.
       #
       # This step covers what that cannot: the wheel. It installs the built artifact into its own
@@ -125,4 +125,3 @@ jobs:
           uv pip install --python .venv/bin/python "${WHEEL}"
           printf 'DATABASE_URL=sqlite:///%s/wheel_smoke.db\nDEFAULT_GEO=VN\n' "$(pwd)" > wheel.env
           IGNIS_ENV_FILE="$(pwd)/wheel.env" .venv/bin/python "${GITHUB_WORKSPACE}/scripts/wheel_mcp_smoke.py"
-

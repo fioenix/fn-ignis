@@ -178,7 +178,7 @@
     "type": "function",
     "function": {
       "name": "list_research_missions",
-      "description": "List recent trend research missions and tracking campaigns.",
+      "description": "List recent bounded research missions in the configured database.",
       "parameters": {
         "additionalProperties": false,
         "properties": {

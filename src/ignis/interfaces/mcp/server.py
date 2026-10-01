@@ -110,49 +110,29 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("ignis.mcp")
 
 HARNESS_SYSTEM_INSTRUCTIONS = """
-fn-ignis is an Autonomous Social Intelligence & Market Opportunity Agent Harness.
-It equips AI agents with social listening connectors, mathematical methodologies, domain knowledge, and reporting scaffolds without constraining the agent's workflow or deliverables.
-
-Harness Capabilities:
-1. Multi-Platform Connectors & Probes: Atomic operations across Threads, TikTok, YouTube, Google Trends, and Instagram (autocomplete queries, comments, video cards, trending topics, dynamic config, auth tokens).
-2. Methodology & Scoring: Mathematical formulations including Opportunity Index (Demand vs. Supply), Quality Gate (Coverage, Precision, Freshness, Diversity >= 70%), and Voice of Customer pain-point clustering.
-3. Domain Knowledge & Lexicons: Dynamic domain lexicon registration, negative noise filtering, and localized language heuristics.
-4. Reporting Scaffolds: Data contracts and high-contrast interactive HTML Dashboard artifacts (`generate_mission_artifact`).
-
-Operational Flexibility:
-- Agents have full autonomy to select and compose tools as needed (e.g., ad-hoc social scanning, customer pain-point auditing, or end-to-end strategic dossiers).
-- The 6-Step Strategic Research Framework is provided as an analytical recipe/guideline (accessible via resource `fn-ignis://sop/market-research` or prompt `market_research_pipeline`) when a comprehensive market opportunity dossier is requested.
+fn-ignis is an evidence-grounded social market research agent. Start collection or analysis only
+for an explicit bounded task. Atomic source probes may answer a source question independently.
+For Market analysis, confirm a mission and Brief before ingress, qualify the current evidence
+frame, and render only claims permitted by the persisted Claim Ledger. Seek contrary evidence
+and preserve unavailable channel states. An unsupported strategic verdict becomes a Gap Report,
+not an Opportunity Index or a confident narrative. Stop work at the mission's terminal state.
+Collection and analysis are separate capabilities; choose only what the requester assigned.
 """
 
 SOP_FRAMEWORK_DOC = """
-# fn-ignis 6-Step Strategic Market Research Reference Framework
+# Mission-bound social market research reference
 
-This framework serves as a recommended analytical recipe when agents conduct comprehensive market opportunity and white-space discovery:
-
-1. Step 1 (Clarify Objectives & Core Hypothesis):
-   Establish clear, falsifiable hypotheses. Identify vertical (Fashion, Crypto, Healthcare, Logistics) and call `register_domain_lexicon(domain="...", terms=[...])` to expand the Quality Gate's domain vocabulary dynamically before deep crawling.
-
-2. Step 2 (Macro Scan & Real-World Keyword Expansion):
-   Call `get_tiktok_creative_center_trends`, `get_tiktok_search_suggestions`, or `get_threads_trending_topics` to uncover actual slang, tool names, and sub-niches being searched by users in target geo before deep crawling.
-
-3. Step 3 (Deep Ingress & Quality Gate):
-   Call `execute_mission_ingress` for deep multi-platform ingestion. Ensure strict date windowing and noise filtering (>=70% confidence).
-
-4. Step 4 (Single-Source 4-Lens Breakdown):
-   - Google Lens: Macro search demand velocity and growth.
-   - YouTube Lens: Long-form supply, case study and tutorial depth.
-   - TikTok / Threads Lens: Micro short-form intent, trending hashtags, and real-time discussions.
-   - Voice of Customer Lens: Real objections, pricing questions, unmet needs from comments via `extract_customer_pain_points`.
-
-5. Step 5 (Cross-Source Synthesis & White Space Matrix):
-   Correlate Demand vs. Supply, compute Opportunity Index (+100 to -100), identify HIGH_DEMAND_LOW_SUPPLY opportunities, and determine Trend Maturity Stage.
-
-6. Step 6 (Strategic Verdict, Risks & Fast MVP Blueprint):
-   Synthesize 3-5 market truths, evaluate entry risks/moats (why hasn't this been built?), formulate a 3-7 day low-cost MVP validation plan, and generate a full interactive Infographic HTML Dashboard via `generate_mission_artifact`.
+For a source-specific request, make a bounded atomic probe and report provenance and channel
+state; do not manufacture a Market conclusion. For a Market decision, confirm the mission and
+Brief, including alternatives, null hypothesis, falsifiers, kill criteria, and revision rule.
+Collect only the approved plan, qualify support and contradiction by the same standard, submit
+current-frame claim candidates, and read the Claim Ledger before rendering. If a gate fails,
+return the Gap Report and smallest next probe. An HTML report is optional and user-requested.
+The mission and Claim Ledger contracts, not this recipe, decide verdict eligibility.
 """
 
 # Initialize FastMCP Server with Non-Prescriptive Harness Instructions
-mcp = FastMCP("fn-ignis-trend-intelligence", instructions=HARNESS_SYSTEM_INSTRUCTIONS)
+mcp = FastMCP("fn-ignis-social-market-research", instructions=HARNESS_SYSTEM_INSTRUCTIONS)
 
 
 
@@ -2344,7 +2324,7 @@ async def get_mission_claims(mission_id: str, include_superseded: bool = False) 
     )
 
 
-@mcp.tool(name="list_research_missions", description="List recent trend research missions and tracking campaigns.")
+@mcp.tool(name="list_research_missions", description="List recent bounded research missions in the configured database.")
 async def list_research_missions(limit: int = 10) -> str:
     return await handle_list_research_missions(limit)
 
@@ -3263,45 +3243,43 @@ async def verify_connectors_health() -> str:
 
 @mcp.resource("fn-ignis://sop/market-research")
 def get_market_research_sop_resource() -> str:
-    """Full documentation of the fn-ignis 6-Step Market Research Reference Framework."""
+    """Mission-bound social research reference without an automatic verdict."""
     return SOP_FRAMEWORK_DOC
 
 
 @mcp.resource("fn-ignis://methodology/opportunity-index")
 def get_opportunity_index_methodology() -> str:
-    """Methodology and mathematical formulation for the Opportunity Index (Demand vs. Supply Matrix)."""
+    """Historical score formula; Market use still requires a permitted current-frame claim."""
     return """
 # Opportunity Index Methodology
-Opportunity Index (OI) = Search Demand Score (0-100) - Localized Content Supply Score (0-100).
-- Range: -100 to +100.
-- OI >= +30: HIGH_DEMAND_LOW_SUPPLY (Prime White Space Opportunity).
-- OI between -20 and +29: MODERATE_COMPETITION / BALANCED_MARKET.
-- OI <= -30: SATURATED_SEGMENT / RED_OCEAN.
-- High Enterprise Search with 0 supply: ENTERPRISE_GAP.
+Historical formula: Search Demand Score (0-100) minus Localized Content Supply Score (0-100).
+Do not compute, display, or interpret this score for a Market decision unless the current
+mission frame is sufficient and a persisted Claim Ledger record explicitly permits the
+corresponding measurement. Missing channels and missing denominators are not zero.
 """
 
 
 @mcp.prompt(name="market_research_pipeline")
 def prompt_market_research_pipeline(topic: str = "AI Agent", geo: str = "VN") -> str:
-    """Guided prompt instructing Claude to execute the 6-Step Market Research SOP."""
+    """Draft a bounded Market assignment without starting collection or promising a verdict."""
     return f"""
-Please execute a rigorous market intelligence and white-space discovery workflow for the topic: '{topic}' in region '{geo}'.
-Strictly adhere to the 6-Step Standard Operating Procedure:
-1. Clarify the business model, target audience, and establish the Core Hypothesis to validate.
-2. Perform a Macro Scan using Creative Center benchmarks and real-world Autocomplete Search Suggestions to capture authentic search terms and slang.
-3. Ingest deep multi-platform data (Google Trends, YouTube, TikTok) with automated noise and spam rejection (Quality Gate).
-4. Conduct a Single-Source 4-Lens Breakdown (Macro Demand, Long-form Supply, Micro Intent, Voice of Customer / Pain Points).
-5. Synthesize the Cross-Source Demand vs. Supply Matrix, compute the Opportunity Index, and identify HIGH_DEMAND_LOW_SUPPLY white spaces.
-6. Deliver the Strategic Verdict, evaluate entry risks and competitive moats, formulate a 3-7 day fast MVP validation plan, and export the interactive Infographic HTML Dashboard Artifact.
+The requester is considering a Market question about '{topic}' in '{geo}'. First ask for the
+decision, target user, timeframe, core hypothesis, two alternatives, null hypothesis,
+falsifiers, kill criteria, revision rule, allowed sources, quota, and stop condition. Show a
+bounded Brief for confirmation before creating a mission or collecting. After authorization,
+qualify the current evidence frame, seek contradiction, and submit claim candidates. Render
+only permitted claims; otherwise return the Gap Report. Export HTML only if requested.
 """
 
 
 @mcp.prompt(name="voice_of_customer_audit")
 def prompt_voice_of_customer_audit(keywords: str = "Chatbot AI") -> str:
-    """Guided prompt to extract authentic customer voice, pain points, and objections from TikTok comments."""
+    """Frame a bounded source-specific customer-voice probe."""
     return f"""
-Please extract and analyze authentic customer voice, pricing objections, technical complaints, and unmet needs for the topic '{keywords}'.
-Use the `extract_customer_pain_points` tool across top market videos to synthesize the top 5 unresolved customer pain points.
+The requester wants customer-voice evidence about '{keywords}'. Confirm the source surface,
+geography, time window, sampling cap, and stop condition. Use an authorized atomic comments
+or pain-point tool, report provenance and unavailable states, and distinguish observations
+from inference. Do not claim market prevalence or a strategic verdict from this probe alone.
 """
 
 

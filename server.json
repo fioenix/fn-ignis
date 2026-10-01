@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.fioenix/fn-ignis",
-  "title": "fnIgnis Trend Intelligence & Market Research",
-  "description": "Self-hosted autonomous trend intelligence & market opportunity discovery MCP server",
+  "title": "fnIgnis Mission-Bound Social Market Research",
+  "description": "Self-hosted social evidence collection and mission-grounded Market analysis MCP server",
   "repository": {
     "url": "https://github.com/fioenix/fn-ignis",
     "source": "github"

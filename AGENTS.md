@@ -24,74 +24,68 @@ This document defines the operational protocol, architectural guidelines, and to
 
 ---
 
-## 🏛️ 1. Architecture: The Dual-Track Model
+## 🏛️ 1. Architecture: Mission-Bound Evidence Grounding
 
-Agents must understand the dual-track design of `fn-ignis`:
+Ignis starts only after a person or host agent assigns an explicit bounded task. There is no
+worker, scheduler, daily discovery, or idle collection. Inside a confirmed Mission Manifest,
+the agent may autonomously select in-scope probes; it stops at a terminal state or an authority
+boundary.
 
-1. **Track 1: Always-On Autonomous Radar (Optional Continuous Baseline)**
-   - Operated by the Docker daemon (`fn-ignis-worker`). **Optional** — every on-demand capability works without it.
-   - Maintains baseline data through **official HTTP APIs only**: Google Trends RSS and the YouTube Data API.
-   - The image carries no browser runtime on purpose (Playwright plus Chromium would take it from ~90MB to ~500MB, and an unattended scraper on a 15-minute loop is what gets an IP blocked). `build_connector_registry()` asks each connector for its `resolve_ingest_runtime()` and registers only the ones that can pull over HTTP; the rest are reported at startup and belong to Track 2, where Playwright runs on the operator's own machine with their own session.
-   - A dual-tier connector crosses over on its own: Threads and Instagram Reels join the radar as soon as a Graph API token is configured, because that tier is plain HTTP.
-   - **Do not tell an operator to obtain `threads_keyword_search`.** Meta grants it only through App Review, which a self-hosted install cannot be expected to pass, and until it is granted the endpoint answers HTTP 200 while searching the authenticated account's own posts only — an install that trusts it listens to itself. `authenticate_threads()` probes this and returns `keyword_search_access`; on `SELF_ONLY` or `NOT_PERMITTED`, direct the operator to `authenticate_threads(browser_login=True)` instead. The verdict is persisted rather than recomputed, and the routing reads it: a token known to search only its own posts loses to a browser session in `resolve_auth_tier()`, and when it is the last path left `search_signals()` refuses instead of returning the install's own timeline as market evidence. Accessibility is a design constraint of this project: no capability may require an approval process to be useful.
-   - Generates automated daily discovery digests (`reports/daily_discovery_vn_YYYY-MM-DD.html`).
-   - *Agent Action*: Query `get_latest_daily_discovery()` or `get_trending_topics()` to inspect current macro dynamics.
+The product has two independent capability families:
 
-2. **Track 2: On-Demand Targeted Deep Research (Active Strategic Probes)**
-   - Driven directly by the Agent upon user request.
-   - Does not merely read existing baseline data: **deploys active on-demand probes** to pull live search suggestions, video grids, and raw customer comments for specific niche topics.
-   - Enriches the shared database while generating comprehensive business viability dossiers.
+1. **Collection**: integrated connectors and skills pull source observations for an explicit
+   tactical probe or mission. The result retains source identity, query, collection time, channel
+   outcome, and access limitations. Collected data is not yet a Market conclusion.
+2. **Senior Market Analytics**: the analysis skill and report templates work on an eligible Ignis
+   evidence frame. A confirmed Market Brief includes alternatives, a null hypothesis, falsifiers,
+   kill criteria, and a revision rule. Counterevidence and missingness must be reported.
 
----
+Both families share the evidence control plane: Mission Manifest, source/observation lineage,
+channel outcomes, qualification, strategic sufficiency, and the current-frame Claim Ledger.
+Market verdicts render only from persisted permitted claims. When evidence is insufficient,
+return a typed Gap Report; no Opportunity Index or recommendation is inferred from raw metrics.
+Attention observations remain context and never silently become Market support.
 
-## 🧭 2. Frameworks & Operational Modes
+The beachhead pilot is Vietnamese consumer-market research for founders, operators, independent
+analysts, consultants, and small teams. This is a validation audience, not proof of market fit.
 
-`fn-ignis` is a modular Agent Harness providing tools, mathematical methodologies, domain knowledge, and reporting scaffolds. The harness **does NOT enforce rigid workflows or dictate agent deliverables**. Agents have full autonomy to select operational modes based on user intent:
+## 🧭 2. Operating Modes
 
-### A. Tactical & Ad-Hoc Probes (Fast & Unbundled Mode)
-Agents can independently invoke any atomic FastMCP tool without initializing a research mission:
-- **Instant Trend Spotting**: Call `get_threads_trending_topics` or `get_tiktok_creative_center_trends` to capture breakout daily topics.
-- **Voice of Customer (VoC) Extraction**: Call `extract_customer_pain_points` or `get_tiktok_video_comments` to dissect customer objections, pricing inquiries, and unmet needs.
-- **Keyword & Slang Expansion**: Call `get_tiktok_search_suggestions` or `get_threads_search_suggestions` to uncover colloquial phrasing and long-tail search intent.
-- **Dynamic Configuration & Diagnostics**: Call `get_runtime_config`, `update_runtime_config`, `diagnose_system_health`.
+### Tactical collection
 
-Agents are free to synthesize and present responses as concise summaries, tables, or charts matching user conversational context.
+Use an atomic connector operation for a bounded user question. Return observations, provenance,
+channel state, and limitations. It does not create a mission, schedule follow-up work, or produce a
+strategic Market verdict. Requested collection preserves source languages for downstream
+qualification.
 
-### B. Strategic Research Reference Framework (6-Step Blueprint)
-When users request a **comprehensive research campaign, market white-space analysis, or commercial viability dossier**, agents are recommended to follow the 6-Step analytical blueprint:
+### Strategic Market research
 
-#### Step 1: Clarify Objectives & Establish Core Hypothesis
-- Clarify business model (SaaS, Retail, Agency, Content), target audience (B2B/B2C), geography, and timeframe.
-- Establish a falsifiable **Core Hypothesis** (e.g., *"Market demand for customer service AI agents is accelerating, but adoption is blocked by setup complexity and high SaaS fees"*).
-- **Dynamic Lexicon Ingestion**: For specialized verticals, call `register_domain_lexicon(domain="...", terms=[...])` so the Quality Gate recognizes domain vernacular dynamically.
+1. Frame the decision backwards from the outcome. Confirm a Mission Manifest, allowed sources,
+   authority boundary, cost, output, stop conditions, and retention policy.
+2. Confirm the Market Brief: target user, problem, hypothesis, at least two alternatives, null
+   hypothesis, falsifiers, kill criteria, and revision rule.
+3. Plan and run only authorized probes. Preserve every channel's measured outcome, including
+   auth failure, rate limit, degradation, and healthy emptiness.
+4. Qualify each observation against the current Brief and collection-plan frame, including
+   support, contradiction, and context. Do not promote external files or earlier Attention
+   observations to primary evidence without mission-scoped verification.
+5. Submit typed candidate claims against the current evidence-frame digest. Read the current
+   Claim Ledger. Render permitted claims with citations, contradiction, limitations, and decision
+   conditions; otherwise render the Gap Report and next-best probe.
+6. Stop at completion, insufficient evidence, cancellation, failure, or missing authority.
 
-#### Step 2: Macro Scan & Real-World Keyword Expansion
-- Call `get_tiktok_creative_center_trends` or `get_threads_trending_topics` to establish macro benchmarks.
-- Call `get_tiktok_search_suggestions` and `get_threads_search_suggestions` on root keywords to discover authentic user slang, competitor tool names, and sub-niches.
-- Register newly discovered terminology via `register_domain_lexicon` prior to deep crawling.
+This is an analytical reference, not an unskippable pipeline for tactical calls. Outcome thinking
+defines the decision, design thinking locates the user and method, and critical thinking actively
+tests the initial belief.
 
-#### Step 3: Multi-Platform Ingestion & Quality Gate
-- Call `create_research_mission` and `execute_mission_ingress`.
-- Verify `QualityScorecard` (Coverage, Precision, Freshness, Creator Diversity) achieves Confidence Score $\ge 70\%$.
+### Connector access boundary
 
-#### Step 4: Single-Source 4-Lens Breakdown
-- **Google Lens**: Macro search demand velocity and search volume growth.
-- **YouTube Lens**: Long-form supply depth, case studies, and tutorial maturity of competitors.
-- **TikTok / Threads Lens**: Micro short-form intent, trending hashtags, and real-time public conversations.
-- **Voice of Customer Lens**: Real purchase friction, pricing objections, and unmet needs via `extract_customer_pain_points`.
-
-#### Step 5: Cross-Source Synthesis & Opportunity Index Matrix
-- Call `get_mission_analysis(mission_id)`.
-- Correlate Demand vs. Supply, calculate `Opportunity Index` (+100 to -100), identify `HIGH_DEMAND_LOW_SUPPLY` white spaces, and determine Trend Maturity Stage.
-
-#### Step 6: Strategic Verdict, Entry Risks & Fast MVP Validation
-- Synthesize 3-5 grounded market truths (Key Takeaways).
-- Assess entry barriers and economic moats (Why hasn't the market solved this? What if Big Tech enters?).
-- Formulate a 3-7 day fast low-cost MVP validation plan.
-- Call `generate_mission_artifact(mission_id)` to render and export an interactive Infographic HTML Dashboard.
+Threads Graph keyword search may return only the authenticated account's posts unless Meta grants
+the capability. Treat `SELF_ONLY` and `NOT_PERMITTED` as unavailable for market listening; use a
+user-authorized browser session only when the mission permits it. Never present an own-account
+timeline as market evidence. Browser, token, and paid-quota authority must be confirmed before use.
 
 ---
-
 ## 🎨 3. Presentation & Evidence Attribution Standards
 
 ### Campaign Identification Banner
@@ -102,7 +96,7 @@ When executing a formal Strategic Research Campaign, prefix the analysis with th
 > **Session ID:** `codex://threads/01a05666...` *(if available)*
 
 ### Native Artifacts First
-- Render summaries, scorecards, and white-space matrices directly inside the chat interface (using markdown tables and cards).
+- Render source coverage, permitted claims, or a Gap Report directly in chat at the level of detail the user requested.
 - Export standalone HTML files to `reports/` via `generate_mission_artifact` when the user requests a persistent local dossier.
 
 ### 🎨 FINOLABS Design System
@@ -129,11 +123,11 @@ Rules that apply to artifacts specifically:
 ### 📊 Evidence Attribution Standards
 When presenting strategic conclusions, agents must maintain evidentiary integrity:
 1. **Data Ingress Summary Table**:
-   - Explicitly list all probed channels (Google Trends, YouTube, TikTok Video, TikTok Comments, Threads, Instagram Reels).
-   - Display signal counts and channel status (`HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`, `RATE_LIMITED`, `DEGRADED`) from `channel_summaries` returned by `get_mission_analysis`.
+   - Explicitly list every requested channel, including those that did not run or could not be measured.
+   - Display counts and exact channel state from the current evidence frame; never equate missingness with zero.
 2. **Inline Evidence Citations**:
-   - Every market claim and friction point MUST be backed by concrete citations (e.g. `[YouTube: "Build AI Agent" (45K views)]`, `[TikTok Comments: 35/84 comments on @creator video]`, `[Google Trends: +180% velocity]`).
-   - Disallow vague, unsourced generalizations without origin attribution.
+   - Render only current-frame `PERMITTED` Claim Ledger entries with their observation bindings.
+   - Disclose contradiction, sample limitations, denominator/timeframe for measurements, and conditions that would change the decision.
 
 ### 🧾 Recommended Full Strategic Report Structure
 When compiling a Comprehensive Strategic Dossier, the following standard structure is recommended:
@@ -141,8 +135,8 @@ When compiling a Comprehensive Strategic Dossier, the following standard structu
 2. **Data Ingress Summary Table** (from `channel_summaries`)
 3. **Quality Scorecard**
 4. **Single-Source 4-Lens Breakdown** (with source citations)
-5. **Market Opportunities & Demand vs. Supply Matrix** (with numeric evidence)
-6. **Fast MVP Action Plan**
+5. **Current-frame Claim Ledger and counterevidence** (only permitted claims)
+6. **Decision conditions or Gap Report** (never invent a verdict when evidence fails)
 
 *(For ad-hoc queries, agents should adjust output format flexibly to match the user's specific conversational need).*
 
@@ -205,29 +199,14 @@ sides by default, and never match a multi-word term as a raw substring — ancho
 
 ---
 
-### 🚦 Ingress Filtering Depends on Who Asked
+### 🚦 Requested Ingress Boundary
 
-Content filtering at ingress keys on the requester, not on the code path.
-
-| Trigger | Path | Script-gated |
-|---|---|---|
-| `IngressTrigger.SCHEDULED` — unattended worker sweep | `fetch_from_all` | **Yes** |
-| `IngressTrigger.REQUESTED` — `trigger_ingress_refresh` | `fetch_from_all` | No |
-| Agent keyword probe — missions, discovery, refinement | `search_across_all` | No |
-
-A scheduled sweep accumulates a corpus nobody reviews, so a title in a script the region does not use is
-noise it carries forever. Anything a person or an agent asked for keeps what it found: social listening
-means hearing what is actually said, and a market question can legitimately be answered in another
-language. **Latin script always passes**, so the English that runs through Vietnamese social content is
-never filtered — the gate only ever excludes Hangul, Cyrillic, Arabic, CJK, Thai and similar in a
-Vietnam pass.
-
-Relevance is never judged at ingress. `QualityEvaluator` holds the domain vocabulary and decides
-relevance downstream, because judging it at ingress meant the radar could only ever store topics
-somebody had already seeded — the opposite of a trend radar's job.
+Every ingress pass is explicitly requested. The registry refuses any other trigger before a
+connector probe or quota reservation. Source language is retained; relevance and claim support
+are judged downstream. The historical YouTube `scheduled_used` column remains read-only audit
+data, not a reason to schedule work or reserve quota.
 
 ---
-
 ## 🏷️ 4. Release Versioning Principles & SemVer Guardrails
 
 All agents (**Claude Desktop, Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, Pi Agent**) must strictly adhere to **Semantic Versioning 2.0.0 (`MAJOR.MINOR.PATCH`)**:
@@ -289,8 +268,8 @@ Every AI Agent modifying this repository or preparing a release must verify comp
 
 ### Checklist B: Harness Autonomy & Non-Prescriptive Decoupling
 - [ ] **Non-Prescriptive Instructions**: Verify FastMCP server instructions and tool docstrings do NOT coerce agents into forced pipelines (no "MUST STRICTLY FOLLOW").
-- [ ] **Atomic Independence**: Ensure all 47 FastMCP tools remain callable independently for ad-hoc tactical operations.
-- [ ] **Framework Separation**: The 6-Step SOP is exposed as an analytical reference recipe (via resources/prompts), never as an unskippable constraint.
+- [ ] **Atomic Independence**: Ensure all 41 FastMCP tools are independently callable within their authority and evidence contracts.
+- [ ] **Framework Separation**: The strategic research recipe is a reference, never a forced pipeline for tactical collection.
 - [ ] **Contextual Deliverables**: Deliverables match user intent (concise text, cards, tables, or full HTML dashboards) without forcing boilerplate templates for trivial queries.
 
 ### Checklist C: Formal Release & Version Bump Gate
@@ -336,7 +315,7 @@ These boundaries hold for every contributor. Where the `noulmes` skill is instal
 - An agent asks the owner before writing or applying a migration in `sql/` that transforms persisted evidence (Constitution VI).
 - An agent asks the owner before a version bump, a tag, or a release (Section 4).
 - An agent asks the owner before changing or removing an MCP tool's signature.
-- An agent asks the owner before moving a connector between the HTTP and browser tiers, or into or out of the worker registry.
+- An agent asks the owner before moving a connector between the HTTP and browser tiers.
 - An agent asks the owner before writing to the Supabase development database; reading it needs no question.
 - An agent asks the owner before using a real TikTok, Threads, or Instagram session or token.
 

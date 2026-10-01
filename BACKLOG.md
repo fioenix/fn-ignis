@@ -19,6 +19,22 @@
 
 ---
 
+## Spec 011 — trạng thái nhánh phát triển, chưa phát hành
+
+Nhánh `codex/evidence-grounded-product-reset` đang thay mô hình Dual-Track bằng nghiên cứu
+theo nhiệm vụ được chỉ định. MCP runtime của nhánh có **41 tools**; các con số 47 tools,
+worker, quota scheduled và migration `024` trong phần lịch sử dưới đây mô tả v0.7.0 đã
+phát hành, không mô tả nhánh hiện tại. Migration mới nhất của nhánh là
+`sql/025_evidence_grounded_claim_ledger.sql`. SQLite cục bộ đã được kiểm thử; áp dụng
+Full suite tại worktree ngày 02/10/2026: **1.783 passed, 337 skipped, 2 warnings**;
+ruff, lock check và build local đều đạt. PostgreSQL, pilot Việt Nam, merge và phát hành
+vẫn cần các cổng trong
+[`tasks.md`](specs/011-evidence-grounded-product-reset/tasks.md). Không xóa baseline corpus
+hiện hữu chỉ vì chế độ nền đã bị loại; inventory trước và xử lý dữ liệu sau khi chủ sở hữu
+phê duyệt. **Trạng thái: local implementation, chưa ship.**
+
+---
+
 ## 0. Chất Lượng Corpus (Epic Đang Mở)
 
 Đo trực tiếp trên Postgres ngày 09/09/2026. Bản đo chi tiết giữ ngoài repository.

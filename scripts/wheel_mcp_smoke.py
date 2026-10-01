@@ -32,6 +32,12 @@ import threading
 from dataclasses import dataclass
 
 EXPECTED_TOOL_COUNT = 41
+REQUIRED_RESET_TOOLS = {"create_attention_mission", "confirm_market_brief", "submit_mission_claims", "get_mission_claims"}
+REMOVED_RESET_TOOLS = {
+    "create_research_mission", "run_autonomous_research_mission", "get_trending_topics",
+    "get_topic_detail", "generate_trend_artifact", "trigger_ingress_refresh",
+    "trigger_autonomous_discovery", "get_latest_daily_discovery",
+}
 PROTOCOL_VERSION = "2024-11-05"
 RESPONSE_TIMEOUT_SECONDS = 120.0
 # A stdio server has nothing left to do once its client hangs up. One that keeps running holds a
@@ -189,6 +195,14 @@ def run_smoke(
         tools = session.response(2).get("result", {}).get("tools", [])
         if len(tools) != expected_tools:
             raise SmokeFailure(f"expected {expected_tools} tools, discovered {len(tools)}")
+        if expected_tools == EXPECTED_TOOL_COUNT:
+            names = {tool.get("name") for tool in tools}
+            missing = REQUIRED_RESET_TOOLS - names
+            retained = REMOVED_RESET_TOOLS & names
+            if missing or retained:
+                raise SmokeFailure(
+                    f"mission-bound catalog mismatch: missing {sorted(missing)}, retained {sorted(retained)}"
+                )
         log(f"tool discovery ok, {len(tools)} tools")
 
         session.send(
