@@ -21,6 +21,11 @@
 
 ## Spec 011 — trạng thái nhánh phát triển, chưa phát hành
 
+**Mục tiêu phiên bản đã duyệt: `v0.8.0`** (02/10/2026). MINOR dành cho thay đổi chức năng
+hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đổi còn lại không làm khác đáng
+kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
+các cổng pilot và release vẫn giữ nguyên.
+
 Nhánh `codex/evidence-grounded-product-reset` đang thay mô hình Dual-Track bằng nghiên cứu
 theo nhiệm vụ được chỉ định. MCP runtime của nhánh có **41 tools**; các con số 47 tools,
 worker, quota scheduled và migration `024` trong phần lịch sử dưới đây mô tả v0.7.0 đã
@@ -29,10 +34,14 @@ phát hành, không mô tả nhánh hiện tại. Migration mới nhất của n
 là môi trường dev và cho phép thao tác trong phạm vi triển khai. Migration 023–025 đã áp dụng;
 số bản ghi và dấu kiểm tra dữ liệu gốc giữ nguyên. 18 ca Market trên SQLite/PostgreSQL
 và chín ca inventory SQLite đều đạt; inventory dev đã lưu 14.637 target baseline cụ thể.
-Full suite tại worktree ngày 02/10/2026: **1.783 passed, 337 skipped, 2 warnings**;
-ruff, lock check, build và MCP smoke từ wheel cài riêng đều đạt. Full parity sweep,
-pilot Việt Nam, merge và phát hành
-vẫn cần các cổng trong
+Full suite sau sửa review ngày 02/10/2026: **2.134 passed, 6 skipped, 2 warnings**, đã bật
+PostgreSQL thật và fresh Compose; ruff, lock check, build, wheel MCP smoke và secret scan đều đạt.
+[PR #43](https://github.com/fioenix/fn-ignis/pull/43) đạt 7/7 required checks trên commit
+`ee8e1942dd56dfa7eb4eece0ec19e3d0c69343d4`. Code Review không còn blocker trong phạm vi đã
+kiểm tra; Security Review có 0 finding đủ điều kiện báo cáo nhưng coverage vẫn partial.
+Chủ sở hữu đã duyệt merge và quy trình phát hành v0.8.0. Pilot Việt Nam chưa chạy; ngoại lệ
+phát hành beta trước pilot chưa được duyệt. Trạng thái tích hợp và phát hành phải được đọc lại
+từ GitHub trước khi coi là hoàn tất. Các cổng còn lại nằm trong
 [`tasks.md`](specs/011-evidence-grounded-product-reset/tasks.md). Không xóa baseline corpus
 hiện hữu chỉ vì chế độ nền đã bị loại; disposition đang giữ dữ liệu để đánh giá giá trị và
 xác minh bản phục hồi, không còn chờ quyền thao tác database dev.
