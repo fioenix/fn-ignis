@@ -118,6 +118,13 @@ COMPLETE_BRIEF = {
     "timeframe": "30d",
     "hypothesis": "VN fashion retailers will pay for sub-minute automated support replies",
     "falsifiers": ["No retailer names reply latency among their top three costs"],
+    "alternative_hypotheses": [
+        "Slow replies are caused by staffing schedules rather than software",
+        "Retailers value response quality more than response speed",
+    ],
+    "null_hypothesis": "Faster replies do not improve retailer decisions or sales",
+    "kill_criteria": ["No repeated decision-relevant support delay appears"],
+    "revision_rule": "Reframe when contrary evidence is at least as strong as support",
 }
 
 

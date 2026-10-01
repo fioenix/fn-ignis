@@ -6,7 +6,8 @@ of the old. It was called an Atomic Replace and it was neither atomic nor a repl
 
 Writing first and pruning last cannot be atomic either, and does not pretend to be. What it
 guarantees is weaker and sufficient: at every point where the pass can fail, the mission holds
-at least the evidence it started with, and a retry converges on the intended set.
+at least the evidence it started with. A failed mission is terminal under Spec 011; continuing
+requires a new explicit assignment rather than an implicit retry.
 """
 
 from datetime import datetime, timezone
@@ -14,7 +15,8 @@ from datetime import datetime, timezone
 import pytest
 
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
-from ignis.domain.entities import ResearchMission
+from ignis.domain.entities import ResearchMission, TrendSignal
+from ignis.domain.research_workspace import MissionTerminalStateError
 from ignis.domain.value_objects import GeoCode, PlatformType, Timeframe
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.connectors.registry import SearchPassResult
@@ -48,13 +50,18 @@ def _registry(video_id=YT_ID, title="A sighting"):
 
 
 async def _seed_prior_evidence(repository_case, mission):
-    """One pass that succeeds, so there is something to lose."""
-    use_case = ExecuteMissionUseCase(
-        repository=repository_case.repository,
-        registry=_registry(title="The evidence it already had"),
-        clusterer=SemanticClusterer(),
+    """Seed a prior observation without completing the mission under the new lifecycle."""
+    signal = TrendSignal(
+        platform=PlatformType.YOUTUBE,
+        raw_title="The evidence it already had",
+        metric_value=100.0,
+        source_url=YT_URL,
+        geo_code=GeoCode.VN,
+        captured_at=datetime.now(timezone.utc),
+        metadata={"video_id": YT_ID},
     )
-    await use_case.execute(mission.id)
+    await repository_case.repository.save_signals([signal])
+    repository_case.attach_evidence(mission.id, str(signal.observation_id))
     assert repository_case.counts()["mission_evidence"] == 1
     return await repository_case.repository.get_mission_signals(mission.id)
 
@@ -121,8 +128,8 @@ async def test_a_failure_while_attaching_preserved_evidence_keeps_the_previous_e
     assert {s.observation_id for s in before} <= kept
 
 
-async def test_a_failure_while_pruning_leaves_both_sets_and_a_retry_converges(repository_case):
-    """Stale evidence surviving a failure is recoverable. Evidence deleted is not."""
+async def test_a_failure_while_pruning_leaves_both_sets_and_refuses_an_implicit_retry(repository_case):
+    """Failed mission evidence remains inspectable; continuation requires a new assignment."""
     mission = await _mission(repository_case.repository)
     before = await _seed_prior_evidence(repository_case, mission)
 
@@ -139,11 +146,12 @@ async def test_a_failure_while_pruning_leaves_both_sets_and_a_retry_converges(re
         registry=_registry("9bZkp7q19f0", title="The retry"),
         clusterer=SemanticClusterer(),
     )
-    await use_case.execute(mission.id)
+    with pytest.raises(MissionTerminalStateError):
+        await use_case.execute(mission.id)
 
     after = await repository_case.repository.get_mission_signals(mission.id)
-    assert len(after) == 1, "the retry converges on the intended set, without duplicates"
-    assert after[0].observation_id not in {s.observation_id for s in before}
+    assert {s.observation_id for s in after} == {s.observation_id for s in during}
+    assert (await repository_case.repository.get_mission(mission.id)).status == "FAILED"
 
 
 async def test_a_successful_pass_drops_the_evidence_it_replaced(repository_case):
