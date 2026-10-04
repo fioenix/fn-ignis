@@ -57,6 +57,7 @@ SCHEMA_MIGRATIONS = (
     "024_youtube_quota_ledger.sql",
     # Mission authority, complete evidence-frame metadata, and the Claim Ledger.
     "025_evidence_grounded_claim_ledger.sql",
+    "026_partial_degraded_probe_outcomes.sql",
 )
 
 

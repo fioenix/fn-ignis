@@ -9,7 +9,8 @@ EMAIL_PATTERN = re.compile(
 
 # Vietnamese Phone Number Pattern (e.g., 0931405002, 0931.405.002, +84 931 405 002, (+84) 938-940-397)
 VN_PHONE_PATTERN = re.compile(
-    r"(?:(?:\+84|0084|84|\(\+84\))\s*|\b0)[235789](?:[\s\.\-]*\d){8}\b"
+    # Country-code matching must not start inside a longer numeric evidence identity.
+    r"(?<!\d)(?:(?:\+84|0084|84|\(\+84\))\s*|\b0)[235789](?:[\s\.\-]*\d){8}\b"
 )
 
 # Structured International Formatted Phone Numbers (Requires explicit delimiters or '+' country prefix)

@@ -27,7 +27,7 @@ kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã
 các cổng pilot và release vẫn giữ nguyên.
 
 Nhánh `codex/evidence-grounded-product-reset` đang thay mô hình Dual-Track bằng nghiên cứu
-theo nhiệm vụ được chỉ định. MCP runtime của nhánh có **41 tools**; các con số 47 tools,
+theo nhiệm vụ được chỉ định. MCP runtime của nhánh có **44 tools**; các con số 47 tools,
 worker, quota scheduled và migration `024` trong phần lịch sử dưới đây mô tả v0.7.0 đã
 phát hành, không mô tả nhánh hiện tại. Migration mới nhất của nhánh là
 `sql/025_evidence_grounded_claim_ledger.sql`. Ngày 02/10/2026, chủ sở hữu xác nhận Supabase
@@ -39,17 +39,66 @@ PostgreSQL thật và fresh Compose; ruff, lock check, build, wheel MCP smoke v�
 [PR #43](https://github.com/fioenix/fn-ignis/pull/43) đạt 7/7 required checks trên commit
 `ee8e1942dd56dfa7eb4eece0ec19e3d0c69343d4`. Code Review không còn blocker trong phạm vi đã
 kiểm tra; Security Review có 0 finding đủ điều kiện báo cáo nhưng coverage vẫn partial.
-Chủ sở hữu đã duyệt merge và quy trình phát hành v0.8.0. Pilot Việt Nam chưa chạy; ngoại lệ
+PR đã merge vào `main` tại `7e089a37447b42a2c35aee25874020bcec94016a`; CI sau merge
+chưa chốt ở checkpoint này. Chủ sở hữu đã duyệt merge và quy trình phát hành v0.8.0.
+Pilot Việt Nam chưa chạy; ngoại lệ
 phát hành beta trước pilot chưa được duyệt. Trạng thái tích hợp và phát hành phải được đọc lại
 từ GitHub trước khi coi là hoàn tất. Các cổng còn lại nằm trong
 [`tasks.md`](specs/011-evidence-grounded-product-reset/tasks.md). Không xóa baseline corpus
 hiện hữu chỉ vì chế độ nền đã bị loại; disposition đang giữ dữ liệu để đánh giá giá trị và
 xác minh bản phục hồi, không còn chờ quyền thao tác database dev.
-**Trạng thái: nhánh local và schema dev đã cập nhật, chưa ship.**
+**Trạng thái: implementation đã merge, schema dev đã cập nhật; v0.8.0 chưa tag hoặc publish.**
 
 ---
 
+## Spec 013 — vòng UAT đầy đủ và sửa tính đúng của bằng chứng
+
+Ngày 04/10/2026, chủ sở hữu duyệt tự thực hiện toàn bộ UAT, đóng gói bài học/issues,
+lên plan/tasks, implement và chạy lại toàn bộ UAT sau sửa. Hồ sơ chính thức nằm tại
+[`spec.md`](specs/013-uat-evidence-integrity/spec.md),
+[`plan.md`](specs/013-uat-evidence-integrity/plan.md),
+[`tasks.md`](specs/013-uat-evidence-integrity/tasks.md) và
+[`uat-ledger.md`](specs/013-uat-evidence-integrity/uat-ledger.md).
+
+Issue đã tạo và đọc lại: [#46](https://github.com/fioenix/fn-ignis/issues/46) về xác nhận
+truy vấn/nhận bằng chứng sai, [#47](https://github.com/fioenix/fn-ignis/issues/47) điều tra
+search không có phản hồi đúng từ khóa, [#48](https://github.com/fioenix/fn-ignis/issues/48)
+về khuyến nghị thương mại trong Attention. Các bản sửa đã được kiểm chứng cục bộ;
+lượt cuối thu 59 quan sát TikTok và 77 Threads, đánh giá đủ 136 quan sát, từ chối frame
+cũ/bằng chứng ngoại lai và giữ nguyên số lượng khi gửi lại. Market vẫn thiếu bằng chứng:
+không có khuyến nghị ngành hàng hay claim được phép. Claim Ledger dương được kiểm chứng
+riêng bằng fixture tổng hợp, không dùng làm kết luận kinh doanh.
+
+Cổng cuối trước tích hợp: 2.007 passed/379 skipped ở môi trường mặc định; 750 passed/năm
+skip không áp dụng trong lượt SQLite/PostgreSQL dùng fixture riêng; build/lock/Ruff và
+wheel đã cài được kiểm chứng. Security diff scan đã đóng với 37 bề mặt được rà soát,
+không có finding. Skip, kiểm tra cấu trúc HTML và fixture tổng hợp không phải bằng chứng
+live hoặc kiểm tra hình ảnh. Migration 026 chưa áp dụng trên Supabase.
+
+Spec 012 và các thay đổi hiện có được giữ nguyên; actual branch là `release/v0.8.0`.
+Chủ sở hữu đã chốt nghiệm thu và yêu cầu PR/merge trước Goal 2. Chấp nhận ngoại lệ về
+lịch sử test-first và hình ảnh chưa được kiểm chứng độc lập, không đổi chúng thành kết
+quả PASS. Không đổi version/tag/release trong vòng này. PR/CI/merge còn phải đọc lại.
+**Trạng thái: PO đã nghiệm thu với ngoại lệ được ghi rõ; đang tích hợp.**
+
 ## Nghiên cứu riêng — benchmark đối thủ
+
+### UAT thực tế — 04/10/2026, chưa tích hợp
+
+Chủ sở hữu duyệt setup chỉ Codex với SQLite riêng và một lượt TikTok/Threads có giới hạn.
+UAT Attention đã thu, lưu, đọc lại và xuất báo cáo cho 47 quan sát TikTok qua bốn truy vấn;
+hai truy vấn Threads được kiểm tra trên Chrome nhưng chưa nhập vào mission. Không có
+khuyến nghị ngành hàng: 47 quan sát còn chưa được đánh giá về ngữ nghĩa. UAT phát hiện và
+sửa cục bộ ba lỗi báo cáo (gợi ý giám sát định kỳ, cửa sổ thời gian chưa đo, độ mới suy từ
+ngày thu thập) cùng các lỗi setup cách ly cấu hình. Full suite trên mã đã sửa:
+**1.926 passed, 374 skipped, 2 warnings**; các lượt skip không chứng minh coverage live/PostgreSQL.
+Các thay đổi này chưa commit/merge hoặc phát hành.
+
+- [x] **UAT-001 — hoàn tất Market UAT:** lượt cuối 136 quan sát TikTok/Threads đã đánh giá,
+  Gap Report giữ kết luận thiếu bằng chứng; Claim Ledger kiểm chứng riêng bằng fixture.
+  PO đã nghiệm thu với ngoại lệ hình ảnh/lịch sử test-first trong ledger Spec 013.
+- [ ] **UAT-002 — tích hợp các bản sửa UAT:** kiểm tra diff cuối, PR/CI/merge và đọc lại main;
+  không đóng chỉ bằng test cục bộ. Release là bước riêng, chưa phát hành.
 
 - [ ] **RES-001 — thiết kế và thực hiện benchmark có thể tái lập.** Chuyển từ T091 của
   Spec 011 theo quyết định chủ sở hữu ngày 02/10/2026; chưa thực hiện và không chặn hoàn tất

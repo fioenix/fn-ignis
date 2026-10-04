@@ -9,7 +9,7 @@ import httpx
 
 from ignis.application.ports.connector_port import IConnectorPlugin
 from ignis.domain.entities import TrendSignal
-from ignis.domain.exceptions import ConnectorExecutionException
+from ignis.domain.exceptions import ConnectorCapabilityUnavailableException, ConnectorExecutionException
 from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
 
 logger = logging.getLogger(__name__)
@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 
 class GoogleTrendsRssPlugin(IConnectorPlugin):
     """
-    Ingress Plugin for Google Trends & Google Search Intent Intelligence.
-    Measures dynamic search demand, query breadth, and intent depth via Google Suggest API multi-probing.
+    Google Trends RSS observations and separately identified Autocomplete suggestions.
+
+    Autocomplete expands keywords; it cannot measure demand, volume, or temporal growth.
     """
 
     BASE_RSS_URL = "https://trends.google.com/trending/rss"
@@ -61,7 +62,7 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
     def _get_probe_patterns(self, geo_str: str) -> List[str]:
         if not self._probe_templates:
             logger.warning(
-                "No probe templates registered: measuring demand from the bare keyword alone. "
+                "No probe templates registered: expanding the bare keyword alone. "
                 "Check the probe_templates_* domains in market_lexicons."
             )
             return [self.BARE_KEYWORD_TEMPLATE]
@@ -76,22 +77,6 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
             return ""
         return geo_str.upper()
 
-
-    def _normalize_timeframe(self, timeframe_str: str) -> str:
-        tf = timeframe_str.lower().strip()
-        if tf in ["1d", "24h", "now 1-d"]:
-            return "now 1-d"
-        elif tf in ["7d", "now 7-d"]:
-            return "now 7-d"
-        elif tf in ["30d", "1m", "today 1-m"]:
-            return "today 1-m"
-        elif tf in ["90d", "3m", "today 3-m"]:
-            return "today 3-m"
-        elif tf in ["12m", "1y", "today 12-m"]:
-            return "today 12-m"
-        elif tf in ["5y", "today 5-y"]:
-            return "today 5-y"
-        return "today 3-m" if "90" in tf else "now 7-d"
 
     def _parse_traffic(self, traffic_str: Optional[str]) -> float:
         if not traffic_str:
@@ -123,71 +108,72 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
             logger.warning(f"Google Trends health check failed: {e}")
             return False
 
-    async def _probe_suggest(self, query: str, geo_str: str) -> List[str]:
+    async def _probe_suggest(self, query: str, geo_str: str) -> Optional[List[str]]:
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
         }
         params = {
             "client": "firefox",
             "q": query,
-            "gl": geo_str.lower() if geo_str else "vn",
             "hl": "vi",
         }
+        if geo_str:
+            params["gl"] = geo_str.lower()
         try:
             async with httpx.AsyncClient(timeout=6.0, headers=headers) as client:
                 resp = await client.get(self.SUGGEST_API_URL, params=params)
                 if resp.status_code == 200:
                     data = resp.json()
-                    if len(data) > 1 and isinstance(data[1], list):
-                        return [q for q in data[1] if isinstance(q, str)]
+                    if (
+                        isinstance(data, list) and len(data) > 1 and isinstance(data[1], list)
+                        and all(isinstance(q, str) for q in data[1])
+                    ):
+                        return data[1]
         except Exception:
             pass
-        return []
+        return None
 
-    async def _calculate_dynamic_search_demand(self, keyword: str, geo_str: str) -> Dict[str, Any]:
+    async def fetch_suggestions(
+        self, keywords: List[str], geo: GeoCode = GeoCode.VN,
+    ) -> List[Dict[str, Any]]:
+        """Return query-expansion observations, never Trends metric signals.
+
+        A valid empty reply measures no suggestions, not zero market demand. A failed
+        request measures nothing; retain that gap even if other probes answered.
         """
-        Multi-probe Google Suggest to calculate real, differentiated search demand index (0 - 100).
-        Different topics exhibit varying penetration depth across query intents.
-        """
-        all_unique_queries = set()
-        active_probes = 0
-
-        probe_patterns = self._get_probe_patterns(geo_str)
-        for pattern in probe_patterns:
-            probe_q = pattern.format(keyword)
-            results = await self._probe_suggest(probe_q, geo_str)
-            if results:
-                active_probes += 1
-                for r in results:
-                    all_unique_queries.add(r.lower().strip())
-
-        total_unique_variants = len(all_unique_queries)
-
-        # Baseline demand calculated from probe penetration & query variety
-        penetration_score = (active_probes / float(len(probe_patterns))) * 45.0
-        variety_score = min(35.0, total_unique_variants * 1.4)
-        
-        # Commercial / practical intent depth bonus. Without the registered markers there is
-        # no evidence of intent to score, so the bonus is zero rather than guessed.
-        intent_matches = sum(
-            1 for q in all_unique_queries if any(k in q for k in self._intent_keywords)
-        )
-        intent_bonus = min(20.0, intent_matches * 2.0)
-
-
-        raw_score = penetration_score + variety_score + intent_bonus
-
-        # Dynamic calibrated score (20.0 - 98.0)
-        demand_index = round(min(98.0, max(25.0, raw_score)), 1)
-        velocity = round(float(total_unique_variants * 1.5 + active_probes * 3.0), 1)
-
-        return {
-            "demand_index": demand_index,
-            "velocity": velocity,
-            "related_queries": sorted(list(all_unique_queries))[:12],
-            "active_probes": active_probes,
-            "unique_variants": total_unique_variants,
-        }
+        batches: List[Dict[str, Any]] = []
+        geo_str = self._geo_to_param(geo)
+        for keyword in keywords:
+            variants: Dict[str, str] = {}
+            executed = failed = 0
+            for pattern in self._get_probe_patterns(geo_str):
+                suggestions = await self._probe_suggest(pattern.format(keyword), geo_str)
+                if suggestions is None:
+                    failed += 1
+                    continue
+                executed += 1
+                for suggestion in suggestions:
+                    cleaned = suggestion.strip()
+                    if cleaned:
+                        variants.setdefault(cleaned.casefold(), cleaned)
+            batches.append({
+                "keyword": keyword,
+                "platform": "google_autocomplete",
+                "data_source": "google_autocomplete",
+                "measurement_type": "keyword_expansion",
+                "geo_code": geo.value,
+                "source_url": self.SUGGEST_API_URL,
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "status": "DEGRADED" if failed else ("HEALTHY" if variants else "EMPTY_NO_DATA"),
+                "probes_executed": executed,
+                "failed_probes": failed,
+                "suggestions_count": len(variants) if executed else None,
+                "suggestions": [
+                    {"query": value, "type": "autocomplete"}
+                    for value in variants.values()
+                ],
+            })
+        return batches
 
     def _explore_url(self, query: str, geo: GeoCode) -> str:
         """The Google Trends explore URL for one keyword, used as that topic's stable address."""
@@ -282,40 +268,10 @@ class GoogleTrendsRssPlugin(IConnectorPlugin):
         limit: int = 20,
         custom_timeframe: Optional[str] = None,
     ) -> List[TrendSignal]:
-        signals: List[TrendSignal] = []
-        geo_code_str = self._geo_to_param(geo)
-        
-        tf_input = custom_timeframe or (timeframe.value if hasattr(timeframe, "value") else str(timeframe))
-        tf_google = self._normalize_timeframe(tf_input)
-
-        for kw in keywords:
-            encoded_kw = urllib.parse.quote(kw)
-            explore_url = f"https://trends.google.com/trends/explore?date={urllib.parse.quote(tf_google)}&geo={geo_code_str}&q={encoded_kw}"
-
-            # Calculate real dynamic demand via multi-probe analysis
-            demand_data = await self._calculate_dynamic_search_demand(kw, geo_code_str)
-
-            meta = {
-                "keyword": kw,
-                "timeframe_requested": tf_input,
-                "timeframe_google": tf_google,
-                "explore_url": explore_url,
-                "related_queries": demand_data["related_queries"],
-                "active_probes": demand_data["active_probes"],
-                "unique_variants": demand_data["unique_variants"],
-                "data_source": "google_search_dynamic_probes",
-            }
-
-            signal = TrendSignal(
-                platform=PlatformType.GOOGLE_TRENDS,
-                raw_title=f"Google Search Trends: {kw}",
-                metric_value=demand_data["demand_index"],
-                growth_velocity=demand_data["velocity"],
-                source_url=explore_url,
-                geo_code=geo,
-                metadata=meta,
-                captured_at=datetime.now(timezone.utc),
-            )
-            signals.append(signal)
-
-        return signals
+        """Fail visibly until a genuine keyword Trends measurement source is available."""
+        if not keywords:
+            return []
+        raise ConnectorCapabilityUnavailableException(
+            "Keyword Google Trends measurements are unavailable. Autocomplete is keyword "
+            "expansion only; use fetch_suggestions. Trends RSS remains available as macro context."
+        )

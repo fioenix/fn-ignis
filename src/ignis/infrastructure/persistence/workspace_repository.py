@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
+from ignis.application.cancellation import await_settled
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import (
     IResearchWorkspaceStore,
@@ -232,8 +233,8 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         never wait for each other.
         """
         run_id = run_id or uuid4()
-        await self.require_mission_writer(mission_id, run_id)
         try:
+            await self.require_mission_writer(mission_id, run_id)
             # Preflight may have awaited while an earlier run completed. Recheck under the
             # writer slot, before allocating a journal, so delayed admission cannot restart it.
             mission = await self._repo.get_mission(mission_id)
@@ -246,18 +247,18 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         except BaseException:
             # No journal, so there is no run to record -- and holding the slot for a run that
             # never started is exactly the stale claim the release exists to prevent.
-            await self.release_mission_writer(mission_id, run_id)
+            await await_settled(self.release_mission_writer(mission_id, run_id))
             raise
 
         try:
             yield journal
         except BaseException:
-            await self._finish_run_journal(journal, status="FAILED")
+            await await_settled(self._finish_run_journal(journal, status="FAILED"))
             raise
         else:
-            await self._finish_run_journal(journal, status="COMPLETED")
+            await await_settled(self._finish_run_journal(journal, status="COMPLETED"))
         finally:
-            await self.release_mission_writer(mission_id, run_id)
+            await await_settled(self.release_mission_writer(mission_id, run_id))
 
     async def _finish_run_journal(self, journal: RunJournal, status: str) -> RunJournal:
         """Close a run's journal on disk and in the database, without raising over the run.

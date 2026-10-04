@@ -18,6 +18,8 @@ This document defines the operational protocol, architectural guidelines, and to
 > 2. Creates `.env` with SQLite default (`DATABASE_URL=sqlite:///ignis.db`) and generates a persistent Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) key.
 > 3. Bootstraps SQLite database schemas and loads 84+ seed domain lexicons & noise filters.
 > 4. Auto-configures FastMCP server in all supported agent environments (`.mcp.json`, `claude_desktop_config.json`, Google Antigravity, OpenAI Codex `config.toml`).
+>
+> Owner-approved exception (2026-10-04): `./scripts/bootstrap.sh --client codex --env-file /absolute/path/to/uat/.env` configures only Codex and isolates UAT storage. The default remains all clients.
 > 5. Runs synthetic diagnostics and outputs structured readiness confirmation.
 >
 > *No user input or external database installation is required.*
@@ -274,7 +276,7 @@ Every AI Agent modifying this repository or preparing a release must verify comp
 
 ### Checklist B: Harness Autonomy & Non-Prescriptive Decoupling
 - [ ] **Non-Prescriptive Instructions**: Verify FastMCP server instructions and tool docstrings do NOT coerce agents into forced pipelines (no "MUST STRICTLY FOLLOW").
-- [ ] **Atomic Independence**: Ensure all 41 FastMCP tools are independently callable within their authority and evidence contracts.
+- [ ] **Atomic Independence**: Ensure all 44 FastMCP tools are independently callable within their authority and evidence contracts.
 - [ ] **Framework Separation**: The strategic research recipe is a reference, never a forced pipeline for tactical collection.
 - [ ] **Contextual Deliverables**: Deliverables match user intent (concise text, cards, tables, or full HTML dashboards) without forcing boilerplate templates for trivial queries.
 

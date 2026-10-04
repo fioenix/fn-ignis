@@ -884,9 +884,51 @@ EVIDENCE_GROUNDED_FUNCTIONS = (
 )
 
 
+def test_026_retains_existing_outcome_and_security_then_accepts_only_partial_degraded(empty_postgres_dsn):
+    dsn = empty_postgres_dsn
+    _apply(dsn, *_through(25))
+    with psycopg.connect(dsn) as conn:
+        workspace = conn.execute(
+            "INSERT INTO research_workspaces (slug, root_path) VALUES ('t026', '/t026') RETURNING id"
+        ).fetchone()[0]
+        mission = conn.execute(
+            "INSERT INTO research_missions (title, workspace_id) VALUES ('t026', %s) RETURNING id",
+            (workspace,),
+        ).fetchone()[0]
+        run = conn.execute(
+            "INSERT INTO mission_run_journals (workspace_id, mission_id, journal_path, sequence,"
+            " status, started_at, completed_at) VALUES (%s, %s, '/t026/run.md', 1, 'COMPLETED',"
+            " now(), now()) RETURNING id", (workspace, mission),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO mission_probe_outcomes (run_id, platform, connector_surface, status,"
+            " signals_collected, queried_keywords, query_fingerprint, completed_at)"
+            " VALUES (%s, 'tiktok', 'tiktok_video', 'HEALTHY', 47, ARRAY['bounded'], 'frame', now())",
+            (run,),
+        )
+    before = _all(dsn, "SELECT to_jsonb(o) FROM mission_probe_outcomes o ORDER BY id")
+    security = _security_state(dsn)
+    with pytest.raises(errors.CheckViolation):
+        with psycopg.connect(dsn) as conn:
+            conn.execute("UPDATE mission_probe_outcomes SET status='DEGRADED'")
+    _apply(dsn, "026_partial_degraded_probe_outcomes.sql")
+    assert _all(dsn, "SELECT to_jsonb(o) FROM mission_probe_outcomes o ORDER BY id") == before
+    assert _security_state(dsn) == security
+    with psycopg.connect(dsn) as conn:
+        conn.execute("UPDATE mission_probe_outcomes SET status='DEGRADED'")
+    for status in ("EMPTY_NO_DATA", "FAILED", "AUTH_REQUIRED", "RATE_LIMITED", "NOT_REQUESTED"):
+        with pytest.raises(errors.CheckViolation):
+            with psycopg.connect(dsn) as conn:
+                conn.execute("UPDATE mission_probe_outcomes SET status=%s", (status,))
+    settled = _all(dsn, "SELECT to_jsonb(o) FROM mission_probe_outcomes o ORDER BY id")
+    _apply(dsn, "026_partial_degraded_probe_outcomes.sql")
+    assert _all(dsn, "SELECT to_jsonb(o) FROM mission_probe_outcomes o ORDER BY id") == settled
+    assert _security_state(dsn) == security
+
+
 def test_025_creates_owner_only_constrained_tables_without_promoting_baseline(supabase_like_dsn):
     dsn = supabase_like_dsn
-    _apply(dsn, *all_postgres_migrations()[:-1])
+    _apply(dsn, *_through(24))
     with psycopg.connect(dsn) as conn:
         conn.execute("INSERT INTO trend_signals (platform, raw_title) VALUES ('youtube', 'legacy baseline')")
         baseline_before = conn.execute("SELECT count(*) FROM trend_signals").fetchone()[0]

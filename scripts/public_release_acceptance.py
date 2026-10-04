@@ -678,7 +678,7 @@ def _checkout_record(repository: str, tag: str, expected_commit: str | None, che
                 f"tag {tag} resolved to {resolved}, not the verified main commit {expected_commit}",
                 "behavior_mismatch",
             ),
-            True,
+            False,
         )
     return (
         SurfaceRecord(

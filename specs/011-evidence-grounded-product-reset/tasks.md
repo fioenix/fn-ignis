@@ -263,6 +263,10 @@ separate implementation completion from owner-authorized migration, release, and
     T095's release/version/tag/push questions remain separate from the settled dev authorization.
 - [ ] T097 Prepare the owner-approved breaking release by synchronizing `pyproject.toml`, `openclaw.json`, `server.json`, `CITATION.cff`, `.openclaw/config.yaml`, `BACKLOG.md`, and regenerated `uv.lock` in one atomic change
 - [ ] T098 Merge, tag, push, and publish only the owner-approved release, then record the PR, merge commit, tag, public package/container checks, and anonymous clean-install evidence in `BACKLOG.md` and `specs/011-evidence-grounded-product-reset/tasks.md`
+  - Implementation PR 43 merged on 2026-10-02 (Vietnam time) at
+    `7e089a37447b42a2c35aee25874020bcec94016a`, following 7/7 required checks on `ee8e194`.
+    Post-merge CI is pending at this checkpoint. No v0.8.0 tag or publication exists;
+    pre-pilot publication exception is awaiting the owner, so this combined task remains open.
 
 ### PR 43 review follow-up (owner requested 2026-10-02)
 

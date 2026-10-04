@@ -105,7 +105,9 @@ async def test_a_stored_session_is_sent_with_the_probe(probes):
     _launchable, reachable = probes
     auth = AsyncMock()
     auth.get_storage_state = AsyncMock(
-        return_value={"cookies": [{"name": "sessionid", "value": "abc"}]}
+        return_value={"cookies": [{"name": "sessionid", "value": "abc",
+                                   "domain": ".tiktok.com", "path": "/",
+                                   "secure": True, "expires": -1}]}
     )
 
     await TikTokPlugin(auth_manager=auth).is_healthy()

@@ -7,9 +7,10 @@ import re
 import sqlite3
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar
 from uuid import UUID, uuid4
 
+from ignis.application.cancellation import await_settled
 from ignis.application.ports.repository_port import (
     ITrendRepository,
     PlatformCredentialRecord,
@@ -80,6 +81,7 @@ from ignis.infrastructure.persistence.migration_state import (
 )
 
 logger = logging.getLogger(__name__)
+_WriteResult = TypeVar("_WriteResult")
 
 
 def _platforms_of(row) -> List[PlatformType]:
@@ -142,6 +144,10 @@ class SqliteTrendRepository(ITrendRepository):
             # The pragma is per connection, and this one is handed straight back by
             # _get_connection without passing the line that sets it there.
             self._mem_conn.execute("PRAGMA foreign_keys = ON")
+
+    async def _run_write(self, operation: Callable[[], _WriteResult]) -> _WriteResult:
+        """Keep ownership until the synchronous mutation settles, even after cancellation."""
+        return await await_settled(asyncio.to_thread(operation))
 
     async def close(self) -> None:
         """Close SQLite connection if in-memory."""
@@ -234,7 +240,7 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.close()
 
         async with self._lock:
-            return await asyncio.to_thread(_sync_reserve)
+            return await self._run_write(_sync_reserve)
 
     async def mark_youtube_quota_exhausted(
         self,
@@ -272,7 +278,7 @@ class SqliteTrendRepository(ITrendRepository):
                     conn.close()
 
         async with self._lock:
-            return await asyncio.to_thread(_sync_mark)
+            return await self._run_write(_sync_mark)
 
     async def get_youtube_quota_usage(self, quota_day: date) -> List[YouTubeQuotaUsage]:
         await self._ensure_schema()
@@ -309,7 +315,7 @@ class SqliteTrendRepository(ITrendRepository):
             return
         async with self._lock:
             if not self._initialized:
-                await asyncio.to_thread(self._create_tables_and_seed)
+                await self._run_write(self._create_tables_and_seed)
                 await asyncio.to_thread(self._refuse_an_unbackfilled_corpus)
                 self._initialized = True
 
@@ -344,6 +350,7 @@ class SqliteTrendRepository(ITrendRepository):
         rebuild_briefs = "market_brief_revisions_evidence_contract" not in brief_sql
         rebuild_outcomes = (
             "collection_plan_digest" not in outcome_sql or "'NOT_REQUESTED'" not in outcome_sql
+            or "mission_probe_outcomes_partial_count_check" not in outcome_sql
         )
         rebuild_qualifications = (
             "evidence_role" not in qualification_sql
@@ -446,6 +453,15 @@ class SqliteTrendRepository(ITrendRepository):
 
             if rebuild_outcomes:
                 existing = _columns("mission_probe_outcomes")
+                # SQLite validates triggers on other tables during RENAME. Restore the existing
+                # claim guards inside this transaction after the replacement table exists.
+                dependent_triggers = cur.execute(
+                    "SELECT name, sql FROM sqlite_master WHERE type = 'trigger'"
+                    " AND sql LIKE '%mission_probe_outcomes%'"
+                ).fetchall()
+                for name, _ in dependent_triggers:
+                    quoted_name = name.replace('"', '""')
+                    cur.execute(f'DROP TRIGGER "{quoted_name}"')
                 cur.execute("DROP TABLE IF EXISTS mission_probe_outcomes_rebuilt")
                 cur.execute(
                     """
@@ -468,8 +484,10 @@ class SqliteTrendRepository(ITrendRepository):
                         evidence_contract_version INTEGER NOT NULL DEFAULT 1,
                         completed_at TEXT NOT NULL,
                         UNIQUE (run_id, connector_surface),
-                        CHECK (signals_collected >= 0
-                               AND (status = 'HEALTHY') = (signals_collected > 0)),
+                        CONSTRAINT mission_probe_outcomes_partial_count_check CHECK (signals_collected >= 0
+                               AND ((status = 'HEALTHY' AND signals_collected > 0)
+                                    OR status = 'DEGRADED'
+                                    OR (status NOT IN ('HEALTHY', 'DEGRADED') AND signals_collected = 0))),
                         CHECK (status <> 'EMPTY_NO_DATA' OR queried_keywords <> '[]'),
                         CHECK (evidence_contract_version = 1 OR (
                             evidence_contract_version = 2
@@ -515,6 +533,8 @@ class SqliteTrendRepository(ITrendRepository):
                 cur.execute(
                     "ALTER TABLE mission_probe_outcomes_rebuilt RENAME TO mission_probe_outcomes"
                 )
+                for _, trigger_sql in dependent_triggers:
+                    cur.execute(trigger_sql)
 
             if rebuild_qualifications:
                 existing = _columns("mission_evidence_qualifications")
@@ -1069,8 +1089,10 @@ class SqliteTrendRepository(ITrendRepository):
                 evidence_contract_version INTEGER NOT NULL DEFAULT 1,
                 completed_at TEXT NOT NULL,
                 UNIQUE (run_id, connector_surface),
-                CHECK (signals_collected >= 0
-                       AND (status = 'HEALTHY') = (signals_collected > 0)),
+                CONSTRAINT mission_probe_outcomes_partial_count_check CHECK (signals_collected >= 0
+                       AND ((status = 'HEALTHY' AND signals_collected > 0)
+                            OR status = 'DEGRADED'
+                            OR (status NOT IN ('HEALTHY', 'DEGRADED') AND signals_collected = 0))),
                 CHECK (status <> 'EMPTY_NO_DATA' OR queried_keywords <> '[]'),
                 CHECK (evidence_contract_version = 1 OR (
                     evidence_contract_version = 2
@@ -1423,7 +1445,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_save)
+        return await self._run_write(_sync_save)
 
     @staticmethod
     def _claim_from_row(row: Any, binding_rows: Sequence[Any]) -> MissionClaim:
@@ -1582,7 +1604,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        stored = await asyncio.to_thread(_sync_save)
+        stored = await self._run_write(_sync_save)
         by_identity = {
             (claim.frame_digest, claim.client_claim_key): claim for claim in stored
         }
@@ -1624,7 +1646,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_supersede)
+        return await self._run_write(_sync_supersede)
 
     async def load_mission_evidence_snapshot(self, mission_id: UUID):
         from ignis.infrastructure.persistence.evidence_snapshot import read_evidence_snapshot
@@ -1779,7 +1801,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_prune)
+        return await self._run_write(_sync_prune)
 
     def _reconcile_through_aliases(self, cur, platform, signal, identity):
         """The canonical identity for this sighting once the alias ledger has had its say.
@@ -1976,7 +1998,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        await asyncio.to_thread(_sync_save)
+        await self._run_write(_sync_save)
 
     async def get_top_clusters(
         self,
@@ -2257,7 +2279,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_save)
+        return await self._run_write(_sync_save)
 
     async def get_mission(self, mission_id: UUID) -> Optional[ResearchMission]:
         await self._ensure_schema()
@@ -2434,7 +2456,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_assign)
+        return await self._run_write(_sync_assign)
 
     async def attach_mission_evidence(self, mission_id: UUID, signals: List[TrendSignal]) -> int:
         """Record that a mission used observations that already exist. See Postgres."""
@@ -2462,7 +2484,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_attach)
+        return await self._run_write(_sync_attach)
 
     async def prune_mission_evidence(self, mission_id: UUID, retained_observation_ids) -> int:
         """Drop this mission's claims on anything outside the retained set. See Postgres."""
@@ -2491,7 +2513,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_prune)
+        return await self._run_write(_sync_prune)
 
     async def delete_mission_signals(self, mission_id: UUID) -> int:
         await self._ensure_schema()
@@ -2511,7 +2533,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_del)
+        return await self._run_write(_sync_del)
 
     async def log_event(
         self,
@@ -2544,7 +2566,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        await asyncio.to_thread(_sync_log)
+        await self._run_write(_sync_log)
 
     async def get_recent_logs(
         self,
@@ -2646,7 +2668,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        await asyncio.to_thread(_sync_save)
+        await self._run_write(_sync_save)
 
     async def get_platform_credentials(self, platform: str) -> Optional[PlatformCredentialRecord]:
         await self._ensure_schema()
@@ -2735,7 +2757,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_del)
+        return await self._run_write(_sync_del)
 
     async def get_domain_lexicons(self, domain: Optional[str] = None) -> List[Dict[str, Any]]:
         await self._ensure_schema()
@@ -2803,7 +2825,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_reg)
+        return await self._run_write(_sync_reg)
 
     async def get_industry_taxonomies(self) -> List[Dict[str, Any]]:
         await self._ensure_schema()
@@ -2903,7 +2925,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        await asyncio.to_thread(_sync_set)
+        await self._run_write(_sync_set)
 
     async def delete_runtime_config(self, key: str) -> bool:
         await self._ensure_schema()
@@ -2919,7 +2941,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_del)
+        return await self._run_write(_sync_del)
 
 
     # ------------------------------------------------------------------
@@ -2958,7 +2980,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_save)
+        return await self._run_write(_sync_save)
 
     @staticmethod
     def _workspace_from_row(row: Any) -> ResearchWorkspace:
@@ -3106,7 +3128,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_save)
+        return await self._run_write(_sync_save)
 
     async def create_market_mission_with_brief(
         self, mission: ResearchMission, revision: MarketBriefRevision
@@ -3150,7 +3172,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_create)
+        return await self._run_write(_sync_create)
 
     async def create_attention_mission_with_manifest(
         self, mission: ResearchMission, manifest: MissionManifest
@@ -3179,7 +3201,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_create)
+        return await self._run_write(_sync_create)
 
     async def create_market_mission_with_brief_and_manifest(
         self,
@@ -3219,7 +3241,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_create)
+        return await self._run_write(_sync_create)
 
     @staticmethod
     def _brief_from_row(row: Any) -> MarketBriefRevision:
@@ -3318,7 +3340,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_next)
+        return await self._run_write(_sync_next)
 
     async def list_workspace_missions(
         self, workspace_id: UUID, limit: int = 50
@@ -3447,7 +3469,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_save)
+        return await self._run_write(_sync_save)
 
     async def get_mission_manifest(self, mission_id: UUID) -> Optional[MissionManifest]:
         await self._ensure_schema()
@@ -3484,7 +3506,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_claim)
+        return await self._run_write(_sync_claim)
 
     async def release_mission_writer(self, mission_id: UUID, run_id: UUID) -> None:
         await self._ensure_schema()
@@ -3503,7 +3525,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        await asyncio.to_thread(_sync_release)
+        await self._run_write(_sync_release)
 
     async def get_mission_writer_claim(self, mission_id: UUID) -> Optional[MissionWriterClaim]:
         await self._ensure_schema()
@@ -3601,7 +3623,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_record)
+        return await self._run_write(_sync_record)
 
     # ------------------------------------------------------------------
     # Probe outcomes and evidence qualifications (sql/023)
@@ -3683,7 +3705,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_record)
+        return await self._run_write(_sync_record)
 
     async def get_latest_completed_probe_outcomes(
         self, mission_id: UUID
@@ -3853,4 +3875,4 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_save)
+        return await self._run_write(_sync_save)

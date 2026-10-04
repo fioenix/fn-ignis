@@ -112,6 +112,8 @@ class GetMissionAnalysisUseCase:
             p_str = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
             
             clean_meta = {}
+            if s.metadata.get("metric_known") is False:
+                clean_meta.update(metric_known=False, metric_kind=None)
             if "channel_title" in s.metadata:
                 clean_meta["channel"] = s.metadata["channel_title"]
             if "likes" in s.metadata:
@@ -130,8 +132,8 @@ class GetMissionAnalysisUseCase:
                 "evidence_role": evidence_role,
                 "platform": p_str,
                 "title": s.raw_title,
-                "metric_value": s.metric_value,
-                "velocity_per_hour": s.growth_velocity,
+                "metric_value": None if s.metadata.get("metric_known") is False else s.metric_value,
+                "velocity_per_hour": None if s.metadata.get("metric_known") is False else s.growth_velocity,
                 "url": s.source_url,
                 "metadata": clean_meta,
             })

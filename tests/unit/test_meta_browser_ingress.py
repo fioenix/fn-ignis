@@ -1,3 +1,5 @@
+import json
+import urllib.parse
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -7,13 +9,18 @@ from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType
 from ignis.infrastructure.connectors.meta_browser_ingress import (
     caption_text,
     coerce_int,
+    collect_json_payloads,
     extract_records,
     walk_dicts,
 )
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 
-STORAGE_STATE = {"cookies": [{"name": "sessionid", "value": "SECRET"}]}
+STORAGE_STATE = {"cookies": [
+    {"name": "sessionid", "value": "SECRET", "domain": domain, "path": "/",
+     "secure": True, "expires": -1, "httpOnly": True, "sameSite": "Lax"}
+    for domain in (".threads.com", ".instagram.com")
+]}
 
 # Shaped like Meta's private GraphQL envelope: the post sits several wrappers deep.
 THREADS_PAYLOAD = {
@@ -137,6 +144,87 @@ def test_caption_text_handles_both_dict_and_plain_string_shapes():
 
 
 # --- Threads Tier 1 ingress ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variables,status,body,expected_query,accepted", [
+    ({"query": "retail"}, 200, THREADS_PAYLOAD, "retail", True),
+    ({"search_query": "retail"}, 200, THREADS_PAYLOAD, "retail", True),
+    ({"query": "other"}, 200, THREADS_PAYLOAD, "retail", False),
+    ({"unrelated": "retail"}, 200, THREADS_PAYLOAD, "retail", False),
+    ({"query": "retail", "search_query": "other"}, 200, THREADS_PAYLOAD, "retail", False),
+    ({"query": "retail"}, 500, THREADS_PAYLOAD, "retail", False),
+    ({"query": "retail"}, 200, {"data": {"custom_feeds": []}}, "retail", False),
+    ({"query": "retail"}, 200, {"errors": [{"message": "failed"}], **THREADS_PAYLOAD}, "retail", False),
+    ({"query": "retail"}, 200, {"data": {"searchResults": {"edges": []}}}, "retail", True),
+    ({"query": "retail"}, 200, {"data": {"custom_feeds": []}}, None, True),
+])
+async def test_query_capture_requires_exact_request_and_public_response(variables, status, body, expected_query, accepted):
+    """Removing request/status/envelope admission must fail this real capture callback test."""
+    handlers = {}
+    page = AsyncMock()
+    page.on = MagicMock(side_effect=lambda event, callback: handlers.__setitem__(event, callback))
+    request = MagicMock(url="https://www.threads.com/api/graphql", method="POST")
+    request.post_data = urllib.parse.urlencode({"variables": json.dumps(variables), "doc_id": "test-doc"})
+    response = MagicMock(url=request.url, status=status, request=request)
+    response.headers = {"content-type": "application/json"}
+    response.json = AsyncMock(return_value=body)
+
+    async def navigate(*args, **kwargs):
+        await handlers["request"](request)
+        await handlers["response"](response)
+
+    page.goto.side_effect = navigate
+    browser = AsyncMock()
+    browser.new_context.return_value.new_page.return_value = page
+    playwright = MagicMock()
+    playwright.chromium.launch = AsyncMock(return_value=browser)
+    manager = MagicMock()
+    manager.__aenter__ = AsyncMock(return_value=playwright)
+    manager.__aexit__ = AsyncMock(return_value=None)
+    with patch("playwright.async_api.async_playwright", return_value=manager), patch(
+        "ignis.infrastructure.connectors.meta_browser_ingress.GraphQLDocIdCache.set"
+    ) as cache:
+        payloads = await collect_json_payloads(
+            url="https://www.threads.com/search?q=retail", storage_state={},
+            url_markers=["/api/graphql"], scrolls=0, expected_query=expected_query,
+            payload_validator=ThreadsPlugin._public_search_results,
+        )
+    assert payloads == ([body] if accepted else [])
+    assert cache.called is (accepted and expected_query is not None)
+
+
+@pytest.mark.asyncio
+async def test_threads_background_payload_cannot_attest_or_admit_posts():
+    from ignis.application.ports.connector_port import SearchAttestation
+
+    plugin = ThreadsPlugin()
+    attestation = SearchAttestation()
+    with patch(
+        "ignis.infrastructure.connectors.threads.threads_plugin.collect_json_payloads",
+        AsyncMock(return_value=[{"data": {"custom_feeds": []}}]),
+    ):
+        signals = await plugin._fetch_via_browser_session(
+            url="https://www.threads.com/search?q=retail", storage_state={},
+            geo=GeoCode.VN, limit=10, keyword="retail", attestation=attestation,
+        )
+    assert signals == []
+    assert attestation.queried == []
+
+
+@pytest.mark.asyncio
+async def test_threads_public_search_does_not_extract_background_siblings():
+    plugin = ThreadsPlugin()
+    body = {"data": {"searchResults": {"edges": []}, "background": THREADS_PAYLOAD}}
+    with patch(
+        "ignis.infrastructure.connectors.threads.threads_plugin.collect_json_payloads",
+        AsyncMock(return_value=[body]),
+    ):
+        signals = await plugin._fetch_via_browser_session(
+            url="https://www.threads.com/search?q=retail", storage_state={},
+            geo=GeoCode.VN, limit=10, keyword="retail",
+        )
+    assert signals == []
 
 
 @pytest.mark.asyncio

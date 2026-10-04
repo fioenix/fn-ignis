@@ -3,8 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
+import re
 import urllib.parse
+from http.cookiejar import Cookie, CookieJar, DefaultCookiePolicy
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
+from urllib.request import Request
 
 import httpx
 
@@ -20,6 +24,41 @@ USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 )
+
+# Project in the page so unrelated account/bootstrap JSON never leaves the browser.
+THREADS_SEARCH_RELAY_EXTRACTOR = r"""(elements, query) => {
+    const expected = new Set(), streams = [];
+    function walk(node, depth) {
+        if (!node || typeof node !== 'object' || depth > 24) return;
+        if (Array.isArray(node) && node[0] === 'RelayPrefetchedStreamCache' && node[1] === 'next') {
+            const args = node[3];
+            if (Array.isArray(args)) streams.push(args);
+            return;
+        }
+        if (Array.isArray(node.expectedPreloaders)) {
+            for (const preloader of node.expectedPreloaders) {
+                if (preloader?.queryName === 'BarcelonaSearchResultsQuery' &&
+                    preloader.variables?.query === query && typeof preloader.preloaderID === 'string') {
+                    expected.add(preloader.preloaderID);
+                }
+            }
+        }
+        for (const value of Object.values(node)) walk(value, depth + 1);
+    }
+    for (const element of elements) {
+        try { walk(JSON.parse(element.textContent), 0); } catch {}
+    }
+    const results = [];
+    for (const [id, wrapper] of streams) {
+        const bbox = wrapper?.__bbox, result = bbox?.result;
+        if (!expected.has(id) || bbox?.complete !== true || !result || result.errors) continue;
+        const search = result.data?.searchResults;
+        if (search && typeof search === 'object' && !Array.isArray(search)) {
+            results.push({data: {searchResults: search}});
+        }
+    }
+    return results;
+}"""
 
 
 def get_threads_web_client_id() -> str:
@@ -144,24 +183,62 @@ class GraphQLDocIdCache:
             cls.set("trending_topics", doc_id, lsd)
 
 
-def build_cookie_header(storage_state: Dict[str, Any]) -> str:
-    """Convert Playwright storage_state cookies list into a valid HTTP Cookie header string."""
-    cookies = storage_state.get("cookies", []) or []
-    parts = []
-    for c in cookies:
-        name = c.get("name")
-        val = c.get("value")
-        if name and val is not None:
-            parts.append(f"{name}={val}")
-    return "; ".join(parts)
+def build_cookie_header(storage_state: Dict[str, Any], target_url: str) -> str:
+    """Select only unexpired browser cookies eligible for the actual HTTP destination."""
+    # Match the URL HTTPX actually sends, including dot-segment and IDNA normalization.
+    try:
+        target_url = str(httpx.URL(target_url))
+        target = urllib.parse.urlsplit(target_url)
+    except (httpx.InvalidURL, ValueError):
+        return ""
+    if target.scheme not in ("http", "https") or not target.hostname or target.username:
+        return ""
+    cookies = storage_state.get("cookies", [])
+    if not isinstance(cookies, list):
+        return ""
+    # CookieJar's default Netscape policy otherwise permits host-only cookies on subdomains.
+    jar = CookieJar(DefaultCookiePolicy(
+        strict_ns_domain=DefaultCookiePolicy.DomainStrictNonDomain,
+    ))
+    for item in cookies:
+        if not isinstance(item, dict) or item.get("partitionKey"):
+            continue
+        name, value = item.get("name"), item.get("value")
+        domain, path = item.get("domain"), item.get("path")
+        secure, expires = item.get("secure"), item.get("expires")
+        if (
+            not isinstance(name, str) or not re.fullmatch(r"[!#$%&'*+\-.^_`|~0-9A-Za-z]+", name)
+            or not isinstance(value, str)
+            or not re.fullmatch(r"[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]*", value)
+            or not isinstance(domain, str)
+            or not re.fullmatch(r"\.?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*", domain)
+            or not isinstance(path, str) or not path.startswith("/")
+            or any(ord(c) < 32 or ord(c) == 127 for c in path)
+            or not isinstance(secure, bool)
+            or isinstance(expires, bool) or not isinstance(expires, (int, float))
+            or not math.isfinite(expires) or (expires < 0 and expires != -1)
+        ):
+            continue
+        jar.set_cookie(Cookie(
+            version=0, name=name, value=value, port=None, port_specified=False,
+            domain=domain.lower(), domain_specified=domain.startswith("."),
+            domain_initial_dot=domain.startswith("."), path=path, path_specified=True,
+            secure=secure, expires=None if expires == -1 else int(expires),
+            discard=expires == -1, comment=None, comment_url=None, rest={},
+        ))
+    request = Request(target_url)
+    jar.add_cookie_header(request)
+    return request.get_header("Cookie", "")
 
 
-def extract_token_from_storage(storage_state: Dict[str, Any], token_name: str) -> Optional[str]:
-    """Find a specific cookie value (such as csrftoken or ds_user_id) from storage state."""
-    cookies = storage_state.get("cookies", []) or []
-    for c in cookies:
-        if c.get("name") == token_name:
-            return c.get("value")
+def extract_token_from_storage(
+    storage_state: Dict[str, Any], token_name: str, target_url: str,
+) -> Optional[str]:
+    """Choose the first eligible token, respecting CookieJar's longest-path ordering."""
+    for cookie in build_cookie_header(storage_state, target_url).split("; "):
+        name, separator, value = cookie.partition("=")
+        if separator and name == token_name:
+            return value
     return None
 
 
@@ -179,14 +256,14 @@ async def fetch_graphql_direct(
     Uses persisted doc_id and session cookies captured from storage_state.
     Returns parsed JSON dict on success, or None on error/invalidation so caller falls back to Playwright.
     """
-    cookie_header = build_cookie_header(storage_state)
+    target_url = url or get_threads_graphql_endpoint()
+    cookie_header = build_cookie_header(storage_state, target_url)
     if not cookie_header:
         logger.debug("No cookies in storage_state; cannot perform direct GraphQL fetch.")
         return None
 
-    target_url = url or get_threads_graphql_endpoint()
     client_id = get_threads_web_client_id()
-    csrf_token = extract_token_from_storage(storage_state, "csrftoken") or ""
+    csrf_token = extract_token_from_storage(storage_state, "csrftoken", target_url) or ""
     headers = {
         "User-Agent": USER_AGENT,
         "X-IG-App-ID": client_id,
@@ -208,7 +285,8 @@ async def fetch_graphql_direct(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+        # Custom CSRF headers are not stripped by HTTPX on cross-origin redirects.
+        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
             resp = await client.post(target_url, headers=headers, data=form_data)
             if resp.status_code != 200:
                 logger.debug(f"Direct GraphQL POST returned status {resp.status_code} for doc_id {doc_id}")
@@ -231,13 +309,16 @@ async def collect_json_payloads(
     geo: GeoCode = GeoCode.VN,
     settle_ms: int = 4000,
     scrolls: int = 2,
+    expected_query: Optional[str] = None,
+    payload_validator: Optional[Callable[[Dict[str, Any]], Optional[Dict[str, Any]]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Drive a logged-in Playwright context over `url` and return the JSON bodies of every
     XHR whose URL contains one of `url_markers`.
 
     Also sniffs outgoing POST requests to capture and update doc_id and lsd signatures
-    in GraphQLDocIdCache for future zero-overhead fast-path calls.
+    in GraphQLDocIdCache for future zero-overhead fast-path calls. Scoped search capture
+    requires the exact request query and an admitted response before caching or retention.
     """
     try:
         from playwright.async_api import async_playwright
@@ -271,6 +352,9 @@ async def collect_json_payloads(
 
             # Self-healing listener: capture doc_id and lsd from outgoing GraphQL queries
             async def handle_request(request: Any) -> None:
+                if expected_query is not None:
+                    # A request alone cannot authorize a public-search signature.
+                    return
                 try:
                     req_url = request.url
                     if any(marker in req_url for marker in url_markers) and request.method == "POST":
@@ -283,6 +367,12 @@ async def collect_json_payloads(
                                 captured_doc_id = doc_ids[0]
                                 captured_lsd = lsds[0] if lsds else None
                                 vars_raw = params.get("variables", ["{}"])[0]
+                                variables = json.loads(vars_raw)
+                                if isinstance(variables, dict) and (
+                                    "query" in variables or "search_query" in variables
+                                ) and not ("has_communities" in variables or "has_favicons" in variables):
+                                    # Public search signatures are cached only by proven scoped responses.
+                                    return
                                 GraphQLDocIdCache.record_signature_from_payload(
                                     captured_doc_id, captured_lsd, vars_raw
                                 )
@@ -297,16 +387,51 @@ async def collect_json_payloads(
                 try:
                     if "json" not in response.headers.get("content-type", ""):
                         return
+                    params: Dict[str, List[str]] = {}
+                    if expected_query is not None:
+                        if response.status != 200 or response.request.method != "POST":
+                            return
+                        params = urllib.parse.parse_qs(response.request.post_data or "")
+                        variables = json.loads(params.get("variables", ["{}"])[0])
+                        if not isinstance(variables, dict):
+                            return
+                        queries = [variables[key] for key in ("query", "search_query") if key in variables]
+                        if not queries or any(query != expected_query for query in queries):
+                            return
                     body = await response.json()
                 except Exception:
                     return
                 if isinstance(body, dict):
+                    if expected_query is not None:
+                        if body.get("errors") or payload_validator is None or payload_validator(body) is None:
+                            return
+                        doc_ids = params.get("doc_id")
+                        if doc_ids:
+                            GraphQLDocIdCache.set("search_posts", doc_ids[0], params.get("lsd", [None])[0])
                     payloads.append(body)
 
             page.on("response", handle_response)
 
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            navigation = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(settle_ms)
+
+            if expected_query is not None and payload_validator is not None and navigation is not None:
+                requested = urllib.parse.urlsplit(url)
+                returned = urllib.parse.urlsplit(navigation.request.url)
+                landed = urllib.parse.urlsplit(page.url)
+                if (
+                    navigation.status == 200
+                    and requested.scheme == returned.scheme == landed.scheme == "https"
+                    and requested.hostname == returned.hostname == landed.hostname == "www.threads.com"
+                    and requested.path == returned.path == landed.path == "/search"
+                    and all(urllib.parse.parse_qs(part.query).get("q") == [expected_query]
+                            for part in (requested, returned, landed))
+                ):
+                    rendered = await page.locator('script[type="application/json"]').evaluate_all(
+                        THREADS_SEARCH_RELAY_EXTRACTOR, expected_query,
+                    )
+                    payloads.extend(body for body in rendered
+                                    if isinstance(body, dict) and payload_validator(body) is not None)
 
             for _ in range(max(scrolls, 0)):
                 await page.mouse.wheel(0, 2400)
@@ -572,4 +697,3 @@ async def collect_threads_search_suggestions_via_browser(
         logger.warning(f"Failed to collect search suggestions via browser: {e}")
 
     return payloads
-

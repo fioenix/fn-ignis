@@ -555,7 +555,7 @@ def test_dynamic_report_copy_is_rendered_in_english():
 
     assert report.strategic_insights[0].statement.startswith("Market maturity stage")
     assert any(
-        "Schedule periodic ingress surveillance" in a.statement
+        "Request a separately authorized bounded follow-up probe" in a.statement
         for a in report.actionable_takeaways
     )
     assert all(
@@ -714,6 +714,27 @@ def test_an_attention_analysis_is_serialized_without_any_market_verdict():
     assert "market_brief" not in payload
     for insight in report.strategic_insights:
         assert "Opportunity Index" not in insight.statement
+
+
+def test_attention_topic_counts_do_not_authorize_saturation_positioning_advice():
+    """Three matching posts are observations, not a measured supply saturation verdict."""
+    signals = [
+        TrendSignal(
+            platform=PlatformType.THREADS,
+            raw_title=f"Tìm túi đi làm phù hợp {index}",
+            metric_value=10.0,
+            geo_code=GeoCode.VN,
+            source_url=f"https://www.threads.net/@fixture/post/test{index}",
+        )
+        for index in range(3)
+    ]
+    mission = _mission(surface=ResearchSurface.ATTENTION.value, keywords=["túi đi làm"])
+    report = StrategicMarketReasoner().analyze_mission(
+        mission, signals, [], QualityEvaluator().evaluate_quality(signals, geo=GeoCode.VN)
+    )
+
+    assert any("3 verified signals" in item.statement for item in report.strategic_insights)
+    assert not any("saturated supply" in item.statement for item in report.actionable_takeaways)
 
 
 def test_two_probes_on_one_platform_stay_two_channel_health_rows():

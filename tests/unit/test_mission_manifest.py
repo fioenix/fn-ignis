@@ -10,6 +10,29 @@ from ignis.domain import research_workspace as workspace
 NOW = datetime(2026, 9, 30, 9, 0, tzinfo=timezone.utc)
 
 
+@pytest.mark.asyncio
+async def test_query_budget_counts_counterevidence_before_any_connector_is_opened():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+    from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
+
+    manifest = _manifest(required_channels=("threads",), optional_channels=(), quota_budget={"queries": 2})
+    mission = SimpleNamespace(id="unit-mission", surface="MARKET", platforms=["threads"])
+    store = SimpleNamespace(get_mission_manifest=AsyncMock(return_value=manifest))
+    repo = SimpleNamespace(update_mission=AsyncMock())
+    registry = SimpleNamespace(resolve_execution_requirements=AsyncMock(return_value={
+        "resources": ("threads",), "authority": ("public_http",), "quota_costs": {},
+    }))
+    executor = ExecuteMissionUseCase(repo, registry, None, workspace_store=store)
+    plan = {"probes": [{"query_families": {"root": ["retail", "office"], "falsification": ["returns"]}}]}
+    with patch.object(executor, "_build_collection_plan", AsyncMock(return_value=plan)):
+        with pytest.raises(workspace.InvalidMissionAuthorizationError) as exc:
+            await executor._require_manifest_authority(mission)
+    assert exc.value.reason_code == "QUOTA_BUDGET_EXCEEDED"
+    assert exc.value.quota_overruns == {"queries": {"budget": 2, "requested": 3}}
+    assert mission.status == "BLOCKED"
+
+
 def _contract(name: str):
     assert hasattr(workspace, name), f"{name} is required by the mission-bound contract"
     return getattr(workspace, name)

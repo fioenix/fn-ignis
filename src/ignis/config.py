@@ -12,11 +12,16 @@ _PROJECT_ENV = Path(__file__).resolve().parents[2] / ".env"
 # the project tree -- a wheel in site-packages, for instance. It is a path, not a secret, so it
 # is the one thing an MCP config needs to carry.
 _ENV_FILE_OVERRIDE = os.environ.get("IGNIS_ENV_FILE", "").strip()
+_ENV_ISOLATED = os.environ.get("IGNIS_ENV_ISOLATED") == "1"
+if _ENV_ISOLATED and not _ENV_FILE_OVERRIDE:
+    raise ValueError("Isolated configuration requires IGNIS_ENV_FILE")
+if _ENV_ISOLATED and not Path(_ENV_FILE_OVERRIDE).is_file():
+    raise ValueError("Isolated configuration requires an existing environment file")
 
 # pydantic-settings gives the LAST file the highest priority, so the order is
 # least to most specific. The bare ".env" comes first: a stray file in whatever directory the
 # host happened to start in must not outrank the project's own.
-_ENV_FILES = tuple(
+_ENV_FILES = (_ENV_FILE_OVERRIDE,) if _ENV_ISOLATED else tuple(
     source for source in (".env", _PROJECT_ENV, _ENV_FILE_OVERRIDE or None) if source
 )
 
@@ -45,6 +50,16 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore"
     )
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings,
+                                  dotenv_settings, file_secret_settings):
+        # An isolated UAT must not silently inherit a production DSN or credentials.
+        if _ENV_ISOLATED:
+            if not dotenv_settings().get("DATABASE_URL"):
+                raise ValueError("Isolated configuration requires an explicit DATABASE_URL")
+            return init_settings, dotenv_settings
+        return init_settings, env_settings, dotenv_settings, file_secret_settings
 
     # Database TimescaleDB / PostgreSQL or SQLite
     # Carries a password whenever it points at anything but local SQLite. Unwrap with

@@ -875,7 +875,7 @@ SMOKE_SCRIPT = REPO / "scripts" / "wheel_mcp_smoke.py"
 FAKE_SERVER = r'''
 import json, sys, time
 mode = sys.argv[1]
-tools = int(sys.argv[2]) if len(sys.argv) > 2 else 41
+tools = int(sys.argv[2]) if len(sys.argv) > 2 else 44
 if mode == "banner":
     print("starting worker loop", flush=True)
 for raw in sys.stdin:
@@ -922,7 +922,7 @@ def _smoke():
     return wheel_mcp_smoke
 
 
-def _fake(tmp_path, mode, tools=41) -> list[str]:
+def _fake(tmp_path, mode, tools=44) -> list[str]:
     import sys
 
     server = tmp_path / "fake_server.py"
@@ -948,7 +948,7 @@ def test_a_wrong_tool_count_fails_the_smoke(tmp_path):
     module = _smoke()
     import pytest
 
-    with pytest.raises(module.SmokeFailure, match="expected 41 tools, discovered 39"):
+    with pytest.raises(module.SmokeFailure, match="expected 44 tools, discovered 39"):
         module.run_smoke(_fake(tmp_path, "ok", tools=39), response_timeout=10, exit_timeout=10)
 
 
@@ -1035,7 +1035,7 @@ cd "$(dirname "$0")/.."
 env > bootstrap-env.txt
 [ "${FAKE_BOOTSTRAP_FAIL:-}" = "1" ] && { echo "boom" >&2; exit 3; }
 mkdir -p .venv/bin
-printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-41}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
+printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-44}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
 chmod +x .venv/bin/python
 printf 'DATABASE_URL=sqlite:///ignis.db\n' > .env
 "$FAKE_PYTHON" - <<'PY'
@@ -1166,9 +1166,12 @@ def test_the_exact_tag_is_cloned_and_matches_the_verified_commit(tmp_path, monke
 def test_a_tag_on_the_wrong_commit_fails(tmp_path, monkeypatch):
     module = _acceptance()
     fixture = _source_fixture(tmp_path)
-    records, _ = _observe_source(module, fixture, tmp_path, monkeypatch, expected=fixture["main"])
+    records, marker = _observe_source(module, fixture, tmp_path, monkeypatch, expected=fixture["main"])
     assert records["source_tag_checkout"].state == module.SurfaceState.FAILED
     assert records["source_tag_checkout"].failure_class == "behavior_mismatch"
+    assert records["source_bootstrap"].state == module.SurfaceState.UNREADABLE
+    assert records["source_mcp_runtime"].state == module.SurfaceState.UNREADABLE
+    assert not marker, "A mismatched release tag must not execute its bootstrap"
 
 
 def test_without_an_expected_commit_the_checkout_is_not_verified(tmp_path, monkeypatch):
@@ -1384,7 +1387,7 @@ if args[0] == "pull":
     print("Digest: " + os.environ["FAKE_DOCKER_REPO_DIGEST"].split("@", 1)[1])
     sys.exit(0)
 if args[0] == "run":
-    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "41"])
+    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "44"])
 if args[:2] == ["image", "rm"]:
     sys.exit(0)
 print("unexpected docker call: " + " ".join(args), file=sys.stderr)
@@ -1769,19 +1772,19 @@ def _mutate(root: Path, relative: str, pattern: str, replacement: str) -> None:
 
 # (control name, file, regex, replacement, contract test it must turn red)
 NEGATIVE_CONTROLS = (
-    ("AGENTS tool count", "AGENTS.md", r"all 41 FastMCP tools", "all 39 FastMCP tools",
+    ("AGENTS tool count", "AGENTS.md", r"all 44 FastMCP tools", "all 39 FastMCP tools",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("CLAUDE tool count", "CLAUDE.md", r"All 41 tools", "All 39 tools",
+    ("CLAUDE tool count", "CLAUDE.md", r"All 44 tools", "All 39 tools",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("BACKLOG branch tool count", "BACKLOG.md", r"\*\*41 tools\*\*", "**39 tools**",
+    ("BACKLOG branch tool count", "BACKLOG.md", r"\*\*44 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("README tool count", "README.md", r"\*\*41 tools\*\*", "**39 tools**",
+    ("README tool count", "README.md", r"\*\*44 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("user guide tool count", "docs/USER_GUIDE.md", r"\*\*41 tools\*\*", "**39 tools**",
+    ("user guide tool count", "docs/USER_GUIDE.md", r"\*\*44 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("README migration endpoint", "README.md", r"`sql/025_evidence_grounded_claim_ledger\.sql`", "`sql/024_youtube_quota_ledger.sql`",
+    ("README migration endpoint", "README.md", r"`sql/026_partial_degraded_probe_outcomes\.sql`", "`sql/024_youtube_quota_ledger.sql`",
      "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
-    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/025_evidence_grounded_claim_ledger\.sql`",
+    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/026_partial_degraded_probe_outcomes\.sql`",
      "`sql/023_evidence_qualification.sql`", "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
     ("PyPI install claim", "README.md", r"^(## Local source setup)$", r"\1\n\npip install fn-ignis\n",
      "test_no_public_surface_claims_a_pypi_package"),

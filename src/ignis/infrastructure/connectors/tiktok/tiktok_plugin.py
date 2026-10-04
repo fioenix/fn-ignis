@@ -1,8 +1,10 @@
 import logging
 import re
 import hashlib
+import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
@@ -132,7 +134,7 @@ class TikTokPlugin(IConnectorPlugin):
             try:
                 storage_state = await self._auth_manager.get_storage_state()
                 if storage_state:
-                    cookie_header = build_cookie_header(storage_state) or None
+                    cookie_header = build_cookie_header(storage_state, self.EXPLORE_URL) or None
             except Exception as e:
                 logger.warning(f"Could not read the stored TikTok session for the probe: {e}")
 
@@ -229,8 +231,8 @@ class TikTokPlugin(IConnectorPlugin):
         """Search public trending videos by specific keywords on TikTok.
 
         `attestation`, when given, records a keyword only when its search answered: a search API
-        response was captured or cards were read from the grid. Only the first ten keywords are
-        probed, and only those can ever be attested.
+        response was captured or cards were read from the grid. Mission execution preflight
+        bounds the approved query plan; this connector must not silently truncate it.
         """
 
         storage_state = None
@@ -241,7 +243,7 @@ class TikTokPlugin(IConnectorPlugin):
         seen_urls: Set[str] = set()
 
         import urllib.parse
-        for kw in keywords[:10]:
+        for kw in keywords:
             kw_clean = kw.strip()
             url = f"{self.SEARCH_BASE_URL}{urllib.parse.quote(kw_clean)}"
             signals = await self._fetch_via_playwright(
@@ -612,6 +614,21 @@ class TikTokPlugin(IConnectorPlugin):
 
 
 
+    @staticmethod
+    def _matches_search_query(url: str, keyword: str, *, api: bool = False) -> bool:
+        """Bind a public search response or page to one exact requested query."""
+        try:
+            parsed = urlsplit(url)
+            paths = ("/api/search/item", "/api/search/general") if api else ("/search", "/search/video")
+            return (
+                parsed.scheme == "https" and parsed.hostname == "www.tiktok.com"
+                and parsed.port in (None, 443) and not parsed.username and not parsed.password
+                and parsed.path.rstrip("/") in paths
+                and parse_qs(parsed.query).get("keyword" if api else "q") == [keyword]
+            )
+        except (TypeError, ValueError):
+            return False
+
     async def _fetch_via_playwright(
         self,
         url: str,
@@ -632,7 +649,7 @@ class TikTokPlugin(IConnectorPlugin):
 
         signals: List[TrendSignal] = []
         captured_items: List[Dict[str, Any]] = []
-        # Set once a search API body is read, even an empty one: the proof the query ran.
+        # Only an acknowledged video-search envelope proves the query ran.
         answered: List[bool] = []
         local_seen: Set[str] = set(seen_urls or [])
 
@@ -663,7 +680,9 @@ class TikTokPlugin(IConnectorPlugin):
 
                 # Listen for underlying JSON API responses
                 async def handle_response(response):
-                    if any(k in response.url for k in ["item_list", "search/item", "search/general"]):
+                    if keyword and not self._matches_search_query(response.url, keyword, api=True):
+                        return
+                    if any(k in response.url for k in ["search/item", "search/general"]):
                         try:
                             ct = response.headers.get("content-type", "")
                             if "json" in ct or "application/json" in ct:
@@ -672,14 +691,33 @@ class TikTokPlugin(IConnectorPlugin):
                                 except Exception as parse_err:
                                     logger.debug(f"Failed to decode TikTok JSON response from {response.url}: {parse_err}")
                                     return
-                                if not isinstance(body, dict):
+                                if not isinstance(body, dict) or response.status != 200:
+                                    return
+                                if any(body.get(key, 0) not in (0, "0") for key in ("status_code", "statusCode")):
+                                    return
+                                items = body.get("itemList")
+                                if items is None:
+                                    data = body.get("data")
+                                    items = data.get("list") if isinstance(data, dict) else data
+                                # Suggestions, story feeds and access errors are not empty video results.
+                                if not isinstance(items, list):
+                                    return
+                                videos = []
+                                for item in items:
+                                    if not isinstance(item, dict):
+                                        continue
+                                    video = item.get("item") or item.get("item_info") or item
+                                    if (
+                                        isinstance(video, dict)
+                                        and any(video.get(key) for key in ("id", "item_id", "aweme_id"))
+                                        and isinstance(video.get("author"), dict)
+                                        and any(key in video for key in ("desc", "title", "stats", "statistics"))
+                                    ):
+                                        videos.append(video)
+                                if items and not videos:
                                     return
                                 answered.append(True)
-                                items = body.get("itemList") or body.get("data", {}).get("list", []) or body.get("data", [])
-                                if isinstance(items, list):
-                                    for item in items:
-                                        if isinstance(item, dict):
-                                            captured_items.append(item)
+                                captured_items.extend(videos)
                         except Exception as e:
                             logger.debug(f"Error reading TikTok response payload: {e}")
 
@@ -709,6 +747,14 @@ class TikTokPlugin(IConnectorPlugin):
                         f"the DOM, which carries no view counts."
                     )
 
+                search_page_verified = not keyword or (
+                    self._matches_search_query(url, keyword)
+                    and self._matches_search_query(page.url, keyword)
+                )
+                if not search_page_verified:
+                    captured_items.clear()
+                    answered.clear()
+
                 # 1. Transform from captured JSON API items if available
                 for item in captured_items:
                     sig = self._parse_json_item(item, geo, keyword)
@@ -719,9 +765,10 @@ class TikTokPlugin(IConnectorPlugin):
                         break
 
                 # 2. Fallback to DOM parsing if JSON API was not captured
-                if not signals:
+                if not signals and search_page_verified:
                     cards = await page.query_selector_all(
-                        'div[data-e2e="search_top-item"], div[data-e2e="search_video-item"], div[data-e2e="search-card-item"], div[data-e2e="explore-item"]'
+                        'div[data-e2e="search_top-item"], div[data-e2e="search_video-item"], div[data-e2e="search-card-item"]'
+                        if keyword else 'div[data-e2e="explore-item"]'
                     )
                     for card in cards:
                         sig = await self._parse_dom_card(card, geo, keyword)
@@ -759,12 +806,24 @@ class TikTokPlugin(IConnectorPlugin):
             if len(kw_low) <= 4 and not re.search(rf"\b{re.escape(kw_low)}\b", title.lower()):
                 return None
 
-        play_count = float(stats.get("playCount") or stats.get("play_count", 0))
+        raw_play_count = stats.get("playCount", stats.get("play_count"))
+        try:
+            play_count = float(raw_play_count)
+            metric_known = not isinstance(raw_play_count, bool) and math.isfinite(play_count) and play_count >= 0
+        except (TypeError, ValueError):
+            play_count, metric_known = 0.0, False
+        if not metric_known:
+            play_count = 0.0
         author_id = author.get("uniqueId") or author.get("unique_id", "")
         if not author_id:
             return None
 
         url = f"https://www.tiktok.com/@{author_id}/video/{item_id}"
+        raw_publication_time = item.get("createTime") or item.get("create_time")
+        try:
+            published_at = datetime.fromtimestamp(int(raw_publication_time), tz=timezone.utc) if raw_publication_time else None
+        except (TypeError, ValueError, OverflowError, OSError):
+            published_at = None
 
         metadata = {
             "item_id": str(item_id),
@@ -774,17 +833,23 @@ class TikTokPlugin(IConnectorPlugin):
             "comments": int(stats.get("commentCount") or stats.get("comment_count", 0)),
             "shares": int(stats.get("shareCount") or stats.get("share_count", 0)),
             "keyword": keyword,
+            "excerpt": sanitize_pii_text(title),
+            "metric_known": metric_known,
+            "metric_kind": "views" if metric_known else None,
+            "publication_known": published_at is not None,
+            "collection_path": "native_browser:tiktok-public-json",
         }
 
         return TrendSignal(
             platform=PlatformType.TIKTOK,
             raw_title=sanitize_pii_text(title[:250]),
-            metric_value=play_count or float(metadata["likes"]),
+            metric_value=play_count,
             growth_velocity=0.0,
             source_url=url,
             geo_code=geo,
             metadata=metadata,
             captured_at=datetime.now(timezone.utc),
+            published_at=published_at,
         )
 
 
@@ -823,21 +888,11 @@ class TikTokPlugin(IConnectorPlugin):
                 return None
 
             # Parse metrics and true caption
-            metric_val = 0.0
             raw_title = combined_text
             author_display = author_tag.replace("@", "")
 
             m_match = re.search(r"^(\d+(\.\d+)?)\s*([KkMmBb])?$", lines[0])
             if m_match:
-                num = float(m_match.group(1))
-                unit = (m_match.group(3) or "").upper()
-                if unit == "K":
-                    num *= 1000
-                elif unit == "M":
-                    num *= 1000000
-                elif unit == "B":
-                    num *= 1000000000
-                metric_val = num
                 if len(lines) > 1:
                     raw_title = lines[1]
                 if len(lines) > 2 and lines[2] not in ["", "·"]:
@@ -861,12 +916,18 @@ class TikTokPlugin(IConnectorPlugin):
                 "item_id": video_id,
                 "author": author_display,
                 "keyword": keyword,
+                "excerpt": sanitize_pii_text(raw_title),
+                # A numeric tile label does not attest whether it counts views or likes.
+                "metric_known": False,
+                "metric_kind": None,
+                "publication_known": False,
+                "collection_path": "native_browser:tiktok-public-grid",
             }
 
             return TrendSignal(
                 platform=PlatformType.TIKTOK,
                 raw_title=sanitize_pii_text(raw_title[:250]),
-                metric_value=metric_val,
+                metric_value=0.0,
                 growth_velocity=0.0,
                 source_url=canonical_url,
                 geo_code=geo,
