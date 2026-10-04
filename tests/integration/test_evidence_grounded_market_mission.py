@@ -13,6 +13,7 @@ from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefU
 from ignis.application.use_cases.create_research_workspace import CreateResearchWorkspaceUseCase
 from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
 from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
+from ignis.application.use_cases.get_evidence_qualification_batch import GetEvidenceQualificationBatchUseCase
 from ignis.application.use_cases.get_mission_claims import GetMissionClaimsUseCase
 from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaimsUseCase
 from ignis.domain.entities import TrendSignal
@@ -75,6 +76,32 @@ def _manifest():
         created_by="integration-test",
         confirmed_at=NOW,
     )
+
+
+@pytest.mark.asyncio
+async def test_overlapping_queries_reach_qualification_on_both_backends(repository_case, tmp_path):
+    repository = repository_case.repository
+    store, mission, _, _ = await _mission_case(repository, tmp_path, "query-overlap")
+    queries = ["retail need", "retail counterevidence"]
+    await repository.save_signals([
+        TrendSignal(
+            platform=PlatformType.THREADS,
+            raw_title="Public overlap fixture",
+            source_url="https://www.threads.net/@fixture/post/overlap",
+            geo_code=GeoCode.VN,
+            captured_at=NOW,
+            mission_id=mission.id,
+            metadata={"post_id": "overlap", "matched_keyword": queries[0], "matched_keywords": queries},
+        ),
+    ])
+    stored = [signal for signal in await repository.get_mission_signals(mission.id)
+              if signal.metadata.get("post_id") == "overlap"]
+    assert len(stored) == 1
+    assert stored[0].metadata["matched_keywords"] == queries
+    batch = await GetEvidenceQualificationBatchUseCase(repository, store).execute(str(mission.id))
+    assert len(batch["evidence"]) == 1
+    assert batch["evidence"][0]["probe_keyword"] == "retail need"
+    assert batch["evidence"][0]["probe_keywords"] == queries
 
 
 async def _mission_case(repository, tmp_path, condition):

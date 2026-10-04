@@ -93,6 +93,43 @@ def test_default_install_has_no_worker_service_or_scheduler_entrypoint():
     assert "ignis-worker" not in scripts
 
 
+@compose_only
+def test_database_healthcheck_rejects_unix_only_initialization_server():
+    """An initialization-only server must not release dependent consumers."""
+    db = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))["services"]["db"]
+    name = f"ignis-health-boundary-{uuid4().hex[:12]}"
+
+    def run(*args, timeout=30):
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+
+    try:
+        started = run(
+            "docker", "run", "--detach", "--pull=missing", "--name", name,
+            "--env", "POSTGRES_PASSWORD=synthetic-health-boundary",
+            "--env", "POSTGRES_DB=ignis", db["image"],
+            "postgres", "-c", "listen_addresses=",
+            timeout=180,
+        )
+        assert started.returncode == 0, "The disposable PostgreSQL fixture did not start"
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            unix = run("docker", "exec", name, "pg_isready", "-U", "postgres", "-d", "ignis")
+            if unix.returncode == 0:
+                break
+            time.sleep(0.2)
+        else:
+            raise AssertionError("The Unix-only PostgreSQL fixture never became ready")
+        tcp = run(
+            "docker", "exec", name, "pg_isready", "-h", "127.0.0.1",
+            "-U", "postgres", "-d", "ignis",
+        )
+        assert tcp.returncode != 0, "The initialization-only fixture unexpectedly accepts TCP"
+        health = run("docker", "exec", name, "sh", "-c", db["healthcheck"]["test"][1])
+        assert health.returncode != 0, "The healthcheck accepted the Unix-only initialization server"
+    finally:
+        run("docker", "rm", "--force", "--volumes", name)
+
+
 def _run(args: list, env: dict, check: bool = True) -> subprocess.CompletedProcess:
     result = subprocess.run(args, cwd=REPO, env=env, capture_output=True, text=True)
     if check and result.returncode != 0:

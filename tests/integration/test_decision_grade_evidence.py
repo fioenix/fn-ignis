@@ -1605,7 +1605,7 @@ async def test_a_vocabulary_failure_behind_an_active_writer_is_a_conflict_that_c
 async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query(
     repository_case, host_workspace, monkeypatch
 ):
-    """Eleven mission keywords; the real Reels and TikTok search loops probe only the first ten."""
+    """Reels truncates at ten; TikTok probes every root and falsification query, without a window."""
     from unittest.mock import AsyncMock, patch
 
     from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
@@ -1667,7 +1667,9 @@ async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query
     outcomes = {o.connector_surface: o for o in await store.get_latest_completed_probe_outcomes(mission.id)}
     assert outcomes["reels"].status.value == outcomes["tiktok_video_grid"].status.value == "EMPTY_NO_DATA"
     assert outcomes["reels"].queried_keywords == tuple(keywords[:10])
-    assert outcomes["tiktok_video_grid"].queried_keywords == tuple(keywords[:10])
+    assert outcomes["tiktok_video_grid"].queried_keywords == tuple(keywords) + (
+        "No repeated operational pain is observed among small retailers",
+    )
     # Neither real search restricts results to a window, so neither measured the 7d frame.
     assert outcomes["reels"].queried_window is None
     assert outcomes["tiktok_video_grid"].queried_window is None

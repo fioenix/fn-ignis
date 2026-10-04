@@ -23,6 +23,7 @@ from ignis.application.use_cases.create_research_workspace import (
     CreateResearchWorkspaceUseCase,
 )
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
+from ignis.application.use_cases.host_browser_search import HostBrowserSearchService
 from ignis.application.use_cases.get_evidence_qualification_batch import (
     DEFAULT_BATCH_LIMIT,
     GetEvidenceQualificationBatchUseCase,
@@ -133,6 +134,90 @@ The mission and Claim Ledger contracts, not this recipe, decide verdict eligibil
 
 # Initialize FastMCP Server with Non-Prescriptive Harness Instructions
 mcp = FastMCP("fn-ignis-social-market-research", instructions=HARNESS_SYSTEM_INSTRUCTIONS)
+
+# This service opens no listener until an explicitly authorized finite request is prepared.
+_host_browser_search_service = HostBrowserSearchService()
+
+
+async def handle_prepare_host_browser_search(
+    host_task_ref: str, session_ref: str, queries: List[str], result_limit: int,
+    lifetime_seconds: int, authorized: bool, mode: str = "TACTICAL", mission_id: Optional[str] = None,
+) -> dict:
+    try:
+        if mode == "MISSION":
+            if not mission_id or queries or result_limit != 20 or authorized is not True:
+                raise ValueError("Mission queries and limits derive from confirmed authority")
+            comp = get_components()
+            mission = await comp["repository"].get_mission(mission_id)
+            if mission is None:
+                raise ValueError("Mission not found")
+            return await _host_browser_search_service.prepare_mission(
+                comp["execute_mission_use_case"], mission.id, host_task_ref, session_ref,
+                lifetime_seconds, authorized,
+            )
+        if mode != "TACTICAL" or mission_id is not None:
+            raise ValueError("Invalid host search mode")
+        return _host_browser_search_service.prepare(
+            host_task_ref, session_ref, queries, result_limit, lifetime_seconds, authorized,
+        )
+    except (ValueError, InvalidMissionAuthorizationError, InvalidMissionManifestError):
+        return {"status": "BLOCKED", "reason_code": "INVALID_HOST_SEARCH_SCOPE"}
+
+
+@mcp.tool(name="prepare_host_browser_search")
+async def prepare_host_browser_search(
+    host_task_ref: str, session_ref: str, queries: List[str], result_limit: int,
+    lifetime_seconds: int, authorized: bool, mode: str = "TACTICAL", mission_id: Optional[str] = None,
+) -> dict:
+    """Prepare one explicit finite public TikTok search batch through an authorized host browser.
+
+    This opt-in loopback relay does not export cookies or collect in the background. TACTICAL
+    creates no mission. MISSION requires an existing confirmed mission_id, queries=[] and
+    result_limit=20; its full query union and limit derive from authority, including falsifiers.
+    The host executes the packaged deterministic extractor and stages its JSON via
+    the same-origin local form. It is not a default collector or a Market recommendation.
+    """
+    return await handle_prepare_host_browser_search(
+        host_task_ref, session_ref, queries, result_limit, lifetime_seconds, authorized, mode, mission_id,
+    )
+
+
+async def handle_submit_host_browser_search(request_id: str, host_task_ref: str, session_ref: str) -> dict:
+    try:
+        if _host_browser_search_service.mode(request_id, host_task_ref, session_ref) == "MISSION":
+            return await _host_browser_search_service.submit_mission(
+                get_components()["execute_mission_use_case"], request_id, host_task_ref, session_ref,
+            )
+        return _host_browser_search_service.submit(request_id, host_task_ref, session_ref)
+    except Exception as exc:
+        if hasattr(exc, "host_search_failure"):
+            return exc.host_search_failure
+        return {"status": "BLOCKED", "reason_code": "HOST_SEARCH_NOT_ACCEPTABLE"}
+
+
+@mcp.tool(name="submit_host_browser_search")
+async def submit_host_browser_search(request_id: str, host_task_ref: str, session_ref: str) -> dict:
+    """Consume a validated answer already staged through this task's local host-browser relay.
+
+    No raw records need to be copied into model tool arguments. TACTICAL returns observations;
+    MISSION revalidates scope under its existing writer and returns its canonical run/frame.
+    Unknown counters/windows stay unmeasured. Failed ingestion requires journal/frame readback,
+    not a retry. Accepted replay returns the cached receipt. Never returns commercial claims.
+    """
+    return await handle_submit_host_browser_search(request_id, host_task_ref, session_ref)
+
+
+async def handle_cancel_host_browser_search(request_id: str, host_task_ref: str, session_ref: str) -> dict:
+    try:
+        return _host_browser_search_service.cancel(request_id, host_task_ref, session_ref)
+    except ValueError:
+        return {"status": "BLOCKED", "reason_code": "HOST_SEARCH_CANNOT_CANCEL"}
+
+
+@mcp.tool(name="cancel_host_browser_search")
+async def cancel_host_browser_search(request_id: str, host_task_ref: str, session_ref: str) -> dict:
+    """Cancel a task-bound host search and close its listener, not the owner's browser or tabs."""
+    return await handle_cancel_host_browser_search(request_id, host_task_ref, session_ref)
 
 
 
@@ -1865,14 +1950,17 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
 def _get_secure_reports_dir() -> Path:
     # 1. Try project root reports/ directory
     try:
-        project_root = Path(__file__).resolve().parents[4]
-        reports_dir = project_root / "reports"
-        reports_dir.mkdir(parents=True, exist_ok=True)
-        # Test write permission
-        test_file = reports_dir / ".write_test"
-        test_file.touch()
-        test_file.unlink()
-        return reports_dir
+        source_module = Path(__file__).resolve()
+        project_root = source_module.parents[4]
+        # An installed wheel has no checkout root; its library directory is not user output.
+        if source_module == project_root / "src/ignis/interfaces/mcp/server.py":
+            reports_dir = project_root / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            # Test write permission
+            test_file = reports_dir / ".write_test"
+            test_file.touch()
+            test_file.unlink()
+            return reports_dir
     except Exception:
         pass
 
@@ -3319,7 +3407,10 @@ def main():
     second editor killed the first one's server mid-session.
     """
     _register_shutdown_handlers()
-    mcp.run()
+    try:
+        mcp.run()
+    finally:
+        _host_browser_search_service.close()
 
 
 if __name__ == "__main__":

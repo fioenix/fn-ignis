@@ -27,7 +27,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-EXPECTED_TOOL_COUNT = 41
+EXPECTED_TOOL_COUNT = 44
 REQUIRED_RESET_TOOLS = {"create_attention_mission", "confirm_market_brief", "submit_mission_claims", "get_mission_claims"}
 REMOVED_RESET_TOOLS = {
     "create_research_mission", "run_autonomous_research_mission", "get_trending_topics",
@@ -281,18 +281,19 @@ def _newest_migration(tree: Path) -> Path:
     return sorted((tree / "sql").glob("[0-9][0-9][0-9]_*.sql"))[-1]
 
 
-def test_bootstrap_applies_the_newest_migration(bootstrapped):
+def test_bootstrap_applies_tables_from_the_complete_migration_chain(bootstrapped):
     """The schema must reach the end of the chain the tag ships, not the end some doc remembers.
 
-    The table names come from the newest migration file itself, so the day a new migration is
-    committed this contract demands its tables without anyone editing it.
+    Collect table additions across the chain: a later constraint-only migration need not create
+    a table. Its behavioral changes are exercised separately, not inferred from table presence.
     """
     import re
     import sqlite3
 
     newest = _newest_migration(REPO_ROOT)
-    expected = re.findall(r"CREATE TABLE IF NOT EXISTS\s+(\w+)", newest.read_text(encoding="utf-8"))
-    assert expected, f"{newest.name} creates no table; this contract would pass on nothing"
+    expected = {table for migration in (REPO_ROOT / "sql").glob("*.sql")
+                for table in re.findall(r"CREATE TABLE IF NOT EXISTS\s+(\w+)", migration.read_text(encoding="utf-8"))}
+    assert expected, "The migration chain must define tables"
     assert (bootstrapped["checkout"] / "sql" / newest.name).is_file(), f"the checkout lacks {newest.name}"
 
     with sqlite3.connect(bootstrapped["checkout"] / "ignis.db") as connection:
@@ -302,6 +303,21 @@ def test_bootstrap_applies_the_newest_migration(bootstrapped):
         }
     missing = [table for table in expected if table not in tables]
     assert not missing, f"bootstrap did not create the tables {newest.name} adds: {missing}"
+
+
+def test_bootstrapped_database_retains_partial_outcomes_without_permitting_failed_counts(bootstrapped):
+    import sqlite3
+    from scripts import rehearse_evidence_grounded_schema as rehearsal
+
+    with sqlite3.connect(bootstrapped["checkout"] / "ignis.db") as conn:
+        conn.execute("PRAGMA foreign_keys=ON")
+        rehearsal._seed_control_plane(conn)
+        conn.execute("UPDATE mission_probe_outcomes SET status='DEGRADED', signals_collected=47,"
+                     " note='Partial query failure' WHERE run_id=?", (rehearsal.RUN,))
+        assert conn.execute("SELECT status, signals_collected FROM mission_probe_outcomes WHERE run_id=?", (rehearsal.RUN,)).fetchone() == ("DEGRADED", 47)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE mission_probe_outcomes SET status='FAILED' WHERE run_id=?", (rehearsal.RUN,))
+        conn.rollback()
 
 
 def test_the_qualification_use_cases_ship_and_import(bootstrapped):

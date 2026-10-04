@@ -20,7 +20,7 @@ SEED_FILES = (
 )
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
-NEWEST_POSTGRES_MIGRATION = "025_evidence_grounded_claim_ledger.sql"
+NEWEST_POSTGRES_MIGRATION = "026_partial_degraded_probe_outcomes.sql"
 
 
 def test_seed_directory_is_found_in_this_layout():
@@ -86,14 +86,14 @@ def test_the_whole_postgres_migration_chain_ships_not_only_the_seeds():
     assert '"sql"' not in excluded and '"/sql"' not in excluded, "the sdist excludes sql/"
 
 
-def test_the_migration_inventory_ends_at_025_and_both_backends_state_its_tables():
+def test_the_migration_inventory_includes_partial_outcomes_and_both_backends_state_claim_tables():
     """Compose and a hand-applied chain need 025 in order; SQLite restates it, not reads it."""
     directory = sql_seed_dir()
     names = sorted(path.name for path in directory.glob("*.sql"))
     assert names[-1] == NEWEST_POSTGRES_MIGRATION
     assert [int(name[:3]) for name in names] == list(range(1, len(names) + 1))
 
-    migration = (directory / NEWEST_POSTGRES_MIGRATION).read_text(encoding="utf-8")
+    migration = (directory / "025_evidence_grounded_claim_ledger.sql").read_text(encoding="utf-8")
     sqlite_source = (
         Path(__file__).resolve().parents[2]
         / "src/ignis/infrastructure/persistence/sqlite_repository.py"

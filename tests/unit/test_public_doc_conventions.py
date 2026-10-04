@@ -167,7 +167,7 @@ def test_current_guides_explain_mission_bound_work_and_release_boundary():
         text = _read(relative)
         assert "Spec 011" in text, relative
         assert "025_evidence_grounded_claim_ledger.sql" in text, relative
-        assert "41 tools" in text, relative
+        assert "44 tools" in text, relative
         assert "v0.7.0" in text, relative
         assert "trigger_autonomous_discovery" not in text, relative
         assert "get_latest_daily_discovery" not in text, relative

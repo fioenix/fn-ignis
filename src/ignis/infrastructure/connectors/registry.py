@@ -10,6 +10,7 @@ from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttes
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.exceptions import (
     ConnectorAuthenticationException,
+    ConnectorCapabilityUnavailableException,
     ConnectorQuotaExceededException,
 )
 from ignis.domain.harness_models import ChannelHealthStatus
@@ -198,7 +199,7 @@ class ConnectorPluginRegistry:
             and plugin.plugin_id in allowed
         ]
         selected_ids = {plugin.plugin_id for plugin in selected}
-        required = set(required_surfaces or allowed_surfaces)
+        required = set(allowed_surfaces if required_surfaces is None else required_surfaces)
         optional = set(optional_surfaces or ())
         unavailable = tuple(
             surface
@@ -862,6 +863,10 @@ class ConnectorPluginRegistry:
             signals = await plugin.search_signals(**kwargs)
             breaker.record_success()
             return self._stamp_connector_surface(plugin, signals)
+        except ConnectorCapabilityUnavailableException:
+            # Unsupported measurement says nothing about the health of the plugin's feed.
+            # Preserve earlier operational failures too; this is not a recovery probe.
+            raise
         except Exception as e:
             breaker.record_failure(e)
             raise e

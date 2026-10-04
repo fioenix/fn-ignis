@@ -15,7 +15,7 @@ def get_project_root() -> Path:
     return Path(__file__).resolve().parents[4]
 
 
-def ensure_environment_file(project_root: Path) -> Tuple[bool, str]:
+def ensure_environment_file(project_root: Path, *, env_file: Path | None = None) -> Tuple[bool, str]:
     """
     Ensure .env file exists with essential defaults and auto-generated encryption key.
     Returns (created_or_updated: bool, message: str).
@@ -27,14 +27,17 @@ def ensure_environment_file(project_root: Path) -> Tuple[bool, str]:
     run that generated nothing. Rotating that key silently strands every credential already
     encrypted with the old one, so a message claiming it happened is worse than no message.
     """
-    env_file = project_root / ".env"
+    explicit_env = env_file is not None
+    env_file = env_file.resolve() if env_file is not None else project_root / ".env"
 
     if not env_file.exists():
+        env_file.parent.mkdir(parents=True, exist_ok=True)
+        database_url = f"sqlite:///{env_file.parent / 'ignis.db'}" if explicit_env else "sqlite:///ignis.db"
         default_env = (
             "# ==============================================================================\n"
             "# fn-ignis Configuration\n"
             "# ==============================================================================\n"
-            "DATABASE_URL=sqlite:///ignis.db\n"
+            f"DATABASE_URL={database_url}\n"
             "DEFAULT_GEO=VN\n"
             f"IGNIS_ENCRYPTION_KEY={Fernet.generate_key().decode()}\n"
             "YOUTUBE_API_KEY=\n"
@@ -113,10 +116,8 @@ def _strip_fn_ignis_sections(content: str) -> str:
 def register_mcp_to_codex_toml(config_path: Path, entry: Dict[str, Any]) -> bool:
     """Safely register or update fn-ignis entry in Codex TOML configuration file."""
     try:
-        if not config_path.exists():
-            return False
-
-        content = _strip_fn_ignis_sections(config_path.read_text(encoding="utf-8"))
+        content = _strip_fn_ignis_sections(config_path.read_text(encoding="utf-8")) if config_path.exists() else ""
+        config_path.parent.mkdir(parents=True, exist_ok=True)
 
         toml_block = (
             "\n[mcp_servers.fn-ignis]\n"
@@ -134,7 +135,7 @@ def register_mcp_to_codex_toml(config_path: Path, entry: Dict[str, Any]) -> bool
         return False
 
 
-def build_mcp_entry(python_bin: str, project_root: Path) -> Dict[str, Any]:
+def build_mcp_entry(python_bin: str, project_root: Path, *, env_file: Path | None = None) -> Dict[str, Any]:
     """Generate the MCP server entry, carrying a path to the secrets rather than the secrets.
 
     This used to copy DATABASE_URL, IGNIS_ENCRYPTION_KEY and YOUTUBE_API_KEY into every MCP
@@ -152,7 +153,8 @@ def build_mcp_entry(python_bin: str, project_root: Path) -> Dict[str, Any]:
         "command": python_bin,
         "args": ["-m", "ignis.interfaces.mcp.server"],
         "env": {
-            "IGNIS_ENV_FILE": str((project_root / ".env").resolve()),
+            "IGNIS_ENV_FILE": str((env_file if env_file is not None else project_root / ".env").resolve()),
+            **({"IGNIS_ENV_ISOLATED": "1"} if env_file is not None else {}),
         },
     }
 
@@ -181,10 +183,19 @@ def register_mcp_to_json_file(config_path: Path, entry: Dict[str, Any], key_name
         return False
 
 
-def setup_all_mcp_clients(project_root: Path, python_bin: str) -> List[Dict[str, Any]]:
+def setup_all_mcp_clients(
+    project_root: Path, python_bin: str, *, client: str = "all", env_file: Path | None = None
+) -> List[Dict[str, Any]]:
     """Register fn-ignis across target local agents: Google Antigravity, Claude Desktop, OpenAI Codex."""
-    mcp_entry = build_mcp_entry(python_bin, project_root)
+    if client not in ("all", "codex"):
+        raise ValueError("Unsupported setup client")
+    mcp_entry = build_mcp_entry(python_bin, project_root, env_file=env_file)
     results = []
+    if client == "codex":
+        codex_config = Path.home() / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        ok = register_mcp_to_codex_toml(codex_config, mcp_entry)
+        return [{"client": "OpenAI Codex", "path": str(codex_config), "status": "configured" if ok else "failed"}]
 
     # 1. Project Root .mcp.json (Standard MCP Workspace Config)
     root_mcp = project_root / ".mcp.json"
@@ -307,19 +318,34 @@ async def run_synthetic_diagnostics() -> Dict[str, Any]:
     return diag
 
 
-def auto_provision(json_output: bool = False) -> Dict[str, Any]:
+def auto_provision(json_output: bool = False, *, client: str = "all", env_file: Path | None = None) -> Dict[str, Any]:
     """Execute complete end-to-end zero-touch auto-provisioning."""
     project_root = get_project_root()
     python_bin = sys.executable
 
     # 1. Environment & Fernet Key
-    env_created, env_msg = ensure_environment_file(project_root)
+    if env_file is not None:
+        env_file = env_file.resolve()
+        loaded_config = sys.modules.get("ignis.config")
+        if loaded_config is not None and (
+            not loaded_config._ENV_ISOLATED or loaded_config._ENV_FILE_OVERRIDE != str(env_file)
+        ):
+            raise RuntimeError("Isolated setup requires a fresh process before configuration is loaded")
+        os.environ["IGNIS_ENV_FILE"] = str(env_file)
+        os.environ["IGNIS_ENV_ISOLATED"] = "1"
+        env_created, env_msg = ensure_environment_file(project_root, env_file=env_file)
+    else:
+        env_created, env_msg = ensure_environment_file(project_root)
 
     # 2. Database Schema Bootstrap
     db_ok, db_msg = asyncio.run(bootstrap_database())
 
     # 3. Multi-client MCP Registration
-    client_results = setup_all_mcp_clients(project_root, python_bin)
+    client_results = (
+        setup_all_mcp_clients(project_root, python_bin)
+        if client == "all" and env_file is None
+        else setup_all_mcp_clients(project_root, python_bin, client=client, env_file=env_file)
+    )
 
     # 4. Run Diagnostics
     diag = asyncio.run(run_synthetic_diagnostics())
@@ -338,7 +364,8 @@ def auto_provision(json_output: bool = False) -> Dict[str, Any]:
         discovery_error = f"MCP catalog discovery failed: {e}"
 
     report = {
-        "status": "success" if db_ok and discovery_error is None else "warning",
+        "status": "success" if db_ok and discovery_error is None and
+            all(c["status"] == "configured" for c in client_results) else "warning",
         "project_root": str(project_root),
         "python_executable": python_bin,
         "environment": env_msg,
@@ -390,9 +417,13 @@ def main():
     parser = argparse.ArgumentParser(description="fn-ignis Zero-Touch Agent Auto-Provisioner")
     parser.add_argument("--json", action="store_true", help="Output report in JSON format for automated agents")
     parser.add_argument("--all", action="store_true", default=True, help="Configure all supported clients and databases")
+    parser.add_argument("--client", choices=("all", "codex"), default="all", help="Limit client registration (default: all)")
+    parser.add_argument("--env-file", type=Path, help="Use an isolated environment file and absolute SQLite default")
     args = parser.parse_args()
 
-    auto_provision(json_output=args.json)
+    report = auto_provision(json_output=args.json, client=args.client, env_file=args.env_file)
+    if report["status"] != "success":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

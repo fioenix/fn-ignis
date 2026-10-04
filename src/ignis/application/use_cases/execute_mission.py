@@ -1,8 +1,10 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
+from ignis.application.cancellation import await_settled
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
@@ -123,6 +125,12 @@ class ExecuteMissionUseCase:
             keywords=planned_queries,
         )
         requirements = self._scope_optional_execution(manifest, requirements)
+        if "queries" in manifest.quota_budget:
+            # A declared query budget bounds the plan, including counterevidence, not only
+            # connector-specific paid/API costs. Do not silently truncate an approved plan.
+            requirements["quota_costs"] = {
+                **requirements.get("quota_costs", {}), "queries": len(planned_queries),
+            }
         unavailable = tuple(requirements.get("unavailable_resources", ()))
         if unavailable:
             mission.status = "BLOCKED"
@@ -178,7 +186,7 @@ class ExecuteMissionUseCase:
             if surface_requirement.get("requires_paid_quota"):
                 authorities.append("paid_quota")
             surface_quota = dict(surface_requirement.get("quota_costs", {}))
-            if not surface_quota and surface not in optional:
+            if "quota_costs" not in surface_requirement and surface not in optional:
                 surface_quota = fallback_quota
 
             proposed_quota = dict(approved_quota)
@@ -258,13 +266,24 @@ class ExecuteMissionUseCase:
         manifest, execution_requirements = await self._require_manifest_authority(mission)
         await self._require_confirmed_brief(mission)
 
+        return await self._execute_authorized(mission, manifest, execution_requirements)
+
+    async def _execute_authorized(
+        self, mission, manifest, execution_requirements, *, scope_guard=None, search_provider=None, expiry_guard=None
+    ) -> Dict[str, Any]:
+        """Reuse the canonical writer; validate a staged host scope before any ingress write."""
+
         workspace = await self._run_workspace(mission)
         if workspace is None:
+            if scope_guard is not None:
+                raise ValueError("Host mission ingestion requires a workspace writer")
             await self._synchronize_vocabulary(mission)
             result = await self._execute_pass(
                 mission,
                 manifest=manifest,
                 execution_requirements=execution_requirements,
+                search_provider=search_provider,
+                expiry_guard=expiry_guard,
             )
             return result
 
@@ -274,12 +293,16 @@ class ExecuteMissionUseCase:
         # and every connector call. The claim and the journal are given back by the context
         # manager, including when synchronization or the pass raises.
         async with self._workspace_store.mission_run(workspace, mission.id) as journal:
+            if scope_guard is not None:
+                await scope_guard(journal)
             await self._synchronize_vocabulary(mission)
             result = await self._execute_pass(
                 mission,
                 journal=journal,
                 manifest=manifest,
                 execution_requirements=execution_requirements,
+                search_provider=search_provider,
+                expiry_guard=expiry_guard,
             )
             result["run"] = {
                 "run_id": str(journal.run_id),
@@ -502,14 +525,15 @@ class ExecuteMissionUseCase:
                     completed_at=completed_at,
                     scope_attestation=(
                         outcome.scope_attestation
-                        or {
+                        if outcome.scope_attestation is not None
+                        else ({
                             "geo": mission.geo_code.value,
                             "timeframe": outcome.queried_window or mission.timeframe,
                             "keywords": list(outcome.queried_keywords),
                         }
                         if collection_plan_digest is not None
                         and outcome.status.value in ("HEALTHY", "EMPTY_NO_DATA")
-                        else None
+                        else None)
                     ),
                     note=(
                         outcome.note
@@ -529,14 +553,16 @@ class ExecuteMissionUseCase:
         )
 
     async def _execute_pass(
-        self, mission, journal=None, manifest=None, execution_requirements=None
+        self, mission, journal=None, manifest=None, execution_requirements=None, search_provider=None, expiry_guard=None
     ) -> Dict[str, Any]:
         mission_id = mission.id
+        if expiry_guard is not None:
+            expiry_guard()
         logger.info(f"Executing Research Mission '{mission.title}' [ID: {mission_id}] with keywords: {mission.keywords} (Timeframe: {mission.timeframe})...")
         mission.status = "RUNNING"
-        await self._repo.update_mission(mission)
 
         try:
+            await self._repo.update_mission(mission)
             collection_plan_digest = None
             collection_plan = None
             if manifest is not None:
@@ -549,7 +575,7 @@ class ExecuteMissionUseCase:
             # 1. Targeted ingress across active connector plugins, with the outcome of every
             # surface it reached: a workspace run records them, so a reopened report can tell a
             # measured zero from a probe that never measured.
-            search = await self._registry.search_with_outcomes(
+            search = await (search_provider or self._registry.search_with_outcomes)(
                 keywords=(
                     self._collection_queries(collection_plan)
                     if collection_plan is not None
@@ -614,10 +640,16 @@ class ExecuteMissionUseCase:
             # marking the mission COMPLETED, for one -- is a failure after the fact, not a loss
             # of evidence. Stale claims surviving a failure are removed by the next pass;
             # evidence deleted by a failed pass is gone.
+            if expiry_guard is not None:
+                expiry_guard()
             if clusters:
                 await self._repo.save_clusters(clusters)
+            if expiry_guard is not None:
+                expiry_guard()
             if signals:
                 await self._repo.save_signals(signals)
+            if expiry_guard is not None:
+                expiry_guard()
             if preserved:
                 await self._repo.attach_mission_evidence(mission.id, preserved)
                 await self._repo.assign_observation_clusters(preserved)
@@ -658,8 +690,12 @@ class ExecuteMissionUseCase:
                 result["collection_plan_digest"] = collection_plan_digest
                 result["collection_plan"] = collection_plan
             return result
-        except Exception as e:
-            safe_error = sanitize_pii_text(str(e))
+        except (Exception, asyncio.CancelledError) as e:
+            safe_error = (
+                "Mission execution cancelled"
+                if isinstance(e, asyncio.CancelledError)
+                else sanitize_pii_text(str(e))
+            )
             # Preserve the exception type for callers and tests, but replace its display payload
             # before any logger, mission summary, or upstream handler can render it.
             try:
@@ -669,5 +705,5 @@ class ExecuteMissionUseCase:
             logger.error("Error executing Research Mission %s: %s", mission_id, safe_error)
             mission.status = "FAILED"
             mission.summary = f"Execution error: {safe_error}"
-            await self._repo.update_mission(mission)
+            await await_settled(self._repo.update_mission(mission))
             raise

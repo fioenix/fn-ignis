@@ -1,4 +1,6 @@
+import asyncio
 import sqlite3
+import threading
 
 import pytest
 from ignis.domain.cross_platform_score import cross_platform_score
@@ -14,6 +16,54 @@ from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendReposi
 def sqlite_repo():
     # Use temporary file or in-memory sqlite for isolation
     return SqliteTrendRepository("sqlite:///:memory:")
+
+
+@pytest.mark.asyncio
+async def test_write_boundary_preserves_results_and_uncancelled_errors(sqlite_repo):
+    assert await sqlite_repo._run_write(lambda: 42) == 42
+
+    def fail():
+        raise sqlite3.OperationalError("Synthetic write failure")
+
+    with pytest.raises(sqlite3.OperationalError, match="Synthetic write failure"):
+        await sqlite_repo._run_write(fail)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("worker_fails", [False, True])
+async def test_write_boundary_drains_repeated_cancellation_and_worker_errors(sqlite_repo, worker_fails):
+    entered = asyncio.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    loop = asyncio.get_running_loop()
+
+    def write():
+        loop.call_soon_threadsafe(entered.set)
+        try:
+            if not release.wait(5):
+                raise RuntimeError("Test did not release worker")
+            if worker_fails:
+                raise sqlite3.OperationalError("Synthetic cancelled write failure")
+            return 42
+        finally:
+            finished.set()
+
+    task = asyncio.create_task(sqlite_repo._run_write(write))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert not finished.is_set()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert finished.is_set()
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio

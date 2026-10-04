@@ -6,7 +6,7 @@ acting on it. Its two capabilities are independent: source collection can end wi
 frame, while Market analysis can end with a Gap Report rather than a forced verdict.
 
 **Release boundary:** This branch implements the unreleased Spec 011 product reset. The published
-v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 41-tool
+v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 44-tool
 mission-bound surface described here. Do not use a published image to validate this branch.
 
 ## Product contract
@@ -31,14 +31,23 @@ supported MCP clients, and runs synthetic diagnostics. Connector credentials and
 sessions are optional and require the operator's own authorization. Never interpret synthetic
 readiness as live source access.
 
+For a Codex-only installation with separate UAT storage, run
+`./scripts/bootstrap.sh --client codex --env-file /absolute/path/to/uat/.env`.
+Other client configurations remain unchanged; omitting these options retains the all-client setup.
+
 The current source tree contains migrations through
-`sql/025_evidence_grounded_claim_ledger.sql`. A fresh SQLite bootstrap is exercised locally;
-PostgreSQL application of `025` has not yet been verified. For an existing database, inventory
+`sql/026_partial_degraded_probe_outcomes.sql`. Migration 026 changes only the outcome-count
+constraint: partial DEGRADED results remain incomplete measurements. A fresh SQLite bootstrap is exercised locally;
+PostgreSQL migration rehearsal on a disposable database does not verify an operator's existing
+database. For an existing database, inventory
 legacy baseline rows with `python scripts/inventory_legacy_baseline.py --dsn sqlite:///ignis.db`
 or an explicit existing PostgreSQL DSN before planning any migration or
-archive. Apply numbered migrations in order only after reviewing the migration's data impact and
+archive. Apply only pending numbered migrations in order after reviewing the migration's data impact and
 the operator's approval. The previous files include `sql/022_builtin_uuid_defaults.sql`,
-`sql/023_evidence_qualification.sql`, and `sql/024_youtube_quota_ledger.sql`.
+`sql/023_evidence_qualification.sql`, `sql/024_youtube_quota_ledger.sql`, and
+`sql/025_evidence_grounded_claim_ledger.sql`.
+Do not rerun historical 025 after partial DEGRADED rows exist: it reinstalls the stricter count
+CHECK before 026 can run. Replay verification for 026 is not whole-history replay verification.
 
 The published OCI image and manifest still refer to v0.7.0. Build and run this source branch
 locally for Spec 011 validation; do not assume the public image includes `025` or the new tools.
@@ -47,13 +56,16 @@ committed report templates live only in `src/ignis/infrastructure/templates/html
 
 ## Agent capabilities
 
-The current MCP server exposes **41 tools**. Use the server's live tool descriptions as the
+The current MCP server exposes **44 tools**. Use the server's live tool descriptions as the
 signature authority. Representative operations:
 
 - `create_attention_mission` and `confirm_market_brief` establish a bounded question and
   confirmed scope; `execute_mission_ingress` collects the requested frame.
 - Atomic source tools such as `get_tiktok_search_suggestions` and
   `get_tiktok_video_comments` can answer source-specific questions without a Market verdict.
+- Opt-in `prepare_host_browser_search`, `submit_host_browser_search` and
+  `cancel_host_browser_search` collect bounded public TikTok grids through an authorized host
+  browser. See [host-browser scope and limits](docs/USER_GUIDE.md#explicit-host-browser-tiktok-search-development-branch).
 - `get_mission_evidence_qualification_batch` and
   `submit_mission_evidence_qualifications` record evidence judgments.
 - `submit_mission_claims`, `get_mission_claims`, and `get_mission_analysis` control
