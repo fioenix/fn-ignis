@@ -78,8 +78,11 @@ live hoặc kiểm tra hình ảnh. Migration 026 chưa áp dụng trên Supabas
 Spec 012 và các thay đổi hiện có được giữ nguyên; actual branch là `release/v0.8.0`.
 Chủ sở hữu đã chốt nghiệm thu và yêu cầu PR/merge trước Goal 2. Chấp nhận ngoại lệ về
 lịch sử test-first và hình ảnh chưa được kiểm chứng độc lập, không đổi chúng thành kết
-quả PASS. Không đổi version/tag/release trong vòng này. PR/CI/merge còn phải đọc lại.
-**Trạng thái: PO đã nghiệm thu với ngoại lệ được ghi rõ; đang tích hợp.**
+quả PASS. Không đổi version/tag/release trong vòng này. PR
+[#50](https://github.com/fioenix/fn-ignis/pull/50) đã merge vào main `a94db308` sau đủ
+bảy tên check bắt buộc thành công; commit đã được fetch và kiểm tra ancestry.
+Lần đọc cuối xác nhận đủ bảy check sau merge trên đúng commit main đều thành công.
+**Trạng thái: PO đã nghiệm thu với ngoại lệ; mã nguồn đã tích hợp, chưa phát hành.**
 
 ## Nghiên cứu riêng — benchmark đối thủ
 
@@ -97,8 +100,10 @@ Các thay đổi này chưa commit/merge hoặc phát hành.
 - [x] **UAT-001 — hoàn tất Market UAT:** lượt cuối 136 quan sát TikTok/Threads đã đánh giá,
   Gap Report giữ kết luận thiếu bằng chứng; Claim Ledger kiểm chứng riêng bằng fixture.
   PO đã nghiệm thu với ngoại lệ hình ảnh/lịch sử test-first trong ledger Spec 013.
-- [ ] **UAT-002 — tích hợp các bản sửa UAT:** kiểm tra diff cuối, PR/CI/merge và đọc lại main;
-  không đóng chỉ bằng test cục bộ. Release là bước riêng, chưa phát hành.
+- [x] **UAT-002 — tích hợp các bản sửa UAT:** PR #50 đã merge, bảy check PR đạt,
+  ancestry/main đã đọc lại; không có diff runtime/test/SQL phát sinh do merge.
+  Bảy check sau merge trên đúng commit main cũng đã đạt. Release và activation client là bước riêng,
+  chưa phát hành hoặc tự đổi cấu hình của chủ sở hữu.
 
 - [ ] **RES-001 — thiết kế và thực hiện benchmark có thể tái lập.** Chuyển từ T091 của
   Spec 011 theo quyết định chủ sở hữu ngày 02/10/2026; chưa thực hiện và không chặn hoàn tất

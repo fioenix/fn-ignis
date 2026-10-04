@@ -93,7 +93,7 @@ frame/qualification; stale or replayed answers cannot write and unknown window c
 - [x] T027 Verify wheel extractor packaging and installed MCP discovery using tests/integration/test_host_browser_search_mcp.py; record exact artifact/revision in .handoff/spec012-verification.md.
 - [x] T028 Run sanitized full tests, conventions and lint; record commands/results in .handoff/spec012-verification.md.
 - [x] T029 Review complete implementation/security diff and fix validated findings test-first; bounded review corrections and final code re-review retained, latest security scan 2e6d4703-84b3-4e55-9d4c-9235b0e4e760 sealed with 37 changed source/configuration entries and zero findings. See Spec 013 final ledger; no shipping claim.
-- [ ] T030 Reconcile acceptance and integration/activation status in specs/012-host-browser-search/tasks.md; leave merge/release actions gated.
+- [x] T030 Reconcile acceptance and integration/activation: PR #50 merged to main a94db308 after all seven distinct protected PR checks succeeded; reviewed head ancestry and unchanged runtime/test/SQL merge read back. All seven post-merge main checks subsequently completed successfully. PO accepts historical-process/pixel exceptions; release, owner-client activation and Supabase 026 are separate, not claimed. See Spec 013's integration checkpoint.
 
 ## Dependencies and Parallel Examples
 
