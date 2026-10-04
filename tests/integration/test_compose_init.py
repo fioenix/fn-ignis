@@ -99,15 +99,16 @@ def test_database_healthcheck_rejects_unix_only_initialization_server():
     db = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))["services"]["db"]
     name = f"ignis-health-boundary-{uuid4().hex[:12]}"
 
-    def run(*args):
-        return subprocess.run(args, capture_output=True, text=True, timeout=30)
+    def run(*args, timeout=30):
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
 
     try:
         started = run(
-            "docker", "run", "--detach", "--pull=never", "--name", name,
+            "docker", "run", "--detach", "--pull=missing", "--name", name,
             "--env", "POSTGRES_PASSWORD=synthetic-health-boundary",
             "--env", "POSTGRES_DB=ignis", db["image"],
             "postgres", "-c", "listen_addresses=",
+            timeout=180,
         )
         assert started.returncode == 0, "The disposable PostgreSQL fixture did not start"
         deadline = time.monotonic() + 60

@@ -8,6 +8,10 @@ Owner explicitly decided: "Tao chốt, tạo PR và merge đi, để xong rồi 
 
 U12, Spec 012 T030 and Spec 013 T027 remain pending until actual PR checks, merge and main readback. This authorization covers integration, not a version bump, tag, publication, Supabase migration or additional live collection. Goal 2 starts only after verified integration. Later status supersedes historical pending language below without rewriting its evidence.
 
+### PR #50 cold-runner regression
+
+Fresh GitHub Compose runs 37178326996 and 37178344053 observed RED before reaching the healthcheck: the disposable Unix-only fixture used `--pull=never`, but the fresh runner had no configured Timescale image. The separate full Compose initialization test subsequently passed and pulled that same image, exposing an unintended test-order/cache dependency. The fixture now permits a bounded missing-image pull of the unchanged configured image. Production Compose health semantics, migrations, runtime source and owner data are unchanged. The exact cold-runner repetition and protected checks remain required before merge; cached local verification alone cannot establish this fix.
+
 | Case | Baseline evidence | Remediation / final proof required | State |
 |---|---|---|---|
 | U01 Setup isolation | Actual Codex setup and installed-wheel handshake; inherited config defects fixed locally | Isolated installed setup preserved unrelated synthetic clients; generated command and final wheel readback verified | Final runtime verified; integration separate |
