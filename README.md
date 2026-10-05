@@ -36,8 +36,11 @@ For a Codex-only installation with separate UAT storage, run
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
 The current source tree contains migrations through
-`sql/026_partial_degraded_probe_outcomes.sql`. Migration 026 changes only the outcome-count
-constraint: partial DEGRADED results remain incomplete measurements. A fresh SQLite bootstrap is exercised locally;
+`sql/027_mission_progress.sql`. Migration 027 adds only PostgreSQL revision, progress-event,
+and command-receipt tables, preserving canonical evidence. SQLite and PostgreSQL now commit collection, qualification and claim facts together with
+their matching progress events. The read-only Relay viewer is not implemented yet. Migration 026
+changes only the outcome-count constraint: partial DEGRADED results remain incomplete measurements.
+A fresh SQLite bootstrap is exercised locally;
 PostgreSQL migration rehearsal on a disposable database does not verify an operator's existing
 database. For an existing database, inventory
 legacy baseline rows with `python scripts/inventory_legacy_baseline.py --dsn sqlite:///ignis.db`

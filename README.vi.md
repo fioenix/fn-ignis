@@ -32,8 +32,11 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/026_partial_degraded_probe_outcomes.sql`. Migration
-026 chỉ sửa constraint số quan sát; kết quả DEGRADED vẫn không phải phép đo hoàn chỉnh. Khởi tạo
+Cây mã nguồn hiện có migration tới `sql/027_mission_progress.sql`. Migration 027 chỉ bổ sung
+các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
+chuẩn được giữ nguyên. SQLite và PostgreSQL hiện ghi dữ kiện thu thập, qualification và claim cùng sự kiện tiến độ
+tương ứng trong một giao dịch. Viewer Relay chỉ đọc chưa được triển khai. Migration 026 chỉ sửa constraint số quan sát; kết quả DEGRADED
+vẫn không phải phép đo hoàn chỉnh. Khởi tạo
 SQLite mới đã được kiểm tra cục bộ; rehearsal PostgreSQL tạm không xác minh database hiện hữu
 của người vận hành.
 Với cơ sở dữ liệu sẵn có, chạy lệnh inventory chỉ đọc

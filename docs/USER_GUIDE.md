@@ -12,7 +12,10 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/026_partial_degraded_probe_outcomes.sql`. Migration 026
+The source migration chain ends at `sql/027_mission_progress.sql`. Migration 027 adds only
+PostgreSQL revision, progress-event, and command-receipt tables, preserving canonical evidence.
+SQLite and PostgreSQL commit collection, qualification and claim facts together with matching
+progress events. The read-only Relay viewer is not implemented yet. Migration 026
 changes only the count CHECK and retains partial DEGRADED observations without treating them
 as complete measurements or measured absence. Fresh local
 SQLite initialization has been exercised. Disposable PostgreSQL rehearsal does not verify an

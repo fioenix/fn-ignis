@@ -52,6 +52,9 @@ OWNER_ONLY = {
     "mission_claims": "mission claim",
     "mission_manifests": "mission manifest",
     "mission_probe_outcomes": "probe outcome",
+    "mission_progress_revisions": "progress revision",
+    "mission_progress_events": "progress event",
+    "mission_progress_commands": "progress command receipt",
     "mission_run_journals": "run journal",
     "mission_writer_claims": "writer claim",
     "observations": "observation",
@@ -154,6 +157,22 @@ OWNER_ROWS_SINCE_025 = (
     " (id, claim_id, observation_id, role, hypothesis_target) VALUES"
     f" ('{T025_BINDING}', '{T025_CLAIM}', '{OBSERVATION}', 'SUPPORT', 'core')",
 )
+T027_EVENT = "00000000-0000-4000-8000-000000000020"
+T027_SPARE_EVENT = "00000000-0000-4000-8000-000000000021"
+T027_KEY = f"probe-outcomes:{MISSION}:{RUN}:{'a' * 64}"
+T027_SPARE_KEY = f"probe-outcomes:{MISSION}:{RUN}:{'c' * 64}"
+OWNER_ROWS_SINCE_027 = (
+    f"INSERT INTO mission_progress_revisions (mission_id, revision) VALUES ('{MISSION}', 1)",
+    "INSERT INTO mission_progress_events"
+    " (id, mission_id, revision, ordinal, run_id, kind, provenance, causation_key) VALUES"
+    f" ('{T027_EVENT}', '{MISSION}', 1, 1, '{RUN}', 'PROBE_OUTCOMES_RECORDED',"
+    f" 'HARNESS_OBSERVED', '{T027_KEY}'),"
+    f" ('{T027_SPARE_EVENT}', '{MISSION}', 1, 2, '{RUN}', 'PROBE_OUTCOMES_RECORDED',"
+    f" 'HARNESS_OBSERVED', '{T027_SPARE_KEY}')",
+    "INSERT INTO mission_progress_commands"
+    " (mission_id, command_key, payload_fingerprint, outcome_count, run_id, event_id, revision, ordinal)"
+    f" VALUES ('{MISSION}', '{T027_KEY}', '{'b' * 64}', 1, '{RUN}', '{T027_EVENT}', 1, 1)",
+)
 # A valid row a client could write to each table, so an INSERT that is allowed actually lands.
 # Ids are supplied rather than defaulted, so the outcome turns only on the table privilege and RLS
 # under test; a client that wants to write can always send its own id.
@@ -180,6 +199,12 @@ CLIENT_ROWS = {
     "mission_probe_outcomes": "(id, run_id, platform, connector_surface, status,"
     " signals_collected, queried_keywords, query_fingerprint, completed_at) VALUES"
     f" ('{uuid4()}', '{RUN}', 'tiktok', 'tiktok', 'EMPTY_NO_DATA', 0, ARRAY['t018'], 'fp', now())",
+    "mission_progress_revisions": f"(mission_id, revision) VALUES ('{SPARE_MISSION}', 0)",
+    "mission_progress_events": "(id, mission_id, revision, ordinal, run_id, kind, provenance, causation_key)"
+    f" VALUES ('{uuid4()}', '{MISSION}', 1, 3, '{RUN}', 'COLLECTION_STARTED', 'HARNESS_OBSERVED', 'client')",
+    "mission_progress_commands": "(mission_id, command_key, payload_fingerprint, outcome_count, run_id,"
+    " event_id, revision, ordinal)"
+    f" VALUES ('{MISSION}', '{T027_SPARE_KEY}', '{'d' * 64}', 1, '{RUN}', '{T027_SPARE_EVENT}', 1, 2)",
     "mission_run_journals": "(id, workspace_id, mission_id, journal_path, sequence) VALUES"
     f" ('{uuid4()}', '{WORKSPACE}', '{MISSION}', '/t018/journal-2', 2)",
     "mission_writer_claims": f"(mission_id, run_id) VALUES ('{SPARE_MISSION}', '{uuid4()}')",
@@ -241,6 +266,9 @@ def _seed(dsn: str) -> None:
                 conn.execute(statement)
         if conn.execute("SELECT to_regclass('public.mission_manifests')").fetchone()[0]:
             for statement in OWNER_ROWS_SINCE_025:
+                conn.execute(statement)
+        if conn.execute("SELECT to_regclass('public.mission_progress_events')").fetchone()[0]:
+            for statement in OWNER_ROWS_SINCE_027:
                 conn.execute(statement)
 
 

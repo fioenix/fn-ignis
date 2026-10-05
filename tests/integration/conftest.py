@@ -58,6 +58,8 @@ SCHEMA_MIGRATIONS = (
     # Mission authority, complete evidence-frame metadata, and the Claim Ledger.
     "025_evidence_grounded_claim_ledger.sql",
     "026_partial_degraded_probe_outcomes.sql",
+    # Transactional progress state, typed events and original probe-command receipts.
+    "027_mission_progress.sql",
 )
 
 

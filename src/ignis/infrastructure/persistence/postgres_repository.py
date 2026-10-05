@@ -3,16 +3,31 @@ import dataclasses
 import copy
 import json
 import logging
+from collections.abc import Mapping
 from datetime import date, datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg
 from psycopg import errors as pg_errors
 from psycopg.rows import tuple_row
 from psycopg_pool import AsyncConnectionPool
 
+from ignis.application.cancellation import await_settled
+from ignis.application.ports.mission_relay_port import (
+    ProbeOutcomeCommitCommand,
+    ProbeOutcomeCommitReceipt,
+)
+from ignis.domain.mission_relay import (
+    MissionProgressEvent,
+    MissionProgressKind,
+    MissionRelayCursor,
+    RelayProvenance,
+    RelayEvidenceReference,
+    EvidenceRole,
+)
 from ignis.application.ports.repository_port import (
     ITrendRepository,
     PlatformCredentialRecord,
@@ -25,10 +40,14 @@ from ignis.domain.research_workspace import (
     ClaimStatus,
     ClaimType,
     EvidenceDirection,
+    QualificationRelation,
+    compute_frame_fingerprint,
     EvidenceQualification,
     EvidenceQualificationConflictError,
     InvalidEvidenceQualificationError,
     InvalidMissionClaimError,
+    StaleEvidenceQualificationError,
+    StaleMissionClaimError,
     InvalidMissionManifestError,
     MarketBriefRevision,
     MissionClaim,
@@ -93,6 +112,7 @@ class PostgresTimescaleRepository(ITrendRepository):
         self._min_pool_size = min_pool_size
         self._max_pool_size = max_pool_size
         self._pool = pool
+        self._relay_fact_lock = asyncio.Lock()
 
 
     async def _get_pool(self) -> AsyncConnectionPool:
@@ -239,6 +259,298 @@ class PostgresTimescaleRepository(ITrendRepository):
                 )
                 rows = await cur.fetchall()
         return [self._youtube_quota_usage_from_row(row) for row in rows]
+
+    async def _commit_relay_facts(self, mission_id: UUID, operation, *, analysis: bool = False):
+        """Serialize local retries and hold the mission row through physical settlement."""
+        async def commit():
+            async with self._relay_fact_lock:
+                pool = await self._get_pool()
+                async with pool.connection() as conn:
+                    async with conn.cursor(row_factory=tuple_row) as cur:
+                        await self._lock_relay_tables(cur, analysis=analysis)
+                        await cur.execute(
+                            "INSERT INTO mission_progress_revisions (mission_id, revision) VALUES (%s, 0)"
+                            " ON CONFLICT (mission_id) DO NOTHING", (str(mission_id),),
+                        )
+                        await cur.execute(
+                            "SELECT revision FROM mission_progress_revisions WHERE mission_id = %s FOR UPDATE",
+                            (str(mission_id),),
+                        )
+                        revision = (await cur.fetchone())[0]
+                        result, publish = await operation(conn, cur)
+                        await cur.execute(
+                            "SELECT revision FROM mission_progress_revisions WHERE mission_id = %s", (str(mission_id),),
+                        )
+                        if (await cur.fetchone())[0] == revision:
+                            # A zero-delta retry must not leave a synthetic control row.
+                            await conn.rollback()
+                if publish is not None:
+                    publish()
+                return result
+
+        return await await_settled(commit())
+
+    @staticmethod
+    async def _lock_relay_tables(cur, *, analysis: bool = False) -> None:
+        # Legacy writers do not lock progress rows. Fence snapshot inputs until commit;
+        # all progress writers take this gate before journal/revision locks to avoid
+        # inversion. Analysis serializes across missions; collection remains concurrent.
+        mode = "SHARE ROW EXCLUSIVE" if analysis else "ROW EXCLUSIVE"
+        await cur.execute(
+            "LOCK TABLE sources, observations, research_missions, mission_manifests,"
+            " market_brief_revisions, mission_run_journals, mission_probe_outcomes,"
+            " mission_evidence, mission_evidence_qualifications, mission_claims,"
+            " mission_claim_evidence IN " + mode + " MODE"
+        )
+
+    @staticmethod
+    async def _require_collection_run(cur, mission_id: UUID, run_id: UUID) -> None:
+        await cur.execute(
+            "SELECT j.mission_id, j.workspace_id, m.workspace_id"
+            " FROM mission_run_journals j JOIN research_missions m ON m.id = j.mission_id"
+            " WHERE j.id = %s FOR SHARE OF j, m", (str(run_id),),
+        )
+        row = await cur.fetchone()
+        if row is None or str(row[0]) != str(mission_id) or row[1] != row[2]:
+            raise RepositoryException("The recorded collection run does not belong to this mission scope.")
+
+    async def _commit_snapshot(self, conn, mission_id: UUID):
+        from ignis.infrastructure.persistence.evidence_snapshot import SnapshotConnectionPool, read_evidence_snapshot
+
+        reader = copy.copy(self)
+        reader._pool = SnapshotConnectionPool(conn)
+        return await read_evidence_snapshot(reader, mission_id)
+
+    @staticmethod
+    async def _progress_reference(cur, mission_id: UUID, observation_id: UUID) -> RelayEvidenceReference:
+        await cur.execute(
+            "SELECT o.source_id, m.surface, q.relation, q.frame_fingerprint, q.evidence_role"
+            " FROM mission_evidence e JOIN observations o ON o.id = e.observation_id"
+            " JOIN research_missions m ON m.id = e.mission_id"
+            " LEFT JOIN mission_evidence_qualifications q"
+            " ON q.mission_id = e.mission_id AND q.observation_id = e.observation_id"
+            " WHERE e.mission_id = %s AND e.observation_id = %s", (str(mission_id), str(observation_id)),
+        )
+        row = await cur.fetchone()
+        if row is None:
+            raise RepositoryException("A progress reference requires canonical mission membership.")
+        role = {"ATTENTION": EvidenceRole.ATTENTION_CONTEXT, "MARKET": EvidenceRole.MARKET_EVIDENCE}.get(row[1])
+        if role is None:
+            raise RepositoryException("A relay commit requires a declared mission surface.")
+        return RelayEvidenceReference(
+            mission_id=mission_id, observation_id=observation_id, source_id=UUID(str(row[0])), evidence_role=role,
+            direction=EvidenceDirection(row[4]) if row[4] else None,
+            qualification_relation=QualificationRelation(row[2]) if row[2] else None,
+            qualification_frame_fingerprint=row[3],
+        )
+
+    @staticmethod
+    async def _record_progress(cur, mission_id: UUID, kind: MissionProgressKind, causation_key: str,
+                               *, run_id=None, claim_id=None, references=(), reason=None, revision=None, ordinal=1):
+        """Advance the held control row within the fact transaction, never a sequence."""
+        if revision is None:
+            await cur.execute(
+                "UPDATE mission_progress_revisions SET revision = revision + 1 WHERE mission_id = %s RETURNING revision",
+                (str(mission_id),),
+            )
+            revision = (await cur.fetchone())[0]
+        event = MissionProgressEvent(
+            event_id=uuid4(), cursor=MissionRelayCursor(mission_id=mission_id, revision=revision, ordinal=ordinal),
+            kind=kind, provenance=RelayProvenance.HARNESS_OBSERVED, recorded_at=datetime.now(timezone.utc),
+            causation_key=causation_key, run_id=run_id, claim_id=claim_id, evidence_references=references, reason=reason,
+        )
+        await cur.execute(
+            "INSERT INTO mission_progress_events (id, mission_id, revision, ordinal, kind, provenance,"
+            " recorded_at, causation_key, run_id, claim_id, evidence_references, reason)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (str(event.event_id), str(mission_id), revision, ordinal, kind.value, event.provenance.value,
+             event.recorded_at, causation_key, str(run_id) if run_id else None, str(claim_id) if claim_id else None,
+             json.dumps([ref.to_payload() for ref in references]), reason),
+        )
+        return revision
+
+    async def commit_collection_state(self, mission: ResearchMission, run_id: UUID) -> None:
+        """Commit the run-scoped collection state and its matching receipt together."""
+        if mission.status not in ("RUNNING", "COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "INSUFFICIENT"):
+            raise RepositoryException("Unsupported collection state transition.")
+
+        async def write(conn, cur):
+            await self._require_collection_run(cur, mission.id, run_id)
+            await cur.execute("SELECT status FROM research_missions WHERE id = %s", (str(mission.id),))
+            status = (await cur.fetchone())[0]
+            kind = (MissionProgressKind.COLLECTION_STARTED if mission.status == "RUNNING"
+                    else MissionProgressKind.COLLECTION_STATE_CHANGED)
+            await cur.execute(
+                "SELECT id FROM mission_progress_events WHERE mission_id = %s AND run_id = %s AND kind = %s AND reason = %s",
+                (str(mission.id), str(run_id), kind.value, mission.status),
+            )
+            if await cur.fetchone() is not None and status == mission.status:
+                return None, None
+            if status in ("COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "INSUFFICIENT"):
+                raise RepositoryException("Terminal collection cannot be reopened or rewritten.")
+            await cur.execute(
+                "UPDATE research_missions SET status = %s, summary = %s, updated_at = %s WHERE id = %s",
+                (mission.status, mission.summary, datetime.now(timezone.utc), str(mission.id)),
+            )
+            await self._record_progress(cur, mission.id, kind, f"collection:{run_id}:{mission.status}",
+                                        run_id=run_id, reason=mission.status)
+            return None, None
+
+        await self._commit_relay_facts(mission.id, write)
+
+    async def commit_collection_observations(self, mission_id: UUID, run_id: UUID, signals: Sequence[TrendSignal]) -> int:
+        """Publish sightings, membership and canonical identities only after durable commit."""
+        signals = tuple(signals)
+        if any(signal.mission_id not in (None, mission_id) for signal in signals):
+            raise RepositoryException("Collection signals cannot name another mission.")
+
+        async def write(conn, cur):
+            await self._require_collection_run(cur, mission_id, run_id)
+            batch = [dataclasses.replace(signal, mission_id=mission_id) for signal in signals]
+            fresh = []
+            for signal in batch:
+                if signal.observation_id is not None:
+                    await self._progress_reference(cur, mission_id, signal.observation_id)
+                    continue
+                if await self._record_observations(cur, [signal]):
+                    await cur.execute("SELECT source_id FROM observations WHERE id = %s", (str(signal.observation_id),))
+                    signal.source_id = UUID(str((await cur.fetchone())[0]))
+                    fresh.append(signal)
+            if fresh:
+                refs = tuple([await self._progress_reference(cur, mission_id, signal.observation_id) for signal in fresh])
+                await self._record_progress(cur, mission_id, MissionProgressKind.OBSERVATIONS_COMMITTED,
+                                            f"observations:{run_id}:{uuid4()}", run_id=run_id, references=refs)
+
+            def publish():
+                for original, staged in zip(signals, batch):
+                    if original.observation_id is None and staged.observation_id is not None:
+                        for name in ("observation_id", "source_id", "identity_source", "time_provenance"):
+                            setattr(original, name, getattr(staged, name))
+
+            return len(fresh), publish
+
+        return await self._commit_relay_facts(mission_id, write)
+
+    async def commit_collection_membership(self, mission_id: UUID, run_id: UUID, signals: Sequence[TrendSignal]) -> int:
+        """Reattach stored observations without creating another sighting."""
+        identities = tuple(dict.fromkeys(signal.observation_id for signal in signals))
+        if None in identities:
+            raise RepositoryException("Membership commits require stored observation identities.")
+
+        async def write(conn, cur):
+            await self._require_collection_run(cur, mission_id, run_id)
+            refs = []
+            for identity in identities:
+                await cur.execute(
+                    "INSERT INTO mission_evidence (mission_id, observation_id) VALUES (%s, %s)"
+                    " ON CONFLICT (mission_id, observation_id) DO NOTHING", (str(mission_id), str(identity)),
+                )
+                if cur.rowcount:
+                    refs.append(await self._progress_reference(cur, mission_id, identity))
+            if refs:
+                await self._record_progress(cur, mission_id, MissionProgressKind.OBSERVATIONS_COMMITTED,
+                    f"membership:{run_id}:{uuid4()}", run_id=run_id, references=tuple(refs), reason="MEMBERSHIP_REATTACHED")
+            return len(refs), None
+
+        return await self._commit_relay_facts(mission_id, write)
+
+    async def commit_collection_pruning(self, mission_id: UUID, run_id: UUID, retained_observation_ids: Sequence[UUID]) -> int:
+        """Prune memberships and record actual cascading ledger changes in one revision."""
+        retained = set(retained_observation_ids)
+
+        async def write(conn, cur):
+            await self._require_collection_run(cur, mission_id, run_id)
+            await cur.execute("SELECT observation_id FROM mission_evidence WHERE mission_id = %s ORDER BY observation_id",
+                              (str(mission_id),))
+            removed = [UUID(str(row[0])) for row in await cur.fetchall() if UUID(str(row[0])) not in retained]
+            refs = tuple([await self._progress_reference(cur, mission_id, value) for value in removed])
+            claims = await self._read_claims(mission_id, include_superseded=True, conn=conn)
+            affected = [(claim, tuple(ref for ref in refs if any(b.observation_id == ref.observation_id
+                         for b in claim.evidence_bindings))) for claim in claims]
+            for identity in removed:
+                await cur.execute("DELETE FROM mission_evidence WHERE mission_id = %s AND observation_id = %s",
+                                  (str(mission_id), str(identity)))
+            if removed:
+                revision = await self._record_progress(cur, mission_id, MissionProgressKind.OBSERVATIONS_COMMITTED,
+                    f"membership:{run_id}:{uuid4()}", run_id=run_id, references=refs, reason="MEMBERSHIP_PRUNED")
+                ordinal = 1
+                for claim, invalidated in affected:
+                    if not invalidated:
+                        continue
+                    await cur.execute("SELECT status FROM mission_claims WHERE id = %s", (str(claim.claim_id),))
+                    status = (await cur.fetchone())[0]
+                    if status != claim.status.value:
+                        ordinal += 1
+                        await self._record_progress(cur, mission_id, MissionProgressKind.CLAIM_GATE_CHANGED,
+                            f"claim-pruned:{claim.claim_id}:{uuid4()}", claim_id=claim.claim_id, references=invalidated,
+                            reason=status, revision=revision, ordinal=ordinal)
+            return len(removed), None
+
+        return await self._commit_relay_facts(mission_id, write)
+
+    async def commit_evidence_qualifications(self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]) -> int:
+        """Recheck the frame and publish new judgments plus receipt on the held connection."""
+        from ignis.infrastructure.persistence.evidence_snapshot import SnapshotConnectionPool
+        batch = tuple(qualifications)
+        if not batch:
+            return 0
+        if any(q.mission_id != mission_id for q in batch):
+            raise InvalidEvidenceQualificationError("Every judgment must name the selected mission.")
+
+        async def write(conn, cur):
+            snapshot = await self._commit_snapshot(conn, mission_id)
+            if snapshot.mission is None or any(
+                q.frame_fingerprint != compute_frame_fingerprint(snapshot.mission, snapshot.brief)
+                or q.brief_revision_id != (snapshot.brief.brief_revision_id if snapshot.brief else None) for q in batch
+            ):
+                raise StaleEvidenceQualificationError("The submitted qualification frame is stale.")
+            reader = copy.copy(self)
+            reader._pool = SnapshotConnectionPool(conn)
+            recorded = {q.observation_id for q in snapshot.qualifications}
+            result = await reader.save_evidence_qualifications(mission_id, batch)
+            fresh = dict.fromkeys(q.observation_id for q in batch if q.observation_id not in recorded)
+            refs = tuple([await self._progress_reference(cur, mission_id, identity) for identity in fresh])
+            if refs:
+                await self._record_progress(cur, mission_id, MissionProgressKind.QUALIFICATION_RECORDED,
+                                            f"qualification:{mission_id}:{uuid4()}", references=refs)
+            return result, None
+
+        return await self._commit_relay_facts(mission_id, write, analysis=True)
+
+    async def commit_mission_claims(self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]) -> List[MissionClaim]:
+        """Keep legacy ledger validation inside the current-frame fact/event transaction."""
+        from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
+        from ignis.infrastructure.persistence.evidence_snapshot import SnapshotConnectionPool
+        batch = tuple(claims)
+        if not batch:
+            return []
+        if any(c.mission_id != mission_id or c.frame_digest != frame_digest for c in batch):
+            raise InvalidMissionClaimError("Every claim must name the requested mission and evidence frame.")
+
+        async def write(conn, cur):
+            snapshot = await self._commit_snapshot(conn, mission_id)
+            if frame_from_snapshot(snapshot).frame_digest != frame_digest:
+                raise StaleMissionClaimError("The submitted claim frame is stale.")
+            recorded = {(c.frame_digest, c.client_claim_key) for c in snapshot.claims}
+            reader = copy.copy(self)
+            reader._pool = SnapshotConnectionPool(conn)
+            result = await reader.save_mission_claims(mission_id, frame_digest, batch)
+            revision = None
+            ordinal = 0
+            for claim in result:
+                identity = (claim.frame_digest, claim.client_claim_key)
+                if identity in recorded:
+                    continue
+                recorded.add(identity)
+                ordinal += 1
+                refs = tuple([await self._progress_reference(cur, mission_id, b.observation_id)
+                              for b in claim.evidence_bindings if b.observation_id])
+                revision = await self._record_progress(cur, mission_id, MissionProgressKind.CLAIM_GATE_CHANGED,
+                    f"claim:{claim.claim_id}", claim_id=claim.claim_id, references=refs,
+                    reason=claim.status.value, revision=revision, ordinal=ordinal)
+            return result, None
+
+        return await self._commit_relay_facts(mission_id, write, analysis=True)
 
     async def save_signals(self, signals: List[TrendSignal]) -> int:
         """Record each sighting in the source/observation model. Nothing else is written.
@@ -2276,18 +2588,106 @@ class PostgresTimescaleRepository(ITrendRepository):
     async def record_probe_outcomes(
         self, run_id: UUID, outcomes: Sequence[MissionProbeOutcome]
     ) -> int:
-        """Record one run's surface outcomes in one transaction, all of them or none."""
-        rows = list(outcomes)
+        """Resolve the journal scope and return the original atomic publication count."""
+        rows = tuple(outcomes)
         if any(str(o.run_id) != str(run_id) for o in rows):
             raise InvalidEvidenceQualificationError(
                 f"Every probe outcome recorded for run {run_id} must belong to that run."
             )
+        receipt = await await_settled(self._publish_probe_outcomes(run_id, rows))
+        return receipt.outcome_count if receipt is not None else 0
+
+    async def commit_probe_outcomes(
+        self, command: ProbeOutcomeCommitCommand
+    ) -> ProbeOutcomeCommitReceipt:
+        """Settle one fact/event transaction before returning its original typed receipt."""
+        if type(command) is not ProbeOutcomeCommitCommand:
+            raise ValueError("A probe publication requires an admitted commit command.")
+        receipt = await await_settled(
+            self._publish_probe_outcomes(command.run_id, command.outcomes, command)
+        )
+        assert receipt is not None  # Admitted commands cannot contain an empty batch.
+        return receipt
+
+    @staticmethod
+    def _probe_fact_value(value: Any) -> Any:
+        """Encode immutable admitted values without retaining caller-owned aliases."""
+        if isinstance(value, Mapping):
+            return {key: PostgresTimescaleRepository._probe_fact_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [PostgresTimescaleRepository._probe_fact_value(item) for item in value]
+        if isinstance(value, Enum):
+            return PostgresTimescaleRepository._probe_fact_value(value.value)
+        if isinstance(value, UUID):
+            return str(value)
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc).isoformat()
+        return value
+
+    async def _publish_probe_outcomes(
+        self,
+        run_id: UUID,
+        rows: tuple[MissionProbeOutcome, ...],
+        command: ProbeOutcomeCommitCommand | None = None,
+    ) -> ProbeOutcomeCommitReceipt | None:
         pool = await self._get_pool()
         try:
-            # One connection block is one transaction: psycopg commits it on a clean exit and
-            # rolls it back on any exception, so a refused row takes the whole run with it.
+            # The pool context commits/rolls back on this same connection before reuse.
             async with pool.connection() as conn:
-                async with conn.cursor() as cur:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    await self._lock_relay_tables(cur)
+                    await cur.execute(
+                        "SELECT mission_id FROM mission_run_journals WHERE id = %s FOR SHARE",
+                        (str(run_id),),
+                    )
+                    journal = await cur.fetchone()
+                    if journal is None:
+                        if command is None and not rows:
+                            return None
+                        raise RepositoryException("Probe publication requires a recorded run journal.")
+                    mission_id = journal[0]
+                    if command is not None and command.mission_id != mission_id:
+                        raise RepositoryException("Probe command mission does not own its recorded run.")
+                    admitted = command
+                    if admitted is None and rows:
+                        try:
+                            admitted = ProbeOutcomeCommitCommand(mission_id=mission_id, run_id=run_id, outcomes=rows)
+                        except ValueError as exc:
+                            raise RepositoryException("Probe facts were refused before publication.") from exc
+                    if admitted is not None:
+                        # Bootstrap and lock the mission control row in the fact transaction.
+                        # Concurrent first publications serialize here before reading receipts.
+                        await cur.execute(
+                            "INSERT INTO mission_progress_revisions (mission_id, revision) VALUES (%s, 0)"
+                            " ON CONFLICT (mission_id) DO NOTHING",
+                            (str(mission_id),),
+                        )
+                        await cur.execute(
+                            "SELECT revision FROM mission_progress_revisions WHERE mission_id = %s FOR UPDATE",
+                            (str(mission_id),),
+                        )
+                        revision = (await cur.fetchone())[0]
+                        await cur.execute(
+                            "SELECT c.payload_fingerprint, c.outcome_count, e.id, e.revision, e.ordinal,"
+                            " e.kind, e.provenance, e.recorded_at, e.causation_key, e.run_id"
+                            " FROM mission_progress_commands c JOIN mission_progress_events e"
+                            " ON e.id = c.event_id AND e.mission_id = c.mission_id"
+                            " WHERE c.mission_id = %s AND c.command_key = %s",
+                            (str(mission_id), admitted.command_key),
+                        )
+                        original = await cur.fetchone()
+                        if original is not None:
+                            if original[0] != admitted.payload_fingerprint:
+                                raise RepositoryException("Probe command conflicts with its original committed facts.")
+                            return ProbeOutcomeCommitReceipt(
+                                command_key=admitted.command_key, payload_fingerprint=original[0],
+                                outcome_count=original[1], event=MissionProgressEvent(
+                                    event_id=original[2],
+                                    cursor=MissionRelayCursor(mission_id=mission_id, revision=original[3], ordinal=original[4]),
+                                    kind=MissionProgressKind(original[5]), provenance=RelayProvenance(original[6]),
+                                    recorded_at=original[7], causation_key=original[8], run_id=original[9],
+                                ),
+                            )
                     await cur.execute(
                         "SELECT m.required_channels, m.optional_channels"
                         " FROM mission_run_journals j"
@@ -2298,10 +2698,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                     manifest_row = await cur.fetchone()
                     if manifest_row is not None:
                         require_complete_channel_outcomes(
-                            manifest_row[0], manifest_row[1], rows
+                            manifest_row[0], manifest_row[1], admitted.outcomes if admitted is not None else rows
                         )
-                    elif not rows:
-                        return 0
+                    if admitted is None:
+                        return None
                     await cur.executemany(
                         "INSERT INTO mission_probe_outcomes (id, run_id, platform, connector_surface,"
                         " status, signals_collected, queried_keywords, queried_window,"
@@ -2320,7 +2720,10 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 o.queried_window,
                                 o.query_fingerprint,
                                 (
-                                    json.dumps(dict(o.scope_attestation), sort_keys=True)
+                                    json.dumps(
+                                        self._probe_fact_value(o.scope_attestation), sort_keys=True,
+                                        ensure_ascii=False, allow_nan=False, separators=(",", ":"),
+                                    )
                                     if o.scope_attestation is not None
                                     else None
                                 ),
@@ -2329,10 +2732,36 @@ class PostgresTimescaleRepository(ITrendRepository):
                                 2 if o.collection_plan_digest is not None else 1,
                                 o.completed_at,
                             )
-                            for o in rows
+                            for o in admitted.outcomes
                         ],
                     )
-            return len(rows)
+                    revision += 1
+                    await cur.execute(
+                        "UPDATE mission_progress_revisions SET revision = %s WHERE mission_id = %s",
+                        (revision, str(mission_id)),
+                    )
+                    event = MissionProgressEvent(
+                        event_id=uuid4(), cursor=MissionRelayCursor(mission_id=mission_id, revision=revision, ordinal=1),
+                        kind=MissionProgressKind.PROBE_OUTCOMES_RECORDED, provenance=RelayProvenance.HARNESS_OBSERVED,
+                        recorded_at=datetime.now(timezone.utc), causation_key=admitted.command_key, run_id=run_id,
+                    )
+                    receipt = ProbeOutcomeCommitReceipt(
+                        command_key=admitted.command_key, payload_fingerprint=admitted.payload_fingerprint,
+                        outcome_count=len(admitted.outcomes), event=event,
+                    )
+                    await cur.execute(
+                        "INSERT INTO mission_progress_events (id, mission_id, revision, ordinal, kind,"
+                        " provenance, recorded_at, causation_key, run_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (str(event.event_id), str(mission_id), revision, 1, event.kind.value,
+                         event.provenance.value, event.recorded_at, event.causation_key, str(run_id)),
+                    )
+                    await cur.execute(
+                        "INSERT INTO mission_progress_commands (mission_id, command_key, payload_fingerprint,"
+                        " outcome_count, run_id, event_id, revision, ordinal) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                        (str(mission_id), receipt.command_key, receipt.payload_fingerprint, receipt.outcome_count,
+                         str(run_id), str(event.event_id), revision, 1),
+                    )
+            return receipt
         except pg_errors.IntegrityError as exc:
             raise RepositoryException(
                 f"Probe outcomes for run {run_id} were refused and none was written: {exc}"

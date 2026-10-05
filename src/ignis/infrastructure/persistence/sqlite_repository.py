@@ -5,12 +5,19 @@ import json
 import logging
 import re
 import sqlite3
+from collections.abc import Mapping
 from datetime import date, datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar
 from uuid import UUID, uuid4
 
 from ignis.application.cancellation import await_settled
+from ignis.application.ports.mission_relay_port import (
+    IMissionRelayWriter,
+    ProbeOutcomeCommitCommand,
+    ProbeOutcomeCommitReceipt,
+)
 from ignis.application.ports.repository_port import (
     ITrendRepository,
     PlatformCredentialRecord,
@@ -24,10 +31,14 @@ from ignis.domain.research_workspace import (
     ClaimStatus,
     ClaimType,
     EvidenceDirection,
+    EvidenceRole,
+    compute_frame_fingerprint,
     EvidenceQualification,
     EvidenceQualificationConflictError,
     InvalidEvidenceQualificationError,
     InvalidMissionClaimError,
+    StaleEvidenceQualificationError,
+    StaleMissionClaimError,
     InvalidMissionManifestError,
     MarketBriefRevision,
     MissionClaim,
@@ -74,6 +85,13 @@ from ignis.domain.youtube_quota import (
 )
 
 from ignis.domain.exceptions import RepositoryException
+from ignis.domain.mission_relay import (
+    MissionProgressEvent,
+    MissionProgressKind,
+    MissionRelayCursor,
+    RelayProvenance,
+    RelayEvidenceReference,
+)
 from ignis.infrastructure.auth.crypto import decrypt_credentials, encrypt_credentials
 from ignis.infrastructure.persistence.migration_state import (
     UNBACKFILLED_CORPUS,
@@ -125,7 +143,7 @@ BRIEF_ALREADY_CONFIRMED = (
 )
 
 
-class SqliteTrendRepository(ITrendRepository):
+class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
     """
     Lightweight, zero-dependency SQLite repository adapter for fn-ignis.
     Supports file-based SQLite databases (sqlite:///path/to/db.sqlite) and in-memory databases (sqlite:///:memory:).
@@ -147,13 +165,15 @@ class SqliteTrendRepository(ITrendRepository):
 
     async def _run_write(self, operation: Callable[[], _WriteResult]) -> _WriteResult:
         """Keep ownership until the synchronous mutation settles, even after cancellation."""
-        return await await_settled(asyncio.to_thread(operation))
+        async with self._lock:
+            return await await_settled(asyncio.to_thread(operation))
 
     async def close(self) -> None:
         """Close SQLite connection if in-memory."""
-        if self._mem_conn is not None:
-            self._mem_conn.close()
-            self._mem_conn = None
+        async with self._lock:
+            if self._mem_conn is not None:
+                self._mem_conn.close()
+                self._mem_conn = None
 
     @staticmethod
     def _youtube_quota_usage_from_row(row) -> YouTubeQuotaUsage:
@@ -239,8 +259,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        async with self._lock:
-            return await self._run_write(_sync_reserve)
+        return await self._run_write(_sync_reserve)
 
     async def mark_youtube_quota_exhausted(
         self,
@@ -277,8 +296,7 @@ class SqliteTrendRepository(ITrendRepository):
                 if self._mem_conn is None:
                     conn.close()
 
-        async with self._lock:
-            return await self._run_write(_sync_mark)
+        return await self._run_write(_sync_mark)
 
     async def get_youtube_quota_usage(self, quota_day: date) -> List[YouTubeQuotaUsage]:
         await self._ensure_schema()
@@ -313,11 +331,201 @@ class SqliteTrendRepository(ITrendRepository):
     async def _ensure_schema(self) -> None:
         if self._initialized:
             return
-        async with self._lock:
+
+        def _sync_initialize() -> None:
             if not self._initialized:
-                await self._run_write(self._create_tables_and_seed)
-                await asyncio.to_thread(self._refuse_an_unbackfilled_corpus)
+                self._create_tables_and_seed()
+                self._refuse_an_unbackfilled_corpus()
                 self._initialized = True
+
+        await self._run_write(_sync_initialize)
+
+    async def _ensure_progress_schema(self) -> None:
+        """Explicit additive setup for authorized writers, never canonical bootstrap or reads."""
+        await self._run_write(self._create_progress_tables)
+
+    def _create_progress_tables(self) -> None:
+        """Mirror sql/027 without upgrading canonical rows or fabricating historical receipts."""
+        conn = self._get_connection()
+        try:
+            for table, required in (
+                ("research_missions", {"id"}),
+                ("mission_run_journals", {"id", "mission_id"}),
+                ("mission_claims", {"id", "mission_id"}),
+            ):
+                info = conn.execute(f"PRAGMA table_info({table})").fetchall()
+                target = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+                ).fetchone()
+                if (
+                    target is None
+                    or not required <= {row[1] for row in info}
+                    or [row[1] for row in info if row[5]] != ["id"]
+                ):
+                    raise RepositoryException(
+                        "Mission progress setup requires initialized canonical tables."
+                    )
+
+            uuid_pattern = "-".join("[0-9a-f]" * size for size in (8, 4, 4, 4, 12))
+
+            def uuid_check(expression: str) -> str:
+                return (
+                    f"(typeof({expression}) = 'text' AND instr({expression}, char(0)) = 0"
+                    f" AND {expression} GLOB '{uuid_pattern}')"
+                )
+
+            optional_ids = "\n".join(
+                f"CHECK ({name} IS NULL OR {uuid_check(name)}),"
+                for name in ("run_id", "work_id", "handoff_id", "finding_id", "claim_id")
+            )
+            schema = f"""
+                BEGIN IMMEDIATE;
+                CREATE TABLE IF NOT EXISTS mission_progress_revisions (
+                    mission_id TEXT PRIMARY KEY NOT NULL
+                        REFERENCES research_missions(id) ON DELETE CASCADE,
+                    revision INTEGER NOT NULL DEFAULT 0
+                        CHECK (typeof(revision) = 'integer' AND revision >= 0),
+                    CHECK {uuid_check('mission_id')}
+                );
+                CREATE TABLE IF NOT EXISTS mission_progress_events (
+                    id TEXT PRIMARY KEY NOT NULL DEFAULT (
+                        lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+                        substr(lower(hex(randomblob(2))), 2) || '-' ||
+                        substr('89ab', (random() & 3) + 1, 1) ||
+                        substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))
+                    ),
+                    mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                    revision INTEGER NOT NULL CHECK (typeof(revision) = 'integer' AND revision > 0),
+                    ordinal INTEGER NOT NULL CHECK (
+                        typeof(ordinal) = 'integer' AND ordinal > 0 AND ordinal <= 2147483647
+                    ),
+                    kind TEXT NOT NULL CHECK (kind IN (
+                        'COLLECTION_STARTED', 'COLLECTION_STATE_CHANGED', 'PROBE_OUTCOMES_RECORDED', 'OBSERVATIONS_COMMITTED',
+                        'QUALIFICATION_RECORDED', 'CLAIM_GATE_CHANGED', 'WORK_STARTED', 'WORK_WAITING',
+                        'HANDOFF_COMMITTED', 'FINDING_REVISED', 'CANCELLATION_REQUESTED',
+                        'CANCELLATION_ACKNOWLEDGED'
+                    )),
+                    provenance TEXT NOT NULL CHECK (provenance IN ('HARNESS_OBSERVED', 'HOST_REPORTED')),
+                    causation_key TEXT NOT NULL CHECK (length(trim(causation_key)) > 0),
+                    occurred_at TEXT,
+                    recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    run_id TEXT REFERENCES mission_run_journals(id),
+                    work_id TEXT,
+                    handoff_id TEXT,
+                    finding_id TEXT,
+                    claim_id TEXT REFERENCES mission_claims(id),
+                    evidence_references TEXT NOT NULL DEFAULT '[]',
+                    reason TEXT,
+                    CHECK {uuid_check('id')},
+                    CHECK {uuid_check('mission_id')},
+                    {optional_ids}
+                    UNIQUE (mission_id, revision, ordinal),
+                    UNIQUE (mission_id, id, revision, ordinal, run_id, causation_key, kind, provenance),
+                    CHECK (kind <> 'PROBE_OUTCOMES_RECORDED' OR run_id IS NOT NULL)
+                );
+                CREATE TABLE IF NOT EXISTS mission_progress_commands (
+                    mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                    command_key TEXT NOT NULL,
+                    payload_fingerprint TEXT NOT NULL CHECK (
+                        instr(payload_fingerprint, char(0)) = 0 AND length(payload_fingerprint) = 64
+                        AND payload_fingerprint NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    outcome_count INTEGER NOT NULL CHECK (
+                        typeof(outcome_count) = 'integer' AND outcome_count > 0
+                        AND outcome_count <= 2147483647
+                    ),
+                    run_id TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL CHECK (typeof(revision) = 'integer' AND revision > 0),
+                    ordinal INTEGER NOT NULL CHECK (
+                        typeof(ordinal) = 'integer' AND ordinal > 0 AND ordinal <= 2147483647
+                    ),
+                    event_kind TEXT NOT NULL DEFAULT 'PROBE_OUTCOMES_RECORDED'
+                        CHECK (event_kind = 'PROBE_OUTCOMES_RECORDED'),
+                    event_provenance TEXT NOT NULL DEFAULT 'HARNESS_OBSERVED'
+                        CHECK (event_provenance = 'HARNESS_OBSERVED'),
+                    PRIMARY KEY (mission_id, command_key),
+                    CHECK {uuid_check('mission_id')},
+                    CHECK {uuid_check('run_id')},
+                    CHECK {uuid_check('event_id')},
+                    CHECK (
+                        instr(command_key, char(0)) = 0
+                        AND length(command_key) = length('probe-outcomes:' || mission_id || ':' || run_id || ':') + 64
+                        AND substr(command_key, 1, length(command_key) - 64) =
+                            'probe-outcomes:' || mission_id || ':' || run_id || ':'
+                        AND substr(command_key, -64) NOT GLOB '*[^0-9a-f]*'
+                    ),
+                    FOREIGN KEY (
+                        mission_id, event_id, revision, ordinal, run_id, command_key,
+                        event_kind, event_provenance
+                    ) REFERENCES mission_progress_events (
+                        mission_id, id, revision, ordinal, run_id, causation_key, kind, provenance
+                    ) ON DELETE CASCADE
+                );
+            """
+            reference_check = f"""
+                (SELECT count(*) FROM json_each(reference.value)) = 7
+                AND NOT EXISTS (
+                    SELECT 1 FROM json_each(reference.value) field
+                    WHERE field.key NOT IN (
+                        'mission_id', 'observation_id', 'source_id', 'evidence_role', 'direction',
+                        'qualification_relation', 'qualification_frame_fingerprint'
+                    )
+                )
+                AND {uuid_check("json_extract(reference.value, '$.mission_id')")}
+                AND json_extract(reference.value, '$.mission_id') = NEW.mission_id
+                AND {uuid_check("json_extract(reference.value, '$.observation_id')")}
+                AND {uuid_check("json_extract(reference.value, '$.source_id')")}
+                AND json_extract(reference.value, '$.evidence_role') IN ('MARKET_EVIDENCE', 'ATTENTION_CONTEXT')
+                AND (json_type(reference.value, '$.direction') = 'null'
+                    OR json_extract(reference.value, '$.direction') IN ('SUPPORT', 'CONTRADICTION', 'CONTEXT'))
+                AND ((json_type(reference.value, '$.qualification_relation') = 'null'
+                        AND json_type(reference.value, '$.qualification_frame_fingerprint') = 'null')
+                    OR (json_extract(reference.value, '$.qualification_relation') IN (
+                            'QUALIFIED_SUPPORT', 'QUALIFIED_CONTRADICTION', 'CONTEXT_ONLY',
+                            'EXCLUDED_IRRELEVANT', 'UNASSESSED'
+                        )
+                        AND json_type(reference.value, '$.qualification_frame_fingerprint') = 'text'
+                        AND instr(json_extract(reference.value, '$.qualification_frame_fingerprint'), char(0)) = 0
+                        AND length(json_extract(reference.value, '$.qualification_frame_fingerprint')) = 64
+                        AND json_extract(reference.value, '$.qualification_frame_fingerprint')
+                            NOT GLOB '*[^0-9a-f]*'))
+            """
+            # Sequential guards and lazy CASE prevent malformed JSON/scalars from reaching
+            # object extraction. IS NOT TRUE refuses missing fields instead of accepting NULL.
+            for operation in ("INSERT", "UPDATE"):
+                schema += f"""
+                    CREATE TRIGGER IF NOT EXISTS mission_progress_events_validate_{operation.lower()}
+                    BEFORE {operation} ON mission_progress_events
+                    BEGIN
+                        SELECT CASE WHEN EXISTS (
+                            SELECT 1 FROM mission_run_journals
+                            WHERE id = NEW.run_id AND mission_id <> NEW.mission_id
+                        ) THEN RAISE(ABORT, 'Progress run belongs to another mission') END;
+                        SELECT CASE WHEN EXISTS (
+                            SELECT 1 FROM mission_claims
+                            WHERE id = NEW.claim_id AND mission_id <> NEW.mission_id
+                        ) THEN RAISE(ABORT, 'Progress claim belongs to another mission') END;
+                        SELECT CASE WHEN typeof(NEW.evidence_references) <> 'text'
+                            THEN RAISE(ABORT, 'Progress references must be JSON text') END;
+                        SELECT CASE WHEN json_valid(NEW.evidence_references) IS NOT TRUE
+                            THEN RAISE(ABORT, 'Progress references must be valid JSON') END;
+                        SELECT CASE WHEN json_type(NEW.evidence_references) IS NOT 'array'
+                            THEN RAISE(ABORT, 'Progress references must be a typed array') END;
+                        SELECT CASE WHEN EXISTS (
+                            SELECT 1 FROM json_each(NEW.evidence_references) reference
+                            WHERE CASE WHEN reference.type <> 'object' THEN 1
+                                ELSE ({reference_check}) IS NOT TRUE END
+                        ) THEN RAISE(ABORT, 'Progress reference has invalid typed fields') END;
+                    END;
+                """
+            conn.executescript(schema + "COMMIT;")
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            if self._mem_conn is None:
+                conn.close()
 
     def _refuse_an_unbackfilled_corpus(self) -> None:
         """Checked once the schema is ready, which is this backend's equivalent of opening."""
@@ -1421,6 +1629,271 @@ class SqliteTrendRepository(ITrendRepository):
         if self._mem_conn is None:
             conn.close()
 
+    @staticmethod
+    def _require_collection_run(conn: sqlite3.Connection, mission_id: UUID, run_id: UUID) -> None:
+        row = conn.execute(
+            "SELECT j.mission_id, j.workspace_id, m.workspace_id AS mission_workspace"
+            " FROM mission_run_journals j JOIN research_missions m ON m.id = j.mission_id"
+            " WHERE j.id = ?", (str(run_id),),
+        ).fetchone()
+        if row is None or row["mission_id"] != str(mission_id) or row["workspace_id"] != row["mission_workspace"]:
+            raise RepositoryException("The recorded collection run does not belong to this mission scope.")
+
+    def _commit_snapshot(self, conn: sqlite3.Connection, mission_id: UUID):
+        """Reuse canonical decoders on the held write transaction, without a second snapshot."""
+        from ignis.infrastructure.persistence.evidence_snapshot import read_evidence_snapshot
+
+        reader = copy.copy(self)
+        reader._mem_conn = conn
+        # This method runs in the serialized worker thread; decoder coroutines only read
+        # this connection and cannot release or commit the owning transaction.
+        return asyncio.run(read_evidence_snapshot(reader, mission_id))
+
+    @staticmethod
+    def _progress_reference(
+        conn: sqlite3.Connection, mission_id: UUID, observation_id: UUID
+    ) -> RelayEvidenceReference:
+        row = conn.execute(
+            "SELECT o.source_id, m.surface, q.relation, q.frame_fingerprint, q.evidence_role"
+            " FROM mission_evidence e JOIN observations o ON o.id = e.observation_id"
+            " JOIN research_missions m ON m.id = e.mission_id"
+            " LEFT JOIN mission_evidence_qualifications q"
+            " ON q.mission_id = e.mission_id AND q.observation_id = e.observation_id"
+            " WHERE e.mission_id = ? AND e.observation_id = ?",
+            (str(mission_id), str(observation_id)),
+        ).fetchone()
+        if row is None:
+            raise RepositoryException("A progress reference requires canonical mission membership.")
+        from ignis.domain.research_workspace import QualificationRelation
+
+        role = {"ATTENTION": EvidenceRole.ATTENTION_CONTEXT, "MARKET": EvidenceRole.MARKET_EVIDENCE}.get(row["surface"])
+        if role is None:
+            raise RepositoryException("A relay commit requires a declared mission surface.")
+        return RelayEvidenceReference(
+            mission_id=mission_id, observation_id=observation_id, source_id=UUID(row["source_id"]),
+            evidence_role=role,
+            direction=EvidenceDirection(row["evidence_role"]) if row["evidence_role"] else None,
+            qualification_relation=QualificationRelation(row["relation"]) if row["relation"] else None,
+            qualification_frame_fingerprint=row["frame_fingerprint"],
+        )
+
+    @staticmethod
+    def _record_progress(
+        conn: sqlite3.Connection, mission_id: UUID, kind: MissionProgressKind, causation_key: str,
+        *, run_id: UUID | None = None, claim_id: UUID | None = None,
+        references: tuple[RelayEvidenceReference, ...] = (), reason: str | None = None,
+        revision: int | None = None, ordinal: int = 1,
+    ) -> int:
+        """Allocate one revision inside its fact transaction; never commit independently."""
+        if revision is None:
+            conn.execute(
+                "INSERT INTO mission_progress_revisions (mission_id, revision) VALUES (?, 1)"
+                " ON CONFLICT(mission_id) DO UPDATE SET revision = revision + 1", (str(mission_id),),
+            )
+            revision = conn.execute(
+                "SELECT revision FROM mission_progress_revisions WHERE mission_id = ?", (str(mission_id),),
+            ).fetchone()["revision"]
+        event = MissionProgressEvent(
+            event_id=uuid4(), cursor=MissionRelayCursor(mission_id=mission_id, revision=revision, ordinal=ordinal),
+            kind=kind, provenance=RelayProvenance.HARNESS_OBSERVED, recorded_at=datetime.now(timezone.utc),
+            causation_key=causation_key, run_id=run_id, claim_id=claim_id,
+            evidence_references=references, reason=reason,
+        )
+        conn.execute(
+            "INSERT INTO mission_progress_events (id, mission_id, revision, ordinal, kind, provenance,"
+            " recorded_at, causation_key, run_id, claim_id, evidence_references, reason)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (str(event.event_id), str(mission_id), revision, ordinal, kind.value, event.provenance.value,
+             event.recorded_at.isoformat(), causation_key, str(run_id) if run_id else None,
+             str(claim_id) if claim_id else None,
+             json.dumps([ref.to_payload() for ref in references], separators=(",", ":")), reason),
+        )
+        return revision
+
+    async def commit_collection_state(self, mission: ResearchMission, run_id: UUID) -> None:
+        """Record a collection state transition and its run-scoped receipt atomically."""
+        if mission.status not in ("RUNNING", "COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "INSUFFICIENT"):
+            raise RepositoryException("Unsupported collection state transition.")
+        await self._ensure_schema()
+        await self._ensure_progress_schema()
+
+        def commit():
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                self._require_collection_run(conn, mission.id, run_id)
+                row = conn.execute("SELECT status FROM research_missions WHERE id = ?", (str(mission.id),)).fetchone()
+                kind = (MissionProgressKind.COLLECTION_STARTED if mission.status == "RUNNING"
+                        else MissionProgressKind.COLLECTION_STATE_CHANGED)
+                original = conn.execute(
+                    "SELECT id FROM mission_progress_events WHERE mission_id = ? AND run_id = ?"
+                    " AND kind = ? AND reason = ?",
+                    (str(mission.id), str(run_id), kind.value, mission.status),
+                ).fetchone()
+                if original is not None and row["status"] == mission.status:
+                    conn.rollback()
+                    return
+                if row["status"] in ("COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "INSUFFICIENT"):
+                    raise RepositoryException("Terminal collection cannot be reopened or rewritten.")
+                conn.execute(
+                    "UPDATE research_missions SET status = ?, summary = ?, updated_at = ? WHERE id = ?",
+                    (mission.status, mission.summary, datetime.now(timezone.utc).isoformat(), str(mission.id)),
+                )
+                self._record_progress(conn, mission.id, kind, f"collection:{run_id}:{mission.status}",
+                                      run_id=run_id, reason=mission.status)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        await self._run_write(commit)
+
+    async def commit_collection_observations(
+        self, mission_id: UUID, run_id: UUID, signals: Sequence[TrendSignal]
+    ) -> int:
+        """Publish fresh sightings plus memberships; retries retain their canonical identities."""
+        signals = tuple(signals)
+        if any(signal.mission_id not in (None, mission_id) for signal in signals):
+            raise RepositoryException("Collection signals cannot name another mission.")
+        await self._ensure_schema()
+        await self._ensure_progress_schema()
+
+        def commit():
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                self._require_collection_run(conn, mission_id, run_id)
+                batch = [dataclasses.replace(signal, mission_id=mission_id) for signal in signals]
+                fresh = []
+                for signal in batch:
+                    if signal.observation_id is not None:
+                        self._progress_reference(conn, mission_id, signal.observation_id)
+                        continue
+                    if self._record_observations(conn.cursor(), [signal]):
+                        signal.source_id = UUID(conn.execute(
+                            "SELECT source_id FROM observations WHERE id = ?", (str(signal.observation_id),)
+                        ).fetchone()["source_id"])
+                        fresh.append(signal)
+                if fresh:
+                    refs = tuple(self._progress_reference(conn, mission_id, signal.observation_id) for signal in fresh)
+                    self._record_progress(conn, mission_id, MissionProgressKind.OBSERVATIONS_COMMITTED,
+                                          f"observations:{run_id}:{uuid4()}", run_id=run_id, references=refs)
+                conn.commit()
+                # Publish identities before releasing write ownership, including when the
+                # waiting coroutine is cancelled after a successful durable commit.
+                for original, staged in zip(signals, batch):
+                    if original.observation_id is None and staged.observation_id is not None:
+                        for name in ("observation_id", "source_id", "identity_source", "time_provenance"):
+                            setattr(original, name, getattr(staged, name))
+                return len(fresh)
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await self._run_write(commit)
+
+    async def commit_collection_membership(
+        self, mission_id: UUID, run_id: UUID, signals: Sequence[TrendSignal]
+    ) -> int:
+        """Reattach canonical observations without describing another sighting."""
+        observation_ids = tuple(dict.fromkeys(signal.observation_id for signal in signals))
+        if None in observation_ids:
+            raise RepositoryException("Membership commits require stored observation identities.")
+        await self._ensure_schema()
+        await self._ensure_progress_schema()
+
+        def commit():
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                self._require_collection_run(conn, mission_id, run_id)
+                refs = []
+                for observation_id in observation_ids:
+                    inserted = conn.execute(
+                        "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at)"
+                        " VALUES (?, ?, ?, ?) ON CONFLICT(mission_id, observation_id) DO NOTHING",
+                        (str(uuid4()), str(mission_id), str(observation_id), datetime.now(timezone.utc).isoformat()),
+                    ).rowcount
+                    if inserted:
+                        refs.append(self._progress_reference(conn, mission_id, observation_id))
+                if refs:
+                    self._record_progress(conn, mission_id, MissionProgressKind.OBSERVATIONS_COMMITTED,
+                        f"membership:{run_id}:{uuid4()}", run_id=run_id, references=tuple(refs), reason="MEMBERSHIP_REATTACHED")
+                conn.commit()
+                return len(refs)
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await self._run_write(commit)
+
+    async def commit_collection_pruning(
+        self, mission_id: UUID, run_id: UUID, retained_observation_ids: Sequence[UUID]
+    ) -> int:
+        """Commit removed memberships and cascades with their original immutable references."""
+        retained = {str(value) for value in retained_observation_ids}
+        await self._ensure_schema()
+        await self._ensure_progress_schema()
+
+        def commit():
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                self._require_collection_run(conn, mission_id, run_id)
+                removed = [UUID(row["observation_id"]) for row in conn.execute(
+                    "SELECT observation_id FROM mission_evidence WHERE mission_id = ? ORDER BY observation_id",
+                    (str(mission_id),),
+                ) if row["observation_id"] not in retained]
+                refs = tuple(self._progress_reference(conn, mission_id, value) for value in removed)
+                affected = {}
+                for claim in conn.execute(
+                    "SELECT DISTINCT c.id, c.status FROM mission_claims c"
+                    " JOIN mission_claim_evidence b ON b.claim_id = c.id"
+                    " WHERE c.mission_id = ? AND b.observation_id IS NOT NULL ORDER BY c.id",
+                    (str(mission_id),),
+                ):
+                    bindings = [UUID(row["observation_id"]) for row in conn.execute(
+                        "SELECT observation_id FROM mission_claim_evidence"
+                        " WHERE claim_id = ? AND observation_id IS NOT NULL", (claim["id"],),
+                    )]
+                    invalidated = tuple(ref for ref in refs if ref.observation_id in bindings)
+                    if invalidated:
+                        affected[claim["id"]] = (claim["status"], invalidated)
+                conn.executemany(
+                    "DELETE FROM mission_evidence WHERE mission_id = ? AND observation_id = ?",
+                    [(str(mission_id), str(value)) for value in removed],
+                )
+                if removed:
+                    revision = self._record_progress(conn, mission_id, MissionProgressKind.OBSERVATIONS_COMMITTED,
+                        f"membership:{run_id}:{uuid4()}", run_id=run_id, references=refs, reason="MEMBERSHIP_PRUNED")
+                    ordinal = 1
+                    for claim_id, (old_status, invalidated) in affected.items():
+                        current = conn.execute("SELECT status FROM mission_claims WHERE id = ?", (claim_id,)).fetchone()
+                        if current["status"] != old_status:
+                            ordinal += 1
+                            self._record_progress(conn, mission_id, MissionProgressKind.CLAIM_GATE_CHANGED,
+                                f"claim-pruned:{claim_id}:{uuid4()}", claim_id=UUID(claim_id),
+                                references=invalidated, reason=current["status"], revision=revision, ordinal=ordinal)
+                conn.commit()
+                return len(removed)
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await self._run_write(commit)
+
     async def save_signals(self, signals: List[TrendSignal]) -> int:
         """Record each sighting in the source/observation model. Nothing else is written.
 
@@ -1504,6 +1977,17 @@ class SqliteTrendRepository(ITrendRepository):
     async def save_mission_claims(
         self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
     ) -> List[MissionClaim]:
+        return await self._save_mission_claims(mission_id, frame_digest, claims, progress=False)
+
+    async def commit_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
+    ) -> List[MissionClaim]:
+        """Commit current-frame ledger candidates and their gate receipts together."""
+        return await self._save_mission_claims(mission_id, frame_digest, claims, progress=True)
+
+    async def _save_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim], *, progress: bool
+    ) -> List[MissionClaim]:
         batch = list(claims)
         if any(
             str(claim.mission_id) != str(mission_id) or claim.frame_digest != frame_digest
@@ -1515,12 +1999,21 @@ class SqliteTrendRepository(ITrendRepository):
         if not batch:
             return []
         await self._ensure_schema()
+        if progress:
+            await self._ensure_progress_schema()
 
         def _sync_save():
             conn = self._get_connection()
             try:
                 if not conn.in_transaction:
                     conn.execute("BEGIN IMMEDIATE")
+                if progress:
+                    from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
+
+                    snapshot = self._commit_snapshot(conn, mission_id)
+                    if frame_from_snapshot(snapshot).frame_digest != frame_digest:
+                        raise StaleMissionClaimError("The submitted claim frame is stale.")
+                recorded = []
                 for claim in batch:
                     inserted = conn.execute(
                         "INSERT INTO mission_claims"
@@ -1573,6 +2066,7 @@ class SqliteTrendRepository(ITrendRepository):
                                     binding.hypothesis_target,
                                 ),
                             )
+                        recorded.append(claim)
                         continue
                     existing = conn.execute(
                         "SELECT * FROM mission_claims WHERE mission_id = ?"
@@ -1588,6 +2082,15 @@ class SqliteTrendRepository(ITrendRepository):
                         raise InvalidMissionClaimError(
                             f"client_claim_key {claim.client_claim_key!r} already names a different claim."
                         )
+                revision = None
+                for ordinal, claim in enumerate(recorded, start=1) if progress else ():
+                    refs = tuple(self._progress_reference(conn, mission_id, binding.observation_id)
+                                 for binding in claim.evidence_bindings if binding.observation_id)
+                    revision = self._record_progress(
+                        conn, mission_id, MissionProgressKind.CLAIM_GATE_CHANGED,
+                        f"claim:{claim.claim_id}", claim_id=claim.claim_id,
+                        references=refs, reason=claim.status.value, revision=revision, ordinal=ordinal,
+                    )
                 conn.commit()
                 return self._read_claims_sync(
                     conn, mission_id, include_superseded=True
@@ -3632,19 +4135,104 @@ class SqliteTrendRepository(ITrendRepository):
     async def record_probe_outcomes(
         self, run_id: UUID, outcomes: Sequence[MissionProbeOutcome]
     ) -> int:
-        """Record one run's surface outcomes in one transaction. See the port."""
-        rows = list(outcomes)
+        """Resolve the journal scope and return the original atomic publication count."""
+        rows = tuple(outcomes)
         if any(str(o.run_id) != str(run_id) for o in rows):
             raise InvalidEvidenceQualificationError(
                 f"Every probe outcome recorded for run {run_id} must belong to that run."
             )
-        await self._ensure_schema()
+        receipt = await self._publish_probe_outcomes(run_id, rows)
+        return receipt.outcome_count if receipt is not None else 0
 
-        def _sync_record():
+    async def commit_probe_outcomes(
+        self, command: ProbeOutcomeCommitCommand
+    ) -> ProbeOutcomeCommitReceipt:
+        """Commit admitted facts and their original typed receipt in one SQLite transaction."""
+        if type(command) is not ProbeOutcomeCommitCommand:
+            raise ValueError("A probe publication requires an admitted commit command.")
+        receipt = await self._publish_probe_outcomes(command.run_id, command.outcomes, command)
+        assert receipt is not None  # Admitted commands cannot contain an empty batch.
+        return receipt
+
+    @staticmethod
+    def _probe_fact_value(value: Any) -> Any:
+        """Encode the admitted recursive values without thawing caller-owned aliases."""
+        if isinstance(value, Mapping):
+            return {key: SqliteTrendRepository._probe_fact_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [SqliteTrendRepository._probe_fact_value(item) for item in value]
+        if isinstance(value, Enum):
+            return SqliteTrendRepository._probe_fact_value(value.value)
+        if isinstance(value, UUID):
+            return str(value)
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc).isoformat()
+        return value
+
+    async def _publish_probe_outcomes(
+        self,
+        run_id: UUID,
+        rows: tuple[MissionProbeOutcome, ...],
+        command: ProbeOutcomeCommitCommand | None = None,
+    ) -> ProbeOutcomeCommitReceipt | None:
+        """Keep schema setup outside the physical fact transaction and ownership until settlement."""
+        await self._ensure_schema()
+        await self._ensure_progress_schema()
+
+        def _sync_record() -> ProbeOutcomeCommitReceipt | None:
             conn = self._get_connection()
             try:
-                if not conn.in_transaction:
-                    conn.execute("BEGIN IMMEDIATE")
+                conn.execute("BEGIN IMMEDIATE")
+                journal = conn.execute(
+                    "SELECT mission_id FROM mission_run_journals WHERE id = ?", (str(run_id),)
+                ).fetchone()
+                if journal is None:
+                    if command is None and not rows:
+                        # The legacy empty call never admitted a fact or required a journal.
+                        conn.rollback()
+                        return None
+                    raise RepositoryException("Probe publication requires a recorded run journal.")
+                mission_id = UUID(journal["mission_id"])
+                if command is not None and command.mission_id != mission_id:
+                    raise RepositoryException("Probe command mission does not own its recorded run.")
+                admitted = command
+                if admitted is None and rows:
+                    try:
+                        admitted = ProbeOutcomeCommitCommand(
+                            mission_id=mission_id, run_id=run_id, outcomes=rows
+                        )
+                    except ValueError as exc:
+                        raise RepositoryException("Probe facts were refused before publication.") from exc
+                if admitted is not None:
+                    original = conn.execute(
+                        "SELECT c.payload_fingerprint, c.outcome_count, e.*"
+                        " FROM mission_progress_commands c JOIN mission_progress_events e"
+                        " ON e.id = c.event_id AND e.mission_id = c.mission_id"
+                        " WHERE c.mission_id = ? AND c.command_key = ?",
+                        (str(mission_id), admitted.command_key),
+                    ).fetchone()
+                    if original is not None:
+                        if original["payload_fingerprint"] != admitted.payload_fingerprint:
+                            raise RepositoryException("Probe command conflicts with its original committed facts.")
+                        receipt = ProbeOutcomeCommitReceipt(
+                            command_key=admitted.command_key,
+                            payload_fingerprint=original["payload_fingerprint"],
+                            outcome_count=original["outcome_count"],
+                            event=MissionProgressEvent(
+                                event_id=UUID(original["id"]),
+                                cursor=MissionRelayCursor(
+                                    mission_id=mission_id, revision=original["revision"], ordinal=original["ordinal"]
+                                ),
+                                kind=MissionProgressKind(original["kind"]),
+                                provenance=RelayProvenance(original["provenance"]),
+                                recorded_at=datetime.fromisoformat(original["recorded_at"]),
+                                causation_key=original["causation_key"],
+                                run_id=UUID(original["run_id"]),
+                            ),
+                        )
+                        # An identical retry performs no durable writes or cursor advance.
+                        conn.rollback()
+                        return receipt
                 manifest_row = conn.execute(
                     "SELECT m.required_channels, m.optional_channels"
                     " FROM mission_run_journals j"
@@ -3656,11 +4244,11 @@ class SqliteTrendRepository(ITrendRepository):
                     require_complete_channel_outcomes(
                         json.loads(manifest_row["required_channels"]),
                         json.loads(manifest_row["optional_channels"]),
-                        rows,
+                        admitted.outcomes if admitted is not None else rows,
                     )
-                elif not rows:
-                    conn.commit()
-                    return 0
+                if admitted is None:
+                    conn.rollback()
+                    return None
                 conn.executemany(
                     "INSERT INTO mission_probe_outcomes (id, run_id, platform, connector_surface,"
                     " status, signals_collected, queried_keywords, queried_window,"
@@ -3675,11 +4263,15 @@ class SqliteTrendRepository(ITrendRepository):
                             o.connector_surface,
                             o.status.value,
                             o.signals_collected,
-                            json.dumps(list(o.queried_keywords), ensure_ascii=False),
+                            json.dumps(o.queried_keywords, ensure_ascii=False),
                             o.queried_window,
                             o.query_fingerprint,
                             (
-                                json.dumps(dict(o.scope_attestation), sort_keys=True)
+                                json.dumps(
+                                    self._probe_fact_value(o.scope_attestation),
+                                    sort_keys=True, ensure_ascii=False, allow_nan=False,
+                                    separators=(",", ":"),
+                                )
                                 if o.scope_attestation is not None
                                 else None
                             ),
@@ -3688,11 +4280,46 @@ class SqliteTrendRepository(ITrendRepository):
                             2 if o.collection_plan_digest is not None else 1,
                             o.completed_at.isoformat(),
                         )
-                        for o in rows
+                        for o in admitted.outcomes
                     ],
                 )
+                conn.execute(
+                    "INSERT INTO mission_progress_revisions (mission_id, revision) VALUES (?, 1)"
+                    " ON CONFLICT(mission_id) DO UPDATE SET revision = revision + 1",
+                    (str(mission_id),),
+                )
+                revision = conn.execute(
+                    "SELECT revision FROM mission_progress_revisions WHERE mission_id = ?",
+                    (str(mission_id),),
+                ).fetchone()["revision"]
+                event = MissionProgressEvent(
+                    event_id=uuid4(),
+                    cursor=MissionRelayCursor(mission_id=mission_id, revision=revision, ordinal=1),
+                    kind=MissionProgressKind.PROBE_OUTCOMES_RECORDED,
+                    provenance=RelayProvenance.HARNESS_OBSERVED,
+                    recorded_at=datetime.now(timezone.utc),
+                    causation_key=admitted.command_key,
+                    run_id=run_id,
+                )
+                receipt = ProbeOutcomeCommitReceipt(
+                    command_key=admitted.command_key,
+                    payload_fingerprint=admitted.payload_fingerprint,
+                    outcome_count=len(admitted.outcomes), event=event,
+                )
+                conn.execute(
+                    "INSERT INTO mission_progress_events (id, mission_id, revision, ordinal, kind,"
+                    " provenance, recorded_at, causation_key, run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (str(event.event_id), str(mission_id), revision, 1, event.kind.value,
+                     event.provenance.value, event.recorded_at.isoformat(), event.causation_key, str(run_id)),
+                )
+                conn.execute(
+                    "INSERT INTO mission_progress_commands (mission_id, command_key, payload_fingerprint,"
+                    " outcome_count, run_id, event_id, revision, ordinal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (str(mission_id), receipt.command_key, receipt.payload_fingerprint, receipt.outcome_count,
+                     str(run_id), str(event.event_id), revision, 1),
+                )
                 conn.commit()
-                return len(rows)
+                return receipt
             except sqlite3.IntegrityError as exc:
                 conn.rollback()
                 raise RepositoryException(
@@ -3805,6 +4432,17 @@ class SqliteTrendRepository(ITrendRepository):
         self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]
     ) -> int:
         """Persist one batch atomically; replay is idempotent, a rewrite is refused. See the port."""
+        return await self._save_evidence_qualifications(mission_id, qualifications, progress=False)
+
+    async def commit_evidence_qualifications(
+        self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]
+    ) -> int:
+        """Commit new canonical judgments and one matching batch receipt atomically."""
+        return await self._save_evidence_qualifications(mission_id, qualifications, progress=True)
+
+    async def _save_evidence_qualifications(
+        self, mission_id: UUID, qualifications: Sequence[EvidenceQualification], *, progress: bool
+    ) -> int:
         batch = list(qualifications)
         if any(str(q.mission_id) != str(mission_id) for q in batch):
             raise InvalidEvidenceQualificationError(
@@ -3813,12 +4451,23 @@ class SqliteTrendRepository(ITrendRepository):
         if not batch:
             return 0
         await self._ensure_schema()
+        if progress:
+            await self._ensure_progress_schema()
 
         def _sync_save():
             conn = self._get_connection()
             try:
                 if not conn.in_transaction:
                     conn.execute("BEGIN IMMEDIATE")
+                if progress:
+                    snapshot = self._commit_snapshot(conn, mission_id)
+                    if snapshot.mission is None or any(
+                        q.frame_fingerprint != compute_frame_fingerprint(snapshot.mission, snapshot.brief)
+                        or q.brief_revision_id != (snapshot.brief.brief_revision_id if snapshot.brief else None)
+                        for q in batch
+                    ):
+                        raise StaleEvidenceQualificationError("The submitted qualification frame is stale.")
+                recorded = []
                 now = datetime.now(timezone.utc).isoformat()
                 for q in batch:
                     # Insert-or-keep, then compare: the unique pair decides a race, and the
@@ -3849,6 +4498,7 @@ class SqliteTrendRepository(ITrendRepository):
                         ),
                     ).rowcount
                     if inserted:
+                        recorded.append(q)
                         continue
                     existing = conn.execute(
                         self._QUALIFICATION_COLUMNS + " WHERE mission_id = ? AND observation_id = ?",
@@ -3860,6 +4510,13 @@ class SqliteTrendRepository(ITrendRepository):
                             f"for mission {mission_id}. A recorded judgment is not rewritten; a "
                             "different one needs a new mission or Market Brief revision."
                         )
+                if progress and recorded:
+                    refs = tuple(self._progress_reference(conn, mission_id, q.observation_id)
+                                 for q in recorded)
+                    self._record_progress(
+                        conn, mission_id, MissionProgressKind.QUALIFICATION_RECORDED,
+                        f"qualification:{mission_id}:{uuid4()}", references=refs,
+                    )
                 conn.commit()
                 return len(batch)
             except sqlite3.IntegrityError as exc:

@@ -1,11 +1,12 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 from uuid import UUID
 
 from ignis.application.cancellation import await_settled
 from ignis.application.ports.clustering_port import IClusteringEngine
+from ignis.application.ports.mission_relay_port import ICollectionRelayWriter
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
@@ -233,7 +234,16 @@ class ExecuteMissionUseCase:
             )
         return workspace
 
-    async def _synchronize_vocabulary(self, mission) -> None:
+    async def _update_collection_state(self, mission, journal=None) -> None:
+        """Run receipts use the canonical transaction; unscoped legacy writes stay unchanged."""
+        if journal is None:
+            await self._repo.update_mission(mission)
+        else:
+            await cast(ICollectionRelayWriter, self._workspace_store).commit_collection_state(
+                mission, journal.run_id
+            )
+
+    async def _synchronize_vocabulary(self, mission, journal=None) -> None:
         """Load the persisted vocabulary before the mission can reach a connector.
 
         The first mission after a process starts used to run with none of it: only an analysis
@@ -252,8 +262,19 @@ class ExecuteMissionUseCase:
                 "Failed before ingress: the persisted vocabulary could not be synchronized, so "
                 f"no connector was called. {exc}"
             )
-            await self._repo.update_mission(mission)
+            await self._update_collection_state(mission, journal)
             raise
+
+    async def _settle_collection_failure(self, mission, journal, safe_error: str) -> None:
+        """Keep the complete read/write cleanup under settlement, even on repeated cancel."""
+        # A terminal transaction may already have committed when cancellation is delivered.
+        current = await self._repo.get_mission(mission.id) if journal is not None else None
+        if current is not None and str(current.status).upper() in TERMINAL_MISSION_STATES:
+            mission.status, mission.summary = current.status, current.summary
+        else:
+            mission.status = "FAILED"
+            mission.summary = f"Execution error: {safe_error}"
+            await self._update_collection_state(mission, journal)
 
     async def execute(self, mission_id: UUID) -> Dict[str, Any]:
         mission = await self._repo.get_mission(mission_id)
@@ -295,7 +316,7 @@ class ExecuteMissionUseCase:
         async with self._workspace_store.mission_run(workspace, mission.id) as journal:
             if scope_guard is not None:
                 await scope_guard(journal)
-            await self._synchronize_vocabulary(mission)
+            await self._synchronize_vocabulary(mission, journal)
             result = await self._execute_pass(
                 mission,
                 journal=journal,
@@ -562,7 +583,7 @@ class ExecuteMissionUseCase:
         mission.status = "RUNNING"
 
         try:
-            await self._repo.update_mission(mission)
+            await self._update_collection_state(mission, journal)
             collection_plan_digest = None
             collection_plan = None
             if manifest is not None:
@@ -647,11 +668,21 @@ class ExecuteMissionUseCase:
             if expiry_guard is not None:
                 expiry_guard()
             if signals:
-                await self._repo.save_signals(signals)
+                if journal is None:
+                    await self._repo.save_signals(signals)
+                else:
+                    await cast(ICollectionRelayWriter, self._workspace_store).commit_collection_observations(
+                        mission.id, journal.run_id, signals
+                    )
             if expiry_guard is not None:
                 expiry_guard()
             if preserved:
-                await self._repo.attach_mission_evidence(mission.id, preserved)
+                if journal is None:
+                    await self._repo.attach_mission_evidence(mission.id, preserved)
+                else:
+                    await cast(ICollectionRelayWriter, self._workspace_store).commit_collection_membership(
+                        mission.id, journal.run_id, preserved
+                    )
                 await self._repo.assign_observation_clusters(preserved)
 
             signals = signals + preserved
@@ -661,7 +692,12 @@ class ExecuteMissionUseCase:
             # rather than assumed: a sighting the writer skipped carries no observation id and
             # must not be treated as evidence this mission holds.
             retained = [s.observation_id for s in signals if s.observation_id]
-            await self._repo.prune_mission_evidence(mission.id, retained)
+            if journal is None:
+                await self._repo.prune_mission_evidence(mission.id, retained)
+            else:
+                await cast(ICollectionRelayWriter, self._workspace_store).commit_collection_pruning(
+                    mission.id, journal.run_id, retained
+                )
             active_platforms = list(set(s.platform.value if hasattr(s.platform, "value") else str(s.platform) for s in signals))
             active_plat_str = ", ".join(active_platforms) if active_platforms else "none"
 
@@ -675,7 +711,7 @@ class ExecuteMissionUseCase:
 
             mission.status = "COMPLETED"
             mission.summary = f"Successfully collected {len(signals)} signals across {len(active_platforms)}/{len(mission.platforms)} responsive platforms ({active_plat_str}), discovered {len(clusters)} topic clusters."
-            await self._repo.update_mission(mission)
+            await self._update_collection_state(mission, journal)
 
             logger.info(f"Research Mission {mission_id} completed: {mission.summary}")
             result = {
@@ -703,7 +739,10 @@ class ExecuteMissionUseCase:
             except (AttributeError, TypeError):
                 pass
             logger.error("Error executing Research Mission %s: %s", mission_id, safe_error)
-            mission.status = "FAILED"
-            mission.summary = f"Execution error: {safe_error}"
-            await await_settled(self._repo.update_mission(mission))
+            try:
+                await await_settled(self._settle_collection_failure(mission, journal, safe_error))
+            except (Exception, asyncio.CancelledError):
+                # Cleanup cannot replace the original refusal or cancellation. In particular,
+                # a refused terminal event leaves the earlier RUNNING fact untouched.
+                logger.error("Could not settle failure state for Research Mission %s", mission_id)
             raise

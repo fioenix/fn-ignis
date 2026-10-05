@@ -18,17 +18,18 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple, cast
 from uuid import UUID, uuid4
 
 from ignis.application.cancellation import await_settled
+from ignis.application.ports.mission_relay_port import IAnalysisRelayWriter, ICollectionRelayWriter
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import (
     IResearchWorkspaceStore,
     MissionWriterClaim,
     RunJournal,
 )
-from ignis.domain.entities import ResearchMission
+from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.research_workspace import (
     JOURNAL_DIRNAME,
     MANIFEST_FILENAME,
@@ -253,12 +254,27 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         try:
             yield journal
         except BaseException:
-            await await_settled(self._finish_run_journal(journal, status="FAILED"))
+            await await_settled(self._finish_interrupted_run_journal(journal))
             raise
         else:
             await await_settled(self._finish_run_journal(journal, status="COMPLETED"))
         finally:
             await await_settled(self.release_mission_writer(mission_id, run_id))
+
+    async def _finish_interrupted_run_journal(self, journal: RunJournal) -> RunJournal:
+        """A lost completion acknowledgement cannot contradict its committed collection.
+
+        The caller still holds the mission writer. Check canonical state only after any
+        ownership-sensitive write settled; never infer completion from the filesystem.
+        """
+        status = "FAILED"
+        try:
+            mission = await self._repo.get_mission(journal.mission_id)
+            if mission is not None and str(mission.status).upper() == "COMPLETED":
+                status = "COMPLETED"
+        except Exception:
+            logger.error("Could not read collection settlement for run %s", journal.run_id)
+        return await self._finish_run_journal(journal, status=status)
 
     async def _finish_run_journal(self, journal: RunJournal, status: str) -> RunJournal:
         """Close a run's journal on disk and in the database, without raising over the run.
@@ -405,6 +421,30 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     # Probe outcomes and evidence qualifications (configured shared database)
     # ------------------------------------------------------------------
 
+    async def commit_collection_state(self, mission: ResearchMission, run_id: UUID) -> None:
+        await cast(ICollectionRelayWriter, self._repo).commit_collection_state(mission, run_id)
+
+    async def commit_collection_observations(
+        self, mission_id: UUID, run_id: UUID, signals: Sequence[TrendSignal]
+    ) -> int:
+        return await cast(ICollectionRelayWriter, self._repo).commit_collection_observations(
+            mission_id, run_id, signals
+        )
+
+    async def commit_collection_membership(
+        self, mission_id: UUID, run_id: UUID, signals: Sequence[TrendSignal]
+    ) -> int:
+        return await cast(ICollectionRelayWriter, self._repo).commit_collection_membership(
+            mission_id, run_id, signals
+        )
+
+    async def commit_collection_pruning(
+        self, mission_id: UUID, run_id: UUID, retained_observation_ids: Sequence[UUID]
+    ) -> int:
+        return await cast(ICollectionRelayWriter, self._repo).commit_collection_pruning(
+            mission_id, run_id, retained_observation_ids
+        )
+
     async def record_probe_outcomes(
         self, run_id: UUID, outcomes: Sequence[MissionProbeOutcome]
     ) -> int:
@@ -429,6 +469,20 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
     ) -> List[MissionClaim]:
         return await self._repo.save_mission_claims(mission_id, frame_digest, claims)
+
+    async def commit_evidence_qualifications(
+        self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]
+    ) -> int:
+        return await cast(IAnalysisRelayWriter, self._repo).commit_evidence_qualifications(
+            mission_id, qualifications
+        )
+
+    async def commit_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
+    ) -> List[MissionClaim]:
+        return await cast(IAnalysisRelayWriter, self._repo).commit_mission_claims(
+            mission_id, frame_digest, claims
+        )
 
     async def list_mission_claims(
         self, mission_id: UUID, *, include_superseded: bool = False

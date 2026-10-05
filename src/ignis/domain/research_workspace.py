@@ -181,6 +181,10 @@ class InvalidMissionClaimError(IgnisDomainException):
     """A claim or evidence binding cannot be traced to one valid evidence frame."""
 
 
+class StaleMissionClaimError(InvalidMissionClaimError):
+    """The current evidence frame changed before the claim transaction could commit."""
+
+
 @dataclass(frozen=True)
 class AuthorityBoundary:
     """Boolean authority only; credentials remain in their dedicated secure stores."""
@@ -880,6 +884,10 @@ class HandoffStatus(str, Enum):
 
 class InvalidEvidenceQualificationError(IgnisDomainException):
     """A judgment or probe outcome is malformed, contradicts itself, or names foreign evidence."""
+
+
+class StaleEvidenceQualificationError(InvalidEvidenceQualificationError):
+    """The judgment frame changed before the qualification transaction could commit."""
 
 
 class EvidenceQualificationConflictError(IgnisDomainException):

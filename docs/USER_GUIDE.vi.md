@@ -12,7 +12,10 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/026_partial_degraded_probe_outcomes.sql`.
+Chuỗi migration trong mã nguồn kết thúc ở `sql/027_mission_progress.sql`. Migration 027 chỉ bổ sung
+các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
+chuẩn được giữ nguyên. SQLite và PostgreSQL hiện ghi dữ kiện thu thập, qualification và claim cùng sự kiện tiến độ
+tương ứng trong một giao dịch. Viewer Relay chỉ đọc chưa được triển khai.
 Migration 026 chỉ sửa constraint số quan sát, giữ kết quả thu thập một phần ở trạng thái
 DEGRADED; không coi đó là phép đo hoàn chỉnh hay bằng chứng về sự vắng mặt.
 Khởi tạo SQLite mới đã được kiểm tra tại máy; rehearsal PostgreSQL tạm không xác minh database
