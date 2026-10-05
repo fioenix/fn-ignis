@@ -123,7 +123,7 @@ def _us3_permitted_snapshot():
         evidence_bindings=(MissionClaimEvidence(claim_id=claim_id, observation_id=observation.observation_id,
                             probe_outcome_id=None, role=EvidenceDirection.SUPPORT, hypothesis_target='core'),),
     )
-    return _snapshot((observation,), revision=2, surface=ResearchSurface.MARKET,
+    return _snapshot((observation,), (_event(2, (observation,)),), revision=2, surface=ResearchSurface.MARKET,
                      brief_revision_id=brief_id, frame_digest='a' * 64, frame_pending_reason=None,
                      claim_gate=gate_type(state=gate_state.CURRENT, frame_digest='a' * 64, claims=(claim,)))
 

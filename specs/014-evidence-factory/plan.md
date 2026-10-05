@@ -2,7 +2,7 @@
 
 **Branch**: `codex/ignis-evidence-factory` | **Date**: 2026-10-04 | **Spec**: [approved R1](spec.md)
 
-**Status**: T001–T035 accepted:35/92. T035 persistent header keeps selected identity, successful read and separate failed attempt/reason. Coordinator73PASS5deselected10.01s; independent73PASS5deselected9.99s, no failures/errors/skips. Genuine missing-attempt RED retained; T033 five stale claim cases await T036/T037. Evidence .handoff/spec014/t035/{verified.xml,review.handoff.md}. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
+**Status**: T001–T036 accepted:36/92. T036 exact stored ledger claims render bindings, limits and revision conditions; otherwise actual Gap Report retains missing evidence, probe, authority and cost. No-script fallback retains these facts and fits390px. Three independent P2s reproduced then corrected (obsolete stage copy, incomplete offline Gap, digest overflow). Final77PASS5deselected13.51s; independent77PASS5deselected11.80s, no failures/errors/skips. Evidence .handoff/spec014/t036/{final3.xml,review.handoff.md}; five T037 stale controls remain open. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
 
 ## Summary
 

@@ -96,7 +96,13 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
 <li data-event-id="{{ event.event_id }}"><span class="identity">{{ event.kind }} · {{ event.provenance }} · {{ event.recorded_at }}</span><p>{{ event.reason or 'No failure reason recorded.' }}</p><span data-testid="event-observation-count">{{ event.evidence_references | length }}</span> recorded references</li>
 {% endfor %}
 </ol><p class="muted">A historic snapshot does not animate as new collection. Unsupported research work is unavailable.</p></section>
-<noscript><p>JavaScript is unavailable. The selected snapshot, canonical identities and exact counts above remain readable. Refresh this document for a new bounded read.</p></noscript>
+<noscript><section class="inspector" aria-label="Recorded strategic ledger"><h2>Recorded strategic permission · {{ snapshot.claim_gate.render_status }}</h2>
+{% for claim in snapshot.claim_gate.claims %}<article><h3>{{ claim.wording }}</h3><p>{{ claim.claim_type }} · {{ claim.status }} · {{ claim.claim_id }} · frame {{ claim.frame_digest }}</p>
+{% for binding in claim.evidence_bindings %}<p>{{ binding.role }} · observation {{ binding.observation_id or 'Unknown' }} · probe {{ binding.probe_outcome_id or 'Unknown' }} · target {{ binding.hypothesis_target or 'Unknown' }}</p>{% endfor %}
+<p>Method {{ claim.inference_method or 'Unknown' }} · denominator {{ claim.metric_denominator or 'Unknown' }} · timeframe {{ claim.metric_timeframe or 'Unknown' }} · recorded confidence {{ claim.confidence if claim.confidence is not none else 'Unknown' }}</p>
+{% for value in claim.limitations %}<p>Limitation: {{ value }}</p>{% endfor %}{% for value in claim.change_conditions %}<p>Revision condition: {{ value }}</p>{% endfor %}</article>{% endfor %}
+{% if snapshot.claim_gate.gap_report %}<h3>Gap Report · outputs withheld</h3>{% for value in snapshot.claim_gate.gap_report.withheld_outputs %}<p>Withheld output: {{ value }}</p>{% endfor %}{% for value in snapshot.claim_gate.gap_report.safe_partial_conclusions %}<p>Safe partial conclusion: {{ value }}</p>{% endfor %}{% for probe in snapshot.claim_gate.gap_report.attempted_probes %}<p>Attempted probe: {{ probe.connector_surface or 'Unknown' }} · {{ probe.status or 'Unknown' }} · {{ probe.queried_window or 'Unknown' }} · observations {{ probe.signals_collected if probe.signals_collected is not none else 'Unknown' }}</p>{% endfor %}<p>Required authority: {{ snapshot.claim_gate.gap_report.required_authority or 'Unknown' }} · estimated cost: {{ snapshot.claim_gate.gap_report.estimated_cost or 'Unknown' }}</p>{% for value in snapshot.claim_gate.gap_report.failed_gates %}<p>Failed gate: {{ value }}</p>{% endfor %}{% for value in snapshot.claim_gate.gap_report.missing_evidence %}<p>Missing evidence: {{ value }}</p>{% endfor %}<p>Next probe: {{ snapshot.claim_gate.gap_report.next_best_probe }}</p>{% endif %}
+<h3>History · no current permission</h3>{% for claim in snapshot.claim_gate.history %}<p>{{ claim.wording }} · {{ claim.status }} · {{ claim.frame_digest }}</p>{% endfor %}</section><p>JavaScript is unavailable. The selected snapshot, canonical identities and exact counts above remain readable. Refresh this document for a new bounded read.</p></noscript>
 <script id="relay-initial" type="application/json">{{ snapshot | tojson }}</script>
 </main>
 <script>
@@ -212,14 +218,45 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     } else {
       values = {
         'Input': `Frame ${unknown(snapshot.frame_digest)} · ${unknown(snapshot.frame_pending_reason)}.`,
-        'Output': `Withheld — ${unknown(snapshot.frame_pending_reason)}. ${stale ? 'Stale last successful read.' : ''} Current-frame Claim Ledger permission is unavailable in this internal slice.`,
+        'Output': `${snapshot.claim_gate.render_status === 'PERMITTED' ? 'PERMITTED · exact-frame persisted ledger entries.' : 'Withheld · ' + snapshot.claim_gate.reason_code}. Descriptive and provisional labels grant no permission.`,
         'Failure reason': 'Observation volume, a present frame digest or old events do not grant strategic permission.',
         'Why it matters': 'A permitted verdict requires a persisted current-frame ledger gate, not animation or a cached count.'
       };
     }
     const output = regions(name, values)['Output'];
     if (name === 'Sources') showChannels(output);
+    if (name === 'Synthesis') showLedger(output);
     if (['Sources', 'Cleaning', 'Cross-check'].includes(name)) addEvidence(output, snapshot.evidence);
+  }
+  function showLedger(output) {
+    const gate = snapshot.claim_gate;
+    const current = node('section'); current.dataset.testid = 'current-claims';
+    const history = node('section'); history.dataset.testid = 'claim-history';
+    history.append(node('h3', 'History · no current permission'));
+    function entry(container, claim) {
+      const article = node('article');
+      article.append(node('h4', claim.wording), node('p', `${claim.claim_type} · ${claim.status} · claim ${claim.claim_id} · frame ${claim.frame_digest}`, 'identity'));
+      for (const binding of claim.evidence_bindings) article.append(node('p', `${binding.role} · observation ${unknown(binding.observation_id)} · probe ${unknown(binding.probe_outcome_id)} · target ${unknown(binding.hypothesis_target)}`, 'identity'));
+      article.append(node('p', `Method ${unknown(claim.inference_method)} · denominator ${unknown(claim.metric_denominator)} · timeframe ${unknown(claim.metric_timeframe)} · recorded confidence ${unknown(claim.confidence)}`));
+      for (const limitation of claim.limitations) article.append(node('p', `Limitation: ${limitation}`));
+      for (const condition of claim.change_conditions) article.append(node('p', `Revision condition: ${condition}`));
+      for (const reason of claim.withheld_reasons) article.append(node('p', `Withheld: ${reason}`));
+      container.append(article);
+    }
+    for (const claim of gate.claims) entry(current, claim);
+    for (const claim of gate.history) entry(history, claim);
+    output.append(current, history);
+    const gap = node('section'); gap.dataset.testid = 'gap-report';
+    if (gate.gap_report) {
+      const report = gate.gap_report;
+      gap.append(node('h3', 'Gap Report · strategic outputs withheld'));
+      for (const [label, field] of [['Withheld outputs', 'withheld_outputs'], ['Failed gate', 'failed_gates'], ['Missing evidence', 'missing_evidence'], ['Safe partial conclusion', 'safe_partial_conclusions']]) {
+        for (const value of report[field]) gap.append(node('p', `${label}: ${value}`));
+      }
+      for (const probe of report.attempted_probes) gap.append(node('p', `Attempted probe: ${unknown(probe.connector_surface)} · ${unknown(probe.status)} · ${unknown(probe.queried_window)} · observations ${unknown(probe.signals_collected)}`));
+      gap.append(node('p', `Next probe: ${report.next_best_probe}`), node('p', `Required authority: ${unknown(report.required_authority)} · estimated cost: ${unknown(report.estimated_cost)}`));
+    } else if (!gate.claims.length) gap.append(node('p', `Withheld · ${gate.reason_code}. No recorded Gap Report is available.`));
+    output.append(gap);
   }
   async function inspectObservation(row) {
     stopInspection();

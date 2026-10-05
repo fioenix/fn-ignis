@@ -102,7 +102,7 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             ("Cleaning", "Recorded qualifications; missing judgments remain Unknown."),
             ("Research", "Actual research activity unavailable without an authorized receipt."),
             ("Cross-check", "Support, contradiction, context and exclusions stay distinct."),
-            ("Synthesis", "Current strategic permission withheld until a frame-bound ledger gate is available."),
+            ("Synthesis", "Exact-frame persisted ledger permission, or the recorded evidence Gap Report."),
         )
         return self._env.get_template("mission_relay.html").render(
             snapshot=snapshot.to_payload(), expires_at=expires_at.isoformat(), stages=stages)
