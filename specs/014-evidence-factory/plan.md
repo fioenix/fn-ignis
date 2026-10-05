@@ -2,7 +2,7 @@
 
 **Branch**: `codex/ignis-evidence-factory` | **Date**: 2026-10-04 | **Spec**: [approved R1](spec.md)
 
-**Status**: T001–T033 accepted:33/92. US1 committed8892253; T032 committed1495e44. T033 independently accepted test design:5 typed-gate API-contract RED,0errors/skips; stale behavior awaits T034/T036/T037. T034–T040 remain required for US3. Commit each completed task; PR only after full spec completion. No UAT/shipment claim.
+**Status**: T001–T034 accepted:34/92. T034 current/pending/stale/history projection independently verified:396PASS0SKIP plus13 independentPASS and an actual newer-STARTED-history refusal probe. Nested Gap privacy P1 resolved with genuine RED regression. US1 and T032/T033 are committed; T035–T040 remain required for US3. Commit each task; PR after full spec completion. No UAT/shipment claim.
 
 ## Summary
 

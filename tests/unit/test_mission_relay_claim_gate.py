@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from uuid import uuid4
+import json
 
 import pytest
 import pytest_asyncio
@@ -156,3 +157,14 @@ async def test_missing_qualification_retains_actual_gap_and_no_commercial_verdic
     assert actual["gap_report"]["missing_evidence"] == expected["missing_evidence"]
     assert actual["gap_report"]["next_best_probe"] == expected["next_best_probe"]
     assert "commercial_recommendations" in actual["gap_report"]["withheld_outputs"]
+
+
+async def test_gap_probe_strings_are_sanitized_at_the_outward_boundary(market_records):
+    _, _, evidence, run, _ = market_records
+    marker = "private-review-marker@example.invalid"
+    outcomes = tuple(replace(o, queried_window=marker, connector_surface=marker) for o in evidence.outcomes)
+    actual = gate(project(replace(evidence, qualifications=(), outcomes=outcomes), run))
+    assert actual["render_status"] == "WITHHELD"
+    assert actual["gap_report"]["failed_gates"]
+    assert actual["gap_report"]["attempted_probes"]
+    assert marker not in json.dumps(actual), "Gap fields must share the observation/channel privacy boundary"

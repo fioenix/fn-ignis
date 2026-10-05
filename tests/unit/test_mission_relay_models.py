@@ -346,7 +346,10 @@ def test_safe_snapshot_and_inspection_have_concrete_nested_allowlists(relay):
         "evidence",
         "event_page",
         "channels",
+        "claim_gate",
     }
+    assert set(payload["claim_gate"]) == {"state", "frame_digest", "render_status", "reason_code", "claims", "history", "gap_report"}
+    assert payload["claim_gate"]["render_status"] == "WITHHELD"
     observation_keys = {
         "mission_id",
         "observation_id",

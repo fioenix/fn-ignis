@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-04
 
-**Status**: T001–T033 accepted:33/92. US1 committed8892253; T032 committed1495e44. T033 independently accepted test design:5 typed-gate API-contract RED,0errors/skips; stale behavior awaits T034/T036/T037. T034–T040 remain required for US3. Commit each completed task; PR only after full spec completion. No UAT/shipment claim.
+**Status**: T001–T034 accepted:34/92. T034 current/pending/stale/history projection independently verified:396PASS0SKIP plus13 independentPASS and an actual newer-STARTED-history refusal probe. Nested Gap privacy P1 resolved with genuine RED regression. US1 and T032/T033 are committed; T035–T040 remain required for US3. Commit each task; PR after full spec completion. No UAT/shipment claim.
 
 **Review revision**: R1 — 2026-10-04
 
@@ -323,3 +323,7 @@ The following alternatives were considered before the owner selected option 3; o
 ### Session 2026-10-05 — owner delivery policy
 
 - Q: When should completed task work be committed and a PR created? → A: Commit each completed, verified task immediately. Create the PR for merge only after the entire spec is complete (owner decision: "Mỗi lần làm xong task thì cứ commit, còn chừng nào xong spec thì mới tạo PR để merge"). This authorizes local commits, not release/version/tag operations. US1 is committed at8892253.
+
+### Session 2026-10-05 — T034 frame projection
+
+- Q: Can a paginated viewer derive claim permission from the returned page or an older completed run? → A: No. Read full canonical Market frame facts and latest journal identity on the same existing pinned read-only transaction, then return only the bounded selected page. Select current claims only through canonical frame/sufficiency and exact stored PERMITTED bindings; older selected journals remain history. Internal direct-projection tests supply complete trusted canonical facts. No second database read, migration, existing MCP signature or semantic provider is added (agent decided; basis: US3 and existing current-frame ledger policy). Full-corpus frame derivation has real read cost and remains subject to the existing admission/deadline/size controls.

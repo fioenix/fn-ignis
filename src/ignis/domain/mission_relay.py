@@ -16,6 +16,9 @@ from ignis.domain.harness_models import ChannelHealthStatus
 from ignis.domain.research_workspace import (
     EvidenceDirection,
     EvidenceRole,
+    ClaimStatus,
+    GapReport,
+    MissionClaim,
     QualificationRelation,
     ResearchSurface,
 )
@@ -77,6 +80,14 @@ class RelayReadReason(str, Enum):
 class RelayFramePendingReason(str, Enum):
     UNKNOWN = "UNKNOWN"
     PENDING = "PENDING"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class RelayGateState(str, Enum):
+    CURRENT = "CURRENT"
+    PENDING = "PENDING"
+    STALE = "STALE"
+    HISTORY = "HISTORY"
     UNAVAILABLE = "UNAVAILABLE"
 
 
@@ -435,6 +446,40 @@ class RelayChannelOutcome:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RelayClaimGate:
+    """Exact-frame permission and separately labeled historical ledger facts."""
+
+    state: RelayGateState = RelayGateState.UNAVAILABLE
+    frame_digest: str | None = None
+    claims: tuple[MissionClaim, ...] = ()
+    history: tuple[MissionClaim, ...] = ()
+    gap_report: GapReport | None = None
+    reason_code: str = "FRAME_UNKNOWN"
+
+    def __post_init__(self) -> None:
+        _require_type(self.state, RelayGateState, "state")
+        _digest(self.frame_digest, "frame_digest")
+        _text(self.reason_code, "reason_code")
+        _items(self.claims, MissionClaim, "claims")
+        _items(self.history, MissionClaim, "history")
+        if self.gap_report is not None:
+            _require_type(self.gap_report, GapReport, "gap_report")
+        if self.claims and (self.state is not RelayGateState.CURRENT or self.frame_digest is None or self.gap_report is not None):
+            raise ValueError("Only a current exact-frame gate can expose permitted claims.")
+        if any(c.status is not ClaimStatus.PERMITTED or c.frame_digest != self.frame_digest for c in self.claims):
+            raise ValueError("Current claims require exact-frame persisted permission.")
+        if any(c.status is ClaimStatus.PERMITTED for c in self.history):
+            raise ValueError("History cannot retain current permission.")
+
+    def to_payload(self) -> dict[str, object]:
+        return {"state": self.state.value, "frame_digest": self.frame_digest,
+                "render_status": "PERMITTED" if self.claims else "WITHHELD",
+                "reason_code": self.reason_code, "claims": [c.to_payload() for c in self.claims],
+                "history": [c.to_payload() for c in self.history],
+                "gap_report": self.gap_report.to_payload() if self.gap_report is not None else None}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class MissionRelaySnapshot:
     """One bounded safe evidence read; it grants no strategic claim permission."""
 
@@ -455,9 +500,18 @@ class MissionRelaySnapshot:
     event_page: MissionRelayEventPage | None = None
     channels: tuple[RelayChannelOutcome, ...] = ()
     collection_state: RelayCollectionState | None = None
+    claim_gate: RelayClaimGate = RelayClaimGate()
 
     def __post_init__(self) -> None:
         _read_identity(self.mission_id, self.run_id, self.high_water, self.read_at)
+        _require_type(self.claim_gate, RelayClaimGate, "claim_gate")
+        if any(c.mission_id != self.mission_id for c in (*self.claim_gate.claims, *self.claim_gate.history)):
+            raise ValueError("Ledger rows must retain selected mission identity.")
+        if self.claim_gate.claims and (
+            self.surface is not ResearchSurface.MARKET or self.claim_gate.frame_digest != self.frame_digest
+            or any(c.brief_revision_id != self.brief_revision_id for c in self.claim_gate.claims)
+        ):
+            raise ValueError("Current ledger rows must retain the selected Market frame and Brief.")
         if self.collection_state is not None:
             _require_type(self.collection_state, RelayCollectionState, "collection_state")
         _page_size(self.page_size)
@@ -509,6 +563,7 @@ class MissionRelaySnapshot:
             "event_page": self.event_page.to_payload() if self.event_page is not None else None,
             "channels": [channel.to_payload() for channel in self.channels],
             "collection_state": self.collection_state.value if self.collection_state is not None else None,
+            "claim_gate": self.claim_gate.to_payload(),
         }
 
 

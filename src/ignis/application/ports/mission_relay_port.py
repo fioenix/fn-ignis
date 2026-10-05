@@ -197,11 +197,30 @@ class MissionRelayRead:
     events: MissionRelayEventPage
     total_observations: int
     source_count: int
+    frame_evidence: MissionEvidenceSnapshot | None = field(default=None, repr=False)
+    latest_run_id: UUID | None = None
 
     def __post_init__(self) -> None:
         _typed(self.request, MissionRelayReadRequest, "request")
         _typed(self.evidence, MissionEvidenceSnapshot, "evidence")
         _typed(self.events, MissionRelayEventPage, "events")
+        if self.latest_run_id is not None:
+            _typed(self.latest_run_id, UUID, "latest_run_id")
+        if self.frame_evidence is not None:
+            _typed(self.frame_evidence, MissionEvidenceSnapshot, "frame_evidence")
+            if (
+                self.frame_evidence.mission != self.evidence.mission
+                or self.frame_evidence.manifest != self.evidence.manifest
+                or self.frame_evidence.brief != self.evidence.brief
+                or self.frame_evidence.qualifications != self.evidence.qualifications
+                or self.frame_evidence.outcomes != self.evidence.outcomes
+                or self.frame_evidence.claims != self.evidence.claims
+                or len(self.frame_evidence.signals) != self.total_observations
+                or tuple(self.frame_evidence.signals[
+                    self.request.evidence_offset:self.request.evidence_offset + self.request.page_size
+                ]) != tuple(self.evidence.signals)
+            ):
+                raise ValueError("Full frame facts must belong to the same coherent read.")
         _aware(self.read_at)
         if self.evidence.mission is None or self.evidence.mission.id != self.request.mission_id:
             raise ValueError("Read evidence must belong to the selected mission.")

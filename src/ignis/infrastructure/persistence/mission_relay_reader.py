@@ -8,6 +8,7 @@ writes remain prohibited by the read-only connection and query-only transaction.
 import asyncio
 import json
 import sqlite3
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -281,12 +282,14 @@ class SqliteMissionRelayReader(IMissionRelayReader):
         ).fetchone()
         if broken_lineage:
             raise ValueError("Canonical mission evidence has missing observation or source lineage.")
-        signals = tuple(_signal(row) for row in conn.execute(
+        full_frame = mission.surface == "MARKET"
+        corpus = tuple(_signal(row) for row in conn.execute(
             "SELECT o.*,s.platform,e.mission_id FROM mission_evidence e"
             " JOIN observations o ON o.id=e.observation_id JOIN sources s ON s.id=o.source_id"
-            " WHERE e.mission_id=? ORDER BY o.observed_at DESC,o.id LIMIT ? OFFSET ?",
-            (mission_id, request.page_size, request.evidence_offset),
+            " WHERE e.mission_id=? ORDER BY o.observed_at DESC,o.id" + ("" if full_frame else " LIMIT ? OFFSET ?"),
+            (mission_id,) if full_frame else (mission_id, request.page_size, request.evidence_offset),
         ).fetchall())
+        signals = corpus[request.evidence_offset:request.evidence_offset + request.page_size] if full_frame else corpus
         manifest_row = conn.execute("SELECT * FROM mission_manifests WHERE mission_id=?", (mission_id,)).fetchone()
         brief_row = conn.execute(SqliteTrendRepository._BRIEF_COLUMNS + " WHERE mission_id=?", (mission_id,)).fetchone()
         qualifications = tuple(SqliteTrendRepository._qualification_from_row(row) for row in conn.execute(
@@ -306,6 +309,11 @@ class SqliteMissionRelayReader(IMissionRelayReader):
         return MissionRelayRead(
             request=request, evidence=evidence, run=run, events=_event_page(conn, request),
             read_at=datetime.now(timezone.utc), total_observations=total, source_count=source_count,
+            frame_evidence=replace(evidence, signals=corpus) if full_frame else None,
+            latest_run_id=_uuid(latest["id"]) if (latest := conn.execute(
+                "SELECT id FROM mission_run_journals WHERE mission_id=? ORDER BY started_at DESC,sequence DESC LIMIT 1",
+                (mission_id,),
+            ).fetchone()) is not None else None,
         )
 
 
@@ -398,13 +406,14 @@ class PostgresMissionRelayReader(IMissionRelayReader):
         )
         if broken_lineage:
             raise ValueError("Canonical mission evidence has missing observation or source lineage.")
+        full_frame = mission.surface == "MARKET"
         rows = await _pg_fetch(conn,
             "SELECT o.*,s.platform FROM mission_evidence e JOIN observations o ON o.id=e.observation_id"
             " JOIN sources s ON s.id=o.source_id WHERE e.mission_id=%s"
-            " ORDER BY o.observed_at DESC NULLS LAST,o.id LIMIT %s OFFSET %s",
-            (mission_id, request.page_size, request.evidence_offset), many=True,
+            " ORDER BY o.observed_at DESC NULLS LAST,o.id" + ("" if full_frame else " LIMIT %s OFFSET %s"),
+            (mission_id,) if full_frame else (mission_id, request.page_size, request.evidence_offset), many=True,
         )
-        signals = tuple(TrendSignal(
+        corpus = tuple(TrendSignal(
             platform=PlatformType(row["platform"]), raw_title=row["observed_title"],
             metric_value=row["metric_value"], growth_velocity=row["growth_velocity"], source_url=row["source_url"],
             geo_code=GeoCode(row["geo_code"]), cluster_id=_pg_uuid(row["cluster_id"]), mission_id=mission_id,
@@ -412,6 +421,7 @@ class PostgresMissionRelayReader(IMissionRelayReader):
             identity_source=row["identity_source"], time_provenance=row["time_provenance"],
             metadata=row["metadata"] or {}, captured_at=row["observed_at"], published_at=row["published_at"],
         ) for row in rows)
+        signals = corpus[request.evidence_offset:request.evidence_offset + request.page_size] if full_frame else corpus
         repository = PostgresTimescaleRepository
         manifest_row = await _pg_fetch(conn, repository._MANIFEST_COLUMNS + " WHERE mission_id=%s", (mission_id,), tuples=True)
         brief_row = await _pg_fetch(conn, repository._BRIEF_COLUMNS + " WHERE mission_id=%s", (mission_id,), tuples=True)
@@ -440,9 +450,15 @@ class PostgresMissionRelayReader(IMissionRelayReader):
             brief=repository._brief_from_row(brief_row) if brief_row is not None else None,
             signals=signals, qualifications=qualifications, outcomes=outcomes, claims=tuple(claims),
         )
+        latest = await _pg_fetch(conn,
+            "SELECT id FROM mission_run_journals WHERE mission_id=%s ORDER BY started_at DESC,sequence DESC LIMIT 1",
+            (mission_id,),
+        )
         return MissionRelayRead(
             request=request, evidence=evidence, run=run, events=await PostgresMissionRelayReader._event_page(conn, request),
             read_at=datetime.now(timezone.utc), total_observations=total, source_count=source_count,
+            frame_evidence=replace(evidence, signals=corpus) if full_frame else None,
+            latest_run_id=_pg_uuid(latest["id"]) if latest is not None else None,
         )
 
     @staticmethod
