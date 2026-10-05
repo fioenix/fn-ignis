@@ -1,7 +1,9 @@
+import asyncio
+from contextlib import asynccontextmanager
 import json
 import logging
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import uuid
@@ -14,7 +16,7 @@ import mcp.shared.exceptions
 if not hasattr(mcp.shared.exceptions, "McpError") and hasattr(mcp.shared.exceptions, "MCPError"):
     mcp.shared.exceptions.McpError = mcp.shared.exceptions.MCPError
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 
 from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
 from ignis.application.use_cases.create_market_revision import CreateMarketRevisionUseCase
@@ -132,8 +134,179 @@ return the Gap Report and smallest next probe. An HTML report is optional and us
 The mission and Claim Ledger contracts, not this recipe, decide verdict eligibility.
 """
 
+class _MissionRelayRuntime:
+    """Lazy read-only composition, owned by one FastMCP async lifespan."""
+
+    def __init__(self):
+        self.owner_loop = asyncio.get_running_loop()
+        self.listener = None
+        self.closed = False
+        self._projection = None
+        self._reads = None
+
+    def read_service(self):
+        if self.closed or asyncio.get_running_loop() is not self.owner_loop:
+            raise RuntimeError("Mission viewer requires an active owning lifespan.")
+        if self._reads is None:
+            from ignis.infrastructure.mission_relay import MissionRelayReadService
+            self._reads = MissionRelayReadService(provider=self, owner_loop=self.owner_loop)
+        return self._reads
+
+    def _use_case(self):
+        if self.closed or asyncio.get_running_loop() is not self.owner_loop:
+            raise RuntimeError("Mission viewer requires an active owning lifespan.")
+        if self._projection is None:
+            from ignis.application.use_cases.get_mission_relay_snapshot import GetMissionRelaySnapshotUseCase
+            from ignis.infrastructure.persistence.mission_relay_reader import (
+                PostgresMissionRelayReader, SqliteMissionRelayReader,
+            )
+            from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+            from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+            # Borrow initialized in-memory storage only when the owner already created it.
+            repository = _COMPONENTS.get("repository") if _COMPONENTS is not None else None
+            if isinstance(repository, SqliteTrendRepository):
+                reader = SqliteMissionRelayReader(repository)
+            elif isinstance(repository, PostgresTimescaleRepository):
+                reader = PostgresMissionRelayReader(repository)
+            else:
+                dsn = reveal_secret(settings.DATABASE_URL)
+                if dsn.startswith("sqlite:///"):
+                    reader = SqliteMissionRelayReader(dsn.removeprefix("sqlite:///"))
+                elif dsn.startswith(("postgresql://", "postgres://")):
+                    reader = PostgresMissionRelayReader(dsn)
+                else:
+                    raise ValueError("Unsupported viewer storage identity.")
+            self._projection = GetMissionRelaySnapshotUseCase(reader)
+        return self._projection
+
+    async def authorize_view(self, mission_id, run_id):
+        from ignis.application.ports.mission_relay_port import MissionRelayReadRequest
+        from ignis.domain.mission_relay import MissionRelayReadFailure
+        result = await self.snapshot(MissionRelayReadRequest(mission_id=mission_id, run_id=run_id, page_size=1))
+        return result if type(result) is MissionRelayReadFailure else None
+
+    async def snapshot(self, request):
+        from ignis.domain.mission_relay import MissionRelayReadFailure, RelayReadReason, RelayReadStatus
+        try:
+            return await self._use_case().execute(request)
+        except (ValueError, RuntimeError):
+            return MissionRelayReadFailure(status=RelayReadStatus.UNAVAILABLE, reason_code=RelayReadReason.READ_UNAVAILABLE)
+
+    async def inspect(self, request, observation_id):
+        from ignis.domain.mission_relay import MissionRelayReadFailure, RelayReadReason, RelayReadStatus
+        try:
+            return await self._use_case().inspect(request, observation_id)
+        except (ValueError, RuntimeError):
+            return MissionRelayReadFailure(status=RelayReadStatus.UNAVAILABLE, reason_code=RelayReadReason.READ_UNAVAILABLE)
+
+    async def close(self):
+        self.closed = True
+        resources = [resource for resource in (self.listener, self._reads) if resource is not None]
+        for resource in resources:
+            resource.close()
+        from ignis.application.cancellation import await_settled
+        async def settle():
+            for resource in resources:
+                if not await resource.wait_closed(timeout=None):
+                    raise RuntimeError("Mission viewer reads did not settle during shutdown.")
+        await await_settled(settle())
+
+
+@asynccontextmanager
+async def _mission_relay_lifespan(server):
+    runtime = _MissionRelayRuntime()
+    try:
+        yield {"mission_relay": runtime}
+    finally:
+        await runtime.close()
+
+
 # Initialize FastMCP Server with Non-Prescriptive Harness Instructions
-mcp = FastMCP("fn-ignis-social-market-research", instructions=HARNESS_SYSTEM_INSTRUCTIONS)
+mcp = FastMCP("fn-ignis-social-market-research", instructions=HARNESS_SYSTEM_INSTRUCTIONS,
+              lifespan=_mission_relay_lifespan)
+
+def _relay_failure(reason, unavailable=False):
+    from ignis.domain.mission_relay import MissionRelayReadFailure, RelayReadStatus
+    return MissionRelayReadFailure(status=RelayReadStatus.UNAVAILABLE if unavailable else RelayReadStatus.REFUSED,
+                                   reason_code=reason)
+
+
+async def handle_open_mission_relay(mission_id: str, expires_at: str, run_id: Optional[str] = None,
+                                    *, runtime: Optional[_MissionRelayRuntime] = None):
+    """Validate finite selected scope before any listener or component work."""
+    from ignis.domain.mission_relay import MissionRelayOpenResult, RelayReadReason
+    try:
+        mission = UUID(mission_id)
+        run = UUID(run_id) if run_id is not None else None
+    except (ValueError, TypeError, AttributeError):
+        return _relay_failure(RelayReadReason.SCOPE_MISMATCH)
+    try:
+        deadline = datetime.fromisoformat(expires_at)
+        now = datetime.now(timezone.utc)
+        if deadline.tzinfo is None or deadline.utcoffset() != timedelta(0) or not now < deadline <= now + timedelta(minutes=60):
+            raise ValueError
+    except (ValueError, TypeError):
+        return _relay_failure(RelayReadReason.INVALID_EXPIRY)
+    if runtime is None or runtime.closed or runtime.owner_loop is not asyncio.get_running_loop():
+        return _relay_failure(RelayReadReason.READ_UNAVAILABLE, True)
+    refusal = await runtime.read_service().authorize_view(mission, run, deadline)
+    if refusal is not None:
+        return refusal
+    if runtime.closed:
+        return _relay_failure(RelayReadReason.READ_UNAVAILABLE, True)
+    if deadline <= datetime.now(timezone.utc):
+        return _relay_failure(RelayReadReason.INVALID_EXPIRY)
+    if runtime.listener is None:
+        from ignis.infrastructure.mission_relay import MissionRelayHTTP
+        runtime.listener = MissionRelayHTTP(provider=runtime, owner_loop=runtime.owner_loop)
+    capability = await runtime.listener.open_view(mission_id=mission, run_id=run, expires_at=deadline)
+    from ignis.domain.mission_relay import MissionRelayReadFailure
+    if type(capability) is MissionRelayReadFailure:
+        return capability
+    return MissionRelayOpenResult(mission_id=mission, run_id=run, url=capability.url, expires_at=capability.expires_at)
+
+
+async def handle_get_mission_relay_snapshot(mission_id: str, page_size: int, run_id: Optional[str] = None,
+        after_revision: Optional[int] = None, after_ordinal: Optional[int] = None, evidence_offset: int = 0,
+        *, runtime: Optional[_MissionRelayRuntime] = None):
+    """Independently read a bounded selected projection without opening a browser."""
+    from ignis.application.ports.mission_relay_port import MissionRelayReadRequest
+    from ignis.domain.mission_relay import MissionRelayCursor, RelayReadReason
+    try:
+        mission = UUID(mission_id)
+        run = UUID(run_id) if run_id is not None else None
+    except (ValueError, TypeError, AttributeError):
+        return _relay_failure(RelayReadReason.SCOPE_MISMATCH)
+    if type(page_size) is not int or not 1 <= page_size <= 200:
+        return _relay_failure(RelayReadReason.INVALID_PAGE_SIZE)
+    try:
+        cursor = None
+        if after_revision is not None or after_ordinal is not None:
+            cursor = MissionRelayCursor(mission_id=mission, revision=after_revision, ordinal=after_ordinal)
+        request = MissionRelayReadRequest(mission_id=mission, run_id=run, page_size=page_size,
+                                         after_cursor=cursor, evidence_offset=evidence_offset)
+    except ValueError:
+        return _relay_failure(RelayReadReason.INVALID_REQUEST)
+    if runtime is None or runtime.closed or runtime.owner_loop is not asyncio.get_running_loop():
+        return _relay_failure(RelayReadReason.READ_UNAVAILABLE, True)
+    return await runtime.read_service().read_snapshot(request)
+
+
+@mcp.tool(name="open_mission_relay", description="Open a finite read-only local viewer for one explicitly selected mission and optional run. Requires an explicit UTC deadline; validates installed storage without bootstrap or collectors.")
+async def open_mission_relay(mission_id: str, expires_at: str, ctx: Context, run_id: Optional[str] = None) -> dict:
+    result = await handle_open_mission_relay(mission_id, expires_at, run_id,
+                                           runtime=ctx.lifespan_context.get("mission_relay"))
+    return result.to_payload()
+
+
+@mcp.tool(name="get_mission_relay_snapshot", description="Read an allowlisted bounded coherent snapshot for one selected mission and optional run, without opening a viewer. Page size is explicit; cursors and evidence offsets remain selected-scope reads.")
+async def get_mission_relay_snapshot(mission_id: str, page_size: int, ctx: Context,
+        run_id: Optional[str] = None, after_revision: Optional[int] = None,
+        after_ordinal: Optional[int] = None, evidence_offset: int = 0) -> dict:
+    result = await handle_get_mission_relay_snapshot(mission_id, page_size, run_id, after_revision,
+        after_ordinal, evidence_offset, runtime=ctx.lifespan_context.get("mission_relay"))
+    return result.to_payload()
+
 
 # This service opens no listener until an explicitly authorized finite request is prepared.
 _host_browser_search_service = HostBrowserSearchService()

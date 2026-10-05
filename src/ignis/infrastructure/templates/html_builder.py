@@ -84,6 +84,29 @@ class HtmlArtifactBuilder(IArtifactBuilder):
 
 
 
+    def build_mission_relay_artifact(self, snapshot, *, snapshot_url: str, expires_at: datetime) -> str:
+        """Render only typed safe projection data; no capability or external read URL is embedded."""
+        from urllib.parse import urlsplit
+        from ignis.domain.mission_relay import MissionRelaySnapshot
+        if type(snapshot) is not MissionRelaySnapshot:
+            raise ValueError("Mission relay requires a typed outward snapshot.")
+        if type(expires_at) is not datetime or expires_at.tzinfo is None or expires_at.utcoffset() != timezone.utc.utcoffset(expires_at):
+            raise ValueError("Mission relay expiry requires a UTC-aware timestamp.")
+        target = urlsplit(snapshot_url)
+        if (target.scheme != "http" or target.hostname != "127.0.0.1" or target.port is None
+                or target.username is not None or target.password is not None or target.query or target.fragment
+                or re.fullmatch(r"/view/[A-Za-z0-9_-]+/snapshot", target.path) is None):
+            raise ValueError("Mission relay read target must be an exact scoped loopback endpoint.")
+        stages = (
+            ("Sources", "Canonical observations and measured channel outcomes."),
+            ("Cleaning", "Recorded qualifications; missing judgments remain Unknown."),
+            ("Research", "Actual research activity unavailable without an authorized receipt."),
+            ("Cross-check", "Support, contradiction, context and exclusions stay distinct."),
+            ("Synthesis", "Current strategic permission withheld until a frame-bound ledger gate is available."),
+        )
+        return self._env.get_template("mission_relay.html").render(
+            snapshot=snapshot.to_payload(), expires_at=expires_at.isoformat(), stages=stages)
+
     def build_dashboard_artifact(
         self,
         clusters: List[TopicCluster],

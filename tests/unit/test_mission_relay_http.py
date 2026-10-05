@@ -876,3 +876,55 @@ def test_shutdown_waits_for_underlying_cancellation_without_blocking_owner_loop(
             pass  # Closed connection is a valid shutdown revocation.
         else:
             assert result.status != 200, "Shutdown exposed a late successful read"
+
+
+def test_authorization_that_outlives_deadline_mints_no_capability(factory, loop_owner):
+    """The finite lifetime includes authorization, rather than starting after it."""
+    class SlowAuthorization(InertReadProvider):
+        async def authorize_view(self, mission_id, run_id):
+            await super().authorize_view(mission_id, run_id)
+            await asyncio.sleep(0.08)
+            return None
+
+    relay, provider = factory(SlowAuthorization(loop_owner))
+    result = _await(loop_owner, relay.open_view(
+        mission_id=MISSION, run_id=None,
+        expires_at=datetime.now(timezone.utc) + timedelta(seconds=0.04),
+    ))
+    assert type(result) is MissionRelayReadFailure
+    assert result.reason_code is RelayReadReason.INVALID_EXPIRY
+    assert provider.authorizations == [(MISSION, None)] and provider.calls == []
+
+
+def test_shutdown_retains_pending_authorization_until_cleanup_settles(factory, loop_owner):
+    """Authorization reads are loop-owned resources even before a URL exists."""
+    class PendingAuthorization(InertReadProvider):
+        async def authorize_view(self, mission_id, run_id):
+            await super().authorize_view(mission_id, run_id)
+            self.entered.release()
+            try:
+                await self.release.wait()
+            except asyncio.CancelledError:
+                self.cancelled.set()
+                await self.cancel_release.wait()
+                raise
+            finally:
+                self.settled.set()
+
+    relay, provider = factory(PendingAuthorization(loop_owner))
+    pending = asyncio.run_coroutine_threadsafe(relay.open_view(
+        mission_id=MISSION, run_id=None,
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
+    ), loop_owner)
+    try:
+        assert provider.entered.acquire(timeout=1)
+        relay.close()
+        assert provider.cancelled.wait(1)
+        assert not _await(loop_owner, relay.wait_closed(timeout=0.1))
+    finally:
+        loop_owner.call_soon_threadsafe(provider.cancel_release.set)
+        loop_owner.call_soon_threadsafe(provider.release.set)
+    assert _await(loop_owner, relay.wait_closed(timeout=3))
+    result = pending.result(5)
+    assert type(result) is MissionRelayReadFailure
+    assert provider.settled.is_set()

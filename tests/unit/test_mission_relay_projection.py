@@ -19,6 +19,7 @@ import pytest
 from ignis.application.ports.research_workspace_port import MissionEvidenceSnapshot, RunJournal
 from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.harness_models import ChannelHealthStatus
+from ignis.domain.mission_relay import MissionRelayCursor
 from ignis.domain.research_workspace import (
     AuthorityBoundary,
     EvidencePurpose,
@@ -112,6 +113,7 @@ def _projection(kind, evidence, run, **overrides):
         "selected_mission_id": MISSION, "selected_run_id": RUN,
         "evidence": evidence, "run": run, "revision": 7, "read_at": NOW,
         "page_size": 100,
+        "high_water": MissionRelayCursor(mission_id=MISSION, revision=7, ordinal=3),
     }
     if kind == "inspection":
         arguments["observation_id"] = OBSERVATION
@@ -337,3 +339,114 @@ def test_existing_recursive_sanitizer_masks_secrets_but_preserves_evidence_ident
     for sentinel in ("0931405002", "relay-person@example.invalid", "control-secret-sentinel"):
         assert sentinel not in serialized
     assert raw["access_token"] == "control-secret-sentinel"
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_projection_bounds_utf8_bytes_without_truncating_multibyte_text(records, kind):
+    """Catch a character-length bound accepting more than one MiB of UTF-8."""
+    evidence, run = records
+    evidence.signals[0].raw_title = "界" * 350_000
+    payload, _ = _projection(kind, evidence, run)
+    assert payload["reason_code"] == "RESPONSE_TOO_LARGE"
+
+
+@pytest.mark.parametrize("surface,role", (("ATTENTION", "ATTENTION_CONTEXT"), ("MARKET", "MARKET_EVIDENCE")))
+def test_projection_retains_question_roles_without_inventing_direction(records, surface, role):
+    """Catch Attention promotion or v1 qualification turned into measured direction."""
+    evidence, run = records
+    evidence.mission.surface = surface
+    payload, _ = _projection("snapshot", evidence, run)
+    row = payload["evidence"][0]
+    assert row["evidence_role"] == role
+    assert row["direction"] is None
+    assert row["qualification_relation"] == "QUALIFIED_SUPPORT"
+    assert row["qualification_frame_fingerprint"] == evidence.qualifications[0].frame_fingerprint
+    assert payload["frame_digest"] is None
+
+
+def test_channel_projection_distinguishes_unknown_from_measured_empty(records):
+    """Catch missing channel defaulted to healthy zero, or dropped from coverage."""
+    evidence, run = records
+    evidence = replace(evidence, manifest=replace(evidence.manifest, required_channels=("youtube", "tiktok")),
+                       outcomes=(replace(evidence.outcomes[0], status=ChannelHealthStatus.EMPTY_NO_DATA,
+                                         signals_collected=0, note="No matching observations"),))
+    payload, _ = _projection("snapshot", evidence, run)
+    assert payload["channels"] == [
+        {"platform": "youtube", "connector_surface": "youtube.search", "status": "EMPTY_NO_DATA", "signals_collected": 0,
+         "completed_at": NOW.isoformat(), "note": "No matching observations"},
+        {"platform": "tiktok", "connector_surface": None, "status": None, "signals_collected": None,
+         "completed_at": None, "note": None},
+    ]
+
+
+def test_projection_pages_without_substituting_page_counts_for_corpus_totals(records):
+    """Catch re-counting a page as complete coverage or losing continuation."""
+    evidence, run = records
+    second = replace(evidence.signals[0], observation_id=FOREIGN)
+    evidence = replace(evidence, signals=(evidence.signals[0], second))
+    payload, _ = _projection("snapshot", evidence, run, page_size=1)
+    assert payload["counts"] == {"observations": 2, "sources": 1}
+    assert len(payload["evidence"]) == 1
+    assert payload["next_evidence_offset"] == 1
+    last, _ = _projection("snapshot", evidence, run, page_size=1, evidence_offset=1)
+    assert last["evidence"][0]["observation_id"] == str(FOREIGN)
+    assert last["counts"] == {"observations": 2, "sources": 1}
+    assert last["next_evidence_offset"] is None
+
+
+def test_unknown_selected_run_is_not_replaced_by_a_completed_run(records):
+    """Catch implicit latest-run substitution when no run was selected."""
+    evidence, _ = records
+    evidence = replace(evidence, outcomes=())
+    payload, _ = _projection("snapshot", evidence, None, selected_run_id=None)
+    assert payload["run_id"] is None
+    assert payload["channels"][0]["signals_collected"] is None
+
+
+def test_large_finite_integer_is_not_coerced_through_float(records):
+    """Catch OverflowError from float finiteness on an exact, finite count."""
+    evidence, run = records
+    evidence.signals[0].metric_value = 10 ** 400
+    payload, _ = _projection("snapshot", evidence, run)
+    assert payload["evidence"][0]["metric_value"] == 10 ** 400
+
+
+def test_projection_preserves_recorded_ordinal_instead_of_inventing_one(records):
+    """Catch reconstructed high-water from revision alone."""
+    payload, _ = _projection("snapshot", *records)
+    assert payload["high_water"] == {"mission_id": str(MISSION), "revision": 7, "ordinal": 3}
+
+
+def test_direct_projection_without_highwater_is_unavailable(records):
+    """Catch an invented receipt when the caller did not supply its committed cursor."""
+    payload, _ = _projection("snapshot", *records, high_water=None)
+    assert payload == {"schema_version": 1, "status": "UNAVAILABLE", "reason_code": "READ_UNAVAILABLE"}
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("metadata", (None, [], ["private-unallowlisted-sentinel"]))
+def test_malformed_recorded_metadata_returns_typed_unavailable(records, kind, metadata):
+    """Catch raw JSON shapes escaping as an exception or leaking fallback data."""
+    evidence, run = records
+    evidence.signals[0].metadata = metadata
+    payload, serialized = _projection(kind, evidence, run)
+    assert payload == {"schema_version": 1, "status": "UNAVAILABLE", "reason_code": "READ_UNAVAILABLE"}
+    assert "private-unallowlisted-sentinel" not in serialized
+
+
+@pytest.mark.parametrize('mission_status,run_status,selected_run,expected', (
+    ('PENDING', 'RUNNING', False, 'PENDING'),
+    ('RUNNING', 'COMPLETED', False, 'RUNNING'),
+    ('RUNNING', 'COMPLETED', True, 'COMPLETED'),
+    ('PENDING', 'STARTED', True, 'STARTED'),
+    ('COMPLETED', 'RUNNING', True, 'RUNNING'),
+    ('UNRECOGNIZED_PRIVATE_STATE', 'COMPLETED', False, None),
+))
+def test_collection_state_projects_canonical_scope_without_inference(records, mission_status, run_status, selected_run, expected):
+    evidence, run = records
+    evidence.mission.status = mission_status
+    run = replace(run, status=run_status) if selected_run else None
+    if not selected_run:
+        evidence = replace(evidence, outcomes=())
+    payload, _ = _projection('snapshot', evidence, run, selected_run_id=RUN if selected_run else None)
+    assert payload['collection_state'] == expected

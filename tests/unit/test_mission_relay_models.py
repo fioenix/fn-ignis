@@ -338,12 +338,14 @@ def test_safe_snapshot_and_inspection_have_concrete_nested_allowlists(relay):
         "surface",
         "frame_digest",
         "frame_pending_reason",
+        "collection_state",
         "counts",
         "page_size",
         "evidence_offset",
         "next_evidence_offset",
         "evidence",
         "event_page",
+        "channels",
     }
     observation_keys = {
         "mission_id",

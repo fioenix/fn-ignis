@@ -203,11 +203,13 @@ def _event_page(conn, request) -> MissionRelayEventPage:
 class SqliteMissionRelayReader(IMissionRelayReader):
     """Borrow configured identity, then own each read-only transaction and its settlement."""
 
-    def __init__(self, repository: SqliteTrendRepository):
-        self._repository = repository
-        self._memory = repository._db_path == ":memory:"
-        self._owner_connection = repository._mem_conn
-        self._file_uri = None if self._memory else Path(repository._db_path).resolve().as_uri() + "?mode=ro"
+    def __init__(self, repository: SqliteTrendRepository | str):
+        # A configured file identity needs no writable repository or bootstrap.
+        path = repository if type(repository) is str else repository._db_path
+        self._repository = None if type(repository) is str else repository
+        self._memory = path == ":memory:"
+        self._owner_connection = None if self._repository is None else self._repository._mem_conn
+        self._file_uri = None if self._memory else Path(path).resolve().as_uri() + "?mode=ro"
 
     async def load_snapshot(self, request: MissionRelayReadRequest) -> MissionRelayRead | MissionRelayReadFailure:
         # Shield the entire resource lifetime, not just SQL dispatch. Repeated cancellation
@@ -218,6 +220,8 @@ class SqliteMissionRelayReader(IMissionRelayReader):
         conn = None
         try:
             if self._memory:
+                if self._repository is None:
+                    return MissionRelayReadFailure(status=RelayReadStatus.UNAVAILABLE, reason_code=RelayReadReason.READ_UNAVAILABLE)
                 async with self._repository._lock:
                     if (
                         not self._repository._initialized or self._owner_connection is None
@@ -337,8 +341,8 @@ async def _pg_fetch(conn, query, params=(), *, many=False, tuples=False):
 class PostgresMissionRelayReader(IMissionRelayReader):
     """Own one connection per invoking loop, borrowing only configured store identity."""
 
-    def __init__(self, repository: PostgresTimescaleRepository):
-        self._dsn = repository._dsn
+    def __init__(self, repository: PostgresTimescaleRepository | str):
+        self._dsn = repository if type(repository) is str else repository._dsn
 
     async def load_snapshot(self, request: MissionRelayReadRequest) -> MissionRelayRead | MissionRelayReadFailure:
         # Shield opening through transaction exit and close; never leave a connection

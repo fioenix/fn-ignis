@@ -16,7 +16,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -54,6 +54,65 @@ WRITE_SQL = re.compile(
     re.IGNORECASE,
 )
 FACT_TABLES = ("research_missions", "mission_run_journals", "mission_probe_outcomes", "mission_progress_events")
+
+
+@pytest.mark.asyncio
+async def test_safe_projection_consumes_one_readonly_page_and_refuses_foreign_inspection(relay_case, monkeypatch):
+    """Catch raw-record projection, re-counted totals or a global inspection fallback."""
+    case, missions, runs = relay_case
+    selected_mission = ResearchMission(title="Projected Attention", keywords=["synthetic"],
+                                       surface="ATTENTION", workspace_id=missions[0].workspace_id)
+    selected_run = uuid4()
+    await case.repository.save_mission(selected_mission)
+    await case.repository.record_run_journal(RunJournal(
+        run_id=selected_run, mission_id=selected_mission.id, workspace_id=selected_mission.workspace_id,
+        journal_path=Path("private/projection-journal.md"), sequence=1, status="COMPLETED", started_at=NOW,
+        completed_at=NOW,
+    ))
+    await case.repository.save_signals([
+        TrendSignal(platform=PlatformType.YOUTUBE, raw_title=f"Projected observation {index}",
+                    source_url=f"https://www.youtube.com/watch?v=projection{index}",
+                    mission_id=selected_mission.id, captured_at=NOW) for index in range(3)
+    ])
+    await case.repository.commit_probe_outcomes(ProbeOutcomeCommitCommand(
+        mission_id=selected_mission.id, run_id=selected_run, outcomes=(MissionProbeOutcome(
+            run_id=selected_run, platform="youtube", connector_surface="youtube", status=ChannelHealthStatus.HEALTHY,
+            signals_collected=3, queried_keywords=("synthetic",), query_fingerprint="a" * 64, completed_at=NOW,
+        ),),
+    ))
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+    try:
+        module = importlib.import_module("ignis.application.use_cases.get_mission_relay_snapshot")
+    except ModuleNotFoundError as exc:
+        if exc.name != "ignis.application.use_cases.get_mission_relay_snapshot":
+            raise
+        pytest.fail("T023 projection use case is not implemented", pytrace=False)
+    use_case = module.GetMissionRelaySnapshotUseCase(_reader(case.repository))
+    request = _request(selected_mission, selected_run)
+    async def observed_read(read_request, observation_id=None):
+        observer = _observe_postgres(monkeypatch) if case.name == "postgres" else _observe_sqlite(monkeypatch, case.repository)
+        with observer as observation:
+            result = await use_case.execute(read_request) if observation_id is None else await use_case.inspect(read_request, observation_id)
+        if case.name == "postgres":
+            _assert_postgres_reads(observation)
+        else:
+            observation.assert_no_writes()
+        return result.to_payload()
+
+    first = await observed_read(request)
+    second_request = replace(request, evidence_offset=2)
+    second = await observed_read(second_request)
+    selected = UUID(second["evidence"][0]["observation_id"])
+    inspected = await observed_read(second_request, selected)
+    refused = await observed_read(second_request, missions[1].id)
+    assert first["counts"] == second["counts"] == {"observations": 3, "sources": 3}
+    assert first["next_evidence_offset"] == 2 and second["next_evidence_offset"] is None
+    assert first["high_water"] == second["high_water"] == {"mission_id": str(selected_mission.id), "revision": 1, "ordinal": 1}
+    assert len(first["evidence"]) == 2 and len(second["evidence"]) == 1
+    assert inspected["observation"]["observation_id"] == str(selected)
+    assert refused == {"schema_version": 1, "status": "REFUSED", "reason_code": "SCOPE_MISMATCH"}
+    assert _state(case) == before
 
 
 def _reader(repository):

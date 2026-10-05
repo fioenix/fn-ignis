@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-04
 
-**Status**: Approved — owner approved written scope R1 and technical plan on 2026-10-04; T001–T022 accepted with independent task reviews and observed verification. Collection, qualification and claim producer wiring is locally verified on SQLite/PostgreSQL; all36 original producer failures pass in the final full run. T023–T092 remain unchecked. Full project retains187 failures and10 setup errors; full-feature runtime, UAT and integration remain unaccepted. Local work is explicitly parked at the T022 boundary.
+**Status**: T001–T031 independently accepted:31/92. US1 internal slice is implemented and locally verified. Stable-source required US1/original mission/Task Relay gate:1348PASS3SKIP0FAIL0ERROR over36 files;287 Python/template hashes unchanged. Independent final correction check:18PASS0SKIP; no open US1 review finding. Changes are explicitly parked on the uncommitted/unmerged checkout; no full-feature GREEN, real-mission UAT or shipment claim.
 
 **Review revision**: R1 — 2026-10-04
 
@@ -307,3 +307,15 @@ The following alternatives were considered before the owner selected option 3; o
 - Q: What does a duplicate qualification batch report? → A: Preserve the existing batch return count and conflict validation, but emit exactly one canonical reference for each newly inserted observation judgment. Replay advances neither event nor revision (agent decided; basis: physical duplicate-batch test reproduced two references for one inserted fact; T019's insertion-based delta is the parity contract).
 
 - Q: How must T021 handle cancellation during a settled terminal collection commit? → A: Read the canonical mission after physical settlement while the existing run still holds its writer claim. Retain a durably committed terminal state instead of attempting a forbidden FAILED rewrite; preserve the original exception or cancellation. Settle the entire failure read/write cleanup against repeated cancellation. An interrupted journal finalizes COMPLETED only when its canonical collection is already COMPLETED under that held claim; rolled-back or preterminal failures remain FAILED. Filesystem journals remain projections, never an event fallback. The narrow ICollectionRelayWriter structural port names the accepted backend operations without widening any public MCP signature (agent decided; basis: independent P2 reproduction plus three-backend physical commit/rollback and repeated-cancellation controls; cost: one canonical state read on failure cleanup and interrupted finalization, no change to terminal adapter fences or research authority).
+
+
+### Session 2026-10-05 — T023 projection
+
+- Q: How does the direct internal projection retain an exact high-water when revision alone cannot identify the final ordinal? → A: Require an additive supplied typed high_water cursor for successful direct projection; absent receipt returns typed UNAVAILABLE. The actual use case consumes one MissionRelayRead and retains its canonical cursor rather than reconstructing one. T005 fixtures explicitly supply their receipt. No existing MCP signature changes (agent decided; basis: accepted committed revision/ordinal identity and multi-event transactions).
+- Q: Which observation may bounded inspection resolve? → A: Only immutable membership on the explicitly requested evidence page/offset. No global lookup or implicit full-corpus scan; other pages require an explicit page request, and foreign/missing IDs refuse without echo. Global counts and cursor remain the coherent read's values (agent decided; basis: bounded resource and selected membership contracts).
+- Q: May this projection derive a frame or strategic permission from its page? → A: No. Retain unknown/pending frame identity at T023; exact current-frame/ledger permission remains T032/T034. Snapshot channels add a frozen explicit allowlist that retains declared unmeasured fields as null, not zero. Attention/Market association and recorded qualification fields remain separate (agent decided; basis: approved T023 versus T034 scope and no partial-corpus permission).
+
+
+### Session 2026-10-05 — T031 US1 collection visibility
+
+- Q: Which persisted state may the read-only viewer label Idle? → A: Expose an optional allowlisted collection_state from the explicitly selected RunJournal, otherwise the canonical mission status. Only recorded PENDING renders Idle; retain STARTED exactly as emitted by WorkspaceRepository.begin_run. Unrecognized legacy values remain null/Unknown. Do not infer idle from absent selected run, zero counts or empty receipts, and do not fall back to an unrelated journal (agent decided; basis: US1 scenario 1, selected-scope coherence and explicit missingness). This adds an outward snapshot field without changing an MCP tool signature or starting collection.

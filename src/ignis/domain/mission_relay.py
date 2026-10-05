@@ -11,6 +11,8 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
+from ignis.domain.harness_models import ChannelHealthStatus
+
 from ignis.domain.research_workspace import (
     EvidenceDirection,
     EvidenceRole,
@@ -45,11 +47,31 @@ class RelayReadStatus(str, Enum):
     UNAVAILABLE = "UNAVAILABLE"
 
 
+class RelayCollectionState(str, Enum):
+    """Allowlisted canonical collection states, independent of viewer activity."""
+
+    PENDING = "PENDING"
+    STARTED = "STARTED"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    BLOCKED = "BLOCKED"
+    CANCELLED = "CANCELLED"
+
+
 class RelayReadReason(str, Enum):
     SCOPE_MISMATCH = "SCOPE_MISMATCH"
     INVALID_PAGE_SIZE = "INVALID_PAGE_SIZE"
     RESPONSE_TOO_LARGE = "RESPONSE_TOO_LARGE"
     READ_UNAVAILABLE = "READ_UNAVAILABLE"
+    INVALID_EXPIRY = "INVALID_EXPIRY"
+    METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
+    ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND"
+    CAPABILITY_EXPIRED = "CAPABILITY_EXPIRED"
+    INVALID_REQUEST = "INVALID_REQUEST"
+    REQUEST_TOO_LARGE = "REQUEST_TOO_LARGE"
+    READ_BUSY = "READ_BUSY"
+    READ_TIMEOUT = "READ_TIMEOUT"
 
 
 class RelayFramePendingReason(str, Enum):
@@ -329,7 +351,7 @@ class RelayObservation:
         for name in ("metric_value", "growth_velocity"):
             value = getattr(self, name)
             if value is not None:
-                if type(value) not in (int, float) or not math.isfinite(value):
+                if type(value) not in (int, float) or type(value) is float and not math.isfinite(value):
                     raise ValueError(f"{name} must be finite or unknown.")
         _time(self.published_at, "published_at", optional=True)
         _time(self.captured_at, "captured_at", optional=True)
@@ -379,6 +401,40 @@ def _receipt(
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RelayChannelOutcome:
+    """Recorded channel coverage; a declared but unmeasured channel has null facts."""
+
+    platform: str
+    connector_surface: str | None
+    status: ChannelHealthStatus | None
+    signals_collected: int | None
+    completed_at: datetime | None
+    note: str | None
+
+    def __post_init__(self) -> None:
+        _text(self.platform, "platform")
+        _text(self.connector_surface, "connector_surface", optional=True)
+        _text(self.note, "note", optional=True)
+        _time(self.completed_at, "completed_at", optional=True)
+        if self.status is None:
+            if any(value is not None for value in (self.connector_surface, self.signals_collected, self.completed_at, self.note)):
+                raise ValueError("Unmeasured channels cannot carry recorded facts.")
+        else:
+            _require_type(self.status, ChannelHealthStatus, "status")
+            _text(self.connector_surface, "connector_surface")
+            _integer(self.signals_collected, "signals_collected")
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "platform": self.platform, "connector_surface": self.connector_surface,
+            "status": self.status.value if self.status is not None else None,
+            "signals_collected": self.signals_collected,
+            "completed_at": self.completed_at.isoformat() if self.completed_at is not None else None,
+            "note": self.note,
+        }
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class MissionRelaySnapshot:
     """One bounded safe evidence read; it grants no strategic claim permission."""
 
@@ -397,11 +453,16 @@ class MissionRelaySnapshot:
     frame_digest: str | None = None
     frame_pending_reason: RelayFramePendingReason | None = RelayFramePendingReason.UNKNOWN
     event_page: MissionRelayEventPage | None = None
+    channels: tuple[RelayChannelOutcome, ...] = ()
+    collection_state: RelayCollectionState | None = None
 
     def __post_init__(self) -> None:
         _read_identity(self.mission_id, self.run_id, self.high_water, self.read_at)
+        if self.collection_state is not None:
+            _require_type(self.collection_state, RelayCollectionState, "collection_state")
         _page_size(self.page_size)
         _items(self.evidence, RelayObservation, "evidence")
+        _items(self.channels, RelayChannelOutcome, "channels")
         _require_type(self.surface, ResearchSurface, "surface")
         for name in ("total_observations", "source_count", "evidence_offset"):
             _integer(getattr(self, name), name)
@@ -446,6 +507,8 @@ class MissionRelaySnapshot:
             "next_evidence_offset": end if end < self.total_observations else None,
             "evidence": [row.to_payload() for row in self.evidence],
             "event_page": self.event_page.to_payload() if self.event_page is not None else None,
+            "channels": [channel.to_payload() for channel in self.channels],
+            "collection_state": self.collection_state.value if self.collection_state is not None else None,
         }
 
 
@@ -485,3 +548,25 @@ class MissionRelayReadFailure:
 
     def to_payload(self) -> dict[str, object]:
         return {"schema_version": 1, "status": self.status.value, "reason_code": self.reason_code.value}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MissionRelayOpenResult:
+    """Allowlisted finite viewing receipt; the URL carries selected read authority."""
+
+    mission_id: UUID
+    run_id: UUID | None
+    url: str
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        _require_type(self.mission_id, UUID, "mission_id")
+        _optional_uuid(self.run_id, "run_id")
+        _text(self.url, "url")
+        _time(self.expires_at, "expires_at")
+
+    def to_payload(self) -> dict[str, object]:
+        return {"schema_version": 1, "status": "OK", "mission_id": str(self.mission_id),
+                "run_id": str(self.run_id) if self.run_id is not None else None,
+                "url": self.url, "expires_at": self.expires_at.isoformat(),
+                "read_only": True, "inspection_supported": True}

@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Ignis · Mission relay</title>
+{% include '_fino_theme.html' %}
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; color: var(--color-foreground); background: var(--color-background); font-family: var(--font-sans); }
+main { max-width: 1440px; margin: auto; padding: 24px; }
+h1 { font-family: var(--font-display); text-transform: uppercase; font-weight: 400; font-size: clamp(28px, 4vw, 48px); margin: 0; }
+h2 { font-size: var(--text-lg); margin: 0 0 12px; }
+h3 { font-size: var(--text-sm); margin: 0 0 8px; }
+p { margin: 8px 0; line-height: 1.5; }
+button { font: inherit; color: inherit; background: var(--color-card); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 10px 14px; cursor: pointer; }
+button:hover { background: var(--color-elevated); }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--color-ring); outline-offset: 3px; }
+button[aria-pressed="true"] { background: var(--color-primary); color: var(--color-primary-foreground); }
+.authority, .stage, .inspector, .timeline { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-card); padding: 18px; box-shadow: var(--shadow-xs); }
+.authority { margin: 20px 0; }
+.identity { font: var(--text-xs)/1.6 var(--font-mono); overflow-wrap: anywhere; }
+.receipt-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.label { display: block; color: var(--color-muted-foreground); font-size: var(--text-xs); }
+.count { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.stages { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.stage { min-width: 0; border-top: 3px solid var(--color-chart-1); }
+.stage button { width: 100%; text-align: left; }
+.stage p { font-size: var(--text-sm); color: var(--color-muted-foreground); }
+.gate { border-top-color: var(--color-chart-2); }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0; }
+.inspector, .timeline { margin-top: 18px; overflow-wrap: anywhere; }
+.inspector section { padding: 10px 0; border-bottom: 1px solid var(--color-border); }
+.timeline ol, .evidence-list { padding-left: 20px; }
+.timeline li { margin: 12px 0; }
+.evidence-list li { margin-bottom: 8px; }
+.packet { display: inline-flex; gap: 8px; align-items: center; padding: 8px; margin: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-elevated); font: var(--text-xs)/1.4 var(--font-mono); }
+.packet-mark { width: 8px; height: 8px; background: var(--color-chart-1); }
+.muted { color: var(--color-muted-foreground); }
+[hidden] { display: none !important; }
+@media (max-width: 900px) { .stages { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 540px) { main { padding: 14px; } .stages, .receipt-grid { grid-template-columns: 1fr; } }
+@keyframes recorded-transfer { from { transform: translateX(0); opacity: 1; } to { transform: translateX(24px); opacity: 0; } }
+.packet { animation: recorded-transfer 1800ms ease-out forwards; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body class="product-mode respect-motion-prefs" data-density="comfortable">
+<main data-expires-at="{{ expires_at }}" data-snapshot-url="snapshot">
+<p class="label">IGNIS · READ-ONLY OBSERVATORY</p><h1>Evidence journey</h1>
+<p data-testid="snapshot-state" role="status">Recorded snapshot · research activity unavailable until supported by a receipt</p>
+<header class="authority" data-testid="mission-authority">
+<button type="button" data-stage="Mission authority">Mission authority</button>
+<p class="identity">Mission <span data-testid="mission-identity">{{ snapshot.mission_id }}</span></p>
+<div class="receipt-grid">
+<div><span class="label">Selected run</span><span class="identity" data-testid="run-identity">{{ snapshot.run_id or 'Unknown' }}</span></div>
+<div><span class="label">Collection · {{ 'selected run' if snapshot.run_id else 'mission' }}</span><span class="identity" data-testid="collection-state">{% if snapshot.collection_state == 'PENDING' %}Idle · recorded PENDING{% elif snapshot.collection_state %}{{ snapshot.collection_state }} · recorded state{% else %}Unknown · no canonical collection state{% endif %}</span></div>
+<div><span class="label">Manifest fingerprint</span><span class="identity" data-testid="manifest-identity">{{ snapshot.manifest_digest or 'Unknown' }}</span></div>
+<div><span class="label">Read receipt</span><span class="identity" data-testid="read-receipt">{{ snapshot.read_at }}</span></div>
+<div><span class="label">Evidence frame</span><span class="identity" data-testid="frame-identity">{{ snapshot.frame_digest or snapshot.frame_pending_reason or 'Unknown' }}</span></div>
+<div><span class="label">Observations · full selected corpus</span><strong class="count" data-testid="observation-count">{{ snapshot.counts.observations }}</strong></div>
+<div><span class="label">Canonical sources · full selected corpus</span><strong class="count" data-testid="source-count">{{ snapshot.counts.sources }}</strong></div>
+</div>
+<p class="identity">Viewing deadline <time>{{ expires_at }}</time> · research authority is independent of this viewer.</p>
+</header>
+<nav class="stages" aria-label="Evidence responsibilities">
+{% for name, explanation in stages %}
+<section class="stage {% if name == 'Synthesis' %}gate{% endif %}">
+<button type="button" data-stage="{{ name }}">{{ name }}</button><p>{{ explanation }}</p>
+</section>
+{% endfor %}
+</nav>
+<div class="controls" aria-label="Viewer controls">
+<button type="button" data-action="refresh" aria-pressed="false">Pause refresh</button>
+<button type="button" data-action="motion" aria-pressed="false">Pause motion</button>
+<button type="button" data-action="first-evidence" disabled>First evidence page</button>
+<button type="button" data-action="next-evidence" disabled>Next evidence page</button>
+</div>
+<p class="identity" data-testid="page-state">Selected evidence page; exact aggregate counts are shown above.</p>
+<section aria-label="Recorded observation arrivals"><h2>Recorded arrivals</h2><div data-testid="arrivals"></div></section>
+<section aria-label="Recorded qualification changes"><div data-testid="role-moves"></div></section>
+<p class="muted" data-testid="packet-overflow"></p>
+<section class="inspector" data-testid="stage-inspector" aria-label="Stage inspector">
+<h2>Sources</h2><section role="region" aria-label="Input"><h3>Input</h3><p>Selected canonical mission observations. This page is not full corpus coverage.</p></section>
+<section role="region" aria-label="Output"><h3>Output</h3><p>{{ snapshot.evidence | length }} observations on this page; {{ snapshot.counts.observations }} in the selected corpus.</p>
+<h3>Measured channel coverage</h3>
+{% for channel in snapshot.channels %}<p data-channel-platform="{{ channel.platform }}">{{ channel.platform }} · {{ channel.status or 'Unknown' }} · <span data-testid="channel-count">{{ channel.signals_collected if channel.signals_collected is not none else 'Unknown' }}</span> observations · {{ channel.completed_at or 'Unknown' }} · {{ channel.note or 'Unknown' }}</p>{% else %}<p>Unknown — no measured channel outcomes in this selected view.</p>{% endfor %}
+<ul class="evidence-list">{% for row in snapshot.evidence %}<li><span>{{ row.title }}</span> <span class="identity">{{ row.observation_id }} · {{ row.evidence_role }} · {{ row.direction or 'Unknown' }}</span></li>{% else %}<li>No observations on this page.</li>{% endfor %}</ul></section>
+<section role="region" aria-label="Failure reason"><h3>Failure reason</h3><p>Unmeasured channel availability is Unknown; absence of a receipt is not a measured empty result.</p></section>
+<section role="region" aria-label="Why it matters"><h3>Why it matters</h3><p>Source and observation identity preserve evidence lineage without promoting attention to Market support.</p></section>
+</section>
+<section class="timeline" aria-label="Recorded events"><h2>Committed timeline</h2><ol data-testid="event-timeline">
+{% for event in (snapshot.event_page.events if snapshot.event_page else []) %}
+<li data-event-id="{{ event.event_id }}"><span class="identity">{{ event.kind }} · {{ event.provenance }} · {{ event.recorded_at }}</span><p>{{ event.reason or 'No failure reason recorded.' }}</p><span data-testid="event-observation-count">{{ event.evidence_references | length }}</span> recorded references</li>
+{% endfor %}
+</ol><p class="muted">A historic snapshot does not animate as new collection. Unsupported research work is unavailable.</p></section>
+<noscript><p>JavaScript is unavailable. The selected snapshot, canonical identities and exact counts above remain readable. Refresh this document for a new bounded read.</p></noscript>
+<script id="relay-initial" type="application/json">{{ snapshot | tojson }}</script>
+</main>
+<script>
+(() => {
+  'use strict';
+  const initial = JSON.parse(document.getElementById('relay-initial').textContent);
+  let snapshot = initial;
+  const main = document.querySelector('main');
+  const inspector = document.querySelector('[data-testid="stage-inspector"]');
+  const timeline = document.querySelector('[data-testid="event-timeline"]');
+  const deadline = Date.parse(main.dataset.expiresAt);
+  let inspectionGeneration = 0;
+  let inspectionController = null;
+  let inspectionPending = false;
+  let selectedStage = 'Sources';
+  const unknown = value => value === null || value === undefined ? 'Unknown' : String(value);
+  const node = (tag, value, className) => {
+    const element = document.createElement(tag);
+    if (value !== undefined) element.textContent = String(value);
+    if (className) element.className = className;
+    return element;
+  };
+  function stopInspection() {
+    inspectionGeneration += 1;
+    if (inspectionController) inspectionController.abort();
+    inspectionController = null;
+    inspectionPending = false;
+  }
+  function regions(title, values) {
+    inspector.replaceChildren(node('h2', title));
+    const result = {};
+    for (const name of ['Input', 'Output', 'Failure reason', 'Why it matters']) {
+      const region = node('section');
+      region.setAttribute('role', 'region');
+      region.setAttribute('aria-label', name);
+      region.append(node('h3', name), node('p', values[name]));
+      inspector.append(region);
+      result[name] = region;
+    }
+    return result;
+  }
+  function showChannels(output) {
+    output.append(node('h3', 'Measured channel coverage'));
+    if (!snapshot.channels.length) {
+      output.append(node('p', 'Unknown — no measured channel outcomes in this selected view.'));
+    }
+    for (const channel of snapshot.channels) {
+      const row = node('p');
+      row.dataset.channelPlatform = channel.platform;
+      row.append(node('span', `${channel.platform} · ${unknown(channel.connector_surface)} · ${unknown(channel.status)} · `));
+      const count = node('span', unknown(channel.signals_collected), 'count');
+      count.dataset.testid = 'channel-count';
+      row.append(count, node('span', ` observations · ${unknown(channel.completed_at)} · ${unknown(channel.note)}`));
+      output.append(row);
+    }
+  }
+  function addEvidence(output, rows) {
+    const list = node('ul');
+    list.className = 'evidence-list';
+    for (const row of rows) {
+      const item = node('li');
+      item.dataset.observationId = row.observation_id;
+      const button = node('button', row.title);
+      button.type = 'button';
+      button.addEventListener('click', () => inspectObservation(row));
+      item.append(button, node('p', `${row.observation_id} · ${row.source_id} · ${row.evidence_role} · ${unknown(row.direction)} · ${unknown(row.qualification_relation)}`, 'identity'));
+      list.append(item);
+    }
+    if (!rows.length) list.append(node('li', 'No observations on this page; missing coverage remains Unknown.'));
+    output.append(list);
+  }
+  function selectStage(name) {
+    stopInspection();
+    selectedStage = name;
+    for (const button of document.querySelectorAll('[data-stage]')) button.setAttribute('aria-pressed', String(button.dataset.stage === name));
+    let values;
+    if (name === 'Mission authority') {
+      values = {
+        'Input': `Selected mission ${snapshot.mission_id}, run ${unknown(snapshot.run_id)}.`,
+        'Output': `Read-only viewing scope. Manifest ${unknown(snapshot.manifest_digest)}. Research authority and remaining quota are Unknown in this read projection.`,
+        'Failure reason': 'Unknown authority details cannot grant collection, research or write permission. The viewing deadline never renews research authority.',
+        'Why it matters': 'A finite read URL authorizes inspection of this selected scope only.'
+      };
+    } else if (name === 'Sources') {
+      values = {
+        'Input': 'Canonical selected-mission observations and recorded channel outcomes.',
+        'Output': `${snapshot.evidence.length} observations on this page; ${snapshot.counts.observations} observations and ${snapshot.counts.sources} canonical sources in the full selected corpus.`,
+        'Failure reason': 'Unmeasured channel availability remains Unknown. EMPTY_NO_DATA is a measured outcome with its recorded count; it is not inferred from a missing result.',
+        'Why it matters': 'Source and observation identity retain lineage. Attention context does not become Market support.'
+      };
+    } else if (name === 'Cleaning') {
+      const qualified = snapshot.evidence.filter(row => row.qualification_relation !== null);
+      values = {
+        'Input': `${snapshot.evidence.length} canonical observations on this selected page.`,
+        'Output': qualified.length ? `${qualified.length} recorded qualifications on this page; complete-corpus qualification coverage is Unknown.` : 'Unknown — no recorded qualifications on this page. Cleaning remains pending.',
+        'Failure reason': 'Missing qualification receipts are not completed cleaning. Excluded observations remain inspectable without supporting a claim.',
+        'Why it matters': 'Recorded relations and frame fingerprints preserve the original judgment and its question frame.'
+      };
+    } else if (name === 'Research') {
+      values = {
+        'Input': 'Selected evidence page and persisted event history; no specialist assignment or activity basis is projected here.',
+        'Output': 'Unavailable — actual research activity is unsupported until authorized work and fresh activity receipts are available.',
+        'Failure reason': 'A work-start event alone does not prove an active specialist. No synthetic team, confidence, work rate or status is inferred.',
+        'Why it matters': 'The observatory distinguishes committed evidence from an unsupported description of ongoing work.'
+      };
+    } else if (name === 'Cross-check') {
+      values = {
+        'Input': 'Recorded support, contradiction, context and excluded roles on the selected evidence page.',
+        'Output': 'Unknown — complete counterevidence coverage and current-frame checks are unavailable in this projection. Recorded page roles remain separately inspectable.',
+        'Failure reason': 'Attention association, absent direction and excluded evidence cannot be promoted to supporting Market evidence.',
+        'Why it matters': 'The original relation and frame fingerprint let the reader question favorable evidence as well as counterevidence.'
+      };
+    } else {
+      values = {
+        'Input': `Frame ${unknown(snapshot.frame_digest)} · ${unknown(snapshot.frame_pending_reason)}.`,
+        'Output': `Withheld — ${unknown(snapshot.frame_pending_reason)}. ${stale ? 'Stale last successful read.' : ''} Current-frame Claim Ledger permission is unavailable in this internal slice.`,
+        'Failure reason': 'Observation volume, a present frame digest or old events do not grant strategic permission.',
+        'Why it matters': 'A permitted verdict requires a persisted current-frame ledger gate, not animation or a cached count.'
+      };
+    }
+    const output = regions(name, values)['Output'];
+    if (name === 'Sources') showChannels(output);
+    if (['Sources', 'Cleaning', 'Cross-check'].includes(name)) addEvidence(output, snapshot.evidence);
+  }
+  async function inspectObservation(row) {
+    stopInspection();
+    clearTimeout(refreshTimer);
+    const generation = inspectionGeneration;
+    if (Date.now() >= deadline) {
+      regions('Evidence inspection', {'Input': row.observation_id, 'Output': 'Unavailable — viewing deadline expired.', 'Failure reason': 'CAPABILITY_EXPIRED', 'Why it matters': 'Expired viewing scope cannot fetch another observation.'});
+      return;
+    }
+    regions('Evidence inspection', {'Input': row.observation_id, 'Output': 'Inspection pending.', 'Failure reason': 'Unknown until the scoped read settles.', 'Why it matters': 'Inspection is a bounded selected-page membership read.'});
+    inspectionPending = true;
+    if (refreshSettled) await refreshSettled;
+    if (generation !== inspectionGeneration || Date.now() >= deadline) return;
+    row = snapshot.evidence.find(item => item.observation_id === row.observation_id && item.source_id === row.source_id);
+    if (!row) {
+      inspectionPending = false;
+      regions('Evidence inspection', {'Input': 'Selected page', 'Output': 'Unavailable — selected observation is no longer on this page.', 'Failure reason': 'SCOPE_MISMATCH', 'Why it matters': 'Inspection cannot bypass current-page membership.'});
+      scheduleRefresh();
+      return;
+    }
+    const controller = new AbortController();
+    inspectionController = controller;
+    const query = new URLSearchParams({page_size: String(snapshot.page_size), evidence_offset: String(snapshot.evidence_offset)});
+    try {
+      const response = await fetch(`inspect/${encodeURIComponent(row.observation_id)}?${query}`, {cache: 'no-store', signal: controller.signal});
+      const data = await response.json();
+      if (generation !== inspectionGeneration || Date.now() >= deadline) return;
+      if (!response.ok || data.status !== 'OK' || data.mission_id !== snapshot.mission_id || data.run_id !== snapshot.run_id || data.revision !== snapshot.revision || data.high_water.ordinal !== snapshot.high_water.ordinal || data.observation.observation_id !== row.observation_id || data.observation.source_id !== row.source_id) {
+        regions('Evidence inspection', {'Input': row.observation_id, 'Output': 'Unavailable — scoped inspection refused or requires a fresh snapshot.', 'Failure reason': unknown(data.reason_code), 'Why it matters': 'A stale or foreign read cannot replace the selected evidence facts.'});
+        return;
+      }
+      const observation = data.observation;
+      const values = {
+        'Input': `Mission ${data.mission_id} · revision ${data.revision} · observation ${observation.observation_id} · source ${observation.source_id}.`,
+        'Output': `${observation.title}\n${unknown(observation.excerpt)}\n${observation.evidence_role} · ${unknown(observation.direction)} · ${unknown(observation.qualification_relation)}\nQualification frame ${unknown(observation.qualification_frame_fingerprint)}\nMetric ${unknown(observation.metric_value)} · growth ${unknown(observation.growth_velocity)}\nPublished ${unknown(observation.published_at)} · captured ${unknown(observation.captured_at)}\nSource URL ${unknown(observation.source_url)}`,
+        'Failure reason': 'Unknown unless a recorded channel or qualification refusal explains a gap. Current strategic claim permission is unavailable.',
+        'Why it matters': 'Source association, qualification relation and metric provenance are distinct from claim support.'
+      };
+      regions('Evidence inspection', values);
+    } catch (error) {
+      if (generation === inspectionGeneration && Date.now() < deadline) regions('Evidence inspection', {'Input': row.observation_id, 'Output': 'Unavailable — the scoped inspection read failed.', 'Failure reason': 'READ_UNAVAILABLE', 'Why it matters': 'A failed read is not an empty successful observation.'});
+    } finally {
+      if (inspectionController === controller) inspectionController = null;
+      if (generation === inspectionGeneration) inspectionPending = false;
+      scheduleRefresh();
+    }
+  }
+  function renderTimeline() {
+    timeline.replaceChildren();
+    const rows = new Map(snapshot.evidence.map(row => [row.observation_id, row]));
+    for (const event of recentEvents.values()) {
+      const item = node('li');
+      item.dataset.eventId = event.event_id;
+      item.append(node('p', `${event.kind} · ${event.provenance} · ${event.recorded_at} · run ${unknown(event.run_id)}`, 'identity'), node('p', event.reason || 'No failure reason recorded.'));
+      const count = node('span', event.evidence_references.length, 'count');
+      count.dataset.testid = 'event-observation-count';
+      item.append(count, node('span', ' recorded references'));
+      const references = node('ul');
+      for (const reference of event.evidence_references) {
+        const ref = node('li');
+        ref.dataset.observationId = reference.observation_id;
+        const row = rows.get(reference.observation_id);
+        const button = node('button', row ? row.title : `Observation ${reference.observation_id} — not on this evidence page`);
+        button.type = 'button';
+        button.disabled = !row;
+        if (row) button.addEventListener('click', () => inspectObservation(row));
+        ref.append(button, node('p', `${reference.source_id} · ${reference.evidence_role} · ${unknown(reference.direction)} · ${unknown(reference.qualification_relation)}`, 'identity'));
+        if (row) references.append(ref);
+      }
+      const visibleReferences = event.evidence_references.filter(ref => rows.has(ref.observation_id)).length;
+      if (visibleReferences < event.evidence_references.length) item.append(node('p', `${event.evidence_references.length - visibleReferences} references outside this evidence page; use the evidence page controls for bounded inspection.`));
+      item.append(references);
+      timeline.append(item);
+    }
+  }
+  const stateLabel = document.querySelector('[data-testid="snapshot-state"]');
+  const arrivals = document.querySelector('[data-testid="arrivals"]');
+  const roleMoves = document.querySelector('[data-testid="role-moves"]');
+  const overflow = document.querySelector('[data-testid="packet-overflow"]');
+  const refreshButton = document.querySelector('[data-action="refresh"]');
+  const motionButton = document.querySelector('[data-action="motion"]');
+  const nextEvidence = document.querySelector('[data-action="next-evidence"]');
+  const firstEvidence = document.querySelector('[data-action="first-evidence"]');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let refreshPaused = false;
+  let motionPaused = false;
+  let closed = false;
+  let stale = false;
+  let baselineMode = false;
+  let refreshTimer = null;
+  let refreshController = null;
+  let refreshSettled = null;
+  let policyGeneration = 0;
+  let readCursor = initial.event_page?.next_cursor || initial.high_water;
+  let deliveredCursor = initial.high_water;
+  const seenEvents = new Map();
+  const recentEvents = new Map();
+  const activePackets = new Set();
+  const cursorCompare = (a, b) => a.revision - b.revision || a.ordinal - b.ordinal;
+  const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+  const count = value => Number.isSafeInteger(value) && value >= 0;
+  const validCursor = cursor => cursor && cursor.mission_id === initial.mission_id && count(cursor.revision) && count(cursor.ordinal) && (cursor.revision === 0) === (cursor.ordinal === 0);
+  function validSnapshot(data, requestedCursor = undefined) {
+    if (!data || data.schema_version !== 1 || data.status !== 'OK' || data.mission_id !== initial.mission_id || data.run_id !== initial.run_id || !validCursor(data.high_water) || data.revision !== data.high_water.revision || cursorCompare(data.high_water, snapshot.high_water) < 0) return false;
+    if (!count(data.counts?.observations) || !count(data.counts?.sources) || data.counts.sources > data.counts.observations || !Number.isSafeInteger(data.page_size) || data.page_size < 1 || data.page_size > 200 || !count(data.evidence_offset) || !Array.isArray(data.evidence) || data.evidence.length > data.page_size || data.evidence_offset + data.evidence.length > data.counts.observations || !Array.isArray(data.channels)) return false;
+    if (data.collection_state !== null && !['PENDING', 'STARTED', 'RUNNING', 'COMPLETED', 'FAILED', 'BLOCKED', 'CANCELLED'].includes(data.collection_state)) return false;
+    const identities = new Map();
+    for (const row of data.evidence) {
+      if (row.mission_id !== data.mission_id || !uuid(row.observation_id) || !uuid(row.source_id) || identities.has(row.observation_id) || typeof row.title !== 'string') return false;
+      identities.set(row.observation_id, row.source_id);
+    }
+    const page = data.event_page;
+    if (page !== null) {
+      if (!validCursor(page?.high_water) || cursorCompare(page.high_water, data.high_water) !== 0 || !Array.isArray(page.events) || page.events.length > data.page_size || typeof page.has_more !== 'boolean' || typeof page.resync_required !== 'boolean') return false;
+      if (page.after_cursor !== null && (!validCursor(page.after_cursor) || cursorCompare(page.after_cursor, data.high_water) > 0)) return false;
+      if (!page.resync_required && requestedCursor !== undefined && (requestedCursor === null ? page.after_cursor !== null : !validCursor(page.after_cursor) || cursorCompare(page.after_cursor, requestedCursor) !== 0)) return false;
+      let previous = page.after_cursor || {revision: 0, ordinal: 0};
+      const eventIds = new Set();
+      for (const event of page.events) {
+        if (!uuid(event.event_id) || eventIds.has(event.event_id) || !validCursor(event) || cursorCompare(event, data.high_water) > 0 || previous && cursorCompare(event, previous) <= 0 || !Array.isArray(event.evidence_references)) return false;
+        if (seenEvents.has(event.event_id) && seenEvents.get(event.event_id) !== `${event.revision}:${event.ordinal}`) return false;
+        eventIds.add(event.event_id);
+        previous = event;
+        const references = new Set();
+        for (const ref of event.evidence_references) {
+          if (ref.mission_id !== data.mission_id || !uuid(ref.observation_id) || !uuid(ref.source_id) || references.has(ref.observation_id) || identities.has(ref.observation_id) && identities.get(ref.observation_id) !== ref.source_id) return false;
+          references.add(ref.observation_id);
+        }
+      }
+      if (page.has_more && (!previous || !validCursor(page.next_cursor) || cursorCompare(page.next_cursor, previous) !== 0 || cursorCompare(previous, data.high_water) >= 0)) return false;
+      if (!page.resync_required && !page.has_more && (page.next_cursor !== null || cursorCompare(previous, data.high_water) !== 0)) return false;
+      if (page.resync_required && (page.events.length || page.has_more || page.next_cursor !== null)) return false;
+    }
+    return true;
+  }
+  function remember(event) {
+    seenEvents.set(event.event_id, `${event.revision}:${event.ordinal}`);
+    if (seenEvents.size > 256) seenEvents.delete(seenEvents.keys().next().value);
+    recentEvents.set(event.event_id, event);
+    // Retain settled incremental receipts without growing an unbounded history.
+    while (recentEvents.size > snapshot.page_size || new TextEncoder().encode(JSON.stringify([...recentEvents.values()])).byteLength > 1048576) recentEvents.delete(recentEvents.keys().next().value);
+  }
+  function clearPackets() {
+    for (const packet of activePackets) packet.remove();
+    activePackets.clear();
+    overflow.textContent = '';
+  }
+  const viewActive = () => !closed && !refreshPaused && document.visibilityState === 'visible' && Date.now() < deadline;
+  const motionActive = () => viewActive() && !motionPaused && !reducedMotion.matches;
+  function packetGroups(event) {
+    const groups = new Map();
+    for (const ref of event.evidence_references) {
+      const key = JSON.stringify([ref.evidence_role, ref.direction, ref.qualification_relation]);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(ref);
+    }
+    return [...groups.values()];
+  }
+  function animate(events, baseline) {
+    let overflowReferences = 0;
+    const overflowEvents = new Set();
+    for (const event of events) {
+      const isNew = !baseline && cursorCompare(event, deliveredCursor) > 0 && !seenEvents.has(event.event_id);
+      remember(event);
+      if (!isNew || !motionActive()) continue;
+      const intake = event.kind === 'OBSERVATIONS_COMMITTED' && event.reason !== 'MEMBERSHIP_REATTACHED' && event.run_id === snapshot.run_id;
+      const qualification = event.kind === 'QUALIFICATION_RECORDED';
+      if (!intake && !qualification) continue;
+      for (const references of packetGroups(event)) {
+        if (activePackets.size >= 120) {
+          overflowReferences += references.length;
+          overflowEvents.add(event.event_id);
+          continue;
+        }
+        const packet = node('span');
+        packet.className = 'packet';
+        packet.dataset.testid = 'relay-packet';
+        packet.dataset.eventId = event.event_id;
+        packet.dataset.observationIds = JSON.stringify(references.map(ref => ref.observation_id));
+        packet.dataset.sourceIds = JSON.stringify([...new Set(references.map(ref => ref.source_id))]);
+        packet.dataset.evidenceRole = references[0].evidence_role;
+        if (references[0].direction !== null) packet.dataset.direction = references[0].direction;
+        packet.dataset.provenance = event.provenance;
+        const mark = node('span');
+        mark.className = 'packet-mark';
+        mark.setAttribute('aria-hidden', 'true');
+        const amount = node('span', references.length);
+        amount.dataset.testid = 'packet-observation-count';
+        packet.append(mark, amount, node('span', `${references[0].evidence_role} · ${unknown(references[0].direction)} · ${event.provenance}`));
+        packet.setAttribute('aria-label', `${references.length} recorded observation references, ${references[0].evidence_role}, ${unknown(references[0].direction)}, ${event.provenance}; inspect committed timeline for identities.`);
+        (intake ? arrivals : roleMoves).append(packet);
+        activePackets.add(packet);
+        const remove = () => { packet.remove(); activePackets.delete(packet); };
+        packet.addEventListener('animationend', remove, {once: true});
+        setTimeout(remove, 1900);
+      }
+    }
+    overflow.textContent = overflowReferences ? `${overflowReferences} additional recorded references across ${overflowEvents.size} events aggregated without extra moving packets; exact identities remain in the paged committed timeline and evidence inspector.` : '';
+  }
+  function updateReceipt() {
+    document.querySelector('[data-testid="collection-state"]').textContent = snapshot.collection_state === 'PENDING' ? 'Idle · recorded PENDING' : snapshot.collection_state === null ? 'Unknown · no canonical collection state' : `${snapshot.collection_state} · recorded state`;
+    document.querySelector('[data-testid="read-receipt"]').textContent = snapshot.read_at;
+    document.querySelector('[data-testid="frame-identity"]').textContent = unknown(snapshot.frame_digest || snapshot.frame_pending_reason);
+    document.querySelector('[data-testid="observation-count"]').textContent = String(snapshot.counts.observations);
+    document.querySelector('[data-testid="source-count"]').textContent = String(snapshot.counts.sources);
+    document.querySelector('[data-testid="page-state"]').textContent = `Evidence page ${snapshot.evidence.length ? snapshot.evidence_offset + 1 : 0}–${snapshot.evidence_offset + snapshot.evidence.length} of ${snapshot.counts.observations}; ${snapshot.event_page?.events.length || 0} events on this page${snapshot.event_page?.has_more ? ', more event pages pending' : ''}; ${recentEvents.size} recent committed receipts retained, bounded to ${snapshot.page_size} receipts and 1 MiB.`;
+    nextEvidence.disabled = snapshot.next_evidence_offset === null;
+    firstEvidence.disabled = snapshot.evidence_offset === 0;
+  }
+  function markStale(reason) {
+    stale = true;
+    clearPackets();
+    stateLabel.textContent = `Stale snapshot — ${reason}. Last successful read ${snapshot.read_at}; current strategic permission unavailable.`;
+    if (selectedStage === 'Synthesis') selectStage(selectedStage);
+  }
+  function scheduleRefresh() {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+    if (viewActive() && !refreshController && !inspectionController && !inspectionPending) refreshTimer = setTimeout(() => refresh(), 2000);
+  }
+  async function refresh(offset = snapshot.evidence_offset) {
+    if (!viewActive() || refreshController || inspectionController || inspectionPending) return;
+    const generation = policyGeneration;
+    const controller = new AbortController();
+    refreshController = controller;
+    let settled;
+    refreshSettled = new Promise(resolve => { settled = resolve; });
+    const requestedCursor = baselineMode ? null : readCursor;
+    const query = new URLSearchParams({page_size: String(snapshot.page_size), evidence_offset: String(offset)});
+    if (!baselineMode) {
+      query.set('after_revision', String(readCursor.revision));
+      query.set('after_ordinal', String(readCursor.ordinal));
+    }
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    try {
+      const response = await fetch(`snapshot?${query}`, {cache: 'no-store', signal: controller.signal});
+      const data = await response.json();
+      if (generation !== policyGeneration || !viewActive()) return;
+      if (!response.ok || !validSnapshot(data, requestedCursor)) {
+        markStale('read unavailable, incompatible identity/cursor or reordered page discarded');
+        return;
+      }
+      const baseline = baselineMode || data.event_page?.resync_required;
+      snapshot = data;
+      stale = false;
+      if (baseline) {
+        clearPackets();
+        recentEvents.clear();
+        deliveredCursor = data.high_water;
+        baselineMode = false;
+      }
+      const events = data.event_page?.events || [];
+      animate(events, baseline);
+      if (events.length && cursorCompare(events[events.length - 1], deliveredCursor) > 0) deliveredCursor = events[events.length - 1];
+      readCursor = data.event_page?.next_cursor || data.high_water;
+      updateReceipt();
+      renderTimeline();
+      if (!inspectionPending && !inspectionController) selectStage(selectedStage);
+      stateLabel.textContent = `${baseline ? 'Resync recorded snapshot' : 'Recorded snapshot'} · read ${snapshot.read_at}; particle motion encodes receipts, not throughput.`;
+    } catch (error) {
+      if (generation === policyGeneration && viewActive()) markStale('read unavailable or timed out');
+    } finally {
+      clearTimeout(timeout);
+      if (refreshController === controller) refreshController = null;
+      refreshSettled = null;
+      settled();
+      scheduleRefresh();
+    }
+  }
+  function suspendReads(label) {
+    policyGeneration += 1;
+    baselineMode = true;
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+    if (refreshController) refreshController.abort();
+    stopInspection();
+    clearPackets();
+    stateLabel.textContent = label;
+  }
+  refreshButton.addEventListener('click', () => {
+    refreshPaused = !refreshPaused;
+    refreshButton.textContent = refreshPaused ? 'Resume refresh' : 'Pause refresh';
+    refreshButton.setAttribute('aria-pressed', String(refreshPaused));
+    suspendReads(refreshPaused ? 'Refresh paused · recorded snapshot retained' : 'Recorded snapshot · resync pending');
+    if (!refreshPaused) scheduleRefresh();
+  });
+  motionButton.addEventListener('click', () => {
+    motionPaused = !motionPaused;
+    motionButton.textContent = motionPaused ? 'Resume motion' : 'Pause motion';
+    motionButton.setAttribute('aria-pressed', String(motionPaused));
+    if (motionPaused) clearPackets();
+  });
+  nextEvidence.addEventListener('click', () => { if (snapshot.next_evidence_offset !== null) refresh(snapshot.next_evidence_offset); });
+  firstEvidence.addEventListener('click', () => refresh(0));
+  document.addEventListener('visibilitychange', () => {
+    suspendReads(document.visibilityState === 'visible' ? 'Recorded snapshot · resync pending' : 'Hidden · refresh and motion stopped');
+    if (document.visibilityState === 'visible') scheduleRefresh();
+  });
+  window.addEventListener('pagehide', () => { closed = true; suspendReads('Viewer closed · recorded snapshot retained'); });
+  window.addEventListener('pageshow', event => { if (event.persisted) { closed = false; baselineMode = true; scheduleRefresh(); } });
+  reducedMotion.addEventListener('change', () => { if (reducedMotion.matches) clearPackets(); });
+  for (const event of initial.event_page?.events || []) remember(event);
+  if (!validSnapshot(initial)) {
+    stateLabel.textContent = 'Unavailable — initial snapshot cannot be represented safely.';
+    return;
+  }
+  updateReceipt();
+  setTimeout(() => { suspendReads('Viewing deadline expired · refresh and motion stopped'); }, Math.max(0, deadline - Date.now()));
+  scheduleRefresh();
+  for (const button of document.querySelectorAll('[data-stage]')) button.addEventListener('click', () => selectStage(button.dataset.stage));
+  selectStage('Sources');
+  renderTimeline();
+})();
+</script>
+
+</body>
+</html>

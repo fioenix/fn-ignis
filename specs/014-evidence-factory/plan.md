@@ -2,9 +2,13 @@
 
 **Branch**: `codex/ignis-evidence-factory` | **Date**: 2026-10-04 | **Spec**: [approved R1](spec.md)
 
-**Status**: Owner-approved on 2026-10-04; T001–T022 accepted (22/92). Collection and analysis producer wiring is locally verified on both backends. T022 scoped314PASS; final full3168PASS187FAIL10ERROR10SKIP2warnings, no new failed/error nodes versus T021; all36 original producer failures pass. T023 projection and all later runtime/UAT/integration gates remain open. Full-suite GREEN and shipment are unproven. Work is local and explicitly parked at the T022 boundary. Prior acceptance results below remain revision-specific history.
+**Status**: T001–T031 independently accepted:31/92. US1 internal slice is implemented and locally verified. Stable-source required US1/original mission/Task Relay gate:1348PASS3SKIP0FAIL0ERROR over36 files;287 Python/template hashes unchanged. Independent final correction check:18PASS0SKIP; no open US1 review finding. Changes are explicitly parked on the uncommitted/unmerged checkout; no full-feature GREEN, real-mission UAT or shipment claim.
 
 ## Summary
+
+Current acceptance update (2026-10-05): T001–T031 independently accepted:31/92. The first internal slice (US1) is implemented and automatically verified on frozen source:1348PASS3 disclosed conditional skips, zero failures/errors; final independent correction gate18PASS0SKIP. Canonical idle/STARTED/Unknown and actual persisted observation/qualification transitions pass through FastMCP, real HTTP and isolated Chromium on disposable SQLite file/private memory/local PostgreSQL. Unsupported research remains unavailable and strategic permission withheld. Changes are explicitly parked uncommitted/unmerged. This closes US1 only; later stories, full-feature UAT and shipment remain unaccepted.
+
+Historical T022 acceptance follows.
 
 Current acceptance update (2026-10-05): T022 joins both submission use cases to narrow atomic fact/event operations through a structural port and workspace delegates. Typed transaction-window stale errors retain CONFLICT/STALE_FRAME, with no submission write; existing final-readback withholding and audit history remain unchanged. Independent re-review closes the sole P2; all314 scoped cases pass with no skip, including6 new RED-before-fix race controls. Full3375 cases:3168PASS187FAIL10ERROR10SKIP2warnings598.10s. Exact36 original producer RED nodes pass; no new failed/error node. Remaining failures belong to future HTTP/projection/browser implementations or inherited isolated-settings/doc checks; clean-user bootstrap setup remains unaccepted. Canonical ledger22/92; T023 next, no integration/release action.
 

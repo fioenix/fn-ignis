@@ -105,7 +105,7 @@ def _snapshot(observations=(), events=(), *, revision=None, resync=False, **chan
     return MissionRelaySnapshot(**values)
 
 
-def _render(snapshot, builder=None):
+def _render(snapshot, builder=None, *, expires_at=None):
     """Discover missing real seams in each call phase, never manufacture HTML."""
     builder = builder or HtmlArtifactBuilder()
     build = getattr(builder, "build_mission_relay_artifact", None)
@@ -115,7 +115,7 @@ def _render(snapshot, builder=None):
     except TemplateNotFound:
         pytest.fail("T018 TEMPLATE RED: maintained mission_relay.html is absent", pytrace=False)
     assert Path(template.filename).resolve() == TEMPLATE
-    html = build(snapshot, snapshot_url=SNAPSHOT_URL, expires_at=NOW + timedelta(minutes=15))
+    html = build(snapshot, snapshot_url=SNAPSHOT_URL, expires_at=expires_at or NOW + timedelta(minutes=15))
     assert isinstance(html, str) and html.strip(), "The typed builder must render maintained HTML"
     return html
 
@@ -208,7 +208,18 @@ class FixtureViewer:
         elif parsed.path == "/view/inert-fixture/snapshot":
             if self.responses:
                 self.current = self.responses.pop(0)
-            route.fulfill(status=200, content_type="application/json", body=json.dumps(self.current.to_payload()))
+            payload = self.current.to_payload()
+            # Model the real reader's exclusive cursor page, rather than replaying
+            # the full fixture history for every incremental request.
+            from urllib.parse import parse_qs
+            query = parse_qs(parsed.query)
+            page = payload.get('event_page')
+            if page is not None and not page['resync_required'] and 'after_revision' in query:
+                after = _cursor(int(query['after_revision'][0]), int(query['after_ordinal'][0]))
+                if after.position <= self.current.high_water.position:
+                    page['after_cursor'] = after.to_payload()
+                    page['events'] = [event for event in page['events'] if (event['revision'], event['ordinal']) > after.position]
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
         elif parsed.path.startswith("/view/inert-fixture/inspect/"):
             identifier = parsed.path.rsplit("/", 1)[-1]
             observation = next((row for row in self.current.evidence if str(row.observation_id) == identifier), None)
@@ -646,3 +657,247 @@ def test_packet_observer_catches_reinserted_nodes_without_counting_nested_additi
         assert packets[-1]['event'] == 'subtree-control'
     finally:
         context.close()
+
+
+@pytest.mark.parametrize("width", (390, 768, 1440))
+def test_offline_no_script_snapshot_remains_readable_and_responsive(installed_browser, width):
+    """T027 static fallback only; interactive accessibility and real-mission UAT stay separate."""
+    from playwright.sync_api import expect
+    context = installed_browser.new_context(java_script_enabled=False, viewport={"width": width, "height": 900})
+    snapshot = _snapshot((_observation(),))
+    document = _render(snapshot)
+    context.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html", body=document)
+                  if route.request.url == DOCUMENT_URL else route.abort())
+    try:
+        page = context.new_page()
+        page.goto(DOCUMENT_URL)
+        expect(page.get_by_test_id("mission-authority")).to_contain_text(str(MISSION))
+        expect(page.get_by_test_id("observation-count")).to_have_text("1")
+        expect(page.get_by_test_id("source-count")).to_have_text("1")
+        # Chromium's execution-disable switch does not change the HTML parser's
+        # scripting flag. Check the noscript source separately; visible facts above
+        # and below prove the fallback without depending on that browser mechanism.
+        assert "JavaScript is unavailable" in page.locator("noscript").text_content()
+        expect(page.get_by_test_id("stage-inspector")).to_contain_text(snapshot.evidence[0].title)
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), "Offline snapshot overflows the page horizontally"
+        output = Path(__file__).resolve().parents[2] / ".handoff/spec014/t027" / f"offline-{width}.png"
+        page.screenshot(path=str(output), full_page=True)
+    finally:
+        context.close()
+
+
+def test_sources_measured_empty_and_unmeasured_channels_remain_distinct(installed_browser):
+    """A missing channel count must remain Unknown rather than become measured zero."""
+    from playwright.sync_api import expect
+    from ignis.domain.harness_models import ChannelHealthStatus
+    from ignis.domain.mission_relay import RelayChannelOutcome
+    channels = (
+        RelayChannelOutcome(platform="YOUTUBE", connector_surface="HTTP", status=ChannelHealthStatus.EMPTY_NO_DATA,
+            signals_collected=0, completed_at=NOW, note="Measured fixture empty"),
+        RelayChannelOutcome(platform="THREADS", connector_surface=None, status=None,
+            signals_collected=None, completed_at=None, note=None),
+    )
+    with _viewer(installed_browser, _snapshot(channels=channels)) as viewer:
+        viewer.page.get_by_role("button", name="Sources", exact=True).click()
+        output = viewer.page.get_by_test_id("stage-inspector").get_by_role("region", name="Output", exact=True)
+        measured = output.locator('[data-channel-platform="YOUTUBE"]')
+        unknown = output.locator('[data-channel-platform="THREADS"]')
+        expect(measured).to_contain_text("EMPTY_NO_DATA")
+        expect(measured.get_by_test_id("channel-count")).to_have_text("0")
+        expect(unknown.get_by_test_id("channel-count")).to_have_text("Unknown")
+        expect(unknown).to_contain_text("Unknown")
+
+
+def test_source_evidence_roles_are_selectable_without_motion(installed_browser):
+    """Direct inspector selection preserves stored associations and judgments."""
+    from playwright.sync_api import expect
+    rows = (
+        _observation(1, evidence_role=EvidenceRole.MARKET_EVIDENCE, direction=EvidenceDirection.SUPPORT,
+            qualification_relation=QualificationRelation.QUALIFIED_SUPPORT, qualification_frame_fingerprint="b" * 64),
+        _observation(2, evidence_role=EvidenceRole.MARKET_EVIDENCE, direction=EvidenceDirection.CONTRADICTION,
+            qualification_relation=QualificationRelation.QUALIFIED_CONTRADICTION, qualification_frame_fingerprint="b" * 64),
+        _observation(3, evidence_role=EvidenceRole.ATTENTION_CONTEXT, direction=EvidenceDirection.CONTEXT,
+            qualification_relation=QualificationRelation.CONTEXT_ONLY, qualification_frame_fingerprint="b" * 64),
+        _observation(4, evidence_role=EvidenceRole.MARKET_EVIDENCE, direction=None,
+            qualification_relation=QualificationRelation.EXCLUDED_IRRELEVANT, qualification_frame_fingerprint="b" * 64),
+    )
+    with _viewer(installed_browser, _snapshot(rows, surface=ResearchSurface.MARKET)) as viewer:
+        for row in rows:
+            viewer.page.get_by_role("button", name="Sources", exact=True).click()
+            viewer.page.get_by_test_id("stage-inspector").get_by_role("button", name=row.title, exact=True).click()
+            inspector = viewer.page.get_by_test_id("stage-inspector")
+            for value in (str(row.observation_id), str(row.source_id), row.evidence_role.value,
+                          row.qualification_relation.value, "b" * 64):
+                expect(inspector).to_contain_text(value)
+            expect(inspector).to_contain_text(row.direction.value if row.direction is not None else "Unknown")
+        assert viewer.packets == [], "Direct inspection must not manufacture arrivals"
+
+
+def _set_visible(page, visible):
+    page.evaluate("""visible => {
+        Object.defineProperty(document, 'visibilityState', {configurable: true, value: visible ? 'visible' : 'hidden'});
+        document.dispatchEvent(new Event('visibilitychange'));
+    }""", visible)
+
+
+def test_refresh_hidden_and_paused_boundaries_admit_no_automatic_reads(installed_browser):
+    """Fixture visibility signal only; actual host/browser visibility UAT stays separate."""
+    from playwright.sync_api import expect
+    with _viewer(installed_browser, _snapshot()) as viewer:
+        _set_visible(viewer.page, False)
+        viewer.page.clock.run_for(6000)
+        assert not [path for method, path in viewer.requests if path.endswith('/snapshot')]
+        _set_visible(viewer.page, True)
+        viewer.refresh(_snapshot())
+        before = len([path for method, path in viewer.requests if path.endswith('/snapshot')])
+        viewer.page.get_by_role('button', name='Pause refresh', exact=True).click()
+        viewer.page.clock.run_for(6000)
+        assert len([path for method, path in viewer.requests if path.endswith('/snapshot')]) == before
+        expect(viewer.page.get_by_test_id('snapshot-state')).to_contain_text(re.compile('paused', re.I))
+        viewer.page.get_by_role('button', name='Resume refresh', exact=True).click()
+        viewer.refresh(_snapshot((_observation(),), (_event(observations=(_observation(),)),)))
+        viewer.counts(1, 1)
+        assert viewer.packets == [], 'Resuming refresh establishes a baseline, rather than replaying history'
+
+
+def test_expired_view_admits_no_new_automatic_reads(installed_browser):
+    from playwright.sync_api import expect
+    viewer = FixtureViewer(installed_browser, _snapshot())
+    viewer.document = _render(_snapshot(), expires_at=NOW + timedelta(seconds=1))
+    try:
+        viewer.open()
+        viewer.page.clock.run_for(6000)
+        assert not [path for method, path in viewer.requests if path.endswith('/snapshot')]
+        expect(viewer.page.get_by_test_id('snapshot-state')).to_contain_text(re.compile('expired', re.I))
+        assert viewer.packets == []
+    finally:
+        viewer.close()
+
+
+def test_motion_pause_and_reduced_motion_preserve_static_evidence(installed_browser):
+    from playwright.sync_api import expect
+    observation = _observation()
+    event = _event(observations=(observation,))
+    with _viewer(installed_browser, _snapshot()) as viewer:
+        viewer.page.get_by_role('button', name='Pause motion', exact=True).click()
+        viewer.refresh(_snapshot((observation,), (event,)))
+        viewer.counts(1, 1)
+        assert viewer.packets == []
+        expect(_event_row(viewer.page, event)).to_be_visible()
+    viewer = FixtureViewer(installed_browser, _snapshot())
+    viewer.page.emulate_media(reduced_motion='reduce')
+    try:
+        viewer.open()
+        viewer.refresh(_snapshot((observation,), (event,)))
+        viewer.counts(1, 1)
+        assert viewer.packets == []
+        expect(_event_row(viewer.page, event)).to_be_visible()
+    finally:
+        viewer.close()
+
+
+def test_older_or_foreign_refresh_never_replaces_selected_snapshot(installed_browser):
+    from playwright.sync_api import expect
+    row = _observation()
+    recorded = _snapshot((row,), (_event(observations=(row,)),))
+    foreign = replace(_snapshot(), mission_id=UUID(int=9001),
+        high_water=MissionRelayCursor(mission_id=UUID(int=9001), revision=0, ordinal=0), event_page=None)
+    with _viewer(installed_browser, recorded) as viewer:
+        for bad in (_snapshot(), foreign):
+            viewer.refresh(bad)
+            viewer.counts(1, 1)
+            expect(viewer.page.get_by_test_id('mission-authority')).to_contain_text(str(MISSION))
+            expect(viewer.page.get_by_test_id('snapshot-state')).to_contain_text(re.compile('stale|discarded|incompatible', re.I))
+        assert viewer.packets == []
+
+
+def test_unavailable_refresh_keeps_last_counts_and_marks_them_stale(installed_browser):
+    from playwright.sync_api import expect
+    from ignis.domain.mission_relay import MissionRelayReadFailure, RelayReadReason, RelayReadStatus
+    with _viewer(installed_browser, _snapshot((_observation(),))) as viewer:
+        viewer.refresh(MissionRelayReadFailure(status=RelayReadStatus.UNAVAILABLE, reason_code=RelayReadReason.READ_UNAVAILABLE))
+        viewer.counts(1, 1)
+        expect(viewer.page.get_by_test_id('snapshot-state')).to_contain_text(re.compile('stale', re.I))
+        viewer.page.get_by_role('button', name='Synthesis', exact=True).click()
+        expect(viewer.page.get_by_test_id('stage-inspector')).to_contain_text(re.compile('withheld|unavailable', re.I))
+
+
+def test_refresh_schedules_only_after_previous_request_settles(installed_browser):
+    from playwright.sync_api import expect
+    viewer = FixtureViewer(installed_browser, _snapshot())
+    held = []
+    original = viewer._route
+    def hold_snapshot(route):
+        if urlsplit(route.request.url).path.endswith('/snapshot'):
+            viewer.requests.append(('GET', '/view/inert-fixture/snapshot'))
+            held.append(route)
+        else:
+            original(route)
+    viewer.context.unroute('**/*')
+    viewer.context.route('**/*', hold_snapshot)
+    try:
+        viewer.open()
+        with viewer.page.expect_request(lambda request: urlsplit(request.url).path.endswith('/snapshot')):
+            viewer.page.clock.run_for(5000)
+        viewer.page.evaluate('async () => { await Promise.resolve(); await Promise.resolve(); }')
+        assert len(held) == 1, 'Automatic refresh overlapped an unresolved read'
+        settled = _snapshot(event_page=MissionRelayEventPage(high_water=_cursor(),
+            page_size=200, events=(), after_cursor=_cursor())).to_payload()
+        with viewer.page.expect_response(lambda response: urlsplit(response.url).path.endswith('/snapshot')):
+            held[0].fulfill(status=200, content_type='application/json', body=json.dumps(settled))
+        expect(viewer.page.get_by_test_id('snapshot-state')).to_contain_text('particle motion encodes receipts')
+        viewer.page.clock.run_for(1900)
+        assert len(held) == 1, 'Refresh scheduled before two seconds after settlement'
+        with viewer.page.expect_request(lambda request: urlsplit(request.url).path.endswith('/snapshot')):
+            viewer.page.clock.run_for(201)
+        viewer.page.evaluate('async () => { await Promise.resolve(); await Promise.resolve(); }')
+        assert len(held) == 2
+        held[1].fulfill(status=200, content_type='application/json', body=json.dumps(settled))
+    finally:
+        viewer.close()
+
+
+def test_incomplete_event_page_cannot_advance_refresh_cursor(installed_browser):
+    from playwright.sync_api import expect
+    row, new = _observation(), _observation(2)
+    initial = _snapshot((row,), (_event(observations=(row,)),))
+    bad = _snapshot((row, new), (_event(observations=(row,)), _event(2, (new,)))).to_payload()
+    bad['event_page'].update(events=[], after_cursor=initial.high_water.to_payload(), has_more=False, next_cursor=None)
+    with _viewer(installed_browser, initial) as viewer:
+        viewer.page.evaluate('''data => {
+            window.calls = [];
+            window.fetch = async url => { calls.push(url); return {ok: true, json: async () => data}; };
+        }''', bad)
+        viewer.page.clock.run_for(2001)
+        expect(viewer.page.get_by_test_id('snapshot-state')).to_contain_text('Stale')
+        viewer.counts(1, 1)
+        viewer.page.clock.run_for(2001)
+        assert 'after_revision=1' in viewer.page.evaluate('calls')[1]
+        assert viewer.packets == []
+
+
+def test_inspection_waits_for_refresh_and_retains_selected_observation(installed_browser):
+    from playwright.sync_api import expect
+    row = _observation()
+    initial = _snapshot((row,), (_event(observations=(row,)),))
+    inspection = MissionRelayInspection(mission_id=MISSION, run_id=RUN,
+        high_water=initial.high_water, read_at=NOW, observation=row)
+    with _viewer(installed_browser, initial) as viewer:
+        viewer.page.evaluate('''() => {
+            window.calls = []; window.replies = [];
+            window.fetch = url => new Promise(resolve => {
+                calls.push(url); replies.push(data => resolve({ok: true, json: async () => data}));
+            });
+        }''')
+        viewer.page.clock.run_for(2001)
+        viewer.page.get_by_test_id('stage-inspector').get_by_role('button', name=row.title, exact=True).click()
+        assert len(viewer.page.evaluate('calls')) == 1, 'Inspection overlapped the pending refresh'
+        settled = replace(initial, event_page=MissionRelayEventPage(high_water=initial.high_water,
+            page_size=200, events=(), after_cursor=initial.high_water)).to_payload()
+        viewer.page.evaluate('data => replies[0](data)', settled)
+        expect(viewer.page.get_by_test_id('stage-inspector')).to_contain_text('Inspection pending')
+        assert len(viewer.page.evaluate('calls')) == 2
+        assert viewer.page.evaluate('calls')[1].startswith('inspect/')
+        viewer.page.evaluate('data => replies[1](data)', inspection.to_payload())
+        expect(viewer.page.get_by_test_id('stage-inspector').get_by_role('heading', name='Evidence inspection', exact=True)).to_be_visible()
+        expect(viewer.page.get_by_test_id('stage-inspector')).to_contain_text(row.title)
