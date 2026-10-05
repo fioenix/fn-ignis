@@ -2,7 +2,7 @@
 
 **Input**: Approved R1 `spec.md`, owner-approved `plan.md`, `research.md`, `data-model.md`, `contracts/` and `quickstart.md`.
 
-**Status**: T001–T032 accepted:32/92. US1 is committed at8892253. T032 independently accepted test design:9 expected US3 implementation RED and3 controls PASS,0errors/skips. T033–T040 remain required for US3. Owner directs one commit per completed task and a PR only after full Spec014 completion; no merge/release/UAT claim.
+**Status**: T001–T033 accepted:33/92. US1 committed8892253; T032 committed1495e44. T033 independently accepted test design:5 typed-gate API-contract RED,0errors/skips; stale behavior awaits T034/T036/T037. T034–T040 remain required for US3. Commit each completed task; PR only after full spec completion. No UAT/shipment claim.
 
 **Outcome**: A real, bounded, read-only research observatory with inspectable events, actual host work/handoffs, evolving findings and one authority-bound child follow-up. Static animation, synthetic concurrency and SQLite-only success do not close this feature.
 
@@ -78,7 +78,7 @@
 **Independent test**: Incomplete/changed/failed refresh immediately withholds strategic permission; unknown publication/reach stays unknown; insufficient evidence displays a gap without category winner or confidence.
 
 - [x] T032 [US3] Add failing partial-run, frame-change, mismatched mission/run and unknown-metric cases in `tests/unit/test_mission_relay_claim_gate.py`; independently negate each permission/missingness assertion.
-- [ ] T033 [P] [US3] Add failing failed-read, reordered-response and immediate stale-claim removal browser cases in `tests/integration/test_mission_relay_browser.py`; measure from the read/failure boundary rather than connector start.
+- [x] T033 [P] [US3] Add failing failed-read, reordered-response and immediate stale-claim removal browser cases in `tests/integration/test_mission_relay_browser.py`; measure from the read/failure boundary rather than connector start.
 - [ ] T034 [US3] Add explicit current/pending/stale/history gate projection in `src/ignis/application/use_cases/get_mission_relay_snapshot.py`; make T032 pass without treating old completed outcomes as current active-pass success.
 - [ ] T035 [US3] Add mission/run/frame, last successful read and unavailable reasons to the persistent header in `src/ignis/infrastructure/templates/html/mission_relay.html`; verify successful and failed reads have distinct receipts.
 - [ ] T036 [US3] Render only exact-frame PERMITTED strategic entries or the actual Gap Report in `src/ignis/infrastructure/templates/html/mission_relay.html`; verify descriptive/provisional labeling never grants permission.
@@ -670,3 +670,7 @@ The earlier repository-wide run was intentionally interrupted for the final acce
 ### T032 test-design acceptance — 2026-10-05
 
 Canonical Market fixtures establish real persisted PERMITTED and same-frame WITHHELD rows. Exact original binding, unknown500/3.5 versus known-zero0/0, requested-journal mismatch, selected-run STARTED/RUNNING/FAILED/CANCELLED, changed corpus history, paginated full-frame and canonical specific qualification Gap assertions have independent review. Coordinator9RED3PASS0ERROR0SKIP0.69s; reviewer9RED3PASS0ERROR0SKIP0.74s. These are test-design acceptance and future T034 implementation obligations, not gate permission PASS. Setup-only failures were corrected before the final receipt; no product code changed for T032. Evidence .handoff/spec014/t032/{red-r2.xml,reviewer-r2.xml,review.handoff.md}. Canonical32/92; T033 next.
+
+### T033 test-design acceptance — 2026-10-05
+
+Five browser negatives require visible current claims before a network, foreign mission/run, reordered cursor or incompatible-frame read. They retain the exact last successful receipt, require a newer failed attempt receipt/reason, remove current permission without stage-navigation resurrection and retain labeled history. Test-local native fetch/JSON boundary and stable-inspector MutationObserver measure removal under50ms; independent parent-replacement control proves the observer survives correct DOM replacement. Independent5API-contractRED47deselected0ERROR0SKIP1.06s with installed isolated Chromium. Typed gate is absent, so stale behavior is not yet executed; T034/T036/T037 remain obligations. Review accepted corrected design; evidence .handoff/spec014/t033/review.handoff.md and reviewer XML/log. Canonical33/92.

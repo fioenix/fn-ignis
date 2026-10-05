@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-04
 
-**Status**: T001–T032 accepted:32/92. US1 is committed at8892253. T032 independently accepted test design:9 expected US3 implementation RED and3 controls PASS,0errors/skips. T033–T040 remain required for US3. Owner directs one commit per completed task and a PR only after full Spec014 completion; no merge/release/UAT claim.
+**Status**: T001–T033 accepted:33/92. US1 committed8892253; T032 committed1495e44. T033 independently accepted test design:5 typed-gate API-contract RED,0errors/skips; stale behavior awaits T034/T036/T037. T034–T040 remain required for US3. Commit each completed task; PR only after full spec completion. No UAT/shipment claim.
 
 **Review revision**: R1 — 2026-10-04
 

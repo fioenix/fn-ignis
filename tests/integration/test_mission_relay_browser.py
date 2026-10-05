@@ -105,6 +105,29 @@ def _snapshot(observations=(), events=(), *, revision=None, resync=False, **chan
     return MissionRelaySnapshot(**values)
 
 
+def _us3_permitted_snapshot():
+    """Typed future gate seam; absent API is design RED, not stale behavior proof."""
+    from ignis.domain import mission_relay
+    from ignis.domain.research_workspace import ClaimStatus, ClaimType, MissionClaim, MissionClaimEvidence
+    gate_type = getattr(mission_relay, 'RelayClaimGate', None)
+    gate_state = getattr(mission_relay, 'RelayGateState', None)
+    assert gate_type is not None and gate_state is not None, 'T033 API RED: typed US3 gate is absent'
+    claim_id = UUID(int=8700)
+    brief_id = UUID(int=8800)
+    observation = _observation(evidence_role=EvidenceRole.MARKET_EVIDENCE)
+    claim = MissionClaim(
+        claim_id=claim_id, mission_id=MISSION, brief_revision_id=brief_id, frame_digest='a' * 64,
+        client_claim_key='fixture-current', claim_type=ClaimType.OBSERVATION,
+        wording='A persisted fixture statement, not a live market verdict.',
+        status=ClaimStatus.PERMITTED, created_by='browser-fixture', created_at=NOW,
+        evidence_bindings=(MissionClaimEvidence(claim_id=claim_id, observation_id=observation.observation_id,
+                            probe_outcome_id=None, role=EvidenceDirection.SUPPORT, hypothesis_target='core'),),
+    )
+    return _snapshot((observation,), revision=2, surface=ResearchSurface.MARKET,
+                     brief_revision_id=brief_id, frame_digest='a' * 64, frame_pending_reason=None,
+                     claim_gate=gate_type(state=gate_state.CURRENT, frame_digest='a' * 64, claims=(claim,)))
+
+
 def _render(snapshot, builder=None, *, expires_at=None):
     """Discover missing real seams in each call phase, never manufacture HTML."""
     builder = builder or HtmlArtifactBuilder()
@@ -901,3 +924,68 @@ def test_inspection_waits_for_refresh_and_retains_selected_observation(installed
         viewer.page.evaluate('data => replies[1](data)', inspection.to_payload())
         expect(viewer.page.get_by_test_id('stage-inspector').get_by_role('heading', name='Evidence inspection', exact=True)).to_be_visible()
         expect(viewer.page.get_by_test_id('stage-inspector')).to_contain_text(row.title)
+
+
+@pytest.mark.parametrize('failure', ['network', 'foreign-mission', 'foreign-run', 'reordered', 'incompatible-frame'])
+def test_us3_failed_or_incompatible_read_removes_current_permission_immediately(installed_browser, failure):
+    from playwright.sync_api import expect
+    initial = _us3_permitted_snapshot()
+    with _viewer(installed_browser, initial) as viewer:
+        viewer.page.get_by_role('button', name='Synthesis', exact=True).click()
+        current = viewer.page.get_by_test_id('current-claims')
+        expect(current).to_contain_text(initial.claim_gate.claims[0].wording)
+        receipt = viewer.page.get_by_test_id('read-receipt').inner_text()
+        prior_attempt = viewer.page.get_by_test_id('last-read-attempt').inner_text()
+        viewer.page.evaluate('''() => {
+            window.t033Boundary = null; window.t033Removal = null;
+            const original = window.fetch;
+            window.fetch = async (...args) => {
+                try {
+                    const response = await original(...args);
+                    const json = response.json.bind(response);
+                    response.json = async () => {
+                        const data = await json(); window.t033Boundary = performance.now(); return data;
+                    };
+                    return response;
+                } catch (error) { window.t033Boundary = performance.now(); throw error; }
+            };
+            new MutationObserver(() => {
+                const region = document.querySelector('[data-testid="current-claims"]');
+                if ((!region || !region.textContent.trim()) && window.t033Boundary !== null)
+                    window.t033Removal = performance.now() - window.t033Boundary;
+            }).observe(document.querySelector('[data-testid="stage-inspector"]'),
+                       {childList: true, subtree: true, characterData: true});
+        }''')
+        data = initial.to_payload()
+        data['event_page']['after_cursor'] = initial.high_water.to_payload()
+        if failure == 'foreign-mission':
+            data['mission_id'] = str(UUID(int=9001))
+        elif failure == 'foreign-run':
+            data['run_id'] = str(UUID(int=9002))
+        elif failure == 'reordered':
+            data['revision'] = 1
+            data['high_water'] = _cursor(1).to_payload()
+        elif failure == 'incompatible-frame':
+            data['frame_digest'] = 'b' * 64
+        def answer(route):
+            if failure == 'network':
+                route.abort()
+            else:
+                route.fulfill(status=200, content_type='application/json', body=json.dumps(data))
+        viewer.context.route('**/snapshot?*', answer)
+        viewer.page.clock.run_for(2100)
+        expect(viewer.page.get_by_test_id('snapshot-state')).to_contain_text('Stale')
+        expect(current).to_be_empty()
+        expect(viewer.page.get_by_test_id('claim-history')).to_contain_text('History')
+        expect(viewer.page.get_by_test_id('claim-history')).to_contain_text(initial.claim_gate.claims[0].wording)
+        expect(viewer.page.get_by_test_id('read-receipt')).to_have_text(receipt)
+        attempt = viewer.page.get_by_test_id('last-read-attempt')
+        expect(attempt).not_to_have_text(prior_attempt)
+        assert viewer.page.evaluate('values => Date.parse(values[1]) > Date.parse(values[0])',
+                                    [receipt, attempt.inner_text()])
+        expect(viewer.page.get_by_test_id('read-failure-reason')).to_contain_text(re.compile('read|identity|frame|cursor|unavailable', re.I))
+        latency = viewer.page.evaluate('t033Removal')
+        assert latency is not None and 0 <= latency < 50, 'Permission removal was deferred beyond the read/failure task'
+        viewer.page.get_by_role('button', name='Sources', exact=True).click()
+        viewer.page.get_by_role('button', name='Synthesis', exact=True).click()
+        expect(current).to_be_empty()
