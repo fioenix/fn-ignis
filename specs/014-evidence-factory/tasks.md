@@ -2,7 +2,7 @@
 
 **Input**: Approved R1 `spec.md`, owner-approved `plan.md`, `research.md`, `data-model.md`, `contracts/` and `quickstart.md`.
 
-**Status**: T001–T034 accepted:34/92. T034 current/pending/stale/history projection independently verified:396PASS0SKIP plus13 independentPASS and an actual newer-STARTED-history refusal probe. Nested Gap privacy P1 resolved with genuine RED regression. US1 and T032/T033 are committed; T035–T040 remain required for US3. Commit each task; PR after full spec completion. No UAT/shipment claim.
+**Status**: T001–T035 accepted:35/92. T035 persistent header keeps selected identity, successful read and separate failed attempt/reason. Coordinator73PASS5deselected10.01s; independent73PASS5deselected9.99s, no failures/errors/skips. Genuine missing-attempt RED retained; T033 five stale claim cases await T036/T037. Evidence .handoff/spec014/t035/{verified.xml,review.handoff.md}. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
 
 **Outcome**: A real, bounded, read-only research observatory with inspectable events, actual host work/handoffs, evolving findings and one authority-bound child follow-up. Static animation, synthetic concurrency and SQLite-only success do not close this feature.
 
@@ -80,7 +80,7 @@
 - [x] T032 [US3] Add failing partial-run, frame-change, mismatched mission/run and unknown-metric cases in `tests/unit/test_mission_relay_claim_gate.py`; independently negate each permission/missingness assertion.
 - [x] T033 [P] [US3] Add failing failed-read, reordered-response and immediate stale-claim removal browser cases in `tests/integration/test_mission_relay_browser.py`; measure from the read/failure boundary rather than connector start.
 - [x] T034 [US3] Add explicit current/pending/stale/history gate projection in `src/ignis/application/use_cases/get_mission_relay_snapshot.py`; make T032 pass without treating old completed outcomes as current active-pass success.
-- [ ] T035 [US3] Add mission/run/frame, last successful read and unavailable reasons to the persistent header in `src/ignis/infrastructure/templates/html/mission_relay.html`; verify successful and failed reads have distinct receipts.
+- [x] T035 [US3] Add mission/run/frame, last successful read and unavailable reasons to the persistent header in `src/ignis/infrastructure/templates/html/mission_relay.html`; verify successful and failed reads have distinct receipts.
 - [ ] T036 [US3] Render only exact-frame PERMITTED strategic entries or the actual Gap Report in `src/ignis/infrastructure/templates/html/mission_relay.html`; verify descriptive/provisional labeling never grants permission.
 - [ ] T037 [US3] Make client failed/incompatible refresh remove current strategic permission immediately in `src/ignis/infrastructure/templates/html/mission_relay.html`; make T033 pass while preserving labeled history and the last successful read time.
 - [ ] T038 [US3] Add cross-mission inspector and empty/degraded/unknown channel negatives in `tests/integration/test_mission_relay_mcp.py`; verify no synthetic fallback, foreign record access or missingness-as-zero.
@@ -678,3 +678,7 @@ Five browser negatives require visible current claims before a network, foreign 
 ### T034 implementation acceptance — 2026-10-05
 
 Typed gate consumes the canonical complete Market corpus and latest selected journal in the same no-bootstrap read-only transaction, while outward pages remain bounded. Exact canonical frame, current question qualifications, strategic sufficiency and persisted PERMITTED rows/bindings govern permission. Incomplete runs remain PENDING/unavailable; selecting an older completed journal returns HISTORY/WITHHELD; changed ledger rows stay labeled history. Unknown metric annotations hide placeholder metric/growth while preserving known zero. Independent P1 nested Gap privacy bypass was reproduced and corrected with an explicit sanitized Gap allowlist; canonical machine reasons/counts remain intact. Final seven-file gate396PASS0SKIP38.87s, PostgreSQL scratch cleanup verified; independent13PASS0SKIP0.97s plus actual newer-STARTED-history refusal probe. Ruff/diff-check pass. Evidence .handoff/spec014/t034/{final.xml,privacy-red.xml,review.handoff.md}; browser stale/rendering T035–T037 remains unverified. Canonical34/92.
+
+### T035 local acceptance — 2026-10-05
+
+T035 persistent header keeps selected identity, successful read and separate failed attempt/reason. Coordinator73PASS5deselected10.01s; independent73PASS5deselected9.99s, no failures/errors/skips. Genuine missing-attempt RED retained; T033 five stale claim cases await T036/T037. Evidence .handoff/spec014/t035/{verified.xml,review.handoff.md}.

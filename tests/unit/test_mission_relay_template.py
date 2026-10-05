@@ -41,6 +41,33 @@ def test_maintained_initial_document_has_readable_offline_receipt_and_theme():
     assert 'inert-fixture' not in html, "Capability path must not be copied into document data"
 
 
+def test_header_distinguishes_successful_receipt_attempt_and_unavailable_reason():
+    from html.parser import HTMLParser
+    class Receipts(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.values = {}
+            self.selected = None
+        def handle_starttag(self, tag, attrs):
+            self.selected = dict(attrs).get('data-testid')
+            if self.selected:
+                self.values[self.selected] = ''
+        def handle_data(self, data):
+            if self.selected:
+                self.values[self.selected] += data
+        def handle_endtag(self, tag):
+            self.selected = None
+    snapshot = _snapshot()
+    document = Receipts()
+    document.feed(_build(snapshot))
+    assert document.values['read-receipt'] == snapshot.read_at.isoformat()
+    assert 'last-read-attempt' in document.values, 'Header must retain a separate viewer read-attempt receipt'
+    assert document.values['last-read-attempt'] == 'Unknown'
+    assert 'read-failure-reason' in document.values, 'Unknown gate/failed read must expose its bounded reason'
+    assert 'FRAME_UNKNOWN' in document.values['read-failure-reason']
+    assert document.values['gate-state'] == 'UNAVAILABLE'
+
+
 def test_typed_builder_escapes_markup_and_script_termination():
     title = '</script><script>window.privateMarker = 1</script><img src=x onerror=alert(1)> Trà'
     html = _build(_snapshot(title))

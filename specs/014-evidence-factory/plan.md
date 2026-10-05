@@ -2,7 +2,7 @@
 
 **Branch**: `codex/ignis-evidence-factory` | **Date**: 2026-10-04 | **Spec**: [approved R1](spec.md)
 
-**Status**: T001–T034 accepted:34/92. T034 current/pending/stale/history projection independently verified:396PASS0SKIP plus13 independentPASS and an actual newer-STARTED-history refusal probe. Nested Gap privacy P1 resolved with genuine RED regression. US1 and T032/T033 are committed; T035–T040 remain required for US3. Commit each task; PR after full spec completion. No UAT/shipment claim.
+**Status**: T001–T035 accepted:35/92. T035 persistent header keeps selected identity, successful read and separate failed attempt/reason. Coordinator73PASS5deselected10.01s; independent73PASS5deselected9.99s, no failures/errors/skips. Genuine missing-attempt RED retained; T033 five stale claim cases await T036/T037. Evidence .handoff/spec014/t035/{verified.xml,review.handoff.md}. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
 
 ## Summary
 

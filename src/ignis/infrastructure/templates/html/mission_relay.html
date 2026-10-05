@@ -55,7 +55,10 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
 <div><span class="label">Selected run</span><span class="identity" data-testid="run-identity">{{ snapshot.run_id or 'Unknown' }}</span></div>
 <div><span class="label">Collection · {{ 'selected run' if snapshot.run_id else 'mission' }}</span><span class="identity" data-testid="collection-state">{% if snapshot.collection_state == 'PENDING' %}Idle · recorded PENDING{% elif snapshot.collection_state %}{{ snapshot.collection_state }} · recorded state{% else %}Unknown · no canonical collection state{% endif %}</span></div>
 <div><span class="label">Manifest fingerprint</span><span class="identity" data-testid="manifest-identity">{{ snapshot.manifest_digest or 'Unknown' }}</span></div>
-<div><span class="label">Read receipt</span><span class="identity" data-testid="read-receipt">{{ snapshot.read_at }}</span></div>
+<div><span class="label">Last successful read</span><span class="identity" data-testid="read-receipt">{{ snapshot.read_at }}</span></div>
+<div><span class="label">Last viewer read attempt</span><span class="identity" data-testid="last-read-attempt">Unknown</span></div>
+<div><span class="label">Permission state</span><span class="identity" data-testid="gate-state">{{ snapshot.claim_gate.state }}</span></div>
+<div><span class="label">Unavailable reason</span><span class="identity" data-testid="read-failure-reason">{{ snapshot.claim_gate.reason_code }}</span></div>
 <div><span class="label">Evidence frame</span><span class="identity" data-testid="frame-identity">{{ snapshot.frame_digest or snapshot.frame_pending_reason or 'Unknown' }}</span></div>
 <div><span class="label">Observations · full selected corpus</span><strong class="count" data-testid="observation-count">{{ snapshot.counts.observations }}</strong></div>
 <div><span class="label">Canonical sources · full selected corpus</span><strong class="count" data-testid="source-count">{{ snapshot.counts.sources }}</strong></div>
@@ -417,6 +420,8 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     overflow.textContent = overflowReferences ? `${overflowReferences} additional recorded references across ${overflowEvents.size} events aggregated without extra moving packets; exact identities remain in the paged committed timeline and evidence inspector.` : '';
   }
   function updateReceipt() {
+    document.querySelector('[data-testid="gate-state"]').textContent = snapshot.claim_gate.state;
+    document.querySelector('[data-testid="read-failure-reason"]').textContent = snapshot.claim_gate.reason_code;
     document.querySelector('[data-testid="collection-state"]').textContent = snapshot.collection_state === 'PENDING' ? 'Idle · recorded PENDING' : snapshot.collection_state === null ? 'Unknown · no canonical collection state' : `${snapshot.collection_state} · recorded state`;
     document.querySelector('[data-testid="read-receipt"]').textContent = snapshot.read_at;
     document.querySelector('[data-testid="frame-identity"]').textContent = unknown(snapshot.frame_digest || snapshot.frame_pending_reason);
@@ -428,6 +433,9 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
   }
   function markStale(reason) {
     stale = true;
+    document.querySelector('[data-testid="last-read-attempt"]').textContent = new Date().toISOString();
+    document.querySelector('[data-testid="gate-state"]').textContent = 'STALE';
+    document.querySelector('[data-testid="read-failure-reason"]').textContent = reason;
     clearPackets();
     stateLabel.textContent = `Stale snapshot — ${reason}. Last successful read ${snapshot.read_at}; current strategic permission unavailable.`;
     if (selectedStage === 'Synthesis') selectStage(selectedStage);
@@ -461,6 +469,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
       }
       const baseline = baselineMode || data.event_page?.resync_required;
       snapshot = data;
+      document.querySelector('[data-testid="last-read-attempt"]').textContent = new Date().toISOString();
       stale = false;
       if (baseline) {
         clearPackets();

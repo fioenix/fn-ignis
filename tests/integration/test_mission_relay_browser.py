@@ -989,3 +989,26 @@ def test_us3_failed_or_incompatible_read_removes_current_permission_immediately(
         viewer.page.get_by_role('button', name='Sources', exact=True).click()
         viewer.page.get_by_role('button', name='Synthesis', exact=True).click()
         expect(current).to_be_empty()
+
+
+def test_header_keeps_successful_read_separate_from_failed_attempt(installed_browser):
+    from playwright.sync_api import expect
+    initial = _snapshot()
+    with _viewer(installed_browser, initial) as viewer:
+        receipt = viewer.page.get_by_test_id("read-receipt")
+        attempt = viewer.page.get_by_test_id("last-read-attempt")
+        expect(receipt).to_have_text(initial.read_at.isoformat())
+        expect(attempt).to_have_text("Unknown")
+        updated = replace(initial, read_at=NOW + timedelta(seconds=1))
+        viewer.refresh(updated)
+        expect(receipt).to_have_text(updated.read_at.isoformat())
+        successful_attempt = attempt.inner_text()
+        viewer.context.route("**/snapshot?*", lambda route: route.abort())
+        viewer.page.clock.run_for(2100)
+        expect(viewer.page.get_by_test_id("snapshot-state")).to_contain_text("Stale")
+        expect(receipt).to_have_text(updated.read_at.isoformat())
+        assert datetime.fromisoformat(attempt.inner_text().replace("Z", "+00:00")) > datetime.fromisoformat(successful_attempt.replace("Z", "+00:00"))
+        expect(viewer.page.get_by_test_id("read-failure-reason")).to_contain_text("read unavailable")
+        expect(viewer.page.get_by_test_id("gate-state")).to_have_text("STALE")
+        expect(viewer.page.get_by_test_id("mission-identity")).to_have_text(str(initial.mission_id))
+        expect(viewer.page.get_by_test_id("run-identity")).to_have_text(str(initial.run_id))
