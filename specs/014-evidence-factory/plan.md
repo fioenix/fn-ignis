@@ -2,7 +2,7 @@
 
 **Branch**: `codex/ignis-evidence-factory` | **Date**: 2026-10-04 | **Spec**: [approved R1](spec.md)
 
-**Status**: T001–T037 accepted:37/92. T037 failed/incompatible reads remove displayed current permission synchronously, keep exact successful receipt and separately label prior claims as SUPERSEDED History. Client validates gate/frame/Brief/binding-owner and shape before accepting responses. T0335 genuine behavioralRED nowPASS; coordinator82PASS16.25s, independent82PASS13.10s plus4 malformed-gate negatives PASS. Evidence .handoff/spec014/t037/{verified.xml,review.handoff.md}. No real-mission UAT acceptance. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
+**Status**: T001–T038 accepted:38/92. T038 actual FastMCP selected-scope tool and capability HTTP inspector refuse foreign observation, unknown observation and foreign journal with exact SCOPE_MISMATCH. EMPTY_NO_DATA0, DEGRADED and later declared unmeasured channel null stay distinct; committed corpus/storage unchanged and bootstrap traps silent. Coordinator shared15PASS5.68s (T0383); independent shared15PASS6.43s (T0383), no skips, verified PostgreSQL scratch cleanup. Evidence .handoff/spec014/t038/review.handoff.md and t039/reviewer-final.xml. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
 
 ## Summary
 

@@ -400,3 +400,55 @@ async def test_committed_changes_reach_actual_http_browser_once(attention_case, 
                 await context.close()
         finally:
             await browser.close()
+
+
+@pytest.mark.asyncio
+async def test_us3_actual_mcp_channels_and_foreign_inspector_refuse_fallback(attention_case, monkeypatch):
+    from dataclasses import replace
+    from tests.unit.test_mission_claims import _manifest
+    from ignis.interfaces.mcp import server
+    case, missions, runs = attention_case
+    mission = missions[0]
+    run = uuid4()
+    await case.repository.record_run_journal(RunJournal(run_id=run, mission_id=mission.id,
+        workspace_id=mission.workspace_id, journal_path=Path(f'private/{run}'), sequence=2,
+        status='COMPLETED', started_at=datetime.now(timezone.utc), completed_at=datetime.now(timezone.utc)))
+    await case.repository.commit_probe_outcomes(ProbeOutcomeCommitCommand(mission_id=mission.id, run_id=run,
+        outcomes=tuple(MissionProbeOutcome(run_id=run, platform=platform, connector_surface=platform,
+            status=status, signals_collected=0, queried_keywords=('synthetic',), query_fingerprint='b' * 64,
+            completed_at=datetime.now(timezone.utc)) for platform, status in
+            (('youtube', ChannelHealthStatus.EMPTY_NO_DATA), ('google', ChannelHealthStatus.DEGRADED)))))
+    # Declare a later frame channel whose old selected-run outcomes never measured it.
+    await case.repository.save_mission_manifest(replace(_manifest(), mission_id=mission.id,
+        required_channels=('youtube', 'google', 'threads'), optional_channels=()))
+    foreign = (await case.repository.get_mission_signals(missions[1].id))[0]
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+    monkeypatch.setattr(server, '_COMPONENTS', {'repository': case.repository})
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Negative read started a connector, synthetic fallback or bootstrap')
+    monkeypatch.setattr(server, 'get_components', forbidden)
+    monkeypatch.setattr(server, 'create_repository', forbidden)
+    with _observe_chain(case, monkeypatch) as observed:
+        async with Client(server.mcp) as client:
+            snapshot = (await client.call_tool('get_mission_relay_snapshot', {
+                'mission_id': str(mission.id), 'run_id': str(run), 'page_size': 2,
+            })).structured_content
+            channels = {row['platform']: row for row in snapshot['channels']}
+            assert channels['youtube']['status'] == 'EMPTY_NO_DATA' and channels['youtube']['signals_collected'] == 0
+            assert channels['google']['status'] == 'DEGRADED'
+            assert channels['threads']['status'] is None and channels['threads']['signals_collected'] is None
+            assert channels['threads']['completed_at'] is None
+            assert snapshot['claim_gate']['claims'] == [] and snapshot['claim_gate']['render_status'] == 'WITHHELD'
+            assert snapshot['counts'] == {'observations': 3, 'sources': 3}, 'Empty probe must not synthesize or erase committed corpus'
+            cap = (await client.call_tool('open_mission_relay', {'mission_id': str(mission.id), 'run_id': str(run),
+                'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()})).structured_content
+            for identifier in (foreign.observation_id, uuid4()):
+                status, _, body = await asyncio.to_thread(_http, cap['url'] + f'inspect/{identifier}?page_size=2')
+                assert status == 403
+                assert json.loads(body) == {'schema_version': 1, 'status': 'REFUSED', 'reason_code': 'SCOPE_MISMATCH'}
+            refused = (await client.call_tool('get_mission_relay_snapshot', {
+                'mission_id': str(mission.id), 'run_id': str(runs[1]), 'page_size': 2})).structured_content
+            assert refused == {'schema_version': 1, 'status': 'REFUSED', 'reason_code': 'SCOPE_MISMATCH'}
+        observed.assert_no_writes()
+    assert _state(case) == before
