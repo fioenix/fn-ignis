@@ -2,7 +2,7 @@
 
 **Input**: Approved R1 `spec.md`, owner-approved `plan.md`, `research.md`, `data-model.md`, `contracts/` and `quickstart.md`.
 
-**Status**: T001–T031 independently accepted:31/92. US1 internal slice is implemented and locally verified. Stable-source required US1/original mission/Task Relay gate:1348PASS3SKIP0FAIL0ERROR over36 files;287 Python/template hashes unchanged. Independent final correction check:18PASS0SKIP; no open US1 review finding. Changes are explicitly parked on the uncommitted/unmerged checkout; no full-feature GREEN, real-mission UAT or shipment claim.
+**Status**: T001–T032 accepted:32/92. US1 is committed at8892253. T032 independently accepted test design:9 expected US3 implementation RED and3 controls PASS,0errors/skips. T033–T040 remain required for US3. Owner directs one commit per completed task and a PR only after full Spec014 completion; no merge/release/UAT claim.
 
 **Outcome**: A real, bounded, read-only research observatory with inspectable events, actual host work/handoffs, evolving findings and one authority-bound child follow-up. Static animation, synthetic concurrency and SQLite-only success do not close this feature.
 
@@ -77,7 +77,7 @@
 
 **Independent test**: Incomplete/changed/failed refresh immediately withholds strategic permission; unknown publication/reach stays unknown; insufficient evidence displays a gap without category winner or confidence.
 
-- [ ] T032 [US3] Add failing partial-run, frame-change, mismatched mission/run and unknown-metric cases in `tests/unit/test_mission_relay_claim_gate.py`; independently negate each permission/missingness assertion.
+- [x] T032 [US3] Add failing partial-run, frame-change, mismatched mission/run and unknown-metric cases in `tests/unit/test_mission_relay_claim_gate.py`; independently negate each permission/missingness assertion.
 - [ ] T033 [P] [US3] Add failing failed-read, reordered-response and immediate stale-claim removal browser cases in `tests/integration/test_mission_relay_browser.py`; measure from the read/failure boundary rather than connector start.
 - [ ] T034 [US3] Add explicit current/pending/stale/history gate projection in `src/ignis/application/use_cases/get_mission_relay_snapshot.py`; make T032 pass without treating old completed outcomes as current active-pass success.
 - [ ] T035 [US3] Add mission/run/frame, last successful read and unavailable reasons to the persistent header in `src/ignis/infrastructure/templates/html/mission_relay.html`; verify successful and failed reads have distinct receipts.
@@ -666,3 +666,7 @@ Final gate on frozen current source covers all36 US1 and original mission/Task R
 Independent final audit accepts every T024–T031 requirement and all three US1 scenarios with no open finding. The last corrections preserve exact selected-journal STARTED and canonical mission state, render Idle only for recorded PENDING, and retain legacy Unknown. Actual FastMCP→HTTP→isolated Chromium transition controls on SQLite file/private memory/local PostgreSQL prove new observations and support/contradiction qualification animate once with their stored provenance/roles; refresh/reload do not duplicate arrival/count, and guarded viewer phases leave whole physical storage unchanged. Coordinator correction gate259PASS0SKIP; independent state/real-transition gate18PASS0SKIP15.91s. Evidence: .handoff/spec014/t031/{scoped.xml,scoped-status.json,final-source-before.json,reviewer-final.xml,review.handoff.md,completion-audit.json} and .handoff/spec014/us1.handoff.md.
 
 The earlier repository-wide run was intentionally interrupted for the final acceptance corrections; its retained pre-idle artifacts are intermediate history, not full-suite GREEN. T031 requires US1 plus existing mission/Task Relay regressions, fulfilled by the stable36-file gate. Unsupported research activity remains unavailable and strategic permission withheld for this internal slice. Canonical31/92; all US1 tasks accepted locally. T032–T092, real-mission UAT, later full-feature/performance/minimum-runtime/security gates remain open. Work is explicitly parked uncommitted/unmerged on codex/ignis-relay-checkout at HEAD9eae76a plus the verified dirty US1 changes; no commit, merge, deployment or release occurred in this goal.
+
+### T032 test-design acceptance — 2026-10-05
+
+Canonical Market fixtures establish real persisted PERMITTED and same-frame WITHHELD rows. Exact original binding, unknown500/3.5 versus known-zero0/0, requested-journal mismatch, selected-run STARTED/RUNNING/FAILED/CANCELLED, changed corpus history, paginated full-frame and canonical specific qualification Gap assertions have independent review. Coordinator9RED3PASS0ERROR0SKIP0.69s; reviewer9RED3PASS0ERROR0SKIP0.74s. These are test-design acceptance and future T034 implementation obligations, not gate permission PASS. Setup-only failures were corrected before the final receipt; no product code changed for T032. Evidence .handoff/spec014/t032/{red-r2.xml,reviewer-r2.xml,review.handoff.md}. Canonical32/92; T033 next.

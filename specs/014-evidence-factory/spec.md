@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-04
 
-**Status**: T001–T031 independently accepted:31/92. US1 internal slice is implemented and locally verified. Stable-source required US1/original mission/Task Relay gate:1348PASS3SKIP0FAIL0ERROR over36 files;287 Python/template hashes unchanged. Independent final correction check:18PASS0SKIP; no open US1 review finding. Changes are explicitly parked on the uncommitted/unmerged checkout; no full-feature GREEN, real-mission UAT or shipment claim.
+**Status**: T001–T032 accepted:32/92. US1 is committed at8892253. T032 independently accepted test design:9 expected US3 implementation RED and3 controls PASS,0errors/skips. T033–T040 remain required for US3. Owner directs one commit per completed task and a PR only after full Spec014 completion; no merge/release/UAT claim.
 
 **Review revision**: R1 — 2026-10-04
 
@@ -319,3 +319,7 @@ The following alternatives were considered before the owner selected option 3; o
 ### Session 2026-10-05 — T031 US1 collection visibility
 
 - Q: Which persisted state may the read-only viewer label Idle? → A: Expose an optional allowlisted collection_state from the explicitly selected RunJournal, otherwise the canonical mission status. Only recorded PENDING renders Idle; retain STARTED exactly as emitted by WorkspaceRepository.begin_run. Unrecognized legacy values remain null/Unknown. Do not infer idle from absent selected run, zero counts or empty receipts, and do not fall back to an unrelated journal (agent decided; basis: US1 scenario 1, selected-scope coherence and explicit missingness). This adds an outward snapshot field without changing an MCP tool signature or starting collection.
+
+### Session 2026-10-05 — owner delivery policy
+
+- Q: When should completed task work be committed and a PR created? → A: Commit each completed, verified task immediately. Create the PR for merge only after the entire spec is complete (owner decision: "Mỗi lần làm xong task thì cứ commit, còn chừng nào xong spec thì mới tạo PR để merge"). This authorizes local commits, not release/version/tag operations. US1 is committed at8892253.

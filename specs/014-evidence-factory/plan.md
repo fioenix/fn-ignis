@@ -2,7 +2,7 @@
 
 **Branch**: `codex/ignis-evidence-factory` | **Date**: 2026-10-04 | **Spec**: [approved R1](spec.md)
 
-**Status**: T001–T031 independently accepted:31/92. US1 internal slice is implemented and locally verified. Stable-source required US1/original mission/Task Relay gate:1348PASS3SKIP0FAIL0ERROR over36 files;287 Python/template hashes unchanged. Independent final correction check:18PASS0SKIP; no open US1 review finding. Changes are explicitly parked on the uncommitted/unmerged checkout; no full-feature GREEN, real-mission UAT or shipment claim.
+**Status**: T001–T032 accepted:32/92. US1 is committed at8892253. T032 independently accepted test design:9 expected US3 implementation RED and3 controls PASS,0errors/skips. T033–T040 remain required for US3. Owner directs one commit per completed task and a PR only after full Spec014 completion; no merge/release/UAT claim.
 
 ## Summary
 
