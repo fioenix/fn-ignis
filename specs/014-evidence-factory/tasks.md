@@ -2,7 +2,7 @@
 
 **Input**: Approved R1 `spec.md`, owner-approved `plan.md`, `research.md`, `data-model.md`, `contracts/` and `quickstart.md`.
 
-**Status**: T001–T036 accepted:36/92. T036 exact stored ledger claims render bindings, limits and revision conditions; otherwise actual Gap Report retains missing evidence, probe, authority and cost. No-script fallback retains these facts and fits390px. Three independent P2s reproduced then corrected (obsolete stage copy, incomplete offline Gap, digest overflow). Final77PASS5deselected13.51s; independent77PASS5deselected11.80s, no failures/errors/skips. Evidence .handoff/spec014/t036/{final3.xml,review.handoff.md}; five T037 stale controls remain open. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
+**Status**: T001–T037 accepted:37/92. T037 failed/incompatible reads remove displayed current permission synchronously, keep exact successful receipt and separately label prior claims as SUPERSEDED History. Client validates gate/frame/Brief/binding-owner and shape before accepting responses. T0335 genuine behavioralRED nowPASS; coordinator82PASS16.25s, independent82PASS13.10s plus4 malformed-gate negatives PASS. Evidence .handoff/spec014/t037/{verified.xml,review.handoff.md}. No real-mission UAT acceptance. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
 
 **Outcome**: A real, bounded, read-only research observatory with inspectable events, actual host work/handoffs, evolving findings and one authority-bound child follow-up. Static animation, synthetic concurrency and SQLite-only success do not close this feature.
 
@@ -82,7 +82,7 @@
 - [x] T034 [US3] Add explicit current/pending/stale/history gate projection in `src/ignis/application/use_cases/get_mission_relay_snapshot.py`; make T032 pass without treating old completed outcomes as current active-pass success.
 - [x] T035 [US3] Add mission/run/frame, last successful read and unavailable reasons to the persistent header in `src/ignis/infrastructure/templates/html/mission_relay.html`; verify successful and failed reads have distinct receipts.
 - [x] T036 [US3] Render only exact-frame PERMITTED strategic entries or the actual Gap Report in `src/ignis/infrastructure/templates/html/mission_relay.html`; verify descriptive/provisional labeling never grants permission.
-- [ ] T037 [US3] Make client failed/incompatible refresh remove current strategic permission immediately in `src/ignis/infrastructure/templates/html/mission_relay.html`; make T033 pass while preserving labeled history and the last successful read time.
+- [x] T037 [US3] Make client failed/incompatible refresh remove current strategic permission immediately in `src/ignis/infrastructure/templates/html/mission_relay.html`; make T033 pass while preserving labeled history and the last successful read time.
 - [ ] T038 [US3] Add cross-mission inspector and empty/degraded/unknown channel negatives in `tests/integration/test_mission_relay_mcp.py`; verify no synthetic fallback, foreign record access or missingness-as-zero.
 - [ ] T039 [US3] Run gate negatives on SQLite and PostgreSQL through `tests/integration/test_mission_relay_read_boundary.py`; verify consistent frame/role interpretation and exact canonical observation identities.
 - [ ] T040 [US3] Record permission/missingness readback and measured successful-read-to-display latency in `.handoff/spec014/us3.handoff.md`; leave real-mission latency acceptance pending until final UAT.
@@ -686,3 +686,7 @@ T035 persistent header keeps selected identity, successful read and separate fai
 ### T036 local acceptance — 2026-10-05
 
 T036 exact stored ledger claims render bindings, limits and revision conditions; otherwise actual Gap Report retains missing evidence, probe, authority and cost. No-script fallback retains these facts and fits390px. Three independent P2s reproduced then corrected (obsolete stage copy, incomplete offline Gap, digest overflow). Final77PASS5deselected13.51s; independent77PASS5deselected11.80s, no failures/errors/skips. Evidence .handoff/spec014/t036/{final3.xml,review.handoff.md}; five T037 stale controls remain open.
+
+### T037 local acceptance — 2026-10-05
+
+T037 failed/incompatible reads remove displayed current permission synchronously, keep exact successful receipt and separately label prior claims as SUPERSEDED History. Client validates gate/frame/Brief/binding-owner and shape before accepting responses. T0335 genuine behavioralRED nowPASS; coordinator82PASS16.25s, independent82PASS13.10s plus4 malformed-gate negatives PASS. Evidence .handoff/spec014/t037/{verified.xml,review.handoff.md}. No real-mission UAT acceptance.

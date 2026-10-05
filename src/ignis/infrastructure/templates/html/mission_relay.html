@@ -218,7 +218,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     } else {
       values = {
         'Input': `Frame ${unknown(snapshot.frame_digest)} · ${unknown(snapshot.frame_pending_reason)}.`,
-        'Output': `${snapshot.claim_gate.render_status === 'PERMITTED' ? 'PERMITTED · exact-frame persisted ledger entries.' : 'Withheld · ' + snapshot.claim_gate.reason_code}. Descriptive and provisional labels grant no permission.`,
+        'Output': `${!stale && snapshot.claim_gate.render_status === 'PERMITTED' ? 'PERMITTED · exact-frame persisted ledger entries.' : 'Withheld · ' + snapshot.claim_gate.reason_code}. Descriptive and provisional labels grant no permission.`,
         'Failure reason': 'Observation volume, a present frame digest or old events do not grant strategic permission.',
         'Why it matters': 'A permitted verdict requires a persisted current-frame ledger gate, not animation or a cached count.'
       };
@@ -243,8 +243,9 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
       for (const reason of claim.withheld_reasons) article.append(node('p', `Withheld: ${reason}`));
       container.append(article);
     }
-    for (const claim of gate.claims) entry(current, claim);
+    if (!stale) for (const claim of gate.claims) entry(current, claim);
     for (const claim of gate.history) entry(history, claim);
+    if (stale) for (const claim of gate.claims) entry(history, {...claim, status: 'SUPERSEDED'});
     output.append(current, history);
     const gap = node('section'); gap.dataset.testid = 'gap-report';
     if (gate.gap_report) {
@@ -359,8 +360,25 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
   const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
   const count = value => Number.isSafeInteger(value) && value >= 0;
   const validCursor = cursor => cursor && cursor.mission_id === initial.mission_id && count(cursor.revision) && count(cursor.ordinal) && (cursor.revision === 0) === (cursor.ordinal === 0);
+  function validGate(data) {
+    const gate = data.claim_gate;
+    const strings = values => Array.isArray(values) && values.every(value => typeof value === 'string');
+    if (!gate || !['CURRENT', 'PENDING', 'STALE', 'HISTORY', 'UNAVAILABLE'].includes(gate.state) || typeof gate.reason_code !== 'string' || !Array.isArray(gate.claims) || !Array.isArray(gate.history)) return false;
+    if (gate.render_status !== (gate.claims.length ? 'PERMITTED' : 'WITHHELD')) return false;
+    if (gate.claims.length && (gate.state !== 'CURRENT' || data.surface !== 'MARKET' || !uuid(data.brief_revision_id) || typeof data.frame_digest !== 'string' || !/^[0-9a-f]{64}$/.test(data.frame_digest) || gate.frame_digest !== data.frame_digest || gate.gap_report !== null)) return false;
+    const identifiers = new Set();
+    for (const [rows, current] of [[gate.claims, true], [gate.history, false]]) for (const claim of rows) {
+      if (!claim || !uuid(claim.claim_id) || identifiers.has(claim.claim_id) || claim.mission_id !== data.mission_id || typeof claim.wording !== 'string' || !strings(claim.limitations) || !strings(claim.change_conditions) || !strings(claim.withheld_reasons) || !Array.isArray(claim.evidence_bindings)) return false;
+      if (current ? claim.status !== 'PERMITTED' || claim.frame_digest !== data.frame_digest || claim.brief_revision_id !== data.brief_revision_id || !claim.evidence_bindings.length : !['SUPERSEDED', 'WITHHELD'].includes(claim.status)) return false;
+      identifiers.add(claim.claim_id);
+      for (const binding of claim.evidence_bindings) if (!binding || binding.claim_id !== claim.claim_id || !(uuid(binding.observation_id) && binding.probe_outcome_id === null || uuid(binding.probe_outcome_id) && binding.observation_id === null) || !['SUPPORT', 'CONTRADICTION', 'CONTEXT'].includes(binding.role)) return false;
+    }
+    const gap = gate.gap_report;
+    if (gap !== null && (!gap || !strings(gap.withheld_outputs) || !strings(gap.failed_gates) || !strings(gap.missing_evidence) || !strings(gap.safe_partial_conclusions) || !Array.isArray(gap.attempted_probes) || gap.attempted_probes.some(probe => !probe || typeof probe !== 'object') || typeof gap.next_best_probe !== 'string')) return false;
+    return true;
+  }
   function validSnapshot(data, requestedCursor = undefined) {
-    if (!data || data.schema_version !== 1 || data.status !== 'OK' || data.mission_id !== initial.mission_id || data.run_id !== initial.run_id || !validCursor(data.high_water) || data.revision !== data.high_water.revision || cursorCompare(data.high_water, snapshot.high_water) < 0) return false;
+    if (!data || !validGate(data) || !Number.isFinite(Date.parse(data.read_at)) || data.schema_version !== 1 || data.status !== 'OK' || data.mission_id !== initial.mission_id || data.run_id !== initial.run_id || !validCursor(data.high_water) || data.revision !== data.high_water.revision || cursorCompare(data.high_water, snapshot.high_water) < 0) return false;
     if (!count(data.counts?.observations) || !count(data.counts?.sources) || data.counts.sources > data.counts.observations || !Number.isSafeInteger(data.page_size) || data.page_size < 1 || data.page_size > 200 || !count(data.evidence_offset) || !Array.isArray(data.evidence) || data.evidence.length > data.page_size || data.evidence_offset + data.evidence.length > data.counts.observations || !Array.isArray(data.channels)) return false;
     if (data.collection_state !== null && !['PENDING', 'STARTED', 'RUNNING', 'COMPLETED', 'FAILED', 'BLOCKED', 'CANCELLED'].includes(data.collection_state)) return false;
     const identities = new Map();
