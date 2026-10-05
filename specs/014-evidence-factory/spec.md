@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-04
 
-**Status**: T001–T038 accepted:38/92. T038 actual FastMCP selected-scope tool and capability HTTP inspector refuse foreign observation, unknown observation and foreign journal with exact SCOPE_MISMATCH. EMPTY_NO_DATA0, DEGRADED and later declared unmeasured channel null stay distinct; committed corpus/storage unchanged and bootstrap traps silent. Coordinator shared15PASS5.68s (T0383); independent shared15PASS6.43s (T0383), no skips, verified PostgreSQL scratch cleanup. Evidence .handoff/spec014/t038/review.handoff.md and t039/reviewer-final.xml. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
+**Status**: T001–T039 accepted:39/92. T039 actual pinned read-only store gates verify page1/full corpus frame equality, exact complete observation/source identity and every projected Market role/direction/relation/question fingerprint; scoped Demand inspection hides unknown500/3.5 placeholders and unknown publication. Canonical PERMITTED control and changed corpus/newer STARTED/unknown metric negatives retain exact historical bindings without permission. Independent12PASS across SQLite file/memory/PostgreSQL, shared15PASS6.43s, no skips and zero leftover PostgreSQL test databases. Coordinator strengthened SQLite8PASS0.93s; original combined15PASS5.68s precedes assertion strengthening and is not final parity proof. Evidence .handoff/spec014/t039/{reviewer-final.xml,identity-final-local.xml,review.handoff.md}. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
 
 **Review revision**: R1 — 2026-10-04
 

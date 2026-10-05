@@ -1670,3 +1670,99 @@ async def test_selected_outcome_run_preserves_full_same_mission_event_stream(rel
         assert tuple(outcome.run_id for outcome in result.evidence.outcomes) == expected_outcome_runs
         assert result.total_observations == 3 and result.source_count == 3
     assert _state(case) == before
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("negative", ("current", "changed-corpus", "newer-run", "unknown-metric"))
+async def test_us3_gate_uses_exact_canonical_frame_and_identity_on_each_store(relay_case, tmp_path, monkeypatch, negative):
+    from tests.unit.test_mission_claims import _eligible_mission, _observation_candidate, _signal_named
+    from ignis.application.use_cases.current_evidence_frame import load_current_evidence_frame
+    from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaimsUseCase
+    from ignis.application.use_cases.get_mission_relay_snapshot import GetMissionRelaySnapshotUseCase
+    from ignis.domain.research_workspace import ClaimStatus
+    case, _, _ = relay_case
+    repository, store, mission, signals, frame = await _eligible_mission(tmp_path, repository=case.repository)
+    submitted = await SubmitMissionClaimsUseCase(repository, store).execute(str(mission.id), frame.frame_digest,
+        [_observation_candidate(_signal_named(signals, "Demand evidence"))], created_by="relay-store-control")
+    assert submitted.get("permitted") == 1
+    evidence = await store.load_mission_evidence_snapshot(mission.id)
+    original = next(claim for claim in evidence.claims if claim.status is ClaimStatus.PERMITTED)
+    run = (await store.list_run_journals(mission.id))[0]
+    if negative == "changed-corpus":
+        await repository.save_signals([TrendSignal(platform=PlatformType.YOUTUBE,
+            raw_title="New unqualified corpus member", source_url=f"https://example.invalid/{uuid4()}",
+            mission_id=mission.id, captured_at=NOW)])
+    elif negative == "newer-run":
+        await repository.record_run_journal(RunJournal(run_id=uuid4(), mission_id=mission.id,
+            workspace_id=mission.workspace_id, journal_path=tmp_path / uuid4().hex, sequence=2,
+            status="STARTED", started_at=datetime.now(timezone.utc)))
+    elif negative == "unknown-metric":
+        signal = _signal_named(signals, "Demand evidence")
+        signal.metadata["metric_known"] = False
+        signal.metric_value = 500
+        signal.growth_velocity = 3.5
+        await repository.save_signals([signal])
+    canonical = await store.load_mission_evidence_snapshot(mission.id)
+    canonical_frame = await load_current_evidence_frame(repository, store, mission)
+    before = _state(case)
+    _setup_traps(monkeypatch, repository)
+    use_case = GetMissionRelaySnapshotUseCase(_reader(repository))
+    with (_observe_postgres(monkeypatch) if case.name == "postgres" else _observe_sqlite(monkeypatch, repository)) as observed:
+        result = await use_case.execute(MissionRelayReadRequest(mission_id=mission.id, run_id=run.run_id, page_size=1))
+        payload = result.to_payload()
+        if case.name == "postgres":
+            _assert_postgres_reads(observed)
+        else:
+            observed.assert_no_writes()
+    assert payload["status"] == "OK"
+    assert payload["counts"]["observations"] == len(canonical.signals)
+    identities = {str(signal.observation_id): str(signal.source_id) for signal in canonical.signals}
+    assert payload["evidence"][0]["source_id"] == identities[payload["evidence"][0]["observation_id"]]
+    request = MissionRelayReadRequest(mission_id=mission.id, run_id=run.run_id, page_size=200)
+    with (_observe_postgres(monkeypatch) if case.name == "postgres" else _observe_sqlite(monkeypatch, repository)) as observed:
+        complete = (await use_case.execute(request)).to_payload()
+        if case.name == "postgres":
+            _assert_postgres_reads(observed)
+        else:
+            observed.assert_no_writes()
+    assert {row["observation_id"]: row["source_id"] for row in complete["evidence"]} == identities
+    qualifications = {str(q.observation_id): q for q in canonical.qualifications}
+    for row in complete["evidence"]:
+        qualification = qualifications.get(row["observation_id"])
+        assert row["evidence_role"] == "MARKET_EVIDENCE"
+        assert row["direction"] == (qualification.evidence_role.value if qualification else None)
+        assert row["qualification_relation"] == (qualification.relation.value if qualification else None)
+        assert row["qualification_frame_fingerprint"] == (qualification.frame_fingerprint if qualification else None)
+    if negative == "unknown-metric":
+        identifier = _signal_named(signals, "Demand evidence").observation_id
+        with (_observe_postgres(monkeypatch) if case.name == "postgres" else _observe_sqlite(monkeypatch, repository)) as observed:
+            inspected = (await use_case.inspect(request, identifier)).to_payload()
+            if case.name == "postgres":
+                _assert_postgres_reads(observed)
+            else:
+                observed.assert_no_writes()
+        assert inspected["status"] == "OK"
+        unknown = inspected["observation"]
+        assert unknown["observation_id"] == str(identifier)
+        assert unknown["source_id"] == identities[str(identifier)]
+        assert unknown["metric_value"] is None and unknown["growth_velocity"] is None
+        assert unknown["published_at"] is None
+    gate = payload["claim_gate"]
+    assert gate == complete["claim_gate"]
+    if negative == "current":
+        assert gate["render_status"] == "PERMITTED"
+        assert gate["frame_digest"] == canonical_frame.frame_digest == frame.frame_digest
+        assert gate["claims"][0]["evidence_bindings"] == [binding.to_payload() for binding in original.evidence_bindings]
+        assert any(binding.role.value == "SUPPORT" for binding in original.evidence_bindings)
+        assert any(q.evidence_role.value == "CONTRADICTION" for q in canonical.qualifications)
+    else:
+        assert gate["render_status"] == "WITHHELD" and gate["claims"] == []
+        assert gate["history"][0]["claim_id"] == str(original.claim_id)
+        assert gate["history"][0]["status"] == "SUPERSEDED"
+        if negative == "newer-run":
+            assert gate["state"] == "HISTORY" and gate["reason_code"] == "SELECTED_RUN_NOT_CURRENT"
+        else:
+            assert gate["frame_digest"] == canonical_frame.frame_digest != frame.frame_digest
+            assert gate["gap_report"]["failed_gates"]
+    assert _state(case) == before

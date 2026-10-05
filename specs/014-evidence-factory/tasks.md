@@ -2,7 +2,7 @@
 
 **Input**: Approved R1 `spec.md`, owner-approved `plan.md`, `research.md`, `data-model.md`, `contracts/` and `quickstart.md`.
 
-**Status**: T001–T038 accepted:38/92. T038 actual FastMCP selected-scope tool and capability HTTP inspector refuse foreign observation, unknown observation and foreign journal with exact SCOPE_MISMATCH. EMPTY_NO_DATA0, DEGRADED and later declared unmeasured channel null stay distinct; committed corpus/storage unchanged and bootstrap traps silent. Coordinator shared15PASS5.68s (T0383); independent shared15PASS6.43s (T0383), no skips, verified PostgreSQL scratch cleanup. Evidence .handoff/spec014/t038/review.handoff.md and t039/reviewer-final.xml. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
+**Status**: T001–T039 accepted:39/92. T039 actual pinned read-only store gates verify page1/full corpus frame equality, exact complete observation/source identity and every projected Market role/direction/relation/question fingerprint; scoped Demand inspection hides unknown500/3.5 placeholders and unknown publication. Canonical PERMITTED control and changed corpus/newer STARTED/unknown metric negatives retain exact historical bindings without permission. Independent12PASS across SQLite file/memory/PostgreSQL, shared15PASS6.43s, no skips and zero leftover PostgreSQL test databases. Coordinator strengthened SQLite8PASS0.93s; original combined15PASS5.68s precedes assertion strengthening and is not final parity proof. Evidence .handoff/spec014/t039/{reviewer-final.xml,identity-final-local.xml,review.handoff.md}. Commit each completed task; PR only after full Spec014 completion. Real-mission UAT and shipment remain pending.
 
 **Outcome**: A real, bounded, read-only research observatory with inspectable events, actual host work/handoffs, evolving findings and one authority-bound child follow-up. Static animation, synthetic concurrency and SQLite-only success do not close this feature.
 
@@ -84,7 +84,7 @@
 - [x] T036 [US3] Render only exact-frame PERMITTED strategic entries or the actual Gap Report in `src/ignis/infrastructure/templates/html/mission_relay.html`; verify descriptive/provisional labeling never grants permission.
 - [x] T037 [US3] Make client failed/incompatible refresh remove current strategic permission immediately in `src/ignis/infrastructure/templates/html/mission_relay.html`; make T033 pass while preserving labeled history and the last successful read time.
 - [x] T038 [US3] Add cross-mission inspector and empty/degraded/unknown channel negatives in `tests/integration/test_mission_relay_mcp.py`; verify no synthetic fallback, foreign record access or missingness-as-zero.
-- [ ] T039 [US3] Run gate negatives on SQLite and PostgreSQL through `tests/integration/test_mission_relay_read_boundary.py`; verify consistent frame/role interpretation and exact canonical observation identities.
+- [x] T039 [US3] Run gate negatives on SQLite and PostgreSQL through `tests/integration/test_mission_relay_read_boundary.py`; verify consistent frame/role interpretation and exact canonical observation identities.
 - [ ] T040 [US3] Record permission/missingness readback and measured successful-read-to-display latency in `.handoff/spec014/us3.handoff.md`; leave real-mission latency acceptance pending until final UAT.
 
 ## Phase 5 — US4: Follow real specialist work and evolving findings (P1)
@@ -694,3 +694,7 @@ T037 failed/incompatible reads remove displayed current permission synchronously
 ### T038 local acceptance — 2026-10-05
 
 T038 actual FastMCP selected-scope tool and capability HTTP inspector refuse foreign observation, unknown observation and foreign journal with exact SCOPE_MISMATCH. EMPTY_NO_DATA0, DEGRADED and later declared unmeasured channel null stay distinct; committed corpus/storage unchanged and bootstrap traps silent. Coordinator shared15PASS5.68s (T0383); independent shared15PASS6.43s (T0383), no skips, verified PostgreSQL scratch cleanup. Evidence .handoff/spec014/t038/review.handoff.md and t039/reviewer-final.xml.
+
+### T039 local acceptance — 2026-10-05
+
+T039 actual pinned read-only store gates verify page1/full corpus frame equality, exact complete observation/source identity and every projected Market role/direction/relation/question fingerprint; scoped Demand inspection hides unknown500/3.5 placeholders and unknown publication. Canonical PERMITTED control and changed corpus/newer STARTED/unknown metric negatives retain exact historical bindings without permission. Independent12PASS across SQLite file/memory/PostgreSQL, shared15PASS6.43s, no skips and zero leftover PostgreSQL test databases. Coordinator strengthened SQLite8PASS0.93s; original combined15PASS5.68s precedes assertion strengthening and is not final parity proof. Evidence .handoff/spec014/t039/{reviewer-final.xml,identity-final-local.xml,review.handoff.md}.
