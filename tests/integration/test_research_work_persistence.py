@@ -15,7 +15,9 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from tests.integration.test_mission_relay_read_boundary import NOW, _state, relay_case
+from tests.integration.test_mission_relay_read_boundary import NOW, _state, relay_case as _relay_case
+
+relay_case = _relay_case
 
 
 TABLES = ("research_assignments", "research_work_items", "research_handoffs", "research_finding_revisions")
@@ -37,7 +39,8 @@ def _api(repository):
     try:
         findings = importlib.import_module("ignis.domain.research_findings")
     except ModuleNotFoundError as exc:
-        if exc.name != "ignis.domain.research_findings": raise
+        if exc.name != "ignis.domain.research_findings":
+            raise
         pytest.fail("T042 API RED: ignis.domain.research_findings is not implemented", pytrace=False)
     for module, names in ((domain, ("ResearchAuthority", "ResearchInputBindings", "ResearchAssignment",
                                     "ResearchWorkItem", "ResearchActivityReceipt")),
@@ -202,10 +205,14 @@ async def test_late_sql_failure_rolls_back_every_atomic_effect(relay_case, tmp_p
 async def test_obsolete_result_refuses_without_retaining_payload(relay_case, tmp_path, control, reason):
     case, mission, _, persistence, _, handoff, revision = await _arrange(relay_case, tmp_path)
     epoch = 1
-    if control == "revision": revision -= 1
-    elif control == "version": handoff = replace(handoff, expected_version=handoff.expected_version - 1)
-    elif control == "epoch": epoch = 2
-    elif control == "fence": handoff = replace(handoff, ownership_fence="obsolete-fence")
+    if control == "revision":
+        revision -= 1
+    elif control == "version":
+        handoff = replace(handoff, expected_version=handoff.expected_version - 1)
+    elif control == "epoch":
+        epoch = 2
+    elif control == "fence":
+        handoff = replace(handoff, ownership_fence="obsolete-fence")
     else:
         # Use a real foreign mission observation and its exact canonical source. Replacing
         # bindings coherently avoids testing constructor inconsistency instead of admission.

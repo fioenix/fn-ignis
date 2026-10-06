@@ -56,7 +56,6 @@ def test_record_activity_requires_current_receipt():
 
 
 def bound_records(state='RUNNING', assignment_state='ACTIVE'):
-    from dataclasses import replace
     authority = ResearchAuthority(actions=frozenset({'ANALYZE'}), sources=frozenset({'youtube'}),
         deadline=NOW + timedelta(hours=1), quota_ceiling=1)
     assignment = ResearchAssignment(assignment_id=UUID(int=1), mission_id=UUID(int=3), host_task_ref='host/1',

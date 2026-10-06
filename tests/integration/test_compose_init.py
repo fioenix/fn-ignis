@@ -54,6 +54,10 @@ READBACK = {
         "SELECT count(*) FROM pg_class"
         " WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p')"
     ),
+    "public_table_names": (
+        "SELECT string_agg(relname, ',' ORDER BY relname) FROM pg_class"
+        " WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p')"
+    ),
     "public_tables_without_rls": (
         "SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace"
         " AND relkind IN ('r', 'p') AND NOT relrowsecurity"
@@ -66,6 +70,14 @@ READBACK = {
         " WHERE c.relnamespace = 'public'::regnamespace"
         " AND pg_get_expr(d.adbin, d.adrelid) = 'gen_random_uuid()'"
     ),
+    "builtin_uuid_columns": (
+        "SELECT string_agg(c.relname || '.' || a.attname, ','"
+        " ORDER BY c.relname, a.attname) FROM pg_attrdef d"
+        " JOIN pg_class c ON c.oid = d.adrelid"
+        " JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum"
+        " WHERE c.relnamespace = 'public'::regnamespace"
+        " AND pg_get_expr(d.adbin, d.adrelid) = 'gen_random_uuid()'"
+    ),
     "uuid_ossp_defaults": (
         "SELECT count(*) FROM pg_attrdef d JOIN pg_class c ON c.oid = d.adrelid"
         " WHERE c.relnamespace = 'public'::regnamespace"
@@ -73,7 +85,89 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "025_evidence_grounded_claim_ledger.sql"
+NEWEST_MIGRATION = "028_research_work.sql"
+
+# Exact full-chain identities: 027 adds three tables/one UUID default; 028 adds fifteen
+# tables with caller-bound identities. Counts alone cannot detect a swapped table or default.
+EXPECTED_PUBLIC_TABLES = (
+    "industry_taxonomies",
+    "market_brief_revisions",
+    "market_lexicons",
+    "mission_claim_evidence",
+    "mission_claims",
+    "mission_evidence",
+    "mission_evidence_qualifications",
+    "mission_manifests",
+    "mission_probe_outcomes",
+    "mission_progress_commands",
+    "mission_progress_events",
+    "mission_progress_revisions",
+    "mission_run_journals",
+    "mission_writer_claims",
+    "observations",
+    "platform_credentials",
+    "research_activity_receipts",
+    "research_assignments",
+    "research_finding_observations",
+    "research_finding_revisions",
+    "research_handoff_acknowledgements",
+    "research_handoff_observations",
+    "research_handoff_references",
+    "research_handoffs",
+    "research_input_findings",
+    "research_input_observations",
+    "research_input_sets",
+    "research_missions",
+    "research_recorded_metadata",
+    "research_work_commands",
+    "research_work_dependencies",
+    "research_work_items",
+    "research_workspaces",
+    "runtime_configs",
+    "signal_metrics",
+    "source_identity_aliases",
+    "sources",
+    "system_audit_logs",
+    "topic_clusters",
+    "trend_signals",
+    "youtube_quota_buckets",
+)
+EXPECTED_UUID_COLUMNS = (
+    "industry_taxonomies.id",
+    "market_brief_revisions.id",
+    "market_lexicons.id",
+    "mission_claim_evidence.id",
+    "mission_claims.id",
+    "mission_evidence.id",
+    "mission_evidence_qualifications.id",
+    "mission_probe_outcomes.id",
+    "mission_progress_events.id",
+    "mission_run_journals.id",
+    "observations.id",
+    "research_missions.id",
+    "research_workspaces.id",
+    "source_identity_aliases.id",
+    "sources.id",
+    "topic_clusters.id",
+)
+
+
+def _assert_readback(readback):
+    assert readback == {
+        "later_objects": "13",
+        "ui_noise_terms": "10",
+        "retired_present": "0",
+        "rls_market_lexicons": "t",
+        "public_policies": "0",
+        "public_tables": "41",
+        "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
+        "public_tables_without_rls": "0",
+        "supabase_roles": "0",
+        "builtin_uuid_defaults": "16",
+        "builtin_uuid_columns": ",".join(EXPECTED_UUID_COLUMNS),
+        "uuid_ossp_defaults": "0",
+    }
+
 
 compose_only = pytest.mark.skipif(
     os.environ.get("IGNIS_TEST_COMPOSE_INIT") != "1" or shutil.which("docker") is None,
@@ -259,18 +353,7 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
         assert run["ran"] == list(all_postgres_migrations()), "init skipped or reordered a file"
         assert NEWEST_MIGRATION in run["ran"], f"init never reached {NEWEST_MIGRATION}"
         assert run["errors"] == []
-        assert run["readback"] == {
-            "later_objects": "13",
-            "ui_noise_terms": "10",
-            "retired_present": "0",
-            "rls_market_lexicons": "t",
-            "public_policies": "0",
-            "public_tables": "23",
-            "public_tables_without_rls": "0",
-            "supabase_roles": "0",
-            "builtin_uuid_defaults": "15",
-            "uuid_ossp_defaults": "0",
-        }
+        _assert_readback(run["readback"])
         assert run["cleanup"]["returncode"] == 0, run["cleanup"]
         assert run["leftovers"] == {"container": 0, "volume": 0, "network": 0}, (
             f"cleanup left {run['leftovers']}: {run['leftover_details']};"
@@ -278,3 +361,29 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
         )
         assert run["credential_file_left"] is False
     assert first["readback"] == second["readback"]
+
+
+@pytest.mark.parametrize("control", ("table_identity", "uuid_identity", "rls", "policy"))
+def test_readback_oracle_rejects_identity_substitution_and_access_widening(control):
+    """Correct counts cannot hide the wrong schema or a widened access policy."""
+    readback = {
+        "later_objects": "13", "ui_noise_terms": "10", "retired_present": "0",
+        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "41",
+        "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
+        "public_tables_without_rls": "0", "supabase_roles": "0",
+        "builtin_uuid_defaults": "16", "builtin_uuid_columns": ",".join(EXPECTED_UUID_COLUMNS),
+        "uuid_ossp_defaults": "0",
+    }
+    _assert_readback(readback)
+    if control == "table_identity":
+        readback["public_table_names"] = readback["public_table_names"].replace(
+            "research_work_commands", "unexpected_table")
+    elif control == "uuid_identity":
+        readback["builtin_uuid_columns"] = readback["builtin_uuid_columns"].replace(
+            "mission_progress_events.id", "research_assignments.assignment_id")
+    elif control == "rls":
+        readback["public_tables_without_rls"] = "1"
+    else:
+        readback["public_policies"] = "1"
+    with pytest.raises(AssertionError):
+        _assert_readback(readback)

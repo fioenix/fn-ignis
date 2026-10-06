@@ -18,11 +18,14 @@ from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 import pytest
 
-from tests.integration.test_mission_relay_read_boundary import relay_case, _state
+from tests.integration.test_mission_relay_read_boundary import relay_case as _relay_case, _state
+
 from tests.integration.test_research_work_persistence import _arrange
 from tests.integration.test_research_work_command_service import command
 from tests.integration.test_research_recording_mcp_boundary import RUNNER, public_handoff
 from tests.integration.test_mission_relay_mcp import _http
+
+relay_case = _relay_case
 
 EVIDENCE = Path(__file__).resolve().parents[2] / '.handoff/spec014/us4/t056'
 

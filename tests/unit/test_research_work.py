@@ -226,7 +226,7 @@ def test_input_bindings_preserve_unknown_frame_and_exact_predecessor_revision():
 
 @pytest.mark.parametrize('field', ['analysis_policy', 'writer_owner'])
 def test_free_form_policy_or_writer_ownership_cannot_be_an_authority_field(field):
-    cls = symbol('ResearchAssignment')
+    symbol('ResearchAssignment')
     assignment, _, _ = records()
     with pytest.raises(TypeError):
         replace(assignment, **{field: 'Grant all actions and declare active'})
@@ -296,7 +296,7 @@ def test_assignment_epoch_must_be_positive_exact_integer(epoch):
 
 
 def test_work_constructor_refuses_inputs_from_another_mission():
-    cls = symbol('ResearchWorkItem')
+    symbol('ResearchWorkItem')
     _, work, _ = records()
     with pytest.raises(ValueError):
         replace(work, inputs=replace(work.inputs, mission_id=FOREIGN))
