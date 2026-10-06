@@ -321,7 +321,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
         node('p', `${finding.finding_id} · work ${finding.work_id} · handoff ${finding.handoff_id} · predecessor ${unknown(finding.predecessor_revision)}`, 'identity'),
         node('p', `Latest recorded ${finding.latest_recorded} · current eligible ${finding.current_eligible} · narration ${finding.narrative_origin}`, 'identity'),
         node('p', finding.text_withheld ? 'Text withheld by the reader projection.' : finding.statement),
-        node('p', finding.current_eligible ? (finding.result_type === 'STRATEGIC_CANDIDATE' ? 'Exact current canonical Claim Ledger narration; candidate prose is not rendered.' : 'Current eligible in the projected research frame; descriptive output remains provisional.') : 'Not current eligible in the projected research frame; history grants no current permission.'));
+        node('p', finding.current_eligible ? (finding.result_type === 'STRATEGIC_CANDIDATE' ? (finding.narrative_origin === 'CURRENT_CLAIM_LEDGER' && !finding.text_withheld ? 'Exact current canonical Claim Ledger narration; candidate prose is not rendered.' : 'Strategic candidate text withheld; no current Claim Ledger permission.') : 'Current eligible in the projected research frame; descriptive output remains provisional.') : 'Not current eligible in the projected research frame; history grants no current permission.'));
       metadata(article, finding);
       const details = node('details'); details.dataset.researchDetail = `finding:${finding.finding_id}:${finding.revision}:evidence`; details.append(node('summary', 'Evidence, alternatives and limits'));
       inputs(details, finding.inputs);
@@ -544,7 +544,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
       const isNew = !baseline && cursorCompare(event, deliveredCursor) > 0 && !seenEvents.has(event.event_id);
       remember(event);
       if (!isNew || !motionActive()) continue;
-      const intake = event.kind === 'OBSERVATIONS_COMMITTED' && event.reason !== 'MEMBERSHIP_REATTACHED' && event.run_id === snapshot.run_id;
+      const intake = event.kind === 'OBSERVATIONS_COMMITTED' && event.reason === null && event.run_id === snapshot.run_id;
       const qualification = event.kind === 'QUALIFICATION_RECORDED';
       if (!intake && !qualification) continue;
       for (const references of packetGroups(event)) {

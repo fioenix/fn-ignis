@@ -36,6 +36,15 @@ async def recorded_research(relay_case, tmp_path, request):
     case, mission, _, port, work, handoff, revision = await _arrange(relay_case, tmp_path)
     handoff = replace(handoff, result='<img src=x onerror="window.untrustedExecuted=true">', occurred_at=None,
                       findings=(replace(handoff.findings[0], statement='<b>Recorded descriptive finding</b>'),))
+    if mode == 'pruned':
+        from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+        store = WorkspaceRepository(repository=case.repository)
+        run = (await store.list_run_journals(mission.id))[0]
+        initial = await GetMissionRelaySnapshotUseCase(_reader(case.repository)).execute(replace(_request(mission, run.run_id), page_size=200))
+        assert await case.repository.commit_collection_pruning(mission.id, run.run_id, []) == 6
+        fresh = await GetMissionRelaySnapshotUseCase(_reader(case.repository)).execute(replace(_request(mission, run.run_id), page_size=200))
+        assert fresh.evidence == ()
+        return initial, fresh, None
     if mode == 'available_empty':
         from ignis.domain.entities import ResearchMission
         empty = ResearchMission(title='Recorded empty research', keywords=['synthetic'],
@@ -200,6 +209,11 @@ def test_unpermitted_candidate_never_reappears_in_handoff_or_history(research_br
         assert 'Aggregate result withheld' in output.inner_text()
         assert 'Text withheld' in output.inner_text()
         assert 'WITHHELD' in output.inner_text()
+        finding = snapshot.to_payload()['research']['findings'][0]
+        assert finding['current_eligible'] is True and finding['text_withheld'] is True
+        assert finding['narrative_origin'] == 'WITHHELD'
+        assert 'Exact current canonical Claim Ledger narration' not in output.inner_text()
+        assert 'Strategic candidate text withheld; no current Claim Ledger permission.' in output.inner_text()
         assert output.locator('[data-testid="finding-history"] article').count() == 1
         output.locator('summary').last.click()
         assert 'UNPERMITTED_STRATEGIC_PROSE' not in output.inner_text()
@@ -341,3 +355,19 @@ def test_successful_refresh_keeps_keyboard_focus_and_expanded_finding(research_b
         summary = page.locator('summary').filter(has_text=detail).first
         assert summary.evaluate('(element) => element.parentElement.open'), 'Automatic refresh closed recorded finding details.'
         assert summary.evaluate('(element) => document.activeElement === element'), 'Automatic refresh stole summary focus.'
+
+
+@pytest.mark.parametrize('relay_case', ('file',), indirect=True)
+@pytest.mark.parametrize('recorded_research', ('pruned',), indirect=True)
+def test_recorded_pruning_remains_inspectable_without_new_arrival_packets(research_browser, recorded_research):
+    """A persisted membership removal is not evidence arriving at intake."""
+    initial, fresh, _ = recorded_research
+    pruned = [event for event in fresh.event_page.events if event.reason == 'MEMBERSHIP_PRUNED']
+    assert len(pruned) == 1 and len(pruned[0].evidence_references) == 6
+    with _viewer(research_browser, initial) as viewer:
+        viewer.refresh(fresh)
+        timeline = viewer.page.get_by_test_id('event-timeline').locator(f'[data-event-id="{pruned[0].event_id}"]')
+        assert 'MEMBERSHIP_PRUNED' in timeline.inner_text()
+        assert timeline.get_by_test_id('event-observation-count').inner_text() == '6'
+        assert viewer.packets == [], 'Removed references were animated as newly arriving evidence.'
+        assert not viewer.unexpected

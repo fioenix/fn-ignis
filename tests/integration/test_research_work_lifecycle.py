@@ -390,8 +390,11 @@ async def test_persisted_activity_has_finite_host_provenance_and_no_implicit_ren
     assert project_work_activity(work=current, receipt=actual, now=fresh).state == "STALE"
     assert project_work_activity(work=current, receipt=None, now=occurred).state == "UNKNOWN"
     before = _state(case)
-    assert (
-        await execute(case, mission, command("RECORD_ACTIVITY", payload, revision, key="obsolete-version")) != receipt
+    await refused(
+        case,
+        mission,
+        command("RECORD_ACTIVITY", payload, revision, key="obsolete-version"),
+        "STALE_REVISION",
     )
     assert _state(case)[1]["research_activity_receipts"] == before[1]["research_activity_receipts"]
 
