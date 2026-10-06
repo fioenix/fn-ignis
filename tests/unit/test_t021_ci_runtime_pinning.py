@@ -47,7 +47,7 @@ NAMES = {
     COMPOSE_INIT: ("Compose Init", {"compose-fresh-init": "Fresh Compose database init"}),
     DOCKER_PUBLISH: ("Docker Publish to GHCR", {"build-and-push": "Build & Push Docker Image"}),
 }
-PYTHON_MATRIX = ["3.11", "3.12", "3.13", "3.14"]
+PYTHON_MATRIX = ["3.12"]
 POSTGRES_SERVICE_IMAGE = "timescale/timescaledb-ha:pg16"
 BENCHMARK = "scripts/t021_read_path_benchmark.py"
 DOCKER_TAG_RULES = (
@@ -337,7 +337,7 @@ def test_workflow_and_job_names_are_unchanged():
         assert found == jobs, f"{path.name} jobs changed: {found}"
 
 
-def test_the_ci_python_matrix_is_exactly_the_supported_range():
+def test_the_ci_python_matrix_is_the_owner_selected_runtime():
     matrix = _jobs(CI)["test"]["strategy"]["matrix"]
     assert matrix == {"python-version": PYTHON_MATRIX}, matrix
 
