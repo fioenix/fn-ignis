@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import timedelta
 from uuid import uuid4
 
+import psycopg
 import pytest
 
 from tests.integration.test_research_work_persistence import _arrange, _commit, _sql
@@ -154,19 +155,37 @@ async def test_handoff_observation_rows_are_scoped_sealed_and_history_retained(r
     assert receipt.disposition == "APPLIED"
     rows = _state(case)[1]["research_handoff_observations"]
     assert len(rows) == len(handoff.observation_sources)
-    input_id = _state(case)[1]["research_input_sets"][0][0]
-    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+    if case.name == "postgres":
+        with psycopg.connect(case.dsn) as conn:
+            input_id = conn.execute(
+                "SELECT input_id FROM research_handoffs WHERE handoff_id=%s", (handoff.handoff_id,)
+            ).fetchone()[0]
+    else:
+        input_id = _state(case)[1]["research_input_sets"][0][0]
+    error = psycopg.errors.CheckViolation if case.name == "postgres" else sqlite3.IntegrityError
+    before = _state(case)
+    with pytest.raises(error, match="immutable") as rejected:
         await _sql(
             case,
             "INSERT INTO research_handoff_observations VALUES (?,?,?,?,?,?)",
             (999, mission.id, handoff.handoff_id, input_id, *handoff.observation_sources[0]),
         )
-    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+    if case.name == "postgres":
+        assert rejected.value.sqlstate == "23514"
+    assert _state(case) == before
+    message = "append-only" if case.name == "postgres" else "immutable"
+    with pytest.raises(error, match=message) as rejected:
         await _sql(
             case, "UPDATE research_handoff_observations SET ordinal=999 WHERE handoff_id=?", (handoff.handoff_id,)
         )
-    with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+    if case.name == "postgres":
+        assert rejected.value.sqlstate == "23514"
+    assert _state(case) == before
+    with pytest.raises(error, match=message) as rejected:
         await _sql(case, "DELETE FROM research_handoff_observations WHERE handoff_id=?", (handoff.handoff_id,))
+    if case.name == "postgres":
+        assert rejected.value.sqlstate == "23514"
+    assert _state(case) == before
     observation = handoff.observation_sources[0][0]
     assert (
         await _sql(

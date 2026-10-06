@@ -189,6 +189,26 @@ async def test_postgres_refused_original_after_new_revision_and_future_result_bo
     assert "OBSOLETE_RESULT_SENTINEL" not in repr(state)
     assert await case.repository.commit_research_work(command) == refusal
     assert _state(case) == state
+    with pytest.raises(psycopg.errors.CheckViolation, match="Invalid safe reason code") as rejected:
+        await _sql(
+            case,
+            """INSERT INTO research_work_commands
+               SELECT mission_id, 'unsafe-reason', payload_fingerprint, operation, %s,
+                      disposition, 'password=unsafe', revision, work_version,
+                      assignment_version, event_ids, recorded_at
+               FROM research_work_commands WHERE receipt_id=%s""",
+            (uuid4(), refusal.receipt_id),
+        )
+    assert rejected.value.sqlstate == "23514"
+    assert _state(case) == state
+    with pytest.raises(psycopg.errors.CheckViolation, match="append-only") as rejected:
+        await _sql(
+            case, "UPDATE research_work_commands SET reason_code=%s WHERE receipt_id=%s",
+            ("password=unsafe", refusal.receipt_id),
+        )
+    assert rejected.value.sqlstate == "23514"
+    assert _state(case) == state
+    assert await case.repository.commit_research_work(command) == refusal
     admitted = await _commit(
         case.repository, port, mission, "SUBMIT_HANDOFF",
         replace(handoff, expected_version=changed.work_version), revision=changed.revision,
@@ -235,9 +255,14 @@ async def test_postgres_immutable_bindings_order_pruning_and_root_cascade(relay_
             (999, input_id, mission.id, *handoff.observation_sources[0]),
         ),
     ]
-    for statement, params in mutations:
-        with pytest.raises(psycopg.IntegrityError):
+    messages = ("immutable", "deleted", "foreign key", "immutable", "immutable")
+    before = _state(case)
+    for (statement, params), message in zip(mutations, messages, strict=True):
+        error = psycopg.errors.ForeignKeyViolation if message == "foreign key" else psycopg.errors.CheckViolation
+        with pytest.raises(error, match=message) as rejected:
             await _sql(case, statement, params)
+        assert rejected.value.sqlstate == ("23503" if message == "foreign key" else "23514")
+        assert _state(case) == before
     await case.repository.delete_mission_signals(mission.id)
     pruned = await case.repository.load_research_work(mission.id)
     assert pruned.work_items == snapshot.work_items and not pruned.observation_sources

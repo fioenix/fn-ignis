@@ -5,6 +5,7 @@ from dataclasses import replace
 from datetime import timedelta
 from uuid import uuid4
 
+import psycopg
 import pytest
 
 from tests.integration.test_mission_relay_read_boundary import NOW, _state, relay_case as canonical_relay_case
@@ -118,6 +119,7 @@ async def test_refusal_original_receipt_without_body_or_fake_event(relay_case, t
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("relay_case", ("file", "memory"), indirect=True)
 async def test_real_start_contention_one_cas_winner(relay_case, tmp_path):
     case, mission, domain, port, work, _, revision = await _ready(relay_case, tmp_path)
     assigned = replace(work, work_id=uuid4(), state="ASSIGNED", version=1)
@@ -169,6 +171,7 @@ async def test_real_start_contention_one_cas_winner(relay_case, tmp_path):
 @pytest.mark.parametrize(
     "fault_table", ["mission_progress_events", "research_recorded_metadata", "research_work_commands"]
 )
+@pytest.mark.parametrize("relay_case", ("file", "memory"), indirect=True)
 async def test_late_progress_failure_rolls_back_all_core_effects(relay_case, tmp_path, fault_table):
     case, mission, _, port, work, _, revision = await _ready(relay_case, tmp_path)
     await _sql(
@@ -188,6 +191,7 @@ async def test_late_progress_failure_rolls_back_all_core_effects(relay_case, tmp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("relay_case", ("file", "memory"), indirect=True)
 async def test_input_seal_source_identity_pruning_and_root_cascade(relay_case, tmp_path):
     case, mission, _, _, work, _, _ = await _ready(relay_case, tmp_path)
     snapshot = await case.repository.load_research_work(mission.id)
@@ -361,6 +365,7 @@ async def test_mask_accepted_text_and_refuse_unsafe_exact_execution_identity(rel
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("relay_case", ("file", "memory"), indirect=True)
 async def test_physical_seals_and_safe_reason_roundtrip(relay_case, tmp_path):
     case, mission, _, port, work, handoff, revision = await _ready(relay_case, tmp_path)
     import sqlite3
@@ -424,7 +429,11 @@ async def test_physical_type_authority_and_metadata_guards(relay_case, tmp_path,
 
     if control == "metadata_time":
         await _sql(case, "UPDATE research_work_items SET version=version+1 WHERE work_id=?", (work.work_id,))
-    with pytest.raises(sqlite3.DatabaseError):
+    before = _state(case)
+    error = sqlite3.DatabaseError
+    if case.name == "postgres":
+        error = psycopg.errors.InvalidTextRepresentation if control in {"uuid", "integer"} else psycopg.errors.CheckViolation
+    with pytest.raises(error) as rejected:
         if control == "uuid":
             await _sql(
                 case, "UPDATE research_assignments SET assignment_id=? WHERE mission_id=?", ("invalid", mission.id)
@@ -435,7 +444,7 @@ async def test_physical_type_authority_and_metadata_guards(relay_case, tmp_path,
             )
         elif control == "action":
             await _sql(
-                case, "UPDATE research_assignments SET actions=? WHERE mission_id=?", ('["DISPATCH"]', mission.id)
+                case, "UPDATE research_assignments SET actions=? WHERE mission_id=?", (["DISPATCH"] if case.name == "postgres" else '["DISPATCH"]', mission.id)
             )
         else:
             await _sql(
@@ -443,6 +452,13 @@ async def test_physical_type_authority_and_metadata_guards(relay_case, tmp_path,
                 "INSERT INTO research_recorded_metadata VALUES (?,?,?,?,?,?,?)",
                 (mission.id, "WORK", work.work_id, work.version + 1, 1, NOW.isoformat(), "HARNESS_OBSERVED"),
             )
+    if case.name == "postgres":
+        assert rejected.value.sqlstate == ("22P02" if control in {"uuid", "integer"} else "23514")
+        if control == "metadata_time":
+            assert "Invalid observed record metadata" in str(rejected.value)
+        elif control == "action":
+            assert "research_assignments_actions_check" in str(rejected.value)
+    assert _state(case) == before
 
 
 @pytest.mark.asyncio
@@ -618,10 +634,17 @@ async def test_physical_uuid_rejects_embedded_null_suffix(relay_case, tmp_path):
 
     case, mission, _, _, _, _, _ = await _ready(relay_case, tmp_path)
     malformed = str(uuid4()) + "\x00unretained"
-    with pytest.raises(sqlite3.IntegrityError, match="physical type"):
+    before = _state(case)
+    error = psycopg.DataError if case.name == "postgres" else sqlite3.IntegrityError
+    message = "cannot contain NUL" if case.name == "postgres" else "physical type"
+    with pytest.raises(error, match=message) as rejected:
         await _sql(
             case, "INSERT INTO research_input_sets VALUES (?,?,?,?,?)", (malformed, mission.id, "a" * 64, None, None)
         )
+    if case.name == "postgres":
+        # Psycopg rejects NUL during parameter adaptation, before the server sees it.
+        assert rejected.value.sqlstate is None
+    assert _state(case) == before
     assert "unretained" not in repr(_state(case))
 
 
