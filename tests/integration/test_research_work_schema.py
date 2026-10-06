@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / 'sql/028_research_work.sql'
 TABLES = ('research_assignments', 'research_work_items', 'research_input_sets',
           'research_input_observations', 'research_input_findings', 'research_work_dependencies',
-          'research_handoffs', 'research_handoff_references', 'research_finding_revisions',
+          'research_handoffs', 'research_handoff_references', 'research_handoff_observations', 'research_finding_revisions',
           'research_finding_observations', 'research_activity_receipts',
           'research_handoff_acknowledgements', 'research_recorded_metadata', 'research_work_commands')
 
@@ -375,7 +375,7 @@ def test_t047_explicit_kind_extension_preserves_legacy_and_decodes_new_events(su
     from ignis.infrastructure.persistence.mission_relay_reader import _pg_event
 
     new_kinds = ('RESEARCH_ASSIGNED', 'WORK_ASSIGNED', 'WORK_ACTIVITY_RECORDED',
-                 'WORK_RESUMED', 'WORK_ENDED', 'RESEARCH_ENDED')
+                 'WORK_RESUMED', 'WORK_ENDED', 'RESEARCH_ENDED', 'HANDOFF_ACKNOWLEDGED')
     with psycopg.connect(supabase_like_dsn, autocommit=True) as conn:
         for migration in SCHEMA_MIGRATIONS:
             if migration != MIGRATION.name:
@@ -406,3 +406,30 @@ def test_t047_explicit_kind_extension_preserves_legacy_and_decodes_new_events(su
         conn.execute(MIGRATION.read_text())
         assert {table: rows(conn,table) for table in watched} == settled
         assert conn.execute('SELECT id FROM mission_progress_events WHERE causation_key=\'legacy\'').fetchall() == [(old_id,)]
+
+
+def test_t049_ordered_handoff_source_scope_seal_and_retention(schema_db):
+    """New handoff references retain canonical pairs and share the metadata owner seal."""
+    conn = schema_db
+    x = arrange(conn)
+    statement = 'INSERT INTO research_handoff_observations VALUES (%s,%s,%s,%s,%s,%s)'
+    row = (1, x['mission'], x['handoff'], x['inputs'], x['observation'], x['source'])
+    for bad in ((1,x['foreign'],x['handoff'],x['inputs'],x['observation'],x['source']),
+                (1,x['mission'],x['handoff'],x['inputs'],x['observation'],x['other_source'])):
+        rejected(conn,statement,bad,error=psycopg.errors.ForeignKeyViolation)
+    rejected(conn,statement,(0,*row[1:]))
+    conn.execute(statement,row)
+    before=rows(conn,'research_handoff_observations')
+    assert before==[row]
+    rejected(conn,statement,row,error=psycopg.errors.UniqueViolation)
+    for operation in ('UPDATE research_handoff_observations SET ordinal=2',
+                      'DELETE FROM research_handoff_observations'):
+        rejected(conn,operation)
+    conn.execute("INSERT INTO mission_progress_revisions VALUES (%s,1)",(x['mission'],))
+    conn.execute("INSERT INTO research_recorded_metadata(mission_id,record_kind,record_id,record_version,mission_revision) VALUES (%s,'HANDOFF',%s,1,1)",(x['mission'],x['handoff']))
+    rejected(conn,statement,(2,*row[1:]))
+    assert conn.execute('DELETE FROM mission_evidence WHERE mission_id=%s',(x['mission'],)).rowcount==1
+    assert rows(conn,'research_handoff_observations')==before
+    assert conn.execute('DELETE FROM research_missions WHERE id=%s',(x['mission'],)).rowcount==1
+    assert rows(conn,'research_handoff_observations')==[]
+    assert conn.execute('SELECT id,source_id FROM observations WHERE id=%s',(x['observation'],)).fetchone()==(x['observation'],x['source'])

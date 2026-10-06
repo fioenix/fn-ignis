@@ -389,20 +389,20 @@ async def test_physical_seals_and_safe_reason_roundtrip(relay_case, tmp_path):
         port,
         mission,
         "SUBMIT_HANDOFF",
-        replace(handoff, result="UNSUPPORTED_SENTINEL"),
+        replace(handoff, expected_version=handoff.expected_version-1, result="OBSOLETE_SENTINEL"),
         revision=revision,
         key="future-result",
     )
-    assert refused.reason_code == "INVALID_TRANSITION"
+    assert refused.reason_code == "STALE_WORK_VERSION"
     assert await case.repository.load_research_work(mission.id) == before
-    assert "UNSUPPORTED_SENTINEL" not in repr(_state(case))
+    assert "OBSOLETE_SENTINEL" not in repr(_state(case))
     assert (
         await _commit(
             case.repository,
             port,
             mission,
             "SUBMIT_HANDOFF",
-            replace(handoff, result="UNSUPPORTED_SENTINEL"),
+            replace(handoff, expected_version=handoff.expected_version-1, result="OBSOLETE_SENTINEL"),
             revision=revision,
             key="future-result",
         )

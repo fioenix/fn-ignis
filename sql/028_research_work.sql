@@ -5,7 +5,7 @@ ALTER TABLE public.mission_progress_events
     ADD CONSTRAINT mission_progress_events_kind_check CHECK (kind IN (
         'COLLECTION_STARTED', 'COLLECTION_STATE_CHANGED', 'PROBE_OUTCOMES_RECORDED',
         'OBSERVATIONS_COMMITTED', 'QUALIFICATION_RECORDED', 'CLAIM_GATE_CHANGED',
-        'WORK_STARTED', 'WORK_WAITING', 'HANDOFF_COMMITTED', 'FINDING_REVISED',
+        'WORK_STARTED', 'WORK_WAITING', 'HANDOFF_COMMITTED','HANDOFF_ACKNOWLEDGED', 'FINDING_REVISED',
         'CANCELLATION_REQUESTED', 'CANCELLATION_ACKNOWLEDGED',
         'RESEARCH_ASSIGNED', 'WORK_ASSIGNED', 'WORK_ACTIVITY_RECORDED',
         'WORK_RESUMED', 'WORK_ENDED', 'RESEARCH_ENDED'
@@ -104,7 +104,21 @@ CREATE TABLE IF NOT EXISTS public.research_handoffs (
     submitted_recorded_at TIMESTAMPTZ CHECK (isfinite(submitted_recorded_at)),
     FOREIGN KEY (mission_id, work_id, input_id) REFERENCES public.research_work_items(mission_id, work_id, input_id),
     UNIQUE (mission_id, handoff_id),
+    UNIQUE (mission_id, handoff_id, input_id),
     UNIQUE (mission_id, handoff_id, work_id, input_id)
+);
+CREATE TABLE IF NOT EXISTS public.research_handoff_observations (
+    ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 1 AND 1000),
+    mission_id UUID NOT NULL REFERENCES public.research_missions(id) ON DELETE CASCADE,
+    handoff_id UUID NOT NULL,
+    input_id UUID NOT NULL,
+    observation_id UUID NOT NULL,
+    source_id UUID NOT NULL,
+    PRIMARY KEY (handoff_id, observation_id),
+    UNIQUE (handoff_id, ordinal),
+    FOREIGN KEY (mission_id, handoff_id, input_id) REFERENCES public.research_handoffs(mission_id, handoff_id, input_id),
+    FOREIGN KEY (input_id, observation_id) REFERENCES public.research_input_observations(input_id, observation_id),
+    FOREIGN KEY (observation_id, source_id) REFERENCES public.observations(id, source_id)
 );
 CREATE TABLE IF NOT EXISTS public.research_handoff_references (
     ordinal INTEGER NOT NULL DEFAULT 1 CHECK (ordinal BETWEEN 1 AND 1000),
@@ -274,7 +288,7 @@ BEGIN
             WHERE record_kind='WORK' AND record_id=NEW.work_id) THEN
             RAISE EXCEPTION 'Finalized research collection is immutable' USING ERRCODE='23514';
         END IF;
-    ELSIF TG_TABLE_NAME IN ('research_handoff_references','research_finding_revisions') THEN
+    ELSIF TG_TABLE_NAME IN ('research_handoff_references','research_handoff_observations','research_finding_revisions') THEN
         PERFORM 1 FROM public.research_handoffs WHERE handoff_id=NEW.handoff_id FOR UPDATE;
         IF EXISTS (SELECT 1 FROM public.research_recorded_metadata
             WHERE record_kind='HANDOFF' AND record_id=NEW.handoff_id) THEN
@@ -391,7 +405,7 @@ DECLARE
     client_role TEXT;
     tables CONSTANT TEXT[] := ARRAY[
         'research_assignments','research_work_items','research_input_sets','research_input_observations',
-        'research_input_findings','research_work_dependencies','research_handoffs','research_handoff_references',
+        'research_input_findings','research_work_dependencies','research_handoffs','research_handoff_references','research_handoff_observations',
         'research_finding_revisions','research_finding_observations','research_activity_receipts',
         'research_handoff_acknowledgements','research_recorded_metadata','research_work_commands'
     ];

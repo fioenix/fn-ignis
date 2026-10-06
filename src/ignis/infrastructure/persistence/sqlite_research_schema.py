@@ -89,12 +89,26 @@ CREATE TABLE IF NOT EXISTS research_handoffs (
     result TEXT NOT NULL CHECK (length(trim(result)) BETWEEN 1 AND 4096),
     limitations TEXT NOT NULL DEFAULT '[]',
     open_questions TEXT NOT NULL DEFAULT '[]',
-    occurred_at TEXT CHECK (julianday(occurred_at) IS NOT NULL),
+    occurred_at TEXT CHECK (occurred_at IS NULL OR julianday(occurred_at) IS NOT NULL),
     -- Submitted identity is retained verbatim; actual transaction time is separate metadata.
-    submitted_recorded_at TEXT CHECK (julianday(submitted_recorded_at) IS NOT NULL),
+    submitted_recorded_at TEXT CHECK (submitted_recorded_at IS NULL OR julianday(submitted_recorded_at) IS NOT NULL),
     FOREIGN KEY (mission_id, work_id, input_id) REFERENCES research_work_items(mission_id, work_id, input_id),
     UNIQUE (mission_id, handoff_id),
+    UNIQUE (mission_id, handoff_id, input_id),
     UNIQUE (mission_id, handoff_id, work_id, input_id)
+);
+CREATE TABLE IF NOT EXISTS research_handoff_observations (
+    ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 1 AND 1000),
+    mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+    handoff_id TEXT NOT NULL,
+    input_id TEXT NOT NULL,
+    observation_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    PRIMARY KEY (handoff_id, observation_id),
+    UNIQUE (handoff_id, ordinal),
+    FOREIGN KEY (mission_id, handoff_id, input_id) REFERENCES research_handoffs(mission_id, handoff_id, input_id),
+    FOREIGN KEY (input_id, observation_id) REFERENCES research_input_observations(input_id, observation_id),
+    FOREIGN KEY (observation_id, source_id) REFERENCES observations(id, source_id)
 );
 CREATE TABLE IF NOT EXISTS research_handoff_references (
     ordinal INTEGER NOT NULL DEFAULT 1 CHECK (ordinal BETWEEN 1 AND 1000),
@@ -125,7 +139,7 @@ CREATE TABLE IF NOT EXISTS research_finding_revisions (
     open_questions TEXT NOT NULL DEFAULT '[]',
     alternative_explanation TEXT,
     claim_id TEXT REFERENCES mission_claims(id),
-    submitted_recorded_at TEXT CHECK (julianday(submitted_recorded_at) IS NOT NULL),
+    submitted_recorded_at TEXT CHECK (submitted_recorded_at IS NULL OR julianday(submitted_recorded_at) IS NOT NULL),
     PRIMARY KEY (finding_id, revision),
     UNIQUE (handoff_id, handoff_ordinal),
     UNIQUE (handoff_id, finding_id),
@@ -163,7 +177,7 @@ CREATE TABLE IF NOT EXISTS research_activity_receipts (
     epoch INTEGER NOT NULL CHECK (epoch > 0),
     ownership_fence TEXT NOT NULL CHECK (length(trim(ownership_fence)) BETWEEN 1 AND 256),
     execution_ref TEXT NOT NULL CHECK (length(trim(execution_ref)) BETWEEN 1 AND 512),
-    occurred_at TEXT NOT NULL CHECK (julianday(occurred_at) IS NOT NULL),
+    occurred_at TEXT NOT NULL CHECK (occurred_at IS NULL OR julianday(occurred_at) IS NOT NULL),
     fresh_until TEXT NOT NULL CHECK (julianday(fresh_until) IS NOT NULL AND julianday(fresh_until) > julianday(occurred_at)),
     provenance TEXT NOT NULL CHECK (provenance = 'HOST_REPORTED'),
     FOREIGN KEY (mission_id, work_id) REFERENCES research_work_items(mission_id, work_id)
@@ -225,6 +239,7 @@ def install_research_schema(conn):
             "research_work_dependencies",
             "research_handoffs",
             "research_handoff_references",
+            "research_handoff_observations",
             "research_finding_revisions",
             "research_finding_observations",
             "research_activity_receipts",
@@ -288,6 +303,7 @@ def install_research_schema(conn):
             "research_input_observations": "EXISTS (SELECT 1 FROM research_work_items WHERE input_id=NEW.input_id)",
             "research_input_findings": "EXISTS (SELECT 1 FROM research_work_items WHERE input_id=NEW.input_id)",
             "research_work_dependencies": "EXISTS (SELECT 1 FROM research_recorded_metadata WHERE record_kind='WORK' AND record_id=NEW.work_id)",
+            "research_handoff_observations": "EXISTS (SELECT 1 FROM research_recorded_metadata WHERE record_kind='HANDOFF' AND record_id=NEW.handoff_id)",
             "research_handoff_references": "EXISTS (SELECT 1 FROM research_recorded_metadata WHERE record_kind='HANDOFF' AND record_id=NEW.handoff_id)",
             "research_finding_revisions": "EXISTS (SELECT 1 FROM research_recorded_metadata WHERE record_kind='HANDOFF' AND record_id=NEW.handoff_id)",
             "research_finding_observations": "EXISTS (SELECT 1 FROM research_recorded_metadata m LEFT JOIN research_finding_revisions f ON f.finding_id=NEW.finding_id AND f.revision=NEW.revision WHERE (m.record_kind='HANDOFF' AND m.record_id=f.handoff_id) OR (m.record_kind='FINDING' AND m.record_id=NEW.finding_id AND m.record_version=NEW.revision))",
