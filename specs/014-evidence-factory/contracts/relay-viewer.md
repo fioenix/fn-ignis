@@ -1,6 +1,6 @@
 # Relay Viewer Contract
 
-**Status**: MCP/HTTP read operations and US3 permission rendering are implemented and locally verified. The T054 research read projection and T055 recorded research UI are locally accepted; the T056 native stdio/SQLite-file/local-PostgreSQL/HTTP/Chromium chain is independently accepted with12 native and11 convention cases passing without failure/error/skip. Native host UAT and shipment remain unverified.
+**Status**: MCP/HTTP read operations and US3 permission rendering are implemented and locally verified. The T054 research read projection and T055 recorded research UI are locally accepted; the T056 native stdio/SQLite-file/local-PostgreSQL/HTTP/Chromium chain is independently accepted with12 native and11 convention cases passing without failure/error/skip. T057 actual native overlap/sequential execution and HTTP source-bearing readback are accepted for synthetic engineering UAT; T058 native revision/display and shipment remain unverified.
 
 ## MCP read operations
 
