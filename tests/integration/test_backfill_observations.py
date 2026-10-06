@@ -4,6 +4,7 @@ These run on both backends, because the two differ in exactly the places that ma
 a transaction rolls back, whether a foreign key is enforced, and what an upsert returns.
 """
 
+from contextlib import closing
 import sqlite3
 import uuid
 
@@ -259,6 +260,51 @@ def _insert_cluster_and_mission(case, cluster_id: str, mission_id: str) -> None:
         )
 
 
+# Remove referencing tables first; never CASCADE away constraints on surviving tables.
+MISSING_TARGET_TABLES = (
+    "research_finding_observations", "research_handoff_observations", "research_input_observations",
+    "mission_claim_evidence", "mission_evidence_qualifications", "mission_evidence", "observations",
+)
+
+
+def _remove_observation_target(case):
+    """Construct and verify the missing-target fault only in the owned disposable fixture."""
+    if case.name == "postgres":
+        connection = psycopg.connect(case.dsn)
+    else:
+        path = case.repository._db_path
+        assert path.endswith("mission_identity.sqlite"), "Only the repository fixture may be modified"
+        connection = sqlite3.connect(path)
+    with closing(connection) as conn, conn:
+        if case.name == "postgres":
+            assert conn.execute("SELECT current_database()").fetchone()[0].startswith("ignis_contract_")
+            inventory = "SELECT tablename FROM pg_tables WHERE schemaname='public'"
+            def foreign_keys():
+                return set(conn.execute(
+                    "SELECT c.relname, p.relname, pg_get_constraintdef(k.oid) FROM pg_constraint k"
+                    " JOIN pg_class c ON c.oid=k.conrelid JOIN pg_class p ON p.oid=k.confrelid"
+                    " WHERE k.contype='f' AND c.relnamespace='public'::regnamespace"
+                ).fetchall())
+        else:
+            conn.execute("PRAGMA foreign_keys=ON")
+            inventory = "SELECT name FROM sqlite_master WHERE type='table'"
+            def foreign_keys():
+                return {(table, *row) for (table,) in conn.execute(inventory)
+                        for row in conn.execute(f'PRAGMA foreign_key_list("{table}")')}
+        before = {row[0] for row in conn.execute(inventory)}
+        assert set(MISSING_TARGET_TABLES[3:]) <= before
+        if case.name == "postgres":
+            assert set(MISSING_TARGET_TABLES) <= before
+        # SQLite initializes research storage lazily; remove only actual dependent tables.
+        removed = {table for table in MISSING_TARGET_TABLES if table in before}
+        keys = foreign_keys()
+        for table in MISSING_TARGET_TABLES:
+            if table in removed:
+                conn.execute(f"DROP TABLE {table}")
+        assert {row[0] for row in conn.execute(inventory)} == before - removed
+        assert foreign_keys() == {key for key in keys if key[0] not in removed}
+
+
 # --- the dry run has to stay read-only through every branch ------------------------------------
 
 
@@ -273,12 +319,7 @@ async def test_a_dry_run_stays_read_only_even_when_the_target_tables_are_missing
     if repository_case.name != "postgres":
         pytest.skip("about Postgres transaction semantics; SQLite uses PRAGMA query_only")
 
-    with psycopg.connect(repository_case.dsn, autocommit=True) as conn:
-        # A pre-016 schema has neither qualifications nor the later claim bindings.
-        conn.execute("DROP TABLE mission_claim_evidence")
-        conn.execute("DROP TABLE mission_evidence_qualifications")
-        conn.execute("DROP TABLE mission_evidence")
-        conn.execute("DROP TABLE observations")
+    _remove_observation_target(repository_case)
 
     target = open_target(_dsn(repository_case))
     try:
@@ -299,40 +340,14 @@ async def test_a_dry_run_reports_whether_the_target_schema_is_there(repository_c
     summary = _run(repository_case, apply=False)
     assert summary["target_tables_present"] is True
 
-    if repository_case.name == "postgres":
-        with psycopg.connect(repository_case.dsn, autocommit=True) as conn:
-            # Remove the later binding tables before recreating the pre-016 state.
-            conn.execute("DROP TABLE mission_claim_evidence")
-            conn.execute("DROP TABLE mission_evidence_qualifications")
-            conn.execute("DROP TABLE mission_evidence")
-            conn.execute("DROP TABLE observations")
-    else:
-        with sqlite3.connect(repository_case.repository._db_path) as conn:
-            # Remove the later binding tables before recreating the pre-016 state.
-            conn.execute("DROP TABLE mission_claim_evidence")
-            conn.execute("DROP TABLE mission_evidence_qualifications")
-            conn.execute("DROP TABLE mission_evidence")
-            conn.execute("DROP TABLE observations")
+    _remove_observation_target(repository_case)
 
     summary = _run(repository_case, apply=False)
     assert summary["target_tables_present"] is False
 
 
 async def test_applying_against_a_missing_target_schema_is_refused(repository_case):
-    if repository_case.name == "postgres":
-        with psycopg.connect(repository_case.dsn, autocommit=True) as conn:
-            # Remove the later binding tables before recreating the pre-016 state.
-            conn.execute("DROP TABLE mission_claim_evidence")
-            conn.execute("DROP TABLE mission_evidence_qualifications")
-            conn.execute("DROP TABLE mission_evidence")
-            conn.execute("DROP TABLE observations")
-    else:
-        with sqlite3.connect(repository_case.repository._db_path) as conn:
-            # Remove the later binding tables before recreating the pre-016 state.
-            conn.execute("DROP TABLE mission_claim_evidence")
-            conn.execute("DROP TABLE mission_evidence_qualifications")
-            conn.execute("DROP TABLE mission_evidence")
-            conn.execute("DROP TABLE observations")
+    _remove_observation_target(repository_case)
 
     with pytest.raises(BackfillRefused, match="sql/016"):
         _run(repository_case, apply=True)

@@ -18,6 +18,7 @@ offline as well.
 
 import json
 import os
+import re
 import select
 import shutil
 import subprocess
@@ -281,18 +282,53 @@ def _newest_migration(tree: Path) -> Path:
     return sorted((tree / "sql").glob("[0-9][0-9][0-9]_*.sql"))[-1]
 
 
+
+def _created_table_names(ddl: str) -> set[str]:
+    """Return the table identifier, excluding an optional schema qualifier."""
+    identifiers = re.findall(
+        r'\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?'
+        r'(?:(?:"\w+"|\w+)\s*\.\s*)?("\w+"|\w+)\s*\(',
+        ddl, re.IGNORECASE,
+    )
+    return {identifier.strip('"') for identifier in identifiers}
+
+
+@pytest.mark.parametrize("ddl,expected", (
+    ("CREATE TABLE IF NOT EXISTS observations (id UUID)", {"observations"}),
+    ("CREATE TABLE IF NOT EXISTS public.research_assignments (id UUID)", {"research_assignments"}),
+    ('CREATE TABLE IF NOT EXISTS "public"."research_work_items" (id UUID)', {"research_work_items"}),
+    ("create table other.research_handoffs (id UUID)", {"research_handoffs"}),
+    ("CREATE TABLE IF NOT EXISTS public . research_work_commands\n(id UUID)", {"research_work_commands"}),
+    ("CREATE TABLE observations (id UUID); CREATE TABLE public.research_input_sets (id UUID)",
+     {"observations", "research_input_sets"}),
+))
+def test_created_table_names_preserve_exact_qualified_and_unqualified_identity(ddl, expected):
+    assert _created_table_names(ddl) == expected
+
+
+def test_sql028_table_oracle_neither_captures_schema_nor_omits_research_tables():
+    names = _created_table_names((REPO_ROOT / "sql/028_research_work.sql").read_text(encoding="utf-8"))
+    assert len(names) == 15 and "public" not in names
+    assert names == {
+        "research_assignments", "research_input_sets", "research_input_observations",
+        "research_work_items", "research_work_dependencies", "research_handoffs",
+        "research_handoff_observations", "research_handoff_references", "research_finding_revisions",
+        "research_input_findings", "research_finding_observations", "research_activity_receipts",
+        "research_handoff_acknowledgements", "research_recorded_metadata", "research_work_commands",
+    }
+
+
 def test_bootstrap_applies_tables_from_the_complete_migration_chain(bootstrapped):
     """The schema must reach the end of the chain the tag ships, not the end some doc remembers.
 
     Collect table additions across the chain: a later constraint-only migration need not create
     a table. Its behavioral changes are exercised separately, not inferred from table presence.
     """
-    import re
     import sqlite3
 
     newest = _newest_migration(REPO_ROOT)
     expected = {table for migration in (REPO_ROOT / "sql").glob("*.sql")
-                for table in re.findall(r"CREATE TABLE IF NOT EXISTS\s+(\w+)", migration.read_text(encoding="utf-8"))}
+                for table in _created_table_names(migration.read_text(encoding="utf-8"))}
     assert expected, "The migration chain must define tables"
     assert (bootstrapped["checkout"] / "sql" / newest.name).is_file(), f"the checkout lacks {newest.name}"
 
