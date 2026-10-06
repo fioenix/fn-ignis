@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 from psycopg import errors as pg_errors
-from psycopg.rows import tuple_row
+from psycopg.rows import dict_row, tuple_row
 from psycopg_pool import AsyncConnectionPool
 
 from ignis.application.cancellation import await_settled
@@ -346,7 +346,8 @@ class PostgresTimescaleRepository(ITrendRepository):
 
     @staticmethod
     async def _record_progress(cur, mission_id: UUID, kind: MissionProgressKind, causation_key: str,
-                               *, run_id=None, claim_id=None, references=(), reason=None, revision=None, ordinal=1):
+                               *, run_id=None, claim_id=None, references=(), reason=None, revision=None, ordinal=1,
+                               work_id=None, handoff_id=None, finding_id=None):
         """Advance the held control row within the fact transaction, never a sequence."""
         if revision is None:
             await cur.execute(
@@ -358,14 +359,17 @@ class PostgresTimescaleRepository(ITrendRepository):
             event_id=uuid4(), cursor=MissionRelayCursor(mission_id=mission_id, revision=revision, ordinal=ordinal),
             kind=kind, provenance=RelayProvenance.HARNESS_OBSERVED, recorded_at=datetime.now(timezone.utc),
             causation_key=causation_key, run_id=run_id, claim_id=claim_id, evidence_references=references, reason=reason,
+            work_id=work_id, handoff_id=handoff_id, finding_id=finding_id,
         )
         await cur.execute(
             "INSERT INTO mission_progress_events (id, mission_id, revision, ordinal, kind, provenance,"
-            " recorded_at, causation_key, run_id, claim_id, evidence_references, reason)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            " recorded_at, causation_key, run_id, claim_id, evidence_references, reason, work_id, handoff_id, finding_id)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (str(event.event_id), str(mission_id), revision, ordinal, kind.value, event.provenance.value,
              event.recorded_at, causation_key, str(run_id) if run_id else None, str(claim_id) if claim_id else None,
-             json.dumps([ref.to_payload() for ref in references]), reason),
+             json.dumps([ref.to_payload() for ref in references]), reason,
+             str(work_id) if work_id else None, str(handoff_id) if handoff_id else None,
+             str(finding_id) if finding_id else None),
         )
         return revision
 
@@ -3161,3 +3165,689 @@ class PostgresTimescaleRepository(ITrendRepository):
                 }
 
         return await asyncio.to_thread(_sync_inventory)
+
+    @staticmethod
+    def _research_queries(conn):
+        """Keep every relational decoder query on the held physical connection."""
+
+        async def execute(statement, params=()):
+            async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute(statement, params)
+
+        async def fetchone(statement, params=()):
+            async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute(statement, params)
+                return await cursor.fetchone()
+
+        async def fetchall(statement, params=()):
+            async with conn.cursor(row_factory=dict_row) as cursor:
+                await cursor.execute(statement, params)
+                return await cursor.fetchall()
+
+        return execute, fetchone, fetchall
+
+    async def load_research_work(self, mission_id):
+        """Read one existing-schema snapshot without installing or migrating storage."""
+
+        async def read():
+            pool = await self._get_pool()
+            async with pool.connection() as conn:
+                async with conn.transaction():
+                    await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                    return await self._research_snapshot(conn, mission_id)
+
+        return await await_settled(read())
+
+    @staticmethod
+    def _research_receipt(row):
+        from ignis.application.ports.research_work_port import ResearchWorkCommitReceipt
+
+        return ResearchWorkCommitReceipt(
+            disposition=row["disposition"],
+            reason_code=row["reason_code"],
+            revision=row["revision"],
+            work_version=row["work_version"],
+            assignment_version=row["assignment_version"],
+            receipt_id=row["receipt_id"],
+            event_ids=tuple(row["event_ids"]),
+            recorded_at=row["recorded_at"],
+        )
+
+    async def _research_snapshot(self, conn, mission_id):
+        execute, fetchone, fetchall = self._research_queries(conn)
+        from ignis.application.ports.research_work_port import ResearchRecordedMetadata, ResearchWorkSnapshot
+        from ignis.domain.research_work import (
+            ResearchAuthority,
+            ResearchAssignment,
+            ResearchInputBindings,
+            ResearchWorkItem,
+        )
+        from ignis.infrastructure.persistence.mission_relay_reader import _pg_event
+
+        scope = (str(mission_id),)
+        revision_row = await fetchone("SELECT revision FROM mission_progress_revisions WHERE mission_id=%s", scope)
+        revision = revision_row["revision"] if revision_row else 0
+        pairs = tuple(
+            (
+                (r["id"], r["source_id"])
+                for r in await fetchall(
+                    "SELECT o.id,o.source_id FROM observations o JOIN mission_evidence e ON e.observation_id=o.id WHERE e.mission_id=%s ORDER BY o.id",
+                    scope,
+                )
+            )
+        )
+        events = tuple(
+            (
+                _pg_event(r)
+                for r in await fetchall(
+                    "SELECT * FROM mission_progress_events WHERE mission_id=%s ORDER BY revision,ordinal", scope
+                )
+            )
+        )
+        exists = (await fetchone("SELECT to_regclass('public.research_assignments') AS relation"))["relation"]
+        assignments, works, metadata = ((), (), ())
+        if exists:
+            assignments = tuple(
+                (
+                    ResearchAssignment(
+                        assignment_id=UUID(str(r["assignment_id"])),
+                        mission_id=mission_id,
+                        host_task_ref=r["host_task_ref"],
+                        epoch=r["epoch"],
+                        authority=ResearchAuthority(
+                            actions=frozenset(r["actions"]),
+                            sources=frozenset(r["sources"]),
+                            deadline=r["deadline"],
+                            quota_ceiling=r["quota_ceiling"],
+                        ),
+                        capability=r["capability"],
+                        state=r["state"],
+                        version=r["version"],
+                    )
+                    for r in await fetchall(
+                        "SELECT * FROM research_assignments WHERE mission_id=%s ORDER BY epoch", scope
+                    )
+                )
+            )
+
+            async def bindings(input_id):
+                r = await fetchone("SELECT * FROM research_input_sets WHERE input_id=%s", (input_id,))
+                return ResearchInputBindings(
+                    mission_id=mission_id,
+                    manifest_digest=r["manifest_digest"],
+                    brief_digest=r["brief_digest"],
+                    frame_digest=r["frame_digest"],
+                    observation_ids=tuple(
+                        (
+                            o["observation_id"]
+                            for o in await fetchall(
+                                "SELECT observation_id FROM research_input_observations WHERE input_id=%s ORDER BY ordinal",
+                                (input_id,),
+                            )
+                        )
+                    ),
+                    finding_revisions=tuple(
+                        (
+                            (f["finding_id"], f["revision"])
+                            for f in await fetchall(
+                                "SELECT finding_id,revision FROM research_input_findings WHERE input_id=%s ORDER BY ordinal",
+                                (input_id,),
+                            )
+                        )
+                    ),
+                )
+
+            works = tuple(
+                [
+                    ResearchWorkItem(
+                        work_id=UUID(str(r["work_id"])),
+                        assignment_id=UUID(str(r["assignment_id"])),
+                        mission_id=mission_id,
+                        run_id=UUID(str(r["run_id"])) if r["run_id"] else None,
+                        question=r["question"],
+                        expertise=r["expertise"],
+                        assignee_ref=r["assignee_ref"],
+                        inputs=await bindings(r["input_id"]),
+                        dependencies=tuple(
+                            (
+                                d["dependency_work_id"]
+                                for d in await fetchall(
+                                    "SELECT dependency_work_id FROM research_work_dependencies WHERE work_id=%s ORDER BY ordinal",
+                                    (r["work_id"],),
+                                )
+                            )
+                        ),
+                        epoch=r["epoch"],
+                        state=r["state"],
+                        version=r["version"],
+                        ownership_fence=r["ownership_fence"],
+                    )
+                    for r in await fetchall(
+                        "SELECT * FROM research_work_items WHERE mission_id=%s ORDER BY (SELECT min(mission_revision) FROM research_recorded_metadata m WHERE m.record_kind='WORK' AND m.record_id=research_work_items.work_id),work_id",
+                        scope,
+                    )
+                ]
+            )
+            metadata = tuple(
+                (
+                    ResearchRecordedMetadata(
+                        record_kind=r["record_kind"],
+                        record_id=UUID(str(r["record_id"])),
+                        record_version=r["record_version"],
+                        mission_revision=r["mission_revision"],
+                        recorded_at=r["recorded_at"],
+                        provenance=r["provenance"],
+                    )
+                    for r in await fetchall(
+                        "SELECT * FROM research_recorded_metadata WHERE mission_id=%s ORDER BY mission_revision,record_kind,record_id",
+                        scope,
+                    )
+                )
+            )
+        return ResearchWorkSnapshot(
+            mission_id=mission_id,
+            revision=revision,
+            current_epoch=max((a.epoch for a in assignments), default=0),
+            assignments=assignments,
+            work_items=works,
+            handoffs=(),
+            findings=(),
+            acknowledgements=(),
+            events=events,
+            observation_sources=pairs,
+            current_finding_revisions=(),
+            recorded_metadata=metadata,
+        )
+
+    async def commit_research_work(self, command):
+        """Admit and settle core lifecycle facts, event, metadata and original receipt together."""
+        from ignis.application.ports.research_work_port import ResearchWorkCommitCommand, ResearchWorkCommitReceipt
+        from ignis.domain.research_work import (
+            ACTIONS,
+            TERMINAL,
+            ResearchWorkCommand,
+            StartWorkPayload,
+            transition_research_work,
+        )
+        from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
+        from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
+
+        if type(command) is not ResearchWorkCommitCommand:
+            raise ValueError("Invalid exact research command.")
+
+        async def commit():
+            pool = await self._get_pool()
+            async with pool.connection() as conn:
+                return await settle(conn)
+
+        async def settle(conn):
+            execute, fetchone, fetchall = self._research_queries(conn)
+            cur = conn.cursor(row_factory=tuple_row)
+            recorded_at = datetime.now(timezone.utc)
+            revision = 0
+            initial_revision = 0
+
+            def receipt(reason=None, work=None, assignment=None, event_ids=()):
+                return ResearchWorkCommitReceipt(
+                    disposition="REFUSED" if reason else "APPLIED",
+                    reason_code=reason,
+                    revision=revision,
+                    work_version=work.version if work else None,
+                    assignment_version=assignment.version if assignment else None,
+                    receipt_id=uuid4(),
+                    event_ids=event_ids,
+                    recorded_at=recorded_at,
+                )
+
+            async def persist(result):
+                # Known-scope safe refusal is durable without inventing an event/revision.
+                await execute(
+                    "INSERT INTO research_work_commands (mission_id,command_key,payload_fingerprint,operation,receipt_id,disposition,reason_code,revision,work_version,assignment_version,event_ids,recorded_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (
+                        str(command.mission_id),
+                        key,
+                        command.fingerprint,
+                        command.operation,
+                        str(result.receipt_id),
+                        result.disposition,
+                        result.reason_code,
+                        result.revision,
+                        result.work_version,
+                        result.assignment_version,
+                        list(result.event_ids),
+                        recorded_at.isoformat(),
+                    ),
+                )
+                await conn.commit()
+                return result
+
+            from hashlib import sha256
+
+            key = sha256(command.idempotency_key.encode()).hexdigest()
+            try:
+                await self._lock_relay_tables(cur, analysis=True)
+                recorded_at = (await fetchone("SELECT transaction_timestamp() AS timestamp"))["timestamp"]
+                # Lock canonical inputs before the revision row; legacy writers share this gate.
+                if not await fetchone("SELECT 1 FROM research_missions WHERE id=%s", (str(command.mission_id),)):
+                    await conn.rollback()
+                    return receipt("SCOPE_MISMATCH")
+                await execute(
+                    "INSERT INTO mission_progress_revisions (mission_id,revision) VALUES (%s,0) ON CONFLICT (mission_id) DO NOTHING",
+                    (str(command.mission_id),),
+                )
+                await fetchone(
+                    "SELECT revision FROM mission_progress_revisions WHERE mission_id=%s FOR UPDATE",
+                    (str(command.mission_id),),
+                )
+                canonical = await self._commit_snapshot(conn, command.mission_id)
+                original = await fetchone(
+                    "SELECT * FROM research_work_commands WHERE mission_id=%s AND command_key=%s",
+                    (str(command.mission_id), key),
+                )
+                state = await self._research_snapshot(conn, command.mission_id)
+                revision = state.revision
+                initial_revision = revision
+                if original:
+                    result = (
+                        self._research_receipt(original)
+                        if original["payload_fingerprint"] == command.fingerprint
+                        else receipt("IDEMPOTENCY_CONFLICT")
+                    )
+                    await conn.rollback()
+                    return result
+                payload = command.payload
+
+                async def refuse(reason):
+                    return await persist(receipt(reason))
+
+                if not command.host_authorized:
+                    return await refuse("UNAUTHORIZED_HOST")
+                if command.expected_revision != revision:
+                    return await refuse("STALE_REVISION")
+                # Transaction time predates lock waits; authority and freshness use admission time.
+                admission_now = (await fetchone("SELECT clock_timestamp() AS timestamp"))["timestamp"]
+                operation = command.operation
+                closure = operation == "ACK_STOP" or (
+                    operation == "END_WORK"
+                    and payload.disposition in {"FAILED", "INTERRUPTED", "INSUFFICIENT_EVIDENCE"}
+                )
+                if operation == "ASSIGN_RESEARCH":
+                    if payload.assignment.mission_id != command.mission_id:
+                        return await refuse("SCOPE_MISMATCH")
+                    if (
+                        payload.assignment.epoch != command.expected_epoch
+                        or command.expected_epoch != state.current_epoch + 1
+                    ):
+                        return await refuse("STALE_EPOCH")
+                elif not closure and command.expected_epoch != state.current_epoch:
+                    return await refuse("STALE_EPOCH")
+                # T050 owns immutable result/finding storage and result CAS admission.
+                if operation in {"SUBMIT_HANDOFF", "ACK_HANDOFF"}:
+                    return await refuse("INVALID_TRANSITION")
+                assignment = None
+                work = None
+                record_kind = None
+                kind = None
+                reason_text = None
+                assignment_activated = False
+                if operation == "ASSIGN_RESEARCH":
+                    assignment = payload.assignment
+                    manifest = canonical.manifest
+                    brief = canonical.brief
+                    if (
+                        manifest is None
+                        or brief is None
+                        or manifest.manifest_digest != payload.expected_manifest_digest
+                        or (brief.brief_revision_id != payload.expected_brief_revision_id)
+                    ):
+                        return await refuse("STALE_INPUT_FRAME")
+                    if assignment.state != "ASSIGNED" or assignment.version != 1:
+                        return await refuse("INVALID_TRANSITION")
+                    if assignment.authority.deadline <= admission_now:
+                        return await refuse("AUTHORITY_EXPIRED")
+                    if (
+                        not assignment.authority.actions <= ACTIONS
+                        or not assignment.authority.sources
+                        <= set(manifest.required_channels + manifest.optional_channels)
+                        or assignment.authority.quota_ceiling > sum(manifest.quota_budget.values())
+                    ):
+                        return await refuse("AUTHORITY_WIDENING")
+                    if any((a.state not in TERMINAL for a in state.assignments)):
+                        return await refuse("INVALID_TRANSITION")
+                    if any((a.assignment_id == assignment.assignment_id for a in state.assignments)):
+                        return await refuse("INVALID_INPUT")
+                    try:
+                        assignment = dataclasses.replace(
+                            assignment,
+                            host_task_ref=sanitize_pii_text(assignment.host_task_ref),
+                            capability=sanitize_pii_text(assignment.capability),
+                        )
+                    except ValueError:
+                        return await refuse("INVALID_INPUT")
+                    a = assignment
+                    await execute(
+                        "INSERT INTO research_assignments (assignment_id,mission_id,host_task_ref,epoch,actions,sources,deadline,quota_ceiling,capability,expected_manifest_digest,expected_brief_revision_id,state,version) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (
+                            str(a.assignment_id),
+                            str(a.mission_id),
+                            a.host_task_ref,
+                            a.epoch,
+                            sorted(a.authority.actions),
+                            sorted(a.authority.sources),
+                            a.authority.deadline.isoformat(),
+                            a.authority.quota_ceiling,
+                            a.capability,
+                            payload.expected_manifest_digest,
+                            str(payload.expected_brief_revision_id),
+                            a.state,
+                            a.version,
+                        ),
+                    )
+                    record_kind = "ASSIGNMENT"
+                    kind = MissionProgressKind.RESEARCH_ASSIGNED
+                else:
+                    if operation == "ASSIGN_WORK":
+                        work = payload
+                        assignment = next((a for a in state.assignments if a.assignment_id == work.assignment_id), None)
+                    elif operation == "END_RESEARCH":
+                        assignment = next(
+                            (a for a in state.assignments if a.assignment_id == payload.assignment_id), None
+                        )
+                    else:
+                        work = next((w for w in state.work_items if w.work_id == payload.work_id), None)
+                        assignment = next(
+                            (a for a in state.assignments if work and a.assignment_id == work.assignment_id), None
+                        )
+                    if assignment is None or (work is None and operation != "END_RESEARCH"):
+                        return await refuse("SCOPE_MISMATCH")
+                    if not closure:
+                        if assignment.epoch != state.current_epoch:
+                            return await refuse("STALE_EPOCH")
+                        if assignment.state in TERMINAL:
+                            return await refuse("ASSIGNMENT_TERMINAL")
+                        if operation != "END_RESEARCH" and assignment.authority.deadline <= admission_now:
+                            return await refuse("AUTHORITY_EXPIRED")
+                    if operation in {"ASSIGN_WORK", "START_WORK", "RESUME_WORK", "RECORD_ACTIVITY"}:
+                        manifest = canonical.manifest
+                        if (
+                            manifest is None
+                            or not assignment.authority.actions <= ACTIONS
+                            or (
+                                not assignment.authority.sources
+                                <= set(manifest.required_channels + manifest.optional_channels)
+                            )
+                            or (assignment.authority.quota_ceiling > sum(manifest.quota_budget.values()))
+                        ):
+                            return await refuse("AUTHORITY_WIDENING")
+                    if operation in {"START_WORK", "RESUME_WORK", "RECORD_ACTIVITY"}:
+                        if not set(work.inputs.observation_ids) <= set(dict(state.observation_sources)):
+                            return await refuse("INPUT_IDENTITY_MISMATCH")
+                        if work.inputs.finding_revisions:
+                            return await refuse("STALE_DEPENDENCY_REVISION")
+                        try:
+                            current_frame = frame_from_snapshot(canonical).frame_digest
+                        except InvalidMissionClaimError:
+                            return await refuse("STALE_INPUT_FRAME")
+                        if (
+                            canonical.brief is None
+                            or work.inputs.manifest_digest != canonical.manifest.manifest_digest
+                            or work.inputs.brief_digest != compute_frame_fingerprint(canonical.mission, canonical.brief)
+                            or (work.inputs.frame_digest != current_frame)
+                        ):
+                            return await refuse("STALE_INPUT_FRAME")
+                    if operation == "END_RESEARCH":
+                        if payload.expected_version != assignment.version:
+                            return await refuse("STALE_VERSION")
+                        assignment = dataclasses.replace(
+                            assignment, state=payload.disposition, version=assignment.version + 1
+                        )
+                        reason_text = sanitize_pii_text(payload.reason)
+                        await execute(
+                            "UPDATE research_assignments SET state=%s,version=%s,reason=%s WHERE assignment_id=%s",
+                            (assignment.state, assignment.version, reason_text, str(assignment.assignment_id)),
+                        )
+                        record_kind = "ASSIGNMENT"
+                        kind = MissionProgressKind.RESEARCH_ENDED
+                    elif operation == "ASSIGN_WORK":
+                        if work.mission_id != command.mission_id or work.epoch != assignment.epoch:
+                            return await refuse("SCOPE_MISMATCH")
+                        if (
+                            work.state != "ASSIGNED"
+                            or work.version != 1
+                            or any((w.work_id == work.work_id for w in state.work_items))
+                        ):
+                            return await refuse("INVALID_TRANSITION")
+                        if assignment.state == "CANCEL_PENDING":
+                            return await refuse("CANCELLATION_PENDING")
+                        if "ANALYZE" not in assignment.authority.actions:
+                            return await refuse("ACTION_NOT_GRANTED")
+                        if work.run_id and (
+                            not await fetchone(
+                                "SELECT 1 FROM mission_run_journals WHERE id=%s AND mission_id=%s",
+                                (str(work.run_id), str(command.mission_id)),
+                            )
+                        ):
+                            return await refuse("SCOPE_MISMATCH")
+                        current_ids = dict(state.observation_sources)
+                        if not set(work.inputs.observation_ids) <= set(current_ids):
+                            return await refuse("INPUT_IDENTITY_MISMATCH")
+                        if work.inputs.finding_revisions:
+                            return await refuse("STALE_DEPENDENCY_REVISION")
+                        try:
+                            current_frame = frame_from_snapshot(canonical).frame_digest
+                        except InvalidMissionClaimError:
+                            return await refuse("STALE_INPUT_FRAME")
+                        if (
+                            canonical.manifest is None
+                            or canonical.brief is None
+                            or work.inputs.manifest_digest != canonical.manifest.manifest_digest
+                            or (
+                                work.inputs.brief_digest
+                                != compute_frame_fingerprint(canonical.mission, canonical.brief)
+                            )
+                            or (work.inputs.frame_digest != current_frame)
+                        ):
+                            return await refuse("STALE_INPUT_FRAME")
+                        dependencies = {w.work_id: w for w in state.work_items}
+                        if any(
+                            (d not in dependencies or dependencies[d].epoch != work.epoch for d in work.dependencies)
+                        ):
+                            return await refuse("SCOPE_MISMATCH")
+                        try:
+                            work = dataclasses.replace(
+                                work,
+                                question=sanitize_pii_text(work.question),
+                                expertise=sanitize_pii_text(work.expertise),
+                                assignee_ref=sanitize_pii_text(work.assignee_ref),
+                            )
+                        except ValueError:
+                            return await refuse("INVALID_INPUT")
+                        if sanitize_pii_text(work.ownership_fence) != work.ownership_fence:
+                            return await refuse("INVALID_INPUT")
+                        input_id = str(uuid4())
+                        b = work.inputs
+                        await execute(
+                            "INSERT INTO research_input_sets VALUES (%s,%s,%s,%s,%s)",
+                            (input_id, str(b.mission_id), b.manifest_digest, b.brief_digest, b.frame_digest),
+                        )
+                        for ordinal, o in enumerate(b.observation_ids, 1):
+                            await execute(
+                                "INSERT INTO research_input_observations VALUES (%s,%s,%s,%s,%s)",
+                                (ordinal, input_id, str(command.mission_id), str(o), str(current_ids[o])),
+                            )
+                        w = work
+                        await execute(
+                            "INSERT INTO research_work_items (work_id,assignment_id,mission_id,input_id,run_id,question,expertise,assignee_ref,epoch,state,version,ownership_fence) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                            (
+                                str(w.work_id),
+                                str(w.assignment_id),
+                                str(w.mission_id),
+                                input_id,
+                                str(w.run_id) if w.run_id else None,
+                                w.question,
+                                w.expertise,
+                                w.assignee_ref,
+                                w.epoch,
+                                w.state,
+                                w.version,
+                                w.ownership_fence,
+                            ),
+                        )
+                        for ordinal, d in enumerate(w.dependencies, 1):
+                            await execute(
+                                "INSERT INTO research_work_dependencies VALUES (%s,%s,%s,%s)",
+                                (ordinal, str(w.mission_id), str(w.work_id), str(d)),
+                            )
+                        record_kind = "WORK"
+                        kind = MissionProgressKind.WORK_ASSIGNED
+                    else:
+                        if closure and command.expected_epoch != work.epoch:
+                            return await refuse("STALE_EPOCH")
+                        if operation in {"START_WORK", "RECORD_ACTIVITY"}:
+                            r = payload.receipt
+                            if r.epoch != work.epoch:
+                                return await refuse("STALE_EPOCH")
+                            if operation == "START_WORK" and any(
+                                (
+                                    next((w for w in state.work_items if w.work_id == d)).state
+                                    not in {"COMPLETED", "HANDOFF_READY"}
+                                    for d in work.dependencies
+                                )
+                            ):
+                                return await refuse("DEPENDENCY_NOT_READY")
+                            pure_payload = StartWorkPayload(
+                                work_id=payload.work_id,
+                                expected_version=payload.expected_version,
+                                ownership_fence=payload.ownership_fence,
+                                execution_ref=r.execution_ref,
+                                occurred_at=r.occurred_at,
+                                fresh_until=r.fresh_until,
+                            )
+                        else:
+                            pure_payload = payload
+                        pure = ResearchWorkCommand(
+                            operation=operation,
+                            idempotency_key=command.idempotency_key,
+                            expected_revision=command.expected_revision,
+                            expected_epoch=command.expected_epoch,
+                            payload=pure_payload,
+                        )
+                        transition = transition_research_work(work=work, assignment=assignment, command=pure, now=admission_now)
+                        if transition.disposition != "APPLIED":
+                            return await refuse(transition.reason_code)
+                        if (
+                            operation == "ACK_STOP"
+                            and sanitize_pii_text(payload.execution_ref) != payload.execution_ref
+                        ):
+                            return await refuse("INVALID_INPUT")
+                        if operation == "ACK_STOP" and (
+                            not await fetchone(
+                                "SELECT 1 FROM research_activity_receipts WHERE work_id=%s AND epoch=%s AND ownership_fence=%s AND execution_ref=%s",
+                                (
+                                    str(work.work_id),
+                                    work.epoch,
+                                    work.ownership_fence,
+                                    sanitize_pii_text(payload.execution_ref),
+                                ),
+                            )
+                        ):
+                            return await refuse("EXECUTION_RECEIPT_NOT_CURRENT")
+                        if (
+                            operation in {"START_WORK", "RECORD_ACTIVITY"}
+                            and sanitize_pii_text(r.execution_ref) != r.execution_ref
+                        ):
+                            return await refuse("INVALID_INPUT")
+                        work = transition.work
+                        if operation == "START_WORK" and assignment.state == "ASSIGNED":
+                            assignment = dataclasses.replace(assignment, state="ACTIVE", version=assignment.version + 1)
+                            await execute(
+                                "UPDATE research_assignments SET state=%s,version=%s WHERE assignment_id=%s",
+                                (assignment.state, assignment.version, str(assignment.assignment_id)),
+                            )
+                            assignment_activated = True
+                        reason_text = sanitize_pii_text(payload.reason) if hasattr(payload, "reason") else None
+                        await execute(
+                            "UPDATE research_work_items SET state=%s,version=%s,reason=%s WHERE work_id=%s",
+                            (work.state, work.version, reason_text, str(work.work_id)),
+                        )
+                        if operation in {"START_WORK", "RECORD_ACTIVITY"}:
+                            await execute(
+                                "INSERT INTO research_activity_receipts VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                                (
+                                    str(uuid4()),
+                                    str(command.mission_id),
+                                    str(work.work_id),
+                                    r.epoch,
+                                    r.ownership_fence,
+                                    sanitize_pii_text(r.execution_ref),
+                                    r.occurred_at.isoformat(),
+                                    r.fresh_until.isoformat(),
+                                    r.provenance,
+                                ),
+                            )
+                        record_kind = "WORK"
+                        kind = {
+                            "START_WORK": MissionProgressKind.WORK_STARTED,
+                            "RECORD_ACTIVITY": MissionProgressKind.WORK_ACTIVITY_RECORDED,
+                            "WAIT_WORK": MissionProgressKind.WORK_WAITING,
+                            "RESUME_WORK": MissionProgressKind.WORK_RESUMED,
+                            "REQUEST_CANCEL": MissionProgressKind.CANCELLATION_REQUESTED,
+                            "ACK_STOP": MissionProgressKind.CANCELLATION_ACKNOWLEDGED,
+                            "END_WORK": MissionProgressKind.WORK_ENDED,
+                        }[operation]
+                revision = await self._record_progress(
+                    cur,
+                    command.mission_id,
+                    kind,
+                    "research:" + key,
+                    work_id=work.work_id if work else None,
+                    reason=reason_text,
+                )
+                record = work if record_kind == "WORK" else assignment
+                record_id = record.work_id if record_kind == "WORK" else record.assignment_id
+                await execute(
+                    "INSERT INTO research_recorded_metadata VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (
+                        str(command.mission_id),
+                        record_kind,
+                        str(record_id),
+                        record.version,
+                        revision,
+                        recorded_at.isoformat(),
+                        "HARNESS_OBSERVED",
+                    ),
+                )
+                if assignment_activated:
+                    await execute(
+                        "INSERT INTO research_recorded_metadata VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                        (
+                            str(command.mission_id),
+                            "ASSIGNMENT",
+                            str(assignment.assignment_id),
+                            assignment.version,
+                            revision,
+                            recorded_at.isoformat(),
+                            "HARNESS_OBSERVED",
+                        ),
+                    )
+                event_ids = tuple(
+                    (
+                        r["id"]
+                        for r in await fetchall(
+                            "SELECT id FROM mission_progress_events WHERE mission_id=%s AND revision=%s ORDER BY ordinal",
+                            (str(command.mission_id), revision),
+                        )
+                    )
+                )
+                return await persist(receipt(work=work, assignment=assignment, event_ids=event_ids))
+            except psycopg.Error:
+                await conn.rollback()
+                revision = initial_revision
+                return receipt("STORAGE_FAILURE")
+            except BaseException:
+                await conn.rollback()
+                raise
+            finally:
+                await cur.close()
+
+        return await await_settled(commit())
