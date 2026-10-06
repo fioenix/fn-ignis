@@ -1,6 +1,6 @@
 # Relay Viewer Contract
 
-**Status**: MCP/HTTP read operations and US3 permission rendering are implemented and locally verified. The T054 research read projection is locally accepted; its UI and expanded recording-to-viewer chain remain T055/T056. Native host UAT and shipment remain unverified.
+**Status**: MCP/HTTP read operations and US3 permission rendering are implemented and locally verified. The T054 research read projection and T055 recorded research UI are locally accepted; the expanded native recording-to-viewer chain remains T056. Native host UAT and shipment remain unverified.
 
 ## MCP read operations
 

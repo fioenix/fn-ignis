@@ -238,7 +238,8 @@ class FixtureViewer:
             query = parse_qs(parsed.query)
             page = payload.get('event_page')
             if page is not None and not page['resync_required'] and 'after_revision' in query:
-                after = _cursor(int(query['after_revision'][0]), int(query['after_ordinal'][0]))
+                after = MissionRelayCursor(mission_id=self.current.mission_id,
+                                          revision=int(query['after_revision'][0]), ordinal=int(query['after_ordinal'][0]))
                 if after.position <= self.current.high_water.position:
                     page['after_cursor'] = after.to_payload()
                     page['events'] = [event for event in page['events'] if (event['revision'], event['ordinal']) > after.position]
@@ -251,7 +252,7 @@ class FixtureViewer:
                 route.abort()
                 return
             inspection = MissionRelayInspection(
-                mission_id=MISSION, run_id=self.current.run_id, high_water=self.current.high_water,
+                mission_id=self.current.mission_id, run_id=self.current.run_id, high_water=self.current.high_water,
                 read_at=self.current.read_at, observation=observation,
             )
             route.fulfill(status=200, content_type="application/json", body=json.dumps(inspection.to_payload()))
