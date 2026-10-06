@@ -173,6 +173,7 @@ class QualityEvaluator:
         # before the field existed.
         now_utc = datetime.now(timezone.utc)
         in_timeframe_count = 0
+        unmeasured_publication_count = 0
         for s in signals:
             signal_dt = s.published_at
             if signal_dt is None and s.metadata and s.metadata.get("published_at"):
@@ -182,6 +183,10 @@ class QualityEvaluator:
                 except Exception:
                     signal_dt = None
             if signal_dt is None:
+                # A host grid attests capture time, not publication time or a filtered window.
+                if s.metadata.get("publication_known") is False or str(s.metadata.get("collection_path", "")).startswith("host_browser:"):
+                    unmeasured_publication_count += 1
+                    continue
                 signal_dt = s.captured_at
 
             if signal_dt:
@@ -194,8 +199,10 @@ class QualityEvaluator:
         data_freshness_score = round((in_timeframe_count / float(len(signals))) * 100.0, 1)
         if data_freshness_score >= 80.0:
             strengths.append(f"High data freshness ({data_freshness_score}% matching {timeframe_days}-day window).")
-        else:
+        elif in_timeframe_count < len(signals) - unmeasured_publication_count:
             flaws.append(f"Low freshness score ({data_freshness_score}%), contains outdated signals.")
+        if unmeasured_publication_count:
+            flaws.append(f"Publication freshness unmeasured for {unmeasured_publication_count}/{len(signals)} observations.")
 
         # 6. Overall Confidence Score (Weighted average from configurable settings)
         base_confidence = (

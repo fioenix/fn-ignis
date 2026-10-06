@@ -21,9 +21,10 @@ from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 
 SAMPLE_STORAGE_STATE = {
     "cookies": [
-        {"name": "sessionid", "value": "test_session_123", "domain": ".threads.net"},
-        {"name": "csrftoken", "value": "test_csrf_token_abc", "domain": ".threads.net"},
-        {"name": "ds_user_id", "value": "999888777", "domain": ".threads.net"},
+        {"name": name, "value": value, "domain": ".threads.net", "path": "/",
+         "secure": True, "expires": -1, "httpOnly": True, "sameSite": "Lax"}
+        for name, value in [("sessionid", "test_session_123"),
+                            ("csrftoken", "test_csrf_token_abc"), ("ds_user_id", "999888777")]
     ]
 }
 
@@ -91,6 +92,118 @@ SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD = {
 # --- Tests for Ingress Helpers ---
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direct", [True, False])
+@pytest.mark.parametrize("limit", [1, 2])
+async def test_search_only_emits_ranked_roots_not_nested_quotes(direct, limit):
+    payload = json.loads(json.dumps(SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD))
+    edges = payload["data"]["searchResults"]["edges"]
+    first = edges[0]["node"]
+    quoted = json.loads(json.dumps(first))
+    quoted.update(pk="quoted", code="QuotedFixture")
+    second = json.loads(json.dumps(first))
+    second.update(pk="second-ranked", code="SecondFixture")
+    first["text_post_app_info"]["quoted_post"] = quoted
+    edges.extend([{"node": first}, {"node": second}])
+    plugin = ThreadsPlugin()
+    with patch.object(GraphQLDocIdCache, "get", return_value=("doc-test" if direct else None, None)), patch(
+        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
+        AsyncMock(return_value=payload),
+    ), patch(
+        "ignis.infrastructure.connectors.threads.threads_plugin.collect_json_payloads",
+        AsyncMock(return_value=[payload]),
+    ):
+        signals = await plugin._search_via_browser_session(["retail"], {}, GeoCode.VN, limit)
+    assert [signal.metadata["post_id"] for signal in signals] == ["3399887766", "second-ranked"][:limit]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direct", [True, False])
+async def test_overlapping_browser_queries_keep_one_post_and_every_query(direct):
+    from ignis.application.ports.connector_port import SearchAttestation
+
+    plugin = ThreadsPlugin()
+    attestation = SearchAttestation()
+    queries = ["retail need", "retail counterevidence", "retail need"]
+    with patch.object(GraphQLDocIdCache, "get", return_value=("doc-test" if direct else None, None)), patch(
+        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
+        AsyncMock(return_value=SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD),
+    ), patch(
+        "ignis.infrastructure.connectors.threads.threads_plugin.collect_json_payloads",
+        AsyncMock(return_value=[SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD]),
+    ):
+        signals = await plugin._search_via_browser_session(queries, {}, GeoCode.VN, 10, attestation)
+    assert len(signals) == 1
+    assert signals[0].metadata["matched_keyword"] == queries[0]
+    assert signals[0].metadata["matched_keywords"] == queries[:2]
+    assert attestation.queried == queries[:2]
+
+
+@pytest.mark.asyncio
+async def test_overlapping_graph_queries_preserve_attribution_without_duplicate_insights():
+    from ignis.application.ports.connector_port import SearchAttestation
+
+    plugin = ThreadsPlugin()
+    attestation = SearchAttestation()
+    queries = ["retail need", "retail counterevidence"]
+    payload = {"data": [{"id": "public-post", "text": "Public fixture post"}]}
+    with patch.object(plugin, "_has_graph_token", AsyncMock(return_value=True)), patch.object(
+        plugin, "_keyword_search_is_blocked", AsyncMock(return_value=False),
+    ), patch.object(plugin, "_require_token", AsyncMock(return_value="fixture-token")), patch.object(
+        plugin, "_graph_get", AsyncMock(return_value=payload),
+    ), patch.object(plugin, "_fetch_insights_batch", AsyncMock(return_value={})) as insights:
+        signals = await plugin.search_signals(queries, attestation=attestation)
+    assert len(signals) == 1
+    assert signals[0].metadata["matched_keyword"] == queries[0]
+    assert signals[0].metadata["matched_keywords"] == queries
+    assert attestation.queried == queries
+    assert [call.args[0] for call in insights.await_args_list if call.args[0]] == [["public-post"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload,should_fallback", [
+    ({"data": {"searchResults": {"edges": []}}}, False),
+    ({"data": {"custom_feeds": []}}, True),
+    ({"data": {"searchResults": {"edges": None}}}, True),
+    ({"data": {"searchResults": {"edges": [{"node": None}]}}}, True),
+    ({"errors": [{"message": "failed"}], **SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD}, True),
+])
+async def test_direct_public_search_proof_distinguishes_valid_empty_from_unavailable(payload, should_fallback):
+    from ignis.application.ports.connector_port import SearchAttestation
+
+    plugin = ThreadsPlugin()
+    attestation = SearchAttestation()
+    with patch.object(GraphQLDocIdCache, "get", return_value=("doc-test", None)), patch(
+        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
+        AsyncMock(return_value=payload),
+    ), patch.object(plugin, "_fetch_via_browser_session", AsyncMock(return_value=[])) as browser:
+        signals = await plugin._search_via_browser_session(
+            ["retail"], {}, GeoCode.VN, 10, attestation=attestation,
+        )
+    assert signals == []
+    assert browser.await_count == int(should_fallback)
+    assert attestation.queried == ([] if should_fallback else ["retail"])
+
+
+@pytest.mark.asyncio
+async def test_direct_empty_search_excludes_background_posts_and_proves_each_query():
+    from ignis.application.ports.connector_port import SearchAttestation
+
+    plugin = ThreadsPlugin()
+    attestation = SearchAttestation()
+    payload = {"data": {"searchResults": {"edges": []}, "background": SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD}}
+    with patch.object(GraphQLDocIdCache, "get", return_value=("doc-test", None)), patch(
+        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
+        AsyncMock(return_value=payload),
+    ), patch.object(plugin, "_fetch_via_browser_session", AsyncMock(return_value=[])) as browser:
+        signals = await plugin._search_via_browser_session(
+            ["retail", "office"], {}, GeoCode.VN, 10, attestation=attestation,
+        )
+    assert signals == []
+    assert attestation.queried == ["retail", "office"]
+    browser.assert_not_awaited()
+
+
 @pytest.fixture(autouse=True)
 def reset_runtime_config_defaults():
     from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
@@ -102,14 +215,14 @@ def reset_runtime_config_defaults():
 
 
 def test_build_cookie_header_and_extract_token():
-    header = build_cookie_header(SAMPLE_STORAGE_STATE)
+    header = build_cookie_header(SAMPLE_STORAGE_STATE, "https://www.threads.net/")
     assert "sessionid=test_session_123" in header
     assert "csrftoken=test_csrf_token_abc" in header
 
-    csrf = extract_token_from_storage(SAMPLE_STORAGE_STATE, "csrftoken")
+    csrf = extract_token_from_storage(SAMPLE_STORAGE_STATE, "csrftoken", "https://www.threads.net/")
     assert csrf == "test_csrf_token_abc"
 
-    missing = extract_token_from_storage(SAMPLE_STORAGE_STATE, "non_existent")
+    missing = extract_token_from_storage(SAMPLE_STORAGE_STATE, "non_existent", "https://www.threads.net/")
     assert missing is None
 
 

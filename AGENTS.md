@@ -18,6 +18,8 @@ This document defines the operational protocol, architectural guidelines, and to
 > 2. Creates `.env` with SQLite default (`DATABASE_URL=sqlite:///ignis.db`) and generates a persistent Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) key.
 > 3. Bootstraps SQLite database schemas and loads 84+ seed domain lexicons & noise filters.
 > 4. Auto-configures FastMCP server in all supported agent environments (`.mcp.json`, `claude_desktop_config.json`, Google Antigravity, OpenAI Codex `config.toml`).
+>
+> Owner-approved exception (2026-10-04): `./scripts/bootstrap.sh --client codex --env-file /absolute/path/to/uat/.env` configures only Codex and isolates UAT storage. The default remains all clients.
 > 5. Runs synthetic diagnostics and outputs structured readiness confirmation.
 >
 > *No user input or external database installation is required.*
@@ -209,21 +211,27 @@ data, not a reason to schedule work or reserve quota.
 ---
 ## 🏷️ 4. Release Versioning Principles & SemVer Guardrails
 
-All agents (**Claude Desktop, Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, Pi Agent**) must strictly adhere to **Semantic Versioning 2.0.0 (`MAJOR.MINOR.PATCH`)**:
+All agents use the **`MAJOR.MINOR.PATCH`** release format. During the current `0.x` beta,
+the owner-approved criterion is user-visible product impact, not implementation size:
 
 ```
 v MAJOR . MINOR . PATCH
     ↑       ↑       ↑
-Breaking Feature   Bugfix / Optimization
+Major   User-visible   Internal / Fix
 ```
 
 ### Version Bump Criteria
 
 | Increment Level | When to Bump | Example Transition | Reset Rule |
 |---|---|---|---|
-| **`PATCH`** (`+0.0.1`) | Backward-compatible bug fixes, minor connector tweaks, test suite additions, documentation updates, or internal performance tuning. | `0.1.0` $\rightarrow$ `0.1.1` | None |
-| **`MINOR`** (`+0.1.0`) | New platform connectors (e.g. Threads comments, Xiaohongshu), new FastMCP tools/prompts, new database migrations, or significant new analytical models. | `0.1.5` $\rightarrow$ `0.2.0` | `PATCH` resets to `0` |
-| **`MAJOR`** (`+1.0.0`) | Breaking architectural overhauls, incompatible database schema drops, or breaking FastMCP tool signature deprecations. | `0.9.4` $\rightarrow$ `1.0.0` | `MINOR` & `PATCH` reset to `0` |
+| **`PATCH`** (`+0.0.1`, tier 3) | Fixes, optimization, refactoring, tests, documentation, and other changes without a material user-visible product change. | `0.7.0` $\rightarrow$ `0.7.1` | None |
+| **`MINOR`** (`+0.1.0`, tier 2) | A clear change to user-facing capabilities or how users operate Ignis. A new migration, dependency, or large refactor alone is not sufficient. | `0.7.0` $\rightarrow$ `0.8.0` | `PATCH` resets to `0` |
+| **`MAJOR`** (`+1.0.0`) | An explicitly owner-approved major/stable product boundary; incompatible public-contract changes after `1.0.0` retain the MAJOR rule. | `0.x.y` $\rightarrow$ `1.0.0` | `MINOR` & `PATCH` reset to `0` |
+
+Owner approved this beta criterion on 2026-10-02. It supersedes the former automatic
+MAJOR-for-breaking rule during `0.x`, not the obligation to disclose removed tools, incompatible
+contracts, or required migration steps. Spec 011's clear change to the user workflow targets
+`v0.8.0`; target approval is not permission to merge, tag, or publish.
 
 ### ⛔ Strict Agent Guardrails
 
@@ -268,7 +276,7 @@ Every AI Agent modifying this repository or preparing a release must verify comp
 
 ### Checklist B: Harness Autonomy & Non-Prescriptive Decoupling
 - [ ] **Non-Prescriptive Instructions**: Verify FastMCP server instructions and tool docstrings do NOT coerce agents into forced pipelines (no "MUST STRICTLY FOLLOW").
-- [ ] **Atomic Independence**: Ensure all 41 FastMCP tools are independently callable within their authority and evidence contracts.
+- [ ] **Atomic Independence**: Ensure all 44 FastMCP tools are independently callable within their authority and evidence contracts.
 - [ ] **Framework Separation**: The strategic research recipe is a reference, never a forced pipeline for tactical collection.
 - [ ] **Contextual Deliverables**: Deliverables match user intent (concise text, cards, tables, or full HTML dashboards) without forcing boilerplate templates for trivial queries.
 

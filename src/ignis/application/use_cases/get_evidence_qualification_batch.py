@@ -37,6 +37,8 @@ def _platform(signal: TrendSignal) -> str:
 
 
 def _metric_highlight(signal: TrendSignal) -> str:
+    if signal.metadata.get("metric_known") is False:
+        return "Metric unmeasured"
     platform = _platform(signal)
     value = int(float(signal.metric_value or 0))
     if platform == "google":
@@ -232,24 +234,33 @@ class GetEvidenceQualificationBatchUseCase:
     def _evidence(signal: TrendSignal) -> Dict[str, Any]:
         metadata = signal.metadata or {}
         excerpt = metadata.get("top_comment") or metadata.get("excerpt")
+        probe_keyword = next(
+            (metadata[key].strip() for key in PROBE_KEY_ALIASES
+             if isinstance(metadata.get(key), str) and metadata[key].strip()),
+            None,
+        )
+        recorded_queries = metadata.get("matched_keywords")
+        probe_keywords = list(dict.fromkeys(
+            query.strip() for query in recorded_queries
+            if isinstance(query, str) and query.strip()
+        )) if isinstance(recorded_queries, list) else []
+        if probe_keyword and probe_keyword not in probe_keywords:
+            probe_keywords.insert(0, probe_keyword)
         return {
             "observation_id": str(signal.observation_id),
             "source_id": str(signal.source_id) if signal.source_id else None,
             "platform": _platform(signal),
             "connector_surface": metadata.get("connector_surface") or _platform(signal),
             "title": signal.raw_title,
+            "source_url": signal.source_url,
+            "published_at": signal.published_at.isoformat() if signal.published_at else None,
+            "captured_at": signal.captured_at.isoformat() if signal.captured_at else None,
             # Comments are written by the public, so a phone number or an e-mail in one is
             # masked before it leaves the server.
             "excerpt": sanitize_pii_text(str(excerpt)) if excerpt else None,
             # As the connector recorded it, not casefolded: it is shown to the Agent as the query.
-            "probe_keyword": next(
-                (
-                    metadata[key].strip()
-                    for key in PROBE_KEY_ALIASES
-                    if isinstance(metadata.get(key), str) and metadata[key].strip()
-                ),
-                None,
-            ),
+            "probe_keyword": probe_keyword,
+            "probe_keywords": probe_keywords,
             "metric_highlight": _metric_highlight(signal),
             "cluster_id": str(signal.cluster_id) if signal.cluster_id else None,
         }

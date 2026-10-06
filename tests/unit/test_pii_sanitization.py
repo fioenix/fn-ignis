@@ -1,9 +1,16 @@
 import re
+import pytest
 from pathlib import Path
 from ignis.infrastructure.security.pii_sanitizer import (
     sanitize_pii_text,
     sanitize_pii_data,
 )
+
+
+@pytest.mark.parametrize("phone", ["0931405002", "84931405002", "+84931405002", "0084931405002"])
+def test_phone_masking_preserves_longer_numeric_evidence_ids(phone):
+    source = "https://www.tiktok.com/@fixture/video/7492034084227599623"
+    assert sanitize_pii_text(f"{source}; contact {phone}") == f"{source}; contact [REDACTED_PHONE]"
 
 
 def test_sanitize_phone_numbers_and_emails():

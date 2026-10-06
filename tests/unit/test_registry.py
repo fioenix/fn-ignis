@@ -650,8 +650,8 @@ async def test_an_empty_answer_without_an_attestation_is_degraded_not_measured()
     ],
 )
 @pytest.mark.asyncio
-async def test_a_browser_surface_attests_only_the_ten_keywords_it_actually_queried(plugin_class, module):
-    """The page answered with an empty envelope for each query it ran; the eleventh never ran."""
+async def test_a_browser_surface_attests_the_keywords_it_actually_queried(plugin_class, module):
+    """Threads executes the full plan; the unrelated Reels connector retains its current cap."""
     from unittest.mock import patch
 
     keywords = [f"topic{index}" for index in range(1, 12)]
@@ -662,7 +662,7 @@ async def test_a_browser_surface_attests_only_the_ten_keywords_it_actually_queri
 
     [outcome] = result.outcomes
     assert outcome.status is ChannelHealthStatus.EMPTY_NO_DATA
-    assert outcome.queried_keywords == tuple(keywords[:10])
+    assert outcome.queried_keywords == tuple(keywords if plugin_class is ThreadsPlugin else keywords[:10])
 
 
 # --- Follow-up review: the window each surface attests is the one the platform filtered by -------

@@ -1163,10 +1163,14 @@ class MissionProbeOutcome:
             raise InvalidEvidenceQualificationError(
                 "signals_collected must be a non-negative integer."
             )
-        if (status is ChannelHealthStatus.HEALTHY) != (count > 0):
+        if (
+            status is ChannelHealthStatus.HEALTHY and count == 0
+            or status not in (ChannelHealthStatus.HEALTHY, ChannelHealthStatus.DEGRADED)
+            and count > 0
+        ):
             raise InvalidEvidenceQualificationError(
                 f"A {status.value} surface cannot report {count} collected signals: HEALTHY means "
-                "signals came back, and every other outcome collected none."
+                "signals came back; DEGRADED may retain partial results, and other outcomes collect none."
             )
         if status is ChannelHealthStatus.EMPTY_NO_DATA and not self.queried_keywords:
             raise InvalidEvidenceQualificationError(

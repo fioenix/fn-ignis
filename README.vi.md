@@ -7,7 +7,7 @@ lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân t
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
 **Ranh giới phát hành:** Nhánh này đang triển khai Spec 011 và chưa được phát hành. Mã nguồn
-và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 41 tool theo
+và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 44 tool theo
 nhiệm vụ được mô tả ở đây. Không dùng image đã phát hành để kiểm chứng nhánh này.
 
 ## Hợp đồng sản phẩm
@@ -32,14 +32,19 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/025_evidence_grounded_claim_ledger.sql`. Khởi tạo
-SQLite mới đã được kiểm tra cục bộ; áp dụng `025` trên PostgreSQL chưa được kiểm chứng.
+Cây mã nguồn hiện có migration tới `sql/026_partial_degraded_probe_outcomes.sql`. Migration
+026 chỉ sửa constraint số quan sát; kết quả DEGRADED vẫn không phải phép đo hoàn chỉnh. Khởi tạo
+SQLite mới đã được kiểm tra cục bộ; rehearsal PostgreSQL tạm không xác minh database hiện hữu
+của người vận hành.
 Với cơ sở dữ liệu sẵn có, chạy lệnh inventory chỉ đọc
 `python scripts/inventory_legacy_baseline.py --dsn sqlite:///ignis.db` (hoặc truyền DSN
 PostgreSQL hiện hữu) trước khi quyết định di chuyển hay lưu trữ
-corpus cũ. Chỉ áp dụng migration theo thứ tự sau khi xem tác động lên dữ liệu và được người
+corpus cũ. Chỉ áp dụng những migration chưa chạy, theo thứ tự sau khi xem tác động lên dữ liệu và được người
 vận hành phê duyệt. Các file trước đó gồm `sql/022_builtin_uuid_defaults.sql`,
-`sql/023_evidence_qualification.sql` và `sql/024_youtube_quota_ledger.sql`.
+`sql/023_evidence_qualification.sql`, `sql/024_youtube_quota_ledger.sql` và
+`sql/025_evidence_grounded_claim_ledger.sql`.
+Không chạy lại 025 khi đã có hàng DEGRADED chứa kết quả một phần: constraint cũ sẽ chặn chúng
+trước khi 026 chạy. Kiểm chứng chạy lại 026 không đồng nghĩa chạy lại toàn bộ lịch sử migration.
 
 OCI image và manifest công khai vẫn trỏ tới v0.7.0. Hãy build nhánh mã nguồn này tại máy để
 kiểm chứng Spec 011; đừng giả định image công khai đã có `025` hoặc tool mới. Chưa công bố
@@ -48,13 +53,17 @@ chỉ nằm tại `src/ignis/infrastructure/templates/html/`.
 
 ## Năng lực dành cho agent
 
-MCP server của nhánh hiện có **41 tools**. Mô tả tool do server đang chạy trả về là nguồn
+MCP server của nhánh hiện có **44 tools**. Mô tả tool do server đang chạy trả về là nguồn
 chuẩn cho tham số. Một số thao tác đại diện:
 
 - `create_attention_mission` và `confirm_market_brief` xác lập câu hỏi và phạm vi;
   `execute_mission_ingress` thu thập khung chứng cứ được yêu cầu.
 - Các tool nguồn riêng lẻ như `get_tiktok_search_suggestions` và
   `get_tiktok_video_comments` có thể trả lời câu hỏi cụ thể mà không cần kết luận thị trường.
+- Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và
+  `cancel_host_browser_search` thu thập lưới video công khai có giới hạn qua trình duyệt được
+  cho phép. Đây là đường chủ động chọn, không phải phương án tự động dự phòng;
+  xem [phạm vi và giới hạn](docs/USER_GUIDE.vi.md#tìm-kiếm-tiktok-qua-trình-duyệt-host-trên-nhánh-phát-triển).
 - `get_mission_evidence_qualification_batch` và
   `submit_mission_evidence_qualifications` lưu đánh giá chứng cứ.
 - `submit_mission_claims`, `get_mission_claims` và `get_mission_analysis` kiểm soát

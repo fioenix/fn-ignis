@@ -1355,5 +1355,116 @@
         "type": "object"
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "cancel_host_browser_search",
+      "description": "Cancel a task-bound host search and close its listener, not the owner's browser or tabs.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "host_task_ref": {
+            "type": "string"
+          },
+          "session_ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "host_task_ref",
+          "session_ref"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "prepare_host_browser_search",
+      "description": "Prepare one explicit finite public TikTok search batch through an authorized host browser.\n\nThis opt-in loopback relay does not export cookies or collect in the background. TACTICAL\ncreates no mission. MISSION requires an existing confirmed mission_id, queries=[] and\nresult_limit=20; its full query union and limit derive from authority, including falsifiers.\nThe host executes the packaged deterministic extractor and stages its JSON via\nthe same-origin local form. It is not a default collector or a Market recommendation.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "host_task_ref": {
+            "type": "string"
+          },
+          "session_ref": {
+            "type": "string"
+          },
+          "queries": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "result_limit": {
+            "type": "integer"
+          },
+          "lifetime_seconds": {
+            "type": "integer"
+          },
+          "authorized": {
+            "type": "boolean"
+          },
+          "mode": {
+            "default": "TACTICAL",
+            "type": "string"
+          },
+          "mission_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "host_task_ref",
+          "session_ref",
+          "queries",
+          "result_limit",
+          "lifetime_seconds",
+          "authorized"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "submit_host_browser_search",
+      "description": "Consume a validated answer already staged through this task's local host-browser relay.\n\nNo raw records need to be copied into model tool arguments. TACTICAL returns observations;\nMISSION revalidates scope under its existing writer and returns its canonical run/frame.\nUnknown counters/windows stay unmeasured. Failed ingestion requires journal/frame readback,\nnot a retry. Accepted replay returns the cached receipt. Never returns commercial claims.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "host_task_ref": {
+            "type": "string"
+          },
+          "session_ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "host_task_ref",
+          "session_ref"
+        ],
+        "type": "object"
+      }
+    }
   }
 ]

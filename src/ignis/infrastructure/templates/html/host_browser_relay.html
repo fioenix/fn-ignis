@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ignis — Task-bound browser relay</title>
+  <style>{{ theme_css | safe }}</style>
+  <style>
+    body { margin: 2rem; background: var(--color-background); color: var(--color-foreground); font-family: var(--font-sans); }
+    main { max-width: 60rem; margin: auto; }
+    h1 { font-family: var(--font-display); }
+    textarea { box-sizing: border-box; width: 100%; padding: 1rem; border: 1px solid var(--color-border); border-radius: var(--radius-lg); font-family: var(--font-mono); background: var(--color-card); color: var(--color-foreground); }
+    button { padding: 1rem; background: var(--color-primary); color: var(--color-primary-foreground); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
+    label { display: block; margin: 1rem 0 .5rem; }
+    :focus-visible { outline: 2px solid var(--color-ring); outline-offset: 2px; }
+  </style>
+</head>
+<body class="product-mode">
+<main>
+  <h1>IGNIS TASK RELAY</h1>
+  {% if status %}
+  <p role="status">{{ status }} — Task listener closed. Read back through Ignis MCP.</p>
+  {% else %}
+  <p>Public search only. This task-bound page stages one answer; it does not create Market claims.</p>
+  <details><summary>Approved request and deterministic extractor</summary>
+    <label for="request">Approved request</label>
+    <textarea id="request" readonly rows="5">{{ request }}</textarea>
+    <label for="extractor">Packaged extractor</label>
+    <textarea id="extractor" readonly rows="5">{{ extractor }}</textarea>
+  </details>
+  <form method="post">
+    <label for="payload">Search answer JSON</label>
+    <textarea id="payload" name="payload" required rows="6" spellcheck="false"></textarea>
+    <p>No cookies, private account content or raw page HTML.</p>
+    <button type="submit">Stage answer →</button>
+  </form>
+  {% endif %}
+</main>
+</body>
+</html>

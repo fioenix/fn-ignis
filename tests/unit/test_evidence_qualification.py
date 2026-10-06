@@ -257,12 +257,22 @@ def test_only_a_completed_empty_surface_measures_zero():
         assert _outcome(status=failed).measures_zero is False, failed
 
 
+def test_partial_degraded_outcome_retains_observations_without_measuring_absence():
+    outcome = _outcome(status="DEGRADED", signals_collected=47)
+    assert outcome.signals_collected == 47
+    assert outcome.status is ChannelHealthStatus.DEGRADED
+    assert outcome.measures_zero is False
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
         {"status": "EMPTY_NO_DATA", "signals_collected": 2},
         {"status": "HEALTHY", "signals_collected": 0},
-        {"status": "DEGRADED", "signals_collected": 1},
+        {"status": "FAILED", "signals_collected": 1},
+        {"status": "AUTH_REQUIRED", "signals_collected": 1},
+        {"status": "RATE_LIMITED", "signals_collected": 1},
+        {"status": "NOT_REQUESTED", "signals_collected": 1},
         {"signals_collected": -1},
         {"status": "FINE"},
         {"connector_surface": ""},
@@ -549,6 +559,44 @@ def _use_cases(repository, store):
         GetEvidenceQualificationBatchUseCase(repository=repository, store=store),
         SubmitEvidenceQualificationsUseCase(repository=repository, store=store),
     )
+
+
+@pytest.mark.asyncio
+async def test_query_overlap_survives_storage_and_qualification_batch(research):
+    repository, store, workspace = research
+    mission, _, _ = await _market(repository, store, workspace, titles=())
+    queries = ["retail need", "retail counterevidence"]
+    signal = TrendSignal(
+        platform=PlatformType.THREADS,
+        raw_title="Public fixture post",
+        source_url="https://www.threads.net/@fixture/post/overlap",
+        captured_at=NOW,
+        mission_id=mission.id,
+        metadata={"post_id": "overlap", "matched_keyword": queries[0], "matched_keywords": queries},
+    )
+    await repository.save_signals([signal])
+    stored = await repository.get_mission_signals(mission.id)
+    assert len(stored) == 1
+    assert stored[0].metadata["matched_keywords"] == queries
+    batch, _ = _use_cases(repository, store)
+    evidence = (await batch.execute(str(mission.id)))["evidence"][0]
+    assert evidence["probe_keyword"] == queries[0]
+    assert evidence["probe_keywords"] == queries
+
+
+@pytest.mark.parametrize("recorded,expected", [
+    (None, ["first query"]),
+    ("not a list", ["first query"]),
+    (["first query", " second query ", "first query", None, ""], ["first query", "second query"]),
+])
+def test_probe_query_projection_keeps_legacy_data_and_filters_invalid_entries(recorded, expected):
+    signal = TrendSignal(
+        platform=PlatformType.THREADS, raw_title="Public fixture",
+        metadata={"matched_keyword": "first query", "matched_keywords": recorded},
+    )
+    evidence = GetEvidenceQualificationBatchUseCase._evidence(signal)
+    assert evidence["probe_keyword"] == "first query"
+    assert evidence["probe_keywords"] == expected
 
 
 @pytest.mark.asyncio
