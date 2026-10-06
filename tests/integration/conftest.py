@@ -60,6 +60,8 @@ SCHEMA_MIGRATIONS = (
     "026_partial_degraded_probe_outcomes.sql",
     # Transactional progress state, typed events and original probe-command receipts.
     "027_mission_progress.sql",
+    # Explicit owner-only host work, immutable input bindings and original receipts.
+    "028_research_work.sql",
 )
 
 
