@@ -157,6 +157,10 @@ async def test_actual_mcp_http_browser_reads_and_inspects_without_writes(attenti
                 'mission_id': str(missions[0].id), 'run_id': str(runs[0]), 'page_size': 100,
             })).structured_content
             assert initial['status'] == 'OK'
+            # Fresh PostgreSQL includes migration 028; these SQLite fixtures
+            # intentionally initialize only canonical/progress storage.
+            expected_research = 'AVAILABLE' if case.name == 'postgres' else 'SCHEMA_UNAVAILABLE'
+            assert initial['research']['availability'] == expected_research
             cap = (await client.call_tool('open_mission_relay', {
                 'mission_id': str(missions[0].id), 'run_id': str(runs[0]),
                 'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
@@ -199,7 +203,20 @@ async def test_actual_mcp_http_browser_reads_and_inspects_without_writes(attenti
                     for value in (row['observation_id'], row['source_id'], row['title'], 'ATTENTION_CONTEXT'):
                         await expect(inspector).to_contain_text(value)
                     await page.get_by_role('button', name='Research', exact=True).click()
-                    await expect(inspector).to_contain_text('Unavailable')
+                    research = inspector.get_by_test_id('research-view')
+                    if expected_research == 'AVAILABLE':
+                        assert initial['research']['work_items'] == []
+                        assert initial['research']['assignments'] == []
+                        await expect(research).to_contain_text('MISSION_CURRENT')
+                        await expect(research).to_contain_text('No recorded work items in this available snapshot.')
+                        await expect(research.get_by_test_id('research-observation-count')).to_have_text('3')
+                        await expect(research.get_by_test_id('research-source-count')).to_have_text('3')
+                        await expect(research).to_contain_text('strategic gate UNAVAILABLE')
+                    else:
+                        await expect(research).to_have_text('SCHEMA_UNAVAILABLE · records, observations and sources Unknown.')
+                        await expect(research.get_by_test_id('research-observation-count')).to_have_count(0)
+                        await expect(research.get_by_test_id('research-source-count')).to_have_count(0)
+                    await expect(research.locator('[data-work-id], [data-assignment-id]')).to_have_count(0)
                     await page.get_by_role('button', name='Synthesis', exact=True).click()
                     await expect(inspector).to_contain_text('Withheld')
                     await page.screenshot(path=str(tmp_path / 'actual-viewer.png'), full_page=True)
