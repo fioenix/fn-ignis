@@ -70,6 +70,25 @@ OWNER_ONLY = {
     "trend_signals": "signal (legacy)",
     "youtube_quota_buckets": "YouTube quota bucket",
 }
+# SQL 028 adds these owner-only tables; keep this declaration independent of SQL parsing.
+RESEARCH_OWNER_ONLY = {
+    "research_assignments": "host assignment",
+    "research_input_sets": "exact input set",
+    "research_input_observations": "input observation binding",
+    "research_work_items": "host work item",
+    "research_work_dependencies": "work dependency",
+    "research_handoffs": "research handoff",
+    "research_handoff_observations": "handoff observation binding",
+    "research_handoff_references": "handoff claim or outcome reference",
+    "research_finding_revisions": "finding revision",
+    "research_input_findings": "input finding binding",
+    "research_finding_observations": "finding observation binding",
+    "research_activity_receipts": "host activity receipt",
+    "research_handoff_acknowledgements": "handoff acknowledgement",
+    "research_recorded_metadata": "observed recording metadata",
+    "research_work_commands": "original work command receipt",
+}
+OWNER_ONLY.update(RESEARCH_OWNER_ONLY)
 POSTURE = {
     **{table: "client read-only" for table in CLIENT_READ_ONLY},
     **{table: "owner only" for table in OWNER_ONLY},
@@ -227,6 +246,84 @@ CLIENT_ROWS = {
 }
 
 
+ASSIGNMENT, INPUT, FINDING_INPUT, WORK, DEPENDENCY, HANDOFF, FINDING = (str(uuid4()) for _ in range(7))
+# Each prefix establishes only the dependencies for the next valid owner/client INSERT.
+# Metadata comes last, because recording it seals the child collections.
+RESEARCH_ROWS = (
+    ("research_assignments", "(assignment_id, mission_id, host_task_ref, epoch, actions, sources, deadline,"
+     " quota_ceiling, expected_manifest_digest, state, version) VALUES"
+     f" ('{ASSIGNMENT}', '{MISSION}', 'host', 1, ARRAY['ANALYZE'], ARRAY['threads'],"
+     f" now()+interval '1 day', 0, '{'a' * 64}', 'ASSIGNED', 1)"),
+    ("research_input_sets", "(input_id, mission_id, manifest_digest) VALUES"
+     f" ('{INPUT}', '{MISSION}', '{'a' * 64}'), ('{FINDING_INPUT}', '{MISSION}', '{'a' * 64}')"),
+    ("research_input_observations", "(input_id, mission_id, observation_id, source_id) VALUES"
+     f" ('{INPUT}', '{MISSION}', '{OBSERVATION}', '{SOURCE}')"),
+    ("research_work_items", "(work_id, assignment_id, mission_id, input_id, question, expertise,"
+     " epoch, state, version, ownership_fence) VALUES"
+     f" ('{WORK}', '{ASSIGNMENT}', '{MISSION}', '{INPUT}', 'Question', 'Synthesis', 1, 'RUNNING', 1, 'fence'),"
+     f" ('{DEPENDENCY}', '{ASSIGNMENT}', '{MISSION}', '{INPUT}', 'Dependency', 'Synthesis', 1, 'ASSIGNED', 1, 'fence')"),
+    ("research_work_dependencies", "(mission_id, work_id, dependency_work_id) VALUES"
+     f" ('{MISSION}', '{WORK}', '{DEPENDENCY}')"),
+    ("research_handoffs", "(handoff_id, mission_id, work_id, input_id, expected_version, ownership_fence,"
+     " consumer_ref, result) VALUES"
+     f" ('{HANDOFF}', '{MISSION}', '{WORK}', '{INPUT}', 1, 'fence', 'consumer', 'Safe result')"),
+    ("research_handoff_observations", "(ordinal, mission_id, handoff_id, input_id, observation_id, source_id)"
+     f" VALUES (1, '{MISSION}', '{HANDOFF}', '{INPUT}', '{OBSERVATION}', '{SOURCE}')"),
+    ("research_handoff_references", "(mission_id, handoff_id, reference_kind, reference_id, claim_id)"
+     f" VALUES ('{MISSION}', '{HANDOFF}', 'CLAIM', '{T025_CLAIM}', '{T025_CLAIM}')"),
+    ("research_finding_revisions", "(finding_id, revision, mission_id, work_id, handoff_id, input_id,"
+     " result_type, statement) VALUES"
+     f" ('{FINDING}', 1, '{MISSION}', '{WORK}', '{HANDOFF}', '{INPUT}', 'DESCRIPTIVE', 'Safe finding')"),
+    ("research_input_findings", "(input_id, mission_id, finding_id, revision) VALUES"
+     f" ('{FINDING_INPUT}', '{MISSION}', '{FINDING}', 1)"),
+    ("research_finding_observations", "(mission_id, finding_id, revision, observation_id, direction) VALUES"
+     f" ('{MISSION}', '{FINDING}', 1, '{OBSERVATION}', 'SUPPORT')"),
+    ("research_activity_receipts", "(receipt_id, mission_id, work_id, epoch, ownership_fence, execution_ref,"
+     " occurred_at, fresh_until, provenance) VALUES"
+     f" ('{uuid4()}', '{MISSION}', '{WORK}', 1, 'fence', 'execution', now(), now()+interval '1 day', 'HOST_REPORTED')"),
+    ("research_handoff_acknowledgements", "(mission_id, handoff_id, input_id, consumer_ref, expected_version,"
+     f" disposition) VALUES ('{MISSION}', '{HANDOFF}', '{INPUT}', 'consumer', 1, 'ACCEPTED')"),
+    ("research_recorded_metadata", "(mission_id, record_kind, record_id, record_version, mission_revision)"
+     f" VALUES ('{MISSION}', 'WORK', '{WORK}', 1, 1)"),
+    ("research_work_commands", "(mission_id, command_key, payload_fingerprint, operation, receipt_id,"
+     f" disposition, revision) VALUES ('{MISSION}', 'research-owner', '{'b' * 64}',"
+     f" 'ASSIGN_WORK', '{uuid4()}', 'APPLIED', 1)"),
+)
+CLIENT_ROWS.update(RESEARCH_ROWS)
+
+
+def test_research_posture_inventory_matches_exact_sql028_tables():
+    declared = set(RESEARCH_OWNER_ONLY)
+    created = set(re.findall(
+        r"CREATE TABLE IF NOT EXISTS public\.(\w+)",
+        (REPO_SQL / "028_research_work.sql").read_text(encoding="utf-8"),
+    ))
+    assert len(declared) == 15 and declared == created
+    assert {table for table in OWNER_ONLY if table in created} == created
+    assert {table for table, _ in RESEARCH_ROWS} == created
+    assert len(RESEARCH_ROWS) == 15
+
+
+def _valid_research_insert(conn, table):
+    """Prove the exact probe INSERT succeeds with real dependencies before changing role."""
+    # A database seeded before 023/025/027 has no claim or progress row after upgrade.
+    # Establish those canonical prerequisites inside this rolled-back probe transaction.
+    if not conn.execute("SELECT 1 FROM mission_claims WHERE id=%s", (T025_CLAIM,)).fetchone():
+        conn.execute(OWNER_ROWS_SINCE_025[2])
+    if not conn.execute("SELECT 1 FROM mission_progress_revisions WHERE mission_id=%s", (MISSION,)).fetchone():
+        conn.execute(OWNER_ROWS_SINCE_027[0])
+    for target, values in RESEARCH_ROWS:
+        statement = f"INSERT INTO public.{target} {values}"
+        if target == table:
+            with conn.transaction(force_rollback=True):
+                written = conn.execute(statement).rowcount
+                assert written == (2 if target in {"research_input_sets", "research_work_items"} else 1)
+                assert conn.execute(f"SELECT count(*) FROM public.{target}").fetchone() == (written,)
+            return
+        conn.execute(statement)
+    raise AssertionError(f"No valid research INSERT fixture for {table}")
+
+
 def _apply(dsn: str, *migrations: str) -> None:
     for migration in migrations:
         try:
@@ -357,6 +454,8 @@ def _attempt(dsn: str, role: str, table: str, statement: str) -> str:
     }[statement]
     with psycopg.connect(dsn) as conn:
         try:
+            if statement == "INSERT" and table in RESEARCH_OWNER_ONLY:
+                _valid_research_insert(conn, table)
             conn.execute(sql.SQL("SET ROLE {}").format(sql.Identifier(role)))
             cursor = conn.execute(text)
             if statement == "SELECT":
@@ -629,3 +728,49 @@ async def test_the_runtime_owner_reads_and_writes_every_table_class_after_021(
         dsn, "SELECT count(*) FROM source_identity_aliases WHERE canonical_external_id = %s",
         ("post:3141592653589793",),
     ) == [(1,)], "the owner's write did not reach the alias ledger"
+
+
+@pytest.mark.parametrize("posture", ("empty_postgres_dsn", "supabase_like_dsn"))
+def test_plain_runtime_owner_writes_and_reads_every_research_table(request, posture):
+    dsn = request.getfixturevalue(posture)
+    _apply(dsn, *all_postgres_migrations())
+    with runtime_owner(dsn) as owner_dsn:
+        assert _all(
+            owner_dsn,
+            "SELECT current_user, rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user",
+        ) == [(RUNTIME_ROLE, False, False)]
+        assert _posture_violations(owner_dsn) == []
+        _seed(owner_dsn)
+        with psycopg.connect(owner_dsn) as conn:
+            for table, values in RESEARCH_ROWS:
+                written = conn.execute(f"INSERT INTO public.{table} {values}").rowcount
+                expected = 2 if table in {"research_input_sets", "research_work_items"} else 1
+                assert written == expected
+                assert conn.execute(f"SELECT count(*) FROM public.{table}").fetchone() == (expected,)
+        # Fresh connection readback distinguishes durable owner writes from a rolled-back probe.
+        for table in RESEARCH_OWNER_ONLY:
+            expected = 2 if table in {"research_input_sets", "research_work_items"} else 1
+            assert _all(owner_dsn, f"SELECT count(*) FROM public.{table}") == [(expected,)]
+
+
+@pytest.mark.parametrize("control", ("rls", "grant", "inventory"))
+def test_research_posture_oracle_rejects_missing_extra_or_weakened_tables(supabase_like_dsn, control):
+    dsn = supabase_like_dsn
+    _apply(dsn, *all_postgres_migrations())
+    assert _posture_violations(dsn) == []
+    with psycopg.connect(dsn) as conn:
+        if control == "rls":
+            conn.execute("ALTER TABLE public.research_handoffs DISABLE ROW LEVEL SECURITY")
+        elif control == "grant":
+            conn.execute("GRANT SELECT ON public.research_handoffs TO anon")
+        else:
+            conn.execute("ALTER TABLE public.research_work_commands RENAME TO undeclared_research_commands")
+    expected = {
+        "rls": ["research_handoffs: row-level security is off"],
+        "grant": ["research_handoffs: anon holds SELECT"],
+        "inventory": [
+            "undeclared_research_commands: public table with no declared posture",
+            "research_work_commands: declared but missing from the catalog",
+        ],
+    }
+    assert _posture_violations(dsn) == expected[control]
