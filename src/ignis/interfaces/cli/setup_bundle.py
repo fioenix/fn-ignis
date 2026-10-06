@@ -67,13 +67,19 @@ def ensure_environment_file(project_root: Path, *, env_file: Path | None = None)
 async def bootstrap_database() -> Tuple[bool, str]:
     """Initialize SQLite database and verify table schemas."""
     try:
-        from ignis.infrastructure.persistence import create_repository
+        from ignis.infrastructure.persistence import SqliteTrendRepository, create_repository
         repo = create_repository()
-        if hasattr(repo, "_ensure_schema"):
-            await repo._ensure_schema()
-        lexicons = await repo.get_domain_lexicons()
-        await repo.close()
-        return True, f"Database initialized successfully with {len(lexicons)} seed lexicons."
+        try:
+            if hasattr(repo, "_ensure_schema"):
+                await repo._ensure_schema()
+            if isinstance(repo, SqliteTrendRepository):
+                # Explicit CLI setup owns additive DDL; canonical reads remain unchanged.
+                await repo._ensure_progress_schema()
+                await repo._ensure_research_schema()
+            lexicons = await repo.get_domain_lexicons()
+            return True, f"Database initialized successfully with {len(lexicons)} seed lexicons."
+        finally:
+            await repo.close()
     except Exception as e:
         return False, f"Database initialization warning: {e}"
 
@@ -406,9 +412,12 @@ def auto_provision(json_output: bool = False, *, client: str = "all", env_file: 
     else:
         print(f"  • MCP catalog: {tools_cnt} tools, {prompts_cnt} prompts, {resources_cnt} resources")
 
-    print("\n🚀 Ready for AI Agents (Claude Desktop, Claude Code, Codex, Antigravity, OpenClaw, Hermes, Pi Agent)")
-    print("Quickstart prompt for agent:")
-    print('  "Run a research mission on AI customer service agents in VN for the last 30 days"')
+    if report["status"] == "success":
+        print("\n🚀 Ready for AI Agents (Claude Desktop, Claude Code, Codex, Antigravity, OpenClaw, Hermes, Pi Agent)")
+        print("Quickstart prompt for agent:")
+        print('  "Run a research mission on AI customer service agents in VN for the last 30 days"')
+    else:
+        print("\nSetup incomplete. Resolve the reported warnings before using the agent tools.")
     print("=" * 64 + "\n")
     return report
 
