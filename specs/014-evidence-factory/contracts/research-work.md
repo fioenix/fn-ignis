@@ -1,6 +1,6 @@
 # Host Research Work Contract
 
-**Status**: Additive recording service and MCP tool implemented and independently verified locally through actual stdio and SQLite. Full PostgreSQL MCP-to-viewer integration and actual host UAT remain pending. This is not a scheduler or provider integration.
+**Status**: Additive recording service and MCP tool independently verified locally through actual stdio, initialized SQLite file/local PostgreSQL, coherent HTTP and Chromium. T056 passed12 native and11 convention cases with zero failure/error/skip. Actual host UAT remains pending. This is not a scheduler or provider integration.
 
 `record_mission_research_work(mission_id, command)` accepts a typed discriminated command. All mutations require eligible server-owned local host context, expected revision/epoch, idempotency key and exact bounded mission scope. New execution additionally requires current authority; exact prior-bound cessation and original receipt replay retain their separate admitted semantics. Unknown fields/operations are refused. The call records work; it never spawns a specialist, invokes a model, authenticates or collects.
 
