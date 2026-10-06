@@ -106,6 +106,22 @@
 
 ### Session 2026-10-02
 
+- Q: May the reviewed implementation be merged and v0.8.0 release preparation proceed?
+  → A: Yes. The owner explicitly instructed "Merge và publish đi" after approving v0.8.0.
+  This authorizes the protected merge, release preparation, tag, and publication workflow,
+  subject to the remaining evidence gates. It does not authorize real social credentials,
+  invented pilot outcomes, legacy deletion, or treating partial security coverage as complete.
+  Whether a pre-pilot beta may publish while T085–T090 remain open is a separately surfaced
+  owner question, not an implied waiver (owner decided; basis: explicit instruction on 2026-10-02).
+- Q: Which version should the product reset target, and how are beta increments chosen?
+  → A: Target `v0.8.0`. MINOR (tier 2) is for a clear user-visible capability or workflow change;
+  PATCH (tier 3) is for other changes without a material product-experience change. Spec 011
+  qualifies for MINOR because users move from daily collection to explicitly assigned research
+  with the Claim Ledger and counterevidence. This owner-approved beta criterion supersedes
+  automatic MAJOR-for-breaking during `0.x`; removed contracts and migration requirements still
+  need explicit disclosure. Version selection does not authorize metadata preparation, merge,
+  tag, publication, or waiving the remaining pilot/release gates (owner decided; basis: the
+  stated user-impact rule followed by "OK chốt" on 2026-10-02).
 - Q: How do current-frame claim reads remain safe against concurrent commits? → A: Derive
   frame identity, sufficiency, and claim selection from one read-only database snapshot;
   project older claims as SUPERSEDED without mutating their audit rows. Revalidate the frame
@@ -448,6 +464,9 @@ silent compatibility alias remains while an on-demand tactical and Market missio
 
 ## Assumptions
 
+- The owner-approved release target is `v0.8.0`; until formal release preparation, package
+  metadata remains at the existing released version. Version approval does not close the
+  live-pilot, migration/disposition, merge, or public-distribution acceptance gates.
 - The approved product proposal is the authoritative product input for this feature.
 - The product remains open-source, local-first, and self-hosted by default; hosted multi-tenancy,
   team billing, and enterprise compliance packages are outside this feature.

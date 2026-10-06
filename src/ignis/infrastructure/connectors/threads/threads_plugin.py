@@ -113,7 +113,7 @@ class ThreadsPlugin(IConnectorPlugin):
             if not storage_state:
                 return False
 
-            cookie_header = build_cookie_header(storage_state)
+            cookie_header = build_cookie_header(storage_state, self.BROWSER_FEED_URL)
             if not cookie_header:
                 return False
 
@@ -311,8 +311,9 @@ class ThreadsPlugin(IConnectorPlugin):
 
         all_signals: List[TrendSignal] = []
         seen_ids: set[str] = set()
+        posts_by_id: Dict[str, TrendSignal] = {}
 
-        for keyword in [k.strip() for k in keywords[:10] if k and k.strip()]:
+        for keyword in [k.strip() for k in keywords if k and k.strip()]:
             payload = await self._graph_get(
                 f"{self._api_root}/keyword_search",
                 params={
@@ -327,11 +328,21 @@ class ThreadsPlugin(IConnectorPlugin):
             )
             if attestation is not None:
                 attestation.executed(keyword)
-            items = [it for it in (payload.get("data") or []) if str(it.get("id")) not in seen_ids]
+            items = []
+            for item in payload.get("data") or []:
+                post_id = str(item.get("id"))
+                existing = posts_by_id.get(post_id)
+                if existing is not None:
+                    self._record_matched_query(existing, keyword)
+                elif post_id not in seen_ids:
+                    items.append(item)
             for it in items:
                 seen_ids.add(str(it.get("id")))
 
             signals = await self._map_items(items, token=token, geo=geo, keyword=keyword)
+            for item, signal in zip(items, signals):
+                self._record_matched_query(signal, keyword)
+                posts_by_id[str(item.get("id"))] = signal
             all_signals.extend(signals)
 
         return all_signals
@@ -579,6 +590,11 @@ class ThreadsPlugin(IConnectorPlugin):
             # Views/impressions is the primary demand metric; fall back to likes when
             # the insights scope is not granted for this token.
             metric_value = views if views > 0 else float(likes)
+            published_at = self._normalize_timestamp(item.get("timestamp"))
+            try:
+                publication_time = datetime.fromisoformat(published_at) if published_at else None
+            except ValueError:
+                publication_time = None
 
             signals.append(
                 TrendSignal(
@@ -597,11 +613,13 @@ class ThreadsPlugin(IConnectorPlugin):
                         "reposts": int(metrics.get("reposts", 0) or 0),
                         "quotes": int(metrics.get("quotes", 0) or 0),
                         "media_type": item.get("media_type"),
-                        "published_at": self._normalize_timestamp(item.get("timestamp")),
+                        "published_at": published_at,
+                        "excerpt": sanitize_pii_text(text),
                         "source": "threads_graph_api",
                         **({"matched_keyword": keyword} if keyword else {}),
                     },
                     captured_at=datetime.now(timezone.utc),
+                    published_at=publication_time,
                 )
             )
         return signals
@@ -754,11 +772,12 @@ class ThreadsPlugin(IConnectorPlugin):
     ) -> List[TrendSignal]:
         """Run search per keyword using Direct GraphQL fast-path, falling back to Playwright."""
         all_signals: List[TrendSignal] = []
-        seen_ids: set[str] = set()
+        posts_by_id: Dict[str, TrendSignal] = {}
         doc_id, lsd = GraphQLDocIdCache.get("search_posts")
 
-        for keyword in [k.strip() for k in keywords[:10] if k and k.strip()]:
+        for keyword in [k.strip() for k in keywords if k and k.strip()]:
             keyword_signals: List[TrendSignal] = []
+            search_answered = False
             if doc_id:
                 direct_payload = await fetch_graphql_direct(
                     doc_id=doc_id,
@@ -767,18 +786,15 @@ class ThreadsPlugin(IConnectorPlugin):
                     lsd=lsd,
                     geo=geo,
                 )
-                if direct_payload:
+                public_results = self._public_search_results(direct_payload)
+                if public_results is not None:
+                    search_answered = True
                     if attestation is not None:
                         attestation.executed(keyword)
-                    records = extract_records(
-                        [direct_payload],
-                        is_record=self._is_browser_post,
-                        identity=lambda node: str(node.get("pk") or node.get("id") or ""),
-                        limit=min(max(limit, 1), 100),
-                    )
+                    records = self._search_records([public_results], limit)
                     keyword_signals = [self._map_browser_post(node, geo=geo, keyword=keyword) for node in records]
 
-            if not keyword_signals:
+            if not search_answered:
                 url = f"{self.BROWSER_SEARCH_URL}?{urllib.parse.urlencode({'q': keyword, 'serp_type': 'default'})}"
                 keyword_signals = await self._fetch_via_browser_session(
                     url=url, storage_state=storage_state, geo=geo, limit=limit, keyword=keyword,
@@ -787,12 +803,22 @@ class ThreadsPlugin(IConnectorPlugin):
 
             for signal in keyword_signals:
                 post_id = str(signal.metadata.get("post_id") or "")
-                if post_id and post_id in seen_ids:
+                if post_id and post_id in posts_by_id:
+                    self._record_matched_query(posts_by_id[post_id], keyword)
                     continue
-                seen_ids.add(post_id)
+                self._record_matched_query(signal, keyword)
+                if post_id:
+                    posts_by_id[post_id] = signal
                 all_signals.append(signal)
 
         return all_signals
+
+    @staticmethod
+    def _record_matched_query(signal: TrendSignal, keyword: str) -> None:
+        """Keep observed query hits without changing the first-query clustering contract."""
+        queries = signal.metadata.setdefault("matched_keywords", [])
+        if keyword not in queries:
+            queries.append(keyword)
 
     async def _fetch_via_browser_session(
         self,
@@ -808,20 +834,66 @@ class ThreadsPlugin(IConnectorPlugin):
             storage_state=storage_state,
             url_markers=self.BROWSER_API_MARKERS,
             geo=geo,
+            **({"expected_query": keyword, "payload_validator": self._public_search_results} if keyword else {}),
         )
+        if keyword:
+            payloads = [result for payload in payloads if (result := self._public_search_results(payload)) is not None]
         if attestation is not None and keyword:
-            # A captured payload proves the search page answered; none proves nothing.
+            # Only an admitted public search envelope proves execution, including valid empty.
             if payloads:
                 attestation.executed(keyword)
             else:
                 attestation.failed(keyword, "no search payload was captured")
-        records = extract_records(
-            payloads,
-            is_record=self._is_browser_post,
+        records = self._search_records(payloads, limit) if keyword else extract_records(
+            payloads, is_record=self._is_browser_post,
             identity=lambda node: str(node.get("pk") or node.get("id") or ""),
             limit=min(max(limit, 1), 100),
         )
         return [self._map_browser_post(node, geo=geo, keyword=keyword) for node in records]
+
+    @staticmethod
+    def _search_records(payloads: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+        """Only admitted roots are query results; nested quotes have no rank authority."""
+        records: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for payload in payloads:
+            for post in payload["posts"]:
+                identity = str(post.get("pk") or post.get("id"))
+                if identity not in seen:
+                    seen.add(identity)
+                    records.append(post)
+                    if len(records) >= min(max(limit, 1), 100):
+                        return records
+        return records
+
+    @classmethod
+    def _public_search_results(cls, payload: Any) -> Optional[Dict[str, Any]]:
+        """Project only supported public result paths; unknown or malformed envelopes fail closed."""
+        if not isinstance(payload, dict) or payload.get("errors"):
+            return None
+        data = payload.get("data")
+        result = data.get("searchResults") if isinstance(data, dict) else None
+        edges = result.get("edges") if isinstance(result, dict) else None
+        if not isinstance(edges, list):
+            return None
+        posts: List[Dict[str, Any]] = []
+        for edge in edges:
+            node = edge.get("node") if isinstance(edge, dict) else None
+            if not isinstance(node, dict):
+                return None
+            if cls._is_browser_post(node):
+                posts.append(node)
+                continue
+            thread = node.get("thread")
+            items = thread.get("thread_items") if isinstance(thread, dict) else None
+            if not isinstance(items, list):
+                return None
+            for item in items:
+                post = item.get("post") if isinstance(item, dict) else None
+                if not isinstance(post, dict) or not cls._is_browser_post(post):
+                    return None
+                posts.append(post)
+        return {"posts": posts}
 
     @staticmethod
     def _is_browser_post(node: Dict[str, Any]) -> bool:
@@ -850,6 +922,7 @@ class ThreadsPlugin(IConnectorPlugin):
 
         likes = coerce_int(node.get("like_count"))
         replies = coerce_int(app_info.get("direct_reply_count"))
+        published_at = self._normalize_epoch(node.get("taken_at"))
 
         return TrendSignal(
             platform=PlatformType.THREADS,
@@ -866,12 +939,14 @@ class ThreadsPlugin(IConnectorPlugin):
                 "reply_count": replies,
                 "reposts": coerce_int(app_info.get("repost_count")),
                 "quotes": coerce_int(app_info.get("quote_count")),
-                "published_at": self._normalize_epoch(node.get("taken_at")),
+                "published_at": published_at,
+                "excerpt": sanitize_pii_text(text),
                 "source": "threads_browser_session",
                 "tier": "TIER_1_BROWSER_SESSION",
                 **({"matched_keyword": keyword} if keyword else {}),
             },
             captured_at=datetime.now(timezone.utc),
+            published_at=datetime.fromisoformat(published_at) if published_at else None,
         )
 
     @staticmethod

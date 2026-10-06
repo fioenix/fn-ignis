@@ -31,7 +31,7 @@ import sys
 import threading
 from dataclasses import dataclass
 
-EXPECTED_TOOL_COUNT = 41
+EXPECTED_TOOL_COUNT = 44
 REQUIRED_RESET_TOOLS = {"create_attention_mission", "confirm_market_brief", "submit_mission_claims", "get_mission_claims"}
 REMOVED_RESET_TOOLS = {
     "create_research_mission", "run_autonomous_research_mission", "get_trending_topics",

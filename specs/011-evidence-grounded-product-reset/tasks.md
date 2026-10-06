@@ -250,6 +250,12 @@ separate implementation completion from owner-authorized migration, release, and
 - [ ] T093 Run the read-only legacy inventory, present explicit archive/deletion candidates, and record the owner's disposition decision without changing data in `specs/011-evidence-grounded-product-reset/legacy-disposition.md`
 - [X] T094 Update `BACKLOG.md` and this ledger with implementation evidence, unresolved owner gates, and explicit shipped/not-shipped state without claiming release from local tests
 - [ ] T095 OWNER GATE: obtain explicit decisions for persistent-database migration application, exact baseline archive/deletion targets, release version, tag, push, and GitHub Release; record each answer in `specs/011-evidence-grounded-product-reset/spec.md`
+  - 2026-10-02: Owner approved the `v0.8.0` target and user-visible MINOR/internal PATCH beta
+    criterion. This settles version selection only; metadata preparation, merge, tag, push of
+    release artifacts, publication, baseline disposition, and pilot gates remain separate.
+  - Later on 2026-10-02: "Merge và publish đi" authorizes merge and the v0.8.0 release workflow.
+    Real social credentials and legacy deletion remain outside this authorization. Publication
+    before the unexecuted real pilots needs a distinct owner exception; that question is open.
 - [ ] T096 Apply only the owner-approved persistent migration and baseline disposition with pre-action manifest, recovery path, post-action readback, and evidence in `.handoff/011-owner-authorized-operations.handoff.md`
   - 2026-10-02: Supabase development operations explicitly authorized; canonical migrations
     023–025 applied and verified with unchanged corpus counts/digests and owner-only RLS.
@@ -257,6 +263,10 @@ separate implementation completion from owner-authorized migration, release, and
     T095's release/version/tag/push questions remain separate from the settled dev authorization.
 - [ ] T097 Prepare the owner-approved breaking release by synchronizing `pyproject.toml`, `openclaw.json`, `server.json`, `CITATION.cff`, `.openclaw/config.yaml`, `BACKLOG.md`, and regenerated `uv.lock` in one atomic change
 - [ ] T098 Merge, tag, push, and publish only the owner-approved release, then record the PR, merge commit, tag, public package/container checks, and anonymous clean-install evidence in `BACKLOG.md` and `specs/011-evidence-grounded-product-reset/tasks.md`
+  - Implementation PR 43 merged on 2026-10-02 (Vietnam time) at
+    `7e089a37447b42a2c35aee25874020bcec94016a`, following 7/7 required checks on `ee8e194`.
+    Post-merge CI is pending at this checkpoint. No v0.8.0 tag or publication exists;
+    pre-pilot publication exception is awaiting the owner, so this combined task remains open.
 
 ### PR 43 review follow-up (owner requested 2026-10-02)
 
@@ -269,8 +279,11 @@ separate implementation completion from owner-authorized migration, release, and
   10,000 observations, 5 warm-ups and 50 measured calls per backend. SQLite P95 30.882 ms;
   PostgreSQL P95 22.850 ms; both meet the unchanged P95 < 50 ms contract.
   These are local read-path measurements, not RES-001 competitor research or pilot results.
-- [ ] T101 Rerun final full dual-backend/Compose verification, publish the reviewed fixes to PR 43,
+- [X] T101 Rerun final full dual-backend/Compose verification, publish the reviewed fixes to PR 43,
   and record the final commit and CI result without merging, tagging, or releasing.
+  - Final code head `ee8e1942dd56dfa7eb4eece0ec19e3d0c69343d4`: 2134 passed, 6 skipped,
+    2 warnings in 329.71 seconds with both backends and Compose enabled. All seven required
+    GitHub checks succeeded; source/wheel smoke, lock, ruff and 17-commit redacted Gitleaks pass.
 
 ---
 

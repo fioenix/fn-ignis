@@ -124,12 +124,7 @@ async def test_each_trending_topic_gets_its_own_url_not_the_feed_url():
     assert "q=gia%20vang" in urls[0]
 
 
-# --- the keyword search path -------------------------------------------------------------------
-#
-# SC-004 promises coverage for this plugin, and until now the whole `search_signals` half of it was
-# untested: the Suggest probing, the demand index built on top of it, and the timeframe translation
-# that decides which window Google is asked about. That half is what a research mission calls; the
-# RSS feed half is what the scheduled worker calls.
+# Autocomplete belongs to keyword expansion, not measured Trends observations.
 
 
 def _suggest_response(suggestions):
@@ -141,13 +136,7 @@ def _suggest_response(suggestions):
 
 
 @pytest.mark.asyncio
-async def test_search_signals_scores_demand_from_the_probes_that_answered():
-    """The demand index is evidence from Suggest, not a constant, so the parts have to be visible.
-
-    Two probe templates, both answering, with one suggestion carrying a registered intent marker.
-    The record has to say how many probes were active and which variants were seen, because a
-    demand number nobody can decompose is a number nobody can dispute.
-    """
+async def test_suggestions_preserve_the_queries_from_each_probe():
     plugin = GoogleTrendsRssPlugin()
     plugin.register_probe_templates({"VN": ["{}", "mua {}"], "DEFAULT": ["{}"]})
     plugin.register_intent_keywords(["mua", "giá"])
@@ -155,42 +144,36 @@ async def test_search_signals_scores_demand_from_the_probes_that_answered():
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_get.return_value = _suggest_response(["mua vàng", "vàng SJC", "Vàng SJC"])
 
-        signals = await plugin.search_signals(["vàng"], geo=GeoCode.VN)
+        batches = await plugin.fetch_suggestions(["vàng"], geo=GeoCode.VN)
 
-    assert len(signals) == 1
-    signal = signals[0]
-    assert signal.platform == PlatformType.GOOGLE_TRENDS
-    assert signal.metadata["keyword"] == "vàng"
-    assert signal.metadata["active_probes"] == 2, "both templates answered, so both are active"
-    # Suggestions are lowercased and deduplicated before counting, so the two spellings of the
-    # same query are one variant.
-    assert signal.metadata["unique_variants"] == 2
-    assert signal.metadata["related_queries"] == ["mua vàng", "vàng sjc"]
-    assert signal.metadata["data_source"] == "google_search_dynamic_probes"
-    assert signal.source_url == signal.metadata["explore_url"]
-    assert "q=v%C3%A0ng" in signal.source_url
+    assert len(batches) == 1
+    batch = batches[0]
+    assert batch["keyword"] == "vàng"
+    assert batch["probes_executed"] == 2
+    assert batch["suggestions_count"] == 2
+    assert batch["suggestions"] == [
+        {"query": "mua vàng", "type": "autocomplete"},
+        {"query": "vàng SJC", "type": "autocomplete"},
+    ]
 
 
 @pytest.mark.asyncio
-async def test_a_keyword_nothing_answers_for_scores_the_documented_floor_not_zero():
-    """An empty result is still a measurement, and the plugin reports it at the band's floor."""
+async def test_empty_suggestions_do_not_create_a_trend_signal():
     plugin = GoogleTrendsRssPlugin()
     plugin.register_probe_templates({"DEFAULT": ["{}"]})
 
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_get.return_value = _suggest_response([])
 
-        signals = await plugin.search_signals(["zzzz"], geo=GeoCode.VN)
+        batch = (await plugin.fetch_suggestions(["zzzz"], geo=GeoCode.VN))[0]
 
-    assert signals[0].metric_value == 25.0
-    assert signals[0].growth_velocity == 0.0
-    assert signals[0].metadata["active_probes"] == 0
-    assert signals[0].metadata["related_queries"] == []
+    assert batch["suggestions_count"] == 0
+    assert batch["status"] == "EMPTY_NO_DATA"
+    assert "metric_value" not in batch
 
 
 @pytest.mark.asyncio
-async def test_the_demand_index_never_leaves_its_band_however_much_suggest_returns():
-    """Twenty variants, every one matching an intent marker, is still capped at 98."""
+async def test_suggestion_variants_are_not_scored_or_silently_truncated():
     plugin = GoogleTrendsRssPlugin()
     plugin.register_probe_templates({"DEFAULT": ["{}"]})
     plugin.register_intent_keywords(["giá"])
@@ -198,31 +181,28 @@ async def test_the_demand_index_never_leaves_its_band_however_much_suggest_retur
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_get.return_value = _suggest_response([f"giá vàng {n}" for n in range(40)])
 
-        signals = await plugin.search_signals(["vàng"], geo=GeoCode.VN)
+        batch = (await plugin.fetch_suggestions(["vàng"], geo=GeoCode.VN))[0]
 
-    assert 25.0 <= signals[0].metric_value <= 98.0
-    assert signals[0].metric_value == 98.0
-    # The record carries at most twelve related queries however many were seen.
-    assert len(signals[0].metadata["related_queries"]) == 12
-    assert signals[0].metadata["unique_variants"] == 40
+    assert batch["suggestions_count"] == 40
+    assert len(batch["suggestions"]) == 40
+    assert "demand_index" not in batch
 
 
 @pytest.mark.asyncio
-async def test_a_failing_suggest_probe_lowers_the_score_rather_than_failing_the_search():
-    """Suggest is an unofficial endpoint. One refusing must not lose the whole mission."""
+async def test_failed_suggest_reports_a_gap_not_a_demand_score():
     plugin = GoogleTrendsRssPlugin()
     plugin.register_probe_templates({"DEFAULT": ["{}", "mua {}"]})
 
     with patch("httpx.AsyncClient.get", side_effect=httpx.ConnectError("Network down")):
-        signals = await plugin.search_signals(["vàng"], geo=GeoCode.VN)
+        batch = (await plugin.fetch_suggestions(["vàng"], geo=GeoCode.VN))[0]
 
-    assert len(signals) == 1
-    assert signals[0].metadata["active_probes"] == 0
-    assert signals[0].metric_value == 25.0
+    assert batch["status"] == "DEGRADED"
+    assert batch["suggestions_count"] is None
+    assert batch["failed_probes"] == 2
 
 
 @pytest.mark.asyncio
-async def test_a_non_200_from_suggest_yields_no_variants():
+async def test_a_non_200_from_suggest_is_not_a_valid_empty_reply():
     plugin = GoogleTrendsRssPlugin()
     plugin.register_probe_templates({"DEFAULT": ["{}"]})
 
@@ -232,9 +212,10 @@ async def test_a_non_200_from_suggest_yields_no_variants():
         refused.json = MagicMock(return_value=["query", ["never read"]])
         mock_get.return_value = refused
 
-        signals = await plugin.search_signals(["vàng"], geo=GeoCode.VN)
+        batch = (await plugin.fetch_suggestions(["vàng"], geo=GeoCode.VN))[0]
 
-    assert signals[0].metadata["unique_variants"] == 0
+    assert batch["status"] == "DEGRADED"
+    assert batch["suggestions_count"] is None
 
 
 def test_probe_templates_without_a_placeholder_are_refused_at_registration():
@@ -248,7 +229,7 @@ def test_probe_templates_without_a_placeholder_are_refused_at_registration():
 
 
 def test_with_no_templates_registered_the_bare_keyword_is_the_only_probe():
-    """The documented degraded mode: measurable, and it says so rather than returning nothing."""
+    """The bare keyword can expand queries without stored market-specific phrasing."""
     plugin = GoogleTrendsRssPlugin()
     assert plugin._get_probe_patterns("VN") == [GoogleTrendsRssPlugin.BARE_KEYWORD_TEMPLATE]
 
@@ -259,68 +240,33 @@ def test_intent_keywords_are_normalized_and_deduplicated_at_registration():
     assert plugin._intent_keywords == ["giá", "mua"]
 
 
-@pytest.mark.parametrize(
-    "requested,google",
-    [
-        ("1d", "now 1-d"),
-        ("24h", "now 1-d"),
-        ("now 1-d", "now 1-d"),
-        ("7d", "now 7-d"),
-        ("now 7-d", "now 7-d"),
-        ("30d", "today 1-m"),
-        ("1m", "today 1-m"),
-        ("today 1-m", "today 1-m"),
-        ("90d", "today 3-m"),
-        ("3m", "today 3-m"),
-        ("today 3-m", "today 3-m"),
-        ("12m", "today 12-m"),
-        ("1y", "today 12-m"),
-        ("today 12-m", "today 12-m"),
-        ("5y", "today 5-y"),
-        ("today 5-y", "today 5-y"),
-        # Unrecognized input: anything mentioning 90 lands on the quarter, everything else on the
-        # week. Stated here because it is the branch a caller hits by typing a window that does not
-        # exist, and it must not raise.
-        ("last 90 days", "today 3-m"),
-        ("whenever", "now 7-d"),
-        ("", "now 7-d"),
-    ],
-)
-def test_every_documented_timeframe_alias_maps_to_a_google_window(requested, google):
-    assert GoogleTrendsRssPlugin()._normalize_timeframe(requested) == google
-
-
 @pytest.mark.asyncio
-async def test_a_custom_timeframe_overrides_the_enum_and_both_are_recorded():
+async def test_a_custom_timeframe_cannot_turn_autocomplete_into_a_time_series():
     plugin = GoogleTrendsRssPlugin()
     plugin.register_probe_templates({"DEFAULT": ["{}"]})
 
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_get.return_value = _suggest_response([])
-        signals = await plugin.search_signals(
-            ["vàng"], geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, custom_timeframe="12m"
-        )
-
-    meta = signals[0].metadata
-    assert meta["timeframe_requested"] == "12m"
-    assert meta["timeframe_google"] == "today 12-m"
-    assert "date=today%2012-m" in meta["explore_url"]
+        with pytest.raises(ConnectorExecutionException, match="unavailable"):
+            await plugin.search_signals(
+                ["vàng"], geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, custom_timeframe="12m"
+            )
 
 
 # --- geo, parsing fallbacks and the failure contract --------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_a_global_search_carries_no_geo_restriction():
-    """GLOBAL is the absence of a region, not a region code Google would recognize."""
+async def test_global_suggestions_disclose_the_requested_scope():
     plugin = GoogleTrendsRssPlugin()
     plugin.register_probe_templates({"DEFAULT": ["{}"]})
 
     with patch("httpx.AsyncClient.get") as mock_get:
         mock_get.return_value = _suggest_response([])
-        signals = await plugin.search_signals(["ai"], geo=GeoCode.GLOBAL)
+        batch = (await plugin.fetch_suggestions(["ai"], geo=GeoCode.GLOBAL))[0]
 
-    assert "geo=&" in signals[0].metadata["explore_url"] + "&"
+    assert batch["geo_code"] == "GLOBAL"
+    assert "timeframe" not in batch
 
 
 def test_traffic_and_publication_date_degrade_instead_of_raising():

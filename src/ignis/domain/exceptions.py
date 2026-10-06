@@ -18,6 +18,11 @@ class ConnectorExecutionException(IgnisDomainException):
     pass
 
 
+class ConnectorCapabilityUnavailableException(ConnectorExecutionException):
+    """A requested measurement is unsupported, not an operational upstream failure."""
+    pass
+
+
 class ConnectorQuotaExceededException(ConnectorExecutionException):
     """Upstream connector platform API quota exhausted."""
 

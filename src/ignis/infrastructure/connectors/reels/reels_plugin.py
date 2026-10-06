@@ -108,7 +108,7 @@ class ReelsPlugin(IConnectorPlugin):
             if not storage_state:
                 return False
 
-            cookie_header = build_cookie_header(storage_state)
+            cookie_header = build_cookie_header(storage_state, self.BROWSER_EXPLORE_URL)
             if not cookie_header:
                 return False
 

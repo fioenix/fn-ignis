@@ -74,7 +74,9 @@ async def test_tiktok_plugin_parse_dom_card():
     signal = await plugin._parse_dom_card(mock_card, geo=GeoCode.VN, keyword="ai")
     assert signal is not None
     assert signal.platform == PlatformType.TIKTOK
-    assert signal.metric_value == 1500000.0
+    assert signal.metric_value == 0.0
+    assert signal.metadata["metric_known"] is False
+    assert signal.metadata["metric_kind"] is None
     assert "AI Agent tu dong hoa" in signal.raw_title
     assert signal.source_url == "https://www.tiktok.com/@creator/video/12345"
 

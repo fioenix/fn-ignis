@@ -35,6 +35,8 @@ If the user gives you this repository link or asks you to set up `fn-ignis`, exe
 ./scripts/bootstrap.sh
 ```
 
+Owner-approved exception (2026-10-04): use `./scripts/bootstrap.sh --client codex --env-file /absolute/path/to/uat/.env` for Codex-only setup with isolated UAT storage. The default remains all clients.
+
 ### What this command does automatically:
 1. Detects Python $\ge 3.11$ and creates isolated virtual environment (`.venv`).
 2. Installs `fn-ignis` with all dependencies.
@@ -114,7 +116,7 @@ Before completing changes or cutting a release, verify these three checklist gat
 
 ### Checklist B: Harness Autonomy & Decoupling
 - [ ] FastMCP server instructions and tool definitions do NOT dictate mandatory agent workflows.
-- [ ] All 41 tools remain callable according to their independent contracts.
+- [ ] All 44 tools remain callable according to their independent contracts.
 - [ ] Output formatting is adapted to conversational context, not forced into rigid report templates.
 
 ### Checklist C: Pre-Release & Version Bump Gate

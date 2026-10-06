@@ -708,7 +708,9 @@
           </div>
           
           <div class="text-right shrink-0">
-            {% if s.platform == 'youtube' or s.platform.value == 'youtube' %}
+            {% if s.metadata.get('metric_known') == false %}
+            <div class="text-xs font-black text-slate-500">Metric unmeasured</div>
+            {% elif s.platform == 'youtube' or s.platform.value == 'youtube' %}
             <div class="text-xs font-black text-orange-600">{{ "{:,.0f}".format(s.metric_value) }} views</div>
             <div class="text-[10px] text-slate-400 font-medium">{{ s.metadata.get('likes', 0) }} likes</div>
             {% else %}

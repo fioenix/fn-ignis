@@ -7,6 +7,9 @@ from ignis.interfaces.mcp.server import mcp
 
 
 EXPECTED_TOOLS = {
+    "prepare_host_browser_search",
+    "submit_host_browser_search",
+    "cancel_host_browser_search",
     "authenticate_instagram",
     "authenticate_threads",
     "authenticate_tiktok",

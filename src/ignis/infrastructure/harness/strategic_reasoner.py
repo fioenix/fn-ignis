@@ -455,7 +455,7 @@ class StrategicMarketReasoner:
                     connector_surface=outcome.connector_surface,
                     status=outcome.status,
                     signals_count=outcome.signals_collected,
-                    timeframe_used=f"{self._platform_value(mission.timeframe)} ({geo_value})",
+                    timeframe_used=f"{outcome.queried_window or 'Window unmeasured'} ({geo_value})",
                     top_citation=(
                         self._mint_citation(top, registry, geo=mission.geo_code) if top else None
                     ),
@@ -490,6 +490,8 @@ class StrategicMarketReasoner:
 
     def _format_metric_highlight(self, signal: TrendSignal, geo: GeoCode = GeoCode.VN) -> str:
         """Render the headline metric a reader can verify against the source."""
+        if signal.metadata.get("metric_known") is False:
+            return "Metric unmeasured"
         platform = self._platform_value(signal.platform)
         parts: List[str] = []
 
@@ -827,7 +829,7 @@ class StrategicMarketReasoner:
         signals: List[TrendSignal],
         clusters: List[TopicCluster],
         geo: GeoCode = GeoCode.VN,
-    ) -> Tuple[TrendMaturityStage, List[str]]:
+    ) -> Tuple[Optional[TrendMaturityStage], List[str]]:
         reasons = []
         video_signals = [
             s for s in signals 
@@ -837,6 +839,10 @@ class StrategicMarketReasoner:
         if not video_signals:
             reasons.append("Zero localized tutorial videos or content assets recorded.")
             return TrendMaturityStage.EMERGING, reasons
+
+        video_signals = [s for s in video_signals if s.metadata.get("metric_known") is not False]
+        if not video_signals:
+            return None, ["Video reach is unmeasured; maturity cannot be assessed."]
 
         avg_views = sum(float(s.metric_value) for s in video_signals) / float(len(video_signals))
         total_clusters = len(clusters)
@@ -861,10 +867,15 @@ class StrategicMarketReasoner:
         for c in clusters[:6]:
             p_counts: Dict[str, int] = defaultdict(int)
             total_views = 0.0
+            measured = unmeasured = 0
             for s in c.signals:
                 if self._is_localized(s.raw_title, geo=geo):
                     p_counts[s.platform.value if hasattr(s.platform, "value") else str(s.platform)] += 1
-                    total_views += float(s.metric_value)
+                    if s.metadata.get("metric_known") is False:
+                        unmeasured += 1
+                    else:
+                        measured += 1
+                        total_views += float(s.metric_value)
 
 
             default_summary = f"Topic cluster synthesized from {len(c.signals)} signals."
@@ -873,7 +884,9 @@ class StrategicMarketReasoner:
                 "momentum": c.momentum_category.value if hasattr(c.momentum_category, "value") else str(c.momentum_category),
                 "cross_platform_score": c.cross_platform_score,
                 "platform_diversity": len(p_counts),
-                "total_estimated_reach": int(total_views),
+                "total_estimated_reach": None if unmeasured else int(total_views),
+                "measured_reach": int(total_views) if measured else None,
+                "unmeasured_signals": unmeasured,
                 "summary": c.summary_text or default_summary,
             })
         return verified
@@ -1125,7 +1138,7 @@ class StrategicMarketReasoner:
         mission: ResearchMission,
         signals: List[TrendSignal],
         opportunities: List[MarketOpportunity],
-        maturity_stage: TrendMaturityStage,
+        maturity_stage: Optional[TrendMaturityStage],
         maturity_reasons: List[str],
         channel_summaries: Optional[List[ChannelDataSummary]] = None,
         citation_registry: Optional[Dict[str, CitationEvidence]] = None,
@@ -1142,7 +1155,8 @@ class StrategicMarketReasoner:
         ]
         demand_signals = [s for s in signals if s.platform == PlatformType.GOOGLE_TRENDS]
 
-        maturity_stmt = f"Market maturity stage: {maturity_stage.value} — {'; '.join(maturity_reasons)}"
+        maturity_stmt = (f"Market maturity stage: {maturity_stage.value} — {'; '.join(maturity_reasons)}"
+                         if maturity_stage is not None else "; ".join(maturity_reasons))
         statements.append((
             maturity_stmt,
             sorted(video_signals, key=self._engagement_rank, reverse=True)[:3],
@@ -1179,9 +1193,11 @@ class StrategicMarketReasoner:
             dominant_kw, max_count = max(topic_counts.items(), key=lambda item: item[1])
             if max_count >= 3:
                 dom_stmt = f"Practitioner content is concentrated around '{dominant_kw}' ({max_count} verified signals)."
-                dom_action = f"Differentiate positioning to avoid direct head-to-head competition with saturated supply in '{dominant_kw}'."
                 statements.append((dom_stmt, topic_signals[dominant_kw]))
-                actions.append((dom_action, topic_signals[dominant_kw]))
+                # Attention counts do not measure supply saturation or authorize positioning.
+                if resolve_surface(mission.surface) is not ResearchSurface.ATTENTION:
+                    dom_action = f"Differentiate positioning to avoid direct head-to-head competition with saturated supply in '{dominant_kw}'."
+                    actions.append((dom_action, topic_signals[dominant_kw]))
 
         # Voice of Customer: pain point clusters must cite the discussion carrying them.
         discussed = [s for s in signals if self._comment_count(s) > 0]
@@ -1210,7 +1226,7 @@ class StrategicMarketReasoner:
                 actions.append((broken_action, []))
 
         actions.append((
-            "Schedule periodic ingress surveillance to track supply shifts and search demand growth velocity.",
+            "Request a separately authorized bounded follow-up probe only when another research question is needed.",
             [],
         ))
 
