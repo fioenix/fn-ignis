@@ -403,7 +403,8 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                         'COLLECTION_STARTED', 'COLLECTION_STATE_CHANGED', 'PROBE_OUTCOMES_RECORDED', 'OBSERVATIONS_COMMITTED',
                         'QUALIFICATION_RECORDED', 'CLAIM_GATE_CHANGED', 'WORK_STARTED', 'WORK_WAITING',
                         'HANDOFF_COMMITTED', 'FINDING_REVISED', 'CANCELLATION_REQUESTED',
-                        'CANCELLATION_ACKNOWLEDGED'
+                        'CANCELLATION_ACKNOWLEDGED', 'RESEARCH_ASSIGNED', 'WORK_ASSIGNED',
+                        'WORK_ACTIVITY_RECORDED', 'WORK_RESUMED', 'WORK_ENDED', 'RESEARCH_ENDED'
                     )),
                     provenance TEXT NOT NULL CHECK (provenance IN ('HARNESS_OBSERVED', 'HOST_REPORTED')),
                     causation_key TEXT NOT NULL CHECK (length(trim(causation_key)) > 0),
@@ -1681,6 +1682,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
     def _record_progress(
         conn: sqlite3.Connection, mission_id: UUID, kind: MissionProgressKind, causation_key: str,
         *, run_id: UUID | None = None, claim_id: UUID | None = None,
+        work_id: UUID | None = None, handoff_id: UUID | None = None, finding_id: UUID | None = None,
         references: tuple[RelayEvidenceReference, ...] = (), reason: str | None = None,
         revision: int | None = None, ordinal: int = 1,
     ) -> int:
@@ -1697,15 +1699,18 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
             event_id=uuid4(), cursor=MissionRelayCursor(mission_id=mission_id, revision=revision, ordinal=ordinal),
             kind=kind, provenance=RelayProvenance.HARNESS_OBSERVED, recorded_at=datetime.now(timezone.utc),
             causation_key=causation_key, run_id=run_id, claim_id=claim_id,
+            work_id=work_id, handoff_id=handoff_id, finding_id=finding_id,
             evidence_references=references, reason=reason,
         )
         conn.execute(
             "INSERT INTO mission_progress_events (id, mission_id, revision, ordinal, kind, provenance,"
-            " recorded_at, causation_key, run_id, claim_id, evidence_references, reason)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " recorded_at, causation_key, run_id, claim_id, work_id, handoff_id, finding_id, evidence_references, reason)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (str(event.event_id), str(mission_id), revision, ordinal, kind.value, event.provenance.value,
              event.recorded_at.isoformat(), causation_key, str(run_id) if run_id else None,
              str(claim_id) if claim_id else None,
+             str(work_id) if work_id else None, str(handoff_id) if handoff_id else None,
+             str(finding_id) if finding_id else None,
              json.dumps([ref.to_payload() for ref in references], separators=(",", ":")), reason),
         )
         return revision
@@ -4533,3 +4538,656 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     conn.close()
 
         return await self._run_write(_sync_save)
+
+    async def _ensure_research_schema(self) -> None:
+        """Only authorized writers install additive research storage."""
+        from ignis.infrastructure.persistence.sqlite_research_schema import install_research_schema
+
+        def setup():
+            conn = self._get_connection()
+            try:
+                install_research_schema(conn)
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        await self._run_write(setup)
+
+    @staticmethod
+    def _research_receipt(row):
+        from ignis.application.ports.research_work_port import ResearchWorkCommitReceipt
+
+        return ResearchWorkCommitReceipt(
+            disposition=row["disposition"],
+            reason_code=row["reason_code"],
+            revision=row["revision"],
+            work_version=row["work_version"],
+            assignment_version=row["assignment_version"],
+            receipt_id=UUID(row["receipt_id"]),
+            event_ids=tuple(UUID(v) for v in json.loads(row["event_ids"])),
+            recorded_at=datetime.fromisoformat(row["recorded_at"]),
+        )
+
+    def _research_snapshot(self, conn, mission_id):
+        from ignis.application.ports.research_work_port import ResearchRecordedMetadata, ResearchWorkSnapshot
+        from ignis.domain.research_work import (
+            ResearchAuthority,
+            ResearchAssignment,
+            ResearchInputBindings,
+            ResearchWorkItem,
+        )
+        from ignis.infrastructure.persistence.mission_relay_reader import _event
+
+        scope = (str(mission_id),)
+        revision_row = conn.execute(
+            "SELECT revision FROM mission_progress_revisions WHERE mission_id=?", scope
+        ).fetchone()
+        revision = revision_row[0] if revision_row else 0
+        pairs = tuple(
+            (UUID(r[0]), UUID(r[1]))
+            for r in conn.execute(
+                "SELECT o.id,o.source_id FROM observations o JOIN mission_evidence e ON e.observation_id=o.id WHERE e.mission_id=? ORDER BY o.id",
+                scope,
+            )
+        )
+        events = tuple(
+            _event(r)
+            for r in conn.execute(
+                "SELECT * FROM mission_progress_events WHERE mission_id=? ORDER BY revision,ordinal", scope
+            )
+        )
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_assignments'"
+        ).fetchone()
+        assignments, works, metadata = (), (), ()
+        if exists:
+            assignments = tuple(
+                ResearchAssignment(
+                    assignment_id=UUID(r["assignment_id"]),
+                    mission_id=mission_id,
+                    host_task_ref=r["host_task_ref"],
+                    epoch=r["epoch"],
+                    authority=ResearchAuthority(
+                        actions=frozenset(json.loads(r["actions"])),
+                        sources=frozenset(json.loads(r["sources"])),
+                        deadline=datetime.fromisoformat(r["deadline"]),
+                        quota_ceiling=r["quota_ceiling"],
+                    ),
+                    capability=r["capability"],
+                    state=r["state"],
+                    version=r["version"],
+                )
+                for r in conn.execute("SELECT * FROM research_assignments WHERE mission_id=? ORDER BY epoch", scope)
+            )
+
+            def bindings(input_id):
+                r = conn.execute("SELECT * FROM research_input_sets WHERE input_id=?", (input_id,)).fetchone()
+                return ResearchInputBindings(
+                    mission_id=mission_id,
+                    manifest_digest=r["manifest_digest"],
+                    brief_digest=r["brief_digest"],
+                    frame_digest=r["frame_digest"],
+                    observation_ids=tuple(
+                        UUID(o[0])
+                        for o in conn.execute(
+                            "SELECT observation_id FROM research_input_observations WHERE input_id=? ORDER BY ordinal",
+                            (input_id,),
+                        )
+                    ),
+                    finding_revisions=tuple(
+                        (UUID(f[0]), f[1])
+                        for f in conn.execute(
+                            "SELECT finding_id,revision FROM research_input_findings WHERE input_id=? ORDER BY ordinal",
+                            (input_id,),
+                        )
+                    ),
+                )
+
+            works = tuple(
+                ResearchWorkItem(
+                    work_id=UUID(r["work_id"]),
+                    assignment_id=UUID(r["assignment_id"]),
+                    mission_id=mission_id,
+                    run_id=UUID(r["run_id"]) if r["run_id"] else None,
+                    question=r["question"],
+                    expertise=r["expertise"],
+                    assignee_ref=r["assignee_ref"],
+                    inputs=bindings(r["input_id"]),
+                    dependencies=tuple(
+                        UUID(d[0])
+                        for d in conn.execute(
+                            "SELECT dependency_work_id FROM research_work_dependencies WHERE work_id=? ORDER BY ordinal",
+                            (r["work_id"],),
+                        )
+                    ),
+                    epoch=r["epoch"],
+                    state=r["state"],
+                    version=r["version"],
+                    ownership_fence=r["ownership_fence"],
+                )
+                for r in conn.execute("SELECT * FROM research_work_items WHERE mission_id=? ORDER BY rowid", scope)
+            )
+            metadata = tuple(
+                ResearchRecordedMetadata(
+                    record_kind=r["record_kind"],
+                    record_id=UUID(r["record_id"]),
+                    record_version=r["record_version"],
+                    mission_revision=r["mission_revision"],
+                    recorded_at=datetime.fromisoformat(r["recorded_at"]),
+                    provenance=r["provenance"],
+                )
+                for r in conn.execute(
+                    "SELECT * FROM research_recorded_metadata WHERE mission_id=? ORDER BY mission_revision,record_kind,record_id",
+                    scope,
+                )
+            )
+        return ResearchWorkSnapshot(
+            mission_id=mission_id,
+            revision=revision,
+            current_epoch=max((a.epoch for a in assignments), default=0),
+            assignments=assignments,
+            work_items=works,
+            handoffs=(),
+            findings=(),
+            acknowledgements=(),
+            events=events,
+            observation_sources=pairs,
+            current_finding_revisions=(),
+            recorded_metadata=metadata,
+        )
+
+    async def load_research_work(self, mission_id):
+        """Read a held coherent physical transaction; never bootstrap on a read."""
+
+        def read():
+            conn = self._mem_conn
+            owned = conn is None
+            if owned:
+                conn = sqlite3.connect(Path(self._db_path).resolve().as_uri() + "?mode=ro", uri=True)
+                conn.row_factory = sqlite3.Row
+            try:
+                conn.execute("BEGIN")
+                result = self._research_snapshot(conn, mission_id)
+                conn.rollback()
+                return result
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if owned:
+                    conn.close()
+
+        return await self._run_write(read)
+
+    async def commit_research_work(self, command):
+        """Admit and settle core lifecycle facts, event, metadata and original receipt together."""
+        from ignis.application.ports.research_work_port import ResearchWorkCommitCommand, ResearchWorkCommitReceipt
+        from ignis.domain.research_work import (
+            ACTIONS,
+            TERMINAL,
+            ResearchWorkCommand,
+            StartWorkPayload,
+            transition_research_work,
+        )
+        from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
+        from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
+
+        if type(command) is not ResearchWorkCommitCommand:
+            raise ValueError("Invalid exact research command.")
+        await self._ensure_schema()
+        await self._ensure_progress_schema()
+        await self._ensure_research_schema()
+
+        def commit():
+            conn = self._get_connection()
+            now = datetime.now(timezone.utc)
+            revision = 0
+            initial_revision = 0
+
+            def receipt(reason=None, work=None, assignment=None, event_ids=()):
+                return ResearchWorkCommitReceipt(
+                    disposition="REFUSED" if reason else "APPLIED",
+                    reason_code=reason,
+                    revision=revision,
+                    work_version=work.version if work else None,
+                    assignment_version=assignment.version if assignment else None,
+                    receipt_id=uuid4(),
+                    event_ids=event_ids,
+                    recorded_at=now,
+                )
+
+            def persist(result):
+                # Raw key is hashed; raw command fingerprint remains unchanged, including rejected text.
+                conn.execute(
+                    "INSERT INTO research_work_commands (mission_id,command_key,payload_fingerprint,operation,receipt_id,disposition,reason_code,revision,work_version,assignment_version,event_ids,recorded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        str(command.mission_id),
+                        key,
+                        command.fingerprint,
+                        command.operation,
+                        str(result.receipt_id),
+                        result.disposition,
+                        result.reason_code,
+                        result.revision,
+                        result.work_version,
+                        result.assignment_version,
+                        json.dumps([str(e) for e in result.event_ids]),
+                        now.isoformat(),
+                    ),
+                )
+                conn.commit()
+                return result
+
+            from hashlib import sha256
+
+            key = sha256(command.idempotency_key.encode()).hexdigest()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                now = datetime.now(timezone.utc)
+                conn.create_function("research_transaction_time", 0, lambda: now.isoformat())
+                canonical = self._commit_snapshot(conn, command.mission_id)
+                if canonical.mission is None:
+                    conn.rollback()
+                    return receipt("SCOPE_MISMATCH")
+                original = conn.execute(
+                    "SELECT * FROM research_work_commands WHERE mission_id=? AND command_key=?",
+                    (str(command.mission_id), key),
+                ).fetchone()
+                state = self._research_snapshot(conn, command.mission_id)
+                revision = state.revision
+                initial_revision = revision
+                if original:
+                    result = (
+                        self._research_receipt(original)
+                        if original["payload_fingerprint"] == command.fingerprint
+                        else receipt("IDEMPOTENCY_CONFLICT")
+                    )
+                    conn.rollback()
+                    return result
+                payload = command.payload
+
+                def refuse(reason):
+                    return persist(receipt(reason))
+
+                if not command.host_authorized:
+                    return refuse("UNAUTHORIZED_HOST")
+                if command.expected_revision != revision:
+                    return refuse("STALE_REVISION")
+                operation = command.operation
+                closure = (
+                    operation == "ACK_STOP"
+                    or operation == "END_WORK"
+                    and payload.disposition in {"FAILED", "INTERRUPTED", "INSUFFICIENT_EVIDENCE"}
+                )
+                if operation == "ASSIGN_RESEARCH":
+                    if payload.assignment.mission_id != command.mission_id:
+                        return refuse("SCOPE_MISMATCH")
+                    if (
+                        payload.assignment.epoch != command.expected_epoch
+                        or command.expected_epoch != state.current_epoch + 1
+                    ):
+                        return refuse("STALE_EPOCH")
+                elif not closure and command.expected_epoch != state.current_epoch:
+                    return refuse("STALE_EPOCH")
+                # Result admission and immutable result decoders belong to T049.
+                if operation in {"SUBMIT_HANDOFF", "ACK_HANDOFF"}:
+                    return refuse("INVALID_TRANSITION")
+                assignment = None
+                work = None
+                record_kind = None
+                kind = None
+                reason_text = None
+                assignment_activated = False
+                if operation == "ASSIGN_RESEARCH":
+                    assignment = payload.assignment
+                    manifest = canonical.manifest
+                    brief = canonical.brief
+                    if (
+                        manifest is None
+                        or brief is None
+                        or manifest.manifest_digest != payload.expected_manifest_digest
+                        or brief.brief_revision_id != payload.expected_brief_revision_id
+                    ):
+                        return refuse("STALE_INPUT_FRAME")
+                    if assignment.state != "ASSIGNED" or assignment.version != 1:
+                        return refuse("INVALID_TRANSITION")
+                    if assignment.authority.deadline <= now:
+                        return refuse("AUTHORITY_EXPIRED")
+                    if (
+                        not assignment.authority.actions <= ACTIONS
+                        or not assignment.authority.sources
+                        <= set(manifest.required_channels + manifest.optional_channels)
+                        or assignment.authority.quota_ceiling > sum(manifest.quota_budget.values())
+                    ):
+                        return refuse("AUTHORITY_WIDENING")
+                    if any(a.state not in TERMINAL for a in state.assignments):
+                        return refuse("INVALID_TRANSITION")
+                    if any(a.assignment_id == assignment.assignment_id for a in state.assignments):
+                        return refuse("INVALID_INPUT")
+                    try:
+                        assignment = dataclasses.replace(
+                            assignment,
+                            host_task_ref=sanitize_pii_text(assignment.host_task_ref),
+                            capability=sanitize_pii_text(assignment.capability),
+                        )
+                    except ValueError:
+                        return refuse("INVALID_INPUT")
+                    a = assignment
+                    conn.execute(
+                        "INSERT INTO research_assignments (assignment_id,mission_id,host_task_ref,epoch,actions,sources,deadline,quota_ceiling,capability,expected_manifest_digest,expected_brief_revision_id,state,version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (
+                            str(a.assignment_id),
+                            str(a.mission_id),
+                            a.host_task_ref,
+                            a.epoch,
+                            json.dumps(sorted(a.authority.actions)),
+                            json.dumps(sorted(a.authority.sources)),
+                            a.authority.deadline.isoformat(),
+                            a.authority.quota_ceiling,
+                            a.capability,
+                            payload.expected_manifest_digest,
+                            str(payload.expected_brief_revision_id),
+                            a.state,
+                            a.version,
+                        ),
+                    )
+                    record_kind = "ASSIGNMENT"
+                    kind = MissionProgressKind.RESEARCH_ASSIGNED
+                else:
+                    if operation == "ASSIGN_WORK":
+                        work = payload
+                        assignment = next((a for a in state.assignments if a.assignment_id == work.assignment_id), None)
+                    elif operation == "END_RESEARCH":
+                        assignment = next(
+                            (a for a in state.assignments if a.assignment_id == payload.assignment_id), None
+                        )
+                    else:
+                        work = next((w for w in state.work_items if w.work_id == payload.work_id), None)
+                        assignment = next(
+                            (a for a in state.assignments if work and a.assignment_id == work.assignment_id), None
+                        )
+                    if assignment is None or work is None and operation != "END_RESEARCH":
+                        return refuse("SCOPE_MISMATCH")
+                    if not closure:
+                        if assignment.epoch != state.current_epoch:
+                            return refuse("STALE_EPOCH")
+                        if assignment.state in TERMINAL:
+                            return refuse("ASSIGNMENT_TERMINAL")
+                        if operation != "END_RESEARCH" and assignment.authority.deadline <= now:
+                            return refuse("AUTHORITY_EXPIRED")
+                    if operation in {"ASSIGN_WORK", "START_WORK", "RESUME_WORK", "RECORD_ACTIVITY"}:
+                        manifest = canonical.manifest
+                        if (
+                            manifest is None
+                            or not assignment.authority.actions <= ACTIONS
+                            or not assignment.authority.sources
+                            <= set(manifest.required_channels + manifest.optional_channels)
+                            or assignment.authority.quota_ceiling > sum(manifest.quota_budget.values())
+                        ):
+                            return refuse("AUTHORITY_WIDENING")
+                    if operation in {"START_WORK", "RESUME_WORK", "RECORD_ACTIVITY"}:
+                        if not set(work.inputs.observation_ids) <= set(dict(state.observation_sources)):
+                            return refuse("INPUT_IDENTITY_MISMATCH")
+                        if work.inputs.finding_revisions:
+                            return refuse("STALE_DEPENDENCY_REVISION")
+                        try:
+                            current_frame = frame_from_snapshot(canonical).frame_digest
+                        except InvalidMissionClaimError:
+                            return refuse("STALE_INPUT_FRAME")
+                        if (
+                            canonical.brief is None
+                            or work.inputs.manifest_digest != canonical.manifest.manifest_digest
+                            or work.inputs.brief_digest != compute_frame_fingerprint(canonical.mission, canonical.brief)
+                            or work.inputs.frame_digest != current_frame
+                        ):
+                            return refuse("STALE_INPUT_FRAME")
+                    if operation == "END_RESEARCH":
+                        if payload.expected_version != assignment.version:
+                            return refuse("STALE_VERSION")
+                        assignment = dataclasses.replace(
+                            assignment, state=payload.disposition, version=assignment.version + 1
+                        )
+                        reason_text = sanitize_pii_text(payload.reason)
+                        conn.execute(
+                            "UPDATE research_assignments SET state=?,version=?,reason=? WHERE assignment_id=?",
+                            (assignment.state, assignment.version, reason_text, str(assignment.assignment_id)),
+                        )
+                        record_kind = "ASSIGNMENT"
+                        kind = MissionProgressKind.RESEARCH_ENDED
+                    elif operation == "ASSIGN_WORK":
+                        if work.mission_id != command.mission_id or work.epoch != assignment.epoch:
+                            return refuse("SCOPE_MISMATCH")
+                        if (
+                            work.state != "ASSIGNED"
+                            or work.version != 1
+                            or any(w.work_id == work.work_id for w in state.work_items)
+                        ):
+                            return refuse("INVALID_TRANSITION")
+                        if assignment.state == "CANCEL_PENDING":
+                            return refuse("CANCELLATION_PENDING")
+                        if "ANALYZE" not in assignment.authority.actions:
+                            return refuse("ACTION_NOT_GRANTED")
+                        if (
+                            work.run_id
+                            and not conn.execute(
+                                "SELECT 1 FROM mission_run_journals WHERE id=? AND mission_id=?",
+                                (str(work.run_id), str(command.mission_id)),
+                            ).fetchone()
+                        ):
+                            return refuse("SCOPE_MISMATCH")
+                        current_ids = dict(state.observation_sources)
+                        if not set(work.inputs.observation_ids) <= set(current_ids):
+                            return refuse("INPUT_IDENTITY_MISMATCH")
+                        if work.inputs.finding_revisions:
+                            return refuse("STALE_DEPENDENCY_REVISION")
+                        try:
+                            current_frame = frame_from_snapshot(canonical).frame_digest
+                        except InvalidMissionClaimError:
+                            return refuse("STALE_INPUT_FRAME")
+                        if (
+                            canonical.manifest is None
+                            or canonical.brief is None
+                            or work.inputs.manifest_digest != canonical.manifest.manifest_digest
+                            or work.inputs.brief_digest != compute_frame_fingerprint(canonical.mission, canonical.brief)
+                            or work.inputs.frame_digest != current_frame
+                        ):
+                            return refuse("STALE_INPUT_FRAME")
+                        dependencies = {w.work_id: w for w in state.work_items}
+                        if any(d not in dependencies or dependencies[d].epoch != work.epoch for d in work.dependencies):
+                            return refuse("SCOPE_MISMATCH")
+                        try:
+                            work = dataclasses.replace(
+                                work,
+                                question=sanitize_pii_text(work.question),
+                                expertise=sanitize_pii_text(work.expertise),
+                                assignee_ref=sanitize_pii_text(work.assignee_ref),
+                            )
+                        except ValueError:
+                            return refuse("INVALID_INPUT")
+                        if sanitize_pii_text(work.ownership_fence) != work.ownership_fence:
+                            return refuse("INVALID_INPUT")
+                        input_id = str(uuid4())
+                        b = work.inputs
+                        conn.execute(
+                            "INSERT INTO research_input_sets VALUES (?,?,?,?,?)",
+                            (input_id, str(b.mission_id), b.manifest_digest, b.brief_digest, b.frame_digest),
+                        )
+                        for ordinal, o in enumerate(b.observation_ids, 1):
+                            conn.execute(
+                                "INSERT INTO research_input_observations VALUES (?,?,?,?,?)",
+                                (ordinal, input_id, str(command.mission_id), str(o), str(current_ids[o])),
+                            )
+                        w = work
+                        conn.execute(
+                            "INSERT INTO research_work_items (work_id,assignment_id,mission_id,input_id,run_id,question,expertise,assignee_ref,epoch,state,version,ownership_fence) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                            (
+                                str(w.work_id),
+                                str(w.assignment_id),
+                                str(w.mission_id),
+                                input_id,
+                                str(w.run_id) if w.run_id else None,
+                                w.question,
+                                w.expertise,
+                                w.assignee_ref,
+                                w.epoch,
+                                w.state,
+                                w.version,
+                                w.ownership_fence,
+                            ),
+                        )
+                        for ordinal, d in enumerate(w.dependencies, 1):
+                            conn.execute(
+                                "INSERT INTO research_work_dependencies VALUES (?,?,?,?)",
+                                (ordinal, str(w.mission_id), str(w.work_id), str(d)),
+                            )
+                        record_kind = "WORK"
+                        kind = MissionProgressKind.WORK_ASSIGNED
+                    else:
+                        if closure and command.expected_epoch != work.epoch:
+                            return refuse("STALE_EPOCH")
+                        if operation in {"START_WORK", "RECORD_ACTIVITY"}:
+                            r = payload.receipt
+                            if r.epoch != work.epoch:
+                                return refuse("STALE_EPOCH")
+                            if operation == "START_WORK" and any(
+                                next(w for w in state.work_items if w.work_id == d).state
+                                not in {"COMPLETED", "HANDOFF_READY"}
+                                for d in work.dependencies
+                            ):
+                                return refuse("DEPENDENCY_NOT_READY")
+                            pure_payload = StartWorkPayload(
+                                work_id=payload.work_id,
+                                expected_version=payload.expected_version,
+                                ownership_fence=payload.ownership_fence,
+                                execution_ref=r.execution_ref,
+                                occurred_at=r.occurred_at,
+                                fresh_until=r.fresh_until,
+                            )
+                        else:
+                            pure_payload = payload
+                        pure = ResearchWorkCommand(
+                            operation=operation,
+                            idempotency_key=command.idempotency_key,
+                            expected_revision=command.expected_revision,
+                            expected_epoch=command.expected_epoch,
+                            payload=pure_payload,
+                        )
+                        transition = transition_research_work(work=work, assignment=assignment, command=pure, now=now)
+                        if transition.disposition != "APPLIED":
+                            return refuse(transition.reason_code)
+                        if (
+                            operation == "ACK_STOP"
+                            and sanitize_pii_text(payload.execution_ref) != payload.execution_ref
+                        ):
+                            return refuse("INVALID_INPUT")
+                        if (
+                            operation == "ACK_STOP"
+                            and not conn.execute(
+                                "SELECT 1 FROM research_activity_receipts WHERE work_id=? AND epoch=? AND ownership_fence=? AND execution_ref=?",
+                                (
+                                    str(work.work_id),
+                                    work.epoch,
+                                    work.ownership_fence,
+                                    sanitize_pii_text(payload.execution_ref),
+                                ),
+                            ).fetchone()
+                        ):
+                            return refuse("EXECUTION_RECEIPT_NOT_CURRENT")
+                        if (
+                            operation in {"START_WORK", "RECORD_ACTIVITY"}
+                            and sanitize_pii_text(r.execution_ref) != r.execution_ref
+                        ):
+                            return refuse("INVALID_INPUT")
+                        work = transition.work
+                        if operation == "START_WORK" and assignment.state == "ASSIGNED":
+                            assignment = dataclasses.replace(assignment, state="ACTIVE", version=assignment.version + 1)
+                            conn.execute(
+                                "UPDATE research_assignments SET state=?,version=? WHERE assignment_id=?",
+                                (assignment.state, assignment.version, str(assignment.assignment_id)),
+                            )
+                            assignment_activated = True
+                        reason_text = sanitize_pii_text(payload.reason) if hasattr(payload, "reason") else None
+                        conn.execute(
+                            "UPDATE research_work_items SET state=?,version=?,reason=? WHERE work_id=?",
+                            (work.state, work.version, reason_text, str(work.work_id)),
+                        )
+                        if operation in {"START_WORK", "RECORD_ACTIVITY"}:
+                            conn.execute(
+                                "INSERT INTO research_activity_receipts VALUES (?,?,?,?,?,?,?,?,?)",
+                                (
+                                    str(uuid4()),
+                                    str(command.mission_id),
+                                    str(work.work_id),
+                                    r.epoch,
+                                    r.ownership_fence,
+                                    sanitize_pii_text(r.execution_ref),
+                                    r.occurred_at.isoformat(),
+                                    r.fresh_until.isoformat(),
+                                    r.provenance,
+                                ),
+                            )
+                        record_kind = "WORK"
+                        kind = {
+                            "START_WORK": MissionProgressKind.WORK_STARTED,
+                            "RECORD_ACTIVITY": MissionProgressKind.WORK_ACTIVITY_RECORDED,
+                            "WAIT_WORK": MissionProgressKind.WORK_WAITING,
+                            "RESUME_WORK": MissionProgressKind.WORK_RESUMED,
+                            "REQUEST_CANCEL": MissionProgressKind.CANCELLATION_REQUESTED,
+                            "ACK_STOP": MissionProgressKind.CANCELLATION_ACKNOWLEDGED,
+                            "END_WORK": MissionProgressKind.WORK_ENDED,
+                        }[operation]
+                revision = self._record_progress(
+                    conn,
+                    command.mission_id,
+                    kind,
+                    "research:" + key,
+                    work_id=work.work_id if work else None,
+                    reason=reason_text,
+                )
+                record = work if record_kind == "WORK" else assignment
+                record_id = record.work_id if record_kind == "WORK" else record.assignment_id
+                conn.execute(
+                    "INSERT INTO research_recorded_metadata VALUES (?,?,?,?,?,?,?)",
+                    (
+                        str(command.mission_id),
+                        record_kind,
+                        str(record_id),
+                        record.version,
+                        revision,
+                        now.isoformat(),
+                        "HARNESS_OBSERVED",
+                    ),
+                )
+                if assignment_activated:
+                    conn.execute(
+                        "INSERT INTO research_recorded_metadata VALUES (?,?,?,?,?,?,?)",
+                        (
+                            str(command.mission_id),
+                            "ASSIGNMENT",
+                            str(assignment.assignment_id),
+                            assignment.version,
+                            revision,
+                            now.isoformat(),
+                            "HARNESS_OBSERVED",
+                        ),
+                    )
+                event_ids = tuple(
+                    UUID(r[0])
+                    for r in conn.execute(
+                        "SELECT id FROM mission_progress_events WHERE mission_id=? AND revision=? ORDER BY ordinal",
+                        (str(command.mission_id), revision),
+                    )
+                )
+                return persist(receipt(work=work, assignment=assignment, event_ids=event_ids))
+            except sqlite3.DatabaseError:
+                conn.rollback()
+                revision = initial_revision
+                return receipt("STORAGE_FAILURE")
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await self._run_write(commit)

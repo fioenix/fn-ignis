@@ -51,6 +51,15 @@ def _apply(dsn, names):
             conn.execute((REPO_SQL / name).read_text(encoding="utf-8"))
 
 
+def _prior_migrations():
+    # Later migrations may depend on this target; legacy setup stops before it.
+    target_number = int(MIGRATION.split("_", 1)[0])
+    return tuple(
+        name for name in all_postgres_migrations()
+        if int(name.split("_", 1)[0]) < target_number
+    )
+
+
 def _install(dsn):
     # During RED, exercise the missing schema rather than failing in fixture setup.
     if (REPO_SQL / MIGRATION).exists():
@@ -66,7 +75,7 @@ def _require_schema(dsn):
 @pytest.fixture
 def populated_progress_dsn(empty_postgres_dsn):
     dsn = empty_postgres_dsn
-    _apply(dsn, tuple(name for name in all_postgres_migrations() if name != MIGRATION))
+    _apply(dsn, _prior_migrations())
     _seed(dsn)
     # A real legacy observation whose absent ingestion clock must survive installation.
     with psycopg.connect(dsn) as conn:
@@ -135,7 +144,7 @@ def _command(conn, **changes):
 
 def test_fresh_install_and_reapply_make_no_synthetic_progress(empty_postgres_dsn):
     dsn = empty_postgres_dsn
-    _apply(dsn, tuple(name for name in all_postgres_migrations() if name != MIGRATION))
+    _apply(dsn, _prior_migrations())
     _install(dsn)
     _require_schema(dsn)
     _install(dsn)

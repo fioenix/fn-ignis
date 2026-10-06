@@ -1,3 +1,16 @@
+-- Explicit additive write-time kind-check extension; no persisted row is transformed.
+ALTER TABLE public.mission_progress_events
+    DROP CONSTRAINT IF EXISTS mission_progress_events_kind_check;
+ALTER TABLE public.mission_progress_events
+    ADD CONSTRAINT mission_progress_events_kind_check CHECK (kind IN (
+        'COLLECTION_STARTED', 'COLLECTION_STATE_CHANGED', 'PROBE_OUTCOMES_RECORDED',
+        'OBSERVATIONS_COMMITTED', 'QUALIFICATION_RECORDED', 'CLAIM_GATE_CHANGED',
+        'WORK_STARTED', 'WORK_WAITING', 'HANDOFF_COMMITTED', 'FINDING_REVISED',
+        'CANCELLATION_REQUESTED', 'CANCELLATION_ACKNOWLEDGED',
+        'RESEARCH_ASSIGNED', 'WORK_ASSIGNED', 'WORK_ACTIVITY_RECORDED',
+        'WORK_RESUMED', 'WORK_ENDED', 'RESEARCH_ENDED'
+    ));
+
 -- Additive host-work storage. Immutable references point to canonical observations, never
 -- mutable mission_evidence rows. Current eligibility and lifecycle CAS belong to admission.
 CREATE TABLE IF NOT EXISTS public.research_assignments (
@@ -249,7 +262,8 @@ DECLARE
         'STALE_INPUT_FRAME','SCOPE_MISMATCH','AUTHORITY_EXPIRED','AUTHORITY_WIDENING',
         'ASSIGNMENT_TERMINAL','CANCELLATION_PENDING','WORK_TERMINAL','ACTION_NOT_GRANTED',
         'UNKNOWN_ASSIGNEE','CAPABILITY_UNAVAILABLE','UNAUTHORIZED_HOST','EXECUTION_RECEIPT_REQUIRED',
-        'EXECUTION_RECEIPT_NOT_CURRENT','INVALID_TRANSITION','DEPENDENCY_NOT_READY','INVALID_INPUT'
+        'EXECUTION_RECEIPT_NOT_CURRENT','INVALID_TRANSITION','DEPENDENCY_NOT_READY','INVALID_INPUT',
+        'INVALID_COMMAND','RESULT_REQUIRED'
     ];
 BEGIN
     -- Child inserts and metadata finalization acquire the same owner locks, then read

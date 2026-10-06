@@ -367,3 +367,42 @@ def test_handoff_child_waits_for_finalization_and_refuses_committed_seal(schema_
                 sleep(0.01)
         assert future.result(timeout=3) == 'Finalized research collection is immutable'
     assert conn.execute('SELECT count(*) FROM research_finding_revisions WHERE handoff_id=%s',(x['handoff'],)).fetchone() == (1,)
+
+
+def test_t047_explicit_kind_extension_preserves_legacy_and_decodes_new_events(supabase_like_dsn):
+    """028 explicitly extends installed 027; reapply preserves all exact old rows."""
+    from psycopg.rows import dict_row
+    from ignis.infrastructure.persistence.mission_relay_reader import _pg_event
+
+    new_kinds = ('RESEARCH_ASSIGNED', 'WORK_ASSIGNED', 'WORK_ACTIVITY_RECORDED',
+                 'WORK_RESUMED', 'WORK_ENDED', 'RESEARCH_ENDED')
+    with psycopg.connect(supabase_like_dsn, autocommit=True) as conn:
+        for migration in SCHEMA_MIGRATIONS:
+            if migration != MIGRATION.name:
+                conn.execute((ROOT / 'sql' / migration).read_text())
+        mission = uuid4()
+        conn.execute("INSERT INTO research_missions(id,title,keywords,geo_code) VALUES (%s,'Kind extension',ARRAY['schema'],'VN')", (mission,))
+        conn.execute('INSERT INTO mission_progress_revisions VALUES (%s,1)', (mission,))
+        old_id = uuid4()
+        conn.execute("INSERT INTO mission_progress_events(id,mission_id,revision,ordinal,kind,provenance,causation_key) VALUES (%s,%s,1,1,'COLLECTION_STATE_CHANGED','HARNESS_OBSERVED','legacy')", (old_id, mission))
+        statement = "INSERT INTO mission_progress_events(mission_id,revision,ordinal,kind,provenance,causation_key) VALUES (%s,2,1,%s,'HARNESS_OBSERVED','extension')"
+        failure = rejected(conn, statement, (mission, new_kinds[0]))
+        assert failure.diag.constraint_name == 'mission_progress_events_kind_check'
+        watched = ('research_missions','sources','observations','mission_evidence',
+                   'mission_progress_revisions','mission_progress_events','mission_progress_commands')
+        before = {table: rows(conn,table) for table in watched}
+        conn.execute(MIGRATION.read_text())
+        assert {table: rows(conn,table) for table in watched} == before
+        for revision, kind in enumerate(new_kinds, 2):
+            identity = uuid4()
+            conn.execute('UPDATE mission_progress_revisions SET revision=%s WHERE mission_id=%s', (revision, mission))
+            conn.execute("INSERT INTO mission_progress_events(id,mission_id,revision,ordinal,kind,provenance,causation_key) VALUES (%s,%s,%s,1,%s,'HARNESS_OBSERVED','extension')", (identity,mission,revision,kind))
+            with conn.cursor(row_factory=dict_row) as cursor:
+                event = _pg_event(cursor.execute('SELECT * FROM mission_progress_events WHERE id=%s',(identity,)).fetchone())
+            assert event.kind.value == kind and event.event_id == identity
+        failure = rejected(conn,statement,(mission,'UNREVIEWED_KIND'))
+        assert failure.diag.constraint_name == 'mission_progress_events_kind_check'
+        settled = {table: rows(conn,table) for table in watched}
+        conn.execute(MIGRATION.read_text())
+        assert {table: rows(conn,table) for table in watched} == settled
+        assert conn.execute('SELECT id FROM mission_progress_events WHERE causation_key=\'legacy\'').fetchall() == [(old_id,)]
