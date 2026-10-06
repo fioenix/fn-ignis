@@ -76,6 +76,11 @@ jobs:
           uv venv
           uv sync --locked --extra dev --extra browser
 
+      # Browser extras install the Python API, not its matching browser or Linux libraries.
+      - name: Install locked Playwright Chromium
+        run: |
+          .venv/bin/python -m playwright install --with-deps chromium
+
       - name: Run Ruff Linter
         run: |
           uv run ruff check src/ tests/
