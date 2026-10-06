@@ -104,9 +104,9 @@ async def test_postgres_two_pool_physical_lock_and_single_start_cas(relay_case, 
     original_gate = contender._lock_relay_tables
     owner_pid = None
 
-    async def held(conn, mission_id):
+    async def held(conn, mission_id, **kwargs):
         nonlocal owner_pid
-        result = await original(conn, mission_id)
+        result = await original(conn, mission_id, **kwargs)
         owner_pid = conn.info.backend_pid
         entered.set()
         await asyncio.wait_for(release.wait(), 5)
@@ -164,7 +164,7 @@ async def test_postgres_refused_original_after_new_revision_and_future_result_bo
     command = port.ResearchWorkCommitCommand(
         mission_id=mission.id,
         operation="SUBMIT_HANDOFF",
-        payload=replace(handoff, result="UNSUPPORTED_SENTINEL"),
+        payload=replace(handoff, expected_version=handoff.expected_version - 1, result="OBSOLETE_RESULT_SENTINEL"),
         expected_revision=revision,
         expected_epoch=1,
         idempotency_key="future-result",
@@ -172,7 +172,7 @@ async def test_postgres_refused_original_after_new_revision_and_future_result_bo
     )
     before = await case.repository.load_research_work(mission.id)
     refusal = await case.repository.commit_research_work(command)
-    assert refusal.reason_code == "INVALID_TRANSITION" and not refusal.event_ids
+    assert refusal.reason_code == "STALE_WORK_VERSION" and not refusal.event_ids
     assert await case.repository.load_research_work(mission.id) == before
     changed = await _commit(
         case.repository,
@@ -186,19 +186,24 @@ async def test_postgres_refused_original_after_new_revision_and_future_result_bo
     )
     assert changed.disposition == "APPLIED"
     state = _state(case)
-    assert "UNSUPPORTED_SENTINEL" not in repr(state)
+    assert "OBSOLETE_RESULT_SENTINEL" not in repr(state)
     assert await case.repository.commit_research_work(command) == refusal
     assert _state(case) == state
+    admitted = await _commit(
+        case.repository, port, mission, "SUBMIT_HANDOFF",
+        replace(handoff, expected_version=changed.work_version), revision=changed.revision,
+    )
+    assert admitted.disposition == "APPLIED"
     ack = port.ResearchHandoffAcknowledgement(
         handoff_id=handoff.handoff_id,
         consumer_ref="rejected-consumer",
-        expected_version=work.version,
+        expected_version=admitted.work_version,
         disposition="REJECTED",
         reason_code="UNSUPPORTED_ACK_SENTINEL",
         inputs=work.inputs,
     )
-    ack_receipt = await _commit(case.repository, port, mission, "ACK_HANDOFF", ack, revision=changed.revision)
-    assert ack_receipt.reason_code == "INVALID_TRANSITION" and not ack_receipt.event_ids
+    ack_receipt = await _commit(case.repository, port, mission, "ACK_HANDOFF", ack, revision=admitted.revision)
+    assert ack_receipt.reason_code == "INVALID_REASON_CODE" and not ack_receipt.event_ids
     assert "UNSUPPORTED_ACK_SENTINEL" not in repr(_state(case))
     for name in ("research_handoffs", "research_finding_revisions", "research_handoff_acknowledgements"):
         assert not state[1][name]
@@ -345,9 +350,9 @@ async def test_postgres_canonical_snapshot_uses_locked_writer_connection(relay_c
                 )
         return await canonical(conn, mission_id)
 
-    async def research(conn, mission_id):
+    async def research(conn, mission_id, **kwargs):
         assert conn.info.backend_pid == connections[0]
-        return await physical(conn, mission_id)
+        return await physical(conn, mission_id, **kwargs)
 
     monkeypatch.setattr(case.repository, "_commit_snapshot", checked)
     monkeypatch.setattr(case.repository, "_research_snapshot", research)

@@ -433,7 +433,7 @@ async def _contended_results(case, mission, persistence, handoff, revision, monk
         # Release blockers before settling workers or closing competing repository resources.
         if tasks:
             await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 6)
-        if repository._mem_conn is not None:
+        if case.name != "postgres" and repository._mem_conn is not None:
             repository._mem_conn.set_trace_callback(None)
         for competitor in competitors:
             await competitor.close()

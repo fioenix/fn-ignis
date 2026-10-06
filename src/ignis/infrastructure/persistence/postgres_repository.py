@@ -3213,8 +3213,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             recorded_at=row["recorded_at"],
         )
 
-    async def _research_snapshot(self, conn, mission_id):
-        execute, fetchone, fetchall = self._research_queries(conn)
+    async def _research_snapshot(self, conn, mission_id, *, canonical=None):
         from ignis.application.ports.research_work_port import ResearchRecordedMetadata, ResearchWorkSnapshot
         from ignis.domain.research_work import (
             ResearchAuthority,
@@ -3224,31 +3223,33 @@ class PostgresTimescaleRepository(ITrendRepository):
         )
         from ignis.infrastructure.persistence.mission_relay_reader import _pg_event
 
+        execute, fetchone, fetchall = self._research_queries(conn)
         scope = (str(mission_id),)
         revision_row = await fetchone("SELECT revision FROM mission_progress_revisions WHERE mission_id=%s", scope)
         revision = revision_row["revision"] if revision_row else 0
         pairs = tuple(
-            (
+            [
                 (r["id"], r["source_id"])
                 for r in await fetchall(
                     "SELECT o.id,o.source_id FROM observations o JOIN mission_evidence e ON e.observation_id=o.id WHERE e.mission_id=%s ORDER BY o.id",
                     scope,
                 )
-            )
+            ]
         )
         events = tuple(
-            (
+            [
                 _pg_event(r)
                 for r in await fetchall(
                     "SELECT * FROM mission_progress_events WHERE mission_id=%s ORDER BY revision,ordinal", scope
                 )
-            )
+            ]
         )
         exists = (await fetchone("SELECT to_regclass('public.research_assignments') AS relation"))["relation"]
         assignments, works, metadata = ((), (), ())
+        handoffs, findings, acknowledgements, current_findings = ((), (), (), ())
         if exists:
             assignments = tuple(
-                (
+                [
                     ResearchAssignment(
                         assignment_id=UUID(str(r["assignment_id"])),
                         mission_id=mission_id,
@@ -3267,7 +3268,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     for r in await fetchall(
                         "SELECT * FROM research_assignments WHERE mission_id=%s ORDER BY epoch", scope
                     )
-                )
+                ]
             )
 
             async def bindings(input_id):
@@ -3278,22 +3279,22 @@ class PostgresTimescaleRepository(ITrendRepository):
                     brief_digest=r["brief_digest"],
                     frame_digest=r["frame_digest"],
                     observation_ids=tuple(
-                        (
+                        [
                             o["observation_id"]
                             for o in await fetchall(
                                 "SELECT observation_id FROM research_input_observations WHERE input_id=%s ORDER BY ordinal",
                                 (input_id,),
                             )
-                        )
+                        ]
                     ),
                     finding_revisions=tuple(
-                        (
+                        [
                             (f["finding_id"], f["revision"])
                             for f in await fetchall(
                                 "SELECT finding_id,revision FROM research_input_findings WHERE input_id=%s ORDER BY ordinal",
                                 (input_id,),
                             )
-                        )
+                        ]
                     ),
                 )
 
@@ -3309,13 +3310,13 @@ class PostgresTimescaleRepository(ITrendRepository):
                         assignee_ref=r["assignee_ref"],
                         inputs=await bindings(r["input_id"]),
                         dependencies=tuple(
-                            (
+                            [
                                 d["dependency_work_id"]
                                 for d in await fetchall(
                                     "SELECT dependency_work_id FROM research_work_dependencies WHERE work_id=%s ORDER BY ordinal",
                                     (r["work_id"],),
                                 )
-                            )
+                            ]
                         ),
                         epoch=r["epoch"],
                         state=r["state"],
@@ -3328,8 +3329,142 @@ class PostgresTimescaleRepository(ITrendRepository):
                     )
                 ]
             )
+            from ignis.domain.research_findings import ResearchFindingRevision, ResearchHandoff
+            from ignis.application.ports.research_work_port import ResearchHandoffAcknowledgement
+
+            def optional_time(value):
+                return value if value else None
+
+            async def directions(row, direction):
+                return tuple(
+                    [
+                        o["observation_id"]
+                        for o in await fetchall(
+                            "SELECT observation_id FROM research_finding_observations WHERE finding_id=%s AND revision=%s AND direction=%s ORDER BY ordinal",
+                            (row["finding_id"], row["revision"], direction),
+                        )
+                    ]
+                )
+
+            findings = tuple(
+                [
+                    ResearchFindingRevision(
+                        finding_id=UUID(str(r["finding_id"])),
+                        revision=r["revision"],
+                        predecessor_revision=r["predecessor_revision"],
+                        work_id=UUID(str(r["work_id"])),
+                        handoff_id=UUID(str(r["handoff_id"])),
+                        inputs=await bindings(r["input_id"]),
+                        result_type=r["result_type"],
+                        statement=r["statement"],
+                        limitations=tuple(r["limitations"]),
+                        open_questions=tuple(r["open_questions"]),
+                        supporting_observation_ids=await directions(r, "SUPPORT"),
+                        contradicting_observation_ids=await directions(r, "CONTRADICTION"),
+                        context_observation_ids=await directions(r, "CONTEXT"),
+                        alternative_explanation=r["alternative_explanation"],
+                        claim_id=UUID(str(r["claim_id"])) if r["claim_id"] else None,
+                        recorded_at=optional_time(r["submitted_recorded_at"]),
+                    )
+                    for r in await fetchall(
+                        "SELECT * FROM research_finding_revisions WHERE mission_id=%s ORDER BY (SELECT min(mission_revision) FROM research_recorded_metadata m WHERE m.record_kind='HANDOFF' AND m.record_id=research_finding_revisions.handoff_id),handoff_ordinal",
+                        scope,
+                    )
+                ]
+            )
+
+            async def references(handoff_id, kind):
+                return tuple(
+                    [
+                        r["reference_id"]
+                        for r in await fetchall(
+                            "SELECT reference_id FROM research_handoff_references WHERE handoff_id=%s AND reference_kind=%s ORDER BY ordinal",
+                            (handoff_id, kind),
+                        )
+                    ]
+                )
+
+            handoffs = tuple(
+                [
+                    ResearchHandoff(
+                        handoff_id=UUID(str(r["handoff_id"])),
+                        work_id=UUID(str(r["work_id"])),
+                        expected_version=r["expected_version"],
+                        ownership_fence=r["ownership_fence"],
+                        consumer_ref=r["consumer_ref"],
+                        inputs=await bindings(r["input_id"]),
+                        observation_sources=tuple(
+                            [
+                                (o["observation_id"], o["source_id"])
+                                for o in await fetchall(
+                                    "SELECT observation_id,source_id FROM research_handoff_observations WHERE handoff_id=%s ORDER BY ordinal",
+                                    (r["handoff_id"],),
+                                )
+                            ]
+                        ),
+                        outcome_ids=await references(r["handoff_id"], "OUTCOME"),
+                        claim_ids=await references(r["handoff_id"], "CLAIM"),
+                        result=r["result"],
+                        limitations=tuple(r["limitations"]),
+                        open_questions=tuple(r["open_questions"]),
+                        findings=tuple([f for f in findings if f.handoff_id == r["handoff_id"]]),
+                        occurred_at=optional_time(r["occurred_at"]),
+                        recorded_at=optional_time(r["submitted_recorded_at"]),
+                    )
+                    for r in await fetchall(
+                        "SELECT * FROM research_handoffs WHERE mission_id=%s ORDER BY (SELECT min(mission_revision) FROM research_recorded_metadata m WHERE m.record_kind='HANDOFF' AND m.record_id=research_handoffs.handoff_id),handoff_id",
+                        scope,
+                    )
+                ]
+            )
+            acknowledgements = tuple(
+                [
+                    ResearchHandoffAcknowledgement(
+                        handoff_id=UUID(str(r["handoff_id"])),
+                        consumer_ref=r["consumer_ref"],
+                        expected_version=r["expected_version"],
+                        disposition=r["disposition"],
+                        reason_code=r["reason_code"],
+                        inputs=await bindings(r["input_id"]),
+                    )
+                    for r in await fetchall(
+                        "SELECT * FROM research_handoff_acknowledgements WHERE mission_id=%s ORDER BY handoff_id", scope
+                    )
+                ]
+            )
+            if canonical is None:
+                canonical = await self._commit_snapshot(conn, mission_id)
+            from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
+
+            try:
+                frame = frame_from_snapshot(canonical).frame_digest
+            except InvalidMissionClaimError:
+                frame = None
+            latest = {f.finding_id: f for f in findings}
+            eligible = {
+                i
+                for i, f in latest.items()
+                if canonical.manifest is not None
+                and canonical.brief is not None
+                and (frame is not None)
+                and (f.inputs.manifest_digest == canonical.manifest.manifest_digest)
+                and (f.inputs.brief_digest == compute_frame_fingerprint(canonical.mission, canonical.brief))
+                and (f.inputs.frame_digest == frame)
+                and (set(f.inputs.observation_ids) <= set(dict(pairs)))
+            }
+            current = set()
+            while True:
+                admitted = {
+                    i
+                    for i in eligible
+                    if all([d in current and latest[d].revision == v for d, v in latest[i].inputs.finding_revisions])
+                }
+                if admitted == current:
+                    break
+                current = admitted
+            current_findings = tuple([(i, f.revision) for i, f in latest.items() if i in current])
             metadata = tuple(
-                (
+                [
                     ResearchRecordedMetadata(
                         record_kind=r["record_kind"],
                         record_id=UUID(str(r["record_id"])),
@@ -3342,20 +3477,20 @@ class PostgresTimescaleRepository(ITrendRepository):
                         "SELECT * FROM research_recorded_metadata WHERE mission_id=%s ORDER BY mission_revision,record_kind,record_id",
                         scope,
                     )
-                )
+                ]
             )
         return ResearchWorkSnapshot(
             mission_id=mission_id,
             revision=revision,
-            current_epoch=max((a.epoch for a in assignments), default=0),
+            current_epoch=max([a.epoch for a in assignments], default=0),
             assignments=assignments,
             work_items=works,
-            handoffs=(),
-            findings=(),
-            acknowledgements=(),
+            handoffs=handoffs,
+            findings=findings,
+            acknowledgements=acknowledgements,
             events=events,
             observation_sources=pairs,
-            current_finding_revisions=(),
+            current_finding_revisions=current_findings,
             recorded_metadata=metadata,
         )
 
@@ -3444,7 +3579,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     "SELECT * FROM research_work_commands WHERE mission_id=%s AND command_key=%s",
                     (str(command.mission_id), key),
                 )
-                state = await self._research_snapshot(conn, command.mission_id)
+                state = await self._research_snapshot(conn, command.mission_id, canonical=canonical)
                 revision = state.revision
                 initial_revision = revision
                 if original:
@@ -3459,6 +3594,41 @@ class PostgresTimescaleRepository(ITrendRepository):
 
                 async def refuse(reason):
                     return await persist(receipt(reason))
+
+                def input_reason(inputs):
+                    latest = {f.finding_id: f.revision for f in state.findings}
+                    if any([latest.get(i) != v for i, v in inputs.finding_revisions]):
+                        return "STALE_DEPENDENCY_REVISION"
+                    try:
+                        frame = frame_from_snapshot(canonical).frame_digest
+                    except InvalidMissionClaimError:
+                        return "STALE_INPUT_FRAME"
+                    if (
+                        canonical.manifest is None
+                        or canonical.brief is None
+                        or inputs.manifest_digest != canonical.manifest.manifest_digest
+                        or (inputs.brief_digest != compute_frame_fingerprint(canonical.mission, canonical.brief))
+                        or (inputs.frame_digest != frame)
+                        or (not set(inputs.observation_ids) <= set(dict(state.observation_sources)))
+                    ):
+                        return "STALE_INPUT_FRAME"
+                    if not set(inputs.finding_revisions) <= set(state.current_finding_revisions):
+                        return "STALE_DEPENDENCY_REVISION"
+                    return None
+
+                async def metadata(kind, identity, version):
+                    await execute(
+                        "INSERT INTO research_recorded_metadata VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                        (
+                            str(command.mission_id),
+                            kind,
+                            str(identity),
+                            version,
+                            revision,
+                            recorded_at.isoformat(),
+                            "HARNESS_OBSERVED",
+                        ),
+                    )
 
                 if not command.host_authorized:
                     return await refuse("UNAUTHORIZED_HOST")
@@ -3481,9 +3651,6 @@ class PostgresTimescaleRepository(ITrendRepository):
                         return await refuse("STALE_EPOCH")
                 elif not closure and command.expected_epoch != state.current_epoch:
                     return await refuse("STALE_EPOCH")
-                # T050 owns immutable result/finding storage and result CAS admission.
-                if operation in {"SUBMIT_HANDOFF", "ACK_HANDOFF"}:
-                    return await refuse("INVALID_TRANSITION")
                 assignment = None
                 work = None
                 record_kind = None
@@ -3554,7 +3721,13 @@ class PostgresTimescaleRepository(ITrendRepository):
                             (a for a in state.assignments if a.assignment_id == payload.assignment_id), None
                         )
                     else:
-                        work = next((w for w in state.work_items if w.work_id == payload.work_id), None)
+                        handoff = (
+                            next((h for h in state.handoffs if h.handoff_id == payload.handoff_id), None)
+                            if operation == "ACK_HANDOFF"
+                            else None
+                        )
+                        work_id = handoff.work_id if handoff else getattr(payload, "work_id", None)
+                        work = next((w for w in state.work_items if w.work_id == work_id), None)
                         assignment = next(
                             (a for a in state.assignments if work and a.assignment_id == work.assignment_id), None
                         )
@@ -3582,7 +3755,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                     if operation in {"START_WORK", "RESUME_WORK", "RECORD_ACTIVITY"}:
                         if not set(work.inputs.observation_ids) <= set(dict(state.observation_sources)):
                             return await refuse("INPUT_IDENTITY_MISMATCH")
-                        if work.inputs.finding_revisions:
+                        if not set(work.inputs.finding_revisions) <= set(state.current_finding_revisions):
                             return await refuse("STALE_DEPENDENCY_REVISION")
                         try:
                             current_frame = frame_from_snapshot(canonical).frame_digest
@@ -3595,6 +3768,275 @@ class PostgresTimescaleRepository(ITrendRepository):
                             or (work.inputs.frame_digest != current_frame)
                         ):
                             return await refuse("STALE_INPUT_FRAME")
+                    if operation in {"SUBMIT_HANDOFF", "ACK_HANDOFF"}:
+                        from ignis.application.ports.research_work_port import SAFE_REASONS
+
+                        if payload.expected_version != work.version:
+                            return await refuse("STALE_WORK_VERSION")
+                        if operation == "SUBMIT_HANDOFF" and payload.ownership_fence != work.ownership_fence:
+                            return await refuse("OWNERSHIP_FENCE_MISMATCH")
+                        if assignment.state == "CANCEL_PENDING" or work.state == "CANCEL_PENDING":
+                            return await refuse("CANCELLATION_PENDING")
+                        if work.state in TERMINAL:
+                            return await refuse("WORK_TERMINAL")
+                        if "ANALYZE" not in assignment.authority.actions:
+                            return await refuse("ACTION_NOT_GRANTED")
+                        if payload.inputs.mission_id != command.mission_id:
+                            return await refuse("SCOPE_MISMATCH")
+                        if operation == "SUBMIT_HANDOFF":
+                            if work.state not in {"RUNNING", "WAITING"}:
+                                return await refuse("INVALID_TRANSITION")
+                            sources = dict(state.observation_sources)
+                            if any([sources.get(o) != source for o, source in payload.observation_sources]):
+                                historical = dict(
+                                    tuple(row.values())
+                                    for row in await fetchall(
+                                        "SELECT observation_id,source_id FROM research_input_observations WHERE input_id=(SELECT input_id FROM research_work_items WHERE work_id=%s)",
+                                        (str(work.work_id),),
+                                    )
+                                )
+                                if any(
+                                    [
+                                        historical.get(o) != source
+                                        for o, source in payload.observation_sources
+                                        if sources.get(o) != source
+                                    ]
+                                ):
+                                    return await refuse("INPUT_IDENTITY_MISMATCH")
+                        problem = input_reason(payload.inputs)
+                        if problem:
+                            return await refuse(problem)
+                        if payload.inputs != work.inputs:
+                            return await refuse("INPUT_REVISION_MISMATCH")
+                        input_id = (
+                            await fetchone(
+                                "SELECT input_id FROM research_work_items WHERE work_id=%s", (str(work.work_id),)
+                            )
+                        )["input_id"]
+                        if operation == "ACK_HANDOFF":
+                            if payload.reason_code is not None and payload.reason_code not in SAFE_REASONS:
+                                return await refuse("INVALID_REASON_CODE")
+                            safe_consumer = sanitize_pii_text(payload.consumer_ref)
+                            if payload.inputs != handoff.inputs or safe_consumer != handoff.consumer_ref:
+                                return await refuse("INPUT_IDENTITY_MISMATCH")
+                            if work.state != "HANDOFF_READY" or any(
+                                [a.handoff_id == handoff.handoff_id for a in state.acknowledgements]
+                            ):
+                                return await refuse("INVALID_TRANSITION")
+                            try:
+                                ack = dataclasses.replace(payload, consumer_ref=safe_consumer)
+                            except ValueError:
+                                return await refuse("INVALID_INPUT")
+                            await execute(
+                                "INSERT INTO research_handoff_acknowledgements VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                                (
+                                    str(command.mission_id),
+                                    str(ack.handoff_id),
+                                    input_id,
+                                    ack.consumer_ref,
+                                    ack.expected_version,
+                                    ack.disposition,
+                                    ack.reason_code,
+                                ),
+                            )
+                            work = dataclasses.replace(
+                                work,
+                                version=work.version + 1,
+                                state="COMPLETED" if ack.disposition == "ACCEPTED" else "HANDOFF_READY",
+                            )
+                            await execute(
+                                "UPDATE research_work_items SET state=%s,version=%s WHERE work_id=%s",
+                                (work.state, work.version, str(work.work_id)),
+                            )
+                            revision = await self._record_progress(
+                                cur,
+                                command.mission_id,
+                                MissionProgressKind.HANDOFF_ACKNOWLEDGED,
+                                "research:" + key,
+                                work_id=work.work_id,
+                                handoff_id=handoff.handoff_id,
+                                reason=ack.disposition,
+                            )
+                            if ack.disposition == "ACCEPTED":
+                                await self._record_progress(
+                                    cur,
+                                    command.mission_id,
+                                    MissionProgressKind.WORK_ENDED,
+                                    "research:" + key,
+                                    work_id=work.work_id,
+                                    handoff_id=handoff.handoff_id,
+                                    reason="COMPLETED",
+                                    revision=revision,
+                                    ordinal=2,
+                                )
+                        else:
+                            if any([h.handoff_id == payload.handoff_id for h in state.handoffs]):
+                                return await refuse("INVALID_INPUT")
+                            for outcome_id in payload.outcome_ids:
+                                if not await fetchone(
+                                    "SELECT 1 FROM mission_probe_outcomes o JOIN mission_run_journals j ON j.id=o.run_id WHERE o.id=%s AND j.mission_id=%s",
+                                    (str(outcome_id), str(command.mission_id)),
+                                ):
+                                    return await refuse("INPUT_IDENTITY_MISMATCH")
+                            for claim_id in (*payload.claim_ids, *[f.claim_id for f in payload.findings if f.claim_id]):
+                                if not await fetchone(
+                                    "SELECT 1 FROM mission_claims WHERE id=%s AND mission_id=%s",
+                                    (str(claim_id), str(command.mission_id)),
+                                ):
+                                    return await refuse("INPUT_IDENTITY_MISMATCH")
+                            latest = {f.finding_id: f.revision for f in state.findings}
+                            for finding in payload.findings:
+                                global_latest = await fetchone(
+                                    "SELECT mission_id,max(revision) FROM research_finding_revisions WHERE finding_id=%s GROUP BY mission_id",
+                                    (str(finding.finding_id),),
+                                )
+                                if global_latest and tuple(global_latest.values())[0] != command.mission_id:
+                                    return await refuse("SCOPE_MISMATCH")
+                                if finding.revision != latest.get(finding.finding_id, 0) + 1:
+                                    return await refuse("STALE_DEPENDENCY_REVISION")
+                            try:
+                                safe_findings = tuple(
+                                    [
+                                        dataclasses.replace(
+                                            f,
+                                            statement=sanitize_pii_text(f.statement),
+                                            limitations=tuple([sanitize_pii_text(t) for t in f.limitations]),
+                                            open_questions=tuple([sanitize_pii_text(t) for t in f.open_questions]),
+                                            alternative_explanation=sanitize_pii_text(f.alternative_explanation),
+                                        )
+                                        for f in payload.findings
+                                    ]
+                                )
+                                handoff = dataclasses.replace(
+                                    payload,
+                                    consumer_ref=sanitize_pii_text(payload.consumer_ref),
+                                    result=sanitize_pii_text(payload.result),
+                                    limitations=tuple([sanitize_pii_text(t) for t in payload.limitations]),
+                                    open_questions=tuple([sanitize_pii_text(t) for t in payload.open_questions]),
+                                    findings=safe_findings,
+                                )
+                            except ValueError:
+                                return await refuse("INVALID_INPUT")
+                            h = handoff
+                            await execute(
+                                "INSERT INTO research_handoffs VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                                (
+                                    str(h.handoff_id),
+                                    str(command.mission_id),
+                                    str(h.work_id),
+                                    input_id,
+                                    h.expected_version,
+                                    h.ownership_fence,
+                                    h.consumer_ref,
+                                    h.result,
+                                    list(h.limitations),
+                                    list(h.open_questions),
+                                    h.occurred_at.isoformat() if h.occurred_at else None,
+                                    h.recorded_at.isoformat() if h.recorded_at else None,
+                                ),
+                            )
+                            for ordinal, (observation_id, source_id) in enumerate(h.observation_sources, 1):
+                                await execute(
+                                    "INSERT INTO research_handoff_observations VALUES (%s,%s,%s,%s,%s,%s)",
+                                    (
+                                        ordinal,
+                                        str(command.mission_id),
+                                        str(h.handoff_id),
+                                        input_id,
+                                        str(observation_id),
+                                        str(source_id),
+                                    ),
+                                )
+                            for ref_kind, identities in (("OUTCOME", h.outcome_ids), ("CLAIM", h.claim_ids)):
+                                for ordinal, identity in enumerate(identities, 1):
+                                    await execute(
+                                        "INSERT INTO research_handoff_references VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                                        (
+                                            ordinal,
+                                            str(command.mission_id),
+                                            str(h.handoff_id),
+                                            ref_kind,
+                                            str(identity),
+                                            str(identity) if ref_kind == "CLAIM" else None,
+                                            str(identity) if ref_kind == "OUTCOME" else None,
+                                        ),
+                                    )
+                            for ordinal, f in enumerate(h.findings, 1):
+                                await execute(
+                                    "INSERT INTO research_finding_revisions VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                                    (
+                                        ordinal,
+                                        str(f.finding_id),
+                                        f.revision,
+                                        f.predecessor_revision,
+                                        str(command.mission_id),
+                                        str(f.work_id),
+                                        str(f.handoff_id),
+                                        input_id,
+                                        f.result_type,
+                                        f.statement,
+                                        list(f.limitations),
+                                        list(f.open_questions),
+                                        f.alternative_explanation,
+                                        str(f.claim_id) if f.claim_id else None,
+                                        f.recorded_at.isoformat() if f.recorded_at else None,
+                                    ),
+                                )
+                                for direction, ids in (
+                                    ("SUPPORT", f.supporting_observation_ids),
+                                    ("CONTRADICTION", f.contradicting_observation_ids),
+                                    ("CONTEXT", f.context_observation_ids),
+                                ):
+                                    for ref_ordinal, observation_id in enumerate(ids, 1):
+                                        await execute(
+                                            "INSERT INTO research_finding_observations VALUES (%s,%s,%s,%s,%s,%s)",
+                                            (
+                                                ref_ordinal,
+                                                str(command.mission_id),
+                                                str(f.finding_id),
+                                                f.revision,
+                                                str(observation_id),
+                                                direction,
+                                            ),
+                                        )
+                            work = dataclasses.replace(work, state="HANDOFF_READY", version=work.version + 1)
+                            await execute(
+                                "UPDATE research_work_items SET state=%s,version=%s WHERE work_id=%s",
+                                (work.state, work.version, str(work.work_id)),
+                            )
+                            revision = await self._record_progress(
+                                cur,
+                                command.mission_id,
+                                MissionProgressKind.HANDOFF_COMMITTED,
+                                "research:" + key,
+                                work_id=work.work_id,
+                                handoff_id=h.handoff_id,
+                            )
+                            for ordinal, f in enumerate(h.findings, 2):
+                                await self._record_progress(
+                                    cur,
+                                    command.mission_id,
+                                    MissionProgressKind.FINDING_REVISED,
+                                    "research:" + key,
+                                    work_id=work.work_id,
+                                    handoff_id=h.handoff_id,
+                                    finding_id=f.finding_id,
+                                    revision=revision,
+                                    ordinal=ordinal,
+                                )
+                                await metadata("FINDING", f.finding_id, f.revision)
+                            await metadata("HANDOFF", h.handoff_id, 1)
+                        await metadata("WORK", work.work_id, work.version)
+                        event_ids = tuple(
+                            [
+                                UUID(str(tuple(r.values())[0]))
+                                for r in await fetchall(
+                                    "SELECT id FROM mission_progress_events WHERE mission_id=%s AND revision=%s ORDER BY ordinal",
+                                    (str(command.mission_id), revision),
+                                )
+                            ]
+                        )
+                        return await persist(receipt(work=work, assignment=assignment, event_ids=event_ids))
                     if operation == "END_RESEARCH":
                         if payload.expected_version != assignment.version:
                             return await refuse("STALE_VERSION")
@@ -3631,7 +4073,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                         current_ids = dict(state.observation_sources)
                         if not set(work.inputs.observation_ids) <= set(current_ids):
                             return await refuse("INPUT_IDENTITY_MISMATCH")
-                        if work.inputs.finding_revisions:
+                        if not set(work.inputs.finding_revisions) <= set(state.current_finding_revisions):
                             return await refuse("STALE_DEPENDENCY_REVISION")
                         try:
                             current_frame = frame_from_snapshot(canonical).frame_digest
@@ -3670,6 +4112,11 @@ class PostgresTimescaleRepository(ITrendRepository):
                             "INSERT INTO research_input_sets VALUES (%s,%s,%s,%s,%s)",
                             (input_id, str(b.mission_id), b.manifest_digest, b.brief_digest, b.frame_digest),
                         )
+                        for ordinal, (finding_id, finding_revision) in enumerate(b.finding_revisions, 1):
+                            await execute(
+                                "INSERT INTO research_input_findings VALUES (%s,%s,%s,%s,%s)",
+                                (ordinal, input_id, str(command.mission_id), str(finding_id), finding_revision),
+                            )
                         for ordinal, o in enumerate(b.observation_ids, 1):
                             await execute(
                                 "INSERT INTO research_input_observations VALUES (%s,%s,%s,%s,%s)",
@@ -3732,7 +4179,42 @@ class PostgresTimescaleRepository(ITrendRepository):
                             expected_epoch=command.expected_epoch,
                             payload=pure_payload,
                         )
-                        transition = transition_research_work(work=work, assignment=assignment, command=pure, now=admission_now)
+                        if operation == "END_WORK" and payload.disposition == "COMPLETED":
+                            from ignis.domain.research_work import _work_reason
+
+                            problem = _work_reason(
+                                assignment,
+                                work,
+                                admission_now,
+                                command.expected_epoch,
+                                payload.expected_version,
+                                payload.ownership_fence,
+                            )
+                            if problem:
+                                return await refuse(problem)
+                            results = [h for h in state.handoffs if h.work_id == work.work_id]
+                            if not results or work.state != "HANDOFF_READY":
+                                return await refuse("RESULT_REQUIRED")
+                            selected = results[-1]
+                            if any(
+                                [
+                                    a.handoff_id == selected.handoff_id and a.disposition == "REJECTED"
+                                    for a in state.acknowledgements
+                                ]
+                            ):
+                                return await refuse("RESULT_REQUIRED")
+                            problem = input_reason(selected.inputs)
+                            if problem:
+                                return await refuse(problem)
+                            from ignis.domain.research_work import ResearchTransition
+
+                            transition = ResearchTransition(
+                                "APPLIED", dataclasses.replace(work, state="COMPLETED", version=work.version + 1)
+                            )
+                        else:
+                            transition = transition_research_work(
+                                work=work, assignment=assignment, command=pure, now=admission_now
+                            )
                         if transition.disposition != "APPLIED":
                             return await refuse(transition.reason_code)
                         if (
