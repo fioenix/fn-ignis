@@ -10,6 +10,8 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, fields, replace
+from ignis.application.ports.research_work_port import ResearchWorkSnapshot
+from ignis.domain.research_work import ResearchActivityReceipt
 from datetime import datetime, timezone
 from enum import Enum
 from types import MappingProxyType
@@ -199,8 +201,28 @@ class MissionRelayRead:
     source_count: int
     frame_evidence: MissionEvidenceSnapshot | None = field(default=None, repr=False)
     latest_run_id: UUID | None = None
+    research_run_id: UUID | None = None
+    research_frame_digest: str | None = None
+    research: ResearchWorkSnapshot | None = field(default=None, repr=False)
+    research_activities: tuple[ResearchActivityReceipt, ...] = field(default=(), repr=False)
 
     def __post_init__(self) -> None:
+        if self.research_run_id is not None:
+            _typed(self.research_run_id, UUID, "research_run_id")
+        if self.research_frame_digest is not None and (type(self.research_frame_digest) is not str or re.fullmatch(r"[0-9a-f]{64}", self.research_frame_digest) is None):
+            raise ValueError("Invalid research frame identity.")
+        if self.research is not None:
+            _typed(self.research, ResearchWorkSnapshot, "research")
+            if self.research.mission_id != self.request.mission_id or self.research.revision != self.events.high_water.revision:
+                raise ValueError("Research must share canonical scope and high-water.")
+        if type(self.research_activities) is not tuple or any(type(r) is not ResearchActivityReceipt for r in self.research_activities):
+            raise ValueError("Invalid research activity records.")
+        if self.research is not None:
+            work_epochs = {w.work_id: w.epoch for w in self.research.work_items}
+            if any(work_epochs.get(r.work_id) != r.epoch for r in self.research_activities):
+                raise ValueError("Invalid research activity scope.")
+        if self.research is None and self.research_activities:
+            raise ValueError("Unknown research cannot carry activity.")
         _typed(self.request, MissionRelayReadRequest, "request")
         _typed(self.evidence, MissionEvidenceSnapshot, "evidence")
         _typed(self.events, MissionRelayEventPage, "events")

@@ -15,6 +15,9 @@ from ignis.application.ports.mission_relay_port import (
     IMissionRelayReader, MissionRelayRead, MissionRelayReadRequest,
 )
 from ignis.application.ports.research_workspace_port import MissionEvidenceSnapshot, RunJournal
+from ignis.application.ports.research_work_port import SAFE_REASONS
+from ignis.domain.relay_research import RelayResearchView
+from ignis.domain.research_work import project_work_activity
 from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
 from ignis.domain.mission_relay import (
     MissionRelayCursor, MissionRelayInspection,
@@ -238,6 +241,80 @@ def _claim_gate(evidence, run, *, coherent_read=None):
     )
 
 
+def _research_view(read, gate):
+    if read is None or read.research is None:
+        return RelayResearchView()
+    state = read.research
+    assignments = {a.assignment_id: a for a in state.assignments}
+    if any(w.assignment_id not in assignments or w.epoch != assignments[w.assignment_id].epoch
+           for w in state.work_items):
+        raise ValueError("Research work scope does not match its pinned assignment/run.")
+    current = set(state.current_finding_revisions)
+    permitted = {claim.claim_id: claim for claim in gate.claims} if gate.state is RelayGateState.CURRENT else {}
+    withheld = set()
+    findings = []
+    for finding in state.findings:
+        key = (finding.finding_id, finding.revision)
+        claim = permitted.get(finding.claim_id)
+        directions = set((*finding.supporting_observation_ids, *finding.contradicting_observation_ids,
+                          *finding.context_observation_ids))
+        bound = {b.observation_id for b in claim.evidence_bindings if b.observation_id is not None} if claim else set()
+        role_bindings = {(o, direction) for direction, values in (('SUPPORT', finding.supporting_observation_ids),
+                         ('CONTRADICTION', finding.contradicting_observation_ids), ('CONTEXT', finding.context_observation_ids))
+                         for o in values}
+        canonical_bindings = {(b.observation_id, b.role.value) for b in claim.evidence_bindings if b.observation_id is not None} if claim else set()
+        allowed = (role_bindings == canonical_bindings and key in current and claim is not None and bound == directions
+                   and bound == set(finding.inputs.observation_ids))
+        hidden = finding.result_type == 'STRATEGIC_CANDIDATE' and not allowed
+        if hidden:
+            withheld.add(key)
+        findings.append(replace(finding,
+            statement='WITHHELD' if hidden else _safe_text(claim.wording) if finding.result_type == 'STRATEGIC_CANDIDATE' else _safe_text(finding.statement),
+            limitations=() if hidden else tuple(_safe_text(t) for t in (claim.limitations if finding.result_type == 'STRATEGIC_CANDIDATE' else finding.limitations)),
+            open_questions=() if finding.result_type == 'STRATEGIC_CANDIDATE' else tuple(_safe_text(t) for t in finding.open_questions),
+            alternative_explanation=None if finding.result_type == 'STRATEGIC_CANDIDATE' else _safe_text(finding.alternative_explanation)))
+    handoffs = []
+    hidden_handoffs = []
+    for handoff in state.handoffs:
+        hidden = any(f.result_type == 'STRATEGIC_CANDIDATE' for f in handoff.findings)
+        if hidden:
+            hidden_handoffs.append(handoff.handoff_id)
+        handoffs.append(replace(handoff,
+            consumer_ref=_safe_text(handoff.consumer_ref), ownership_fence=_safe_text(handoff.ownership_fence),
+            result='WITHHELD' if hidden else _safe_text(handoff.result),
+            limitations=() if hidden else tuple(_safe_text(t) for t in handoff.limitations),
+            open_questions=() if hidden else tuple(_safe_text(t) for t in handoff.open_questions),
+            findings=tuple(f for f in findings if f.handoff_id == handoff.handoff_id)))
+    activities = []
+    for work in state.work_items:
+        receipts = [r for r in read.research_activities if r.work_id == work.work_id]
+        receipt = max(receipts, key=lambda r: (r.occurred_at, r.fresh_until), default=None)
+        activity = project_work_activity(work=work, receipt=receipt, now=read.read_at)
+        safe_receipt = replace(receipt, execution_ref=_safe_text(receipt.execution_ref),
+                               ownership_fence=_safe_text(receipt.ownership_fence)) if receipt else None
+        activities.append((work.work_id, activity.state, safe_receipt))
+    reasons = {}
+    for event in state.events:
+        if event.work_id is not None and event.reason is not None:
+            reasons[event.work_id] = event.reason if event.reason in SAFE_REASONS else 'INVALID_REASON_CODE'
+    return RelayResearchView(read_at=read.read_at, reasons=tuple(reasons.items()), availability='AVAILABLE', mission_id=state.mission_id,
+        revision=state.revision, current_epoch=state.current_epoch,
+        current_run_id=read.research_run_id, frame_digest=read.research_frame_digest,
+        assignments=tuple(replace(a, host_task_ref=_safe_text(a.host_task_ref),
+                                 capability=_safe_text(a.capability)) for a in state.assignments),
+        work_items=tuple(replace(w, question=_safe_text(w.question), expertise=_safe_text(w.expertise),
+                                assignee_ref=_safe_text(w.assignee_ref), ownership_fence=_safe_text(w.ownership_fence))
+                         for w in state.work_items),
+        handoffs=tuple(handoffs), findings=tuple(findings),
+        acknowledgements=tuple((a.handoff_id, _safe_text(a.consumer_ref), a.expected_version, a.disposition,
+                                a.reason_code if a.reason_code in SAFE_REASONS else None if a.reason_code is None
+                                else 'INVALID_REASON_CODE') for a in state.acknowledgements),
+        observation_sources=state.observation_sources, current_finding_revisions=state.current_finding_revisions,
+        withheld_findings=tuple(withheld), withheld_handoffs=tuple(hidden_handoffs), activities=tuple(activities),
+        recorded_metadata=tuple((m.record_kind, m.record_id, m.record_version, m.mission_revision,
+                                 m.recorded_at, m.provenance) for m in state.recorded_metadata))
+
+
 def _project(
     *, selected_mission_id: UUID, selected_run_id: UUID | None,
     evidence: MissionEvidenceSnapshot | None, run: RunJournal | None,
@@ -309,7 +386,7 @@ def _project(
                 RelayFramePendingReason.PENDING if gate.state is RelayGateState.PENDING else RelayFramePendingReason.UNAVAILABLE
             ),
             event_page=events, channels=_channels(evidence), collection_state=collection_state,
-            claim_gate=gate,
+            claim_gate=gate, research=_research_view(coherent_read, gate),
         ))
     except (ValueError, TypeError, OverflowError, UnicodeError):
         return _failure(RelayReadReason.READ_UNAVAILABLE, unavailable=True)

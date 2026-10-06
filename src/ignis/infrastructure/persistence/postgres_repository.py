@@ -3214,6 +3214,15 @@ class PostgresTimescaleRepository(ITrendRepository):
         )
 
     async def _research_snapshot(self, conn, mission_id, *, canonical=None):
+        _, fetchone, _ = self._research_queries(conn)
+        if canonical is None and (await fetchone(
+            "SELECT to_regclass('public.research_assignments') AS relation"
+        ))["relation"]:
+            canonical = await self._commit_snapshot(conn, mission_id)
+        return await self._decode_research_snapshot(conn, mission_id, canonical=canonical)
+
+    @staticmethod
+    async def _decode_research_snapshot(conn, mission_id, *, canonical):
         from ignis.application.ports.research_work_port import ResearchRecordedMetadata, ResearchWorkSnapshot
         from ignis.domain.research_work import (
             ResearchAuthority,
@@ -3223,7 +3232,7 @@ class PostgresTimescaleRepository(ITrendRepository):
         )
         from ignis.infrastructure.persistence.mission_relay_reader import _pg_event
 
-        execute, fetchone, fetchall = self._research_queries(conn)
+        execute, fetchone, fetchall = PostgresTimescaleRepository._research_queries(conn)
         scope = (str(mission_id),)
         revision_row = await fetchone("SELECT revision FROM mission_progress_revisions WHERE mission_id=%s", scope)
         revision = revision_row["revision"] if revision_row else 0
@@ -3432,8 +3441,6 @@ class PostgresTimescaleRepository(ITrendRepository):
                     )
                 ]
             )
-            if canonical is None:
-                canonical = await self._commit_snapshot(conn, mission_id)
             from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
 
             try:

@@ -4568,7 +4568,15 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
             recorded_at=datetime.fromisoformat(row["recorded_at"]),
         )
 
-    def _research_snapshot(self, conn, mission_id):
+    def _research_snapshot(self, conn, mission_id, *, canonical=None):
+        if canonical is None and conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_assignments'"
+        ).fetchone():
+            canonical = self._commit_snapshot(conn, mission_id)
+        return self._decode_research_snapshot(conn, mission_id, canonical=canonical)
+
+    @staticmethod
+    def _decode_research_snapshot(conn, mission_id, *, canonical):
         from ignis.application.ports.research_work_port import ResearchRecordedMetadata, ResearchWorkSnapshot
         from ignis.domain.research_work import (
             ResearchAuthority,
@@ -4755,7 +4763,6 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     "SELECT * FROM research_handoff_acknowledgements WHERE mission_id=? ORDER BY rowid", scope
                 )
             )
-            canonical = self._commit_snapshot(conn, mission_id)
             from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
 
             try:

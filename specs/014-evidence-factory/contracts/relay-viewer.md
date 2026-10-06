@@ -1,6 +1,6 @@
 # Relay Viewer Contract
 
-**Status**: Additive interface design approved with the technical plan. These tools/routes do not exist yet.
+**Status**: MCP/HTTP read operations and US3 permission rendering are implemented and locally verified. The T054 research read projection is locally accepted; its UI and expanded recording-to-viewer chain remain T055/T056. Native host UAT and shipment remain unverified.
 
 ## MCP read operations
 
@@ -38,6 +38,14 @@ Snapshot fields:
 - Event page, next cursor and pagination/resync status. Bounded related-child summaries carry separate mission/frame identity; no implicit child access or merged claim permission.
 
 Empty, degraded and unauthorized are different outcomes. A successful snapshot is internally coherent; a failed read is not an empty successful snapshot. The UI's last successful read is not overwritten by a failed attempt.
+
+## T054 additive research read projection
+
+The allowlisted `research` section is either `AVAILABLE` or exactly `{availability: SCHEMA_UNAVAILABLE}`. Missing, partial or incompatible optional research relations leave records/counts unknown while valid canonical/progress reads and existing Claim Ledger gating remain intact. Reads perform no initialization or migration. Compatibility checks recognize the committed table representations; installed-upgrade validation remains T084.
+
+Available research is explicitly `MISSION_CURRENT`, with its own current run/frame identity and the same held connection, corpus and committed high-water as the canonical read. Selected-run history and its existing strategic permission gate remain separate. Masked assignment/work, handoff/ACK, finding history/currentness, unique observation/source bindings and observed metadata are projected; unknown capacity or submitted time is not inferred from observed storage metadata. Activity is finite `HOST_REPORTED` receipt evidence, not proof of live reasoning. A heartbeat does not mutate the evidence frame.
+
+Strategic finding narration comes only from exact current permitted Claim Ledger content after the existing gate and exact bindings, with `narrative_origin: CURRENT_CLAIM_LEDGER`. A matching claim ID cannot license different candidate prose. Any handoff containing a strategic candidate withholds its free-form aggregate result, including when associated claims are permitted. Source-bound descriptive findings remain distinct; neither history nor currentness grants strategic permission. The existing bounded response refusal applies without a partial raw dump.
 
 ## Local HTTP surface
 

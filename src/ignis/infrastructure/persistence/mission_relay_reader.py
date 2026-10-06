@@ -16,7 +16,9 @@ from uuid import UUID
 import psycopg
 from psycopg.rows import dict_row, tuple_row
 
+from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
 from ignis.application.cancellation import await_settled
+from ignis.domain.research_work import ResearchActivityReceipt
 from ignis.application.ports.mission_relay_port import (
     IMissionRelayReader,
     MissionRelayRead,
@@ -67,6 +69,224 @@ _SCHEMA_COLUMNS = {
     "mission_progress_events": "id,mission_id,revision,ordinal,kind,provenance,causation_key,occurred_at,recorded_at,run_id,work_id,handoff_id,finding_id,claim_id,evidence_references,reason",
     "mission_progress_commands": "mission_id,command_key,payload_fingerprint,outcome_count,run_id,event_id,revision,ordinal,event_kind,event_provenance",
 }
+
+_RESEARCH_SCHEMA_COLUMNS = {
+    'research_assignments': 'assignment_id,mission_id,host_task_ref,epoch,actions,sources,deadline,quota_ceiling,reserved_usage,settled_usage,capability,capability_provenance,expected_manifest_digest,expected_brief_revision_id,state,version,reason',
+    'research_input_sets': 'input_id,mission_id,manifest_digest,brief_digest,frame_digest',
+    'research_input_observations': 'ordinal,input_id,mission_id,observation_id,source_id',
+    'research_work_items': 'work_id,assignment_id,mission_id,input_id,run_id,question,expertise,assignee_ref,epoch,state,version,ownership_fence,reason',
+    'research_work_dependencies': 'ordinal,mission_id,work_id,dependency_work_id',
+    'research_handoffs': 'handoff_id,mission_id,work_id,input_id,expected_version,ownership_fence,consumer_ref,result,limitations,open_questions,occurred_at,submitted_recorded_at',
+    'research_handoff_observations': 'ordinal,mission_id,handoff_id,input_id,observation_id,source_id',
+    'research_handoff_references': 'ordinal,mission_id,handoff_id,reference_kind,reference_id,claim_id,outcome_id',
+    'research_finding_revisions': 'handoff_ordinal,finding_id,revision,predecessor_revision,mission_id,work_id,handoff_id,input_id,result_type,statement,limitations,open_questions,alternative_explanation,claim_id,submitted_recorded_at',
+    'research_input_findings': 'ordinal,input_id,mission_id,finding_id,revision',
+    'research_finding_observations': 'ordinal,mission_id,finding_id,revision,observation_id,direction',
+    'research_activity_receipts': 'receipt_id,mission_id,work_id,epoch,ownership_fence,execution_ref,occurred_at,fresh_until,provenance',
+    'research_handoff_acknowledgements': 'mission_id,handoff_id,input_id,consumer_ref,expected_version,disposition,reason_code',
+    'research_recorded_metadata': 'mission_id,record_kind,record_id,record_version,mission_revision,recorded_at,provenance',
+    'research_work_commands': 'mission_id,command_key,payload_fingerprint,operation,receipt_id,disposition,reason_code,revision,work_version,assignment_version,event_ids,recorded_at',
+}
+
+
+# Required representations mirror sqlite_research_schema.SCHEMA and sql/028_research_work.sql.
+_RESEARCH_COLUMN_TYPES = {
+    'research_assignments': {
+        'assignment_id': ('TEXT', 'UUID'),
+        'mission_id': ('TEXT', 'UUID'),
+        'host_task_ref': ('TEXT', 'TEXT'),
+        'epoch': ('INTEGER', 'BIGINT'),
+        'actions': ('TEXT', 'TEXT[]'),
+        'sources': ('TEXT', 'TEXT[]'),
+        'deadline': ('TEXT', 'TIMESTAMPTZ'),
+        'quota_ceiling': ('INTEGER', 'BIGINT'),
+        'reserved_usage': ('INTEGER', 'BIGINT'),
+        'settled_usage': ('INTEGER', 'BIGINT'),
+        'capability': ('TEXT', 'TEXT'),
+        'capability_provenance': ('TEXT', 'TEXT'),
+        'expected_manifest_digest': ('TEXT', 'TEXT'),
+        'expected_brief_revision_id': ('TEXT', 'UUID'),
+        'state': ('TEXT', 'TEXT'),
+        'version': ('INTEGER', 'BIGINT'),
+        'reason': ('TEXT', 'TEXT'),
+    },
+    'research_input_sets': {
+        'input_id': ('TEXT', 'UUID'),
+        'mission_id': ('TEXT', 'UUID'),
+        'manifest_digest': ('TEXT', 'TEXT'),
+        'brief_digest': ('TEXT', 'TEXT'),
+        'frame_digest': ('TEXT', 'TEXT'),
+    },
+    'research_input_observations': {
+        'ordinal': ('INTEGER', 'INTEGER'),
+        'input_id': ('TEXT', 'UUID'),
+        'mission_id': ('TEXT', 'UUID'),
+        'observation_id': ('TEXT', 'UUID'),
+        'source_id': ('TEXT', 'UUID'),
+    },
+    'research_work_items': {
+        'work_id': ('TEXT', 'UUID'),
+        'assignment_id': ('TEXT', 'UUID'),
+        'mission_id': ('TEXT', 'UUID'),
+        'input_id': ('TEXT', 'UUID'),
+        'run_id': ('TEXT', 'UUID'),
+        'question': ('TEXT', 'TEXT'),
+        'expertise': ('TEXT', 'TEXT'),
+        'assignee_ref': ('TEXT', 'TEXT'),
+        'epoch': ('INTEGER', 'BIGINT'),
+        'state': ('TEXT', 'TEXT'),
+        'version': ('INTEGER', 'BIGINT'),
+        'ownership_fence': ('TEXT', 'TEXT'),
+        'reason': ('TEXT', 'TEXT'),
+    },
+    'research_work_dependencies': {
+        'ordinal': ('INTEGER', 'INTEGER'),
+        'mission_id': ('TEXT', 'UUID'),
+        'work_id': ('TEXT', 'UUID'),
+        'dependency_work_id': ('TEXT', 'UUID'),
+    },
+    'research_handoffs': {
+        'handoff_id': ('TEXT', 'UUID'),
+        'mission_id': ('TEXT', 'UUID'),
+        'work_id': ('TEXT', 'UUID'),
+        'input_id': ('TEXT', 'UUID'),
+        'expected_version': ('INTEGER', 'BIGINT'),
+        'ownership_fence': ('TEXT', 'TEXT'),
+        'consumer_ref': ('TEXT', 'TEXT'),
+        'result': ('TEXT', 'TEXT'),
+        'limitations': ('TEXT', 'TEXT[]'),
+        'open_questions': ('TEXT', 'TEXT[]'),
+        'occurred_at': ('TEXT', 'TIMESTAMPTZ'),
+        'submitted_recorded_at': ('TEXT', 'TIMESTAMPTZ'),
+    },
+    'research_handoff_observations': {
+        'ordinal': ('INTEGER', 'INTEGER'),
+        'mission_id': ('TEXT', 'UUID'),
+        'handoff_id': ('TEXT', 'UUID'),
+        'input_id': ('TEXT', 'UUID'),
+        'observation_id': ('TEXT', 'UUID'),
+        'source_id': ('TEXT', 'UUID'),
+    },
+    'research_handoff_references': {
+        'ordinal': ('INTEGER', 'INTEGER'),
+        'mission_id': ('TEXT', 'UUID'),
+        'handoff_id': ('TEXT', 'UUID'),
+        'reference_kind': ('TEXT', 'TEXT'),
+        'reference_id': ('TEXT', 'UUID'),
+        'claim_id': ('TEXT', 'UUID'),
+        'outcome_id': ('TEXT', 'UUID'),
+    },
+    'research_finding_revisions': {
+        'handoff_ordinal': ('INTEGER', 'INTEGER'),
+        'finding_id': ('TEXT', 'UUID'),
+        'revision': ('INTEGER', 'BIGINT'),
+        'predecessor_revision': ('INTEGER', 'BIGINT'),
+        'mission_id': ('TEXT', 'UUID'),
+        'work_id': ('TEXT', 'UUID'),
+        'handoff_id': ('TEXT', 'UUID'),
+        'input_id': ('TEXT', 'UUID'),
+        'result_type': ('TEXT', 'TEXT'),
+        'statement': ('TEXT', 'TEXT'),
+        'limitations': ('TEXT', 'TEXT[]'),
+        'open_questions': ('TEXT', 'TEXT[]'),
+        'alternative_explanation': ('TEXT', 'TEXT'),
+        'claim_id': ('TEXT', 'UUID'),
+        'submitted_recorded_at': ('TEXT', 'TIMESTAMPTZ'),
+    },
+    'research_input_findings': {
+        'ordinal': ('INTEGER', 'INTEGER'),
+        'input_id': ('TEXT', 'UUID'),
+        'mission_id': ('TEXT', 'UUID'),
+        'finding_id': ('TEXT', 'UUID'),
+        'revision': ('INTEGER', 'BIGINT'),
+    },
+    'research_finding_observations': {
+        'ordinal': ('INTEGER', 'INTEGER'),
+        'mission_id': ('TEXT', 'UUID'),
+        'finding_id': ('TEXT', 'UUID'),
+        'revision': ('INTEGER', 'BIGINT'),
+        'observation_id': ('TEXT', 'UUID'),
+        'direction': ('TEXT', 'TEXT'),
+    },
+    'research_activity_receipts': {
+        'receipt_id': ('TEXT', 'UUID'),
+        'mission_id': ('TEXT', 'UUID'),
+        'work_id': ('TEXT', 'UUID'),
+        'epoch': ('INTEGER', 'BIGINT'),
+        'ownership_fence': ('TEXT', 'TEXT'),
+        'execution_ref': ('TEXT', 'TEXT'),
+        'occurred_at': ('TEXT', 'TIMESTAMPTZ'),
+        'fresh_until': ('TEXT', 'TIMESTAMPTZ'),
+        'provenance': ('TEXT', 'TEXT'),
+    },
+    'research_handoff_acknowledgements': {
+        'mission_id': ('TEXT', 'UUID'),
+        'handoff_id': ('TEXT', 'UUID'),
+        'input_id': ('TEXT', 'UUID'),
+        'consumer_ref': ('TEXT', 'TEXT'),
+        'expected_version': ('INTEGER', 'BIGINT'),
+        'disposition': ('TEXT', 'TEXT'),
+        'reason_code': ('TEXT', 'TEXT'),
+    },
+    'research_recorded_metadata': {
+        'mission_id': ('TEXT', 'UUID'),
+        'record_kind': ('TEXT', 'TEXT'),
+        'record_id': ('TEXT', 'UUID'),
+        'record_version': ('INTEGER', 'BIGINT'),
+        'mission_revision': ('INTEGER', 'BIGINT'),
+        'recorded_at': ('TEXT', 'TIMESTAMPTZ'),
+        'provenance': ('TEXT', 'TEXT'),
+    },
+    'research_work_commands': {
+        'mission_id': ('TEXT', 'UUID'),
+        'command_key': ('TEXT', 'TEXT'),
+        'payload_fingerprint': ('TEXT', 'TEXT'),
+        'operation': ('TEXT', 'TEXT'),
+        'receipt_id': ('TEXT', 'UUID'),
+        'disposition': ('TEXT', 'TEXT'),
+        'reason_code': ('TEXT', 'TEXT'),
+        'revision': ('INTEGER', 'BIGINT'),
+        'work_version': ('INTEGER', 'BIGINT'),
+        'assignment_version': ('INTEGER', 'BIGINT'),
+        'event_ids': ('TEXT', 'UUID[]'),
+        'recorded_at': ('TEXT', 'TIMESTAMPTZ'),
+    },
+}
+
+_RESEARCH_SCOPE_GUARD = (
+    "SELECT 1 FROM research_work_items w LEFT JOIN research_assignments a ON a.assignment_id=w.assignment_id"
+    " LEFT JOIN research_input_sets i ON i.input_id=w.input_id"
+    " LEFT JOIN mission_run_journals j ON j.id=w.run_id"
+    " LEFT JOIN research_missions m ON m.id=w.mission_id WHERE w.mission_id={parameter} AND"
+    " (a.assignment_id IS NULL OR a.mission_id<>w.mission_id OR a.epoch<>w.epoch"
+    " OR i.input_id IS NULL OR i.mission_id<>w.mission_id"
+    " OR (w.run_id IS NOT NULL AND (j.id IS NULL OR j.mission_id<>w.mission_id OR j.workspace_id<>m.workspace_id))) LIMIT 1"
+)
+
+
+def _sqlite_research_available(conn):
+    for table, expected in _RESEARCH_COLUMN_TYPES.items():
+        relation = conn.execute("SELECT type, sql FROM sqlite_master WHERE name=?", (table,)).fetchone()
+        if relation is None or relation[0] != "table" or "CREATE VIRTUAL TABLE" in (relation[1] or "").upper():
+            return False
+        installed = {r[1]: r[2].upper().strip() for r in conn.execute(f"PRAGMA table_info({table})")}
+        if any(installed.get(name) != kinds[0] for name, kinds in expected.items()):
+            return False
+    return True
+
+
+async def _pg_research_available(conn):
+    for table, expected in _RESEARCH_COLUMN_TYPES.items():
+        rows = await _pg_fetch(conn,
+            "SELECT a.attname AS column_name, c.relkind, a.atttypid=to_regtype(e.kind) AS compatible "
+            "FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace "
+            "JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid "
+            "JOIN unnest(%s::text[], %s::text[]) AS e(name,kind) ON e.name=a.attname "
+            "WHERE n.nspname='public' AND c.relname=%s AND a.attnum>0 AND NOT a.attisdropped",
+            (list(expected), [kinds[1] for kinds in expected.values()], table), many=True)
+        if len(rows) != len(expected) or any(r["relkind"] not in ("r", "p") or not r["compatible"] for r in rows):
+            return False
+    return True
 
 
 def _uuid(value):
@@ -306,10 +526,41 @@ class SqliteMissionRelayReader(IMissionRelayReader):
             signals=signals, qualifications=qualifications, outcomes=outcomes,
             claims=tuple(SqliteTrendRepository._read_claims_sync(conn, request.mission_id, include_superseded=True)),
         )
+        canonical = replace(evidence, signals=corpus) if full_frame else evidence
+        research = None
+        activities = ()
+        research_run_id = None
+        research_frame_digest = None
+        if _sqlite_research_available(conn):
+            if conn.execute(_RESEARCH_SCOPE_GUARD.format(parameter="?"), (mission_id,)).fetchone():
+                raise ValueError("Research work has incompatible canonical scope.")
+            current_run = conn.execute(
+                "SELECT id,workspace_id FROM mission_run_journals WHERE mission_id=? AND status='COMPLETED'"
+                " ORDER BY started_at DESC,sequence DESC LIMIT 1", (mission_id,),
+            ).fetchone()
+            if current_run and _uuid(current_run["workspace_id"]) != mission.workspace_id:
+                raise ValueError("Current research run has incompatible workspace scope.")
+            research_run_id = _uuid(current_run["id"]) if current_run else None
+            current_outcomes = outcomes if research_run_id == request.run_id else tuple(_outcome(r) for r in conn.execute(
+                "SELECT * FROM mission_probe_outcomes WHERE run_id=? ORDER BY connector_surface",
+                (str(research_run_id) if research_run_id else None,),
+            ))
+            research_canonical = replace(canonical, outcomes=current_outcomes)
+            research_frame_digest = _research_frame(research_canonical)
+            research = SqliteTrendRepository._decode_research_snapshot(conn, request.mission_id, canonical=research_canonical)
+            activities = tuple(ResearchActivityReceipt(
+                work_id=UUID(r["work_id"]), epoch=r["epoch"], ownership_fence=r["ownership_fence"],
+                execution_ref=r["execution_ref"], occurred_at=_time(r["occurred_at"]),
+                fresh_until=_time(r["fresh_until"]), provenance=r["provenance"],
+            ) for r in conn.execute(
+                "SELECT * FROM research_activity_receipts WHERE mission_id=? ORDER BY rowid", (mission_id,),
+            ))
         return MissionRelayRead(
             request=request, evidence=evidence, run=run, events=_event_page(conn, request),
+            research=research, research_activities=activities,
+            research_run_id=research_run_id, research_frame_digest=research_frame_digest,
             read_at=datetime.now(timezone.utc), total_observations=total, source_count=source_count,
-            frame_evidence=replace(evidence, signals=corpus) if full_frame else None,
+            frame_evidence=canonical if full_frame else None,
             latest_run_id=_uuid(latest["id"]) if (latest := conn.execute(
                 "SELECT id FROM mission_run_journals WHERE mission_id=? ORDER BY started_at DESC,sequence DESC LIMIT 1",
                 (mission_id,),
@@ -319,6 +570,23 @@ class SqliteMissionRelayReader(IMissionRelayReader):
 
 def _pg_uuid(value):
     return UUID(str(value)) if value is not None else None
+
+
+def _pg_outcome(row):
+    return MissionProbeOutcome(
+        outcome_id=_pg_uuid(row["id"]), run_id=_pg_uuid(row["run_id"]), platform=row["platform"],
+        connector_surface=row["connector_surface"], status=row["status"], signals_collected=row["signals_collected"],
+        query_fingerprint=row["query_fingerprint"], completed_at=row["completed_at"],
+        queried_keywords=tuple(row["queried_keywords"] or ()), queried_window=row["queried_window"],
+        scope_attestation=row["scope_attestation"], note=row["note"], collection_plan_digest=row["collection_plan_digest"],
+    )
+
+
+def _research_frame(canonical):
+    try:
+        return frame_from_snapshot(canonical).frame_digest
+    except InvalidMissionClaimError:
+        return None
 
 
 def _pg_event(row) -> MissionProgressEvent:
@@ -454,10 +722,41 @@ class PostgresMissionRelayReader(IMissionRelayReader):
             "SELECT id FROM mission_run_journals WHERE mission_id=%s ORDER BY started_at DESC,sequence DESC LIMIT 1",
             (mission_id,),
         )
+        canonical = replace(evidence, signals=corpus) if full_frame else evidence
+        research = None
+        activities = ()
+        research_run_id = None
+        research_frame_digest = None
+        if await _pg_research_available(conn):
+            if await _pg_fetch(conn, _RESEARCH_SCOPE_GUARD.format(parameter="%s"), (mission_id,)):
+                raise ValueError("Research work has incompatible canonical scope.")
+            current_run = await _pg_fetch(conn,
+                "SELECT id,workspace_id FROM mission_run_journals WHERE mission_id=%s AND status='COMPLETED'"
+                " ORDER BY started_at DESC,sequence DESC LIMIT 1", (mission_id,),
+            )
+            if current_run and _pg_uuid(current_run["workspace_id"]) != mission.workspace_id:
+                raise ValueError("Current research run has incompatible workspace scope.")
+            research_run_id = _pg_uuid(current_run["id"]) if current_run else None
+            current_outcomes = outcomes if research_run_id == request.run_id else tuple(_pg_outcome(r) for r in await _pg_fetch(conn,
+                "SELECT * FROM mission_probe_outcomes WHERE run_id=%s ORDER BY connector_surface", (research_run_id,), many=True,
+            ))
+            research_canonical = replace(canonical, outcomes=current_outcomes)
+            research_frame_digest = _research_frame(research_canonical)
+            research = await PostgresTimescaleRepository._decode_research_snapshot(conn, mission_id, canonical=research_canonical)
+            activities = tuple(ResearchActivityReceipt(
+                work_id=_pg_uuid(r["work_id"]), epoch=r["epoch"], ownership_fence=r["ownership_fence"],
+                execution_ref=r["execution_ref"], occurred_at=r["occurred_at"],
+                fresh_until=r["fresh_until"], provenance=r["provenance"],
+            ) for r in await _pg_fetch(conn,
+                "SELECT * FROM research_activity_receipts WHERE mission_id=%s ORDER BY occurred_at,receipt_id",
+                (mission_id,), many=True,
+            ))
         return MissionRelayRead(
             request=request, evidence=evidence, run=run, events=await PostgresMissionRelayReader._event_page(conn, request),
+            research=research, research_activities=activities,
+            research_run_id=research_run_id, research_frame_digest=research_frame_digest,
             read_at=datetime.now(timezone.utc), total_observations=total, source_count=source_count,
-            frame_evidence=replace(evidence, signals=corpus) if full_frame else None,
+            frame_evidence=canonical if full_frame else None,
             latest_run_id=_pg_uuid(latest["id"]) if latest is not None else None,
         )
 

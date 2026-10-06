@@ -7,6 +7,7 @@ serializers keep repository metadata and future unreviewed fields off the wire.
 import math
 import re
 from dataclasses import dataclass
+from ignis.domain.relay_research import RelayResearchView
 from datetime import datetime
 from enum import Enum
 from uuid import UUID
@@ -508,9 +509,15 @@ class MissionRelaySnapshot:
     channels: tuple[RelayChannelOutcome, ...] = ()
     collection_state: RelayCollectionState | None = None
     claim_gate: RelayClaimGate = RelayClaimGate()
+    research: RelayResearchView = RelayResearchView()
 
     def __post_init__(self) -> None:
         _read_identity(self.mission_id, self.run_id, self.high_water, self.read_at)
+        _require_type(self.research, RelayResearchView, "research")
+        if self.research.availability == 'AVAILABLE' and (
+            self.research.mission_id != self.mission_id or self.research.revision != self.high_water.revision
+        ):
+            raise ValueError("Research must share the selected mission high-water.")
         _require_type(self.claim_gate, RelayClaimGate, "claim_gate")
         if any(c.mission_id != self.mission_id for c in (*self.claim_gate.claims, *self.claim_gate.history)):
             raise ValueError("Ledger rows must retain selected mission identity.")
@@ -571,6 +578,7 @@ class MissionRelaySnapshot:
             "channels": [channel.to_payload() for channel in self.channels],
             "collection_state": self.collection_state.value if self.collection_state is not None else None,
             "claim_gate": self.claim_gate.to_payload(),
+            "research": self.research.to_payload(),
         }
 
 
