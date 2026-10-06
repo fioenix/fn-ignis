@@ -17,6 +17,8 @@ if not hasattr(mcp.shared.exceptions, "McpError") and hasattr(mcp.shared.excepti
     mcp.shared.exceptions.McpError = mcp.shared.exceptions.MCPError
 
 from fastmcp import Context, FastMCP
+from fastmcp.server.middleware import Middleware
+from fastmcp.tools.base import ToolResult
 
 from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
 from ignis.application.use_cases.create_market_revision import CreateMarketRevisionUseCase
@@ -135,14 +137,48 @@ The mission and Claim Ledger contracts, not this recipe, decide verdict eligibil
 """
 
 class _MissionRelayRuntime:
-    """Lazy read-only composition, owned by one FastMCP async lifespan."""
+    """Borrowed storage and viewer resources owned by one FastMCP async lifespan."""
 
-    def __init__(self):
+    def __init__(self, server: Optional[FastMCP] = None):
         self.owner_loop = asyncio.get_running_loop()
+        self.server = server
+        self.transport = Context(server).transport if server is not None else None
+        self._writes: set[asyncio.Task] = set()
         self.listener = None
         self.closed = False
         self._projection = None
         self._reads = None
+
+    async def record(self, mission_id: str, command: dict[str, Any]) -> dict[str, Any]:
+        from ignis.application.cancellation import await_settled
+        from ignis.application.use_cases.record_mission_research_work import RecordMissionResearchWorkUseCase
+        from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+        from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+        if self.closed or asyncio.get_running_loop() is not self.owner_loop:
+            return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
+        components = _COMPONENTS
+        repository = components.get("repository") if components is not None else None
+        owner = _COMPONENTS_OWNER
+        if owner is None or owner[0] is not components or owner[1] is not repository or owner[2] is not self.owner_loop:
+            return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
+        if isinstance(repository, SqliteTrendRepository):
+            ready = repository._initialized and (repository._db_path != ":memory:" or repository._mem_conn is not None)
+        elif isinstance(repository, PostgresTimescaleRepository):
+            ready = repository._pool is not None and not repository._pool.closed
+        else:
+            ready = False
+        if not ready:
+            return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
+        # Borrow only: the owner initializes and closes storage; recording never adopts it.
+        worker = asyncio.create_task(RecordMissionResearchWorkUseCase(repository).execute(
+            mission_id, command, host_authorized=True))
+        self._writes.add(worker)
+        async def join():
+            return await asyncio.shield(worker)
+        try:
+            return await await_settled(join())
+        finally:
+            self._writes.discard(worker)
 
     def read_service(self):
         if self.closed or asyncio.get_running_loop() is not self.owner_loop:
@@ -206,6 +242,8 @@ class _MissionRelayRuntime:
             resource.close()
         from ignis.application.cancellation import await_settled
         async def settle():
+            if self._writes:
+                await asyncio.gather(*tuple(self._writes), return_exceptions=True)
             for resource in resources:
                 if not await resource.wait_closed(timeout=None):
                     raise RuntimeError("Mission viewer reads did not settle during shutdown.")
@@ -214,7 +252,7 @@ class _MissionRelayRuntime:
 
 @asynccontextmanager
 async def _mission_relay_lifespan(server):
-    runtime = _MissionRelayRuntime()
+    runtime = _MissionRelayRuntime(server)
     try:
         yield {"mission_relay": runtime}
     finally:
@@ -224,6 +262,48 @@ async def _mission_relay_lifespan(server):
 # Initialize FastMCP Server with Non-Prescriptive Harness Instructions
 mcp = FastMCP("fn-ignis-social-market-research", instructions=HARNESS_SYSTEM_INSTRUCTIONS,
               lifespan=_mission_relay_lifespan)
+
+class _ResearchRecordingArguments(Middleware):
+    """Stop private argument values before framework validation can echo them."""
+
+    async def on_call_tool(self, context, call_next):
+        if context.message.name == "record_mission_research_work":
+            arguments = context.message.arguments
+            if (type(arguments) is not dict or set(arguments) != {"mission_id", "command"}
+                    or type(arguments["mission_id"]) is not str or type(arguments["command"]) is not dict):
+                from ignis.application.use_cases.record_mission_research_work import RecordMissionResearchWorkUseCase
+                return ToolResult(structured_content=RecordMissionResearchWorkUseCase._refused("INVALID_COMMAND"))
+        return await call_next(context)
+
+
+mcp.add_middleware(_ResearchRecordingArguments())
+
+
+@mcp.tool(name="record_mission_research_work", description="Record one explicit bounded research command through the local host session. Recording does not execute agents, invoke providers or collect sources; mission authority and exact revision, epoch and input bindings remain enforced.")
+async def record_mission_research_work(mission_id: str, command: dict[str, Any], ctx: Context) -> dict:
+    from ignis.application.use_cases.record_mission_research_work import RecordMissionResearchWorkUseCase
+    if type(ctx) is not Context:
+        return RecordMissionResearchWorkUseCase._refused("UNAUTHORIZED_HOST")
+    try:
+        from mcp.server.session import ServerSession
+        runtime = ctx.lifespan_context.get("mission_relay")
+        request = ctx.request_context
+        # Local client process/channel eligibility, never a claim of human identity or execution.
+        authorized = (
+            ctx.fastmcp is mcp and ctx.transport == "stdio"
+            and request is not None and isinstance(request.session, ServerSession)
+            and type(runtime) is _MissionRelayRuntime and runtime.server is mcp
+            and runtime.transport == "stdio"
+        )
+    except Exception:
+        authorized = False
+    if not authorized:
+        return RecordMissionResearchWorkUseCase._refused("UNAUTHORIZED_HOST")
+    try:
+        return await runtime.record(mission_id, command)
+    except Exception:
+        return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
+
 
 def _relay_failure(reason, unavailable=False):
     from ignis.domain.mission_relay import MissionRelayReadFailure, RelayReadStatus
@@ -534,11 +614,17 @@ def _init_components():
     }
 
 _COMPONENTS = None
+_COMPONENTS_OWNER = None
 
 def get_components():
-    global _COMPONENTS
+    global _COMPONENTS, _COMPONENTS_OWNER
     if _COMPONENTS is None:
         _COMPONENTS = _init_components()
+        try:
+            owner_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            owner_loop = None
+        _COMPONENTS_OWNER = (_COMPONENTS, _COMPONENTS.get("repository"), owner_loop)
     return _COMPONENTS
 
 

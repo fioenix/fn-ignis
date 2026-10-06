@@ -1,14 +1,14 @@
 # Host Research Work Contract
 
-**Status**: Additive MCP protocol design approved with the technical plan; not implemented and not a scheduler or provider integration.
+**Status**: Additive recording service and MCP tool implemented and independently verified locally through actual stdio and SQLite. Full PostgreSQL MCP-to-viewer integration and actual host UAT remain pending. This is not a scheduler or provider integration.
 
-`record_mission_research_work(mission_id, command)` accepts a typed discriminated command. All mutations require authorized host context, current expected revision/epoch, idempotency key and exact bounded mission scope. Unknown fields/operations are refused. The call records work; it never spawns a specialist, invokes a model, authenticates or collects.
+`record_mission_research_work(mission_id, command)` accepts a typed discriminated command. All mutations require eligible server-owned local host context, expected revision/epoch, idempotency key and exact bounded mission scope. New execution additionally requires current authority; exact prior-bound cessation and original receipt replay retain their separate admitted semantics. Unknown fields/operations are refused. The call records work; it never spawns a specialist, invokes a model, authenticates or collects.
 
 | Command | Required payload and effect |
 |---|---|
-| `ASSIGN_RESEARCH` | Explicit host task reference, finite authority envelope and declared capability; creates a new research assignment/epoch. No grant inferred from viewing or free-form analysis policy. |
-| `ASSIGN_WORK` | Assignment, question/expertise, known assignee, input bindings and dependencies; records bounded work. |
-| `START_WORK` | Work/version/fence, actual execution receipt and provenance; admits start under valid authority. |
+| `ASSIGN_RESEARCH` | Exactly `assignment_id`, `expected_manifest_digest`, `expected_brief_revision_id`, `host_task_ref`, `authority` and `capability`. Caller supplies stable identity and expected bindings; authority contains `actions`, `sources`, `deadline` and `quota_ceiling`. Creates ASSIGNED/version1 at locked high-water+1; never generates a new ID or recaptures bindings on retry. No grant inferred from viewing or free-form analysis policy. |
+| `ASSIGN_WORK` | Assignment, question/expertise, assignee when known, input bindings, dependencies and ownership fence; derives ASSIGNED/version1/run_id=None. |
+| `START_WORK` | Work/version/fence and host-reported execution/occurrence/freshness receipt; derives HOST_REPORTED provenance and admits recorded start under valid authority. |
 | `RECORD_ACTIVITY` | Work/fence, actual still-active receipt and finite freshness boundary; cannot revive a terminal work item. |
 | `WAIT_WORK` / `RESUME_WORK` | Exact state version and recorded waiting/resumption reason. Resume is separately checked against remaining authority. |
 | `SUBMIT_HANDOFF` | Version/fence, evidence/result references, limitations, open questions and optional finding revisions; commits result and lifecycle/event together. |
@@ -17,7 +17,13 @@
 | `REQUEST_CANCEL` / `ACK_STOP` | Distinct request and acknowledged-stop receipts; authority fenced immediately for new admissions. |
 | `END_RESEARCH` | Explicit assignment terminal disposition and epoch fence; no future child work without a new explicit assignment. |
 
-Command response includes applied/idempotent/refused disposition, immutable receipt/event references, current work/assignment version and safe reason. An identical retry returns the original disposition; changed payload under the same key is a conflict. Concurrent or obsolete results cannot overwrite current findings. Record a safe rejection reason rather than leaking rejected content.
+Command response includes APPLIED/REFUSED disposition, immutable receipt/event references, original recorded work/assignment version and safe reason, plus applied assignment/work/handoff identities when the submitted payload carries them. An identical retry returns the exact original receipt/disposition/time/events/versions, without a separate IDEMPOTENT disposition or fabricated current versions; changed payload under the same key is a conflict. Concurrent or obsolete results cannot overwrite current findings. Record a safe rejection reason rather than leaking rejected content.
+
+The command envelope contains exactly `operation`, `idempotency_key`, `expected_revision`, `expected_epoch` and `payload`; `mission_id` is a canonical UUID string. Existing commands bind their own assignment/work epoch, with an additional current-epoch requirement for new execution. Assignment/work creation derives its initial state/version, and activity derives its provenance. Expected versions and explicit terminal dispositions remain operation-specific typed fields. Caller `host_authorized` and handoff/finding `recorded_at` are not public fields. Submitted handoff occurrence may explicitly be unknown; observed transaction metadata is separate.
+
+Recording eligibility requires an injected Context for this exact server, live request/ServerSession, actual stdio transport, server-observed stdio lifespan and active owning loop. The initialized composition and repository must match the exact objects and creation loop retained by server composition. Unknown, in-memory, HTTP and SSE transports fail closed with UNAUTHORIZED_HOST. This is local single-client process/channel eligibility, not authenticated human identity or verified host execution. The handler borrows initialized owner storage and never calls lazy composition/bootstrap; finite stored assignment and canonical admission remain authoritative.
+
+Only exact built-in JSON primitives are accepted, with nonnegative signed64 integers, 1MiB UTF-8 serialized size, depth12 and existing per-field text/collection bounds. Lifecycle reasons must belong to existing SAFE_REASONS; acknowledgement reason is null or an existing safe code. A recording-only pre-handler middleware rejects unexpected top-level argument names or wrong str/dict primitive types before framework validation, returning safe INVALID_COMMAND without echoing input. Other tools are unchanged. Parse/context/storage failures return ephemeral refusals with receipt_id/revision null; adapter-admitted audit refusals retain their original safe durable receipt. No raw command, rejected content or driver exception is returned.
 
 Host-provided identity, start time or capability is `HOST_REPORTED`, not independently verified execution. Harness-recorded transaction facts are `HARNESS_OBSERVED`. Actual host agent delegation and overlapping execution must be demonstrated separately in SC-012; two fabricated start commands do not satisfy it. Sequential capability is honestly rendered as sequential work.
 
