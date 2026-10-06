@@ -28,8 +28,56 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-EXPECTED_TOOL_COUNT = 44
-REQUIRED_RESET_TOOLS = {"create_attention_mission", "confirm_market_brief", "submit_mission_claims", "get_mission_claims"}
+EXPECTED_TOOL_COUNT = 47
+EXPECTED_TOOL_NAMES = {
+    "authenticate_instagram",
+    "authenticate_threads",
+    "authenticate_tiktok",
+    "cancel_host_browser_search",
+    "clear_instagram_auth",
+    "clear_platform_auth",
+    "clear_threads_auth",
+    "confirm_market_brief",
+    "confirm_research_workspace",
+    "create_attention_mission",
+    "diagnose_system_health",
+    "discover_market_opportunities",
+    "evaluate_mission_quality",
+    "execute_mission_ingress",
+    "extract_customer_pain_points",
+    "generate_mission_artifact",
+    "get_current_session_mission",
+    "get_instagram_auth_status",
+    "get_mission_analysis",
+    "get_mission_claims",
+    "get_mission_evidence_qualification_batch",
+    "get_mission_relay_snapshot",
+    "get_platform_auth_status",
+    "get_runtime_config",
+    "get_system_logs",
+    "get_threads_auth_status",
+    "get_threads_search_suggestions",
+    "get_threads_trending_topics",
+    "get_tiktok_creative_center_trends",
+    "get_tiktok_search_suggestions",
+    "get_tiktok_video_comments",
+    "list_domain_lexicons",
+    "list_research_missions",
+    "list_research_workspaces",
+    "open_mission_relay",
+    "prepare_host_browser_search",
+    "propose_research_workspace",
+    "record_mission_research_work",
+    "refresh_runtime_config_cache",
+    "register_domain_lexicon",
+    "register_noise_blacklist",
+    "release_mission_writer",
+    "submit_host_browser_search",
+    "submit_mission_claims",
+    "submit_mission_evidence_qualifications",
+    "update_runtime_config",
+    "verify_connectors_health",
+}
 REMOVED_RESET_TOOLS = {
     "create_research_mission", "run_autonomous_research_mission", "get_trending_topics",
     "get_topic_detail", "generate_trend_artifact", "trigger_ingress_refresh",
@@ -432,7 +480,7 @@ def test_a_client_can_handshake_discover_and_call(bootstrapped):
             f"expected {EXPECTED_TOOL_COUNT} tools, discovered {len(tools)}"
         )
         names = {tool["name"] for tool in tools}
-        assert REQUIRED_RESET_TOOLS <= names
+        assert names == EXPECTED_TOOL_NAMES
         assert names.isdisjoint(REMOVED_RESET_TOOLS)
 
         called = session.request(
@@ -455,16 +503,18 @@ def test_two_clients_share_the_fresh_install(bootstrapped):
     first = StdioSession(bootstrapped["checkout"], bootstrapped["home"], "first")
     try:
         first.initialize()
-        assert len(first.request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]) == (
-            EXPECTED_TOOL_COUNT
-        )
+        first_tools = first.request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
+        assert len(first_tools) == EXPECTED_TOOL_COUNT
+        assert {tool["name"] for tool in first_tools} == EXPECTED_TOOL_NAMES
 
         second = StdioSession(bootstrapped["checkout"], bootstrapped["home"], "second")
         try:
             second.initialize()
-            assert len(
-                second.request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
-            ) == EXPECTED_TOOL_COUNT
+            second_tools = second.request(
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+            )["result"]["tools"]
+            assert len(second_tools) == EXPECTED_TOOL_COUNT
+            assert {tool["name"] for tool in second_tools} == EXPECTED_TOOL_NAMES
 
             assert first.is_running(), (
                 "the first client's server died when a second client connected; exit code"

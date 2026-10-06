@@ -12,10 +12,12 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/027_mission_progress.sql`. Migration 027 adds only
+The source migration chain ends at `sql/028_research_work.sql`. Migration 028 adds bounded host research-work storage
+and progress-event kinds without transforming persisted evidence. Migration 027 adds only
 PostgreSQL revision, progress-event, and command-receipt tables, preserving canonical evidence.
 SQLite and PostgreSQL commit collection, qualification and claim facts together with matching
-progress events. The read-only Relay viewer is not implemented yet. Migration 026
+progress events. Relay provides a finite read-only local viewer and bounded snapshots of installed mission storage.
+Migration 026
 changes only the count CHECK and retains partial DEGRADED observations without treating them
 as complete measurements or measured absence. Fresh local
 SQLite initialization has been exercised. Disposable PostgreSQL rehearsal does not verify an
@@ -77,9 +79,18 @@ runtime output goes to gitignored `reports/` in a source checkout, or `~/.ignis/
 when running an installed package (with a temporary-directory fallback if needed). Templates live in
 `src/ignis/infrastructure/templates/html/`.
 
+### Mission Relay on the development branch
+
+Use `get_mission_relay_snapshot` for a bounded snapshot of the selected mission and optional run.
+Use `open_mission_relay` with an explicit UTC expiry to open a read-only localhost viewer.
+These reads validate installed storage without bootstrapping a database or starting collectors.
+`record_mission_research_work` records an explicit bounded host command through the local stdio
+session, enforcing mission authority and exact revision, epoch and input bindings. Recording
+does not execute agents, invoke providers or collect sources.
+
 ## 4. Tool and deployment boundaries
 
-The local MCP server exposes **44 tools**. Discover the running server's descriptions for exact
+The local MCP server exposes **47 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
 The published OCI manifest is still v0.7.0, so neither it nor a public-image smoke test
 establishes that Spec 011 shipped. PyPI installation is not advertised. Run the branch's

@@ -31,12 +31,55 @@ import sys
 import threading
 from dataclasses import dataclass
 
-EXPECTED_TOOL_COUNT = 44
-REQUIRED_RESET_TOOLS = {"create_attention_mission", "confirm_market_brief", "submit_mission_claims", "get_mission_claims"}
-REMOVED_RESET_TOOLS = {
-    "create_research_mission", "run_autonomous_research_mission", "get_trending_topics",
-    "get_topic_detail", "generate_trend_artifact", "trigger_ingress_refresh",
-    "trigger_autonomous_discovery", "get_latest_daily_discovery",
+EXPECTED_TOOL_COUNT = 47
+EXPECTED_TOOL_NAMES = {
+    "authenticate_instagram",
+    "authenticate_threads",
+    "authenticate_tiktok",
+    "cancel_host_browser_search",
+    "clear_instagram_auth",
+    "clear_platform_auth",
+    "clear_threads_auth",
+    "confirm_market_brief",
+    "confirm_research_workspace",
+    "create_attention_mission",
+    "diagnose_system_health",
+    "discover_market_opportunities",
+    "evaluate_mission_quality",
+    "execute_mission_ingress",
+    "extract_customer_pain_points",
+    "generate_mission_artifact",
+    "get_current_session_mission",
+    "get_instagram_auth_status",
+    "get_mission_analysis",
+    "get_mission_claims",
+    "get_mission_evidence_qualification_batch",
+    "get_mission_relay_snapshot",
+    "get_platform_auth_status",
+    "get_runtime_config",
+    "get_system_logs",
+    "get_threads_auth_status",
+    "get_threads_search_suggestions",
+    "get_threads_trending_topics",
+    "get_tiktok_creative_center_trends",
+    "get_tiktok_search_suggestions",
+    "get_tiktok_video_comments",
+    "list_domain_lexicons",
+    "list_research_missions",
+    "list_research_workspaces",
+    "open_mission_relay",
+    "prepare_host_browser_search",
+    "propose_research_workspace",
+    "record_mission_research_work",
+    "refresh_runtime_config_cache",
+    "register_domain_lexicon",
+    "register_noise_blacklist",
+    "release_mission_writer",
+    "submit_host_browser_search",
+    "submit_mission_claims",
+    "submit_mission_evidence_qualifications",
+    "update_runtime_config",
+    "verify_connectors_health",
 }
 PROTOCOL_VERSION = "2024-11-05"
 RESPONSE_TIMEOUT_SECONDS = 120.0
@@ -197,8 +240,8 @@ def run_smoke(
             raise SmokeFailure(f"expected {expected_tools} tools, discovered {len(tools)}")
         if expected_tools == EXPECTED_TOOL_COUNT:
             names = {tool.get("name") for tool in tools}
-            missing = REQUIRED_RESET_TOOLS - names
-            retained = REMOVED_RESET_TOOLS & names
+            missing = EXPECTED_TOOL_NAMES - names
+            retained = names - EXPECTED_TOOL_NAMES
             if missing or retained:
                 raise SmokeFailure(
                     f"mission-bound catalog mismatch: missing {sorted(missing)}, retained {sorted(retained)}"

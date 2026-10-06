@@ -276,7 +276,7 @@ Every AI Agent modifying this repository or preparing a release must verify comp
 
 ### Checklist B: Harness Autonomy & Non-Prescriptive Decoupling
 - [ ] **Non-Prescriptive Instructions**: Verify FastMCP server instructions and tool docstrings do NOT coerce agents into forced pipelines (no "MUST STRICTLY FOLLOW").
-- [ ] **Atomic Independence**: Ensure all 44 FastMCP tools are independently callable within their authority and evidence contracts.
+- [ ] **Atomic Independence**: Ensure all 47 FastMCP tools are independently callable within their authority and evidence contracts.
 - [ ] **Framework Separation**: The strategic research recipe is a reference, never a forced pipeline for tactical collection.
 - [ ] **Contextual Deliverables**: Deliverables match user intent (concise text, cards, tables, or full HTML dashboards) without forcing boilerplate templates for trivial queries.
 

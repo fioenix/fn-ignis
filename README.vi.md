@@ -7,7 +7,7 @@ lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân t
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
 **Ranh giới phát hành:** Nhánh này đang triển khai Spec 011 và chưa được phát hành. Mã nguồn
-và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 44 tool theo
+và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 47 tool theo
 nhiệm vụ được mô tả ở đây. Không dùng image đã phát hành để kiểm chứng nhánh này.
 
 ## Hợp đồng sản phẩm
@@ -32,10 +32,12 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/027_mission_progress.sql`. Migration 027 chỉ bổ sung
-các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
+Cây mã nguồn hiện có migration tới `sql/028_research_work.sql`. Migration 028 bổ sung các bảng lưu hoạt động nghiên cứu
+của host trong phạm vi được duyệt và các loại sự kiện tiến độ, không chuyển đổi dữ liệu bằng chứng đã lưu.
+Migration 027 chỉ bổ sung các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
 chuẩn được giữ nguyên. SQLite và PostgreSQL hiện ghi dữ kiện thu thập, qualification và claim cùng sự kiện tiến độ
-tương ứng trong một giao dịch. Viewer Relay chỉ đọc chưa được triển khai. Migration 026 chỉ sửa constraint số quan sát; kết quả DEGRADED
+tương ứng trong một giao dịch. Relay cung cấp giao diện chỉ đọc cục bộ có thời hạn và snapshot giới hạn từ dữ liệu nhiệm vụ đã khởi tạo.
+Migration 026 chỉ sửa constraint số quan sát; kết quả DEGRADED
 vẫn không phải phép đo hoàn chỉnh. Khởi tạo
 SQLite mới đã được kiểm tra cục bộ; rehearsal PostgreSQL tạm không xác minh database hiện hữu
 của người vận hành.
@@ -56,7 +58,7 @@ chỉ nằm tại `src/ignis/infrastructure/templates/html/`.
 
 ## Năng lực dành cho agent
 
-MCP server của nhánh hiện có **44 tools**. Mô tả tool do server đang chạy trả về là nguồn
+MCP server của nhánh hiện có **47 tools**. Mô tả tool do server đang chạy trả về là nguồn
 chuẩn cho tham số. Một số thao tác đại diện:
 
 - `create_attention_mission` và `confirm_market_brief` xác lập câu hỏi và phạm vi;
@@ -72,6 +74,10 @@ chuẩn cho tham số. Một số thao tác đại diện:
 - `submit_mission_claims`, `get_mission_claims` và `get_mission_analysis` kiểm soát
   nhận định còn hiệu lực và báo cáo khoảng trống. `generate_mission_artifact` xuất HTML khi
   người dùng yêu cầu.
+- `get_mission_relay_snapshot` đọc snapshot giới hạn của nhiệm vụ được chọn;
+  `open_mission_relay` mở giao diện chỉ đọc trên localhost với thời hạn UTC được chỉ định.
+- `record_mission_research_work` ghi lệnh có phạm vi của host, kiểm tra quyền của nhiệm vụ,
+  revision, epoch và dữ liệu đầu vào. Việc ghi lệnh không chạy agent, gọi provider hay thu thập nguồn.
 
 Hướng dẫn agent nằm trong [AGENTS.md](AGENTS.md); hai skill
 [thu thập](.agents/skills/ignis-collect/SKILL.md) và
