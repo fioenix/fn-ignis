@@ -764,6 +764,198 @@ def _set_visible(page, visible):
     }""", visible)
 
 
+def _install_lifecycle_probe(viewer):
+    """Observe native fetch and CSS movement; sampler callbacks are not product motion."""
+    viewer.context.add_init_script("""(() => {
+        const probe = window.lifecycleProbe = {
+            fetches: [], sampledFrames: 0, movingFrames: 0, holdJson: false, pending: []
+        };
+        const nativeFetch = window.fetch.bind(window);
+        window.fetch = async (...args) => {
+            probe.fetches.push({url: String(args[0]), method: args[1]?.method || 'GET'});
+            const response = await nativeFetch(...args);
+            if (probe.holdJson && String(args[0]).startsWith('snapshot?')) {
+                const json = response.json.bind(response);
+                response.json = async () => {
+                    const data = await json();
+                    // A delivered response body can settle after AbortSignal fires.
+                    return new Promise(resolve => probe.pending.push(() => resolve(data)));
+                };
+            }
+            return response;
+        };
+        const previous = new WeakMap();
+        function sample() {
+            probe.sampledFrames += 1;
+            let moved = false;
+            for (const animation of document.getAnimations()) {
+                const target = animation.effect?.target;
+                if (!target?.isConnected || animation.playState !== 'running') continue;
+                const style = getComputedStyle(target);
+                const value = style.transform + ':' + style.opacity;
+                if (previous.has(target) && previous.get(target) !== value) moved = true;
+                previous.set(target, value);
+            }
+            if (moved) probe.movingFrames += 1;
+            requestAnimationFrame(sample);
+        }
+        requestAnimationFrame(sample);
+    })();""")
+
+
+def _lifecycle_counters(viewer):
+    return viewer.page.evaluate("""() => ({
+        reads: lifecycleProbe.fetches.length,
+        frames: lifecycleProbe.sampledFrames,
+        moving: lifecycleProbe.movingFrames
+    })""")
+
+
+def _assert_lifecycle_reads_only(viewer):
+    calls = viewer.page.evaluate('lifecycleProbe.fetches')
+    assert calls, 'The positive control must exercise native viewer fetch.'
+    assert all(call['method'] == 'GET' and call['url'].startswith('snapshot?') for call in calls), \
+        'Viewer lifecycle controls must not start, cancel or repeat mission work.'
+    assert not viewer.unexpected
+
+
+def _freeze_lifecycle(viewer, boundary):
+    if boundary == 'refresh-pause':
+        viewer.page.get_by_role('button', name='Pause refresh', exact=True).click()
+    elif boundary == 'hidden':
+        _set_visible(viewer.page, False)
+    elif boundary == 'closed':
+        # Keep the document inspectable to test pagehide cleanup and late delivery.
+        viewer.page.evaluate("window.dispatchEvent(new PageTransitionEvent('pagehide'))")
+    elif boundary == 'expired':
+        remaining = viewer.page.evaluate("Date.parse(document.querySelector('main').dataset.expiresAt) - Date.now()")
+        viewer.page.clock.run_for(max(0, int(remaining)) + 1)
+    else:
+        raise AssertionError('Unknown lifecycle boundary')
+
+
+def test_t059_motion_pause_stops_measured_movement_but_keeps_native_refresh(installed_browser):
+    """Catch coupling motion pause to reads, surviving CSS motion or historical replay."""
+    viewer = FixtureViewer(installed_browser, _snapshot())
+    _install_lifecycle_probe(viewer)
+    try:
+        viewer.open()
+        first, second, third = (_observation(number) for number in (1, 2, 3))
+        events = tuple(_event(number, (row,)) for number, row in enumerate((first, second, third), 1))
+        viewer.refresh(_snapshot((first,), events[:1]))
+        viewer.page.wait_for_function('lifecycleProbe.movingFrames >= 2')
+        viewer.page.get_by_role('button', name='Pause motion', exact=True).click()
+        before = _lifecycle_counters(viewer)
+        viewer.page.wait_for_timeout(120)
+        assert _lifecycle_counters(viewer)['moving'] == before['moving'], 'Motion pause left the active packet moving.'
+        viewer.responses.append(_snapshot((first, second), events[:2]))
+        viewer.page.clock.run_for(2100)
+        viewer.page.wait_for_timeout(120)
+        after = _lifecycle_counters(viewer)
+        assert after['reads'] == before['reads'] + 1, 'Motion pause suppressed authorized refresh.'
+        assert not viewer.responses, 'Authorized refresh did not consume the next snapshot.'
+        assert after['frames'] > before['frames'], 'The frame observer stopped sampling.'
+        assert after['moving'] == before['moving'], 'Motion continued while motion was paused.'
+        viewer.counts(2, 1)
+        assert len(viewer.packets) == 1, 'Paused motion created a new moving packet.'
+        viewer.page.get_by_role('button', name='Resume motion', exact=True).click()
+        viewer.refresh(_snapshot((first, second, third), events))
+        viewer.page.wait_for_function('minimum => lifecycleProbe.movingFrames > minimum', arg=before['moving'])
+        assert [packet['event'] for packet in viewer.packets] == [str(events[0].event_id), str(events[2].event_id)]
+        viewer.counts(3, 1)
+        _assert_lifecycle_reads_only(viewer)
+    finally:
+        viewer.close()
+
+
+def test_t059_physical_page_close_admits_no_subsequent_native_fetch(installed_browser):
+    """Physical teardown companion; inspectable pagehide tests measure motion and late UI."""
+    viewer = FixtureViewer(installed_browser, _snapshot())
+    _install_lifecycle_probe(viewer)
+    try:
+        viewer.open()
+        row = _observation()
+        viewer.refresh(_snapshot((row,), (_event(observations=(row,)),)))
+        viewer.page.wait_for_function('lifecycleProbe.movingFrames >= 2')
+        _assert_lifecycle_reads_only(viewer)
+        viewer.page.close()
+        before = len(viewer.requests)
+        assert viewer.page.is_closed()
+        sentinel = viewer.context.new_page()
+        sentinel.wait_for_timeout(2300)
+        assert len(viewer.requests) == before, 'Closed document performed a subsequent read.'
+        assert not viewer.unexpected
+    finally:
+        viewer.close()
+
+
+@pytest.mark.parametrize('boundary', ('refresh-pause', 'hidden', 'closed', 'expired'))
+def test_t059_freeze_stops_measured_active_motion_and_automatic_fetches(installed_browser, boundary):
+    """Catch lifecycle cleanup that stops labels but leaves reads or CSS motion running."""
+    viewer = FixtureViewer(installed_browser, _snapshot())
+    viewer.document = _render(_snapshot(), expires_at=NOW + timedelta(seconds=3))
+    _install_lifecycle_probe(viewer)
+    try:
+        viewer.open()
+        row = _observation()
+        viewer.refresh(_snapshot((row,), (_event(observations=(row,)),)))
+        viewer.page.wait_for_function('lifecycleProbe.movingFrames >= 2')
+        _freeze_lifecycle(viewer, boundary)
+        before = _lifecycle_counters(viewer)
+        viewer.page.wait_for_timeout(120)
+        assert _lifecycle_counters(viewer)['moving'] == before['moving'], f'{boundary} left an active animation.'
+        viewer.page.clock.run_for(6000)
+        viewer.page.wait_for_timeout(120)
+        after = _lifecycle_counters(viewer)
+        assert after['reads'] == before['reads'], f'{boundary} admitted a new automatic read.'
+        assert after['frames'] > before['frames'], 'The frame observer stopped sampling.'
+        assert after['moving'] == before['moving'], f'{boundary} retained continuous motion.'
+        assert viewer.page.get_by_test_id('relay-packet').count() == 0
+        viewer.counts(1, 1)
+        _assert_lifecycle_reads_only(viewer)
+    finally:
+        viewer.close()
+
+
+@pytest.mark.parametrize('boundary', ('none', 'refresh-pause', 'hidden', 'closed', 'expired'))
+def test_t059_admitted_late_json_cannot_update_frozen_view(installed_browser, boundary):
+    """Catch delivery after suspension; an abort-only fake cannot satisfy this control."""
+    viewer = FixtureViewer(installed_browser, _snapshot())
+    viewer.document = _render(_snapshot(), expires_at=NOW + timedelta(seconds=3))
+    _install_lifecycle_probe(viewer)
+    try:
+        viewer.open()
+        row = _observation()
+        viewer.responses.append(_snapshot((row,), (_event(observations=(row,)),)))
+        viewer.page.evaluate('lifecycleProbe.holdJson = true')
+        viewer.page.clock.run_for(2001)
+        viewer.page.wait_for_function('lifecycleProbe.pending.length === 1')
+        assert _lifecycle_counters(viewer)['reads'] == 1
+        assert len([path for method, path in viewer.requests if path.endswith('/snapshot')]) == 1
+        viewer.counts(0, 0)
+        if boundary != 'none':
+            _freeze_lifecycle(viewer, boundary)
+        frozen = viewer.page.locator('main').inner_text()
+        before = _lifecycle_counters(viewer)
+        viewer.page.evaluate('lifecycleProbe.pending.shift()()')
+        viewer.page.wait_for_timeout(120)
+        if boundary == 'none':
+            viewer.counts(1, 1)
+            viewer.page.wait_for_function('lifecycleProbe.movingFrames >= 2')
+            assert viewer.page.locator('main').inner_text() != frozen
+        else:
+            assert viewer.page.locator('main').inner_text() == frozen, f'{boundary} accepted late response UI.'
+            viewer.page.clock.run_for(6000)
+            viewer.page.wait_for_timeout(120)
+            after = _lifecycle_counters(viewer)
+            assert after['reads'] == before['reads'], f'{boundary} restarted reads after late settlement.'
+            assert after['moving'] == before['moving'], f'{boundary} animated a late response.'
+            viewer.counts(0, 0)
+        _assert_lifecycle_reads_only(viewer)
+    finally:
+        viewer.close()
+
+
 def test_refresh_hidden_and_paused_boundaries_admit_no_automatic_reads(installed_browser):
     """Fixture visibility signal only; actual host/browser visibility UAT stays separate."""
     from playwright.sync_api import expect
