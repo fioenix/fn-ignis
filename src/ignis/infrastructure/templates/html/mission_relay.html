@@ -170,6 +170,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
       item.dataset.observationId = row.observation_id;
       const button = node('button', row.title);
       button.type = 'button';
+      button.dataset.evidenceFocus = `${row.observation_id}:${row.source_id}`;
       button.addEventListener('click', () => inspectObservation(row));
       item.append(button, node('p', `${row.observation_id} · ${row.source_id} · ${row.evidence_role} · ${unknown(row.direction)} · ${unknown(row.qualification_relation)}`, 'identity'));
       list.append(item);
@@ -177,11 +178,18 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     if (!rows.length) list.append(node('li', 'No observations on this page; missing coverage remains Unknown.'));
     output.append(list);
   }
+  function restoreEvidenceFocus(root, identity) {
+    if (!identity) return;
+    // Restore only the surviving canonical identity, never a title or cached record.
+    const button = [...root.querySelectorAll('button[data-evidence-focus]')].find(button => button.dataset.evidenceFocus === identity);
+    if (button) button.focus({preventScroll: true});
+  }
   function selectStage(name) {
     // Only presentation state survives refresh; canonical records always come from snapshot.
     const oldDetails = name === 'Research' && selectedStage === name ? [...inspector.querySelectorAll('details[data-research-detail]')] : [];
     const expanded = new Set(oldDetails.filter(detail => detail.open).map(detail => detail.dataset.researchDetail));
     const focused = oldDetails.find(detail => detail.querySelector('summary') === document.activeElement)?.dataset.researchDetail;
+    const focusedEvidence = inspector.contains(document.activeElement) ? document.activeElement.dataset.evidenceFocus : null;
     stopInspection();
     selectedStage = name;
     for (const button of document.querySelectorAll('[data-stage]')) button.setAttribute('aria-pressed', String(button.dataset.stage === name));
@@ -239,6 +247,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
       detail.open = expanded.has(detail.dataset.researchDetail);
       if (detail.dataset.researchDetail === focused) detail.querySelector('summary').focus({preventScroll: true});
     }
+    restoreEvidenceFocus(inspector, focusedEvidence);
   }
   function showResearch(output) {
     const research = snapshot.research;
@@ -410,6 +419,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     }
   }
   function renderTimeline() {
+    const focusedEvidence = timeline.contains(document.activeElement) ? document.activeElement.dataset.evidenceFocus : null;
     timeline.replaceChildren();
     const rows = new Map(snapshot.evidence.map(row => [row.observation_id, row]));
     for (const event of recentEvents.values()) {
@@ -426,6 +436,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
         const row = rows.get(reference.observation_id);
         const button = node('button', row ? row.title : `Observation ${reference.observation_id} — not on this evidence page`);
         button.type = 'button';
+        button.dataset.evidenceFocus = `${event.event_id}:${reference.observation_id}:${reference.source_id}`;
         button.disabled = !row;
         if (row) button.addEventListener('click', () => inspectObservation(row));
         ref.append(button, node('p', `${reference.source_id} · ${reference.evidence_role} · ${unknown(reference.direction)} · ${unknown(reference.qualification_relation)}`, 'identity'));
@@ -436,6 +447,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
       item.append(references);
       timeline.append(item);
     }
+    restoreEvidenceFocus(timeline, focusedEvidence);
   }
   const stateLabel = document.querySelector('[data-testid="snapshot-state"]');
   const arrivals = document.querySelector('[data-testid="arrivals"]');

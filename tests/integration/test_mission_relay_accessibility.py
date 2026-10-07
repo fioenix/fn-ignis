@@ -235,3 +235,67 @@ def test_blocked_external_resources_keep_exact_facts_and_keyboard_inspection(ins
         _assert_read_only(viewer)
     finally:
         viewer.close()
+
+
+def test_timeline_refresh_preserves_keyboard_focus_on_exact_recorded_reference(installed_browser):
+    first, second = browser._observation(), browser._observation(2)
+    events = (browser._event(1, (first,)), browser._event(2, (second,)))
+    viewer = browser.FixtureViewer(installed_browser, browser._snapshot((first,), events[:1]))
+    _keyboard_probe(viewer)
+    try:
+        viewer.open()
+        selected = browser._event_row(viewer.page, events[0]).get_by_role('button', name=first.title, exact=True)
+        _tab_to(viewer.page, selected)
+        _assert_visible_focus(selected)
+        viewer.refresh(browser._snapshot((first, second), events))
+        viewer.counts(2, 1)
+        assert selected.evaluate('node => node === document.activeElement'), 'Refresh lost keyboard focus on the exact timeline reference.'
+        _assert_visible_focus(selected)
+        _assert_read_only(viewer)
+    finally:
+        viewer.close()
+
+
+def test_refresh_does_not_restore_focus_to_a_different_record_with_the_same_title(installed_browser):
+    first = browser._observation()
+    replacement = browser._observation(2, title=first.title)
+    viewer = browser.FixtureViewer(installed_browser, browser._snapshot((first,)))
+    _keyboard_probe(viewer)
+    try:
+        viewer.open()
+        selected = viewer.page.get_by_test_id('stage-inspector').get_by_role('button', name=first.title, exact=True)
+        _tab_to(viewer.page, selected)
+        _assert_visible_focus(selected)
+        viewer.refresh(browser._snapshot((replacement,), (browser._event(observations=(replacement,)),)))
+        viewer.counts(1, 1)
+        assert viewer.page.get_by_test_id('stage-inspector').locator(f'[data-observation-id="{first.observation_id}"]').count() == 0
+        assert not selected.evaluate('node => node === document.activeElement'), 'Refresh transferred focus to a different evidence identity.'
+        _assert_read_only(viewer)
+    finally:
+        viewer.close()
+
+
+def test_late_refresh_preserves_new_keyboard_focus_instead_of_the_request_start_target(installed_browser):
+    first, second = browser._observation(), browser._observation(2)
+    viewer = browser.FixtureViewer(installed_browser, browser._snapshot((first,)))
+    browser._install_lifecycle_probe(viewer)
+    _keyboard_probe(viewer)
+    try:
+        viewer.open()
+        selected = viewer.page.get_by_role('button', name=first.title, exact=True)
+        _tab_to(viewer.page, selected)
+        _assert_visible_focus(selected)
+        viewer.responses.append(browser._snapshot((first, second), (browser._event(observations=(second,)),)))
+        viewer.page.evaluate('lifecycleProbe.holdJson = true')
+        viewer.page.clock.run_for(2001)
+        viewer.page.wait_for_function('lifecycleProbe.pending.length === 1')
+        moved = viewer.page.get_by_role('button', name='Pause motion', exact=True)
+        _tab_to(viewer.page, moved)
+        _assert_visible_focus(moved)
+        viewer.page.evaluate('lifecycleProbe.pending.shift()()')
+        viewer.counts(2, 1)
+        assert moved.evaluate('node => node === document.activeElement'), 'Settled refresh stole the newer keyboard focus.'
+        _assert_visible_focus(moved)
+        _assert_read_only(viewer)
+    finally:
+        viewer.close()
