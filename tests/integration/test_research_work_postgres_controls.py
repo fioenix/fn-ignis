@@ -288,23 +288,28 @@ async def test_postgres_loader_is_held_readonly_repeatable_read_and_never_bootst
     case, mission, _, _, _, _, _ = await _arrange(relay_case, tmp_path)
     before = _state(case)
     original = case.repository._research_snapshot
+    checked_reads = []
 
-    async def checked(conn, mission_id):
+    async def checked(conn, mission_id, **kwargs):
+        checked_reads.append(mission_id)
         assert conn.info.transaction_status == psycopg.pq.TransactionStatus.INTRANS
         async with conn.cursor() as cur:
             await cur.execute("SHOW transaction_isolation")
             assert (await cur.fetchone())[0] == "repeatable read"
             await cur.execute("SHOW transaction_read_only")
             assert (await cur.fetchone())[0] == "on"
-        return await original(conn, mission_id)
+        return await original(conn, mission_id, **kwargs)
 
     monkeypatch.setattr(case.repository, "_research_snapshot", checked)
-    await case.repository.load_research_work(mission.id)
+    loaded = await case.repository.load_research_work(mission.id)
+    assert loaded.mission_id == mission.id
+    assert checked_reads == [mission.id]
     assert _state(case) == before
     with psycopg.connect(case.dsn) as conn:
         conn.execute("DROP TABLE research_work_commands")
     missing = _state(case)
     await case.repository.load_research_work(mission.id)
+    assert checked_reads == [mission.id, mission.id]
     assert _state(case) == missing and "research_work_commands" not in missing[1]
 
 
