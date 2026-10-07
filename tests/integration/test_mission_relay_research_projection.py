@@ -170,13 +170,13 @@ async def test_decoder_reuses_exact_acquired_corpus_without_bootstrap_or_second_
     decoder = cls._decode_research_snapshot
     canonical_bundles = []
     if case.name == 'postgres':
-        async def observed(conn, identity, *, canonical):
+        async def observed(conn, identity, *, canonical, **kwargs):
             canonical_bundles.append(canonical)
-            return await decoder(conn, identity, canonical=canonical)
+            return await decoder(conn, identity, canonical=canonical, **kwargs)
     else:
-        def observed(conn, identity, *, canonical):
+        def observed(conn, identity, *, canonical, **kwargs):
             canonical_bundles.append(canonical)
-            return decoder(conn, identity, canonical=canonical)
+            return decoder(conn, identity, canonical=canonical, **kwargs)
     monkeypatch.setattr(cls, '_decode_research_snapshot', staticmethod(observed))
     def forbidden(*args, **kwargs):
         raise AssertionError('Viewer must not bootstrap or load a second repository/corpus.')
@@ -254,21 +254,21 @@ async def test_real_heartbeat_between_canonical_and_research_reads_cannot_mix_sn
     loop = asyncio.get_running_loop()
     held = False
     if case.name == 'postgres':
-        async def observed(conn, identity, *, canonical):
+        async def observed(conn, identity, *, canonical, **kwargs):
             nonlocal held
             if not held:
                 held = True
                 entered.set()
                 await release.wait()
-            return await decoder(conn, identity, canonical=canonical)
+            return await decoder(conn, identity, canonical=canonical, **kwargs)
     else:
-        def observed(conn, identity, *, canonical):
+        def observed(conn, identity, *, canonical, **kwargs):
             nonlocal held
             if not held:
                 held = True
                 loop.call_soon_threadsafe(entered.set)
                 assert thread_release.wait(5), 'Pinned reader was not released.'
-            return decoder(conn, identity, canonical=canonical)
+            return decoder(conn, identity, canonical=canonical, **kwargs)
     monkeypatch.setattr(cls, '_decode_research_snapshot', staticmethod(observed))
     task = asyncio.create_task(_reader(case.repository).load_snapshot(_request(mission, None)))
     try:
