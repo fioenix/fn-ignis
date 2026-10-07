@@ -7,11 +7,13 @@ import psycopg
 import pytest
 
 from tests.integration.test_mission_relay_read_boundary import (
-    NOW, _reader, _request, relay_case, _observe_sqlite, _observe_postgres,
+    NOW, _reader, _request, relay_case as _relay_case, _observe_sqlite, _observe_postgres,
 )
 from tests.integration.test_research_work_persistence import _arrange, _commit
+
 from ignis.application.use_cases.record_mission_research_work import RecordMissionResearchWorkUseCase
 
+relay_case = _relay_case
 
 async def _grow(case, mission, work, revision, activity_history):
     def write(conn, placeholder):
