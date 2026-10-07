@@ -28,6 +28,9 @@ EXPECTED_TOOLS = {
     "get_current_session_mission",
     "get_instagram_auth_status",
     "get_mission_analysis",
+    "get_mission_relay_snapshot",
+    "open_mission_relay",
+    "record_mission_research_work",
     "get_mission_claims",
     "get_mission_evidence_qualification_batch",
     "get_platform_auth_status",
@@ -70,6 +73,7 @@ async def test_public_mcp_inventory_is_the_mission_bound_contract():
     """Removing any retained tool or keeping any unscoped tool breaks the cutover contract."""
     actual = {tool.name for tool in await mcp.list_tools()}
 
+    assert "execute_mission_follow_up" not in actual
     assert actual == EXPECTED_TOOLS
     assert actual.isdisjoint(REMOVED_TOOLS)
 

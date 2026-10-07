@@ -875,7 +875,7 @@ SMOKE_SCRIPT = REPO / "scripts" / "wheel_mcp_smoke.py"
 FAKE_SERVER = r'''
 import json, sys, time
 mode = sys.argv[1]
-tools = int(sys.argv[2]) if len(sys.argv) > 2 else 44
+tools = int(sys.argv[2]) if len(sys.argv) > 2 else 47
 if mode == "banner":
     print("starting worker loop", flush=True)
 for raw in sys.stdin:
@@ -892,13 +892,65 @@ for raw in sys.stdin:
         result = {"protocolVersion": message["params"]["protocolVersion"], "capabilities": {},
                   "serverInfo": {"name": "fake", "version": "1"}}
     elif method == "tools/list":
-        names = ["create_attention_mission", "confirm_market_brief", "submit_mission_claims", "get_mission_claims"]
+        names = [
+            "authenticate_instagram",
+            "authenticate_threads",
+            "authenticate_tiktok",
+            "cancel_host_browser_search",
+            "clear_instagram_auth",
+            "clear_platform_auth",
+            "clear_threads_auth",
+            "confirm_market_brief",
+            "confirm_research_workspace",
+            "create_attention_mission",
+            "diagnose_system_health",
+            "discover_market_opportunities",
+            "evaluate_mission_quality",
+            "execute_mission_ingress",
+            "extract_customer_pain_points",
+            "generate_mission_artifact",
+            "get_current_session_mission",
+            "get_instagram_auth_status",
+            "get_mission_analysis",
+            "get_mission_claims",
+            "get_mission_evidence_qualification_batch",
+            "get_mission_relay_snapshot",
+            "get_platform_auth_status",
+            "get_runtime_config",
+            "get_system_logs",
+            "get_threads_auth_status",
+            "get_threads_search_suggestions",
+            "get_threads_trending_topics",
+            "get_tiktok_creative_center_trends",
+            "get_tiktok_search_suggestions",
+            "get_tiktok_video_comments",
+            "list_domain_lexicons",
+            "list_research_missions",
+            "list_research_workspaces",
+            "open_mission_relay",
+            "prepare_host_browser_search",
+            "propose_research_workspace",
+            "record_mission_research_work",
+            "refresh_runtime_config_cache",
+            "register_domain_lexicon",
+            "register_noise_blacklist",
+            "release_mission_writer",
+            "submit_host_browser_search",
+            "submit_mission_claims",
+            "submit_mission_evidence_qualifications",
+            "update_runtime_config",
+            "verify_connectors_health",
+        ]
         names += [f"tool_{i}" for i in range(max(0, tools - len(names)))]
         names = names[:tools]
         if mode == "missing-reset-tool":
-            names[0] = "tool_missing"
+            names[names.index("create_attention_mission")] = "tool_missing"
         if mode == "retained-legacy-tool":
             names[-1] = "trigger_autonomous_discovery"
+        if mode == "future-tool":
+            names[-1] = "execute_mission_follow_up"
+        if mode == "duplicate-tool":
+            names[-1] = names[0]
         result = {"tools": [{"name": name, "inputSchema": {}} for name in names]}
     else:
         failed = mode == "tool-error"
@@ -922,7 +974,7 @@ def _smoke():
     return wheel_mcp_smoke
 
 
-def _fake(tmp_path, mode, tools=44) -> list[str]:
+def _fake(tmp_path, mode, tools=47) -> list[str]:
     import sys
 
     server = tmp_path / "fake_server.py"
@@ -937,8 +989,8 @@ def test_a_caller_supplied_command_completes_the_smoke(tmp_path):
     assert result.runtime_configs == 3
 
 
-@pytest.mark.parametrize("mode", ["missing-reset-tool", "retained-legacy-tool"])
-def test_wheel_smoke_rejects_a_wrong_mission_bound_catalog_even_at_41_tools(tmp_path, mode):
+@pytest.mark.parametrize("mode", ["missing-reset-tool", "retained-legacy-tool", "future-tool", "duplicate-tool"])
+def test_wheel_smoke_rejects_a_wrong_mission_bound_catalog_even_at_47_tools(tmp_path, mode):
     module = _smoke()
     with pytest.raises(module.SmokeFailure, match="mission-bound catalog mismatch"):
         module.run_smoke(_fake(tmp_path, mode), response_timeout=10, exit_timeout=10)
@@ -948,7 +1000,7 @@ def test_a_wrong_tool_count_fails_the_smoke(tmp_path):
     module = _smoke()
     import pytest
 
-    with pytest.raises(module.SmokeFailure, match="expected 44 tools, discovered 39"):
+    with pytest.raises(module.SmokeFailure, match="expected 47 tools, discovered 39"):
         module.run_smoke(_fake(tmp_path, "ok", tools=39), response_timeout=10, exit_timeout=10)
 
 
@@ -1035,7 +1087,7 @@ cd "$(dirname "$0")/.."
 env > bootstrap-env.txt
 [ "${FAKE_BOOTSTRAP_FAIL:-}" = "1" ] && { echo "boom" >&2; exit 3; }
 mkdir -p .venv/bin
-printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-44}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
+printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-47}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
 chmod +x .venv/bin/python
 printf 'DATABASE_URL=sqlite:///ignis.db\n' > .env
 "$FAKE_PYTHON" - <<'PY'
@@ -1387,7 +1439,7 @@ if args[0] == "pull":
     print("Digest: " + os.environ["FAKE_DOCKER_REPO_DIGEST"].split("@", 1)[1])
     sys.exit(0)
 if args[0] == "run":
-    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "44"])
+    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "47"])
 if args[:2] == ["image", "rm"]:
     sys.exit(0)
 print("unexpected docker call: " + " ".join(args), file=sys.stderr)
@@ -1772,19 +1824,19 @@ def _mutate(root: Path, relative: str, pattern: str, replacement: str) -> None:
 
 # (control name, file, regex, replacement, contract test it must turn red)
 NEGATIVE_CONTROLS = (
-    ("AGENTS tool count", "AGENTS.md", r"all 44 FastMCP tools", "all 39 FastMCP tools",
+    ("AGENTS tool count", "AGENTS.md", r"all 47 FastMCP tools", "all 39 FastMCP tools",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("CLAUDE tool count", "CLAUDE.md", r"All 44 tools", "All 39 tools",
+    ("CLAUDE tool count", "CLAUDE.md", r"All 47 tools", "All 39 tools",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("BACKLOG branch tool count", "BACKLOG.md", r"\*\*44 tools\*\*", "**39 tools**",
+    ("BACKLOG branch tool count", "BACKLOG.md", r"\*\*47 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("README tool count", "README.md", r"\*\*44 tools\*\*", "**39 tools**",
+    ("README tool count", "README.md", r"\*\*47 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("user guide tool count", "docs/USER_GUIDE.md", r"\*\*44 tools\*\*", "**39 tools**",
+    ("user guide tool count", "docs/USER_GUIDE.md", r"\*\*47 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("README migration endpoint", "README.md", r"`sql/026_partial_degraded_probe_outcomes\.sql`", "`sql/024_youtube_quota_ledger.sql`",
+    ("README migration endpoint", "README.md", r"`sql/028_research_work\.sql`", "`sql/024_youtube_quota_ledger.sql`",
      "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
-    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/026_partial_degraded_probe_outcomes\.sql`",
+    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/028_research_work\.sql`",
      "`sql/023_evidence_qualification.sql`", "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
     ("PyPI install claim", "README.md", r"^(## Local source setup)$", r"\1\n\npip install fn-ignis\n",
      "test_no_public_surface_claims_a_pypi_package"),

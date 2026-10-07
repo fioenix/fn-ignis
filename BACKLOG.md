@@ -26,11 +26,12 @@ hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đ�
 kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
 các cổng pilot và release vẫn giữ nguyên.
 
-Nhánh `codex/evidence-grounded-product-reset` đang thay mô hình Dual-Track bằng nghiên cứu
-theo nhiệm vụ được chỉ định. MCP runtime của nhánh có **44 tools**; các con số 47 tools,
+Nhánh hiện tại `codex/ignis-relay-checkout` có **47 tools** (06/10/2026), gồm ba tool
+Relay đã triển khai, và migration tới `sql/028_research_work.sql`; các con số 47 tools,
 worker, quota scheduled và migration `024` trong phần lịch sử dưới đây mô tả v0.7.0 đã
-phát hành, không mô tả nhánh hiện tại. Migration mới nhất của nhánh là
-`sql/025_evidence_grounded_claim_ledger.sql`. Ngày 02/10/2026, chủ sở hữu xác nhận Supabase
+phát hành. Tại mốc Spec 011 ngày 02/10/2026, nhánh `codex/evidence-grounded-product-reset`
+có 44 tool theo nhiệm vụ và migration mới nhất là `sql/025_evidence_grounded_claim_ledger.sql`.
+Ngày 02/10/2026, chủ sở hữu xác nhận Supabase
 là môi trường dev và cho phép thao tác trong phạm vi triển khai. Migration 023–025 đã áp dụng;
 số bản ghi và dấu kiểm tra dữ liệu gốc giữ nguyên. 18 ca Market trên SQLite/PostgreSQL
 và chín ca inventory SQLite đều đạt; inventory dev đã lưu 14.637 target baseline cụ thể.
@@ -78,8 +79,94 @@ live hoặc kiểm tra hình ảnh. Migration 026 chưa áp dụng trên Supabas
 Spec 012 và các thay đổi hiện có được giữ nguyên; actual branch là `release/v0.8.0`.
 Chủ sở hữu đã chốt nghiệm thu và yêu cầu PR/merge trước Goal 2. Chấp nhận ngoại lệ về
 lịch sử test-first và hình ảnh chưa được kiểm chứng độc lập, không đổi chúng thành kết
-quả PASS. Không đổi version/tag/release trong vòng này. PR/CI/merge còn phải đọc lại.
-**Trạng thái: PO đã nghiệm thu với ngoại lệ được ghi rõ; đang tích hợp.**
+quả PASS. Không đổi version/tag/release trong vòng này. PR
+[#50](https://github.com/fioenix/fn-ignis/pull/50) đã merge vào main `a94db308` sau đủ
+bảy tên check bắt buộc thành công; commit đã được fetch và kiểm tra ancestry.
+Lần đọc cuối xác nhận đủ bảy check sau merge trên đúng commit main đều thành công.
+**Trạng thái: PO đã nghiệm thu với ngoại lệ; mã nguồn đã tích hợp, chưa phát hành.**
+
+## Spec 014 — Ignis Relay, written scope R1 đã duyệt
+
+Ngày 04/10/2026, chủ sở hữu chốt mock light mode: tối giản, thoáng, nhiều motion thể hiện
+công việc. [Spec R1](specs/014-evidence-factory/spec.md) giữ dashboard read-only theo dõi
+mission thật và mở rõ phạm vi quan sát công việc nghiên cứu: sự kiện có căn cứ, agent bàn giao,
+nhận định có phiên bản, đối chiếu/phản biện và vòng nghiên cứu bổ sung trong authority/hạn mức.
+Motion không được giả throughput; nhận định tạm thời không vượt Claim Ledger; chưa có mission
+thì không thu thập. Dừng motion, dừng refresh và kết thúc nghiên cứu là ba hành vi riêng.
+
+[Checklist](specs/014-evidence-factory/checklists/requirements.md) có mapping yêu cầu–nghiệm thu.
+Ngày 04/10/2026, chủ sở hữu phê duyệt rõ ràng: **"Duyệt written scope R1"**. Quyết định đã ghi
+trong Clarifications của spec và checklist. Goal hoàn thiện/xin duyệt spec đã đạt phạm vi yêu cầu;
+không coi đó là UAT, phê duyệt technical plan chưa tồn tại hoặc quyền triển khai runtime.
+Sau lệnh "OK tiếp tục đi", đã lập [technical plan](specs/014-evidence-factory/plan.md), research,
+data model, ba contracts và hướng dẫn kiểm chứng. Thiết kế viewer chỉ đọc không tự tạo schema,
+công việc host có biên nhận, sự kiện cùng transaction với dữ kiện và follow-up bằng mission con có
+khung bằng chứng riêng. Ngày 04/10/2026, chủ sở hữu trả lời **"TAo duyệt"** cho câu hỏi duyệt
+plan có nêu rõ bốn MCP tools bổ sung và schema workflow mới. Quyết định đã ghi trong spec/plan.
+[Tasks](specs/014-evidence-factory/tasks.md) gồm 92 mục theo dependency và user story; T001–T003 đã hoàn tất phần chuẩn bị, T004/T005 đã qua review riêng cho phần test RED, model T006 và port T007 đã được sửa và qua review lại; schema PostgreSQL T008, SQLite T009, phần ghi dữ liệu SQLite/PostgreSQL T010/T011, bộ kiểm thử RED cho reader T012, hai reader SQLite/PostgreSQL T013/T014, kiểm chứng parity nền tảng T015, bộ kiểm thử fact/event qua use case thật T016 và bộ kiểm thử hợp đồng HTTP T017 cũng đã qua review; thiết kế bộ kiểm thử browser T018 đã được sửa hai lỗi instrumentation và qua review độc lập. T019 đã qua review độc lập và kiểm chứng các transaction fact/event trên SQLite mới tạo. T020 cũng đã qua review độc lập và kiểm chứng các transaction tương đương trên PostgreSQL. T021 đã nối producer thu thập qua giao dịch fact/event và qua review độc lập. T022 đã nối qualification và Claim Ledger qua giao dịch fact/event, kiểm chứng cả hai backend và qua review lại. T023 đã qua review độc lập và kiểm chứng projection nhất quán, an toàn trên hai backend. Hiện đã nghiệm thu 58/92 mục; US1 đã commit tại `8892253`, US3 đã nghiệm thu đến T040; T041/T042 là thiết kế kiểm thử; đã nghiệm thu đến T058, T059–T092 chưa tick.
+Bốn tools và schema đã được duyệt về thiết kế, chưa đăng ký, viết runtime, chạy collector,
+áp dụng schema lên database người dùng hay release. Schema PostgreSQL mới chỉ được kiểm chứng trên database kiểm thử riêng. Có gate riêng cho UAT đồng thời thực tế, hai backend, bảo mật,
+motion/accessibility và follow-up; không đóng spec bằng mock hoặc test đơn vị.
+Kiểm tra cấu trúc tasks có đủ mapping 29 FR/17 SC; convention gate của repository đạt 11/11
+trong môi trường đã bỏ các biến cấu hình/credential. Đây không phải kiểm chứng runtime của Spec 014.
+Baseline chuẩn bị ngày 04/10/2026 đạt **217 passed, 58 skipped** trên ba nhóm convention/unit/integration;
+tất cả skip do thiếu DSN kiểm thử PostgreSQL. Kết quả và lỗi runner ban đầu được giữ trong
+hồ sơ kiểm chứng cục bộ, không phải tài liệu được phát hành.
+SC-012 chưa có bằng chứng nghiên cứu đồng thời thực tế. PostgreSQL kiểm thử riêng đã được xác minh qua TCP và một ca repository hiện có trên cả hai backend; parity của Spec 014 vẫn chưa hoàn tất.
+T004 bổ sung kiểm thử repository thật cho fact/event, rollback, thứ tự commit và retry.
+Review riêng T004 đã chấp nhận bản sửa ca tranh chấp hai lệnh khác nhau. Lượt RED tiếp theo trên SQLite và PostgreSQL kiểm thử riêng đạt **10 failed, 3 passed, 3 skipped**; không phải cổng xanh. Ba ca PostgreSQL còn skip vì chưa có harness tiêm lỗi và điều phối lock/commit, không còn do thiếu DSN; parity vẫn chưa hoàn tất.
+T005 có 59 ca được thu thập: 58 lỗi API chưa tồn tại, một ca sanitizer hiện có chạy được; convention đạt 11/11. Review chấp nhận phần hợp đồng kiểm thử với hai điểm Minor chuyển sang gate model/projection. Chưa có bằng chứng projection thực sự che dữ liệu hay từ chối đúng phạm vi.
+T006 đạt 248 ca model/hồi quy miền/convention, gồm 86 ca model. Review phát hiện lỗi đếm nguồn không khả thi; ba ca tái hiện lỗi chuyển sang đạt và review lại chấp nhận bản sửa. Full suite trên bản cuối có 2060 passed, 68 failed, 419 skipped, hai cảnh báo; các lỗi storage/projection chưa triển khai và bốn xung đột môi trường vẫn còn. Một điểm Minor về số nguyên rất lớn được chuyển sang gate T023/T081 và review cuối, chưa coi là đã sửa.
+T007 đạt 313 ca port/model/hồi quy/convention. Review phát hiện Enum và timezone có thể làm dữ kiện đã nhận thay đổi sau khi tính fingerprint; bốn ca tái hiện lỗi chuyển sang đạt và review lại chấp nhận bản sửa. Full suite trên bản cuối có 2125 passed, 68 failed, 419 skipped, hai cảnh báo, giữ nguyên danh sách lỗi trước sửa. Atomic commit, đọc nhất quán, masking và UAT vẫn thuộc các gate sau, chưa được port chứng minh.
+T008 có 43 ca schema/quyền truy cập PostgreSQL đạt; số lượng và digest dữ liệu canonical không đổi sau cài đặt và áp dụng lại migration. Review phát hiện hướng dẫn và danh mục đóng gói còn dừng ở 026; bản sửa đạt 180 ca liên quan, một ca bỏ qua vì ghi chú cục bộ không có trong checkout. Review lại chấp nhận cả hai finding. Full suite PostgreSQL trước sửa có 2533 passed, 77 failed, 45 skipped, hai cảnh báo; lượt cuối không dùng PostgreSQL có 2125 passed, 68 failed, 462 skipped, hai cảnh báo. Năm lỗi hướng dẫn/đóng gói đã hết; các ca PostgreSQL bị skip ở lượt cuối không được coi là đã sửa. Atomic commit, SQLite progress, reader và UAT vẫn chưa hoàn tất.
+T009 có 201 ca schema SQLite đạt trên file và memory; số lượng và digest của 16 bảng canonical không đổi sau khởi tạo và áp dụng lại. Review phát hiện UUID/fingerprint/key có hậu tố NUL lọt qua ràng buộc; 56 ca tái hiện lỗi chuyển sang đạt và review lại chấp nhận bản sửa. Bộ kiểm tra liên quan có 400 ca đạt, 55 ca bỏ qua; lượt toàn bộ có 2326 passed, 68 failed, 462 skipped, hai cảnh báo, giữ nguyên danh sách lỗi trước sửa. Đây chỉ là schema cục bộ, chưa có producer ghi sự kiện hay viewer đọc riêng. Schema progress thử nghiệm cũ chưa được sửa; cổng từ chối schema thiếu/cũ và kiểm chứng tích hợp vẫn còn mở.
+T010 ghi dữ kiện, revision, sự kiện và biên nhận trong cùng transaction SQLite; tám ca T004 trên SQLite đạt. Review tái hiện lỗi lời ghi journal có thể commit transaction đang chờ trên kết nối memory dùng chung; tám ca tái hiện lỗi đã chuyển sang đạt sau khi sửa quyền sở hữu thao tác ghi và vòng đời đóng kết nối. Review lại xác nhận lỗi được xử lý, không phát hiện lỗi mới trong bản sửa. Bộ kiểm tra liên quan có 506 ca đạt, 79 ca bỏ qua; lượt toàn bộ có 2373 passed, 62 failed, 463 skipped, hai cảnh báo. Danh sách lỗi còn lại không đổi; không coi các ca bỏ qua là đã kiểm chứng. PostgreSQL, reader, projection, UAT và tích hợp vẫn còn mở.
+T011 ghi dữ kiện, revision có khóa dòng, sự kiện và biên nhận trong cùng transaction PostgreSQL. Review phát hiện kiểm thử tranh chấp có thể đạt chỉ nhờ khóa INSERT mà chưa chứng minh khóa revision trên dòng đã tồn tại. Hai ca kiểm thử bổ sung thất bại khi bỏ FOR UPDATE và đạt trên mã không sửa; review lại xác nhận cả hai finding đã được xử lý, không phát hiện lỗi mới trong bản sửa. Bộ kiểm tra liên quan có 231 ca đạt, ba ca bỏ qua; cả 23 ca PostgreSQL mới đều đạt. Lượt toàn bộ có 2813 passed, 62 failed, 46 skipped, hai cảnh báo; danh sách lỗi và ca bỏ qua giữ nguyên. Ba ca T004 PostgreSQL cũ vẫn bị bỏ qua, không đổi nhãn thành đạt. Reader chỉ đọc, projection, UAT và tích hợp vẫn còn mở.
+T012 có 40 ca: 10 ca kiểm chứng bằng engine thật đạt, 30 ca RED do API reader chưa tồn tại. Review phát hiện ba lỗi kiểm thử về đóng kết nối memory, xác định chủ sở hữu khóa và bảo toàn pool PostgreSQL; bản sửa cùng các ca kiểm chứng bổ sung đã qua review lại, không có phát hiện mới. Bộ kiểm tra liên quan có 172 passed, 30 expected failed; lượt toàn bộ có 2823 passed, 92 failed, 46 skipped, hai cảnh báo. Danh sách lỗi và lý do bỏ qua giữ nguyên so với trước sửa. Đây là nghiệm thu bộ kiểm thử, chưa chứng minh reader đọc dữ liệu an toàn. Kiểm thử resync cho cursor chưa biết/bị bỏ lỡ thuộc T013/T014/T015; reader, projection, UAT và tích hợp vẫn còn mở.
+T013 có reader SQLite riêng cho file và memory đã khởi tạo, không gọi bootstrap. Review phát hiện dữ liệu hỏng có thể làm exception kiểm tra dữ liệu của domain thoát khỏi reader; 10 ca tái hiện lỗi trên năm nhóm dữ liệu đã chuyển từ RED sang đạt sau bản sửa. Review lại xác nhận finding đã được xử lý, không phát hiện lỗi mới trong phần sửa. Bộ kiểm tra liên quan có 501 passed, 9 failed do reader PostgreSQL chưa tồn tại và 4 skipped; không có warning hoặc lỗi setup. Lượt toàn bộ của bản sửa có 2874 passed, 71 failed, 46 skipped, hai cảnh báo; danh sách lỗi và lý do bỏ qua giữ nguyên. T013 đã được nghiệm thu trong phạm vi reader SQLite. PostgreSQL, projection, UAT và tích hợp vẫn còn mở.
+T014 có reader PostgreSQL riêng cho từng lượt đọc, dùng transaction chỉ đọc với mức cô lập repeatable-read và không dùng pool của bên gọi. Cả 90 ca kiểm thử read-boundary đều đạt; bộ kiểm tra nền tảng có 530 ca đạt, bốn ca bỏ qua, không có cảnh báo hoặc lỗi setup. Review độc lập chấp thuận cả mức tuân thủ spec lẫn chất lượng mã, không có finding mở. T014 đã được nghiệm thu trong phạm vi reader PostgreSQL; T015 vẫn phải kiểm chứng parity và ba ca PostgreSQL cũ còn bỏ qua. Kiểm thử cancellation đã giữ thao tác đọc và đóng kết nối thực tế; lúc mở kết nối và thoát transaction mới được bao phủ bằng cấu trúc quản lý vòng đời, chưa có ca giữ riêng từng thời điểm. Projection, runtime tối thiểu, regression toàn bộ, UAT và tích hợp vẫn còn mở; không coi các kết quả này là toàn bộ spec đã đạt.
+T015 đã chạy và đạt ba ca PostgreSQL cũ còn bỏ qua. Bộ kiểm tra nền tảng có 718 ca đạt, hai ca bỏ qua vì không áp dụng cho backend tương ứng. Kiểm thử thực tế phát hiện reader có thể trả event với run đã chuyển sang mission khác; kiểm tra quyền sở hữu trong cùng transaction đã khắc phục lỗi này. Review tiếp tục phát hiện thứ tự cleanup có thể làm kiểm thử race bị kẹt khi assertion thất bại hoặc task bị hủy. Hai ca tái hiện lỗi đã đạt sau bản sửa; regression trực tiếp đạt 151/151 ca, cleanup thành công. Review lại xác nhận finding đã được xử lý, không có lỗi mới trong diff sửa. Lượt 718 ca thuộc bản trước sửa cleanup, không phải kết quả của bản sửa cuối. Runtime tối thiểu, hiệu năng, regression toàn bộ, UAT và tích hợp vẫn còn mở.
+T016 đã qua review và hai lượt kiểm tra bản sửa, xử lý đủ năm finding về thiết kế kiểm thử. Lượt R1 có 66 ca: 30 PASS, 36 RED do producer chưa phát event hoặc chưa bảo đảm transaction fact/event. Bản cuối bổ sung ca giữ evidence khi membership không đổi: cả ba backend đạt; ba ca membership có thay đổi vẫn RED vì thiếu receipt. Lượt cuối chỉ chạy sáu ca liên quan, không đổi nhãn kết quả R1 thành bằng chứng cho bản cuối. Đây là nghiệm thu bộ kiểm thử; producer, schema terminal event, projection, UAT và tích hợp vẫn còn mở.
+T017 đã qua review bản sửa, xử lý đủ bốn finding Important về phạm vi run, log của phản hồi thành công, CSP và deadline. Lượt R1 chọn 28 ca: 17 RED vì listener chưa tồn tại, 11 ca kiểm tra độ chặt của assertion đạt. Bản cuối chỉ chạy bốn ca logging, cả bốn vẫn RED vì thiếu listener; không có lỗi setup hoặc ca bỏ qua. Các kết quả thuộc những bản mã khác nhau, không phải bằng chứng HTTP hay bảo mật đã đạt. Hai điểm Minor về cửa sổ expiry ngắn và kiểm tra HEAD được giữ cho T024 và review cuối. Đây là nghiệm thu bộ kiểm thử, chưa phải nghiệm thu listener.
+**Trạng thái: written scope R1 và technical plan đã duyệt; T001–T030 đã được nghiệm thu về triển khai và kiểm chứng cục bộ, qua review theo từng task; chưa có runtime viewer tích hợp.
+T001–T022 đã commit tại `9eae76a`; thay đổi T023–T030 vẫn cục bộ, chưa commit/merge. Chưa có UAT hoặc runtime tích hợp của Spec 014. Schema mới chưa áp dụng lên database người dùng.**
+
+
+### Checkout triển khai — 05/10/2026
+
+Chủ sở hữu đã yêu cầu chuyển toàn bộ phần đang dở về `/Users/fioenix/Projects/fn-ignis`
+và dọn các worktree thừa. Checkout này đang ở nhánh `codex/ignis-relay-checkout`;
+`git worktree list` chỉ còn một checkout. Code, spec, test và log kiểm chứng Spec 014 đã được
+chuyển về; các bản phục hồi giữ trong hồ sơ kiểm chứng cục bộ. Chưa commit hoặc tích hợp các thay đổi này.
+
+T018 đã được nghiệm thu về thiết kế kiểm thử RED. Lượt kiểm tra mới có **23 ca đạt, 33 ca lỗi,
+không có ca bị bỏ qua**. Các ca lỗi đều do thiếu builder/template sẽ triển khai ở T027;
+chưa kiểm chứng hành vi giao diện sản phẩm. T019 hiện đã qua review và kiểm chứng adapter SQLite: **56 ca trực tiếp đạt**; bộ kiểm tra bao phủ có **591 ca đạt, 11 ca bỏ qua**. Lượt full regression của T019 có **231 ca lỗi, 587 ca bỏ qua**, với 2.501 ca đạt; chưa có toàn bộ feature GREEN. Tại mốc T019, T020–T092 vẫn mở. Việc nối producer lúc đó thuộc T021/T022, kiểm chứng nâng cấp schema cũ thuộc T084; chưa commit, tích hợp hoặc triển khai.
+
+T020 đã được kiểm chứng trên PostgreSQL thử nghiệm riêng: **32 ca trực tiếp đạt**, **273 ca regression liên quan đạt, không có ca bỏ qua**; **146 ca đơn vị liên quan đạt**. Review phát hiện race với writer cũ và reference trùng trong batch qualification; hai ca tái hiện đều thất bại trước sửa, sau đó bản sửa qua review lại. Khóa bảng giữ evidence frame trong suốt giao dịch phân tích; chi phí là các mission khác có thể phải chờ giao dịch này. Phép phản chứng bỏ gate sớm của probe gây deadlock thật, còn bản đúng đạt ca kiểm tra thứ tự khóa. Trong lượt T020, T016 có **33 ca đạt, 36 ca lỗi, 0 ca bỏ qua**, không có lỗi setup; các ca chưa đạt thuộc phần nối producer T021/T022. Kết quả full regression ở đoạn T019 là lịch sử, chưa chạy lại toàn bộ trong T020. Log, patch, hash và review giữ trong hồ sơ kiểm chứng cục bộ của T020; thay đổi vẫn cục bộ, chưa commit, tích hợp hoặc triển khai.
+
+
+T021 đã được nghiệm thu về triển khai và kiểm chứng cục bộ. Cả **24 ca lỗi thuộc T021 đã đạt** trên SQLite file, SQLite memory và PostgreSQL. Bộ producer cùng 18 ca bổ sung có **75 ca đạt, 12 ca lỗi**, không có lỗi setup hoặc ca bỏ qua; 12 ca còn lại thuộc qualification/claim của T022. Các ca bổ sung kiểm tra hủy tác vụ, hủy lặp lại, lỗi vocabulary và rollback khi ghi outcome. Nếu trạng thái hoàn tất đã commit, cancellation không được ghi đè nó thành thất bại; journal phản ánh trạng thái bền vững đó. Review lại đã xác nhận bản sửa.
+
+Nhóm hồi quy host/workspace/T021/convention đạt **135 ca, không có ca thất bại; 2 ca bỏ qua** là kiểm thử vòng đời thread riêng của SQLite trên PostgreSQL. Bộ pytest đầy đủ trước khi sửa gate kiểm thử host có **3.148 ca đạt, 201 ca thất bại, 10 lỗi setup, 10 ca bỏ qua và 2 cảnh báo**. Hai ca host hết thời gian chờ đã được xử lý bằng cách chặn đúng writer atomic, giữ nguyên toàn bộ assertion và qua review độc lập. Các lỗi HTTP/projection/browser, 12 ca T022, kiểm tra cấu hình/tài liệu có sẵn và lỗi setup clean-install vẫn được ghi rõ trong hồ sơ; không có kết quả full suite xanh. Tại mốc T021, tổng số task đã nghiệm thu là **21/92**. Thay đổi được dừng tại mốc T021 ở checkout cục bộ, chưa commit, tích hợp hoặc triển khai ra môi trường người dùng.
+
+T022 đã nối qualification và Claim Ledger qua giao dịch fact/event. Review phát hiện phản hồi sai khi frame thay đổi giữa validation và commit: backend từ chối đúng nhưng use case báo dữ liệu không hợp lệ. Bản sửa dùng lỗi có kiểu riêng để giữ phản hồi `CONFLICT / STALE_FRAME`; cả **6 ca tái hiện** đã thất bại trước sửa và đạt sau sửa. Phép thử frame đổi sau commit giữ nguyên các assertion về quyền sử dụng claim và lịch sử ledger. Review lại đã khép phát hiện, không còn vấn đề cần sửa thuộc T022.
+
+Nhóm kiểm chứng T022 và hồi quy liên quan có **314 ca đạt, không có ca thất bại, lỗi setup hoặc bỏ qua**. Bộ pytest đầy đủ có **3.168 ca đạt, 187 ca thất bại, 10 lỗi setup, 10 ca bỏ qua và 2 cảnh báo**; không có node thất bại hoặc lỗi setup mới so với lượt T021. Toàn bộ **36 ca lỗi producer ban đầu đã đạt** trong lượt chạy đầy đủ này. Các ca chưa đạt thuộc HTTP/projection/browser chưa triển khai hoặc kiểm tra cấu hình, tài liệu và clean-install có sẵn; chưa có full suite xanh. Tổng số task đã nghiệm thu là **22/92**. Thay đổi được dừng tại mốc T022 ở checkout cục bộ, chưa tích hợp hoặc triển khai ra môi trường người dùng.
+
+T023 đã được nghiệm thu về triển khai và kiểm chứng cục bộ. Projection giữ số đếm toàn corpus và high-water đã ghi, gồm ordinal; inspector chỉ đọc observation thuộc trang đã chọn, không tra cứu toàn bộ database. Kênh chưa đo giữ giá trị chưa biết, tách khỏi kênh đã đo nhưng rỗng; ATTENTION và MARKET giữ vai trò evidence riêng. Phản hồi có giới hạn 1 MiB theo byte UTF-8, không cắt nội dung để giả thành kết quả hợp lệ. Review đã khép lỗi metadata sai dạng bằng sáu ca tái hiện thất bại trước sửa. Nhóm kiểm chứng đạt **369 ca, không có ca thất bại, lỗi setup hoặc bỏ qua**, trên SQLite file, memory và PostgreSQL; reviewer kiểm tra lại **161 ca đạt**.
+
+Bộ pytest đầy đủ có **3.246 ca đạt, 128 ca thất bại, 10 lỗi setup, 10 ca bỏ qua và 2 cảnh báo**; không có node lỗi mới so với T022 và không có ca cũ biến mất. Cả **58 ca projection ban đầu đã đạt**. Các ca còn thất bại gồm 93 ca HTTP và 33 ca browser chưa triển khai, cùng hai kiểm tra cấu hình có sẵn; lỗi setup clean-install vẫn còn. Chưa có full suite xanh. Tổng số task đã nghiệm thu là **23/92**. T023 được dừng tại mốc đã kiểm chứng cục bộ, chưa commit, tích hợp hoặc triển khai; T024 và các task sau vẫn mở.
+
+T024–T025 đã qua review độc lập và kiểm chứng cục bộ: listener chỉ đọc có scope và thời hạn hữu hạn; FastMCP quản lý vòng đời, không khởi tạo storage lúc startup và giữ ownership cho đến khi read thực sự kết thúc. Gate T024 đạt **203 ca**; gate cuối T025 đạt **123 ca**, nhóm reader SQLite file/memory/PostgreSQL và kiểm tra provenance đạt **133 ca**. Bộ đầy đủ ghi **3.340 ca đạt, 36 ca thất bại, 10 lỗi setup, 10 ca bỏ qua và 2 cảnh báo**; 93 ca HTTP ban đầu đã đạt. Lượt này trùng với việc sửa source T025, làm một assertion đọc source dùng vị trí dòng cũ; ca đó đã đạt khi chạy lại trong tiến trình mới. Lượt này không thay thế gate US1 cuối trên bản mã ổn định. Ở mốc T025, **25/92** task đã nghiệm thu; chưa commit, tích hợp, UAT hoặc triển khai.
+
+T026–T027 đã qua review độc lập. Hai MCP tool chỉ đọc giữ đúng mission/run, deadline và giới hạn read; snapshot riêng không mở listener. Gate T026 đạt **237 ca**; reviewer chạy lại **130 ca** và một ca thu hồi riêng đều đạt. Template FINOLABS được duy trì trong source, có escaping và bản đọc tĩnh khi JavaScript/font ngoài không hoạt động; gate T027 đạt **18 ca**, gồm kiểm tra ba độ rộng 390/768/1440, không bỏ qua. Ở mốc T027, **27/92** task đã nghiệm thu; US1 còn T028–T031. Khi đó điều hướng, refresh và tích hợp viewer chưa được nghiệm thu. Chưa commit hoặc triển khai.
+
+T028–T029 đã qua review độc lập và nghiệm thu cục bộ. Gate cuối đạt **71/71 ca**, reviewer chạy lại **71/71 ca**, không bỏ qua; bốn probe độc lập cũng đạt. Hai lỗi P2 về tranh chấp refresh/inspector và cursor bỏ qua receipt đã được tái hiện bằng regression test rồi sửa. Viewer giữ rõ dữ liệu chưa đo, bằng chứng trái chiều, quyền kết luận chưa có và hoạt động nghiên cứu chưa được hỗ trợ; lịch sử receipt được lưu hữu hạn. Ở mốc T029, **29/92** task đã nghiệm thu; US1 còn T030–T031. Chưa commit, merge hoặc triển khai.
+
+T030 đã nối viewer được duy trì qua MCP → HTTP → Chromium thật trên SQLite file, SQLite memory và PostgreSQL tạm. Gate đạt **139/139 ca**; reviewer chạy lại **139/139 ca**, không bỏ qua. Schema và dữ liệu không thay đổi khi mở, refresh hoặc inspect; storage thiếu, schema cũ và lỗi truy cập đều bị từ chối trước bootstrap. Probe riêng xác nhận capability hết hạn sau render nhận **403 / CAPABILITY_EXPIRED**. Ở mốc T030, **30/92** task đã nghiệm thu; khi đó US1 còn **T031**. Đây là bằng chứng trước gate US1 cuối; chưa nghiệm thu UAT, merge hoặc triển khai.
+
+
 
 ## Nghiên cứu riêng — benchmark đối thủ
 
@@ -97,8 +184,10 @@ Các thay đổi này chưa commit/merge hoặc phát hành.
 - [x] **UAT-001 — hoàn tất Market UAT:** lượt cuối 136 quan sát TikTok/Threads đã đánh giá,
   Gap Report giữ kết luận thiếu bằng chứng; Claim Ledger kiểm chứng riêng bằng fixture.
   PO đã nghiệm thu với ngoại lệ hình ảnh/lịch sử test-first trong ledger Spec 013.
-- [ ] **UAT-002 — tích hợp các bản sửa UAT:** kiểm tra diff cuối, PR/CI/merge và đọc lại main;
-  không đóng chỉ bằng test cục bộ. Release là bước riêng, chưa phát hành.
+- [x] **UAT-002 — tích hợp các bản sửa UAT:** PR #50 đã merge, bảy check PR đạt,
+  ancestry/main đã đọc lại; không có diff runtime/test/SQL phát sinh do merge.
+  Bảy check sau merge trên đúng commit main cũng đã đạt. Release và activation client là bước riêng,
+  chưa phát hành hoặc tự đổi cấu hình của chủ sở hữu.
 
 - [ ] **RES-001 — thiết kế và thực hiện benchmark có thể tái lập.** Chuyển từ T091 của
   Spec 011 theo quyết định chủ sở hữu ngày 02/10/2026; chưa thực hiện và không chặn hoàn tất
@@ -1167,3 +1256,61 @@ tưởng, nhưng không được tính là việc đang mở cho tới khi một
 Khi mở session mới với bất kỳ Agent nào (Antigravity, Claude Code, Codex), chỉ cần truyền lệnh:
 
 > *"Đọc file `BACKLOG.md` để nắm hiện trạng kiến trúc `fn-ignis` và bắt đầu triển khai [Tên tính năng trong Backlog]."*
+
+T031 đã qua review độc lập và đóng US1 ở phạm vi nghiệm thu cục bộ. Gate trên source không đổi đạt **1.348 ca, bỏ qua 3 ca có điều kiện, không có thất bại hoặc lỗi setup**; reviewer kiểm chứng riêng **18/18 ca**, không bỏ qua. Trạng thái Idle/STARTED/Unknown giữ đúng dữ liệu đã lưu; transition observation và qualification đi qua MCP → HTTP → Chromium thật đúng một lần trên ba cấu hình storage tạm. Các pha viewer không làm đổi schema hoặc dữ liệu. Hiện **31/92** task đã nghiệm thu; **US1 không còn task mở**, T032 trở đi thuộc các phần tiếp theo. Thay đổi được tạm dừng rõ ràng ở trạng thái chưa commit/merge; chưa nghiệm thu toàn bộ Spec 014, UAT mission thực tế hoặc triển khai.
+
+Theo quyết định của Fio ngày 05/10/2026, mỗi task hoàn tất sẽ được commit ngay; chỉ tạo PR khi toàn bộ spec hoàn tất. US1 đã commit tại `8892253`. T032 đã qua review độc lập cho thiết kế kiểm thử: **9 RED dự kiến, 3 control đạt, không lỗi setup hoặc skip**; implementation của US3 vẫn chưa được nghiệm thu.
+
+T033 đã qua review độc lập cho thiết kế kiểm thử browser: **5 API-contract RED dự kiến, không lỗi setup hoặc skip**. Các ca kiểm tra receipt lỗi riêng, giữ lần đọc thành công và gỡ quyền kết luận từ mốc read/failure; hành vi thực tế vẫn chờ T034/T036/T037. Hiện **33/92** task đã nghiệm thu.
+
+T034 đã qua review độc lập và kiểm chứng projection quyền theo frame hiện hành: **396/396 ca đạt**, reviewer chạy riêng **13/13 ca** và probe journal STARTED mới đều đạt. Lỗi masking của Gap Report đã được tái hiện rồi sửa. Trang dữ liệu hữu hạn không tự tạo frame; run cũ hoặc chưa hoàn tất không được mượn permission cũ. Hiện **34/92** task đã nghiệm thu; phần header, rendering và gỡ permission phía browser còn T035–T037.
+
+T035 đã qua review độc lập: 73 ca đạt, 5 ca của T036/T037 chưa chạy trong gate này. Header giữ receipt đọc thành công, hiển thị lần thử đọc lỗi và lý do riêng. Hiện 35/92 task đã nghiệm thu.
+
+T036 đã qua review độc lập: 77 ca đạt; ledger đúng frame và Gap Report thực tế được hiển thị đầy đủ, kể cả bản không JavaScript. Ba lỗi review đã có regression và được sửa. Hiện 36/92 task đã nghiệm thu; T037 gỡ permission còn mở.
+
+T037 đã qua review độc lập: 82 ca đạt, thêm 4 probe gate sai đều bị từ chối. Khi đọc lỗi hoặc frame không khớp, quyền kết luận hiện hành bị gỡ ngay; receipt thành công và History được giữ riêng. Hiện 37/92 task đã nghiệm thu.
+
+T038 đã qua review độc lập trên SQLite file/memory và PostgreSQL local: inspector từ chối record ngoài mission, kênh chưa đo giữ Unknown và số 0 chỉ dùng cho kết quả đo được. Hiện 38/92 task đã nghiệm thu.
+
+T039 đã qua review độc lập: 12 ca parity trên ba cấu hình lưu trữ đều đạt. Đã kiểm tra identity và role theo dữ liệu canonical, đúng record có metric unknown và quyền kết luận theo frame đầy đủ. Hiện 39/92 task đã nghiệm thu.
+
+US3 (T032–T040) đã hoàn tất triển khai và kiểm chứng cục bộ, qua review độc lập và commit theo từng task. Gate US1 + US3 cùng regression liên quan đạt 1.390 ca, có 3 skip đã ghi rõ; ba ca readback bổ sung sau chỉnh setup đều đạt. Hiện 40/92 task đã nghiệm thu. UAT với mission thực, các US còn lại và tích hợp vẫn mở; chỉ tạo PR khi toàn bộ spec hoàn tất.
+
+Ngày 06/10/2026, sau khi Fio duyệt payload cụ thể, checkpoint TypeSafe cho US3 đã chạy với model `jev-1.13.0`. Kết quả hỗ trợ mục tiêu và cách báo cáo trạng thái ở phạm vi cục bộ, không chỉ ra lỗi cần sửa thêm trong bằng chứng đã gửi. Agent đã đối chiếu với mục tiêu US3 và bằng chứng kiểm thử, review; đây là đánh giá tham khảo, không thay thế nghiệm thu. Cả 149 hash nguồn và kiểm thử vẫn khớp; lần cập nhật này chỉ ghi bằng chứng, không chạy lại bộ kiểm thử. Hiện vẫn 40/92 task; UAT với mission thực, các US còn lại, tích hợp và bàn giao vẫn mở.
+
+T041 của US4 đã qua review độc lập và review lại sau khi sửa bốn vấn đề trong bộ kiểm thử. Có 93 ca thất bại dự kiến do API mới chưa tồn tại, không có lỗi setup hay skip. Đây là nghiệm thu thiết kế kiểm thử; hành vi authority, lifecycle và giao dịch vẫn chờ implementation. Hiện 41/92 task đã nghiệm thu; US4 và UAT host thực chưa hoàn tất.
+
+T042 đã qua review độc lập và hai vòng review bản sửa. Có 6 control vật lý đạt trên SQLite file, SQLite memory và PostgreSQL local; 48 ca còn lại thất bại do API mới chưa tồn tại, không có lỗi setup hay skip. Đây là nghiệm thu thiết kế kiểm thử, chưa chứng minh giao dịch hay lịch sử finding của implementation. Hiện đã nghiệm thu 42/92 task; US4 và UAT thực còn mở.
+
+T043 đã triển khai mô hình domain và các hàng rào thuần, qua review độc lập sau khi sửa lỗi nested serializer và xác nhận dừng sau termination. Bộ kiểm thử riêng đạt 131 ca, không lỗi hay skip; đã tái hiện lỗi hành vi trước khi sửa. Hiện đã nghiệm thu 43/92 task. Persistence, projection/viewer, UAT host thực và tích hợp vẫn chưa hoàn tất.
+
+T044 đã triển khai handoff/finding revision bất biến và kiểm tra liên kết, qua review độc lập; 158 ca kiểm thử mục tiêu đạt, không lỗi hay skip. Thời gian ghi nhận giao dịch vẫn do store cấp riêng; mô hình không tự tạo timestamp hoặc quyền cho strategic claim. Hiện đã nghiệm thu 44/92 task; persistence và UAT thực vẫn còn mở.
+
+T045 đã nghiệm thu cục bộ sau rà soát độc lập: 189 kiểm thử domain, port và quy ước đạt; không lỗi hoặc bỏ qua. Port giữ riêng timestamp do host gửi và thời gian giao dịch do harness ghi nhận. Chưa nghiệm thu hành vi lưu trữ, viewer hoặc UAT trên host thực tế.
+
+T046 đã nghiệm thu cục bộ sau rà soát độc lập: 46 kiểm thử schema PostgreSQL, đóng gói SQL, quy ước và progress liên quan đạt; không lỗi hoặc bỏ qua, database tạm đã dọn sạch. Lịch sử vẫn giữ khi bỏ membership; các collection đã chốt không nhận thêm reference. Chưa nghiệm thu SQLite, adapter, viewer hay UAT thực tế.
+
+- 2026-10-06: Nghiệm thu T047 sau review độc lập: 339 kiểm thử SQLite/domain đạt; riêng 65 kiểm thử schema PostgreSQL đạt và database tạm đã dọn sạch. Đã kiểm chứng ghi nguyên tử, retry giữ receipt gốc, rollback, khóa ghi thật, dữ liệu lịch sử và che thông tin cá nhân. Adapter PostgreSQL, lưu kết quả, tích hợp viewer và UAT bằng host thật còn chờ; lần chạy bộ unit rộng bị sandbox ngắt do gọi GitHub nên chưa có kết quả toàn bộ bộ kiểm thử.
+
+T048 đã nghiệm thu sau review lại: 118 kiểm thử PostgreSQL và 11 kiểm thử quy ước đạt; không lỗi, bỏ qua hay cảnh báo, database tạm đã dọn sạch. Sáu ca chờ khóa thật tái hiện lỗi thời gian rồi đạt sau một bản sửa: kiểm tra quyền/freshness dùng thời gian mới sau khóa, metadata và receipt giữ thời gian giao dịch. Chưa nghiệm thu ghi kết quả PostgreSQL, viewer hoặc UAT trên host thật.
+
+T049 đã nghiệm thu sau review độc lập: 416 kiểm thử offline đạt, gồm toàn bộ 36 ca T042 trên SQLite; riêng companion schema PostgreSQL đạt 66 ca và database tạm đã dọn sạch. Handoff/finding/event ghi nguyên tử, reference giữ đúng identity và thứ tự, lịch sử bất biến, ACK từ chối không hoàn tất work. Đã qua checkpoint cho CAS file trước khi sửa tiếp. Chưa nghiệm thu adapter ghi kết quả PostgreSQL, viewer hoặc UAT trên host thật.
+
+T050 đã nghiệm thu sau review độc lập: các gate PostgreSQL 137 ca, schema 66 ca, offline 416 ca và gate bổ sung result-owner/quy ước 35 ca đều đạt; không cộng các lượt chồng nhau. Kiểm tra cuối không còn database hoặc role tạm. Đã kiểm chứng ghi kết quả/ACK, rollback, CAS và lịch sử dưới role owner thường. Giữ nguyên assertion T042, chỉ sửa guard cleanup theo backend. Report ghi đúng RED hồi tố, giới hạn source trung gian và lỗi lint có sẵn. Service, MCP, viewer và UAT bằng host thật còn chờ.
+
+T051 đã nghiệm thu cục bộ: service ghi lệnh có kiểu, kiểm tra trường và giới hạn, giữ ID/frame khi gửi lại; 396 ca offline và 32 ca PostgreSQL qua, không lỗi hay skip. Review độc lập chấp nhận; database/role tạm đã dọn sạch. Ma trận vòng đời T052, MCP, viewer, UAT host thật và tích hợp lên main vẫn chưa nghiệm thu.
+
+T052 đã nghiệm thu cục bộ bằng kiểm thử qua service và hai backend: 117 ca mới/quy ước, 385 ca hồi quy không trùng và 53 ca PostgreSQL qua, không lỗi hay skip. Không cần sửa mã sản phẩm. Review độc lập chấp nhận, còn một góp ý nhỏ về assertion activity lỗi thời để review toàn nhánh xử lý; cleanup sạch. MCP/viewer và UAT host thật chưa nghiệm thu.
+
+T053 đã nghiệm thu cục bộ và review độc lập chấp nhận: tool MCP ghi nghiên cứu kiểm tra stdio/session/composition thực, không nhận cờ quyền từ JSON hay tự khởi tạo kho. Đã sửa lỗi framework làm lộ đối số trước handler, chỉ ở tool mới. 37 ca qua; hồi quy 506 ca qua và hai ca listener bị sandbox chặn đã chạy riêng, qua cả hai. Contract đã đồng bộ và review riêng. Chuỗi PostgreSQL qua MCP/viewer và UAT host thật chưa nghiệm thu.
+
+T054 đã nghiệm thu cục bộ sau khi sửa lỗi kiểm tra lược đồ và qua rà soát độc lập. Reader đọc nghiên cứu trên cùng snapshot với dữ liệu canonical, giữ riêng phạm vi mission hiện tại và quyền của run được chọn; chỉ hiển thị lời claim được phép, không cho nội dung ứng viên hay tổng hợp handoff mượn quyền. Sau sửa, 777 ca offline, 153 ca PostgreSQL, 66 ca lược đồ và 34 ca consumer MCP qua riêng từng phạm vi, không lỗi hoặc bỏ qua; kho và role thử nghiệm đã được dọn. Contract viewer đã đồng bộ và review riêng. Giao diện T055, chuỗi ghi qua MCP đến viewer T056, UAT host thật và tích hợp vào main chưa nghiệm thu.
+
+T055 đã nghiệm thu cục bộ và qua review độc lập: giao diện hiển thị work, handoff, ACK và lịch sử finding từ dữ liệu đã ghi, giữ rõ trạng thái, hoạt động do host báo và quyền hiển thị. Đã sửa lỗi refresh làm đóng chi tiết và mất focus, chỉ giữ trạng thái trình bày theo ID. 78 ca browser và 165 ca consumer riêng biệt qua, không lỗi hoặc bỏ qua. Dữ liệu SQLite thật đi vào Chromium qua transport kiểm thử; chưa coi đó là chuỗi native MCP đến viewer. T056 và UAT agent T057–T058 còn mở. Theo yêu cầu mới, sẽ tạo PR review khi US hiện tại đủ nghiệm thu, chưa có quyền merge hay release.
+
+T056 đã nghiệm thu cục bộ và qua review độc lập: chuỗi stdio MCP đến dữ liệu, HTTP và Chromium chạy thật trên SQLite file và PostgreSQL thử nghiệm. 12 ca native và 11 ca convention qua, không lỗi hoặc bỏ qua; kiểm tra riêng xác nhận không còn database hay role thử nghiệm. Không sửa mã sản phẩm. UAT hai agent chuyên viên T057–T058 còn mở; chưa tích hợp vào main hay phát hành.
+
+T057 đã nghiệm thu kỹ thuật và qua review độc lập bằng agent chuyên viên thực sự chạy trên host: hai work chồng lấn và một trường hợp hai work chạy tuần tự riêng. Cả bốn kết quả đã ghi và ACK, hai assignment đã đóng; HTTP đọc lại đúng nguyên văn và ID nguồn, số đếm vẫn là 8 observation và 8 source. Corpus là dữ liệu giả lập, YouTube không được yêu cầu thu thập; không coi đây là nghiệm thu thị trường. T058 còn mở, chưa tạo PR hay merge.
+
+T058 đã nghiệm thu kỹ thuật và qua review độc lập: agent sửa finding theo phản chứng thứ chín, giữ revision 1 trong lịch sử và revision 2 là bản hiện tại. Một lần HTTP đọc thành công trên trang mới đến DOM mất 68,523 ms; lần giữ trang từ trước đã hết cửa sổ chờ trước khi kết quả được ghi, không được coi là đã qua. Replay receipt cũ không làm đổi 42 bảng hay khôi phục bản cũ. Cả năm work và ba assignment đã đóng; controller/listener đã dừng, kho giả lập và backup được giữ. US4 đủ nghiệm thu kỹ thuật để tạo PR review; toàn spec còn T059–T092, chưa merge hay phát hành.

@@ -204,15 +204,17 @@ async def test_repeated_cancellation_settles_terminal_cleanup(repository_case, t
         await asyncio.Event().wait()
 
     if cleanup_stage == "mission":
-        original = repo.update_mission
+        # Run-bound cleanup now uses the atomic state writer; gate the actual
+        # consumer boundary without restoring a silent legacy state write.
+        original = repo.commit_collection_state
 
-        async def blocked_cleanup(value):
+        async def blocked_cleanup(value, run_id):
             if value.status == "FAILED":
                 cleanup.set()
                 await release.wait()
-            return await original(value)
+            return await original(value, run_id)
 
-        monkeypatch.setattr(repo, "update_mission", blocked_cleanup)
+        monkeypatch.setattr(repo, "commit_collection_state", blocked_cleanup)
     else:
         original = store._finish_run_journal
 

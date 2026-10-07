@@ -333,6 +333,8 @@ BUILTIN_SINCE_003 = ("industry_taxonomies", "market_lexicons")
 BUILTIN_SINCE_023 = ("mission_evidence_qualifications", "mission_probe_outcomes")
 # 025 creates two surrogate UUID keys. mission_manifests is keyed by its parent mission_id.
 BUILTIN_SINCE_025 = ("mission_claim_evidence", "mission_claims")
+# 027's event identity is defaulted; control/command keys retain their bound mission identity.
+BUILTIN_SINCE_027 = ("mission_progress_events",)
 UUID_DEFAULTS = (
     "SELECT c.relname, a.attname, pg_get_expr(d.adbin, d.adrelid) FROM pg_attrdef d"
     " JOIN pg_class c ON c.oid = d.adrelid"
@@ -473,6 +475,7 @@ def test_a_fresh_install_defaults_every_uuid_key_to_the_builtin_generator(empty_
         (table, "id", "gen_random_uuid()")
         for table in sorted(
             UUID_DEFAULT_TABLES + BUILTIN_SINCE_003 + BUILTIN_SINCE_023 + BUILTIN_SINCE_025
+            + BUILTIN_SINCE_027
         )
     ]
     assert _one(dsn, UUID_OSSP_DEPENDENT_DEFAULTS)[0] == 0, "a default still calls uuid-ossp"

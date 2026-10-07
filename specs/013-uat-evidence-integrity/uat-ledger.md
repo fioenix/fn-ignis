@@ -4,6 +4,14 @@ This ledger is canonical for Spec 013 acceptance. Local ignored evidence files a
 
 ## Owner acceptance and integration authority — 2026-10-04
 
+### Verified source integration
+
+PR [#50](https://github.com/fioenix/fn-ignis/pull/50) merged at 2026-10-04 05:10:55 UTC. GitHub readback shows MERGED with main commit `a94db308fd58b484e7f0b765b7c56b84e406fb37` and reviewed head `26e7c86e8eeb9c075a0fad08b6912de403b86f31`. All seven distinct protected PR check names succeeded, including fresh cold-runner Compose and the performance benchmark. Fetch/ancestry readback confirms that head is contained in origin/main; the merge introduces no additional runtime/test/SQL diff over the reviewed head. The clean managed checkout was fast-forwarded without touching the separate owner checkout or ignored UAT evidence.
+
+This closes source integration for Spec 012 T030, Spec 013 T027 and UAT-002. Post-merge main CI `37179137930` was still running at the first readback; Compose `37179137968`, performance `37179137975` and Secret scan succeeded. Do not infer the four Python matrix checks succeeded until their terminal result is read. Release/tag/publication, owner-client activation and Supabase migration 026 remain outside this integration action; no shipped version or database change is claimed. Goal 2 may proceed with design while retaining all PO acceptance exceptions.
+
+Final post-merge check-run readback on the exact main commit subsequently returned all seven completed/success: Python 3.11/3.12/3.13/3.14 Test & Lint, Secret scan, Fresh Compose database init and SC-001 get_top_clusters P95. This supersedes the pending CI state above, not the accepted pixel/process exceptions or separate release/activation/database boundaries.
+
 Owner explicitly decided: "Tao chốt, tạo PR và merge đi, để xong rồi qua Goal 2". Goal 1 is accepted for integration with two documented exceptions: original test-first writing order is not independently proven, and report pixels are not independently inspected because supported viewers were blocked. This settles U08/U11's acceptance disposition, not their missing technical evidence. Spec 012 T004/T006/T007/T020/T022 and Spec 013 T006/T018/the visual portion of T022 remain unchecked as technical observations, but are no longer integration blockers under this explicit PO decision. Functional runtime, structural exports, security and backend evidence retain their original scopes.
 
 U12, Spec 012 T030 and Spec 013 T027 remain pending until actual PR checks, merge and main readback. This authorization covers integration, not a version bump, tag, publication, Supabase migration or additional live collection. Goal 2 starts only after verified integration. Later status supersedes historical pending language below without rewriting its evidence.

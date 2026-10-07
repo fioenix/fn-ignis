@@ -3,7 +3,7 @@
 **Input**: spec.md, plan.md, research.md, data-model.md and contracts/query-proof-and-uat.md.
 **Organization**: Independent user stories; observed RED→GREEN required for each production fix. No checked task implies shipping.
 
-**Owner disposition — 2026-10-04**: Goal 1 accepted for PR/merge before Goal 2 with documented historical test-first-order and unavailable independent pixel-proof exceptions. T006/T018/the visual portion of T022 remain unchecked as technical observations, not PO integration blockers. See uat-ledger.md. T027 still requires actual integration readback; no release is implied.
+**Owner disposition — 2026-10-04**: Goal 1 accepted for PR/merge before Goal 2 with documented historical test-first-order and unavailable independent pixel-proof exceptions. T006/T018/the visual portion of T022 remain unchecked as technical observations, not PO integration blockers. See uat-ledger.md. T027 source integration is verified below; post-merge CI is separately tracked and no release is implied.
 
 ## Phase 1: Setup
 
@@ -54,7 +54,7 @@
 - [x] T024 Run final default and non-skipped backend tests, conventions/lint/package gates; post-026 default 2007 passed/379 skipped/two warnings, actual dual-backend/Compose 750 passed/five backend-specific skips with owned cleanup exit 0, clean journey 10 passed. Final build/lock/Ruff exit 0, installed final wheel discovers 44 tools and completes read-only configuration/termination. Pixel and integration acceptance are not part of this task.
 - [x] T025 Complete code/security review and regression corrections; bounded independent code reviews closed the reproduced defects. Fresh security scan 2e6d4703-84b3-4e55-9d4c-9235b0e4e760 is sealed and read back: all 37 current changed source/configuration entries reviewed, zero candidates/findings. Exact snapshot and report reference are in issues.md and uat-ledger.md; this is not repository-wide assurance or shipping.
 - [x] T026 Reconcile every Spec 012 and Spec 013 acceptance task against actual evidence in both tasks.md ledgers; final lesson appended/read back and Spec 012 behavior tasks linked to actual tests/runtime/review. Historical test-first-order tasks remain unchecked pending owner disposition; visual and integration tasks stay open. Reconciliation is not complete acceptance or shipping.
-- [ ] T027 Verify authorized integration/activation or explicitly park that boundary in BACKLOG.md and specs/013-uat-evidence-integrity/uat-ledger.md; no implicit release.
+- [x] T027 Verify integration/activation boundary: PR #50 MERGED to main a94db308, all seven protected PR checks and all seven post-merge main checks completed successfully, reviewed head ancestry and unchanged runtime/test/SQL merge verified. Release, owner-client activation and Supabase migration remain explicitly separate. See uat-ledger.md; no implicit release or waived pixel/process proof.
 
 ## Dependencies and Parallel Examples
 

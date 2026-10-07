@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Ignis · Mission relay</title>
+{% include '_fino_theme.html' %}
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; color: var(--color-foreground); background: var(--color-background); font-family: var(--font-sans); }
+main { max-width: 1440px; margin: auto; padding: 24px; }
+h1 { font-family: var(--font-display); text-transform: uppercase; font-weight: 400; font-size: clamp(28px, 4vw, 48px); margin: 0; }
+h2 { font-size: var(--text-lg); margin: 0 0 12px; }
+h3 { font-size: var(--text-sm); margin: 0 0 8px; }
+p { margin: 8px 0; line-height: 1.5; }
+button { font: inherit; color: inherit; background: var(--color-card); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 10px 14px; cursor: pointer; }
+button:hover { background: var(--color-elevated); }
+button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--color-ring); outline-offset: 3px; }
+button[aria-pressed="true"] { background: var(--color-primary); color: var(--color-primary-foreground); }
+.authority, .stage, .inspector, .timeline { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-card); padding: 18px; box-shadow: var(--shadow-xs); }
+.authority { margin: 20px 0; }
+.identity { font: var(--text-xs)/1.6 var(--font-mono); overflow-wrap: anywhere; }
+.receipt-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.label { display: block; color: var(--color-muted-foreground); font-size: var(--text-xs); }
+.count { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.stages { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.stage { min-width: 0; border-top: 3px solid var(--color-chart-1); }
+.stage button { width: 100%; text-align: left; }
+.stage p { font-size: var(--text-sm); color: var(--color-muted-foreground); }
+.gate { border-top-color: var(--color-chart-2); }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0; }
+.inspector, .timeline { margin-top: 18px; overflow-wrap: anywhere; }
+.inspector section { padding: 10px 0; border-bottom: 1px solid var(--color-border); }
+.timeline ol, .evidence-list { padding-left: 20px; }
+.timeline li { margin: 12px 0; }
+.evidence-list li { margin-bottom: 8px; }
+.packet { display: inline-flex; gap: 8px; align-items: center; padding: 8px; margin: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-elevated); font: var(--text-xs)/1.4 var(--font-mono); }
+.packet-mark { width: 8px; height: 8px; background: var(--color-chart-1); }
+.research-lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 18px; margin-top: 18px; }
+.research-record { min-width: 0; border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 18px; }
+.research-record summary { cursor: pointer; padding: 8px 0; }
+.muted { color: var(--color-muted-foreground); }
+[hidden] { display: none !important; }
+@media (max-width: 900px) { .stages { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 540px) { main { padding: 14px; } .stages, .receipt-grid { grid-template-columns: 1fr; } }
+@keyframes recorded-transfer { from { transform: translateX(0); opacity: 1; } to { transform: translateX(24px); opacity: 0; } }
+.packet { animation: recorded-transfer 1800ms ease-out forwards; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body class="product-mode respect-motion-prefs" data-density="comfortable">
+<main data-expires-at="{{ expires_at }}" data-snapshot-url="snapshot">
+<p class="label">IGNIS · READ-ONLY OBSERVATORY</p><h1>Evidence journey</h1>
+<p data-testid="snapshot-state" role="status">Recorded snapshot · activity requires a finite host receipt</p>
+<header class="authority" data-testid="mission-authority">
+<button type="button" data-stage="Mission authority">Mission authority</button>
+<p class="identity">Mission <span data-testid="mission-identity">{{ snapshot.mission_id }}</span></p>
+<div class="receipt-grid">
+<div><span class="label">Selected run</span><span class="identity" data-testid="run-identity">{{ snapshot.run_id or 'Unknown' }}</span></div>
+<div><span class="label">Collection · {{ 'selected run' if snapshot.run_id else 'mission' }}</span><span class="identity" data-testid="collection-state">{% if snapshot.collection_state == 'PENDING' %}Idle · recorded PENDING{% elif snapshot.collection_state %}{{ snapshot.collection_state }} · recorded state{% else %}Unknown · no canonical collection state{% endif %}</span></div>
+<div><span class="label">Manifest fingerprint</span><span class="identity" data-testid="manifest-identity">{{ snapshot.manifest_digest or 'Unknown' }}</span></div>
+<div><span class="label">Last successful read</span><span class="identity" data-testid="read-receipt">{{ snapshot.read_at }}</span></div>
+<div><span class="label">Last viewer read attempt</span><span class="identity" data-testid="last-read-attempt">Unknown</span></div>
+<div><span class="label">Permission state</span><span class="identity" data-testid="gate-state">{{ snapshot.claim_gate.state }}</span></div>
+<div><span class="label">Unavailable reason</span><span class="identity" data-testid="read-failure-reason">{{ snapshot.claim_gate.reason_code }}</span></div>
+<div><span class="label">Evidence frame</span><span class="identity" data-testid="frame-identity">{{ snapshot.frame_digest or snapshot.frame_pending_reason or 'Unknown' }}</span></div>
+<div><span class="label">Observations · full selected corpus</span><strong class="count" data-testid="observation-count">{{ snapshot.counts.observations }}</strong></div>
+<div><span class="label">Canonical sources · full selected corpus</span><strong class="count" data-testid="source-count">{{ snapshot.counts.sources }}</strong></div>
+</div>
+<p class="identity">Viewing deadline <time>{{ expires_at }}</time> · research authority is independent of this viewer.</p>
+</header>
+<nav class="stages" aria-label="Evidence responsibilities">
+{% for name, explanation in stages %}
+<section class="stage {% if name == 'Synthesis' %}gate{% endif %}">
+<button type="button" data-stage="{{ name }}">{{ name }}</button><p>{{ "Recorded assignments, finite activity receipts and finding history." if name == "Research" else explanation }}</p>
+</section>
+{% endfor %}
+</nav>
+<div class="controls" aria-label="Viewer controls">
+<button type="button" data-action="refresh" aria-pressed="false">Pause refresh</button>
+<button type="button" data-action="motion" aria-pressed="false">Pause motion</button>
+<button type="button" data-action="first-evidence" disabled>First evidence page</button>
+<button type="button" data-action="next-evidence" disabled>Next evidence page</button>
+</div>
+<p class="identity" data-testid="page-state">Selected evidence page; exact aggregate counts are shown above.</p>
+<section aria-label="Recorded observation arrivals"><h2>Recorded arrivals</h2><div data-testid="arrivals"></div></section>
+<section aria-label="Recorded qualification changes"><div data-testid="role-moves"></div></section>
+<p class="muted" data-testid="packet-overflow"></p>
+<section class="inspector" data-testid="stage-inspector" aria-label="Stage inspector">
+<h2>Sources</h2><section role="region" aria-label="Input"><h3>Input</h3><p>Selected canonical mission observations. This page is not full corpus coverage.</p></section>
+<section role="region" aria-label="Output"><h3>Output</h3><p>{{ snapshot.evidence | length }} observations on this page; {{ snapshot.counts.observations }} in the selected corpus.</p>
+<h3>Measured channel coverage</h3>
+{% for channel in snapshot.channels %}<p data-channel-platform="{{ channel.platform }}">{{ channel.platform }} · {{ channel.status or 'Unknown' }} · <span data-testid="channel-count">{{ channel.signals_collected if channel.signals_collected is not none else 'Unknown' }}</span> observations · {{ channel.completed_at or 'Unknown' }} · {{ channel.note or 'Unknown' }}</p>{% else %}<p>Unknown — no measured channel outcomes in this selected view.</p>{% endfor %}
+<ul class="evidence-list">{% for row in snapshot.evidence %}<li><span>{{ row.title }}</span> <span class="identity">{{ row.observation_id }} · {{ row.evidence_role }} · {{ row.direction or 'Unknown' }}</span></li>{% else %}<li>No observations on this page.</li>{% endfor %}</ul></section>
+<section role="region" aria-label="Failure reason"><h3>Failure reason</h3><p>Unmeasured channel availability is Unknown; absence of a receipt is not a measured empty result.</p></section>
+<section role="region" aria-label="Why it matters"><h3>Why it matters</h3><p>Source and observation identity preserve evidence lineage without promoting attention to Market support.</p></section>
+</section>
+<section class="timeline" aria-label="Recorded events"><h2>Committed timeline</h2><ol data-testid="event-timeline">
+{% for event in (snapshot.event_page.events if snapshot.event_page else []) %}
+<li data-event-id="{{ event.event_id }}"><span class="identity">{{ event.kind }} · {{ event.provenance }} · {{ event.recorded_at }}</span><p>{{ event.reason or 'No failure reason recorded.' }}</p><span data-testid="event-observation-count">{{ event.evidence_references | length }}</span> recorded references</li>
+{% endfor %}
+</ol><p class="muted">A historic snapshot does not animate as new collection. Research receipts describe recorded activity without proving live reasoning.</p></section>
+<noscript><section class="inspector" aria-label="Recorded strategic ledger"><h2>Recorded strategic permission · {{ snapshot.claim_gate.render_status }}</h2>
+{% for claim in snapshot.claim_gate.claims %}<article><h3>{{ claim.wording }}</h3><p>{{ claim.claim_type }} · {{ claim.status }} · {{ claim.claim_id }} · frame {{ claim.frame_digest }}</p>
+{% for binding in claim.evidence_bindings %}<p>{{ binding.role }} · observation {{ binding.observation_id or 'Unknown' }} · probe {{ binding.probe_outcome_id or 'Unknown' }} · target {{ binding.hypothesis_target or 'Unknown' }}</p>{% endfor %}
+<p>Method {{ claim.inference_method or 'Unknown' }} · denominator {{ claim.metric_denominator or 'Unknown' }} · timeframe {{ claim.metric_timeframe or 'Unknown' }} · recorded confidence {{ claim.confidence if claim.confidence is not none else 'Unknown' }}</p>
+{% for value in claim.limitations %}<p>Limitation: {{ value }}</p>{% endfor %}{% for value in claim.change_conditions %}<p>Revision condition: {{ value }}</p>{% endfor %}</article>{% endfor %}
+{% if snapshot.claim_gate.gap_report %}<h3>Gap Report · outputs withheld</h3>{% for value in snapshot.claim_gate.gap_report.withheld_outputs %}<p>Withheld output: {{ value }}</p>{% endfor %}{% for value in snapshot.claim_gate.gap_report.safe_partial_conclusions %}<p>Safe partial conclusion: {{ value }}</p>{% endfor %}{% for probe in snapshot.claim_gate.gap_report.attempted_probes %}<p>Attempted probe: {{ probe.connector_surface or 'Unknown' }} · {{ probe.status or 'Unknown' }} · {{ probe.queried_window or 'Unknown' }} · observations {{ probe.signals_collected if probe.signals_collected is not none else 'Unknown' }}</p>{% endfor %}<p>Required authority: {{ snapshot.claim_gate.gap_report.required_authority or 'Unknown' }} · estimated cost: {{ snapshot.claim_gate.gap_report.estimated_cost or 'Unknown' }}</p>{% for value in snapshot.claim_gate.gap_report.failed_gates %}<p>Failed gate: {{ value }}</p>{% endfor %}{% for value in snapshot.claim_gate.gap_report.missing_evidence %}<p>Missing evidence: {{ value }}</p>{% endfor %}<p>Next probe: {{ snapshot.claim_gate.gap_report.next_best_probe }}</p>{% endif %}
+<h3>History · no current permission</h3>{% for claim in snapshot.claim_gate.history %}<p>{{ claim.wording }} · {{ claim.status }} · {{ claim.frame_digest }}</p>{% endfor %}</section><p>JavaScript is unavailable. The selected snapshot, canonical identities and exact counts above remain readable. Refresh this document for a new bounded read.</p></noscript>
+<script id="relay-initial" type="application/json">{{ snapshot | tojson }}</script>
+</main>
+<script>
+(() => {
+  'use strict';
+  const initial = JSON.parse(document.getElementById('relay-initial').textContent);
+  let snapshot = initial;
+  const main = document.querySelector('main');
+  const inspector = document.querySelector('[data-testid="stage-inspector"]');
+  const timeline = document.querySelector('[data-testid="event-timeline"]');
+  const deadline = Date.parse(main.dataset.expiresAt);
+  let inspectionGeneration = 0;
+  let inspectionController = null;
+  let inspectionPending = false;
+  let selectedStage = 'Sources';
+  const unknown = value => value === null || value === undefined ? 'Unknown' : String(value);
+  const node = (tag, value, className) => {
+    const element = document.createElement(tag);
+    if (value !== undefined) element.textContent = String(value);
+    if (className) element.className = className;
+    return element;
+  };
+  function stopInspection() {
+    inspectionGeneration += 1;
+    if (inspectionController) inspectionController.abort();
+    inspectionController = null;
+    inspectionPending = false;
+  }
+  function regions(title, values) {
+    inspector.replaceChildren(node('h2', title));
+    const result = {};
+    for (const name of ['Input', 'Output', 'Failure reason', 'Why it matters']) {
+      const region = node('section');
+      region.setAttribute('role', 'region');
+      region.setAttribute('aria-label', name);
+      region.append(node('h3', name), node('p', values[name]));
+      inspector.append(region);
+      result[name] = region;
+    }
+    return result;
+  }
+  function showChannels(output) {
+    output.append(node('h3', 'Measured channel coverage'));
+    if (!snapshot.channels.length) {
+      output.append(node('p', 'Unknown — no measured channel outcomes in this selected view.'));
+    }
+    for (const channel of snapshot.channels) {
+      const row = node('p');
+      row.dataset.channelPlatform = channel.platform;
+      row.append(node('span', `${channel.platform} · ${unknown(channel.connector_surface)} · ${unknown(channel.status)} · `));
+      const count = node('span', unknown(channel.signals_collected), 'count');
+      count.dataset.testid = 'channel-count';
+      row.append(count, node('span', ` observations · ${unknown(channel.completed_at)} · ${unknown(channel.note)}`));
+      output.append(row);
+    }
+  }
+  function addEvidence(output, rows) {
+    const list = node('ul');
+    list.className = 'evidence-list';
+    for (const row of rows) {
+      const item = node('li');
+      item.dataset.observationId = row.observation_id;
+      const button = node('button', row.title);
+      button.type = 'button';
+      button.addEventListener('click', () => inspectObservation(row));
+      item.append(button, node('p', `${row.observation_id} · ${row.source_id} · ${row.evidence_role} · ${unknown(row.direction)} · ${unknown(row.qualification_relation)}`, 'identity'));
+      list.append(item);
+    }
+    if (!rows.length) list.append(node('li', 'No observations on this page; missing coverage remains Unknown.'));
+    output.append(list);
+  }
+  function selectStage(name) {
+    // Only presentation state survives refresh; canonical records always come from snapshot.
+    const oldDetails = name === 'Research' && selectedStage === name ? [...inspector.querySelectorAll('details[data-research-detail]')] : [];
+    const expanded = new Set(oldDetails.filter(detail => detail.open).map(detail => detail.dataset.researchDetail));
+    const focused = oldDetails.find(detail => detail.querySelector('summary') === document.activeElement)?.dataset.researchDetail;
+    stopInspection();
+    selectedStage = name;
+    for (const button of document.querySelectorAll('[data-stage]')) button.setAttribute('aria-pressed', String(button.dataset.stage === name));
+    let values;
+    if (name === 'Mission authority') {
+      values = {
+        'Input': `Selected mission ${snapshot.mission_id}, run ${unknown(snapshot.run_id)}.`,
+        'Output': `Read-only viewing scope. Manifest ${unknown(snapshot.manifest_digest)}. Research authority and remaining quota are Unknown in this read projection.`,
+        'Failure reason': 'Unknown authority details cannot grant collection, research or write permission. The viewing deadline never renews research authority.',
+        'Why it matters': 'A finite read URL authorizes inspection of this selected scope only.'
+      };
+    } else if (name === 'Sources') {
+      values = {
+        'Input': 'Canonical selected-mission observations and recorded channel outcomes.',
+        'Output': `${snapshot.evidence.length} observations on this page; ${snapshot.counts.observations} observations and ${snapshot.counts.sources} canonical sources in the full selected corpus.`,
+        'Failure reason': 'Unmeasured channel availability remains Unknown. EMPTY_NO_DATA is a measured outcome with its recorded count; it is not inferred from a missing result.',
+        'Why it matters': 'Source and observation identity retain lineage. Attention context does not become Market support.'
+      };
+    } else if (name === 'Cleaning') {
+      const qualified = snapshot.evidence.filter(row => row.qualification_relation !== null);
+      values = {
+        'Input': `${snapshot.evidence.length} canonical observations on this selected page.`,
+        'Output': qualified.length ? `${qualified.length} recorded qualifications on this page; complete-corpus qualification coverage is Unknown.` : 'Unknown — no recorded qualifications on this page. Cleaning remains pending.',
+        'Failure reason': 'Missing qualification receipts are not completed cleaning. Excluded observations remain inspectable without supporting a claim.',
+        'Why it matters': 'Recorded relations and frame fingerprints preserve the original judgment and its question frame.'
+      };
+    } else if (name === 'Research') {
+      values = {
+        'Input': 'Mission-current research records from the same coherent read; selected-run strategic permission remains separate.',
+        'Output': snapshot.research?.availability === 'AVAILABLE' ? 'Recorded research · activity is finite HOST_REPORTED receipt evidence, not proof of live reasoning.' : 'Unavailable — SCHEMA_UNAVAILABLE; research records and counts are Unknown.',
+        'Failure reason': 'A work-start event alone does not prove an active specialist. No synthetic team, confidence, work rate or status is inferred.',
+        'Why it matters': 'The observatory distinguishes committed evidence from an unsupported description of ongoing work.'
+      };
+    } else if (name === 'Cross-check') {
+      values = {
+        'Input': 'Recorded support, contradiction, context and excluded roles on the selected evidence page.',
+        'Output': 'Unknown — complete counterevidence coverage and current-frame checks are unavailable in this projection. Recorded page roles remain separately inspectable.',
+        'Failure reason': 'Attention association, absent direction and excluded evidence cannot be promoted to supporting Market evidence.',
+        'Why it matters': 'The original relation and frame fingerprint let the reader question favorable evidence as well as counterevidence.'
+      };
+    } else {
+      values = {
+        'Input': `Frame ${unknown(snapshot.frame_digest)} · ${unknown(snapshot.frame_pending_reason)}.`,
+        'Output': `${!stale && snapshot.claim_gate.render_status === 'PERMITTED' ? 'PERMITTED · exact-frame persisted ledger entries.' : 'Withheld · ' + snapshot.claim_gate.reason_code}. Descriptive and provisional labels grant no permission.`,
+        'Failure reason': 'Observation volume, a present frame digest or old events do not grant strategic permission.',
+        'Why it matters': 'A permitted verdict requires a persisted current-frame ledger gate, not animation or a cached count.'
+      };
+    }
+    const output = regions(name, values)['Output'];
+    if (name === 'Sources') showChannels(output);
+    if (name === 'Research') showResearch(output);
+    if (name === 'Synthesis') showLedger(output);
+    if (['Sources', 'Cleaning', 'Cross-check'].includes(name)) addEvidence(output, snapshot.evidence);
+    for (const detail of inspector.querySelectorAll('details[data-research-detail]')) {
+      detail.open = expanded.has(detail.dataset.researchDetail);
+      if (detail.dataset.researchDetail === focused) detail.querySelector('summary').focus({preventScroll: true});
+    }
+  }
+  function showResearch(output) {
+    const research = snapshot.research;
+    const root = node('section'); root.dataset.testid = 'research-view';
+    output.append(root);
+    if (stale || !research || research.availability !== 'AVAILABLE') {
+      root.append(node('p', stale ? 'Unavailable — stale read; research activity and result permission are Unknown.' : 'SCHEMA_UNAVAILABLE · records, observations and sources Unknown.'));
+      return;
+    }
+    root.append(node('h3', 'Recorded research · mission current'),
+      node('p', `${research.scope} · run ${unknown(research.current_run_id)} · frame ${unknown(research.frame_digest)} · revision ${research.revision} · epoch ${research.current_epoch}`, 'identity'),
+      node('p', `Selected viewer run ${unknown(snapshot.run_id)} · strategic gate ${snapshot.claim_gate.state}. Research currentness grants no strategic permission.`, 'identity'),
+      node('p', `Capacity ${unknown(research.capacity)} · recorded identity counts, not independent corroboration.`));
+    for (const [label, field, testid] of [['Observations', 'observation_count', 'research-observation-count'], ['Canonical sources', 'source_count', 'research-source-count']]) {
+      const value = node('strong', research[field], 'count'); value.dataset.testid = testid;
+      root.append(node('p', label), value);
+    }
+    function metadata(container, row) {
+      container.append(node('p', `Stored ${unknown(row.recorded_at)} · ${unknown(row.recorded_provenance)} · submitted time ${unknown(row.submitted_recorded_at)}`, 'identity'));
+    }
+    function inputs(container, binding) {
+      container.append(node('p', `Input mission ${binding.mission_id} · Manifest ${binding.manifest_digest} · Brief ${unknown(binding.brief_digest)} · frame ${unknown(binding.frame_digest)}`, 'identity'));
+      for (const identity of binding.observation_ids) container.append(node('p', `Input observation ${identity}`, 'identity'));
+      for (const predecessor of binding.finding_revisions) container.append(node('p', `Input finding ${predecessor.finding_id} · exact revision ${predecessor.revision}`, 'identity'));
+    }
+    function notes(container, row) {
+      for (const value of row.limitations) container.append(node('p', `Limitation: ${value}`));
+      for (const value of row.open_questions) container.append(node('p', `Open question: ${value}`));
+    }
+    const assignments = node('div'); assignments.className = 'research-lanes';
+    for (const assignment of research.assignments) {
+      const record = node('article'); record.className = 'research-record'; record.dataset.assignmentId = assignment.assignment_id;
+      record.append(node('h4', `Assignment · ${assignment.state}`), node('p', `${assignment.assignment_id} · version ${assignment.version} · epoch ${assignment.epoch}`, 'identity'),
+        node('p', `Host ${unknown(assignment.host_task_ref)} · capability ${unknown(assignment.capability)} · ${unknown(assignment.capability_provenance)}`),
+        node('p', `Authority ${assignment.authority_state} · deadline ${assignment.authority.deadline} · quota ceiling ${assignment.authority.quota_ceiling}`, 'identity'),
+        node('p', `Actions ${assignment.authority.actions.join(', ')} · sources ${assignment.authority.sources.join(', ')}`));
+      metadata(record, assignment); assignments.append(record);
+    }
+    root.append(assignments);
+    const lanes = node('div'); lanes.className = 'research-lanes'; lanes.dataset.testid = 'research-work-lanes';
+    for (const work of research.work_items) {
+      const lane = node('article'); lane.className = 'research-record'; lane.dataset.workId = work.work_id;
+      lane.append(node('h4', work.question), node('p', `Expertise ${work.expertise} · assignee ${unknown(work.assignee_ref)}`),
+        node('p', `${work.work_id} · assignment ${work.assignment_id} · run ${unknown(work.run_id)} · epoch ${work.epoch} · version ${work.version} · ${work.state} · reason ${unknown(work.reason_code)}`, 'identity'),
+        node('p', work.state === 'CANCEL_PENDING' ? 'Cancellation requested · stop acknowledgement pending.' : 'Stored lifecycle state; execution is not independently verified.'),
+        node('p', `Activity at read: ${work.activity.state} · ${unknown(work.activity.provenance)}. No ongoing execution is inferred.`));
+      if (work.activity.receipt) {
+        const receipt = work.activity.receipt;
+        lane.append(node('p', `Host receipt ${receipt.execution_ref} · occurred ${unknown(receipt.occurred_at)} · finite freshness boundary ${receipt.fresh_until}`, 'identity'));
+      }
+      lane.append(node('p', `Ownership fence ${work.ownership_fence}`, 'identity'));
+      metadata(lane, work);
+      const details = node('details'); details.dataset.researchDetail = `work:${work.work_id}:inputs`; details.append(node('summary', 'Inputs and dependencies'));
+      inputs(details, work.inputs);
+      for (const dependency of work.dependencies) details.append(node('p', `Dependency work ${dependency}`, 'identity'));
+      if (!work.dependencies.length) details.append(node('p', 'No recorded dependencies.'));
+      lane.append(details);
+      for (const handoff of research.handoffs.filter(row => row.work_id === work.work_id)) {
+        const result = node('section'); result.dataset.handoffId = handoff.handoff_id;
+        result.append(node('h4', 'Recorded handoff'), node('p', `Work ${handoff.work_id} → consumer ${unknown(handoff.consumer_ref)} · ${handoff.handoff_id} · producer version ${handoff.expected_version}`, 'identity'),
+          node('p', `Occurrence ${unknown(handoff.occurred_at)}`, 'identity'),
+          node('p', handoff.text_withheld ? 'Aggregate result withheld · strategic candidate narration cannot grant permission.' : unknown(handoff.result)));
+        metadata(result, handoff); notes(result, handoff);
+        const bindings = node('details'); bindings.dataset.researchDetail = `handoff:${handoff.handoff_id}:inputs`; bindings.append(node('summary', 'Exact handoff inputs')); inputs(bindings, handoff.inputs); result.append(bindings);
+        for (const binding of handoff.observation_sources) result.append(node('p', `Observation ${binding.observation_id} · source ${binding.source_id}`, 'identity'));
+        for (const outcome of handoff.outcome_ids) result.append(node('p', `Outcome ${outcome}`, 'identity'));
+        for (const claim of handoff.claim_ids) result.append(node('p', `Claim reference ${claim} · reference grants no permission`, 'identity'));
+        for (const ack of research.acknowledgements.filter(row => row.handoff_id === handoff.handoff_id)) result.append(node('p', `ACK ${ack.disposition} · consumer ${ack.consumer_ref} · version ${ack.expected_version} · reason ${unknown(ack.reason_code)}`, 'identity'));
+        if (!research.acknowledgements.some(row => row.handoff_id === handoff.handoff_id)) result.append(node('p', 'ACK Unknown · no recorded acknowledgement.'));
+        lane.append(result);
+      }
+      lanes.append(lane);
+    }
+    root.append(lanes);
+    if (!research.work_items.length) root.append(node('p', 'No recorded work items in this available snapshot.'));
+    const history = node('section'); history.dataset.testid = 'finding-history'; history.append(node('h3', 'Finding revisions · recorded history'));
+    for (const finding of research.findings) {
+      const article = node('article'); article.className = 'research-record'; article.dataset.findingId = finding.finding_id;
+      article.append(node('h4', `${finding.result_type} · revision ${finding.revision}`),
+        node('p', `${finding.finding_id} · work ${finding.work_id} · handoff ${finding.handoff_id} · predecessor ${unknown(finding.predecessor_revision)}`, 'identity'),
+        node('p', `Latest recorded ${finding.latest_recorded} · current eligible ${finding.current_eligible} · narration ${finding.narrative_origin}`, 'identity'),
+        node('p', finding.text_withheld ? 'Text withheld by the reader projection.' : finding.statement),
+        node('p', finding.current_eligible ? (finding.result_type === 'STRATEGIC_CANDIDATE' ? (finding.narrative_origin === 'CURRENT_CLAIM_LEDGER' && !finding.text_withheld ? 'Exact current canonical Claim Ledger narration; candidate prose is not rendered.' : 'Strategic candidate text withheld; no current Claim Ledger permission.') : 'Current eligible in the projected research frame; descriptive output remains provisional.') : 'Not current eligible in the projected research frame; history grants no current permission.'));
+      metadata(article, finding);
+      const details = node('details'); details.dataset.researchDetail = `finding:${finding.finding_id}:${finding.revision}:evidence`; details.append(node('summary', 'Evidence, alternatives and limits'));
+      inputs(details, finding.inputs);
+      for (const [label, field] of [['Support', 'supporting_observation_ids'], ['Contradiction', 'contradicting_observation_ids'], ['Context', 'context_observation_ids']]) for (const identity of finding[field]) details.append(node('p', `${label} observation ${identity}`, 'identity'));
+      notes(details, finding); details.append(node('p', `Alternative ${unknown(finding.alternative_explanation)} · claim ${unknown(finding.claim_id)}`));
+      article.append(details); history.append(article);
+    }
+    if (!research.findings.length) history.append(node('p', 'No recorded finding revisions.'));
+    root.append(history);
+  }
+  function showLedger(output) {
+    const gate = snapshot.claim_gate;
+    const current = node('section'); current.dataset.testid = 'current-claims';
+    const history = node('section'); history.dataset.testid = 'claim-history';
+    history.append(node('h3', 'History · no current permission'));
+    function entry(container, claim) {
+      const article = node('article');
+      article.append(node('h4', claim.wording), node('p', `${claim.claim_type} · ${claim.status} · claim ${claim.claim_id} · frame ${claim.frame_digest}`, 'identity'));
+      for (const binding of claim.evidence_bindings) article.append(node('p', `${binding.role} · observation ${unknown(binding.observation_id)} · probe ${unknown(binding.probe_outcome_id)} · target ${unknown(binding.hypothesis_target)}`, 'identity'));
+      article.append(node('p', `Method ${unknown(claim.inference_method)} · denominator ${unknown(claim.metric_denominator)} · timeframe ${unknown(claim.metric_timeframe)} · recorded confidence ${unknown(claim.confidence)}`));
+      for (const limitation of claim.limitations) article.append(node('p', `Limitation: ${limitation}`));
+      for (const condition of claim.change_conditions) article.append(node('p', `Revision condition: ${condition}`));
+      for (const reason of claim.withheld_reasons) article.append(node('p', `Withheld: ${reason}`));
+      container.append(article);
+    }
+    if (!stale) for (const claim of gate.claims) entry(current, claim);
+    for (const claim of gate.history) entry(history, claim);
+    if (stale) for (const claim of gate.claims) entry(history, {...claim, status: 'SUPERSEDED'});
+    output.append(current, history);
+    const gap = node('section'); gap.dataset.testid = 'gap-report';
+    if (gate.gap_report) {
+      const report = gate.gap_report;
+      gap.append(node('h3', 'Gap Report · strategic outputs withheld'));
+      for (const [label, field] of [['Withheld outputs', 'withheld_outputs'], ['Failed gate', 'failed_gates'], ['Missing evidence', 'missing_evidence'], ['Safe partial conclusion', 'safe_partial_conclusions']]) {
+        for (const value of report[field]) gap.append(node('p', `${label}: ${value}`));
+      }
+      for (const probe of report.attempted_probes) gap.append(node('p', `Attempted probe: ${unknown(probe.connector_surface)} · ${unknown(probe.status)} · ${unknown(probe.queried_window)} · observations ${unknown(probe.signals_collected)}`));
+      gap.append(node('p', `Next probe: ${report.next_best_probe}`), node('p', `Required authority: ${unknown(report.required_authority)} · estimated cost: ${unknown(report.estimated_cost)}`));
+    } else if (!gate.claims.length) gap.append(node('p', `Withheld · ${gate.reason_code}. No recorded Gap Report is available.`));
+    output.append(gap);
+  }
+  async function inspectObservation(row) {
+    stopInspection();
+    clearTimeout(refreshTimer);
+    const generation = inspectionGeneration;
+    if (Date.now() >= deadline) {
+      regions('Evidence inspection', {'Input': row.observation_id, 'Output': 'Unavailable — viewing deadline expired.', 'Failure reason': 'CAPABILITY_EXPIRED', 'Why it matters': 'Expired viewing scope cannot fetch another observation.'});
+      return;
+    }
+    regions('Evidence inspection', {'Input': row.observation_id, 'Output': 'Inspection pending.', 'Failure reason': 'Unknown until the scoped read settles.', 'Why it matters': 'Inspection is a bounded selected-page membership read.'});
+    inspectionPending = true;
+    if (refreshSettled) await refreshSettled;
+    if (generation !== inspectionGeneration || Date.now() >= deadline) return;
+    row = snapshot.evidence.find(item => item.observation_id === row.observation_id && item.source_id === row.source_id);
+    if (!row) {
+      inspectionPending = false;
+      regions('Evidence inspection', {'Input': 'Selected page', 'Output': 'Unavailable — selected observation is no longer on this page.', 'Failure reason': 'SCOPE_MISMATCH', 'Why it matters': 'Inspection cannot bypass current-page membership.'});
+      scheduleRefresh();
+      return;
+    }
+    const controller = new AbortController();
+    inspectionController = controller;
+    const query = new URLSearchParams({page_size: String(snapshot.page_size), evidence_offset: String(snapshot.evidence_offset)});
+    try {
+      const response = await fetch(`inspect/${encodeURIComponent(row.observation_id)}?${query}`, {cache: 'no-store', signal: controller.signal});
+      const data = await response.json();
+      if (generation !== inspectionGeneration || Date.now() >= deadline) return;
+      if (!response.ok || data.status !== 'OK' || data.mission_id !== snapshot.mission_id || data.run_id !== snapshot.run_id || data.revision !== snapshot.revision || data.high_water.ordinal !== snapshot.high_water.ordinal || data.observation.observation_id !== row.observation_id || data.observation.source_id !== row.source_id) {
+        regions('Evidence inspection', {'Input': row.observation_id, 'Output': 'Unavailable — scoped inspection refused or requires a fresh snapshot.', 'Failure reason': unknown(data.reason_code), 'Why it matters': 'A stale or foreign read cannot replace the selected evidence facts.'});
+        return;
+      }
+      const observation = data.observation;
+      const values = {
+        'Input': `Mission ${data.mission_id} · revision ${data.revision} · observation ${observation.observation_id} · source ${observation.source_id}.`,
+        'Output': `${observation.title}\n${unknown(observation.excerpt)}\n${observation.evidence_role} · ${unknown(observation.direction)} · ${unknown(observation.qualification_relation)}\nQualification frame ${unknown(observation.qualification_frame_fingerprint)}\nMetric ${unknown(observation.metric_value)} · growth ${unknown(observation.growth_velocity)}\nPublished ${unknown(observation.published_at)} · captured ${unknown(observation.captured_at)}\nSource URL ${unknown(observation.source_url)}`,
+        'Failure reason': 'Unknown unless a recorded channel or qualification refusal explains a gap. Current strategic claim permission is unavailable.',
+        'Why it matters': 'Source association, qualification relation and metric provenance are distinct from claim support.'
+      };
+      regions('Evidence inspection', values);
+    } catch (error) {
+      if (generation === inspectionGeneration && Date.now() < deadline) regions('Evidence inspection', {'Input': row.observation_id, 'Output': 'Unavailable — the scoped inspection read failed.', 'Failure reason': 'READ_UNAVAILABLE', 'Why it matters': 'A failed read is not an empty successful observation.'});
+    } finally {
+      if (inspectionController === controller) inspectionController = null;
+      if (generation === inspectionGeneration) inspectionPending = false;
+      scheduleRefresh();
+    }
+  }
+  function renderTimeline() {
+    timeline.replaceChildren();
+    const rows = new Map(snapshot.evidence.map(row => [row.observation_id, row]));
+    for (const event of recentEvents.values()) {
+      const item = node('li');
+      item.dataset.eventId = event.event_id;
+      item.append(node('p', `${event.kind} · ${event.provenance} · ${event.recorded_at} · run ${unknown(event.run_id)}`, 'identity'), node('p', event.reason || 'No failure reason recorded.'));
+      const count = node('span', event.evidence_references.length, 'count');
+      count.dataset.testid = 'event-observation-count';
+      item.append(count, node('span', ' recorded references'));
+      const references = node('ul');
+      for (const reference of event.evidence_references) {
+        const ref = node('li');
+        ref.dataset.observationId = reference.observation_id;
+        const row = rows.get(reference.observation_id);
+        const button = node('button', row ? row.title : `Observation ${reference.observation_id} — not on this evidence page`);
+        button.type = 'button';
+        button.disabled = !row;
+        if (row) button.addEventListener('click', () => inspectObservation(row));
+        ref.append(button, node('p', `${reference.source_id} · ${reference.evidence_role} · ${unknown(reference.direction)} · ${unknown(reference.qualification_relation)}`, 'identity'));
+        if (row) references.append(ref);
+      }
+      const visibleReferences = event.evidence_references.filter(ref => rows.has(ref.observation_id)).length;
+      if (visibleReferences < event.evidence_references.length) item.append(node('p', `${event.evidence_references.length - visibleReferences} references outside this evidence page; use the evidence page controls for bounded inspection.`));
+      item.append(references);
+      timeline.append(item);
+    }
+  }
+  const stateLabel = document.querySelector('[data-testid="snapshot-state"]');
+  const arrivals = document.querySelector('[data-testid="arrivals"]');
+  const roleMoves = document.querySelector('[data-testid="role-moves"]');
+  const overflow = document.querySelector('[data-testid="packet-overflow"]');
+  const refreshButton = document.querySelector('[data-action="refresh"]');
+  const motionButton = document.querySelector('[data-action="motion"]');
+  const nextEvidence = document.querySelector('[data-action="next-evidence"]');
+  const firstEvidence = document.querySelector('[data-action="first-evidence"]');
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let refreshPaused = false;
+  let motionPaused = false;
+  let closed = false;
+  let stale = false;
+  let baselineMode = false;
+  let refreshTimer = null;
+  let refreshController = null;
+  let refreshSettled = null;
+  let policyGeneration = 0;
+  let readCursor = initial.event_page?.next_cursor || initial.high_water;
+  let deliveredCursor = initial.high_water;
+  const seenEvents = new Map();
+  const recentEvents = new Map();
+  const activePackets = new Set();
+  const cursorCompare = (a, b) => a.revision - b.revision || a.ordinal - b.ordinal;
+  const uuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+  const count = value => Number.isSafeInteger(value) && value >= 0;
+  const validCursor = cursor => cursor && cursor.mission_id === initial.mission_id && count(cursor.revision) && count(cursor.ordinal) && (cursor.revision === 0) === (cursor.ordinal === 0);
+  function validGate(data) {
+    const gate = data.claim_gate;
+    const strings = values => Array.isArray(values) && values.every(value => typeof value === 'string');
+    if (!gate || !['CURRENT', 'PENDING', 'STALE', 'HISTORY', 'UNAVAILABLE'].includes(gate.state) || typeof gate.reason_code !== 'string' || !Array.isArray(gate.claims) || !Array.isArray(gate.history)) return false;
+    if (gate.render_status !== (gate.claims.length ? 'PERMITTED' : 'WITHHELD')) return false;
+    if (gate.claims.length && (gate.state !== 'CURRENT' || data.surface !== 'MARKET' || !uuid(data.brief_revision_id) || typeof data.frame_digest !== 'string' || !/^[0-9a-f]{64}$/.test(data.frame_digest) || gate.frame_digest !== data.frame_digest || gate.gap_report !== null)) return false;
+    const identifiers = new Set();
+    for (const [rows, current] of [[gate.claims, true], [gate.history, false]]) for (const claim of rows) {
+      if (!claim || !uuid(claim.claim_id) || identifiers.has(claim.claim_id) || claim.mission_id !== data.mission_id || typeof claim.wording !== 'string' || !strings(claim.limitations) || !strings(claim.change_conditions) || !strings(claim.withheld_reasons) || !Array.isArray(claim.evidence_bindings)) return false;
+      if (current ? claim.status !== 'PERMITTED' || claim.frame_digest !== data.frame_digest || claim.brief_revision_id !== data.brief_revision_id || !claim.evidence_bindings.length : !['SUPERSEDED', 'WITHHELD'].includes(claim.status)) return false;
+      identifiers.add(claim.claim_id);
+      for (const binding of claim.evidence_bindings) if (!binding || binding.claim_id !== claim.claim_id || !(uuid(binding.observation_id) && binding.probe_outcome_id === null || uuid(binding.probe_outcome_id) && binding.observation_id === null) || !['SUPPORT', 'CONTRADICTION', 'CONTEXT'].includes(binding.role)) return false;
+    }
+    const gap = gate.gap_report;
+    if (gap !== null && (!gap || !strings(gap.withheld_outputs) || !strings(gap.failed_gates) || !strings(gap.missing_evidence) || !strings(gap.safe_partial_conclusions) || !Array.isArray(gap.attempted_probes) || gap.attempted_probes.some(probe => !probe || typeof probe !== 'object') || typeof gap.next_best_probe !== 'string')) return false;
+    return true;
+  }
+  function validSnapshot(data, requestedCursor = undefined) {
+    if (!data || !validGate(data) || !Number.isFinite(Date.parse(data.read_at)) || data.schema_version !== 1 || data.status !== 'OK' || data.mission_id !== initial.mission_id || data.run_id !== initial.run_id || !validCursor(data.high_water) || data.revision !== data.high_water.revision || cursorCompare(data.high_water, snapshot.high_water) < 0) return false;
+    if (!count(data.counts?.observations) || !count(data.counts?.sources) || data.counts.sources > data.counts.observations || !Number.isSafeInteger(data.page_size) || data.page_size < 1 || data.page_size > 200 || !count(data.evidence_offset) || !Array.isArray(data.evidence) || data.evidence.length > data.page_size || data.evidence_offset + data.evidence.length > data.counts.observations || !Array.isArray(data.channels)) return false;
+    if (data.collection_state !== null && !['PENDING', 'STARTED', 'RUNNING', 'COMPLETED', 'FAILED', 'BLOCKED', 'CANCELLED'].includes(data.collection_state)) return false;
+    const identities = new Map();
+    for (const row of data.evidence) {
+      if (row.mission_id !== data.mission_id || !uuid(row.observation_id) || !uuid(row.source_id) || identities.has(row.observation_id) || typeof row.title !== 'string') return false;
+      identities.set(row.observation_id, row.source_id);
+    }
+    const page = data.event_page;
+    if (page !== null) {
+      if (!validCursor(page?.high_water) || cursorCompare(page.high_water, data.high_water) !== 0 || !Array.isArray(page.events) || page.events.length > data.page_size || typeof page.has_more !== 'boolean' || typeof page.resync_required !== 'boolean') return false;
+      if (page.after_cursor !== null && (!validCursor(page.after_cursor) || cursorCompare(page.after_cursor, data.high_water) > 0)) return false;
+      if (!page.resync_required && requestedCursor !== undefined && (requestedCursor === null ? page.after_cursor !== null : !validCursor(page.after_cursor) || cursorCompare(page.after_cursor, requestedCursor) !== 0)) return false;
+      let previous = page.after_cursor || {revision: 0, ordinal: 0};
+      const eventIds = new Set();
+      for (const event of page.events) {
+        if (!uuid(event.event_id) || eventIds.has(event.event_id) || !validCursor(event) || cursorCompare(event, data.high_water) > 0 || previous && cursorCompare(event, previous) <= 0 || !Array.isArray(event.evidence_references)) return false;
+        if (seenEvents.has(event.event_id) && seenEvents.get(event.event_id) !== `${event.revision}:${event.ordinal}`) return false;
+        eventIds.add(event.event_id);
+        previous = event;
+        const references = new Set();
+        for (const ref of event.evidence_references) {
+          if (ref.mission_id !== data.mission_id || !uuid(ref.observation_id) || !uuid(ref.source_id) || references.has(ref.observation_id) || identities.has(ref.observation_id) && identities.get(ref.observation_id) !== ref.source_id) return false;
+          references.add(ref.observation_id);
+        }
+      }
+      if (page.has_more && (!previous || !validCursor(page.next_cursor) || cursorCompare(page.next_cursor, previous) !== 0 || cursorCompare(previous, data.high_water) >= 0)) return false;
+      if (!page.resync_required && !page.has_more && (page.next_cursor !== null || cursorCompare(previous, data.high_water) !== 0)) return false;
+      if (page.resync_required && (page.events.length || page.has_more || page.next_cursor !== null)) return false;
+    }
+    return true;
+  }
+  function remember(event) {
+    seenEvents.set(event.event_id, `${event.revision}:${event.ordinal}`);
+    if (seenEvents.size > 256) seenEvents.delete(seenEvents.keys().next().value);
+    recentEvents.set(event.event_id, event);
+    // Retain settled incremental receipts without growing an unbounded history.
+    while (recentEvents.size > snapshot.page_size || new TextEncoder().encode(JSON.stringify([...recentEvents.values()])).byteLength > 1048576) recentEvents.delete(recentEvents.keys().next().value);
+  }
+  function clearPackets() {
+    for (const packet of activePackets) packet.remove();
+    activePackets.clear();
+    overflow.textContent = '';
+  }
+  const viewActive = () => !closed && !refreshPaused && document.visibilityState === 'visible' && Date.now() < deadline;
+  const motionActive = () => viewActive() && !motionPaused && !reducedMotion.matches;
+  function packetGroups(event) {
+    const groups = new Map();
+    for (const ref of event.evidence_references) {
+      const key = JSON.stringify([ref.evidence_role, ref.direction, ref.qualification_relation]);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(ref);
+    }
+    return [...groups.values()];
+  }
+  function animate(events, baseline) {
+    let overflowReferences = 0;
+    const overflowEvents = new Set();
+    for (const event of events) {
+      const isNew = !baseline && cursorCompare(event, deliveredCursor) > 0 && !seenEvents.has(event.event_id);
+      remember(event);
+      if (!isNew || !motionActive()) continue;
+      const intake = event.kind === 'OBSERVATIONS_COMMITTED' && event.reason === null && event.run_id === snapshot.run_id;
+      const qualification = event.kind === 'QUALIFICATION_RECORDED';
+      if (!intake && !qualification) continue;
+      for (const references of packetGroups(event)) {
+        if (activePackets.size >= 120) {
+          overflowReferences += references.length;
+          overflowEvents.add(event.event_id);
+          continue;
+        }
+        const packet = node('span');
+        packet.className = 'packet';
+        packet.dataset.testid = 'relay-packet';
+        packet.dataset.eventId = event.event_id;
+        packet.dataset.observationIds = JSON.stringify(references.map(ref => ref.observation_id));
+        packet.dataset.sourceIds = JSON.stringify([...new Set(references.map(ref => ref.source_id))]);
+        packet.dataset.evidenceRole = references[0].evidence_role;
+        if (references[0].direction !== null) packet.dataset.direction = references[0].direction;
+        packet.dataset.provenance = event.provenance;
+        const mark = node('span');
+        mark.className = 'packet-mark';
+        mark.setAttribute('aria-hidden', 'true');
+        const amount = node('span', references.length);
+        amount.dataset.testid = 'packet-observation-count';
+        packet.append(mark, amount, node('span', `${references[0].evidence_role} · ${unknown(references[0].direction)} · ${event.provenance}`));
+        packet.setAttribute('aria-label', `${references.length} recorded observation references, ${references[0].evidence_role}, ${unknown(references[0].direction)}, ${event.provenance}; inspect committed timeline for identities.`);
+        (intake ? arrivals : roleMoves).append(packet);
+        activePackets.add(packet);
+        const remove = () => { packet.remove(); activePackets.delete(packet); };
+        packet.addEventListener('animationend', remove, {once: true});
+        setTimeout(remove, 1900);
+      }
+    }
+    overflow.textContent = overflowReferences ? `${overflowReferences} additional recorded references across ${overflowEvents.size} events aggregated without extra moving packets; exact identities remain in the paged committed timeline and evidence inspector.` : '';
+  }
+  function updateReceipt() {
+    document.querySelector('[data-testid="gate-state"]').textContent = snapshot.claim_gate.state;
+    document.querySelector('[data-testid="read-failure-reason"]').textContent = snapshot.claim_gate.reason_code;
+    document.querySelector('[data-testid="collection-state"]').textContent = snapshot.collection_state === 'PENDING' ? 'Idle · recorded PENDING' : snapshot.collection_state === null ? 'Unknown · no canonical collection state' : `${snapshot.collection_state} · recorded state`;
+    document.querySelector('[data-testid="read-receipt"]').textContent = snapshot.read_at;
+    document.querySelector('[data-testid="frame-identity"]').textContent = unknown(snapshot.frame_digest || snapshot.frame_pending_reason);
+    document.querySelector('[data-testid="observation-count"]').textContent = String(snapshot.counts.observations);
+    document.querySelector('[data-testid="source-count"]').textContent = String(snapshot.counts.sources);
+    document.querySelector('[data-testid="page-state"]').textContent = `Evidence page ${snapshot.evidence.length ? snapshot.evidence_offset + 1 : 0}–${snapshot.evidence_offset + snapshot.evidence.length} of ${snapshot.counts.observations}; ${snapshot.event_page?.events.length || 0} events on this page${snapshot.event_page?.has_more ? ', more event pages pending' : ''}; ${recentEvents.size} recent committed receipts retained, bounded to ${snapshot.page_size} receipts and 1 MiB.`;
+    nextEvidence.disabled = snapshot.next_evidence_offset === null;
+    firstEvidence.disabled = snapshot.evidence_offset === 0;
+  }
+  function markStale(reason) {
+    stale = true;
+    document.querySelector('[data-testid="last-read-attempt"]').textContent = new Date().toISOString();
+    document.querySelector('[data-testid="gate-state"]').textContent = 'STALE';
+    document.querySelector('[data-testid="read-failure-reason"]').textContent = reason;
+    clearPackets();
+    stateLabel.textContent = `Stale snapshot — ${reason}. Last successful read ${snapshot.read_at}; current strategic permission unavailable.`;
+    if (['Synthesis', 'Research'].includes(selectedStage)) selectStage(selectedStage);
+  }
+  function scheduleRefresh() {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+    if (viewActive() && !refreshController && !inspectionController && !inspectionPending) refreshTimer = setTimeout(() => refresh(), 2000);
+  }
+  async function refresh(offset = snapshot.evidence_offset) {
+    if (!viewActive() || refreshController || inspectionController || inspectionPending) return;
+    const generation = policyGeneration;
+    const controller = new AbortController();
+    refreshController = controller;
+    let settled;
+    refreshSettled = new Promise(resolve => { settled = resolve; });
+    const requestedCursor = baselineMode ? null : readCursor;
+    const query = new URLSearchParams({page_size: String(snapshot.page_size), evidence_offset: String(offset)});
+    if (!baselineMode) {
+      query.set('after_revision', String(readCursor.revision));
+      query.set('after_ordinal', String(readCursor.ordinal));
+    }
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    try {
+      const response = await fetch(`snapshot?${query}`, {cache: 'no-store', signal: controller.signal});
+      const data = await response.json();
+      if (generation !== policyGeneration || !viewActive()) return;
+      if (!response.ok || !validSnapshot(data, requestedCursor)) {
+        markStale('read unavailable, incompatible identity/cursor or reordered page discarded');
+        return;
+      }
+      const baseline = baselineMode || data.event_page?.resync_required;
+      snapshot = data;
+      document.querySelector('[data-testid="last-read-attempt"]').textContent = new Date().toISOString();
+      stale = false;
+      if (baseline) {
+        clearPackets();
+        recentEvents.clear();
+        deliveredCursor = data.high_water;
+        baselineMode = false;
+      }
+      const events = data.event_page?.events || [];
+      animate(events, baseline);
+      if (events.length && cursorCompare(events[events.length - 1], deliveredCursor) > 0) deliveredCursor = events[events.length - 1];
+      readCursor = data.event_page?.next_cursor || data.high_water;
+      updateReceipt();
+      renderTimeline();
+      if (!inspectionPending && !inspectionController) selectStage(selectedStage);
+      stateLabel.textContent = `${baseline ? 'Resync recorded snapshot' : 'Recorded snapshot'} · read ${snapshot.read_at}; particle motion encodes receipts, not throughput.`;
+    } catch (error) {
+      if (generation === policyGeneration && viewActive()) markStale('read unavailable or timed out');
+    } finally {
+      clearTimeout(timeout);
+      if (refreshController === controller) refreshController = null;
+      refreshSettled = null;
+      settled();
+      scheduleRefresh();
+    }
+  }
+  function suspendReads(label) {
+    policyGeneration += 1;
+    baselineMode = true;
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+    if (refreshController) refreshController.abort();
+    stopInspection();
+    clearPackets();
+    stateLabel.textContent = label;
+  }
+  refreshButton.addEventListener('click', () => {
+    refreshPaused = !refreshPaused;
+    refreshButton.textContent = refreshPaused ? 'Resume refresh' : 'Pause refresh';
+    refreshButton.setAttribute('aria-pressed', String(refreshPaused));
+    suspendReads(refreshPaused ? 'Refresh paused · recorded snapshot retained' : 'Recorded snapshot · resync pending');
+    if (!refreshPaused) scheduleRefresh();
+  });
+  motionButton.addEventListener('click', () => {
+    motionPaused = !motionPaused;
+    motionButton.textContent = motionPaused ? 'Resume motion' : 'Pause motion';
+    motionButton.setAttribute('aria-pressed', String(motionPaused));
+    if (motionPaused) clearPackets();
+  });
+  nextEvidence.addEventListener('click', () => { if (snapshot.next_evidence_offset !== null) refresh(snapshot.next_evidence_offset); });
+  firstEvidence.addEventListener('click', () => refresh(0));
+  document.addEventListener('visibilitychange', () => {
+    suspendReads(document.visibilityState === 'visible' ? 'Recorded snapshot · resync pending' : 'Hidden · refresh and motion stopped');
+    if (document.visibilityState === 'visible') scheduleRefresh();
+  });
+  window.addEventListener('pagehide', () => { closed = true; suspendReads('Viewer closed · recorded snapshot retained'); });
+  window.addEventListener('pageshow', event => { if (event.persisted) { closed = false; baselineMode = true; scheduleRefresh(); } });
+  reducedMotion.addEventListener('change', () => { if (reducedMotion.matches) clearPackets(); });
+  for (const event of initial.event_page?.events || []) remember(event);
+  if (!validSnapshot(initial)) {
+    stateLabel.textContent = 'Unavailable — initial snapshot cannot be represented safely.';
+    return;
+  }
+  updateReceipt();
+  setTimeout(() => { suspendReads('Viewing deadline expired · refresh and motion stopped'); }, Math.max(0, deadline - Date.now()));
+  scheduleRefresh();
+  for (const button of document.querySelectorAll('[data-stage]')) button.addEventListener('click', () => selectStage(button.dataset.stage));
+  selectStage('Sources');
+  renderTimeline();
+})();
+</script>
+
+</body>
+</html>

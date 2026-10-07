@@ -1,8 +1,9 @@
 """Validate and persist candidate claims against the current evidence frame."""
 
-from typing import Any, Dict, Mapping, Sequence
+from typing import Any, Dict, Mapping, Sequence, cast
 from uuid import uuid4
 
+from ignis.application.ports.mission_relay_port import IAnalysisRelayWriter
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
@@ -14,6 +15,7 @@ from ignis.domain.research_workspace import (
     MissionClaimEvidence,
     QualificationContext,
     ResearchSurface,
+    StaleMissionClaimError,
     assess_strategic_sufficiency,
     compute_candidate_claim_key,
     resolve_surface,
@@ -123,9 +125,11 @@ class SubmitMissionClaimsUseCase:
                 )
                 for candidate in batch
             ]
-            stored = await self._store.save_mission_claims(
+            stored = await cast(IAnalysisRelayWriter, self._store).commit_mission_claims(
                 mission.id, frame.frame_digest, claims
             )
+        except StaleMissionClaimError as exc:
+            return self._refused(base, "CONFLICT", "STALE_FRAME", str(exc))
         except (InvalidMissionClaimError, TypeError, ValueError) as exc:
             return self._refused(base, "INVALID", "INVALID_CLAIM_BATCH", str(exc))
 

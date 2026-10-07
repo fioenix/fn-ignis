@@ -1466,5 +1466,123 @@
         "type": "object"
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_mission_relay_snapshot",
+      "description": "Read an allowlisted bounded coherent snapshot for one selected mission and optional run, without opening a viewer. Page size is explicit; cursors and evidence offsets remain selected-scope reads.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "page_size": {
+            "type": "integer"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "after_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "after_ordinal": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "evidence_offset": {
+            "default": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mission_id",
+          "page_size"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "open_mission_relay",
+      "description": "Open a finite read-only local viewer for one explicitly selected mission and optional run. Requires an explicit UTC deadline; validates installed storage without bootstrap or collectors.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "mission_id",
+          "expires_at"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "record_mission_research_work",
+      "description": "Record one explicit bounded research command through the local host session. Recording does not execute agents, invoke providers or collect sources; mission authority and exact revision, epoch and input bindings remain enforced.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "command": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "required": [
+          "mission_id",
+          "command"
+        ],
+        "type": "object"
+      }
+    }
   }
 ]

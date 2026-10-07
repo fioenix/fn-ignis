@@ -284,15 +284,16 @@ async def test_stale_submission_withholds_permission_and_preserves_new_claims(
     store, mission, signals, frame = await _mission_case(repository, tmp_path, "sufficient")
     submitter = SubmitMissionClaimsUseCase(repository, store)
     entered, resume = asyncio.Event(), asyncio.Event()
-    real_save = store.save_mission_claims
+    real_commit = store.commit_mission_claims
 
-    async def delayed_save(mission_id, digest, claims):
+    async def delayed_commit(mission_id, digest, claims):
+        stored = await real_commit(mission_id, digest, claims)
         if digest == frame.frame_digest:
             entered.set()
             await resume.wait()
-        return await real_save(mission_id, digest, claims)
+        return stored
 
-    monkeypatch.setattr(store, "save_mission_claims", delayed_save)
+    monkeypatch.setattr(store, "commit_mission_claims", delayed_commit)
     delayed = asyncio.create_task(submitter.execute(
         str(mission.id), frame.frame_digest, [_candidate("sufficient", signals)],
         created_by="integration-host",

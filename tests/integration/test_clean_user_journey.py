@@ -18,6 +18,7 @@ offline as well.
 
 import json
 import os
+import re
 import select
 import shutil
 import subprocess
@@ -27,8 +28,56 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-EXPECTED_TOOL_COUNT = 44
-REQUIRED_RESET_TOOLS = {"create_attention_mission", "confirm_market_brief", "submit_mission_claims", "get_mission_claims"}
+EXPECTED_TOOL_COUNT = 47
+EXPECTED_TOOL_NAMES = {
+    "authenticate_instagram",
+    "authenticate_threads",
+    "authenticate_tiktok",
+    "cancel_host_browser_search",
+    "clear_instagram_auth",
+    "clear_platform_auth",
+    "clear_threads_auth",
+    "confirm_market_brief",
+    "confirm_research_workspace",
+    "create_attention_mission",
+    "diagnose_system_health",
+    "discover_market_opportunities",
+    "evaluate_mission_quality",
+    "execute_mission_ingress",
+    "extract_customer_pain_points",
+    "generate_mission_artifact",
+    "get_current_session_mission",
+    "get_instagram_auth_status",
+    "get_mission_analysis",
+    "get_mission_claims",
+    "get_mission_evidence_qualification_batch",
+    "get_mission_relay_snapshot",
+    "get_platform_auth_status",
+    "get_runtime_config",
+    "get_system_logs",
+    "get_threads_auth_status",
+    "get_threads_search_suggestions",
+    "get_threads_trending_topics",
+    "get_tiktok_creative_center_trends",
+    "get_tiktok_search_suggestions",
+    "get_tiktok_video_comments",
+    "list_domain_lexicons",
+    "list_research_missions",
+    "list_research_workspaces",
+    "open_mission_relay",
+    "prepare_host_browser_search",
+    "propose_research_workspace",
+    "record_mission_research_work",
+    "refresh_runtime_config_cache",
+    "register_domain_lexicon",
+    "register_noise_blacklist",
+    "release_mission_writer",
+    "submit_host_browser_search",
+    "submit_mission_claims",
+    "submit_mission_evidence_qualifications",
+    "update_runtime_config",
+    "verify_connectors_health",
+}
 REMOVED_RESET_TOOLS = {
     "create_research_mission", "run_autonomous_research_mission", "get_trending_topics",
     "get_topic_detail", "generate_trend_artifact", "trigger_ingress_refresh",
@@ -281,18 +330,53 @@ def _newest_migration(tree: Path) -> Path:
     return sorted((tree / "sql").glob("[0-9][0-9][0-9]_*.sql"))[-1]
 
 
+
+def _created_table_names(ddl: str) -> set[str]:
+    """Return the table identifier, excluding an optional schema qualifier."""
+    identifiers = re.findall(
+        r'\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?'
+        r'(?:(?:"\w+"|\w+)\s*\.\s*)?("\w+"|\w+)\s*\(',
+        ddl, re.IGNORECASE,
+    )
+    return {identifier.strip('"') for identifier in identifiers}
+
+
+@pytest.mark.parametrize("ddl,expected", (
+    ("CREATE TABLE IF NOT EXISTS observations (id UUID)", {"observations"}),
+    ("CREATE TABLE IF NOT EXISTS public.research_assignments (id UUID)", {"research_assignments"}),
+    ('CREATE TABLE IF NOT EXISTS "public"."research_work_items" (id UUID)', {"research_work_items"}),
+    ("create table other.research_handoffs (id UUID)", {"research_handoffs"}),
+    ("CREATE TABLE IF NOT EXISTS public . research_work_commands\n(id UUID)", {"research_work_commands"}),
+    ("CREATE TABLE observations (id UUID); CREATE TABLE public.research_input_sets (id UUID)",
+     {"observations", "research_input_sets"}),
+))
+def test_created_table_names_preserve_exact_qualified_and_unqualified_identity(ddl, expected):
+    assert _created_table_names(ddl) == expected
+
+
+def test_sql028_table_oracle_neither_captures_schema_nor_omits_research_tables():
+    names = _created_table_names((REPO_ROOT / "sql/028_research_work.sql").read_text(encoding="utf-8"))
+    assert len(names) == 15 and "public" not in names
+    assert names == {
+        "research_assignments", "research_input_sets", "research_input_observations",
+        "research_work_items", "research_work_dependencies", "research_handoffs",
+        "research_handoff_observations", "research_handoff_references", "research_finding_revisions",
+        "research_input_findings", "research_finding_observations", "research_activity_receipts",
+        "research_handoff_acknowledgements", "research_recorded_metadata", "research_work_commands",
+    }
+
+
 def test_bootstrap_applies_tables_from_the_complete_migration_chain(bootstrapped):
     """The schema must reach the end of the chain the tag ships, not the end some doc remembers.
 
     Collect table additions across the chain: a later constraint-only migration need not create
     a table. Its behavioral changes are exercised separately, not inferred from table presence.
     """
-    import re
     import sqlite3
 
     newest = _newest_migration(REPO_ROOT)
     expected = {table for migration in (REPO_ROOT / "sql").glob("*.sql")
-                for table in re.findall(r"CREATE TABLE IF NOT EXISTS\s+(\w+)", migration.read_text(encoding="utf-8"))}
+                for table in _created_table_names(migration.read_text(encoding="utf-8"))}
     assert expected, "The migration chain must define tables"
     assert (bootstrapped["checkout"] / "sql" / newest.name).is_file(), f"the checkout lacks {newest.name}"
 
@@ -396,7 +480,7 @@ def test_a_client_can_handshake_discover_and_call(bootstrapped):
             f"expected {EXPECTED_TOOL_COUNT} tools, discovered {len(tools)}"
         )
         names = {tool["name"] for tool in tools}
-        assert REQUIRED_RESET_TOOLS <= names
+        assert names == EXPECTED_TOOL_NAMES
         assert names.isdisjoint(REMOVED_RESET_TOOLS)
 
         called = session.request(
@@ -419,16 +503,18 @@ def test_two_clients_share_the_fresh_install(bootstrapped):
     first = StdioSession(bootstrapped["checkout"], bootstrapped["home"], "first")
     try:
         first.initialize()
-        assert len(first.request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]) == (
-            EXPECTED_TOOL_COUNT
-        )
+        first_tools = first.request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
+        assert len(first_tools) == EXPECTED_TOOL_COUNT
+        assert {tool["name"] for tool in first_tools} == EXPECTED_TOOL_NAMES
 
         second = StdioSession(bootstrapped["checkout"], bootstrapped["home"], "second")
         try:
             second.initialize()
-            assert len(
-                second.request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
-            ) == EXPECTED_TOOL_COUNT
+            second_tools = second.request(
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+            )["result"]["tools"]
+            assert len(second_tools) == EXPECTED_TOOL_COUNT
+            assert {tool["name"] for tool in second_tools} == EXPECTED_TOOL_NAMES
 
             assert first.is_running(), (
                 "the first client's server died when a second client connected; exit code"

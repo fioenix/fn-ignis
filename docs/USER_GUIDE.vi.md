@@ -12,7 +12,11 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/026_partial_degraded_probe_outcomes.sql`.
+Chuỗi migration trong mã nguồn kết thúc ở `sql/028_research_work.sql`. Migration 028 bổ sung các bảng lưu hoạt động nghiên cứu
+của host trong phạm vi được duyệt và các loại sự kiện tiến độ, không chuyển đổi dữ liệu bằng chứng đã lưu.
+Migration 027 chỉ bổ sung các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
+chuẩn được giữ nguyên. SQLite và PostgreSQL hiện ghi dữ kiện thu thập, qualification và claim cùng sự kiện tiến độ
+tương ứng trong một giao dịch. Relay cung cấp giao diện chỉ đọc cục bộ có thời hạn và snapshot giới hạn từ dữ liệu nhiệm vụ đã khởi tạo.
 Migration 026 chỉ sửa constraint số quan sát, giữ kết quả thu thập một phần ở trạng thái
 DEGRADED; không coi đó là phép đo hoàn chỉnh hay bằng chứng về sự vắng mặt.
 Khởi tạo SQLite mới đã được kiểm tra tại máy; rehearsal PostgreSQL tạm không xác minh database
@@ -64,9 +68,18 @@ chính. Phân tích cần nêu chứng cứ phản bác và điều kiện khi�
 không được commit; bản cài bằng package ghi vào `~/.ignis/reports/`, hoặc thư mục tạm nếu
 cần. Mã template chỉ nằm ở `src/ignis/infrastructure/templates/html/`.
 
+### Mission Relay trên nhánh phát triển
+
+Dùng `get_mission_relay_snapshot` để đọc snapshot giới hạn của nhiệm vụ và run được chọn.
+Dùng `open_mission_relay` với thời hạn UTC được chỉ định để mở giao diện chỉ đọc trên localhost.
+Các thao tác đọc kiểm tra storage đã khởi tạo, không khởi tạo database hay chạy collector.
+`record_mission_research_work` ghi lệnh có phạm vi được chỉ định của host qua phiên stdio cục bộ,
+kiểm tra quyền của nhiệm vụ cùng revision, epoch và dữ liệu đầu vào chính xác. Việc ghi lệnh
+không chạy agent, gọi provider hay thu thập nguồn.
+
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **44 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **47 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
 manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/unit/` và `uv lock --check`
