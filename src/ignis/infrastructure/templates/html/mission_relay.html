@@ -7,8 +7,9 @@
 <style>
 * { box-sizing: border-box; }
 body { margin: 0; color: var(--color-foreground); background: var(--color-background); font-family: var(--font-sans); }
-main { max-width: 1440px; margin: auto; padding: 24px; }
-h1 { font-family: var(--font-display); text-transform: uppercase; font-weight: 400; font-size: clamp(28px, 4vw, 48px); margin: 0; }
+main { max-width: 1680px; margin: auto; padding: 0 24px 24px; }
+html { scroll-padding-top: var(--authority-height, 220px); }
+h1 { font-family: var(--font-display); text-transform: uppercase; font-weight: 400; font-size: 22px; margin: 0; }
 h2 { font-size: var(--text-lg); margin: 0 0 12px; }
 h3 { font-size: var(--text-sm); margin: 0 0 8px; }
 p { margin: 8px 0; line-height: 1.5; }
@@ -17,64 +18,99 @@ button:hover { background: var(--color-elevated); }
 button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--color-ring); outline-offset: 3px; }
 button[aria-pressed="true"] { background: var(--color-primary); color: var(--color-primary-foreground); }
 .authority, .stage, .inspector, .timeline { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-card); padding: 18px; box-shadow: var(--shadow-xs); }
-.authority { margin: 20px 0; }
+.authority { position: sticky; top: 0; z-index: 5; padding: 12px 0; margin: 0 0 24px; border-width: 0 0 1px; border-radius: 0; box-shadow: none; }
+.authority-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.authority-heading button { margin-left: auto; padding: 6px 10px; font-size: var(--text-xs); }
+.authority p { margin: 4px 0; font-size: var(--text-xs); }
+.authority details { font-size: var(--text-xs); margin-top: 6px; }
+.authority summary { cursor: pointer; }
 .identity { font: var(--text-xs)/1.6 var(--font-mono); overflow-wrap: anywhere; }
-.receipt-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.receipt-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 16px; }
+.scope-line { display: flex; gap: 4px 12px; flex-wrap: wrap; }
+.scope-line > span { min-width: 0; }
+.read-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; margin: 4px 0; }
+.read-pair .label, .core-state .label { display: inline; margin-right: 6px; }
+.core-state { display: flex; gap: 4px 16px; flex-wrap: wrap; }
+.core-state > div { min-width: 0; }
+.frame-line { flex-basis: 100%; }
 .label { display: block; color: var(--color-muted-foreground); font-size: var(--text-xs); }
 .count { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.stages { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-.stage { min-width: 0; border-top: 3px solid var(--color-chart-1); }
-.stage button { width: 100%; text-align: left; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 24px; align-items: start; }
+.network { position: relative; min-width: 0; }
+.stages { position: relative; display: grid; grid-template-columns: 1fr .8fr 1.5fr .8fr .8fr; gap: 18px; min-height: 480px; }
+.stage { min-width: 0; border: 0; background: none; box-shadow: none; padding: 0; position: relative; z-index: 1; }
+.stage button[data-stage] { border: 0; padding: 8px 0; background: transparent; font-weight: 600; }
+.stage button[data-stage][aria-pressed="true"] { color: var(--color-foreground); box-shadow: inset 0 -2px var(--color-chart-1); }
+.stage.gate button[data-stage][aria-pressed="true"] { box-shadow: inset 0 -2px var(--color-chart-2); }
+.stage-body { min-height: 340px; display: flex; flex-direction: column; justify-content: center; gap: 28px; }
+.network-node { position: relative; width: 100%; padding: 12px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-card); overflow-wrap: anywhere; text-align: left; font-size: var(--text-xs); }
+.network-node p { margin: 4px 0; }
+.network-node::before { content: ''; display: block; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--color-chart-1); margin-bottom: 8px; }
+.processing-layer { padding: 18px 8px; border-inline: 2px solid var(--color-border); background: var(--color-elevated); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.gate .processing-layer { border-color: var(--color-chart-2); border-radius: var(--radius-full); text-align: center; }
+.network-links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.network-links path { fill: none; stroke: var(--color-chart-1); stroke-width: 1.2; }
+.network-links path[data-link-kind="method"] { stroke: var(--color-border); stroke-dasharray: 4 4; }
+.network-legend { font-size: var(--text-xs); color: var(--color-muted-foreground); }
+.synthesis-context { border-left: 1px solid var(--color-border); padding-left: 22px; overflow-wrap: anywhere; }
+.synthesis-context article { margin: 14px 0; padding: 12px; background: var(--color-elevated); border-radius: var(--radius-lg); font-size: var(--text-sm); }
+.synthesis-context article p { margin: 6px 0; }
+.synthesis-context .gate-summary { border-top: 2px solid var(--color-chart-2); padding-top: 14px; }
+.synthesis-context button { padding: 8px; font-size: var(--text-xs); }
+.receipt-lane { min-height: 20px; position: static; margin: 8px 0; }
+.receipt-lane h2 { font-size: var(--text-xs); color: var(--color-muted-foreground); }
+.receipt-lane [data-testid="arrivals"], .receipt-lane [data-testid="role-moves"] { position: absolute; top: 0; left: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .stage p { font-size: var(--text-sm); color: var(--color-muted-foreground); }
-.gate { border-top-color: var(--color-chart-2); }
+
 .controls { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0; }
 .inspector, .timeline { margin-top: 18px; overflow-wrap: anywhere; }
 .inspector section { padding: 10px 0; border-bottom: 1px solid var(--color-border); }
 .timeline ol, .evidence-list { padding-left: 20px; }
-.timeline li { margin: 12px 0; }
+.timeline ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px; padding: 0; list-style: none; max-height: 240px; overflow: auto; }
+.timeline li { margin: 0; min-width: 0; }
+.timeline h2, .timeline p { font-size: var(--text-xs); }
+.timeline button { font-size: var(--text-xs); padding: 6px 8px; }
+.timeline { padding: 12px 0; border-width: 1px 0; border-radius: 0; box-shadow: none; }
 .evidence-list li { margin-bottom: 8px; }
-.packet { display: inline-flex; gap: 8px; align-items: center; padding: 8px; margin: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-elevated); font: var(--text-xs)/1.4 var(--font-mono); }
+.packet { z-index: 2; position: absolute; top: 0; left: 0; display: inline-flex; gap: 4px; align-items: center; padding: 4px; font: var(--text-xs)/1.4 var(--font-mono); }
+.packet[data-evidence-role="ATTENTION_CONTEXT"] .packet-mark { border-radius: var(--radius-full); }
+.packet[data-evidence-role="EXCLUDED"] .packet-mark { transform: rotate(45deg); background: var(--color-muted-foreground); }
 .packet-mark { width: 8px; height: 8px; background: var(--color-chart-1); }
 .research-lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 18px; margin-top: 18px; }
 .research-record { min-width: 0; border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 18px; }
 .research-record summary { cursor: pointer; padding: 8px 0; }
 .muted { color: var(--color-muted-foreground); }
 [hidden] { display: none !important; }
-@media (max-width: 900px) { .stages { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 540px) { main { padding: 14px; } .stages, .receipt-grid { grid-template-columns: 1fr; } }
-@keyframes recorded-transfer { from { transform: translateX(0); opacity: 1; } to { transform: translateX(24px); opacity: 0; } }
+@media (max-width: 1100px) { .workspace { grid-template-columns: minmax(0, 1fr); } .synthesis-context { border-left: 0; border-top: 1px solid var(--color-border); padding: 18px 0 0; } }
+@media (min-width: 541px) and (max-width: 900px) { .receipt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 540px) { main { padding: 0 14px 14px; } .receipt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .scope-line { gap: 4px 12px; } .stages { grid-template-columns: minmax(0, 1fr); gap: 24px; } .stage { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; align-items: center; } .stage > p { grid-column: 1; margin: 0; } .stage-body { grid-column: 2; grid-row: 1 / 3; min-height: 80px; gap: 12px; } .network-node { padding: 8px; } .processing-layer { padding: 12px; } }
+@keyframes recorded-transfer { from { transform: translateX(0); opacity: 1; } to { transform: translate(var(--transfer-x, 24px), var(--transfer-y, 0px)); opacity: 0; } }
 .packet { animation: recorded-transfer 1800ms ease-out forwards; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body class="product-mode respect-motion-prefs" data-density="comfortable">
 <main data-expires-at="{{ expires_at }}" data-snapshot-url="snapshot">
-<p class="label">IGNIS · READ-ONLY OBSERVATORY</p><h1>Evidence journey</h1>
-<p data-testid="snapshot-state" role="status">Recorded snapshot · activity requires a finite host receipt</p>
 <header class="authority" data-testid="mission-authority">
-<button type="button" data-stage="Mission authority">Mission authority</button>
-<p class="identity">Mission <span data-testid="mission-identity">{{ snapshot.mission_id }}</span></p>
-<div class="receipt-grid">
-<div><span class="label">Selected run</span><span class="identity" data-testid="run-identity">{{ snapshot.run_id or 'Unknown' }}</span></div>
-<div><span class="label">Collection · {{ 'selected run' if snapshot.run_id else 'mission' }}</span><span class="identity" data-testid="collection-state">{% if snapshot.collection_state == 'PENDING' %}Idle · recorded PENDING{% elif snapshot.collection_state %}{{ snapshot.collection_state }} · recorded state{% else %}Unknown · no canonical collection state{% endif %}</span></div>
-<div><span class="label">Manifest fingerprint</span><span class="identity" data-testid="manifest-identity">{{ snapshot.manifest_digest or 'Unknown' }}</span></div>
-<div><span class="label">Last successful read</span><span class="identity" data-testid="read-receipt">{{ snapshot.read_at }}</span></div>
-<div><span class="label">Last viewer read attempt</span><span class="identity" data-testid="last-read-attempt">Unknown</span></div>
-<div><span class="label">Permission state</span><span class="identity" data-testid="gate-state">{{ snapshot.claim_gate.state }}</span></div>
-<div><span class="label">Unavailable reason</span><span class="identity" data-testid="read-failure-reason">{{ snapshot.claim_gate.reason_code }}</span></div>
-<div><span class="label">Evidence frame</span><span class="identity" data-testid="frame-identity">{{ snapshot.frame_digest or snapshot.frame_pending_reason or 'Unknown' }}</span></div>
-<div><span class="label">Observations · full selected corpus</span><strong class="count" data-testid="observation-count">{{ snapshot.counts.observations }}</strong></div>
-<div><span class="label">Canonical sources · full selected corpus</span><strong class="count" data-testid="source-count">{{ snapshot.counts.sources }}</strong></div>
-</div>
-<p class="identity">Viewing deadline <time>{{ expires_at }}</time> · research authority is independent of this viewer.</p>
+<div class="authority-heading"><h1>Ignis / Relay</h1><span class="label">Read-only</span><button type="button" data-stage="Mission authority">Mission authority</button></div>
+<p class="scope-line identity"><span>Mission <span data-testid="mission-identity">{{ snapshot.mission_id }}</span></span><span>Run <span data-testid="run-identity">{{ snapshot.run_id or 'Unknown' }}</span></span><span>Full corpus · observations <strong class="count" data-testid="observation-count">{{ snapshot.counts.observations }}</strong> · sources <strong class="count" data-testid="source-count">{{ snapshot.counts.sources }}</strong></span></p>
+<div class="read-pair"><div><span class="label">Last successful read</span><span class="identity" data-testid="read-receipt">{{ snapshot.read_at }}</span></div><div><span class="label">Last viewer read attempt</span><span class="identity" data-testid="last-read-attempt">Unknown</span></div></div>
+<div class="core-state"><div class="frame-line"><span class="label">Evidence frame</span><span class="identity" data-testid="frame-identity">{{ snapshot.frame_digest or snapshot.frame_pending_reason or 'Unknown' }}</span></div><div><span class="label">Permission state</span><span class="identity" data-testid="gate-state">{{ snapshot.claim_gate.state }}</span></div><div><span class="label">Collection · {{ 'selected run' if snapshot.run_id else 'mission' }}</span><span class="identity" data-testid="collection-state">{% if snapshot.collection_state == 'PENDING' %}Idle · recorded PENDING{% elif snapshot.collection_state %}{{ snapshot.collection_state }} · recorded state{% else %}Unknown · no canonical collection state{% endif %}</span></div></div>
+<details><summary>Authority receipts and viewing deadline</summary><div class="receipt-grid"><div><span class="label">Manifest fingerprint</span><span class="identity" data-testid="manifest-identity">{{ snapshot.manifest_digest or 'Unknown' }}</span></div><div><span class="label">Unavailable reason</span><span class="identity" data-testid="read-failure-reason">{{ snapshot.claim_gate.reason_code }}</span></div></div><p class="identity">Viewing deadline <time>{{ expires_at }}</time> · research authority is independent of this viewer.</p></details>
+<p data-testid="snapshot-state" role="status">Recorded snapshot · activity requires a finite host receipt</p>
 </header>
+<div class="workspace">
+<section class="network" data-testid="research-network" aria-label="Recorded evidence network">
+<svg class="network-links" aria-hidden="true"></svg>
 <nav class="stages" aria-label="Evidence responsibilities">
 {% for name, explanation in stages %}
 <section class="stage {% if name == 'Synthesis' %}gate{% endif %}">
-<button type="button" data-stage="{{ name }}">{{ name }}</button><p>{{ "Recorded assignments, finite activity receipts and finding history." if name == "Research" else explanation }}</p>
+<button type="button" data-stage="{{ name }}">{{ name }}</button><p>{{ "Recorded assignments, finite activity receipts and finding history." if name == "Research" else explanation }}</p><div class="stage-body" data-network-stage="{{ name }}"></div>
 </section>
 {% endfor %}
 </nav>
+<p class="network-legend">Dashed paths: method map, not execution. Mint paths: exact recorded inputs on this evidence page. Missing work and coverage remain Unknown.</p>
 <div class="controls" aria-label="Viewer controls">
 <button type="button" data-action="refresh" aria-pressed="false">Pause refresh</button>
 <button type="button" data-action="motion" aria-pressed="false">Pause motion</button>
@@ -82,9 +118,17 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
 <button type="button" data-action="next-evidence" disabled>Next evidence page</button>
 </div>
 <p class="identity" data-testid="page-state">Selected evidence page; exact aggregate counts are shown above.</p>
-<section aria-label="Recorded observation arrivals"><h2>Recorded arrivals</h2><div data-testid="arrivals"></div></section>
-<section aria-label="Recorded qualification changes"><div data-testid="role-moves"></div></section>
+<section class="receipt-lane" aria-label="Recorded observation arrivals"><h2>Recorded arrivals</h2><div data-testid="arrivals"></div></section>
+<section class="receipt-lane" aria-label="Recorded qualification changes"><div data-testid="role-moves"></div></section>
 <p class="muted" data-testid="packet-overflow"></p>
+</section>
+<aside class="synthesis-context" data-testid="synthesis-context" aria-label="Synthesis context"><h2>Recorded findings</h2><div data-testid="context-findings"></div><section class="gate-summary"><h3>Strategic permission</h3><p data-testid="context-gate">{{ snapshot.claim_gate.render_status }} · {{ snapshot.claim_gate.reason_code }}</p><button type="button" data-context-action="synthesis">Inspect Synthesis details</button></section></aside>
+</div>
+<section class="timeline" aria-label="Recorded events"><h2>Committed timeline</h2><ol data-testid="event-timeline">
+{% for event in (snapshot.event_page.events if snapshot.event_page else []) %}
+<li data-event-id="{{ event.event_id }}"><span class="identity">{{ event.kind }} · {{ event.provenance }} · {{ event.recorded_at }}</span><p>{{ event.reason or 'No failure reason recorded.' }}</p><span data-testid="event-observation-count">{{ event.evidence_references | length }}</span> recorded references</li>
+{% endfor %}
+</ol><p class="muted">A historic snapshot does not animate as new collection. Research receipts describe recorded activity without proving live reasoning.</p></section>
 <section class="inspector" data-testid="stage-inspector" aria-label="Stage inspector">
 <h2>Sources</h2><section role="region" aria-label="Input"><h3>Input</h3><p>Selected canonical mission observations. This page is not full corpus coverage.</p></section>
 <section role="region" aria-label="Output"><h3>Output</h3><p>{{ snapshot.evidence | length }} observations on this page; {{ snapshot.counts.observations }} in the selected corpus.</p>
@@ -94,11 +138,6 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
 <section role="region" aria-label="Failure reason"><h3>Failure reason</h3><p>Unmeasured channel availability is Unknown; absence of a receipt is not a measured empty result.</p></section>
 <section role="region" aria-label="Why it matters"><h3>Why it matters</h3><p>Source and observation identity preserve evidence lineage without promoting attention to Market support.</p></section>
 </section>
-<section class="timeline" aria-label="Recorded events"><h2>Committed timeline</h2><ol data-testid="event-timeline">
-{% for event in (snapshot.event_page.events if snapshot.event_page else []) %}
-<li data-event-id="{{ event.event_id }}"><span class="identity">{{ event.kind }} · {{ event.provenance }} · {{ event.recorded_at }}</span><p>{{ event.reason or 'No failure reason recorded.' }}</p><span data-testid="event-observation-count">{{ event.evidence_references | length }}</span> recorded references</li>
-{% endfor %}
-</ol><p class="muted">A historic snapshot does not animate as new collection. Research receipts describe recorded activity without proving live reasoning.</p></section>
 <noscript><section class="inspector" aria-label="Recorded strategic ledger"><h2>Recorded strategic permission · {{ snapshot.claim_gate.render_status }}</h2>
 {% for claim in snapshot.claim_gate.claims %}<article><h3>{{ claim.wording }}</h3><p>{{ claim.claim_type }} · {{ claim.status }} · {{ claim.claim_id }} · frame {{ claim.frame_digest }}</p>
 {% for binding in claim.evidence_bindings %}<p>{{ binding.role }} · observation {{ binding.observation_id or 'Unknown' }} · probe {{ binding.probe_outcome_id or 'Unknown' }} · target {{ binding.hypothesis_target or 'Unknown' }}</p>{% endfor %}
@@ -579,7 +618,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
         mark.setAttribute('aria-hidden', 'true');
         const amount = node('span', references.length);
         amount.dataset.testid = 'packet-observation-count';
-        packet.append(mark, amount, node('span', `${references[0].evidence_role} · ${unknown(references[0].direction)} · ${event.provenance}`));
+        packet.append(mark, amount, node('span', `${references[0].evidence_role} · ${unknown(references[0].direction)} · ${event.provenance}`, 'sr-only'));
         packet.setAttribute('aria-label', `${references.length} recorded observation references, ${references[0].evidence_role}, ${unknown(references[0].direction)}, ${event.provenance}; inspect committed timeline for identities.`);
         (intake ? arrivals : roleMoves).append(packet);
         activePackets.add(packet);
@@ -590,6 +629,92 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     }
     overflow.textContent = overflowReferences ? `${overflowReferences} additional recorded references across ${overflowEvents.size} events aggregated without extra moving packets; exact identities remain in the paged committed timeline and evidence inspector.` : '';
   }
+  const network = document.querySelector('[data-testid="research-network"]');
+  const links = network.querySelector('.network-links');
+  function drawNetworkLinks() {
+    const bounds = network.getBoundingClientRect();
+    links.setAttribute('viewBox', `0 0 ${bounds.width} ${bounds.height}`);
+    links.replaceChildren();
+    const anchors = new Map([...network.querySelectorAll('[data-network-key]')].map(element => [element.dataset.networkKey, element]));
+    function connect(from, to, kind) {
+      const source = anchors.get(from), target = anchors.get(to);
+      if (!source || !target) return;
+      const a = source.getBoundingClientRect(), b = target.getBoundingClientRect();
+      const x1 = a.x + a.width / 2 - bounds.x, y1 = a.y + a.height / 2 - bounds.y;
+      const x2 = b.x + b.width / 2 - bounds.x, y2 = b.y + b.height / 2 - bounds.y;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.dataset.from = from; path.dataset.to = to; path.dataset.linkKind = kind;
+      path.setAttribute('d', `M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1}, ${(x1 + x2) / 2} ${y2}, ${x2} ${y2}`);
+      links.append(path);
+    }
+    const method = ['Sources', 'Cleaning', 'Research', 'Cross-check', 'Synthesis'];
+    for (let i = 1; i < method.length; i++) connect(`stage:${method[i - 1]}`, `stage:${method[i]}`, 'method');
+    if (!stale && snapshot.research?.availability === 'AVAILABLE') for (const work of snapshot.research.work_items) {
+      for (const observation of work.inputs.observation_ids) connect(`observation:${observation}`, `work:${work.work_id}`, 'recorded-input');
+    }
+    // Only newly committed intake/qualification receipts travel; the method scaffold stays static.
+    for (const [container, from, to] of [[arrivals, 'Sources', 'Cleaning'], [roleMoves, 'Cleaning', 'Cross-check']]) {
+      const a = anchors.get(`stage:${from}`).getBoundingClientRect(), b = anchors.get(`stage:${to}`).getBoundingClientRect();
+      container.style.left = `${a.x + a.width / 2 - bounds.x}px`;
+      container.style.top = `${a.y + a.height / 2 - bounds.y}px`;
+      container.style.setProperty('--transfer-x', `${b.x + b.width / 2 - a.x - a.width / 2}px`);
+      container.style.setProperty('--transfer-y', `${b.y + b.height / 2 - a.y - a.height / 2}px`);
+    }
+    document.documentElement.style.setProperty('--authority-height', `${document.querySelector('.authority').getBoundingClientRect().height + 16}px`);
+  }
+  function renderNetwork() {
+    const focused = network.contains(document.activeElement) ? document.activeElement.dataset.networkKey : null;
+    const bodies = new Map([...network.querySelectorAll('[data-network-stage]')].map(element => {
+      element.replaceChildren(); element.dataset.networkKey = `stage:${element.dataset.networkStage}`;
+      return [element.dataset.networkStage, element];
+    }));
+    function box(stage, text) {
+      const element = node('div', text, 'processing-layer'); bodies.get(stage).append(element); return element;
+    }
+    for (const [index, row] of snapshot.evidence.entries()) {
+      const button = node('button', `Inspect source observation ${index + 1}`, 'network-node'); button.type = 'button';
+      button.dataset.testid = 'network-observation'; button.dataset.networkKey = `observation:${row.observation_id}`;
+      button.dataset.networkObservationId = row.observation_id; button.dataset.networkSourceId = row.source_id;
+      button.title = row.title;
+      button.append(node('p', `${row.evidence_role} · ${unknown(row.qualification_relation)}`), node('span', row.source_id, 'identity'));
+      button.addEventListener('click', () => inspectObservation(row)); bodies.get('Sources').append(button);
+    }
+    if (!snapshot.evidence.length) box('Sources', 'No observations on this page. Coverage Unknown.');
+    const qualified = snapshot.evidence.filter(row => row.qualification_relation !== null).length;
+    box('Cleaning', `${qualified} recorded qualifications on this page. Missing judgment remains Unknown.`);
+    const research = snapshot.research;
+    if (!stale && research?.availability === 'AVAILABLE') {
+      for (const [index, work] of research.work_items.entries()) {
+        const button = node('button', `Inspect work ${index + 1}`, 'network-node'); button.type = 'button';
+        button.dataset.testid = 'network-work'; button.dataset.networkKey = `work:${work.work_id}`; button.dataset.networkWorkId = work.work_id;
+        button.title = work.question;
+        button.append(node('p', work.expertise), node('p', `${work.state} · ${work.activity.state}`), node('span', work.work_id, 'identity'));
+        button.addEventListener('click', () => selectStage('Research')); bodies.get('Research').append(button);
+      }
+      if (!research.work_items.length) box('Research', 'No recorded work items. Capacity ' + unknown(research.capacity) + '.');
+    } else box('Research', 'Research unavailable · ' + (stale ? 'stale read' : 'SCHEMA_UNAVAILABLE') + '.');
+    box('Cross-check', 'Recorded roles stay distinct. Complete cross-check coverage Unknown.');
+    box('Synthesis', stale ? 'Withheld · stale read' : `${snapshot.claim_gate.render_status} · ${snapshot.claim_gate.reason_code}`);
+    const context = document.querySelector('[data-testid="context-findings"]'); context.replaceChildren();
+    if (!stale && research?.availability === 'AVAILABLE') for (const finding of research.findings) {
+      const article = node('article'); article.dataset.contextFindingId = finding.finding_id;
+      article.append(node('h3', `${finding.result_type} · revision ${finding.revision}`),
+        node('p', finding.text_withheld ? 'Text withheld by the reader projection.' : finding.statement),
+        node('p', `Current eligible ${finding.current_eligible} · ${finding.narrative_origin}`, 'identity'),
+        node('p', `${finding.finding_id} · work ${finding.work_id}`, 'identity'),
+        node('p', 'Recorded revision; inspect Research for exact inputs, counterevidence, alternatives and limits. No independent execution or strategic permission is inferred.'));
+      context.append(article);
+    }
+    if (!context.children.length) context.append(node('p', stale ? 'Unavailable — stale read; finding currentness Unknown.' : 'No recorded findings in this read.'));
+    document.querySelector('[data-testid="context-gate"]').textContent = stale ? 'WITHHELD · stale read' : `${snapshot.claim_gate.render_status} · ${snapshot.claim_gate.reason_code}. Inspect Synthesis for current claims or the recorded gap.`;
+    drawNetworkLinks();
+    if (focused) [...network.querySelectorAll('button[data-network-key]')].find(button => button.dataset.networkKey === focused)?.focus({preventScroll: true});
+  }
+  window.addEventListener('resize', drawNetworkLinks);
+  // Settled font metrics can move bindings without a viewport resize.
+  document.fonts.ready.then(drawNetworkLinks);
+  document.querySelector('.authority details').addEventListener('toggle', drawNetworkLinks);
+  document.querySelector('[data-context-action="synthesis"]').addEventListener('click', () => selectStage('Synthesis'));
   function updateReceipt() {
     document.querySelector('[data-testid="gate-state"]').textContent = snapshot.claim_gate.state;
     document.querySelector('[data-testid="read-failure-reason"]').textContent = snapshot.claim_gate.reason_code;
@@ -599,6 +724,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     document.querySelector('[data-testid="observation-count"]').textContent = String(snapshot.counts.observations);
     document.querySelector('[data-testid="source-count"]').textContent = String(snapshot.counts.sources);
     document.querySelector('[data-testid="page-state"]').textContent = `Evidence page ${snapshot.evidence.length ? snapshot.evidence_offset + 1 : 0}–${snapshot.evidence_offset + snapshot.evidence.length} of ${snapshot.counts.observations}; ${snapshot.event_page?.events.length || 0} events on this page${snapshot.event_page?.has_more ? ', more event pages pending' : ''}; ${recentEvents.size} recent committed receipts retained, bounded to ${snapshot.page_size} receipts and 1 MiB.`;
+    renderNetwork();
     nextEvidence.disabled = snapshot.next_evidence_offset === null;
     firstEvidence.disabled = snapshot.evidence_offset === 0;
   }
@@ -609,6 +735,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     document.querySelector('[data-testid="read-failure-reason"]').textContent = reason;
     clearPackets();
     stateLabel.textContent = `Stale snapshot — ${reason}. Last successful read ${snapshot.read_at}; current strategic permission unavailable.`;
+    renderNetwork();
     if (['Synthesis', 'Research'].includes(selectedStage)) selectStage(selectedStage);
   }
   function scheduleRefresh() {
