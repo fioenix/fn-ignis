@@ -4568,15 +4568,16 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
             recorded_at=datetime.fromisoformat(row["recorded_at"]),
         )
 
-    def _research_snapshot(self, conn, mission_id, *, canonical=None):
+    def _research_snapshot(self, conn, mission_id, *, canonical=None, event_history=False):
         if canonical is None and conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_assignments'"
         ).fetchone():
             canonical = self._commit_snapshot(conn, mission_id)
-        return self._decode_research_snapshot(conn, mission_id, canonical=canonical)
+        return self._decode_research_snapshot(conn, mission_id, canonical=canonical,
+            event_mode="history" if event_history else "none")
 
     @staticmethod
-    def _decode_research_snapshot(conn, mission_id, *, canonical):
+    def _decode_research_snapshot(conn, mission_id, *, canonical, event_mode="reasons"):
         from ignis.application.ports.research_work_port import ResearchRecordedMetadata, ResearchWorkSnapshot
         from ignis.domain.research_work import (
             ResearchAuthority,
@@ -4598,11 +4599,19 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 scope,
             )
         )
+        # Command admission needs no history; the relay needs only the latest
+        # non-null reason per work. Public history reads retain every event.
+        event_query = (
+            "SELECT * FROM mission_progress_events WHERE mission_id=? ORDER BY revision,ordinal"
+            if event_mode == "history" else
+            "SELECT * FROM (SELECT e.*, ROW_NUMBER() OVER (PARTITION BY work_id "
+            "ORDER BY revision DESC,ordinal DESC) AS reason_rank FROM mission_progress_events e "
+            "WHERE mission_id=? AND work_id IS NOT NULL AND reason IS NOT NULL) reasons "
+            "WHERE reason_rank=1 ORDER BY revision,ordinal"
+        )
         events = tuple(
             _event(r)
-            for r in conn.execute(
-                "SELECT * FROM mission_progress_events WHERE mission_id=? ORDER BY revision,ordinal", scope
-            )
+            for r in (conn.execute(event_query, scope) if event_mode != "none" else ())
         )
         exists = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='research_assignments'"
@@ -4804,7 +4813,14 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     provenance=r["provenance"],
                 )
                 for r in conn.execute(
-                    "SELECT * FROM research_recorded_metadata WHERE mission_id=? ORDER BY mission_revision,record_kind,record_id",
+                    ("SELECT m.* FROM research_recorded_metadata m WHERE m.mission_id=? "
+                     + ("" if event_mode == "history" else
+                        "AND (m.record_kind IN ('HANDOFF','FINDING') "
+                        "OR (m.record_kind='WORK' AND EXISTS (SELECT 1 FROM research_work_items w "
+                        "WHERE w.work_id=m.record_id AND w.mission_id=m.mission_id AND w.version=m.record_version)) "
+                        "OR (m.record_kind='ASSIGNMENT' AND EXISTS (SELECT 1 FROM research_assignments a "
+                        "WHERE a.assignment_id=m.record_id AND a.mission_id=m.mission_id AND a.version=m.record_version))) ")
+                     + "ORDER BY m.mission_revision,m.record_kind,m.record_id"),
                     scope,
                 )
             )
@@ -4836,7 +4852,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 conn.row_factory = sqlite3.Row
             try:
                 conn.execute("BEGIN")
-                result = self._research_snapshot(conn, mission_id)
+                result = self._research_snapshot(conn, mission_id, event_history=True)
                 conn.rollback()
                 return result
             except BaseException:

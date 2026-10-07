@@ -3194,7 +3194,7 @@ class PostgresTimescaleRepository(ITrendRepository):
             async with pool.connection() as conn:
                 async with conn.transaction():
                     await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-                    return await self._research_snapshot(conn, mission_id)
+                    return await self._research_snapshot(conn, mission_id, event_history=True)
 
         return await await_settled(read())
 
@@ -3213,16 +3213,17 @@ class PostgresTimescaleRepository(ITrendRepository):
             recorded_at=row["recorded_at"],
         )
 
-    async def _research_snapshot(self, conn, mission_id, *, canonical=None):
+    async def _research_snapshot(self, conn, mission_id, *, canonical=None, event_history=False):
         _, fetchone, _ = self._research_queries(conn)
         if canonical is None and (await fetchone(
             "SELECT to_regclass('public.research_assignments') AS relation"
         ))["relation"]:
             canonical = await self._commit_snapshot(conn, mission_id)
-        return await self._decode_research_snapshot(conn, mission_id, canonical=canonical)
+        return await self._decode_research_snapshot(conn, mission_id, canonical=canonical,
+            event_mode="history" if event_history else "none")
 
     @staticmethod
-    async def _decode_research_snapshot(conn, mission_id, *, canonical):
+    async def _decode_research_snapshot(conn, mission_id, *, canonical, event_mode="reasons"):
         from ignis.application.ports.research_work_port import ResearchRecordedMetadata, ResearchWorkSnapshot
         from ignis.domain.research_work import (
             ResearchAuthority,
@@ -3245,12 +3246,20 @@ class PostgresTimescaleRepository(ITrendRepository):
                 )
             ]
         )
+        # Command admission needs no history; the relay needs only the latest
+        # non-null reason per work. Public history reads retain every event.
+        event_query = (
+            "SELECT * FROM mission_progress_events WHERE mission_id=%s ORDER BY revision,ordinal"
+            if event_mode == "history" else
+            "SELECT * FROM (SELECT e.*, ROW_NUMBER() OVER (PARTITION BY work_id "
+            "ORDER BY revision DESC,ordinal DESC) AS reason_rank FROM mission_progress_events e "
+            "WHERE mission_id=%s AND work_id IS NOT NULL AND reason IS NOT NULL) reasons "
+            "WHERE reason_rank=1 ORDER BY revision,ordinal"
+        )
         events = tuple(
             [
                 _pg_event(r)
-                for r in await fetchall(
-                    "SELECT * FROM mission_progress_events WHERE mission_id=%s ORDER BY revision,ordinal", scope
-                )
+                for r in (await fetchall(event_query, scope) if event_mode != "none" else ())
             ]
         )
         exists = (await fetchone("SELECT to_regclass('public.research_assignments') AS relation"))["relation"]
@@ -3481,7 +3490,14 @@ class PostgresTimescaleRepository(ITrendRepository):
                         provenance=r["provenance"],
                     )
                     for r in await fetchall(
-                        "SELECT * FROM research_recorded_metadata WHERE mission_id=%s ORDER BY mission_revision,record_kind,record_id",
+                        ("SELECT m.* FROM research_recorded_metadata m WHERE m.mission_id=%s "
+                     + ("" if event_mode == "history" else
+                        "AND (m.record_kind IN ('HANDOFF','FINDING') "
+                        "OR (m.record_kind='WORK' AND EXISTS (SELECT 1 FROM research_work_items w "
+                        "WHERE w.work_id=m.record_id AND w.mission_id=m.mission_id AND w.version=m.record_version)) "
+                        "OR (m.record_kind='ASSIGNMENT' AND EXISTS (SELECT 1 FROM research_assignments a "
+                        "WHERE a.assignment_id=m.record_id AND a.mission_id=m.mission_id AND a.version=m.record_version))) ")
+                     + "ORDER BY m.mission_revision,m.record_kind,m.record_id"),
                         scope,
                     )
                 ]

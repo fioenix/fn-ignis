@@ -243,9 +243,15 @@ class ResearchWorkSnapshot:
         _integer(self.current_epoch)
         for name, cls in (('assignments', ResearchAssignment), ('work_items', ResearchWorkItem),
                           ('handoffs', ResearchHandoff), ('findings', ResearchFindingRevision),
-                          ('acknowledgements', ResearchHandoffAcknowledgement),
-                          ('events', MissionProgressEvent), ('recorded_metadata', ResearchRecordedMetadata)):
+                          ('acknowledgements', ResearchHandoffAcknowledgement)):
             _records(getattr(self, name), cls)
+        # Audit histories are unbounded; admission and relay reads use projections.
+        for name, cls in (('events', MissionProgressEvent), ('recorded_metadata', ResearchRecordedMetadata)):
+            values = getattr(self, name)
+            if type(values) is not tuple:
+                raise ValueError('Invalid audit collection.')
+            for value in values:
+                _typed(value, cls)
         if type(self.observation_sources) is not tuple:
             raise ValueError('Invalid observation source collection.')
         observations = set()
