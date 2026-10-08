@@ -10,6 +10,10 @@ import json
 from typing import Protocol
 from uuid import UUID
 
+from ignis.domain.mission_follow_up import (
+    FollowUpExecutionRequest, FollowUpWork, FollowUpRelationship,
+    FollowUpReservation, FollowUpResult, encumbered_budget,
+)
 from ignis.domain.mission_relay import MissionProgressEvent
 from ignis.domain.research_findings import ResearchFindingRevision, ResearchHandoff
 from ignis.domain.research_work import (
@@ -363,4 +367,188 @@ class IResearchWorkPort(Protocol):
 
     async def load_research_work(self, mission_id: UUID) -> ResearchWorkSnapshot:
         """Read one coherent transaction, preserving history and exact evidence IDs."""
+        ...
+
+
+FOLLOW_UP_REASONS = SAFE_REASONS | {
+    'SOURCE_MISMATCH', 'SESSION_AUTHORITY_REQUIRED', 'BRIEF_REVISION_MISMATCH',
+    'MANIFEST_MISMATCH', 'QUOTA_EXHAUSTED', 'COST_EXHAUSTED', 'RESEARCH_TERMINAL',
+    'CANCEL_REQUESTED', 'STOP_CONDITION_REACHED', 'COLLECTION_AUTHORITY_REQUIRED',
+    'UNKNOWN_FOLLOW_UP', 'RECONCILIATION_REQUIRED', 'UNRESOLVED_EXECUTION',
+}
+
+
+def _follow_up_context(expected_revision, idempotency_key, host_authorized):
+    _integer(expected_revision)
+    _text(idempotency_key, maximum=256)
+    if type(host_authorized) is not bool:
+        raise ValueError('Invalid private host authority context.')
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FollowUpWorkCommand:
+    """Record a proposal, never execute or grant collection authority."""
+    work: FollowUpWork
+    expected_revision: int
+    idempotency_key: str
+    host_authorized: bool
+
+    def __post_init__(self):
+        _typed(self.work, FollowUpWork)
+        _follow_up_context(self.expected_revision, self.idempotency_key, self.host_authorized)
+
+    @property
+    def fingerprint(self):
+        return sha256(json.dumps(_identity(self), sort_keys=True, separators=(',', ':'),
+                                 ensure_ascii=False).encode()).hexdigest()
+
+    def to_payload(self):
+        return {'work_id': str(self.work.work_id), 'expected_revision': self.expected_revision,
+                'fingerprint': self.fingerprint}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FollowUpAdmissionCommand:
+    """Trusted host context is separate from the four-field public execution DTO."""
+    request: FollowUpExecutionRequest
+    selected_parent_id: UUID
+    expected_revision: int
+    host_authorized: bool
+
+    def __post_init__(self):
+        _typed(self.request, FollowUpExecutionRequest)
+        _uuid(self.selected_parent_id)
+        _follow_up_context(self.expected_revision, self.request.idempotency_key, self.host_authorized)
+        if self.selected_parent_id != self.request.mission_id:
+            raise ValueError('Selected parent binding mismatch.')
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FollowUpSettlementCommand:
+    """Candidate settlement; store verifies measurement receipt and canonical child references."""
+    reservation: FollowUpReservation
+    result: FollowUpResult
+    expected_revision: int
+    expected_reservation_version: int
+    idempotency_key: str
+    host_authorized: bool
+
+    def __post_init__(self):
+        _typed(self.reservation, FollowUpReservation)
+        _typed(self.result, FollowUpResult)
+        _follow_up_context(self.expected_revision, self.idempotency_key, self.host_authorized)
+        _integer(self.expected_reservation_version, 1)
+        if self.reservation.relationship != self.result.relationship:
+            raise ValueError('Settlement relationship binding mismatch.')
+        if self.reservation.state == 'SETTLED' and self.result.state not in {'COMPLETED', 'FAILED', 'CANCELLED'}:
+            raise ValueError('Final settlement requires a terminal child result.')
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FollowUpCommitReceipt:
+    disposition: str
+    reason_code: str | None
+    revision: int
+    receipt_id: UUID
+    recorded_at: datetime
+    relationship: FollowUpRelationship | None
+    reservation: FollowUpReservation | None
+
+    def __post_init__(self):
+        if not _literal(self.disposition, {'APPLIED', 'EXISTING', 'REFUSED'}):
+            raise ValueError('Invalid follow-up receipt disposition.')
+        _integer(self.revision)
+        _uuid(self.receipt_id)
+        _time(self.recorded_at)
+        if self.reason_code is not None and not _literal(self.reason_code, FOLLOW_UP_REASONS):
+            raise ValueError('Invalid safe follow-up reason.')
+        if self.disposition == 'REFUSED':
+            if self.reason_code is None or self.relationship is not None or self.reservation is not None:
+                raise ValueError('Refusal requires safe reason and no child or reservation.')
+        else:
+            _typed(self.relationship, FollowUpRelationship)
+            _typed(self.reservation, FollowUpReservation)
+            if self.reason_code is not None or self.reservation.relationship != self.relationship:
+                raise ValueError('Invalid admitted receipt binding.')
+
+    def to_payload(self):
+        return {'disposition': self.disposition, 'reason_code': self.reason_code, 'revision': self.revision,
+                'receipt_id': str(self.receipt_id), 'recorded_at': self.recorded_at.isoformat(),
+                'relationship': self.relationship.to_payload() if self.relationship else None,
+                'reservation': self.reservation.to_payload() if self.reservation else None}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FollowUpSnapshot:
+    """One coherent parent projection; child summaries grant no permission or implicit selection."""
+    mission_id: UUID
+    revision: int
+    work_items: tuple[FollowUpWork, ...]
+    relationships: tuple[FollowUpRelationship, ...]
+    reservations: tuple[FollowUpReservation, ...]
+    results: tuple[FollowUpResult, ...]
+
+    def __post_init__(self):
+        _uuid(self.mission_id)
+        _integer(self.revision)
+        for name, cls in (('work_items', FollowUpWork), ('relationships', FollowUpRelationship),
+                          ('reservations', FollowUpReservation), ('results', FollowUpResult)):
+            _records(getattr(self, name), cls)
+        works = {w.work_id: w for w in self.work_items}
+        relations = {r.follow_up_id: r for r in self.relationships}
+        if len(works) != len(self.work_items) or len(relations) != len(self.relationships):
+            raise ValueError('Duplicate follow-up identity.')
+        if any(w.inputs.mission_id != self.mission_id for w in self.work_items):
+            raise ValueError('Foreign parent work.')
+        for relation in self.relationships:
+            if works.get(relation.work.work_id) != relation.work:
+                raise ValueError('Missing exact admitted work.')
+        encumbered_budget(self.mission_id, self.reservations)
+        if len(self.reservations) != len(self.relationships):
+            raise ValueError('Missing admitted reservation.')
+        for record in (*self.reservations, *self.results):
+            if relations.get(record.relationship.follow_up_id) != record.relationship:
+                raise ValueError('Detached child record binding.')
+        result_ids = [r.relationship.follow_up_id for r in self.results]
+        if len(set(result_ids)) != len(result_ids):
+            raise ValueError('Duplicate current child result.')
+        keys = [r.idempotency_key for r in self.relationships]
+        if len(set(keys)) != len(keys):
+            raise ValueError('Duplicate parent admission retry key.')
+
+    def to_payload(self):
+        return {'mission_id': str(self.mission_id), 'revision': self.revision,
+                'work_items': [_identity(w) for w in self.work_items],
+                'relationships': [r.to_payload() for r in self.relationships],
+                'reservations': [r.to_payload() for r in self.reservations],
+                'related_results': [r.related_payload() for r in self.results]}
+
+
+class IResearchFollowUpPort(Protocol):
+    """Additive port; existing research-work implementers retain their contract.
+
+    Recording validates actual gap/assignment/work and immutable input identities,
+    without admitting collection. Admission validates the authorized selected parent,
+    current assignment action FOLLOW_UP, epoch/versions, manifest/Brief/input bindings,
+    narrowed scope, separate source/session authority, deadline/stop/cancellation and
+    cumulative quota/cost across ALL sibling epochs, including unresolved reservations.
+    Atomically create one child, narrowed manifest, relationship and reservation or none.
+    Refusals have zero probes and no persistent child/reservation. CAS and retry keys
+    recover the same child and original receipt; no connector dispatch occurs here.
+
+    Settlement validates canonical child run/frame/observation-source/finding/claim
+    identities, current reservation version and monotonic usage against stored history.
+    Final receipt must be verified against actual measured usage and closed child writer;
+    partial/unknown/crashed execution retains reservation and cannot authorize a re-probe.
+    Terminal failure alone never releases budget. Parent lifecycle/evidence are unchanged.
+    UUIDs and typed constructors are structural constraints, not evidence or authority.
+    """
+    async def record_follow_up_work(self, command: FollowUpWorkCommand) -> ResearchWorkCommitReceipt: ...
+
+    async def admit_mission_follow_up(self, command: FollowUpAdmissionCommand) -> FollowUpCommitReceipt: ...
+
+    async def settle_mission_follow_up(self, command: FollowUpSettlementCommand) -> FollowUpCommitReceipt: ...
+
+    async def load_mission_follow_ups(self, mission_id: UUID) -> FollowUpSnapshot:
+        """Read canonical links coherently; parent metadata never carries child permission."""
         ...
