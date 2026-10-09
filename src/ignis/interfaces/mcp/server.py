@@ -144,6 +144,7 @@ class _MissionRelayRuntime:
         self.server = server
         self.transport = Context(server).transport if server is not None else None
         self._writes: set[asyncio.Task] = set()
+        self._executions: set[asyncio.Task] = set()
         self.listener = None
         self.closed = False
         self._projection = None
@@ -179,6 +180,60 @@ class _MissionRelayRuntime:
             return await await_settled(join())
         finally:
             self._writes.discard(worker)
+
+    async def follow_up(self, request):
+        from ignis.application.cancellation import await_settled
+        from ignis.application.use_cases.execute_mission_follow_up import ExecuteMissionFollowUpUseCase
+        from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+        from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+        caller = asyncio.current_task()
+        if caller.cancelling():
+            raise asyncio.CancelledError
+        if self.closed or asyncio.get_running_loop() is not self.owner_loop:
+            return _follow_up_refused("STORAGE_FAILURE")
+        components = _COMPONENTS
+        repository = components.get("repository") if components is not None else None
+        owner = _COMPONENTS_OWNER
+        if owner is None or owner[0] is not components or owner[1] is not repository or owner[2] is not self.owner_loop:
+            return _follow_up_refused("STORAGE_FAILURE")
+        if type(repository) is SqliteTrendRepository:
+            ready = repository._initialized and (repository._db_path != ":memory:" or repository._mem_conn is not None)
+        elif type(repository) is PostgresTimescaleRepository:
+            ready = repository._pool is not None and not repository._pool.closed
+        else:
+            ready = False
+        executor = components.get("execute_mission_use_case")
+        if (not ready or type(executor) is not ExecuteMissionUseCase or executor._repo is not repository
+                or executor._workspace_store is not components.get("workspace_store")
+                or type(executor._workspace_store) is not WorkspaceRepository
+                or executor._workspace_store._repo is not repository
+                or executor._registry is not components.get("registry")):
+            return _follow_up_refused("STORAGE_FAILURE")
+        # Selection is immutable per request. The repository's independent verifier still
+        # proves source/session capability; stdio eligibility cannot substitute for it.
+        service = ExecuteMissionFollowUpUseCase(repository, executor,
+            selected_parent_id=request.mission_id, host_authorized=True)
+        worker = asyncio.create_task(service.execute(**request.to_payload()))
+        self._executions.add(worker)
+        async def join():
+            return await asyncio.shield(worker)
+        try:
+            response = await asyncio.shield(worker)
+            payload = response.to_payload()
+            if response.relationship is not None:
+                payload["parent_mission_id"] = str(response.relationship.work.inputs.mission_id)
+            return payload
+        except asyncio.CancelledError:
+            if not worker.cancelling():
+                worker.cancel()
+            # Shield cleanup only after signalling cancellation to the owned execution.
+            try:
+                await await_settled(join())
+            except (asyncio.CancelledError, Exception):
+                pass
+            raise
+        finally:
+            self._executions.discard(worker)
 
     def read_service(self):
         if self.closed or asyncio.get_running_loop() is not self.owner_loop:
@@ -237,11 +292,16 @@ class _MissionRelayRuntime:
 
     async def close(self):
         self.closed = True
+        for worker in tuple(self._executions):
+            if not worker.cancelling():
+                worker.cancel()
         resources = [resource for resource in (self.listener, self._reads) if resource is not None]
         for resource in resources:
             resource.close()
         from ignis.application.cancellation import await_settled
         async def settle():
+            if self._executions:
+                await asyncio.gather(*tuple(self._executions), return_exceptions=True)
             if self._writes:
                 await asyncio.gather(*tuple(self._writes), return_exceptions=True)
             for resource in resources:
@@ -273,6 +333,11 @@ class _ResearchRecordingArguments(Middleware):
                     or type(arguments["mission_id"]) is not str or type(arguments["command"]) is not dict):
                 from ignis.application.use_cases.record_mission_research_work import RecordMissionResearchWorkUseCase
                 return ToolResult(structured_content=RecordMissionResearchWorkUseCase._refused("INVALID_COMMAND"))
+        elif context.message.name == "execute_mission_follow_up":
+            try:
+                _parse_follow_up_arguments(context.message.arguments)
+            except (ValueError, TypeError, AttributeError):
+                return ToolResult(structured_content=_follow_up_refused("INVALID_COMMAND"))
         return await call_next(context)
 
 
@@ -303,6 +368,54 @@ async def record_mission_research_work(mission_id: str, command: dict[str, Any],
         return await runtime.record(mission_id, command)
     except Exception:
         return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
+
+
+def _follow_up_refused(reason):
+    from ignis.application.use_cases.execute_mission_follow_up import FollowUpExecutionResponse
+    return FollowUpExecutionResponse("REFUSED", reason).to_payload()
+
+
+def _parse_follow_up_arguments(arguments):
+    from ignis.domain.mission_follow_up import FollowUpExecutionRequest
+    if type(arguments) is not dict or set(arguments) != {
+            "mission_id", "follow_up_work_id", "expected_research_epoch", "idempotency_key"}:
+        raise ValueError("Invalid follow-up arguments.")
+    identities = {}
+    for name in ("mission_id", "follow_up_work_id"):
+        value = arguments[name]
+        if type(value) is not str or len(value) != 36:
+            raise ValueError("Invalid follow-up identity.")
+        identities[name] = UUID(value)
+        if str(identities[name]) != value:
+            raise ValueError("Invalid canonical follow-up identity.")
+    return FollowUpExecutionRequest(**{**arguments, **identities})
+
+
+@mcp.tool(name="execute_mission_follow_up", description="Execute one recorded, gap-linked bounded follow-up through the local host session. Requires a current research assignment and independently authorized source capability; creates one child and conservative reservation without reopening its parent. Viewing grants no execution authority; uncertain execution never starts a replacement child.")
+async def execute_mission_follow_up(mission_id: str, follow_up_work_id: str,
+                                    expected_research_epoch: int, idempotency_key: str, ctx: Context) -> dict:
+    try:
+        selected = _parse_follow_up_arguments({"mission_id": mission_id, "follow_up_work_id": follow_up_work_id,
+            "expected_research_epoch": expected_research_epoch, "idempotency_key": idempotency_key})
+    except (ValueError, TypeError, AttributeError):
+        return _follow_up_refused("INVALID_COMMAND")
+    if type(ctx) is not Context:
+        return _follow_up_refused("UNAUTHORIZED_HOST")
+    try:
+        from mcp.server.session import ServerSession
+        runtime = ctx.lifespan_context.get("mission_relay")
+        request = ctx.request_context
+        authorized = (ctx.fastmcp is mcp and ctx.transport == "stdio"
+            and request is not None and isinstance(request.session, ServerSession)
+            and type(runtime) is _MissionRelayRuntime and runtime.server is mcp and runtime.transport == "stdio")
+    except Exception:
+        authorized = False
+    if not authorized:
+        return _follow_up_refused("UNAUTHORIZED_HOST")
+    try:
+        return await runtime.follow_up(selected)
+    except Exception:
+        return _follow_up_refused("STORAGE_FAILURE")
 
 
 def _relay_failure(reason, unavailable=False):

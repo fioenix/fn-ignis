@@ -31,7 +31,7 @@ import sys
 import threading
 from dataclasses import dataclass
 
-EXPECTED_TOOL_COUNT = 47
+EXPECTED_TOOL_COUNT = 48
 EXPECTED_TOOL_NAMES = {
     "authenticate_instagram",
     "authenticate_threads",
@@ -47,6 +47,7 @@ EXPECTED_TOOL_NAMES = {
     "discover_market_opportunities",
     "evaluate_mission_quality",
     "execute_mission_ingress",
+    "execute_mission_follow_up",
     "extract_customer_pain_points",
     "generate_mission_artifact",
     "get_current_session_mission",

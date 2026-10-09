@@ -12,7 +12,13 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/028_research_work.sql`. Migration 028 bổ sung các bảng lưu hoạt động nghiên cứu
+Chuỗi migration trong mã nguồn kết thúc ở `sql/030_mission_follow_up_admission.sql`. Migration 030 bổ sung các khoảng trống
+gắn với đầu vào hiện tại, hạn mức ngân sách và đơn vị đo rõ ràng, quyền truy cập nguồn đã thu hẹp, receipt của lệnh gốc
+và phân bổ tài nguyên theo nguyên tắc thận trọng. Khi nhận nhiệm vụ trên SQLite, hệ thống yêu cầu một bên xác minh
+quyền hạn hiện tại được cấu hình độc lập và từ chối nếu thiếu bên này. Bên cấp quyền hạn thực tế của host và việc
+thực thi nhiệm vụ con chưa được xác minh. Migration 029 bổ sung liên kết bất biến giữa nhiệm vụ cha và nhiệm vụ con
+cùng dữ liệu dự trữ ngân sách. Hai migration này không bổ sung hồi tố bằng chứng hay kế thừa quyền hạn cũ.
+Migration 028 bổ sung các bảng lưu hoạt động nghiên cứu
 của host trong phạm vi được duyệt và các loại sự kiện tiến độ, không chuyển đổi dữ liệu bằng chứng đã lưu.
 Migration 027 chỉ bổ sung các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
 chuẩn được giữ nguyên. SQLite và PostgreSQL hiện ghi dữ kiện thu thập, qualification và claim cùng sự kiện tiến độ
@@ -77,9 +83,21 @@ Các thao tác đọc kiểm tra storage đã khởi tạo, không khởi tạo 
 kiểm tra quyền của nhiệm vụ cùng revision, epoch và dữ liệu đầu vào chính xác. Việc ghi lệnh
 không chạy agent, gọi provider hay thu thập nguồn.
 
+`execute_mission_follow_up(mission_id, follow_up_work_id, expected_research_epoch, idempotency_key)`
+thực hiện công việc bổ sung chứng cứ đã ghi nhận qua phiên stdio cục bộ đang sở hữu tài nguyên.
+Ignis kiểm tra phân công còn hiệu lực, khung đầu vào chính xác, ngân sách còn lại và quyền truy cập
+nguồn được xác minh riêng trước khi tạo nhiệm vụ con hoặc thu thập. Công cụ không nhận truy vấn,
+thông tin xác thực hay cờ cấp quyền từ người gọi. Thiếu bộ cung cấp quyền thực hiện thì yêu cầu
+bị từ chối trước khi khởi tạo xác thực hoặc thu thập.
+Kết quả đã được tiếp nhận nêu đúng nhiệm vụ cha, công việc, khoảng trống, phân công, nhiệm vụ con,
+phần ngân sách giữ chỗ, lượt chạy và kết quả từng kênh. Yêu cầu lặp đọc lại cùng nhiệm vụ con;
+kết quả chưa rõ vẫn giữ chỗ ngân sách và không mở lượt thu thập mới. Khi người gọi hủy yêu cầu,
+Ignis dừng tác vụ đang sở hữu và chờ dọn dẹp. Vòng đời nhiệm vụ cha giữ nguyên; quyền xem không
+cấp quyền thực hiện.
+
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **47 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **48 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
 manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/unit/` và `uv lock --check`

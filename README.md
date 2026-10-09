@@ -6,7 +6,7 @@ acting on it. Its two capabilities are independent: source collection can end wi
 frame, while Market analysis can end with a Gap Report rather than a forced verdict.
 
 **Release boundary:** This branch implements the unreleased Spec 011 product reset. The published
-v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 47-tool
+v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 48-tool
 mission-bound surface described here. Do not use a published image to validate this branch.
 
 ## Product contract
@@ -36,7 +36,10 @@ For a Codex-only installation with separate UAT storage, run
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
 The current source tree contains migrations through
-`sql/028_research_work.sql`. Migration 028 adds bounded host research-work storage
+`sql/030_mission_follow_up_admission.sql`. Migration 030 adds current-input gaps, finite budget
+grants, narrowed source authority, command receipts and conservative resource allocations.
+Migration 029 adds immutable parent/child follow-up links and reservation storage. Neither
+migration backfills evidence or adopts old authority. Migration 028 adds bounded host research-work storage
 and progress-event kinds without transforming persisted evidence. Migration 027 adds only PostgreSQL revision, progress-event,
 and command-receipt tables, preserving canonical evidence. SQLite and PostgreSQL now commit collection, qualification and claim facts together with
 their matching progress events. Relay provides a finite read-only local viewer and bounded snapshots of installed mission storage.
@@ -61,7 +64,7 @@ committed report templates live only in `src/ignis/infrastructure/templates/html
 
 ## Agent capabilities
 
-The current MCP server exposes **47 tools**. Use the server's live tool descriptions as the
+The current MCP server exposes **48 tools**. Use the server's live tool descriptions as the
 signature authority. Representative operations:
 
 - `create_attention_mission` and `confirm_market_brief` establish a bounded question and
@@ -80,6 +83,10 @@ signature authority. Representative operations:
   `open_mission_relay` opens its finite read-only localhost viewer with an explicit UTC deadline.
 - `record_mission_research_work` records a bounded host command with mission authority,
   revision, epoch and input checks. Recording does not run agents, invoke providers or collect sources.
+
+- `execute_mission_follow_up` executes one recorded gap-linked work item under its current
+  assignment and independently authorized source capability. It preserves child provenance and
+  reservations; viewing does not grant execution authority and uncertainty does not trigger reprobes.
 
 Agent instructions are in [AGENTS.md](AGENTS.md). The separate
 [collection](.agents/skills/ignis-collect/SKILL.md) and

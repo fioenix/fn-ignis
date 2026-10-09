@@ -93,9 +93,19 @@ These reads validate installed storage without bootstrapping a database or start
 session, enforcing mission authority and exact revision, epoch and input bindings. Recording
 does not execute agents, invoke providers or collect sources.
 
+`execute_mission_follow_up(mission_id, follow_up_work_id, expected_research_epoch, idempotency_key)`
+executes one recorded gap-linked work item through the owning local stdio session. Its current
+assignment, exact input frame, remaining budget and independent source/session capability must
+admit execution before child creation or collection. No queries, credentials or provider flags
+are accepted. A missing capability provider refuses before auth/collection. Admitted responses
+identify the actual parent/work/gap/assignment/child/reservation/run and channel outcomes; retries
+recover the same child, while uncertain execution retains its reservation and cannot reprobe.
+Caller cancellation stops the owned execution and waits for cleanup. The parent lifecycle stays
+unchanged, and viewer tokens confer no execution authority.
+
 ## 4. Tool and deployment boundaries
 
-The local MCP server exposes **47 tools**. Discover the running server's descriptions for exact
+The local MCP server exposes **48 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
 The published OCI manifest is still v0.7.0, so neither it nor a public-image smoke test
 establishes that Spec 011 shipped. PyPI installation is not advertised. Run the branch's

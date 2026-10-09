@@ -1,6 +1,6 @@
 # Bounded Follow-up Contract
 
-**Status**: Additive execution design approved with the technical plan; not implemented, separate from the read-only viewer and recording tool.
+**Status**: T076 bounded MCP implementation has scoped engineering verification through actual stdio on SQLite and PostgreSQL, using synthetic private capability providers and offline connectors. The public tool accepts exactly the four arguments below; framework-injected context is not a public argument. Held source/session permission remains an independent requirement, and execution fails closed when its provider is missing; real provider integration is not established by these tests. Root measured 262 passing offline tests and 19 passing native PostgreSQL companion tests, with no failures, errors or skips in either scoped gate. Delegated PO accepted T076 within this scoped synthetic engineering verification. T077 child-result projection, T078 viewer integration and T079 real-client UAT remain pending. This execution capability is separate from the read-only viewer and recording tool.
 
 `execute_mission_follow_up(mission_id, follow_up_work_id, expected_research_epoch, idempotency_key)` admits one already assigned gap-linked follow-up, then uses existing deterministic collection on a new child mission. No caller-supplied unrestricted query list or credential is accepted at execution time.
 

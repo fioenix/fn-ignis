@@ -26,8 +26,8 @@ hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đ�
 kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
 các cổng pilot và release vẫn giữ nguyên.
 
-Nhánh hiện tại `codex/ignis-relay-checkout` có **47 tools** (06/10/2026), gồm ba tool
-Relay đã triển khai, và migration tới `sql/028_research_work.sql`; các con số 47 tools,
+Nhánh hiện tại `codex/ignis-relay-checkout` có **48 tools** (09/10/2026), gồm các tool Relay và
+`execute_mission_follow_up`, và migration tới `sql/028_research_work.sql`; các con số 47 tools,
 worker, quota scheduled và migration `024` trong phần lịch sử dưới đây mô tả v0.7.0 đã
 phát hành. Tại mốc Spec 011 ngày 02/10/2026, nhánh `codex/evidence-grounded-product-reset`
 có 44 tool theo nhiệm vụ và migration mới nhất là `sql/025_evidence_grounded_claim_ledger.sql`.

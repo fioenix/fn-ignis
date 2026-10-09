@@ -1584,5 +1584,36 @@
         "type": "object"
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "execute_mission_follow_up",
+      "description": "Execute one recorded, gap-linked bounded follow-up through the local host session. Requires a current research assignment and independently authorized source capability; creates one child and conservative reservation without reopening its parent. Viewing grants no execution authority; uncertain execution never starts a replacement child.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "follow_up_work_id": {
+            "type": "string"
+          },
+          "expected_research_epoch": {
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mission_id",
+          "follow_up_work_id",
+          "expected_research_epoch",
+          "idempotency_key"
+        ],
+        "type": "object"
+      }
+    }
   }
 ]
