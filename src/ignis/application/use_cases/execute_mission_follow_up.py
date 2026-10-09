@@ -148,26 +148,38 @@ class ExecuteMissionFollowUpUseCase:
                 or any(v > dict(proof.resources).get(k, -1) for k, v in plan.resources)):
             raise FollowUpRefusal("SESSION_AUTHORITY_REQUIRED")
 
-    async def _recover(self, context):
+    @staticmethod
+    def _classify_history(context):
         receipt = context.receipt
         if receipt is None:
             return None
         link = receipt.relationship
-        journals = await self._repo.list_run_journals(link.child_mission_id)
-        claim = await self._repo.get_mission_writer_claim(link.child_mission_id)
-        child = await self._repo.get_mission(link.child_mission_id)
-        if child is None:
+        history = context.execution_history
+        if history is None or context.reservation is None:
             raise FollowUpRefusal("STORAGE_FAILURE")
-        if not journals and claim is None and child.status == "PENDING":
+        journals, claim, child = history.journals, history.writer, history.child
+        run_id = journals[0].run_id if len(journals) == 1 else claim.run_id if claim else None
+        if (not journals and claim is None and child.status == "PENDING"
+                and context.reservation.state == "RESERVED"):
             return None
-        if child.status == "COMPLETED":
-            return FollowUpExecutionResponse("COMPLETED", relationship=link,
-                                             run_id=journals[-1].run_id if journals else None)
+        if (context.reservation.state != "SETTLED" and child.status == "COMPLETED"
+                and claim is None and len(journals) == 1 and journals[0].status == "COMPLETED"
+                and child.workspace_id is not None and journals[0].workspace_id == child.workspace_id
+                and journals[0].started_at is not None and journals[0].completed_at is not None
+                and journals[0].completed_at >= journals[0].started_at):
+            return FollowUpExecutionResponse("COMPLETED", relationship=link, run_id=run_id)
         if claim is not None:
-            # A persisted claim is not current execution/activity evidence. Only admission is known.
-            return FollowUpExecutionResponse("ADMITTED", "EXECUTION_STATUS_UNKNOWN", link)
-        return FollowUpExecutionResponse("RECONCILIATION_REQUIRED", "UNRESOLVED_EXECUTION", link,
-                                         journals[-1].run_id if journals else None)
+            return FollowUpExecutionResponse("ADMITTED", "EXECUTION_STATUS_UNKNOWN", link, run_id)
+        return FollowUpExecutionResponse("RECONCILIATION_REQUIRED", "UNRESOLVED_EXECUTION", link, run_id)
+
+    async def _recover(self, context):
+        response = self._classify_history(context)
+        if response is not None and context.reservation.state == "RESERVED":
+            link = context.receipt.relationship
+            context = await self._repo._follow_up_execution_context(
+                link.work.inputs.mission_id, link.work.work_id, unresolved=True)
+            response = self._classify_history(context)
+        return response
 
     async def execute(self, mission_id, follow_up_work_id, expected_research_epoch, idempotency_key):
         try:
@@ -185,6 +197,7 @@ class ExecuteMissionFollowUpUseCase:
         caller = asyncio.current_task()
         if caller.cancelling():
             raise asyncio.CancelledError
+        known_link, known_run = None, None
         try:
             context = await self._repo._follow_up_execution_context(
                 request.mission_id, request.follow_up_work_id, request=request)
@@ -193,6 +206,12 @@ class ExecuteMissionFollowUpUseCase:
             if context.receipt is not None:
                 if request.expected_research_epoch != context.receipt.relationship.work.research_epoch:
                     raise FollowUpRefusal("STALE_EPOCH")
+                # Rejected retry identities never borrow an earlier admitted relationship.
+                known_link = context.receipt.relationship
+                history = context.execution_history
+                if history:
+                    known_run = (history.journals[0].run_id if len(history.journals) == 1
+                                 else history.writer.run_id if history.writer else None)
                 recovery = await self._repo.admit_mission_follow_up(FollowUpAdmissionCommand(
                     request=request, selected_parent_id=self._selected, host_authorized=True,
                     expected_revision=context.retry_revision if context.retry_revision is not None else context.research.revision))
@@ -226,6 +245,7 @@ class ExecuteMissionFollowUpUseCase:
                 receipt = await self._repo.admit_mission_follow_up(command)
                 if receipt.disposition == "REFUSED":
                     raise FollowUpRefusal(receipt.reason_code)
+                known_link = receipt.relationship
                 context = await self._repo._follow_up_execution_context(request.mission_id, request.follow_up_work_id)
                 recovered = await self._recover(context)
                 if recovered:
@@ -240,7 +260,7 @@ class ExecuteMissionFollowUpUseCase:
                     current = await self._repo._follow_up_execution_context(request.mission_id, request.follow_up_work_id)
                     if current.receipt is None or current.receipt.relationship != link:
                         raise FollowUpRefusal("STORAGE_FAILURE")
-                    if await self._repo.list_run_journals(child.id):
+                    if current.execution_history is None or current.execution_history.journals:
                         raise FollowUpRefusal("UNRESOLVED_EXECUTION")
                     if self._diagnostic(current):
                         raise FollowUpRefusal(self._diagnostic(current))
@@ -260,7 +280,8 @@ class ExecuteMissionFollowUpUseCase:
                     self._current(lease, authority, plan)
 
                 async def scope_guard(journal):
-                    nonlocal started
+                    nonlocal started, known_run
+                    known_run = journal.run_id
                     started = True
                     self._current(lease, authority, plan)
                     if self._initializer is not None:
@@ -284,17 +305,38 @@ class ExecuteMissionFollowUpUseCase:
                     current = await self._repo._follow_up_execution_context(request.mission_id, request.follow_up_work_id)
                     return await self._recover(current) or FollowUpExecutionResponse(
                         "RECONCILIATION_REQUIRED", "UNRESOLVED_EXECUTION", link)
-                except BaseException:
-                    if started or await self._repo.list_run_journals(child.id):
-                        await await_settled(self._repo._follow_up_execution_context(
-                            request.mission_id, request.follow_up_work_id, unresolved=True))
+                except BaseException as error:
+                    current = None
+                    try:
+                        current = await await_settled(self._repo._follow_up_execution_context(
+                            request.mission_id, request.follow_up_work_id))
+                        if current.execution_history and len(current.execution_history.journals) == 1:
+                            known_run = current.execution_history.journals[0].run_id
+                        if started or (current.execution_history and current.execution_history.journals):
+                            current = await await_settled(self._repo._follow_up_execution_context(
+                                request.mission_id, request.follow_up_work_id, unresolved=True))
+                    except Exception:
+                        # Retained RESERVED allocation remains conservative if recovery storage fails.
+                        pass
+                    if isinstance(error, Exception) and not isinstance(
+                            error, (FollowUpExecutionBoundaryError, RepositoryException)):
+                        if current is None:
+                            return FollowUpExecutionResponse("REFUSED", "STORAGE_FAILURE", known_link, known_run)
+                        return self._classify_history(current) or FollowUpExecutionResponse(
+                            "RECONCILIATION_REQUIRED", "UNRESOLVED_EXECUTION", known_link, known_run)
                     raise
+                known_run = UUID(result["run"]["run_id"])
+                current = await self._repo._follow_up_execution_context(
+                    request.mission_id, request.follow_up_work_id, unresolved=True)
+                classified = self._classify_history(current)
+                if classified is None:
+                    return FollowUpExecutionResponse(
+                        "RECONCILIATION_REQUIRED", "UNRESOLVED_EXECUTION", link, known_run)
                 return FollowUpExecutionResponse(
-                    result["terminal_state"], relationship=link,
-                    run_id=UUID(result["run"]["run_id"]),
-                    channel_outcomes=tuple(result.get("channel_outcomes", ())),
-                )
+                    classified.status, classified.reason_code, classified.relationship,
+                    classified.run_id, tuple(result.get("channel_outcomes", ()))
+                    if classified.status == "COMPLETED" else ())
         except FollowUpExecutionBoundaryError as error:
-            return FollowUpExecutionResponse("REFUSED", error.reason)
+            return FollowUpExecutionResponse("REFUSED", error.reason, known_link, known_run)
         except RepositoryException:
-            return FollowUpExecutionResponse("REFUSED", "STORAGE_FAILURE")
+            return FollowUpExecutionResponse("REFUSED", "STORAGE_FAILURE", known_link, known_run)

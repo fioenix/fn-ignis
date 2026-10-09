@@ -400,6 +400,11 @@ def recovery_binding(
         raise ValueError("Original child Brief revision is absent or ambiguous.")
 
 
+def unverified_settlement_reason(states):
+    """No authenticated usage producer exists; a structural receipt UUID cannot release allowance."""
+    return "RECONCILIATION_REQUIRED" if any(state == "SETTLED" for state in states) else None
+
+
 def execution_budget_reason(authority, root, reservations, allocations, *, admitted):
     """Read-only execution preflight retains all epochs and unknown resource allocations."""
     from ignis.domain.mission_follow_up import encumbered_budget
@@ -418,4 +423,4 @@ def execution_budget_reason(authority, root, reservations, allocations, *, admit
         return "QUOTA_EXHAUSTED"
     if set(used) - limits.keys():
         raise ValueError("Unbound resource history.")
-    return None
+    return unverified_settlement_reason(r.state for r in reservations)

@@ -1,12 +1,15 @@
 """Private checked execution context; records and host identity confer no authority."""
 
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from uuid import UUID
 from typing import Protocol
 from contextlib import AbstractAsyncContextManager
 
 from ignis.application.ports.follow_up_admission_port import AsyncFollowUpCapabilityLease
 from ignis.application.ports.research_work_port import FollowUpCommitReceipt, ResearchWorkSnapshot
-from ignis.application.ports.research_workspace_port import MissionEvidenceSnapshot
+from ignis.application.ports.research_workspace_port import MissionEvidenceSnapshot, MissionWriterClaim, RunJournal
 from ignis.domain.follow_up_admission import WorkAuthority, digest
 from ignis.domain.entities import ResearchMission
 from ignis.domain.research_workspace import MarketBriefRevision, MissionManifest
@@ -24,6 +27,33 @@ class FollowUpExecutionBoundaryError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class FollowUpExecutionHistory:
+    child: ResearchMission | None
+    journals: tuple[RunJournal, ...]
+    writer: MissionWriterClaim | None
+
+    @classmethod
+    def from_rows(cls, child, rows, claim):
+        def timestamp(value, *, optional=False):
+            if value is None and optional:
+                return None
+            value = datetime.fromisoformat(value) if isinstance(value, str) else value
+            if not isinstance(value, datetime) or value.utcoffset() is None:
+                raise ValueError("Timezone-aware canonical timestamp required.")
+            return value
+        journals = tuple(RunJournal(UUID(str(r[0])), UUID(str(r[2])), UUID(str(r[1])),
+                                    Path(r[3]), int(r[4]), r[5], timestamp(r[6]), timestamp(r[7], optional=True))
+                         for r in rows)
+        writer = (MissionWriterClaim(UUID(str(claim[0])), UUID(str(claim[1])), timestamp(claim[2]))
+                  if claim else None)
+        if child is None or any(j.mission_id != child.id for j in journals):
+            raise ValueError("Unbound execution history.")
+        if writer and writer.mission_id != child.id:
+            raise ValueError("Unbound execution writer.")
+        return cls(child, journals, writer)
+
+
+@dataclass(frozen=True, slots=True)
 class FollowUpExecutionContext:
     authority: WorkAuthority | None
     canonical: MissionEvidenceSnapshot
@@ -36,6 +66,7 @@ class FollowUpExecutionContext:
     reservation: FollowUpReservation | None = None
     retry_revision: int | None = None
     retry_reason: str | None = None
+    execution_history: FollowUpExecutionHistory | None = None
 
 
 @dataclass(frozen=True, slots=True)

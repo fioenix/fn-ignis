@@ -823,6 +823,8 @@ async def commit_admission(repository, command, fingerprint, authority, lease):
                         (used_resources.get(k, 0) + v > dict(root.resources)[k] for k, v in live.resources)
                     ):
                         reason = "QUOTA_EXHAUSTED"
+                    if not reason:
+                        reason = rules.unverified_settlement_reason(row["state"] for row in rows)
                 if reason:
                     result = await refusal(conn, mission_id, reason)
                 else:
@@ -1036,13 +1038,15 @@ async def admit(repository, command):
 
 async def execution_context(repository, mission_id, work_id, *, unresolved=False, request=None):
     """Pinned native context with full original bindings; unresolved retains every allocation."""
-    from ignis.application.ports.follow_up_execution_port import FollowUpExecutionContext
+    from ignis.application.ports.follow_up_execution_port import FollowUpExecutionContext, FollowUpExecutionHistory
     from ignis.domain.exceptions import RepositoryException
 
     async def operation():
         try:
             async with connection(repository, readonly=not unresolved) as conn:
                 if unresolved:
+                    # Pin claim/history together before locks or the first MVCC read.
+                    await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
                     await lock(repository, conn, mission_id)
                 canonical, research = await state(repository, conn, mission_id)
                 retry_revision, retry_reason = None, None
@@ -1071,14 +1075,6 @@ async def execution_context(repository, mission_id, work_id, *, unresolved=False
                         and candidate.relationship.work.work_id == work_id):
                         receipt = candidate
                 reason = await authority_reason(authority, canonical, research, conn) if authority else "UNKNOWN_FOLLOW_UP"
-                if unresolved:
-                    if receipt is None:
-                        raise ValueError("Missing bound original admission.")
-                    await conn.execute(
-                        "UPDATE mission_follow_up_reservations SET state='UNRESOLVED',version=version+1 "
-                        "WHERE reservation_id=%s AND state='RESERVED'",
-                        (str(receipt.relationship.reservation_id),),
-                    )
                 candidate = (
                     rules.child_records(canonical, authority, 1, uuid4(), uuid4())
                     if authority and canonical.mission and canonical.manifest and canonical.brief else (None, None, None)
@@ -1086,12 +1082,26 @@ async def execution_context(repository, mission_id, work_id, *, unresolved=False
                 current = await snapshot(repository, conn, mission_id)
                 reservation = next((r for r in current.reservations
                                     if r.relationship == receipt.relationship), None) if receipt else None
+                history = None
+                if receipt is not None:
+                    child_id = receipt.relationship.child_mission_id
+                    actual = await repository._commit_snapshot(conn, child_id)
+                    rows = await (await conn.execute("SELECT id,workspace_id,mission_id,journal_path,sequence,status,started_at,completed_at FROM mission_run_journals WHERE mission_id=%s", (str(child_id),))).fetchall()
+                    claim = await (await conn.execute("SELECT mission_id,run_id,claimed_at FROM mission_writer_claims WHERE mission_id=%s", (str(child_id),))).fetchone()
+                    history = FollowUpExecutionHistory.from_rows(actual.mission, rows, claim)
+                if unresolved:
+                    if receipt is None or reservation is None:
+                        raise ValueError("Missing bound original reservation.")
+                    if reservation.state == "RESERVED":
+                        await conn.execute("UPDATE mission_follow_up_reservations SET state='UNRESOLVED',version=version+1 WHERE reservation_id=%s AND parent_mission_id=%s AND version=%s AND state='RESERVED'", (str(reservation.relationship.reservation_id), str(mission_id), (await (await conn.execute("SELECT version FROM mission_follow_up_reservations WHERE reservation_id=%s", (str(reservation.relationship.reservation_id),))).fetchone())[0]))
+                    current = await snapshot(repository, conn, mission_id)
+                    reservation = next(r for r in current.reservations if r.relationship == receipt.relationship)
                 if authority and not reason:
                     allocations = await (await conn.execute('SELECT r.resource,r.allocated FROM mission_follow_up_reservation_resources r JOIN mission_follow_up_reservations a USING(reservation_id) WHERE a.parent_mission_id=%s', (str(mission_id),))).fetchall()
                     root = await fact(conn, "mission_follow_up_parent_budgets", "budget_id", authority.budget_id)
                     reason = rules.execution_budget_reason(authority, root, current.reservations, allocations,
                                                           admitted=receipt is not None)
-                result = FollowUpExecutionContext(authority, canonical, research, receipt, reason, *candidate, reservation, retry_revision, retry_reason)
+                result = FollowUpExecutionContext(authority, canonical, research, receipt, reason, *candidate, reservation, retry_revision, retry_reason, history)
                 if unresolved:
                     await conn.commit()
                 return result
