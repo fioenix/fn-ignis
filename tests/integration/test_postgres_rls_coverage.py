@@ -89,6 +89,13 @@ RESEARCH_OWNER_ONLY = {
     "research_work_commands": "original work command receipt",
 }
 OWNER_ONLY.update(RESEARCH_OWNER_ONLY)
+# SQL 029 adds owner-only links and conservative reservation history.
+FOLLOW_UP_OWNER_ONLY = {
+    "mission_follow_up_work": "recorded follow-up scope",
+    "mission_follow_ups": "parent-child follow-up identity",
+    "mission_follow_up_reservations": "follow-up budget reservation",
+}
+OWNER_ONLY.update(FOLLOW_UP_OWNER_ONLY)
 POSTURE = {
     **{table: "client read-only" for table in CLIENT_READ_ONLY},
     **{table: "owner only" for table in OWNER_ONLY},
@@ -290,6 +297,7 @@ RESEARCH_ROWS = (
      f" 'ASSIGN_WORK', '{uuid4()}', 'APPLIED', 1)"),
 )
 CLIENT_ROWS.update(RESEARCH_ROWS)
+CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in FOLLOW_UP_OWNER_ONLY})
 
 
 def test_research_posture_inventory_matches_exact_sql028_tables():
@@ -302,6 +310,32 @@ def test_research_posture_inventory_matches_exact_sql028_tables():
     assert {table for table in OWNER_ONLY if table in created} == created
     assert {table for table, _ in RESEARCH_ROWS} == created
     assert len(RESEARCH_ROWS) == 15
+
+
+def _valid_follow_up_insert(conn, table):
+    """Validate exact follow-up INSERT with its reciprocal pair, then roll back the fixture."""
+    from tests.integration.test_mission_follow_up_schema import (
+        Schema, seed, work_values, relation_values, reserve_values,
+    )
+    db = Schema(conn, True)
+    with conn.transaction(force_rollback=True):
+        x = seed(db)
+        records = {
+            "mission_follow_up_work": work_values(x),
+            "mission_follow_ups": relation_values(x),
+            "mission_follow_up_reservations": reserve_values(x),
+        }
+        for target, values in records.items():
+            db.insert(target, values)
+        conn.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        values = records[table]
+        statement = sql.SQL("INSERT INTO public.{} ({}) VALUES ({})").format(
+            sql.Identifier(table),
+            sql.SQL(",").join(sql.Identifier(c) for c in values),
+            sql.SQL(",").join(sql.Literal(v) for v in values.values()),
+        ).as_string(conn)
+        assert conn.execute(sql.SQL("SELECT count(*) FROM public.{}").format(sql.Identifier(table))).fetchone() == (1,)
+    return statement
 
 
 def _valid_research_insert(conn, table):
@@ -456,6 +490,8 @@ def _attempt(dsn: str, role: str, table: str, statement: str) -> str:
         try:
             if statement == "INSERT" and table in RESEARCH_OWNER_ONLY:
                 _valid_research_insert(conn, table)
+            elif statement == "INSERT" and table in FOLLOW_UP_OWNER_ONLY:
+                text = _valid_follow_up_insert(conn, table)
             conn.execute(sql.SQL("SET ROLE {}").format(sql.Identifier(role)))
             cursor = conn.execute(text)
             if statement == "SELECT":

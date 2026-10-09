@@ -12,7 +12,9 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/028_research_work.sql`. Migration 028 adds bounded host research-work storage
+The source migration chain ends at `sql/029_mission_follow_up.sql`. Migration 029 adds immutable
+parent/child follow-up links and conservative reservation storage; execution and atomic
+admission remain separate implementation tasks. Migration 028 adds bounded host research-work storage
 and progress-event kinds without transforming persisted evidence. Migration 027 adds only
 PostgreSQL revision, progress-event, and command-receipt tables, preserving canonical evidence.
 SQLite and PostgreSQL commit collection, qualification and claim facts together with matching
