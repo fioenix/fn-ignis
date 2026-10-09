@@ -36,6 +36,7 @@ from ignis.domain.mission_relay import (
     RelayProvenance,
     RelayReadReason,
     RelayReadStatus,
+    RelayRelatedResult,
 )
 from ignis.domain.research_workspace import (
     EvidenceDirection,
@@ -361,6 +362,195 @@ def _event(row) -> MissionProgressEvent:
     )
 
 
+_RELATED_FINDINGS = """
+SELECT f.finding_id,f.revision,i.frame_digest,i.manifest_digest,i.brief_digest,w.run_id,
+ f.mission_id AS finding_mission,h.mission_id AS handoff_mission,w.mission_id AS work_mission,
+ i.mission_id AS input_mission,j.mission_id AS journal_mission,j.workspace_id,
+ h.input_id AS handoff_input,f.input_id AS finding_input,w.input_id AS work_input,
+ (SELECT COUNT(*) FROM research_input_observations b LEFT JOIN observations o ON o.id=b.observation_id
+  WHERE b.input_id=f.input_id AND (b.mission_id<>f.mission_id OR o.id IS NULL OR o.source_id<>b.source_id)) AS invalid_bindings
+FROM research_finding_revisions f
+LEFT JOIN research_handoffs h ON h.handoff_id=f.handoff_id AND h.work_id=f.work_id
+LEFT JOIN research_work_items w ON w.work_id=f.work_id
+LEFT JOIN research_input_sets i ON i.input_id=f.input_id
+LEFT JOIN mission_run_journals j ON j.id=w.run_id
+WHERE f.mission_id={parameter} AND f.revision=(SELECT MAX(other.revision)
+ FROM research_finding_revisions other WHERE other.finding_id=f.finding_id)
+ORDER BY f.finding_id LIMIT 2001
+"""
+
+
+def _related_scope(link, child, parent, rows):
+    identity = UUID(str(link['child_mission_id']))
+    unknown = RelayRelatedResult(mission_id=identity)
+    if child is None or str(child['workspace_id']) != str(parent['workspace_id']):
+        raise ValueError('Related child ownership mismatch.')
+    if not rows or len(rows) > 2000:
+        return unknown
+    scopes, references = set(), []
+    for row in rows:
+        if any(str(row[k]) != str(identity) for k in ('finding_mission', 'handoff_mission', 'work_mission',
+                                                     'input_mission', 'journal_mission')):
+            return unknown
+        if (str(row['workspace_id']) != str(child['workspace_id'])
+                or row['handoff_input'] != row['finding_input'] or row['work_input'] != row['finding_input']
+                or row['manifest_digest'] != link['child_manifest_digest']
+                or row['brief_digest'] != link['child_brief_digest'] or row['invalid_bindings'] != 0
+                or row['run_id'] is None or row['frame_digest'] is None):
+            return unknown
+        scopes.add((UUID(str(row['run_id'])), row['frame_digest']))
+        references.append((UUID(str(row['finding_id'])), row['revision']))
+    if len(scopes) != 1:
+        return unknown
+    run_id, frame = scopes.pop()
+    return RelayRelatedResult(mission_id=identity, run_id=run_id, frame_digest=frame,
+                              finding_references=tuple(references))
+
+
+_FOLLOW_UP_READ_COLUMNS = {
+    'mission_follow_up_commands': 'parent_mission_id,operation,command_key,fingerprint,work_id,command_payload,receipt_payload',
+    'mission_follow_ups': 'follow_up_id,parent_mission_id,child_mission_id,work_id,reservation_id,child_manifest_digest,child_brief_digest,idempotency_key',
+    'mission_follow_up_work': 'work_id,parent_mission_id,parent_work_id,assignment_id,research_epoch,assignment_version,work_version,input_id,brief_revision_id,gap_id,approved_queries,approved_sources,requested_queries,requested_sources,authority_deadline',
+    'mission_follow_up_reservations': 'reservation_id,follow_up_id,parent_mission_id,child_mission_id,reserved_quota,reserved_cost',
+    'mission_follow_up_reservation_resources': 'reservation_id,resource,allocated',
+    'mission_follow_up_authorities': 'work_id,parent_mission_id,gap_id,budget_id,binding_id,payload',
+    'mission_follow_up_parent_budgets': 'budget_id,parent_mission_id,payload',
+    'mission_follow_up_assignment_budgets': 'binding_id,parent_mission_id,budget_id,assignment_id,epoch,payload',
+    'mission_follow_up_gaps': 'gap_id,parent_mission_id,parent_work_id,payload',
+}
+
+
+def _related(conn, request):
+    for table, required in _FOLLOW_UP_READ_COLUMNS.items():
+        actual = {r[1] for r in conn.execute(f'PRAGMA table_info({table})')}
+        if not set(required.split(',')) <= actual:
+            return (), None
+    if not _sqlite_research_available(conn):
+        return (), None
+    rows = conn.execute('SELECT * FROM mission_follow_ups WHERE parent_mission_id=? ORDER BY follow_up_id LIMIT 201',
+                        (str(request.mission_id),)).fetchall()
+    if len(rows) > 200:
+        return (), 201
+    parent = conn.execute('SELECT workspace_id FROM research_missions WHERE id=?', (str(request.mission_id),)).fetchone()
+    results = []
+    for link in rows:
+        from ignis.infrastructure.persistence.sqlite_follow_up_admission import validated_receipt
+        receipts = conn.execute('SELECT * FROM mission_follow_up_commands WHERE parent_mission_id=? '
+            'AND work_id=? AND operation=? LIMIT 2001', (str(request.mission_id), link['work_id'], 'ADMIT')).fetchall()
+        original = _original_related_receipt(receipts, request.mission_id, link)
+        validated_receipt(SqliteTrendRepository, conn, original, request.mission_id)
+        child = conn.execute('SELECT workspace_id FROM research_missions WHERE id=?', (link['child_mission_id'],)).fetchone()
+        findings = conn.execute(_RELATED_FINDINGS.format(parameter='?'), (link['child_mission_id'],)).fetchall() if _sqlite_research_available(conn) else ()
+        results.append(_related_scope(link, child, parent, findings))
+    return tuple(results), len(rows)
+
+
+async def _pg_related(conn, request):
+    columns = await _pg_fetch(conn, "SELECT table_name,column_name FROM information_schema.columns"
+        " WHERE table_schema='public' AND table_name=ANY(%s)", (list(_FOLLOW_UP_READ_COLUMNS),), many=True)
+    actual = {(row['table_name'], row['column_name']) for row in columns}
+    if any((table, column) not in actual for table, required in _FOLLOW_UP_READ_COLUMNS.items()
+           for column in required.split(',')):
+        return (), None
+    if not await _pg_research_available(conn):
+        return (), None
+    rows = await _pg_fetch(conn, 'SELECT * FROM mission_follow_ups WHERE parent_mission_id=%s ORDER BY follow_up_id LIMIT 201',
+                           (request.mission_id,), many=True)
+    if len(rows) > 200:
+        return (), 201
+    parent = await _pg_fetch(conn, 'SELECT workspace_id FROM research_missions WHERE id=%s', (request.mission_id,))
+    available = await _pg_research_available(conn)
+    results = []
+    for link in rows:
+        from ignis.infrastructure.persistence.postgres_follow_up_admission import validated_receipt, physical_rows
+        previous_factory = conn.row_factory
+        conn.row_factory = physical_rows
+        try:
+            receipts = await (await conn.execute('SELECT * FROM mission_follow_up_commands WHERE parent_mission_id=%s '
+                'AND work_id=%s AND operation=%s LIMIT 2001', (request.mission_id, link['work_id'], 'ADMIT'))).fetchall()
+            original = _original_related_receipt(receipts, request.mission_id, link)
+            await validated_receipt(PostgresTimescaleRepository, conn, original, request.mission_id)
+        finally:
+            conn.row_factory = previous_factory
+        child = await _pg_fetch(conn, 'SELECT workspace_id FROM research_missions WHERE id=%s', (link['child_mission_id'],))
+        findings = await _pg_fetch(conn, _RELATED_FINDINGS.format(parameter='%s'), (link['child_mission_id'],), many=True) if available else ()
+        results.append(_related_scope(link, child, parent, findings))
+    return tuple(results), len(rows)
+
+
+def _original_related_receipt(rows, mission_id, link):
+    from ignis.infrastructure.persistence.follow_up_admission_rules import command_identity
+    if len(rows) > 2000 or sum(len(r['command_payload']) + len(r['receipt_payload']) for r in rows) > 4_194_304:
+        raise ValueError('Related receipt proof exceeds bounded capacity.')
+    originals = []
+    for row in rows:
+        command, receipt, _ = command_identity(row, mission_id)
+        if receipt.disposition != 'APPLIED':
+            continue
+        if (receipt.revision != command.expected_revision + 1 or not command.host_authorized
+                or command.selected_parent_id != mission_id
+                or command.request.idempotency_key != receipt.relationship.idempotency_key
+                or str(receipt.relationship.follow_up_id) != str(link['follow_up_id'])):
+            raise ValueError('Related child original receipt mismatch.')
+        originals.append(row)
+    if len(originals) != 1:
+        raise ValueError('Related child lacks one original admission receipt.')
+    return originals[0]
+
+
+def _receipt_publications(rows, mission_id, start, head):
+    """Recognize original eventless publications, never retry aliases or refusals."""
+    from ignis.infrastructure.persistence.follow_up_admission_rules import command_identity
+    from ignis.application.ports.research_work_port import FollowUpCommitReceipt, ResearchWorkCommitReceipt
+    if len(rows) > 2000 or sum(len(r['command_payload']) + len(r['receipt_payload']) for r in rows) > 4_194_304:
+        raise ValueError("Receipt proof exceeds bounded read capacity.")
+    publications = {}
+    for row in rows:
+        command, receipt, _ = command_identity(row, mission_id)
+        if receipt.disposition != 'APPLIED':
+            continue
+        if receipt.revision != command.expected_revision + 1 or not command.host_authorized:
+            raise ValueError("Original publication revision is invalid.")
+        if type(receipt) is ResearchWorkCommitReceipt and receipt.event_ids != ():
+            raise ValueError("Receipt publication unexpectedly carries legacy events.")
+        if type(receipt) is FollowUpCommitReceipt and (
+            command.selected_parent_id != mission_id
+            or command.request.idempotency_key != receipt.relationship.idempotency_key
+        ):
+            raise ValueError("Admission alias cannot publish a revision.")
+        if receipt.revision in publications:
+            raise ValueError("Conflicting receipt publications.")
+        publications[receipt.revision] = row
+    if head <= start or head - start > 2000 or any(r not in publications for r in range(start + 1, head + 1)):
+        raise ValueError("Committed revision lacks contiguous original receipts.")
+    return tuple(publications[r] for r in range(start + 1, head + 1))
+
+
+def _receipt_tail(conn, request, start, head):
+    from ignis.infrastructure.persistence.sqlite_follow_up_admission import validated_receipt
+    rows = conn.execute('SELECT * FROM mission_follow_up_commands WHERE parent_mission_id=? LIMIT 2001',
+                        (str(request.mission_id),)).fetchall()
+    for row in _receipt_publications(rows, request.mission_id, start, head):
+        validated_receipt(SqliteTrendRepository, conn, row, request.mission_id)
+    return MissionRelayEventPage(high_water=MissionRelayCursor(mission_id=request.mission_id,
+        revision=head, ordinal=1), page_size=request.page_size, events=(), resync_required=True)
+
+
+async def _pg_receipt_tail(conn, request, start, head):
+    from ignis.infrastructure.persistence.postgres_follow_up_admission import validated_receipt, physical_rows
+    previous_factory = conn.row_factory
+    conn.row_factory = physical_rows
+    try:
+        rows = await (await conn.execute('SELECT * FROM mission_follow_up_commands WHERE parent_mission_id=%s LIMIT 2001',
+                                        (request.mission_id,))).fetchall()
+        for row in _receipt_publications(rows, request.mission_id, start, head):
+            await validated_receipt(PostgresTimescaleRepository, conn, row, request.mission_id)
+    finally:
+        conn.row_factory = previous_factory
+    return MissionRelayEventPage(high_water=MissionRelayCursor(mission_id=request.mission_id,
+        revision=head, ordinal=1), page_size=request.page_size, events=(), resync_required=True)
+
+
 def _event_page(conn, request) -> MissionRelayEventPage:
     mission_id = str(request.mission_id)
     # Admission locks cannot protect journal ownership changed after publication. Validate
@@ -383,7 +573,7 @@ def _event_page(conn, request) -> MissionRelayEventPage:
         " ORDER BY revision DESC,ordinal DESC LIMIT 1", (mission_id,),
     ).fetchone()
     if (latest is None and revision != 0) or (latest is not None and latest["revision"] != revision):
-        raise ValueError("Committed revision and event high-water are inconsistent.")
+        return _receipt_tail(conn, request, latest['revision'] if latest else 0, revision)
     high_water = MissionRelayCursor(
         mission_id=request.mission_id, revision=revision, ordinal=latest["ordinal"] if latest is not None else 0,
     )
@@ -454,7 +644,7 @@ class SqliteMissionRelayReader(IMissionRelayReader):
                 conn = await asyncio.to_thread(sqlite3.connect, self._file_uri, uri=True, check_same_thread=False)
             return await asyncio.to_thread(self._read, conn, request)
         except (
-            sqlite3.Error, OSError, ValueError, TypeError, KeyError, IndexError,
+            sqlite3.Error, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError,
             IncompleteMarketBriefError, InvalidEvidenceQualificationError,
             InvalidMissionClaimError, InvalidMissionManifestError,
         ):
@@ -555,10 +745,14 @@ class SqliteMissionRelayReader(IMissionRelayReader):
             ) for r in conn.execute(
                 "SELECT * FROM research_activity_receipts WHERE mission_id=? ORDER BY rowid", (mission_id,),
             ))
+        related, related_total = _related(conn, request)
+        if related_total == 201:
+            return MissionRelayReadFailure(status=RelayReadStatus.REFUSED, reason_code=RelayReadReason.RESPONSE_TOO_LARGE)
         return MissionRelayRead(
             request=request, evidence=evidence, run=run, events=_event_page(conn, request),
             research=research, research_activities=activities,
             research_run_id=research_run_id, research_frame_digest=research_frame_digest,
+            related_results=related, related_results_total=related_total,
             read_at=datetime.now(timezone.utc), total_observations=total, source_count=source_count,
             frame_evidence=canonical if full_frame else None,
             latest_run_id=_uuid(latest["id"]) if (latest := conn.execute(
@@ -632,7 +826,7 @@ class PostgresMissionRelayReader(IMissionRelayReader):
                     await conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
                     return await self._read(conn, request)
         except (
-            psycopg.Error, OSError, ValueError, TypeError, KeyError, IndexError,
+            psycopg.Error, OSError, ValueError, TypeError, KeyError, IndexError, AttributeError,
             IncompleteMarketBriefError, InvalidEvidenceQualificationError,
             InvalidMissionClaimError, InvalidMissionManifestError,
         ):
@@ -751,10 +945,14 @@ class PostgresMissionRelayReader(IMissionRelayReader):
                 "SELECT * FROM research_activity_receipts WHERE mission_id=%s ORDER BY occurred_at,receipt_id",
                 (mission_id,), many=True,
             ))
+        related, related_total = await _pg_related(conn, request)
+        if related_total == 201:
+            return MissionRelayReadFailure(status=RelayReadStatus.REFUSED, reason_code=RelayReadReason.RESPONSE_TOO_LARGE)
         return MissionRelayRead(
             request=request, evidence=evidence, run=run, events=await PostgresMissionRelayReader._event_page(conn, request),
             research=research, research_activities=activities,
             research_run_id=research_run_id, research_frame_digest=research_frame_digest,
+            related_results=related, related_results_total=related_total,
             read_at=datetime.now(timezone.utc), total_observations=total, source_count=source_count,
             frame_evidence=canonical if full_frame else None,
             latest_run_id=_pg_uuid(latest["id"]) if latest is not None else None,
@@ -780,7 +978,7 @@ class PostgresMissionRelayReader(IMissionRelayReader):
             (mission_id,),
         )
         if (latest is None and revision != 0) or (latest is not None and latest["revision"] != revision):
-            raise ValueError("Committed revision and event high-water are inconsistent.")
+            return await _pg_receipt_tail(conn, request, latest['revision'] if latest else 0, revision)
         high_water = MissionRelayCursor(mission_id=mission_id, revision=revision, ordinal=latest["ordinal"] if latest is not None else 0)
         after = request.after_cursor
         position = after.position if after is not None else (0, 0)

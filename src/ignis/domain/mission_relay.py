@@ -488,6 +488,39 @@ class RelayClaimGate:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RelayRelatedResult:
+    """Recorded child finding scope; no inherited membership or permission."""
+    mission_id: UUID
+    run_id: UUID | None = None
+    frame_digest: str | None = None
+    finding_references: tuple[tuple[UUID, int], ...] = ()
+
+    def __post_init__(self):
+        _require_type(self.mission_id, UUID, 'mission_id')
+        _optional_uuid(self.run_id, 'run_id')
+        _digest(self.frame_digest, 'frame_digest')
+        if (self.run_id is None) != (self.frame_digest is None):
+            raise ValueError('Related result scope must be known together.')
+        if type(self.finding_references) is not tuple:
+            raise ValueError('Invalid finding references.')
+        for pair in self.finding_references:
+            if type(pair) is not tuple or len(pair) != 2:
+                raise ValueError('Invalid finding reference.')
+            _require_type(pair[0], UUID, 'finding_id')
+            _integer(pair[1], 'revision')
+            if pair[1] < 1:
+                raise ValueError('Finding revision must be positive.')
+        if len(set(self.finding_references)) != len(self.finding_references) or self.finding_references and self.run_id is None:
+            raise ValueError('Finding references require unique recorded scope.')
+
+    def to_payload(self):
+        return {'relation': 'FOLLOW_UP_CHILD', 'mission_id': str(self.mission_id),
+                'run_id': str(self.run_id) if self.run_id else None, 'frame_digest': self.frame_digest,
+                'finding_references': [{'finding_id': str(i), 'revision': r} for i, r in self.finding_references],
+                'inspection_status': 'SELECT_CHILD_REQUIRED'}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class MissionRelaySnapshot:
     """One bounded safe evidence read; it grants no strategic claim permission."""
 
@@ -510,9 +543,21 @@ class MissionRelaySnapshot:
     collection_state: RelayCollectionState | None = None
     claim_gate: RelayClaimGate = RelayClaimGate()
     research: RelayResearchView = RelayResearchView()
+    related_results: tuple[RelayRelatedResult, ...] = ()
+    related_results_total: int | None = None
 
     def __post_init__(self) -> None:
         _read_identity(self.mission_id, self.run_id, self.high_water, self.read_at)
+        _items(self.related_results, RelayRelatedResult, 'related_results')
+        if self.related_results_total is None:
+            if self.related_results:
+                raise ValueError('Unknown related coverage cannot carry rows.')
+        else:
+            _integer(self.related_results_total, 'related_results_total')
+            if len(self.related_results) > 200 or len(self.related_results) != self.related_results_total:
+                raise ValueError('Related result coverage must be complete and bounded.')
+        if any(row.mission_id == self.mission_id for row in self.related_results):
+            raise ValueError('Child references cannot select the parent.')
         _require_type(self.research, RelayResearchView, "research")
         if self.research.availability == 'AVAILABLE' and (
             self.research.mission_id != self.mission_id or self.research.revision != self.high_water.revision
@@ -574,6 +619,9 @@ class MissionRelaySnapshot:
             "evidence_offset": self.evidence_offset,
             "next_evidence_offset": end if end < self.total_observations else None,
             "evidence": [row.to_payload() for row in self.evidence],
+            "related_results": [row.to_payload() for row in self.related_results],
+            "related_results_coverage": {'availability': 'AVAILABLE' if self.related_results_total is not None else 'SCHEMA_UNAVAILABLE',
+                'total': self.related_results_total},
             "event_page": self.event_page.to_payload() if self.event_page is not None else None,
             "channels": [channel.to_payload() for channel in self.channels],
             "collection_state": self.collection_state.value if self.collection_state is not None else None,

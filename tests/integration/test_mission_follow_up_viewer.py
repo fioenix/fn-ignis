@@ -1,9 +1,7 @@
-"""T069 child-view test design on canonical stores, not follow-up implementation.
+"""T069 child-view isolation on canonical stores and actual typed child admission.
 
-The existing selected reader/inspection and Claim Ledger remain authoritative.
-The future owner-recorded result-link port and related_results summary shape below
-are proposed internal seams. Missing seams fail explicitly inside tests, never
-become behavioral RED. No reader receives execution authority or live credentials.
+Read observation follows offline owner fixture writes and canonical finding
+receipts. No viewer receives execution authority or live credentials.
 """
 
 import json
@@ -22,13 +20,11 @@ from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaim
 from ignis.domain.research_workspace import compute_frame_fingerprint
 from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
 from tests.integration.test_mission_relay_read_boundary import (
-    NOW, _reader, _setup_traps, _state, relay_case as _relay_case,
+    NOW, _reader, _setup_traps, _state,
 )
 from tests.integration.test_research_work_persistence import _api, _commit, _sql
-from tests.unit.test_mission_claims import _eligible_mission, _observation_candidate
-
-relay_case = _relay_case
-
+from tests.unit.test_mission_claims import _eligible_mission, _observation_candidate, _manifest
+from tests.integration.test_mission_follow_up import relay_case
 
 @dataclass
 class Record:
@@ -53,14 +49,34 @@ def _request(record, *, page_size=200):
     return MissionRelayReadRequest(mission_id=record.mission.id, run_id=record.run.run_id, page_size=page_size)
 
 
-async def _record(case, tmp_path, ordinal, *, permitted):
+async def _record(case, tmp_path, ordinal, *, permitted, admitted_child=None, seed=None):
     """Fixture mutation precedes read observation; preserve real qualification/claim paths."""
     repository = case.repository
-    _, store, mission, _, _ = await _eligible_mission(tmp_path, repository=repository)
-    original = await store.load_mission_evidence_snapshot(mission.id)
+    if admitted_child is None:
+        from unittest.mock import patch
+        with patch('tests.unit.test_mission_claims._manifest', return_value=replace(
+                _manifest(), quota_budget={'queries': 20, 'youtube_search_calls': 20})):
+            _, store, mission, _, _ = await _eligible_mission(tmp_path, repository=repository)
+        original = await store.load_mission_evidence_snapshot(mission.id)
+    else:
+        from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+        from ignis.application.ports.research_workspace_port import RunJournal
+        from pathlib import Path
+        store = WorkspaceRepository(repository)
+        mission = admitted_child
+        canonical = await store.load_mission_evidence_snapshot(mission.id)
+        original = replace(seed.evidence, mission=mission, brief=canonical.brief, manifest=canonical.manifest)
+        run_id = uuid4()
+        await store.record_run_journal(RunJournal(run_id=run_id, mission_id=mission.id,
+            workspace_id=mission.workspace_id, journal_path=Path(f'/tmp/{run_id}.md'), sequence=1,
+            status='COMPLETED', started_at=NOW, completed_at=NOW))
+        await store.record_probe_outcomes(run_id, [replace(o, run_id=run_id, outcome_id=uuid4())
+            for o in seed.evidence.outcomes])
+        mission.status = 'COMPLETED'
+        await repository.update_mission(mission)
     await _sql(case, 'DELETE FROM mission_evidence WHERE mission_id=?', (mission.id,))
     # One shared external object, distinct sightings; other sources are disjoint.
-    fresh = [replace(signal, observation_id=None, source_id=None,
+    fresh = [replace(signal, mission_id=mission.id, observation_id=None, source_id=None,
                      captured_at=signal.captured_at - timedelta(minutes=ordinal + 1),
                      source_url=(signal.source_url if signal.raw_title == 'Demand evidence'
                                  else f'https://example.invalid/{mission.id}/{index}'))
@@ -70,7 +86,9 @@ async def _record(case, tmp_path, ordinal, *, permitted):
     old_by_id = {signal.observation_id: signal.raw_title for signal in original.signals}
     new_by_title = {signal.raw_title: signal for signal in signals}
     await store.save_evidence_qualifications(mission.id, [
-        replace(qualification, observation_id=new_by_title[old_by_id[qualification.observation_id]].observation_id)
+        replace(qualification, mission_id=mission.id, brief_revision_id=original.brief.brief_revision_id,
+                frame_fingerprint=compute_frame_fingerprint(mission, original.brief),
+                observation_id=new_by_title[old_by_id[qualification.observation_id]].observation_id)
         for qualification in original.qualifications
     ])
     frame = await load_current_evidence_frame(repository, store, mission)
@@ -88,8 +106,8 @@ async def _record(case, tmp_path, ordinal, *, permitted):
         observation_ids=(demand.observation_id,), finding_revisions=())
     assignment = domain.ResearchAssignment(assignment_id=uuid4(), mission_id=mission.id,
         host_task_ref='t069-offline-owner', epoch=1, authority=domain.ResearchAuthority(
-            actions=frozenset({'ANALYZE'}), sources=frozenset({'youtube'}),
-            deadline=NOW + timedelta(days=300), quota_ceiling=0),
+            actions=frozenset({'ANALYZE', 'FOLLOW_UP'}), sources=frozenset({'google', 'youtube'}),
+            deadline=NOW + timedelta(days=300), quota_ceiling=2),
         capability='SEQUENTIAL', state='ASSIGNED', version=1)
     state = await repository.load_research_work(mission.id)
     admitted = await _commit(repository, port, mission, 'ASSIGN_RESEARCH', port.ResearchAssignmentAdmission(
@@ -126,7 +144,9 @@ async def _record(case, tmp_path, ordinal, *, permitted):
 async def _records(relay_case, tmp_path, *, parent_permitted=True, child_permitted=True):
     case, _, _ = relay_case
     parent = await _record(case, tmp_path, 0, permitted=parent_permitted)
-    child = await _record(case, tmp_path, 1, permitted=child_permitted)
+    from tests.integration.follow_up_viewer_setup import admit_child
+    admitted = await admit_child(case.repository, parent)
+    child = await _record(case, tmp_path, 1, permitted=child_permitted, admitted_child=admitted, seed=parent)
     foreign = await _record(case, tmp_path, 2, permitted=True)
     assert len({record.frame.frame_digest for record in (parent, child, foreign)}) == 3
     observation_sets = [{pair[0] for pair in record.pairs} for record in (parent, child, foreign)]
@@ -136,18 +156,10 @@ async def _records(relay_case, tmp_path, *, parent_permitted=True, child_permitt
 
 
 async def _link(case, parent, child):
-    """Owner fixture records a historical result link, not execution admission."""
-    method = getattr(case.repository, 'record_mission_follow_up_result', None)
-    if not callable(method):
-        pytest.fail('T069 API unavailable: repository.record_mission_follow_up_result; no related-view behavior executed', pytrace=False)
-    await method({
-        'parent_mission_id': str(parent.mission.id), 'parent_work_id': str(parent.work.work_id),
-        'parent_assignment_id': str(parent.assignment.assignment_id), 'gap_id': str(uuid4()),
-        'child_mission_id': str(child.mission.id), 'child_run_id': str(child.run.run_id),
-        'child_frame_digest': child.frame.frame_digest,
-        'finding_references': [{'finding_id': str(child.finding.finding_id), 'revision': 1}],
-        'state': 'COMPLETED', 'provenance': 'OFFLINE_OWNER_FIXTURE',
-    }, host_authorized=True)
+    """Validate the actual admitted link; no historical result mutation seam exists."""
+    stored = await case.repository.load_mission_follow_ups(parent.mission.id)
+    assert len(stored.relationships) == 1
+    assert stored.relationships[0].child_mission_id == child.mission.id
 
 
 def _related(payload):

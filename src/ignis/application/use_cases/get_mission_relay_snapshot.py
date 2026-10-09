@@ -373,6 +373,8 @@ def _project(
         except (ValueError, TypeError):
             collection_state = None
         gate = _claim_gate(evidence, run, coherent_read=coherent_read)
+        if coherent_read is not None and len(coherent_read.related_results) > 200:
+            return _failure(RelayReadReason.RESPONSE_TOO_LARGE)
         return _bounded(MissionRelaySnapshot(
             mission_id=selected_mission_id, run_id=selected_run_id, high_water=high_water,
             read_at=read_at, page_size=page_size,
@@ -387,6 +389,8 @@ def _project(
             ),
             event_page=events, channels=_channels(evidence), collection_state=collection_state,
             claim_gate=gate, research=_research_view(coherent_read, gate),
+            related_results=coherent_read.related_results if coherent_read else (),
+            related_results_total=coherent_read.related_results_total if coherent_read else None,
         ))
     except (ValueError, TypeError, OverflowError, UnicodeError):
         return _failure(RelayReadReason.READ_UNAVAILABLE, unavailable=True)

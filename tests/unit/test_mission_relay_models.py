@@ -348,8 +348,23 @@ def test_safe_snapshot_and_inspection_have_concrete_nested_allowlists(relay):
         "channels",
         "claim_gate",
         "research",
+        "related_results",
+        "related_results_coverage",
     }
     assert payload["research"] == {"availability": "SCHEMA_UNAVAILABLE"}
+    assert payload['related_results'] == []
+    assert payload['related_results_coverage'] == {'availability': 'SCHEMA_UNAVAILABLE', 'total': None}
+    related = replace(safe, related_results=(relay.RelayRelatedResult(mission_id=FOREIGN,
+        run_id=SOURCE, frame_digest='a' * 64, finding_references=((OBSERVATION, 1),)),),
+        related_results_total=1).to_payload()
+    assert related['related_results_coverage'] == {'availability': 'AVAILABLE', 'total': 1}
+    assert related['related_results'] == [{'relation': 'FOLLOW_UP_CHILD', 'mission_id': str(FOREIGN),
+        'run_id': str(SOURCE), 'frame_digest': 'a' * 64,
+        'finding_references': [{'finding_id': str(OBSERVATION), 'revision': 1}],
+        'inspection_status': 'SELECT_CHILD_REQUIRED'}]
+    assert set(related['related_results'][0]) == {'relation', 'mission_id', 'run_id', 'frame_digest',
+                                                'finding_references', 'inspection_status'}
+    assert set(related['related_results'][0]['finding_references'][0]) == {'finding_id', 'revision'}
     assert set(payload["claim_gate"]) == {"state", "frame_digest", "render_status", "reason_code", "claims", "history", "gap_report"}
     assert payload["claim_gate"]["render_status"] == "WITHHELD"
     observation_keys = {

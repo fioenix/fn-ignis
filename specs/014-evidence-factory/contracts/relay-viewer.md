@@ -39,6 +39,12 @@ Snapshot fields:
 
 Empty, degraded and unauthorized are different outcomes. A successful snapshot is internally coherent; a failed read is not an empty successful snapshot. The UI's last successful read is not overwritten by a failed attempt.
 
+## T077 related references and receipt-backed read heads
+
+Original applied follow-up receipts may commit a canonical revision without a legacy progress event. A reader may accept that tail only when every revision after the latest legacy event through the committed head has one exact original typed publication, matching its command identity, fingerprint, parent scope and physical recorded bindings. Refused or alias receipts cannot fill a gap. The receipt-backed logical watermark uses the committed revision and ordinal 1; the event page is explicitly resync-required, empty and has no continuation. This watermark is not a fabricated progress event or complete event history. Legacy event ownership/cursor checks remain intact.
+
+Related references expose only child mission identity and a recorded finding scope. Latest recorded finding revisions must share one exact work run and input frame, with validated handoff/work/input/journal/workspace and admitted manifest/Brief/source-observation bindings. Missing or incompatible scope remains unknown; a current child frame never substitutes for a historical finding frame. Child permission and inspection still require independent selection. Complete related coverage is limited to 200 children; larger lists or the existing response-byte limit produce a typed size refusal, never a partial list. Related lists have no separate pagination argument; existing evidence and event pagination remain unchanged. Absent optional schema is disclosed as unknown coverage.
+
 ## T054 additive research read projection
 
 The allowlisted `research` section is either `AVAILABLE` or exactly `{availability: SCHEMA_UNAVAILABLE}`. Missing, partial or incompatible optional research relations leave records/counts unknown while valid canonical/progress reads and existing Claim Ledger gating remain intact. Reads perform no initialization or migration. Compatibility checks recognize the committed table representations; installed-upgrade validation remains T084.

@@ -25,6 +25,7 @@ from ignis.domain.mission_relay import (
     MissionRelayCursor,
     MissionRelayEventPage,
     MissionRelayReadFailure,
+    RelayRelatedResult,
     RelayProvenance,
 )
 from ignis.domain.research_workspace import EvidenceQualification, MissionClaim, MissionProbeOutcome
@@ -205,8 +206,17 @@ class MissionRelayRead:
     research_frame_digest: str | None = None
     research: ResearchWorkSnapshot | None = field(default=None, repr=False)
     research_activities: tuple[ResearchActivityReceipt, ...] = field(default=(), repr=False)
+    related_results: tuple[RelayRelatedResult, ...] = ()
+    related_results_total: int | None = None
 
     def __post_init__(self) -> None:
+        if type(self.related_results) is not tuple or any(type(r) is not RelayRelatedResult for r in self.related_results):
+            raise ValueError('Invalid typed related references.')
+        if self.related_results_total is None:
+            if self.related_results:
+                raise ValueError('Unknown related coverage cannot carry records.')
+        elif type(self.related_results_total) is not int or self.related_results_total != len(self.related_results):
+            raise ValueError('Related coverage must be complete.')
         if self.research_run_id is not None:
             _typed(self.research_run_id, UUID, "research_run_id")
         if self.research_frame_digest is not None and (type(self.research_frame_digest) is not str or re.fullmatch(r"[0-9a-f]{64}", self.research_frame_digest) is None):
