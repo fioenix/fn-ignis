@@ -4356,3 +4356,29 @@ class PostgresTimescaleRepository(ITrendRepository):
                 await cur.close()
 
         return await await_settled(commit())
+
+    def configure_follow_up_verifier(self, verifier):
+        """Configure a trusted private provider; missing async guard refuses new admission."""
+        self._follow_up_verifier = verifier
+
+    async def record_follow_up_fact(self, command):
+        from ignis.infrastructure.persistence.postgres_follow_up_admission import record_fact
+        try:
+            return await record_fact(self, command)
+        except psycopg.Error:
+            raise RepositoryException("Follow-up fact storage is unavailable.") from None
+
+    async def record_follow_up_work(self, command):
+        from ignis.infrastructure.persistence.postgres_follow_up_admission import record_work
+        try:
+            return await record_work(self, command)
+        except psycopg.Error:
+            raise RepositoryException("Follow-up proposal storage is unavailable.") from None
+
+    async def admit_mission_follow_up(self, command):
+        from ignis.infrastructure.persistence.postgres_follow_up_admission import admit
+        return await admit(self, command)
+
+    async def load_mission_follow_ups(self, mission_id):
+        from ignis.infrastructure.persistence.postgres_follow_up_admission import load
+        return await load(self, mission_id)

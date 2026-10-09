@@ -61,3 +61,17 @@ class FollowUpFactCommand:
     @property
     def fingerprint(self):
         return digest(self)
+
+
+class AsyncFollowUpCapabilityLease(FollowUpCapabilityLease, Protocol):
+    """Optional PostgreSQL shared generation reservation; absent capability fails closed."""
+
+    def async_guard(self) -> AbstractAsyncContextManager:
+        """Atomically verify generations and register a shared admission token.
+
+        Policy, capability, checked plan/platform and operational stop/cancel publishers
+        share authoritative token state across threads/coroutines and wait for every
+        token to settle. Release only after physical commit or completed rollback.
+        No blocking thread lock spans await; providers acquire no DB/auth locks.
+        """
+        ...
