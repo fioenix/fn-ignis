@@ -96,6 +96,16 @@ FOLLOW_UP_OWNER_ONLY = {
     "mission_follow_up_reservations": "follow-up budget reservation",
 }
 OWNER_ONLY.update(FOLLOW_UP_OWNER_ONLY)
+# SQL030 private admission facts and immutable retry/resource history are owner-only.
+ADMISSION_OWNER_ONLY = {
+    "mission_follow_up_gaps": "current-input operational gap",
+    "mission_follow_up_parent_budgets": "explicit parent budget",
+    "mission_follow_up_assignment_budgets": "assignment unit interpretation",
+    "mission_follow_up_authorities": "private narrowed follow-up authority",
+    "mission_follow_up_commands": "original private admission receipt",
+    "mission_follow_up_reservation_resources": "conservative resource allocation",
+}
+OWNER_ONLY.update(ADMISSION_OWNER_ONLY)
 POSTURE = {
     **{table: "client read-only" for table in CLIENT_READ_ONLY},
     **{table: "owner only" for table in OWNER_ONLY},
@@ -298,6 +308,7 @@ RESEARCH_ROWS = (
 )
 CLIENT_ROWS.update(RESEARCH_ROWS)
 CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in FOLLOW_UP_OWNER_ONLY})
+CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in ADMISSION_OWNER_ONLY})
 
 
 def test_research_posture_inventory_matches_exact_sql028_tables():
@@ -334,6 +345,48 @@ def _valid_follow_up_insert(conn, table):
             sql.SQL(",").join(sql.Identifier(c) for c in values),
             sql.SQL(",").join(sql.Literal(v) for v in values.values()),
         ).as_string(conn)
+        assert conn.execute(sql.SQL("SELECT count(*) FROM public.{}").format(sql.Identifier(table))).fetchone() == (1,)
+    return statement
+
+
+def test_admission_posture_inventory_matches_exact_sql030_tables():
+    created = set(
+        re.findall(
+            r"CREATE TABLE IF NOT EXISTS public\.(\w+)", (REPO_SQL / "030_mission_follow_up_admission.sql").read_text()
+        )
+    )
+    assert len(created) == 6 and created == set(ADMISSION_OWNER_ONLY)
+    assert created <= set(CLIENT_ROWS)
+
+
+def _valid_admission_insert(conn, table):
+    """Prove the exact INSERT is structurally valid before testing client refusal."""
+    from tests.integration.test_mission_follow_up_schema import Schema, seed, work_values
+    from tests.integration.test_follow_up_admission_schema import support_records
+
+    db = Schema(conn, True)
+    with conn.transaction(force_rollback=True):
+        x = seed(db)
+        db.insert("mission_follow_up_work", work_values(x))
+        # Reciprocal029 identities commit together within the held outer savepoint.
+        from tests.integration.test_mission_follow_up_schema import relation_values, reserve_values
+
+        db.insert("mission_follow_ups", relation_values(x))
+        db.insert("mission_follow_up_reservations", reserve_values(x))
+        records = support_records(x)
+        for target, values in records.items():
+            db.insert(target, values)
+        conn.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        values = records[table]
+        statement = (
+            sql.SQL("INSERT INTO public.{} ({}) VALUES ({})")
+            .format(
+                sql.Identifier(table),
+                sql.SQL(",").join(sql.Identifier(c) for c in values),
+                sql.SQL(",").join(sql.Literal(v) for v in values.values()),
+            )
+            .as_string(conn)
+        )
         assert conn.execute(sql.SQL("SELECT count(*) FROM public.{}").format(sql.Identifier(table))).fetchone() == (1,)
     return statement
 
@@ -492,6 +545,8 @@ def _attempt(dsn: str, role: str, table: str, statement: str) -> str:
                 _valid_research_insert(conn, table)
             elif statement == "INSERT" and table in FOLLOW_UP_OWNER_ONLY:
                 text = _valid_follow_up_insert(conn, table)
+            elif statement == "INSERT" and table in ADMISSION_OWNER_ONLY:
+                text = _valid_admission_insert(conn, table)
             conn.execute(sql.SQL("SET ROLE {}").format(sql.Identifier(role)))
             cursor = conn.execute(text)
             if statement == "SELECT":

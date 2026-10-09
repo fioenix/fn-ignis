@@ -5705,3 +5705,27 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     conn.close()
 
         return await self._run_write(commit)
+
+    def configure_follow_up_verifier(self, verifier) -> None:
+        """Configure private already-authorized capability proof; absent provider fails closed."""
+        self._follow_up_verifier = verifier
+
+    async def record_follow_up_fact(self, command):
+        """Register explicit private gap/budget/source facts without acquiring authority."""
+        from ignis.infrastructure.persistence.sqlite_follow_up_admission import record_fact
+        return await record_fact(self, command)
+
+    async def record_follow_up_work(self, command):
+        """Record one typed bounded proposal against actual canonical work and private grants."""
+        from ignis.infrastructure.persistence.sqlite_follow_up_admission import record_work
+        return await record_work(self, command)
+
+    async def admit_mission_follow_up(self, command):
+        """Atomically admit a separate child after current guarded capability proof."""
+        from ignis.infrastructure.persistence.sqlite_follow_up_admission import admit
+        return await admit(self, command)
+
+    async def load_mission_follow_ups(self, mission_id):
+        """Read coherent stored child links; no schema initialization or child permission."""
+        from ignis.infrastructure.persistence.sqlite_follow_up_admission import load
+        return await load(self, mission_id)
