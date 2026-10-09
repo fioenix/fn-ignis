@@ -5729,3 +5729,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
         """Read coherent stored child links; no schema initialization or child permission."""
         from ignis.infrastructure.persistence.sqlite_follow_up_admission import load
         return await load(self, mission_id)
+
+    async def _follow_up_execution_context(self, mission_id, work_id, *, unresolved=False, request=None):
+        from ignis.infrastructure.persistence.sqlite_follow_up_admission import execution_context
+        return await execution_context(self, mission_id, work_id, unresolved=unresolved, request=request)

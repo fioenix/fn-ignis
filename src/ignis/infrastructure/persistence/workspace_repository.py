@@ -15,6 +15,7 @@ Which backend is configured is not this class's decision. It delegates to whiche
 import dataclasses
 import json
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -222,6 +223,11 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         mission_id: UUID,
         run_id: Optional[UUID] = None,
     ) -> AsyncIterator[RunJournal]:
+        async with self._mission_run(workspace, mission_id, run_id=run_id) as journal:
+            yield journal
+
+    @asynccontextmanager
+    async def _mission_run(self, workspace, mission_id, *, run_id=None, before_journal=None):
         """Take the mission for one run: claim the writer, take a journal, give both back.
 
         The order is the contract. The claim comes first, so a second run is refused before it
@@ -234,21 +240,44 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         never wait for each other.
         """
         run_id = run_id or uuid4()
-        try:
+        caller = asyncio.current_task()
+        ownership = {"acquired": False, "journal": None}
+
+        async def setup():
+            if caller.cancelling():
+                raise asyncio.CancelledError
             await self.require_mission_writer(mission_id, run_id)
-            # Preflight may have awaited while an earlier run completed. Recheck under the
-            # writer slot, before allocating a journal, so delayed admission cannot restart it.
+            ownership["acquired"] = True
+            if caller.cancelling():
+                raise asyncio.CancelledError
             mission = await self._repo.get_mission(mission_id)
             if mission is None:
                 raise WorkspaceScopeMismatchError(f"Mission {mission_id} no longer exists.")
             status = str(mission.status).upper()
             if status in {"COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "INSUFFICIENT_EVIDENCE"}:
                 raise MissionTerminalStateError(mission_id, status)
-            journal = await self.allocate_run_journal(workspace, mission_id, run_id=run_id)
+            if before_journal is not None:
+                await before_journal(mission, run_id)
+            if caller.cancelling():
+                raise asyncio.CancelledError
+            ownership["journal"] = await self.allocate_run_journal(workspace, mission_id, run_id=run_id)
+
+        async def cleanup_setup():
+            try:
+                if ownership["journal"] is not None:
+                    await self._finish_interrupted_run_journal(ownership["journal"])
+            finally:
+                if ownership["acquired"]:
+                    await self.release_mission_writer(mission_id, run_id)
+
+        try:
+            await await_settled(setup())
+            journal = ownership["journal"]
         except BaseException:
-            # No journal, so there is no run to record -- and holding the slot for a run that
-            # never started is exactly the stale claim the release exists to prevent.
-            await await_settled(self.release_mission_writer(mission_id, run_id))
+            try:
+                await await_settled(cleanup_setup())
+            except Exception:
+                logger.error("Could not finalize interrupted setup for run %s", run_id)
             raise
 
         try:

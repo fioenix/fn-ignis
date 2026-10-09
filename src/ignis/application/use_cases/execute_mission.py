@@ -290,7 +290,7 @@ class ExecuteMissionUseCase:
         return await self._execute_authorized(mission, manifest, execution_requirements)
 
     async def _execute_authorized(
-        self, mission, manifest, execution_requirements, *, scope_guard=None, search_provider=None, expiry_guard=None
+        self, mission, manifest, execution_requirements, *, scope_guard=None, search_provider=None, expiry_guard=None, before_journal=None
     ) -> Dict[str, Any]:
         """Reuse the canonical writer; validate a staged host scope before any ingress write."""
 
@@ -313,7 +313,11 @@ class ExecuteMissionUseCase:
         # vocabulary read failed. Synchronization follows the claim and still precedes RUNNING
         # and every connector call. The claim and the journal are given back by the context
         # manager, including when synchronization or the pass raises.
-        async with self._workspace_store.mission_run(workspace, mission.id) as journal:
+        run = (
+            self._workspace_store._mission_run(workspace, mission.id, before_journal=before_journal)
+            if before_journal is not None else self._workspace_store.mission_run(workspace, mission.id)
+        )
+        async with run as journal:
             if scope_guard is not None:
                 await scope_guard(journal)
             await self._synchronize_vocabulary(mission, journal)
@@ -358,6 +362,9 @@ class ExecuteMissionUseCase:
         brief = None
         if resolve_surface(mission.surface) is ResearchSurface.MARKET:
             brief = await self._workspace_store.get_brief_revision_for_mission(mission.id)
+        return self._collection_plan_for_brief(mission, manifest, execution_requirements, brief)
+
+    def _collection_plan_for_brief(self, mission, manifest, execution_requirements, brief):
         requirements = dict((execution_requirements or {}).get("surface_requirements", {}))
         authority = tuple((execution_requirements or {}).get("authority", ()))
         default_authority = next(

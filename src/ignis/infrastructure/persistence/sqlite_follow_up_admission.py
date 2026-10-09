@@ -936,3 +936,74 @@ async def commit_admission(repository, command, fingerprint, authority, lease):
             close(repository, conn)
 
     return await repository._run_write(write)
+
+
+async def execution_context(repository, mission_id, work_id, *, unresolved=False, request=None):
+    """One held context and validated original admission; never bootstrap or release usage."""
+    from ignis.application.ports.follow_up_execution_port import FollowUpExecutionContext
+    # The canonical decoder borrows this owner's initialized connection contract. Entering
+    # its lazy initializer under the mutation lock would reenter that same lock and deadlock.
+    if repository._initialized is not True:
+        raise RepositoryException("Follow-up execution requires an initialized owner store.")
+
+    def read():
+        conn = repository._get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE" if unresolved else "BEGIN")
+            canonical, research = state(repository, conn, mission_id)
+            retry_revision, retry_reason = None, None
+            if request is not None:
+                retry = conn.execute(
+                    "SELECT * FROM mission_follow_up_commands WHERE parent_mission_id=? AND operation='ADMIT' AND command_key=?",
+                    (str(mission_id), sha256(request.idempotency_key.encode()).hexdigest()),
+                ).fetchone()
+                if retry is not None:
+                    prior = validated_receipt(repository, conn, retry, mission_id)
+                    submitted, _, _ = rules.command_identity(retry, mission_id)
+                    retry_revision = submitted.expected_revision
+                    retry_reason = ("IDEMPOTENCY_CONFLICT" if submitted.request != request
+                                    else prior.reason_code if prior.disposition == "REFUSED" else None)
+            authority = fact(conn, "mission_follow_up_authorities", "work_id", work_id)
+            if authority is not None and authority.work.inputs.mission_id != mission_id:
+                raise ValueError("Execution work belongs to another mission.")
+            receipt = None
+            for row in conn.execute(
+                "SELECT * FROM mission_follow_up_commands WHERE parent_mission_id=? AND operation='ADMIT'",
+                (str(mission_id),),
+            ).fetchall():
+                candidate = validated_receipt(repository, conn, row, mission_id)
+                if (candidate.relationship is not None and candidate.disposition == "APPLIED"
+                    and candidate.relationship.work.work_id == work_id):
+                    receipt = candidate
+            reason = authority_reason(authority, canonical, research, conn) if authority else "UNKNOWN_FOLLOW_UP"
+            if unresolved:
+                if receipt is None:
+                    raise ValueError("Missing bound original admission.")
+                conn.execute(
+                    "UPDATE mission_follow_up_reservations SET state='UNRESOLVED',version=version+1 "
+                    "WHERE reservation_id=? AND state='RESERVED'",
+                    (str(receipt.relationship.reservation_id),),
+                )
+            candidate = (
+                rules.child_records(canonical, authority, 1, uuid4(), uuid4())
+                if authority and canonical.mission and canonical.manifest and canonical.brief else (None, None, None)
+            )
+            current = snapshot(repository, conn, mission_id)
+            reservation = next((r for r in current.reservations
+                                if r.relationship == receipt.relationship), None) if receipt else None
+            if authority and not reason:
+                allocations = conn.execute('SELECT r.resource,r.allocated FROM mission_follow_up_reservation_resources r JOIN mission_follow_up_reservations a USING(reservation_id) WHERE a.parent_mission_id=?', (str(mission_id),)).fetchall()
+                root = fact(conn, "mission_follow_up_parent_budgets", "budget_id", authority.budget_id)
+                reason = rules.execution_budget_reason(authority, root, current.reservations, allocations,
+                                                      admitted=receipt is not None)
+            result = FollowUpExecutionContext(authority, canonical, research, receipt, reason, *candidate, reservation, retry_revision, retry_reason)
+            if unresolved:
+                conn.commit()
+            return result
+        except (sqlite3.DatabaseError, ValueError, KeyError, TypeError, AttributeError):
+            raise RepositoryException("Follow-up execution context is unavailable.") from None
+        finally:
+            conn.rollback()
+            close(repository, conn)
+
+    return await repository._run_write(read)

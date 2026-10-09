@@ -398,3 +398,24 @@ def recovery_binding(
     matches = [b for b in original_briefs if compute_frame_fingerprint(identity, b) == relation.child_brief_digest]
     if len(matches) != 1:
         raise ValueError("Original child Brief revision is absent or ambiguous.")
+
+
+def execution_budget_reason(authority, root, reservations, allocations, *, admitted):
+    """Read-only execution preflight retains all epochs and unknown resource allocations."""
+    from ignis.domain.mission_follow_up import encumbered_budget
+
+    used_quota, used_cost = encumbered_budget(authority.work.inputs.mission_id, reservations)
+    if used_quota + (0 if admitted else authority.quota) > authority.quota_ceiling:
+        return "QUOTA_EXHAUSTED"
+    if used_cost + (0 if admitted else authority.cost) > authority.cost_ceiling:
+        return "COST_EXHAUSTED"
+    used = {}
+    for resource, allocated in allocations:
+        used[resource] = used.get(resource, 0) + allocated
+    limits = dict(root.resources)
+    required = dict(authority.resources) if not admitted else {}
+    if any(used.get(k, 0) + required.get(k, 0) > ceiling for k, ceiling in limits.items()):
+        return "QUOTA_EXHAUSTED"
+    if set(used) - limits.keys():
+        raise ValueError("Unbound resource history.")
+    return None
