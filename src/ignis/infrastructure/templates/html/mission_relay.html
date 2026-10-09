@@ -122,7 +122,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
 <section class="receipt-lane" aria-label="Recorded qualification changes"><div data-testid="role-moves"></div></section>
 <p class="muted" data-testid="packet-overflow"></p>
 </section>
-<aside class="synthesis-context" data-testid="synthesis-context" aria-label="Synthesis context"><h2>Recorded findings</h2><div data-testid="context-findings"></div><section class="gate-summary"><h3>Strategic permission</h3><p data-testid="context-gate">{{ snapshot.claim_gate.render_status }} · {{ snapshot.claim_gate.reason_code }}</p><button type="button" data-context-action="synthesis">Inspect Synthesis details</button></section></aside>
+<aside class="synthesis-context" data-testid="synthesis-context" aria-label="Synthesis context"><h2>Recorded findings</h2><div data-testid="context-findings"></div><section data-testid="related-results" aria-label="Recorded child references"></section><section class="gate-summary"><h3>Strategic permission</h3><p data-testid="context-gate">{{ snapshot.claim_gate.render_status }} · {{ snapshot.claim_gate.reason_code }}</p><button type="button" data-context-action="synthesis">Inspect Synthesis details</button></section></aside>
 </div>
 <section class="timeline" aria-label="Recorded events"><h2>Committed timeline</h2><ol data-testid="event-timeline">
 {% for event in (snapshot.event_page.events if snapshot.event_page else []) %}
@@ -138,7 +138,12 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
 <section role="region" aria-label="Failure reason"><h3>Failure reason</h3><p>Unmeasured channel availability is Unknown; absence of a receipt is not a measured empty result.</p></section>
 <section role="region" aria-label="Why it matters"><h3>Why it matters</h3><p>Source and observation identity preserve evidence lineage without promoting attention to Market support.</p></section>
 </section>
-<noscript><section class="inspector" aria-label="Recorded strategic ledger"><h2>Recorded strategic permission · {{ snapshot.claim_gate.render_status }}</h2>
+<noscript><section class="inspector" aria-label="Recorded child references"><h2>Recorded gap-return references</h2>
+<p>Child references do not identify a specific operational gap or grant strategic permission.</p>
+<p>{{ snapshot.related_results_coverage.availability }} · {{ snapshot.related_results_coverage.total if snapshot.related_results_coverage.total is not none else 'Unknown' }}</p>
+{% for row in snapshot.related_results %}<article class="research-record"><h3>Follow-up child reference</h3><p class="identity">Child mission {{ row.mission_id }}</p><p class="identity">Recorded historical scope · run {{ row.run_id or 'Unknown' }} · frame {{ row.frame_digest or 'Unknown' }}</p>
+{% for ref in row.finding_references %}<p class="identity">Finding {{ ref.finding_id }} · revision {{ ref.revision }}</p>{% else %}<p>Recorded finding references Unknown.</p>{% endfor %}<p>SELECT_CHILD_REQUIRED · Select an independently authorized child mission scope to inspect its observations. This reference grants no child access or current permission.</p></article>{% endfor %}</section>
+<section class="inspector" aria-label="Recorded strategic ledger"><h2>Recorded strategic permission · {{ snapshot.claim_gate.render_status }}</h2>
 {% for claim in snapshot.claim_gate.claims %}<article><h3>{{ claim.wording }}</h3><p>{{ claim.claim_type }} · {{ claim.status }} · {{ claim.claim_id }} · frame {{ claim.frame_digest }}</p>
 {% for binding in claim.evidence_bindings %}<p>{{ binding.role }} · observation {{ binding.observation_id or 'Unknown' }} · probe {{ binding.probe_outcome_id or 'Unknown' }} · target {{ binding.hypothesis_target or 'Unknown' }}</p>{% endfor %}
 <p>Method {{ claim.inference_method or 'Unknown' }} · denominator {{ claim.metric_denominator or 'Unknown' }} · timeframe {{ claim.metric_timeframe or 'Unknown' }} · recorded confidence {{ claim.confidence if claim.confidence is not none else 'Unknown' }}</p>
@@ -532,7 +537,30 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     if (gap !== null && (!gap || !strings(gap.withheld_outputs) || !strings(gap.failed_gates) || !strings(gap.missing_evidence) || !strings(gap.safe_partial_conclusions) || !Array.isArray(gap.attempted_probes) || gap.attempted_probes.some(probe => !probe || typeof probe !== 'object') || typeof gap.next_best_probe !== 'string')) return false;
     return true;
   }
+  function validRelated(data) {
+    if (!data) return false;
+    // Older bounded snapshots may lack this optional projection; absence stays Unknown.
+    if (data.related_results === undefined && data.related_results_coverage === undefined) return true;
+    const rows = data.related_results, coverage = data.related_results_coverage;
+    const keys = (value, expected) => value && typeof value === 'object' && Object.keys(value).sort().join(',') === expected.slice().sort().join(',');
+    if (!Array.isArray(rows) || rows.length > 200 || !keys(coverage, ['availability', 'total'])) return false;
+    if (coverage.availability === 'SCHEMA_UNAVAILABLE') return coverage.total === null && rows.length === 0;
+    if (coverage.availability !== 'AVAILABLE' || !count(coverage.total) || coverage.total !== rows.length) return false;
+    const children = new Set();
+    for (const row of rows) {
+      if (!keys(row, ['relation', 'mission_id', 'run_id', 'frame_digest', 'finding_references', 'inspection_status']) || row.relation !== 'FOLLOW_UP_CHILD' || row.inspection_status !== 'SELECT_CHILD_REQUIRED' || !uuid(row.mission_id) || row.mission_id === data.mission_id || children.has(row.mission_id) || !Array.isArray(row.finding_references)) return false;
+      children.add(row.mission_id);
+      if (row.run_id === null ? row.frame_digest !== null || row.finding_references.length !== 0 : !uuid(row.run_id) || typeof row.frame_digest !== 'string' || !/^[0-9a-f]{64}$/.test(row.frame_digest)) return false;
+      const findings = new Set();
+      for (const ref of row.finding_references) {
+        if (!keys(ref, ['finding_id', 'revision']) || !uuid(ref.finding_id) || !Number.isSafeInteger(ref.revision) || ref.revision < 1 || findings.has(ref.finding_id)) return false;
+        findings.add(ref.finding_id);
+      }
+    }
+    return true;
+  }
   function validSnapshot(data, requestedCursor = undefined) {
+    if (!validRelated(data)) return false;
     if (!data || !validGate(data) || !Number.isFinite(Date.parse(data.read_at)) || data.schema_version !== 1 || data.status !== 'OK' || data.mission_id !== initial.mission_id || data.run_id !== initial.run_id || !validCursor(data.high_water) || data.revision !== data.high_water.revision || cursorCompare(data.high_water, snapshot.high_water) < 0) return false;
     if (!count(data.counts?.observations) || !count(data.counts?.sources) || data.counts.sources > data.counts.observations || !Number.isSafeInteger(data.page_size) || data.page_size < 1 || data.page_size > 200 || !count(data.evidence_offset) || !Array.isArray(data.evidence) || data.evidence.length > data.page_size || data.evidence_offset + data.evidence.length > data.counts.observations || !Array.isArray(data.channels)) return false;
     if (data.collection_state !== null && !['PENDING', 'STARTED', 'RUNNING', 'COMPLETED', 'FAILED', 'BLOCKED', 'CANCELLED'].includes(data.collection_state)) return false;
@@ -707,6 +735,24 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     }
     if (!context.children.length) context.append(node('p', stale ? 'Unavailable — stale read; finding currentness Unknown.' : 'No recorded findings in this read.'));
     document.querySelector('[data-testid="context-gate"]').textContent = stale ? 'WITHHELD · stale read' : `${snapshot.claim_gate.render_status} · ${snapshot.claim_gate.reason_code}. Inspect Synthesis for current claims or the recorded gap.`;
+    const related = document.querySelector('[data-testid="related-results"]'); related.replaceChildren();
+    related.append(node('h3', 'Recorded gap-return references'), node('p', 'Inspect Synthesis for the recorded Gap Report. Child references do not identify a specific operational gap or grant strategic permission.'));
+    const coverage = node('p'); coverage.dataset.testid = 'related-results-coverage';
+    related.append(coverage);
+    if (stale || !validRelated(snapshot)) coverage.textContent = 'Unknown · stale or invalid related read';
+    else if (snapshot.related_results_coverage?.availability !== 'AVAILABLE') coverage.textContent = 'SCHEMA_UNAVAILABLE · Unknown';
+    else {
+      coverage.textContent = `AVAILABLE · ${snapshot.related_results_coverage.total}`;
+      for (const row of snapshot.related_results) {
+        const article = node('article', undefined, 'research-record');
+        article.append(node('h4', 'Follow-up child reference'), node('p', `Child mission ${row.mission_id}`, 'identity'),
+          node('p', `Recorded historical scope · run ${unknown(row.run_id)} · frame ${unknown(row.frame_digest)}`, 'identity'));
+        for (const ref of row.finding_references) article.append(node('p', `Finding ${ref.finding_id} · revision ${ref.revision}`, 'identity'));
+        if (!row.finding_references.length) article.append(node('p', 'Recorded finding references Unknown.'));
+        article.append(node('p', 'SELECT_CHILD_REQUIRED · Select an independently authorized child mission scope to inspect its observations. This reference grants no child access or current permission.'));
+        related.append(article);
+      }
+    }
     drawNetworkLinks();
     if (focused) [...network.querySelectorAll('button[data-network-key]')].find(button => button.dataset.networkKey === focused)?.focus({preventScroll: true});
   }

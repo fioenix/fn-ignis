@@ -45,6 +45,12 @@ Original applied follow-up receipts may commit a canonical revision without a le
 
 Related references expose only child mission identity and a recorded finding scope. Latest recorded finding revisions must share one exact work run and input frame, with validated handoff/work/input/journal/workspace and admitted manifest/Brief/source-observation bindings. Missing or incompatible scope remains unknown; a current child frame never substitutes for a historical finding frame. Child permission and inspection still require independent selection. Complete related coverage is limited to 200 children; larger lists or the existing response-byte limit produce a typed size refusal, never a partial list. Related lists have no separate pagination argument; existing evidence and event pagination remain unchanged. Absent optional schema is disclosed as unknown coverage.
 
+## T078 recorded gap-return presentation
+
+The maintained viewer presents the existing selected-parent Gap Report in permission-gated Synthesis and separately labels child references as recorded historical scope. It preserves exact child mission, recorded run/frame and finding revisions; it does not infer an operational-gap ID, child completion, current child frame or child strategic permission. A reference is inert: `SELECT_CHILD_REQUIRED` directs the person to select an independently authorized child scope, without child navigation or a child fetch under parent viewing capability.
+
+Measured `AVAILABLE` coverage with total zero differs from `SCHEMA_UNAVAILABLE`/Unknown. Null run/frame means recorded scope Unknown. Missing optional projection remains Unknown; malformed related refresh or stale reads withdraw current related presentation while retaining the last good selected-parent identity, counts and frame. No-script rendering preserves the same labeled references. Parent terminal collection state stays terminal; references are not progress events or execution controls.
+
 ## T054 additive research read projection
 
 The allowlisted `research` section is either `AVAILABLE` or exactly `{availability: SCHEMA_UNAVAILABLE}`. Missing, partial or incompatible optional research relations leave records/counts unknown while valid canonical/progress reads and existing Claim Ledger gating remain intact. Reads perform no initialization or migration. Compatibility checks recognize the committed table representations; installed-upgrade validation remains T084.
