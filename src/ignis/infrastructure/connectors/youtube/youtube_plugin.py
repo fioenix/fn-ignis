@@ -52,6 +52,10 @@ class YouTubeDataPlugin(IConnectorPlugin):
         """Private transport injection; the default provider behavior is unchanged."""
         return httpx.AsyncClient(**kwargs)
 
+    def _query_cache(self):
+        """Allow an explicitly scoped private adapter to isolate provider cache payloads."""
+        return _YOUTUBE_QUERY_CACHE
+
     async def _reserve(
         self,
         bucket: YouTubeQuotaBucket,
@@ -335,7 +339,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
 
         for raw_kw in keywords:
             cache_key = f"{raw_kw.lower().strip()}|{region_code}|{tf_str}|{limit}"
-            cached_sigs = _YOUTUBE_QUERY_CACHE.get(cache_key)
+            cached_sigs = self._query_cache().get(cache_key)
             if cached_sigs is not None:
 
                 logger.info(f"Returning {len(cached_sigs)} cached YouTube signals for '{raw_kw}' (Quota preserved).")
@@ -504,7 +508,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
 
                     if kw_signals:
                         signals.extend(kw_signals)
-                        _YOUTUBE_QUERY_CACHE[cache_key] = kw_signals
+                        self._query_cache()[cache_key] = kw_signals
             except ConnectorQuotaExceededException:
                 # Quota errors MUST bubble up to trip Circuit Breaker
                 raise

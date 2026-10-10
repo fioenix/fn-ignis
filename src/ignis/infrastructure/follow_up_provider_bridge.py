@@ -322,6 +322,14 @@ class HostBoundYouTubePlugin(YouTubeDataPlugin):
         self._bridge = bridge
         self._resolve_credential = resolve_credential
         self._transport = transport
+        self._private_caches = {}
+
+    def _query_cache(self):
+        _, binding = self._context()
+        storage = getattr(self._bridge.budget, "storage", None)
+        if storage is not None:
+            return storage.cache(self._bridge.budget.bounds, digest(binding))
+        return self._private_caches.setdefault(digest(binding), {})
 
     def _client(self, **kwargs):
         return httpx.AsyncClient(transport=_GuardedTransport(self), **kwargs)

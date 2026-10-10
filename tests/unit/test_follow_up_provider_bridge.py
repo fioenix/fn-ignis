@@ -508,3 +508,197 @@ async def test_changed_physical_search_scope_is_refused_before_credential(parame
                 assert str(error) == 'SESSION_AUTHORITY_REQUIRED'
     assert calls == credentials == []
     assert bridge.budget._used == {'search': 0, 'other': 0}
+
+
+@pytest.mark.asyncio
+async def test_host_bound_cache_cannot_borrow_unrelated_global_payload(monkeypatch):
+    """An approved private run must not read or overwrite another collector's cache."""
+    from ignis.domain.entities import TrendSignal
+    from ignis.domain.value_objects import PlatformType
+    from ignis.infrastructure.connectors.youtube import youtube_plugin
+    bridge, _, bindings, leases, plugin, calls, credentials, _, _, _ = setup_bridge()
+    foreign = TrendSignal(platform=PlatformType.YOUTUBE, raw_title='Unrelated synthetic cache payload',
+        metadata={'video_id': 'unrelated-cache'})
+    global_cache = {'n8n việt nam|VN|30d|5': [foreign]}
+    monkeypatch.setattr(youtube_plugin, '_YOUTUBE_QUERY_CACHE', global_cache)
+    async with bridge.hold_parent_transport(bindings[0], leases[0]):
+        result = await plugin.search_signals(list(bindings[0].queries))
+    assert [path.rsplit('/', 1)[-1] for path, _ in calls] == ['search', 'videos']
+    assert len(result) == 5
+    assert all(signal.raw_title != foreign.raw_title for signal in result)
+    assert global_cache == {'n8n việt nam|VN|30d|5': [foreign]}
+    assert credentials == ['lookup', 'lookup']
+
+
+def durable_budget(tmp_path, bounds, clock, *, create=True):
+    from ignis.infrastructure.follow_up_run_storage import PrivateRunStorage, DurableRunCallBudget
+    storage = PrivateRunStorage(tmp_path / 'private', authorize=lambda *_: True, create=create)
+    return DurableRunCallBudget(bounds, storage=storage, register=create, clock=lambda: clock[0])
+
+
+@pytest.mark.asyncio
+async def test_durable_reopen_cannot_reset_shared_provider_attempts(tmp_path):
+    bridge, _, bindings, leases, plugin, calls, credentials, _, clock, _ = setup_bridge()
+    budget = durable_budget(tmp_path, bridge.budget.bounds, clock)
+    bridge.budget = budget
+    async with bridge.hold_parent_transport(bindings[0], leases[0]):
+        await plugin.search_signals(list(bindings[0].queries))
+    assert budget._used == {'search': 1, 'other': 1}
+    bridge.budget = durable_budget(tmp_path, budget.bounds, clock, create=False)
+    async with bridge.hold_parent_transport(bindings[1], leases[1]):
+        await plugin.search_signals(list(bindings[1].queries))
+        await plugin.is_healthy()
+        await plugin.is_healthy()
+        assert await plugin.is_healthy() is False
+    assert bridge.budget._used == {'search': 2, 'other': 4}
+    assert len(calls) == len(credentials) == 6
+    assert all(params.get('maxResults', '5') in ('1', '5') for _, params in calls)
+
+
+@pytest.mark.asyncio
+async def test_durable_failed_attempt_is_encumbered_before_credential_resolution(tmp_path):
+    bridge, _, bindings, leases, plugin, calls, credentials, _, clock, _ = setup_bridge()
+    bridge.budget = durable_budget(tmp_path, bridge.budget.bounds, clock)
+    def failed_credential():
+        assert bridge.budget._used == {'search': 1, 'other': 0}
+        raise RuntimeError('Synthetic resolution failure')
+    plugin._resolve_credential = failed_credential
+    async with bridge.hold_parent_transport(bindings[0], leases[0]):
+        assert await plugin.search_signals(list(bindings[0].queries)) == []
+    reopened = durable_budget(tmp_path, bridge.budget.bounds, clock, create=False)
+    assert reopened._used == {'search': 1, 'other': 0}
+    assert calls == credentials == []
+
+
+def test_durable_reopen_missing_changed_or_duplicate_registration_refuses(tmp_path):
+    import sqlite3
+    from ignis.infrastructure.follow_up_run_storage import DurableRunCallBudget
+    from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+    bridge, _, _, _, _, _, _, _, clock, _ = setup_bridge()
+    bounds = bridge.budget.bounds
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        durable_budget(tmp_path, bounds, clock, create=False)
+    assert not (tmp_path / 'private').exists()
+    budget = durable_budget(tmp_path, bounds, clock)
+    budget.charge('search')
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        DurableRunCallBudget(replace(bounds, search_calls=3), storage=budget.storage, clock=lambda: clock[0])
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        DurableRunCallBudget(bounds, storage=budget.storage, register=True, clock=lambda: clock[0])
+    assert budget._used == {'search': 1, 'other': 0}
+    with sqlite3.connect(budget.storage.path) as connection:
+        connection.execute('DELETE FROM runs')
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        durable_budget(tmp_path, bounds, clock, create=False)
+    with sqlite3.connect(budget.storage.path) as connection:
+        assert connection.execute('SELECT COUNT(*) FROM runs').fetchone() == (0,)
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        DurableRunCallBudget(bounds, storage=budget.storage, register=True, clock=lambda: clock[0])
+    budget.storage.path.unlink()
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        budget.storage.counts(bounds)
+    assert not budget.storage.path.exists()
+
+
+@pytest.mark.asyncio
+async def test_host_purge_physically_removes_only_registered_private_payloads(tmp_path):
+    from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+    bridge, _, bindings, leases, plugin, calls, _, _, clock, _ = setup_bridge()
+    bridge.budget = durable_budget(tmp_path, bridge.budget.bounds, clock)
+    bounds, storage = bridge.budget.bounds, bridge.budget.storage
+    async with bridge.hold_parent_transport(bindings[0], leases[0]):
+        result = await plugin.search_signals(list(bindings[0].queries))
+        cache = plugin._query_cache()
+        result[0].raw_title = 'SYNTHETIC_RETAINED_PAYLOAD_SENTINEL'
+        cache['synthetic-isolated-key'] = result
+    artifact = storage.write_artifact(bounds, b'SYNTHETIC_ARTIFACT_SENTINEL')
+    unrelated = tmp_path / 'unrelated.payload'
+    unrelated.write_bytes(b'Unrelated owner data')
+    assert b'SYNTHETIC_RETAINED_PAYLOAD_SENTINEL' in storage.path.read_bytes()
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        storage.purge(bounds, now=clock[0])
+    assert artifact.exists()
+    # Host-off expiry refuses execution but has not performed deletion.
+    clock[0] = bounds.retention_until
+    assert bridge.budget.current() is False
+    assert artifact.exists()
+    audit = storage.purge(bounds, now=clock[0])
+    assert audit == (digest(bounds), clock[0].isoformat(), 2, 1)
+    assert not artifact.exists()
+    assert b'SYNTHETIC_RETAINED_PAYLOAD_SENTINEL' not in storage.path.read_bytes()
+    assert b'SYNTHETIC_ARTIFACT_SENTINEL' not in storage.path.read_bytes()
+    assert unrelated.read_bytes() == b'Unrelated owner data'
+    assert storage.purge(bounds, now=clock[0]) == audit
+    assert storage.counts(bounds) == {'search': 1, 'other': 1}
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        durable_budget(tmp_path, bounds, clock, create=False)
+    assert len(calls) == 2
+
+
+def test_private_purge_refuses_replaced_artifact_and_preserves_other_run(tmp_path):
+    from ignis.infrastructure.follow_up_run_storage import DurableRunCallBudget
+    from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+    bridge, _, _, _, _, _, _, _, clock, _ = setup_bridge()
+    budget = durable_budget(tmp_path, bridge.budget.bounds, clock)
+    other_bounds = replace(budget.bounds, run_id=uuid4())
+    other = DurableRunCallBudget(other_bounds, storage=budget.storage, register=True, clock=lambda: clock[0])
+    own_file = budget.storage.write_artifact(budget.bounds, b'Synthetic original')
+    other_file = budget.storage.write_artifact(other_bounds, b'Synthetic other run')
+    own_file.write_bytes(b'Replacement owner content')
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        budget.storage.purge(budget.bounds, now=budget.bounds.retention_until)
+    assert own_file.read_bytes() == b'Replacement owner content'
+    assert other_file.read_bytes() == b'Synthetic other run'
+    assert other.current() is True
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        durable_budget(tmp_path, budget.bounds, clock, create=False)
+
+
+@pytest.mark.parametrize('interrupt', [RuntimeError, KeyboardInterrupt], ids=['failed-commit', 'interrupted-commit'])
+def test_artifact_enrollment_interruption_remains_purgeable_after_reopen(tmp_path, monkeypatch, interrupt):
+    """Loss of the writing transaction cannot leave an unregistered owned payload."""
+    from ignis.infrastructure.follow_up_run_storage import PrivateRunStorage
+    from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+    bridge, _, _, _, _, _, _, _, clock, _ = setup_bridge()
+    budget = durable_budget(tmp_path, bridge.budget.bounds, clock)
+    storage, bounds = budget.storage, budget.bounds
+    original = storage._connection
+    @contextmanager
+    def fail_after_payload_before_commit():
+        with original() as connection:
+            yield connection
+            if list(storage.root.glob('*.payload')):
+                raise interrupt('Synthetic write-to-commit interruption')
+    with monkeypatch.context() as patch:
+        patch.setattr(storage, '_connection', fail_after_payload_before_commit)
+        with pytest.raises((FollowUpExecutionBoundaryError, KeyboardInterrupt)):
+            storage.write_artifact(bounds, b'SYNTHETIC_INTERRUPTED_ARTIFACT')
+    payloads = list(storage.root.glob('*.payload'))
+    assert len(payloads) == 1
+    assert payloads[0].read_bytes() == b'SYNTHETIC_INTERRUPTED_ARTIFACT'
+    reopened = PrivateRunStorage(storage.root, authorize=lambda *_: True)
+    audit = reopened.purge(bounds, now=bounds.retention_until)
+    assert not payloads[0].exists()
+    assert audit == (digest(bounds), bounds.retention_until.isoformat(), 0, 1)
+    assert reopened.counts(bounds) == {'search': 0, 'other': 0}
+
+
+def test_failed_initial_enrollment_creates_no_artifact_payload(tmp_path, monkeypatch):
+    """Registration must commit before payload creation can begin."""
+    from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+    bridge, _, _, _, _, _, _, _, clock, _ = setup_bridge()
+    budget = durable_budget(tmp_path, bridge.budget.bounds, clock)
+    storage = budget.storage
+    original = storage._connection
+    @contextmanager
+    def failed_commit():
+        with original() as connection:
+            yield connection
+            raise RuntimeError('Synthetic initial enrollment commit failure')
+    with monkeypatch.context() as patch:
+        patch.setattr(storage, '_connection', failed_commit)
+        with pytest.raises(FollowUpExecutionBoundaryError):
+            storage.write_artifact(budget.bounds, b'SYNTHETIC_UNENROLLED_ARTIFACT')
+    assert list(storage.root.glob('*.payload')) == []
+    with original() as connection:
+        assert connection.execute('SELECT COUNT(*) FROM artifacts').fetchone() == (0,)
