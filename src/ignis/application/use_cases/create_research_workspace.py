@@ -32,8 +32,10 @@ logger = logging.getLogger(__name__)
 class CreateResearchWorkspaceUseCase:
     """The workspace lifecycle: propose, confirm, reuse, adopt, reopen."""
 
-    def __init__(self, store: IResearchWorkspaceStore):
+    def __init__(self, store: IResearchWorkspaceStore, *, research_directory=None, path_guard=None):
         self._store = store
+        self._research_directory = research_directory
+        self._path_guard = path_guard
 
     async def propose(
         self,
@@ -49,7 +51,10 @@ class CreateResearchWorkspaceUseCase:
         """
         host_root = Path(host_workspace).expanduser()
         resolved_slug = validate_slug(slug) if slug else slugify_research_name(research_name)
-        proposed_path = research_root(host_root) / resolved_slug
+        proposed_path = (self._research_directory or research_root(host_root)) / resolved_slug
+        if self._path_guard is not None:
+            self._path_guard(proposed_path)
+            self._path_guard(proposed_path / "workspace.json")
 
         # Structural containment. The slug cannot hold a separator or a parent reference --
         # validate_slug refuses both -- so the join cannot climb out of the host workspace. The
@@ -139,6 +144,9 @@ class CreateResearchWorkspaceUseCase:
         and "yes, use this folder that already has my files in it" are different answers, and
         collapsing them would let one click reuse a directory the requester never looked at.
         """
+        if self._path_guard is not None:
+            self._path_guard(proposal.proposed_path)
+            self._path_guard(proposal.proposed_path / "workspace.json")
         if not confirmation:
             logger.info("Workspace creation declined for '%s'; nothing was written.", proposal.slug)
             return None

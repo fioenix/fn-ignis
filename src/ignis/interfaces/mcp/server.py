@@ -104,6 +104,7 @@ from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
 from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+from ignis.infrastructure.caller_storage import CallerStorageMiddleware, current_caller_storage
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
@@ -139,8 +140,10 @@ The mission and Claim Ledger contracts, not this recipe, decide verdict eligibil
 class _MissionRelayRuntime:
     """Borrowed storage and viewer resources owned by one FastMCP async lifespan."""
 
-    def __init__(self, server: Optional[FastMCP] = None):
+    def __init__(self, server: Optional[FastMCP] = None, *, caller_scope=None):
         self.owner_loop = asyncio.get_running_loop()
+        self.caller_scope = caller_scope
+        self.caller_scopes = {}
         self.server = server
         self.transport = Context(server).transport if server is not None else None
         self._writes: set[asyncio.Task] = set()
@@ -157,9 +160,10 @@ class _MissionRelayRuntime:
         from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
         if self.closed or asyncio.get_running_loop() is not self.owner_loop:
             return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
-        components = _COMPONENTS
+        components = self.caller_scope.components if self.caller_scope is not None else _COMPONENTS
+        if self.caller_scope is not None: self.caller_scope.check()
         repository = components.get("repository") if components is not None else None
-        owner = _COMPONENTS_OWNER
+        owner = (components, repository, self.owner_loop) if self.caller_scope is not None else _COMPONENTS_OWNER
         if owner is None or owner[0] is not components or owner[1] is not repository or owner[2] is not self.owner_loop:
             return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
         if isinstance(repository, SqliteTrendRepository):
@@ -191,9 +195,10 @@ class _MissionRelayRuntime:
             raise asyncio.CancelledError
         if self.closed or asyncio.get_running_loop() is not self.owner_loop:
             return _follow_up_refused("STORAGE_FAILURE")
-        components = _COMPONENTS
+        components = self.caller_scope.components if self.caller_scope is not None else _COMPONENTS
+        if self.caller_scope is not None: self.caller_scope.check()
         repository = components.get("repository") if components is not None else None
-        owner = _COMPONENTS_OWNER
+        owner = (components, repository, self.owner_loop) if self.caller_scope is not None else _COMPONENTS_OWNER
         if owner is None or owner[0] is not components or owner[1] is not repository or owner[2] is not self.owner_loop:
             return _follow_up_refused("STORAGE_FAILURE")
         if type(repository) is SqliteTrendRepository:
@@ -244,6 +249,7 @@ class _MissionRelayRuntime:
         return self._reads
 
     def _use_case(self):
+        if self.caller_scope is not None: self.caller_scope.check()
         if self.closed or asyncio.get_running_loop() is not self.owner_loop:
             raise RuntimeError("Mission viewer requires an active owning lifespan.")
         if self._projection is None:
@@ -254,7 +260,9 @@ class _MissionRelayRuntime:
             from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
             from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
             # Borrow initialized in-memory storage only when the owner already created it.
-            repository = _COMPONENTS.get("repository") if _COMPONENTS is not None else None
+            components = self.caller_scope.components if self.caller_scope is not None else _COMPONENTS
+            if self.caller_scope is not None: self.caller_scope.check()
+            repository = components.get("repository") if components is not None else None
             if isinstance(repository, SqliteTrendRepository):
                 reader = SqliteMissionRelayReader(repository)
             elif isinstance(repository, PostgresTimescaleRepository):
@@ -308,6 +316,9 @@ class _MissionRelayRuntime:
                 if not await resource.wait_closed(timeout=None):
                     raise RuntimeError("Mission viewer reads did not settle during shutdown.")
         await await_settled(settle())
+        for scope in self.caller_scopes.values():
+            if scope.runtime is not None: await scope.runtime.close()
+            if scope.components is not None: await scope.components["repository"].close()
 
 
 @asynccontextmanager
@@ -351,7 +362,7 @@ async def record_mission_research_work(mission_id: str, command: dict[str, Any],
         return RecordMissionResearchWorkUseCase._refused("UNAUTHORIZED_HOST")
     try:
         from mcp.server.session import ServerSession
-        runtime = ctx.lifespan_context.get("mission_relay")
+        runtime = _request_runtime(ctx)
         request = ctx.request_context
         # Local client process/channel eligibility, never a claim of human identity or execution.
         authorized = (
@@ -403,7 +414,7 @@ async def execute_mission_follow_up(mission_id: str, follow_up_work_id: str,
         return _follow_up_refused("UNAUTHORIZED_HOST")
     try:
         from mcp.server.session import ServerSession
-        runtime = ctx.lifespan_context.get("mission_relay")
+        runtime = _request_runtime(ctx)
         request = ctx.request_context
         authorized = (ctx.fastmcp is mcp and ctx.transport == "stdio"
             and request is not None and isinstance(request.session, ServerSession)
@@ -488,7 +499,7 @@ async def handle_get_mission_relay_snapshot(mission_id: str, page_size: int, run
 @mcp.tool(name="open_mission_relay", description="Open a finite read-only local viewer for one explicitly selected mission and optional run. Requires an explicit UTC deadline; validates installed storage without bootstrap or collectors.")
 async def open_mission_relay(mission_id: str, expires_at: str, ctx: Context, run_id: Optional[str] = None) -> dict:
     result = await handle_open_mission_relay(mission_id, expires_at, run_id,
-                                           runtime=ctx.lifespan_context.get("mission_relay"))
+                                           runtime=_request_runtime(ctx))
     return result.to_payload()
 
 
@@ -497,7 +508,7 @@ async def get_mission_relay_snapshot(mission_id: str, page_size: int, ctx: Conte
         run_id: Optional[str] = None, after_revision: Optional[int] = None,
         after_ordinal: Optional[int] = None, evidence_offset: int = 0) -> dict:
     result = await handle_get_mission_relay_snapshot(mission_id, page_size, run_id, after_revision,
-        after_ordinal, evidence_offset, runtime=ctx.lifespan_context.get("mission_relay"))
+        after_ordinal, evidence_offset, runtime=_request_runtime(ctx))
     return result.to_payload()
 
 
@@ -587,8 +598,10 @@ async def cancel_host_browser_search(request_id: str, host_task_ref: str, sessio
 
 
 
-def _init_components():
-    repository = create_repository()
+def _init_components(*, caller_scope=None):
+    repository = create_repository('sqlite:///' + str(caller_scope.database)) if caller_scope is not None else create_repository()
+    if caller_scope is not None:
+        caller_scope.guard_repository(repository)
     runtime_config_manager = RuntimeConfigManager(repository=repository)
     tiktok_auth_manager = TikTokAuthManager(repository=repository)
     threads_auth_manager = ThreadsAuthManager(repository=repository)
@@ -638,7 +651,8 @@ def _init_components():
     quality_evaluator = QualityEvaluator(detector=language_detector)
     strategic_reasoner = StrategicMarketReasoner(detector=language_detector)
 
-    workspace_store = WorkspaceRepository(repository=repository)
+    workspace_store = WorkspaceRepository(repository=repository,
+        path_guard=caller_scope.check_path if caller_scope is not None else None)
     # One synchronizer for every entry point, so the first mission after startup registers the
     # same persisted vocabulary a process warmed by an analysis call would already hold.
     vocabulary_synchronizer = VocabularySynchronizer(
@@ -659,7 +673,9 @@ def _init_components():
         workspace_store=workspace_store,
         vocabulary_sync=vocabulary_synchronizer,
     )
-    create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store)
+    create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store,
+        research_directory=caller_scope.directory / "research" if caller_scope is not None else None,
+        path_guard=caller_scope.check_path if caller_scope is not None else None)
     create_attention_mission_use_case = CreateAttentionMissionUseCase(
         repository=repository,
         store=workspace_store,
@@ -729,7 +745,29 @@ def _init_components():
 _COMPONENTS = None
 _COMPONENTS_OWNER = None
 
+def _request_runtime(ctx):
+    scope = current_caller_storage.get()
+    return scope.runtime if scope is not None else ctx.lifespan_context.get("mission_relay")
+
+
+def _compose_caller_scope(scope):
+    return _init_components(caller_scope=scope)
+
+
+def _caller_runtime(scope, owner):
+    runtime = _MissionRelayRuntime(owner.server, caller_scope=scope)
+    runtime.transport = owner.transport
+    return runtime
+
+
+mcp.add_middleware(CallerStorageMiddleware(_compose_caller_scope, _caller_runtime))
+
+
 def get_components():
+    scope = current_caller_storage.get()
+    if scope is not None:
+        scope.check()
+        return scope.components
     global _COMPONENTS, _COMPONENTS_OWNER
     if _COMPONENTS is None:
         _COMPONENTS = _init_components()
@@ -1608,7 +1646,8 @@ def _host_workspace_of(proposed_path: Path) -> Path:
     confirmation carrying exactly the path the requester was shown.
     """
     parts = proposed_path.parts
-    tail = (*RESEARCH_ROOT_SEGMENTS, proposed_path.name)
+    scope = current_caller_storage.get()
+    tail = (*( (".fnignis", "research") if scope is not None else RESEARCH_ROOT_SEGMENTS), proposed_path.name)
     if len(parts) <= len(tail) or parts[-len(tail):] != tail:
         raise ValueError(
             f"'{proposed_path}' is not a research workspace path. Expected a path ending in "
@@ -2320,6 +2359,12 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
 
 
 def _get_secure_reports_dir() -> Path:
+    scope = current_caller_storage.get()
+    if scope is not None:
+        target = scope.check_path(scope.directory / "reports")
+        target.mkdir(parents=True, exist_ok=True)
+        scope.check_path(target / "scope-check")
+        return target
     # 1. Try project root reports/ directory
     try:
         source_module = Path(__file__).resolve()
@@ -2432,6 +2477,9 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
     report_filename = f"mission_{mission.shortcode.lower()}.html"
 
     report_path = reports_dir / report_filename
+    scope = current_caller_storage.get()
+    if scope is not None:
+        scope.check_path(report_path)
     report_path.write_text(html_content, encoding="utf-8")
     abs_path = str(report_path.resolve())
 
@@ -2614,7 +2662,7 @@ async def discover_market_opportunities(mission_id: str) -> str:
     return await handle_discover_market_opportunities(mission_id)
 
 
-@mcp.tool(name="propose_research_workspace", description="Propose where a new research would live: `<host-workspace>/.ignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.")
+@mcp.tool(name="propose_research_workspace", description="Propose caller-owned research storage under the uniquely authorized native repository `.fnignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.")
 async def propose_research_workspace(host_workspace: str, research_name: str, slug: Optional[str] = None) -> str:
     return await handle_propose_research_workspace(host_workspace, research_name, slug)
 

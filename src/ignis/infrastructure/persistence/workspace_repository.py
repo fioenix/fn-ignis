@@ -97,8 +97,9 @@ class RunJournalExhaustedError(Exception):
 class WorkspaceRepository(IResearchWorkspaceStore):
     """Canonical workspace storage, delegating to the configured shared database."""
 
-    def __init__(self, repository: Optional[ITrendRepository] = None):
+    def __init__(self, repository: Optional[ITrendRepository] = None, *, path_guard=None):
         self._repo = repository if repository is not None else create_repository()
+        self._path_guard = path_guard
 
     @property
     def repository(self) -> ITrendRepository:
@@ -110,18 +111,28 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     # ------------------------------------------------------------------
 
     async def save_research_workspace(self, workspace: ResearchWorkspace) -> ResearchWorkspace:
+        if self._path_guard is not None: self._path_guard(workspace.manifest_path)
         return await self._repo.save_research_workspace(workspace)
 
     async def get_research_workspace(self, workspace_id: UUID) -> Optional[ResearchWorkspace]:
-        return await self._repo.get_research_workspace(workspace_id)
+        result = await self._repo.get_research_workspace(workspace_id)
+        if result is not None and self._path_guard is not None: self._path_guard(result.manifest_path)
+        return result
 
     async def find_research_workspace_by_slug(
         self, slug: str, root_path: Optional[Path] = None
     ) -> Optional[ResearchWorkspace]:
-        return await self._repo.find_research_workspace_by_slug(slug, root_path)
+        result = await self._repo.find_research_workspace_by_slug(slug, root_path)
+        if result is not None and self._path_guard is not None:
+            self._path_guard(result.manifest_path)
+        return result
 
     async def list_research_workspaces(self, limit: int = 50) -> List[ResearchWorkspace]:
-        return await self._repo.list_research_workspaces(limit)
+        result = await self._repo.list_research_workspaces(limit)
+        if self._path_guard is not None:
+            for workspace in result:
+                self._path_guard(workspace.manifest_path)
+        return result
 
     async def save_brief_revision(self, revision: MarketBriefRevision) -> MarketBriefRevision:
         return await self._repo.save_brief_revision(revision)
@@ -239,6 +250,7 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         The claim is per mission. Two missions of one research take two different rows and
         never wait for each other.
         """
+        if self._path_guard is not None: self._path_guard(workspace.manifest_path)
         run_id = run_id or uuid4()
         caller = asyncio.current_task()
         ownership = {"acquired": False, "journal": None}
@@ -317,6 +329,8 @@ class WorkspaceRepository(IResearchWorkspaceStore):
             journal, status=status, completed_at=_utc_now()
         )
         try:
+            if self._path_guard is not None:
+                self._path_guard(journal.journal_path)
             existing = json.loads(journal.journal_path.read_text(encoding="utf-8"))
             journal.journal_path.write_text(
                 _journal_payload(finished, collection_plan=existing.get("collection_plan")),
@@ -390,11 +404,15 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         run_id = run_id or uuid4()
         started_at = _utc_now()
         journal_dir = workspace.root_path / JOURNAL_DIRNAME
+        if self._path_guard is not None:
+            self._path_guard(journal_dir)
         journal_dir.mkdir(parents=True, exist_ok=True)
         stamp = started_at.strftime("%Y%m%d-%H%M%S")
 
         for sequence in range(1, JOURNAL_SEQUENCE_LIMIT):
             candidate = journal_dir / f"{JOURNAL_PREFIX}{stamp}-{sequence:03d}.json"
+            if self._path_guard is not None:
+                self._path_guard(candidate)
             journal = RunJournal(
                 run_id=run_id,
                 mission_id=mission_id,
@@ -420,6 +438,7 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         )
 
     async def record_run_journal(self, journal: RunJournal) -> RunJournal:
+        if self._path_guard is not None: self._path_guard(journal.journal_path)
         return await self._repo.record_run_journal(journal)
 
     async def record_collection_plan(
@@ -429,17 +448,26 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         digest = plan.get("plan_digest") if isinstance(plan, dict) else None
         if not isinstance(digest, str) or len(digest) != 64:
             raise ValueError("A run journal collection plan needs its canonical plan_digest.")
+        if self._path_guard is not None: self._path_guard(journal.journal_path)
         current = json.loads(journal.journal_path.read_text(encoding="utf-8"))
         current["collection_plan"] = plan
         current["collection_plan_digest"] = digest
         temporary = journal.journal_path.with_suffix(journal.journal_path.suffix + ".tmp")
+        if self._path_guard is not None:
+            self._path_guard(temporary)
         temporary.write_text(
             json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+        if self._path_guard is not None:
+            self._path_guard(temporary)
+            self._path_guard(journal.journal_path)
         temporary.replace(journal.journal_path)
 
     async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
-        return await self._repo.list_run_journals(mission_id, limit)
+        result = await self._repo.list_run_journals(mission_id, limit)
+        if self._path_guard is not None:
+            for journal in result: self._path_guard(journal.journal_path)
+        return result
 
     async def latest_run_journal(self, mission_id: UUID) -> Optional[RunJournal]:
         """The most recent run of a mission, or None when it has never run."""
