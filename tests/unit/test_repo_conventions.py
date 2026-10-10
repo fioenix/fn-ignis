@@ -234,9 +234,9 @@ def test_the_configured_database_is_never_rebuilt_beside_a_research_folder():
             if isinstance(node, ast.Call) and _call_name(node) in DATABASE_CONSTRUCTORS:
                 if node.args or node.keywords:
                     # The owner replaced installation-global storage with one caller-root
-                    # canonical SQLite store. This exact private branch is the only target
+                    # canonical store with validated literal caller configuration. This exact branch is the only target
                     # exception; arbitrary and per-research databases remain prohibited.
-                    target = "create_repository('sqlite:///' + str(caller_scope.database))"
+                    target = "create_repository(caller_scope.configuration.DATABASE_URL.get_secret_value(), min_pool_size=caller_scope.configuration.DB_MIN_POOL_SIZE, max_pool_size=caller_scope.configuration.DB_MAX_POOL_SIZE)"
                     allowed = rel == "ignis/interfaces/mcp/server.py" and ast.unparse(node) == target
                     if allowed:
                         tree = ast.parse(source)

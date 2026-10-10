@@ -5,7 +5,7 @@ from ignis.infrastructure.persistence.postgres_repository import PostgresTimesca
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
 
-def create_repository(dsn: Optional[str] = None) -> ITrendRepository:
+def create_repository(dsn: Optional[str] = None, *, min_pool_size=None, max_pool_size=None) -> ITrendRepository:
     """
     Factory function to initialize the appropriate storage adapter based on connection string:
     - sqlite://... -> SqliteTrendRepository (Zero-Docker mode)
@@ -17,8 +17,8 @@ def create_repository(dsn: Optional[str] = None) -> ITrendRepository:
     else:
         return PostgresTimescaleRepository(
             dsn=target_dsn,
-            min_pool_size=settings.DB_MIN_POOL_SIZE,
-            max_pool_size=settings.DB_MAX_POOL_SIZE,
+            min_pool_size=settings.DB_MIN_POOL_SIZE if min_pool_size is None else min_pool_size,
+            max_pool_size=settings.DB_MAX_POOL_SIZE if max_pool_size is None else max_pool_size,
         )
 
 

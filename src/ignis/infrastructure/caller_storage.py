@@ -1,5 +1,11 @@
 """Native caller-root ownership for persistent local mission storage, without source grants."""
 from contextvars import ContextVar
+import hashlib
+import os
+import subprocess
+import logging
+import copy
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import stat
 from threading import RLock
@@ -7,9 +13,63 @@ from urllib.parse import unquote, urlsplit
 
 from fastmcp.server.middleware import Middleware
 from fastmcp.exceptions import ToolError
+from ignis.infrastructure.caller_configuration import load_caller_configuration
 
 
 current_caller_storage = ContextVar('ignis_caller_storage', default=None)
+
+
+class _CallerSecretFilter(logging.Filter):
+    def filter(self, record):
+        scope = current_caller_storage.get()
+        if scope is None:
+            return True
+        try:
+            message = record.getMessage()
+            values = (scope.configuration.DATABASE_URL, scope.configuration.YOUTUBE_API_KEY)
+            secrets = [value.get_secret_value() for value in values if value.get_secret_value()]
+            uri = urlsplit(scope.configuration.DATABASE_URL.get_secret_value())
+            secrets.extend(value for value in (uri.username, uri.password,
+                unquote(uri.password or '')) if value)
+            for secret in secrets:
+                message = message.replace(secret, '[REDACTED]')
+            record.msg, record.args = message, ()
+            if record.exc_info is not None:
+                record.msg += ' [exception=' + record.exc_info[0].__name__ + ']'
+                record.exc_info, record.exc_text = None, None
+        except Exception:
+            record.msg, record.args = 'CALLER_DIAGNOSTIC_REDACTED', ()
+            record.exc_info, record.exc_text = None, None
+        return True
+
+
+class _CallerLog(RotatingFileHandler):
+    def __init__(self, scope):
+        self.scope = scope
+        super().__init__(scope.directory/'logs/ignis.log',maxBytes=262144,backupCount=2,delay=True)
+        self.addFilter(_CallerSecretFilter())
+
+    def _open(self):
+        target = self.scope.check_path(Path(self.baseFilename))
+        descriptor = os.open(target, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+        return os.fdopen(descriptor, 'a', encoding='utf-8')
+
+    def emit(self, record):
+        if current_caller_storage.get() is not self.scope or not record.name.startswith('ignis.'):
+            return
+        try:
+            target = self.scope.check_path(Path(self.baseFilename))
+            for suffix in ('','.1','.2'):
+                self.scope.check_path(Path(str(target)+suffix))
+            target.parent.mkdir(exist_ok=True)
+            audit = copy.copy(record)
+            # Persist bounded operational metadata, never arbitrary messages or source bodies.
+            audit.msg = 'CALLER_OPERATIONAL_EVENT level=%d component=ignis' % record.levelno
+            audit.args, audit.exc_info, audit.exc_text, audit.stack_info = (), None, None, None
+            super().emit(audit)
+        except Exception:
+            # A diagnostic refusal cannot replace a mission outcome or disclose a secret.
+            return
 
 
 class CallerStorageScope:
@@ -19,11 +79,30 @@ class CallerStorageScope:
         self.root = Path(root)
         self.directory = self.root / '.fnignis'
         self.database = self.directory / 'canonical.sqlite3'
+        self.config_path = self.directory / '.env'
+        self._config_snapshot = None
+        self.log_handler = None
         self.components = None
         self.runtime = None
         self._identities = {}
         self._lock = RLock()
         self._pin(self.root, require_directory=True)
+        self._pin(self.config_path)
+        text, self._config_snapshot = self._read_configuration()
+        self.configuration, self.database = load_caller_configuration(
+            text, self.root, self.database)
+
+    def _read_configuration(self):
+        if not self.config_path.exists():
+            return '', None
+        info = self.config_path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_size > 32768:
+            raise ToolError('CALLER_CONFIG_REFUSED')
+        try:
+            data = self.config_path.read_bytes()
+            return data.decode('utf-8'), (info.st_dev, info.st_ino, hashlib.sha256(data).digest())
+        except Exception:
+            raise ToolError('CALLER_CONFIG_REFUSED') from None
 
     def _pin(self, path, *, require_directory=False):
         for node in reversed((path, *path.parents)):
@@ -46,7 +125,14 @@ class CallerStorageScope:
             if not self.root.is_dir(): raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
             self._pin(self.root, require_directory=True)
             self._pin(self.directory, require_directory=True)
+            self._pin(self.config_path)
+            if self._read_configuration()[1] != self._config_snapshot:
+                raise ToolError('CALLER_CONFIG_CHANGED')
+            if self.database is None:
+                return
             self._pin(self.database)
+            if self.database.exists() and not self.database.is_file():
+                raise ToolError('CALLER_DATABASE_REFUSED')
             for suffix in ('-journal','-wal','-shm'):
                 if Path(str(self.database)+suffix).is_symlink():
                     raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
@@ -63,11 +149,28 @@ class CallerStorageScope:
         return path
 
     def guard_repository(self, repository):
+        if hasattr(repository, '_get_pool'):
+            original_pool = repository._get_pool
+            async def pool():
+                self.check()
+                try:
+                    result = await original_pool()
+                    self.check()
+                    return result
+                except ToolError:
+                    raise
+                except Exception:
+                    raise ToolError('CALLER_DATABASE_REFUSED') from None
+            repository._get_pool = pool
+            return
         original_connection = repository._get_connection
         original_write = repository._run_write
         def connection():
             self.check()
-            result = original_connection()
+            try:
+                result = original_connection()
+            except Exception:
+                raise ToolError('CALLER_DATABASE_REFUSED') from None
             self.check()
             return result
         async def write(operation):
@@ -80,6 +183,48 @@ class CallerStorageScope:
             return await original_write(guarded)
         repository._get_connection = connection
         repository._run_write = write
+
+
+    def prepare_layout(self):
+        """Protect caller-owned runtime files only after explicit workspace confirmation."""
+        self.check()
+        ignore = self.root / '.gitignore'
+        if ignore.is_symlink() or (ignore.exists() and not ignore.is_file()):
+            raise ToolError('CALLER_LAYOUT_REFUSED')
+        def git(*arguments):
+            return subprocess.run(['git','-C',str(self.root),*arguments], capture_output=True,
+                timeout=5, check=False, env={'PATH':'/usr/bin:/bin:/usr/sbin:/sbin'})
+        tracked = git('ls-files','--error-unmatch','--','.fnignis/.env')
+        if tracked.returncode == 0:
+            raise ToolError('CALLER_CONFIG_TRACKED')
+        before = ignore.read_bytes() if ignore.exists() else None
+        line = b'/.fnignis/'
+        if before is None or line not in before.splitlines():
+            with ignore.open('ab') as opened:
+                opened.write((b'\n' if before and not before.endswith(b'\n') else b'') + line + b'\n')
+        in_git = git('rev-parse','--show-toplevel')
+        if in_git.returncode == 0 and git('check-ignore','--quiet','--','.fnignis/.env').returncode != 0:
+            # Roll back only our exact append; never rewrite a concurrent owner edit.
+            appended = (before or b'') + (b'\n' if before and not before.endswith(b'\n') else b'') + line + b'\n'
+            if ignore.read_bytes() == appended:
+                if before is None: ignore.unlink()
+                else: ignore.write_bytes(before)
+            raise ToolError('CALLER_LAYOUT_REFUSED')
+        self.directory.mkdir(exist_ok=True)
+        self.check_path(self.config_path)
+        if not self.config_path.exists():
+            descriptor = os.open(self.config_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            with os.fdopen(descriptor,'w') as opened:
+                opened.write('# Optional caller-owned settings. Restart the native server after edits.\n')
+            self._config_snapshot = self._read_configuration()[1]
+        example = self.check_path(self.directory / '.env.example')
+        if not example.exists():
+            template = Path(__file__).parent / 'templates' / 'caller.env.example'
+            with example.open('x') as opened: opened.write(template.read_text())
+        self.check()
+        if self.log_handler is None:
+            self.log_handler = _CallerLog(self)
+            logging.getLogger().addHandler(self.log_handler)
 
 
 class CallerStorageMiddleware(Middleware):
@@ -123,9 +268,25 @@ class CallerStorageMiddleware(Middleware):
             scope.check_path(arguments['proposed_path'])
         token = current_caller_storage.set(scope)
         try:
+            for logger in (logging.getLogger(), *tuple(logging.Logger.manager.loggerDict.values())):
+                if isinstance(logger, logging.Logger):
+                    for handler in logger.handlers:
+                        if not any(isinstance(item, _CallerSecretFilter) for item in handler.filters):
+                            handler.addFilter(_CallerSecretFilter())
             if scope.components is None:
-                scope.components = self.compose(scope)
-                scope.runtime = self.runtime_for_scope(scope, owner)
-            return await call_next(context)
+                try:
+                    scope.components = self.compose(scope)
+                    scope.runtime = self.runtime_for_scope(scope, owner)
+                except ToolError:
+                    raise
+                except Exception:
+                    raise ToolError('CALLER_COMPOSITION_REFUSED') from None
+            try:
+                return await call_next(context)
+            except ToolError:
+                raise
+            except Exception:
+                # The outer transport logs after this scoped context has been reset.
+                raise ToolError('CALLER_OPERATION_REFUSED') from None
         finally:
             current_caller_storage.reset(token)

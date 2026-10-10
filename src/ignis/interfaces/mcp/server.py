@@ -319,6 +319,9 @@ class _MissionRelayRuntime:
         for scope in self.caller_scopes.values():
             if scope.runtime is not None: await scope.runtime.close()
             if scope.components is not None: await scope.components["repository"].close()
+            if scope.log_handler is not None:
+                logging.getLogger().removeHandler(scope.log_handler)
+                scope.log_handler.close()
 
 
 @asynccontextmanager
@@ -599,7 +602,9 @@ async def cancel_host_browser_search(request_id: str, host_task_ref: str, sessio
 
 
 def _init_components(*, caller_scope=None):
-    repository = create_repository('sqlite:///' + str(caller_scope.database)) if caller_scope is not None else create_repository()
+    repository = create_repository(caller_scope.configuration.DATABASE_URL.get_secret_value(),
+        min_pool_size=caller_scope.configuration.DB_MIN_POOL_SIZE,
+        max_pool_size=caller_scope.configuration.DB_MAX_POOL_SIZE) if caller_scope is not None else create_repository()
     if caller_scope is not None:
         caller_scope.guard_repository(repository)
     runtime_config_manager = RuntimeConfigManager(repository=repository)
@@ -630,15 +635,16 @@ def _init_components(*, caller_scope=None):
         )
     )
 
-    if reveal_secret(settings.YOUTUBE_API_KEY):
+    composition_settings = caller_scope.configuration if caller_scope is not None else settings
+    if reveal_secret(composition_settings.YOUTUBE_API_KEY):
         registry.register(
             YouTubeDataPlugin(
-                api_key=reveal_secret(settings.YOUTUBE_API_KEY),
+                api_key=reveal_secret(composition_settings.YOUTUBE_API_KEY),
                 quota_manager=YouTubeQuotaManager(
                     repository,
                     YouTubeQuotaPolicy(
-                        search_daily_limit=settings.YOUTUBE_SEARCH_DAILY_LIMIT,
-                        other_daily_unit_limit=settings.YOUTUBE_OTHER_DAILY_UNIT_LIMIT,
+                        search_daily_limit=composition_settings.YOUTUBE_SEARCH_DAILY_LIMIT,
+                        other_daily_unit_limit=composition_settings.YOUTUBE_OTHER_DAILY_UNIT_LIMIT,
                     ),
                 ),
             )
@@ -675,7 +681,8 @@ def _init_components(*, caller_scope=None):
     )
     create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store,
         research_directory=caller_scope.directory / "research" if caller_scope is not None else None,
-        path_guard=caller_scope.check_path if caller_scope is not None else None)
+        path_guard=caller_scope.check_path if caller_scope is not None else None,
+        setup=caller_scope.prepare_layout if caller_scope is not None else None)
     create_attention_mission_use_case = CreateAttentionMissionUseCase(
         repository=repository,
         store=workspace_store,

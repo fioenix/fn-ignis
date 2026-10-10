@@ -32,10 +32,11 @@ logger = logging.getLogger(__name__)
 class CreateResearchWorkspaceUseCase:
     """The workspace lifecycle: propose, confirm, reuse, adopt, reopen."""
 
-    def __init__(self, store: IResearchWorkspaceStore, *, research_directory=None, path_guard=None):
+    def __init__(self, store: IResearchWorkspaceStore, *, research_directory=None, path_guard=None, setup=None):
         self._store = store
         self._research_directory = research_directory
         self._path_guard = path_guard
+        self._setup = setup
 
     async def propose(
         self,
@@ -157,6 +158,9 @@ class CreateResearchWorkspaceUseCase:
                 "confirmation. "
                 + (" ".join(proposal.notes) if proposal.notes else "")
             )
+
+        if self._setup is not None:
+            self._setup()
 
         if proposal.existing_workspace is not None:
             # Reuse. The manifest already on disk is the identity, and it is not rewritten.
