@@ -48,6 +48,10 @@ class YouTubeDataPlugin(IConnectorPlugin):
         self._api_key = api_key
         self._quota_manager = quota_manager
 
+    def _client(self, **kwargs):
+        """Private transport injection; the default provider behavior is unchanged."""
+        return httpx.AsyncClient(**kwargs)
+
     async def _reserve(
         self,
         bucket: YouTubeQuotaBucket,
@@ -126,9 +130,13 @@ class YouTubeDataPlugin(IConnectorPlugin):
         }
         return lang_map.get(geo_str.upper(), None)
 
+    def _window_clock(self) -> datetime:
+        """Private clock seam; public collection windows retain their current clock."""
+        return datetime.now(timezone.utc)
+
     def _timeframe_to_published_after(self, timeframe_str: str) -> Tuple[str, datetime]:
         """Convert timeframe expression to RFC 3339 formatted UTC datetime string."""
-        now = datetime.now(timezone.utc)
+        now = self._window_clock()
         tf = str(timeframe_str).lower().strip()
 
         if tf in ["1d", "24h", "now 1-d", "last_24h"]:
@@ -174,7 +182,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
                 "maxResults": 1,
                 "key": self._api_key,
             }
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with self._client(timeout=5.0) as client:
                 resp = await client.get(self.BASE_API_URL, params=params)
                 reasons = self._error_reasons(resp)
                 if "quotaExceeded" in reasons or "dailyLimitExceeded" in reasons:
@@ -207,7 +215,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
 
         try:
             await self._reserve(YouTubeQuotaBucket.DEFAULT_UNITS)
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with self._client(timeout=15.0) as client:
                 response = await client.get(self.BASE_API_URL, params=params)
 
                 if response.status_code == 403:
@@ -372,7 +380,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
             video_ids = []
             try:
                 await self._reserve(YouTubeQuotaBucket.SEARCH_LIST, trigger)
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with self._client(timeout=15.0) as client:
                     resp = await client.get(self.SEARCH_API_URL, params=search_params)
                     if resp.status_code in [403, 429]:
                         reasons = self._error_reasons(resp)
