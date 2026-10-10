@@ -439,7 +439,22 @@ class IsolatedCanonicalSQLite:
         if repository is not None:
             await repository.close()
         self.closed = True
+        return self._purge_closed(now=host.clock())
+
+    def _purge_closed(self, *, now):
+        """Root deletion-only recovery; no host construction or ingress grant is needed."""
+        import sqlite3
+        record = self._ownership()
+        request = self._request()
+        state = self._disposition()
+        if (not self.closed or now < self.confirmation.bounds.retention_until
+                or tuple(record['identity']) != self._identity
+                or (state is None and not self._deletion_only and self._delete_request != request)):
+            raise FollowUpExecutionBoundaryError()
+        if state and state.get('purged'):
+            return state
         if state is None:
+            self._check_identity()
             self._publish(dict(request, deletion_pending=True, purged=False))
         # Exact absence is recoverable only behind a validated durable pending intent.
         if self.path.is_symlink():
@@ -465,7 +480,7 @@ class IsolatedCanonicalSQLite:
         elif state is None:
             raise FollowUpExecutionBoundaryError()
         audit = dict(request, deletion_pending=True, purged=True,
-                     purged_at=host.clock().isoformat(), stores_deleted=1)
+                     purged_at=now.isoformat(), stores_deleted=1)
         self._publish(audit)
         return audit
 
@@ -492,3 +507,126 @@ def open_owned_canonical_repository(enrollment):
     repository._get_connection = connection
     repository.close = close
     return repository
+
+
+class PreparedCanonicalSQLite:
+    """Root-exclusive metadata bootstrap; source ingress remains denied until final seal."""
+
+    def __init__(self, root, *, owner_reference, collection_scope_digest):
+        import sqlite3
+        self.root = Path(root)
+        self.root.mkdir(parents=False, exist_ok=False)
+        self.path = self.root / 'canonical.sqlite3'
+        self.owner_reference = owner_reference
+        self.collection_scope_digest = collection_scope_digest
+        self._token = uuid4().hex
+        self._sealed = False
+        self._closed = False
+        with self.path.open('xb') as stream:
+            stream.flush()
+            os.fsync(stream.fileno())
+        stat = self.path.stat()
+        self._identity = (stat.st_dev, stat.st_ino)
+        self.receipt = self.root / 'bootstrap-ownership.json'
+        self._record = {'owner_reference': owner_reference, 'scope_digest': collection_scope_digest,
+                        'identity': list(self._identity), 'token': self._token}
+        with self.receipt.open('x') as stream:
+            json.dump(self._record, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        descriptor = os.open(self.root, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        self.repository = SqliteTrendRepository(str(self.path))
+        original = self.repository._get_connection
+        source_tables = frozenset({'observations', 'sources', 'trend_signals',
+            'mission_signal_memberships', 'mission_probe_outcomes', 'mission_collection_plans',
+            'mission_run_journals', 'mission_writer_claims'})
+        def guarded_connection():
+            self._check()
+            connection = original()
+            def authorize(action, table, column, database, trigger):
+                if action in (sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE) and table in source_tables:
+                    return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+            connection.set_authorizer(authorize)
+            return connection
+        self.repository._get_connection = guarded_connection
+
+    def _check(self):
+        if self._sealed or self._closed or self.root.is_symlink() or self.path.is_symlink() or self.receipt.is_symlink():
+            raise FollowUpExecutionBoundaryError()
+        stat = self.path.stat()
+        if ((stat.st_dev, stat.st_ino) != self._identity
+                or json.loads(self.receipt.read_text()) != self._record):
+            raise FollowUpExecutionBoundaryError()
+
+    @staticmethod
+    def purge_owned_bootstrap(path, *, owner_reference, scope_digest, receipt_hash,
+                              identity, now, retention_until):
+        """Closed deletion-only inspection of an original exclusively created bootstrap store."""
+        import hashlib
+        import sqlite3
+        path = Path(path)
+        receipt = path.parent / 'bootstrap-ownership.json'
+        if now < retention_until or path.is_symlink() or receipt.is_symlink() or path.parent.is_symlink():
+            raise FollowUpExecutionBoundaryError()
+        raw = receipt.read_bytes()
+        record = json.loads(raw)
+        if (hashlib.sha256(raw).hexdigest() != receipt_hash
+                or set(record) != {'owner_reference', 'scope_digest', 'identity', 'token'}
+                or record['owner_reference'] != owner_reference or record['scope_digest'] != scope_digest
+                or record['identity'] != identity or not isinstance(record['token'], str)
+                or len(record['token']) != 32):
+            raise FollowUpExecutionBoundaryError()
+        stat = path.stat()
+        if [stat.st_dev, stat.st_ino] != identity:
+            raise FollowUpExecutionBoundaryError()
+        connection = sqlite3.connect(path.as_uri() + '?mode=rw', uri=True, timeout=2)
+        try:
+            connection.execute('BEGIN EXCLUSIVE')
+            if connection.execute('PRAGMA journal_mode').fetchone()[0] != 'delete':
+                raise FollowUpExecutionBoundaryError()
+            if any(Path(str(path)+suffix).exists() for suffix in ('-wal', '-shm', '-journal')):
+                raise FollowUpExecutionBoundaryError()
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if any(connection.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]
+                   for table in ('observations', 'sources', 'trend_signals') if table in tables):
+                raise FollowUpExecutionBoundaryError()
+            stat = path.stat()
+            if path.is_symlink() or [stat.st_dev, stat.st_ino] != identity:
+                raise FollowUpExecutionBoundaryError()
+            path.unlink()
+        finally:
+            connection.rollback()
+            connection.close()
+
+    async def seal(self, confirmation, repository):
+        self._check()
+        if (repository is not self.repository or confirmation.reference != self.owner_reference):
+            raise FollowUpExecutionBoundaryError()
+        await repository._ensure_schema()
+        with repository._get_connection() as connection:
+            if any(connection.execute('SELECT COUNT(*) FROM '+table).fetchone()[0]
+                   for table in ('observations', 'sources', 'trend_signals')):
+                raise FollowUpExecutionBoundaryError()
+            rows = connection.execute('SELECT id FROM research_missions').fetchall()
+            if [row[0] for row in rows] != [str(confirmation.selected_parent_id)]:
+                raise FollowUpExecutionBoundaryError()
+        await repository.close()
+        self._check()
+        enrollment = IsolatedCanonicalSQLite.__new__(IsolatedCanonicalSQLite)
+        enrollment.root, enrollment.confirmation = self.root, confirmation
+        enrollment.path, enrollment.marker = self.path, self.root/'ownership.json'
+        enrollment.disposition = self.root/'deletion.json'
+        enrollment.closed, enrollment._deletion_only = False, False
+        enrollment._delete_request, enrollment._identity = None, self._identity
+        with enrollment.marker.open('x') as stream:
+            json.dump({'owner_scope': digest(confirmation), 'identity': self._identity, 'purged': False}, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        enrollment._sync_directory()
+        self._sealed = True
+        return enrollment
