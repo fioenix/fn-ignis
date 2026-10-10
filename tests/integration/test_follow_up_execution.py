@@ -384,9 +384,12 @@ async def test_cancelled_execution_token_acquisition_creates_no_child_or_probe(e
 
 
 @pytest.mark.asyncio
-async def test_cancelled_journal_setup_settles_before_execution_token_release(tmp_path, monkeypatch):
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
+async def test_cancelled_journal_setup_settles_before_execution_token_release(executor_parity_case, monkeypatch):
     import asyncio
-    repository, parent, work, service, ingress, verifier = await execution_ready(tmp_path)
+    _, values, _ = executor_parity_case
+    repository, parent, work, service, ingress, verifier = values
+    parent_before = await repository.get_mission(parent.id)
     store = service._executor._workspace_store
     allocated, release = asyncio.Event(), asyncio.Event()
     original = store.allocate_run_journal
@@ -399,13 +402,19 @@ async def test_cancelled_journal_setup_settles_before_execution_token_release(tm
 
     monkeypatch.setattr(store, "allocate_run_journal", allocate)
     task = asyncio.create_task(service.execute(str(parent.id), str(work.work_id), 1, "cancel-setup"))
-    await asyncio.wait_for(allocated.wait(), 5)
-    assert len(verifier.tokens) == 1
-    task.cancel()
-    task.cancel()
-    release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    try:
+        await asyncio.wait_for(allocated.wait(), 5)
+        assert len(verifier.tokens) == 1
+        task.cancel()
+        task.cancel()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 5)
     snapshot = await repository.load_mission_follow_ups(parent.id)
     assert len(snapshot.relationships) == len(snapshot.reservations) == 1
     link = snapshot.relationships[0]
@@ -420,7 +429,7 @@ async def test_cancelled_journal_setup_settles_before_execution_token_release(tm
     assert retry.status == "RECONCILIATION_REQUIRED"
     assert retry.reason_code == "UNRESOLVED_EXECUTION" and retry.relationship == link
     assert ingress.auth_initializations == ingress.connector_calls == 0
-    await repository.close()
+    assert await repository.get_mission(parent.id) == parent_before
 
 
 @pytest.mark.asyncio
@@ -537,8 +546,11 @@ async def test_unavailable_execution_provider_refuses_without_runtime_or_admissi
 
 
 @pytest.mark.asyncio
-async def test_missing_actual_child_brief_refuses_before_journal_and_ingress(tmp_path, monkeypatch):
-    repository, parent, work, service, ingress, verifier = await execution_ready(tmp_path)
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
+async def test_missing_actual_child_brief_refuses_before_journal_and_ingress(executor_parity_case, monkeypatch):
+    _, values, _ = executor_parity_case
+    repository, parent, work, service, ingress, verifier = values
+    parent_before = await repository.get_mission(parent.id)
 
     async def missing_brief(mission_id):
         return None
@@ -553,7 +565,7 @@ async def test_missing_actual_child_brief_refuses_before_journal_and_ingress(tmp
     assert await repository.get_mission_writer_claim(child_id) is None
     assert ingress.auth_initializations == ingress.connector_calls == 0
     assert verifier.tokens == set()
-    await repository.close()
+    assert await repository.get_mission(parent.id) == parent_before
 
 
 @pytest.mark.asyncio
