@@ -282,18 +282,22 @@ async def test_native_follow_up_schema_child_provenance_and_original_alias_retry
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('relay_case', ('file',), indirect=True)
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
 async def test_actual_stdio_channel_cannot_replace_independent_execution_provider(relay_case, tmp_path):
+    from tests.integration.test_mission_relay_read_boundary import _state
     case, _, _ = relay_case
     parent, work = await _native_arrange(case, tmp_path)
     before = await case.repository.load_mission_follow_ups(parent.id)
+    physical_before = _state(case)
     async with native_client(tmp_path, case, missing_provider=True) as client:
         result = (await client.call_tool('execute_mission_follow_up', dict(mission_id=str(parent.id),
             follow_up_work_id=work['work_id'], expected_research_epoch=1, idempotency_key='no-provider'))).data
     assert result['status'] == 'REFUSED' and result['reason_code'] == 'SESSION_AUTHORITY_REQUIRED'
     assert result['child_mission_id'] is None and result['run_id'] is None
     assert await case.repository.load_mission_follow_ups(parent.id) == before
+    assert _state(case) == physical_before
     assert not (tmp_path / 'probes.json').exists()
+    assert PRIVATE_SENTINEL not in (tmp_path / 'stdio.log').read_text()
 
 
 @pytest.mark.asyncio
@@ -311,7 +315,7 @@ async def test_in_process_follow_up_refuses_without_resource_initialization(monk
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('relay_case', ('file',), indirect=True)
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
 @pytest.mark.parametrize('operation', ['caller-cancel', 'lifespan-close'])
 async def test_owned_actual_collector_cancellation_settles_before_release(relay_case, tmp_path, monkeypatch, operation):
     """Actual accepted execution, synthetic blocked probe; ownership survives repeated cancellation."""
@@ -322,7 +326,16 @@ async def test_owned_actual_collector_cancellation_settles_before_release(relay_
     entered, gate, cleanup_entered, cleanup_gate = (asyncio.Event() for _ in range(4))
     executor, registry, store = native_executor(case.repository, tmp_path / 'owned-probes.json',
         entered=entered, gate=gate, cleanup_entered=cleanup_entered, cleanup_gate=cleanup_gate)
-    case.repository.configure_follow_up_verifier(OfflineExecutionVerifier())
+    if case.name == 'postgres':
+        from tests.integration.test_follow_up_postgres_admission import AsyncVerifier
+        # The accepted execution verifier inherits AsyncVerifier; retain its native
+        # admission lease as well as the separate held execution capability.
+        class NativeVerifier(OfflineExecutionVerifier):
+            hold_current = AsyncVerifier.hold_current
+        verifier = NativeVerifier()
+    else:
+        verifier = OfflineExecutionVerifier()
+    case.repository.configure_follow_up_verifier(verifier)
     components = {'repository': case.repository, 'execute_mission_use_case': executor,
                   'registry': registry, 'workspace_store': store}
     monkeypatch.setattr(server, '_COMPONENTS', components)
@@ -366,11 +379,17 @@ async def test_owned_actual_collector_cancellation_settles_before_release(relay_
         assert reservation.encumbered == (2, 2)
         assert reservation.measurement_receipt_id is None
         assert reservation.measured_quota is None and reservation.measured_cost is None
-        import sqlite3
-        from contextlib import closing as closing_connection
-        with closing_connection(sqlite3.connect(case.repository._db_path)) as conn:
-            resources = conn.execute('SELECT resource,allocated FROM mission_follow_up_reservation_resources '
-                'WHERE reservation_id=? ORDER BY resource', (str(link.reservation_id),)).fetchall()
+        if case.name == 'postgres':
+            import psycopg
+            with psycopg.connect(case.dsn) as conn:
+                resources = conn.execute('SELECT resource,allocated FROM mission_follow_up_reservation_resources '
+                    'WHERE reservation_id=%s ORDER BY resource', (link.reservation_id,)).fetchall()
+        else:
+            import sqlite3
+            from contextlib import closing as closing_connection
+            with closing_connection(sqlite3.connect(case.repository._db_path)) as conn:
+                resources = conn.execute('SELECT resource,allocated FROM mission_follow_up_reservation_resources '
+                    'WHERE reservation_id=? ORDER BY resource', (str(link.reservation_id),)).fetchall()
         assert resources == [('queries', 2), ('youtube_search_calls', 2)]
         journals = await case.repository.list_run_journals(link.child_mission_id)
         assert len(journals) == 1 and journals[0].run_id == running[0].run_id
@@ -404,7 +423,7 @@ async def test_owned_actual_collector_cancellation_settles_before_release(relay_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('relay_case', ('file',), indirect=True)
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
 async def test_actual_stdio_pre_admission_refusals_preserve_physical_state(relay_case, tmp_path):
     """Actual MCP rejects hostile/stale/unbound arguments before any child or probe exists."""
     from tests.integration.test_mission_relay_read_boundary import _state
