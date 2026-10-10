@@ -333,9 +333,28 @@ async def test_uninitialized_execution_context_refuses_before_worker_or_database
 
 
 @pytest.mark.asyncio
-async def test_cancelled_execution_token_acquisition_creates_no_child_or_probe(tmp_path):
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
+async def test_cancelled_execution_token_acquisition_creates_no_child_or_probe(executor_parity_case, monkeypatch):
     import asyncio
-    repository, parent, work, service, ingress, verifier = await execution_ready(tmp_path)
+    from ignis.application.ports.connector_port import IngestRuntime
+    from tests.integration.test_mission_relay_read_boundary import _state
+    case, values, source = executor_parity_case
+    repository, parent, work, service, ingress, verifier = values
+    physical = _state(case)
+    runtime_calls, health_calls = [], []
+
+    async def runtime():
+        runtime_calls.append('runtime')
+        return IngestRuntime.HTTP_API
+
+    async def health():
+        health_calls.append('health')
+        return None
+
+    plugin = service._executor._registry.get_plugin_by_id(source)
+    monkeypatch.setattr(plugin, 'resolve_ingest_runtime', runtime)
+    monkeypatch.setattr(plugin, 'keyword_search_blocked_reason', health, raising=False)
+    monkeypatch.setattr(plugin, 'is_healthy', health)
     entered = asyncio.Event()
 
     @asynccontextmanager
@@ -347,14 +366,21 @@ async def test_cancelled_execution_token_acquisition_creates_no_child_or_probe(t
     verifier.hold_execution = wait_for_token
     before = await repository.load_mission_follow_ups(parent.id)
     task = asyncio.create_task(service.execute(str(parent.id), str(work.work_id), 1, "cancel-before-token"))
-    await asyncio.wait_for(entered.wait(), 5)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        assert verifier.tokens == set()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 5)
     assert await repository.load_mission_follow_ups(parent.id) == before
     assert ingress.auth_initializations == ingress.connector_calls == 0
     assert verifier.tokens == set()
-    await repository.close()
+    assert runtime_calls == health_calls == []
+    assert _state(case) == physical
 
 
 @pytest.mark.asyncio
@@ -419,8 +445,27 @@ async def test_interrupted_external_probe_cannot_be_folded_into_completed_empty_
 
 
 @pytest.mark.asyncio
-async def test_incomplete_execution_resource_proof_refuses_before_admission_or_ingress(tmp_path):
-    repository, parent, work, service, ingress, verifier = await execution_ready(tmp_path)
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
+async def test_incomplete_execution_resource_proof_refuses_before_admission_or_ingress(executor_parity_case, monkeypatch):
+    from ignis.application.ports.connector_port import IngestRuntime
+    from tests.integration.test_mission_relay_read_boundary import _state
+    case, values, source = executor_parity_case
+    repository, parent, work, service, ingress, verifier = values
+    physical = _state(case)
+    runtime_calls, health_calls = [], []
+
+    async def runtime():
+        runtime_calls.append('runtime')
+        return IngestRuntime.HTTP_API
+
+    async def health():
+        health_calls.append('health')
+        return None
+
+    plugin = service._executor._registry.get_plugin_by_id(source)
+    monkeypatch.setattr(plugin, 'resolve_ingest_runtime', runtime)
+    monkeypatch.setattr(plugin, 'keyword_search_blocked_reason', health, raising=False)
+    monkeypatch.setattr(plugin, 'is_healthy', health)
     original = verifier.hold_execution
 
     @asynccontextmanager
@@ -437,13 +482,33 @@ async def test_incomplete_execution_resource_proof_refuses_before_admission_or_i
     assert await repository.load_mission_follow_ups(parent.id) == before
     assert ingress.auth_initializations == ingress.connector_calls == 0
     assert verifier.tokens == set()
-    await repository.close()
+    assert runtime_calls == health_calls == []
+    assert _state(case) == physical
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
 @pytest.mark.parametrize("phase", ["provider", "guard"])
-async def test_unavailable_execution_provider_refuses_without_runtime_or_admission(tmp_path, phase):
-    repository, parent, work, service, ingress, verifier = await execution_ready(tmp_path)
+async def test_unavailable_execution_provider_refuses_without_runtime_or_admission(executor_parity_case, monkeypatch, phase):
+    from ignis.application.ports.connector_port import IngestRuntime
+    from tests.integration.test_mission_relay_read_boundary import _state
+    case, values, source = executor_parity_case
+    repository, parent, work, service, ingress, verifier = values
+    physical = _state(case)
+    runtime_calls, health_calls = [], []
+
+    async def runtime():
+        runtime_calls.append('runtime')
+        return IngestRuntime.HTTP_API
+
+    async def health():
+        health_calls.append('health')
+        return None
+
+    plugin = service._executor._registry.get_plugin_by_id(source)
+    monkeypatch.setattr(plugin, 'resolve_ingest_runtime', runtime)
+    monkeypatch.setattr(plugin, 'keyword_search_blocked_reason', health, raising=False)
+    monkeypatch.setattr(plugin, 'is_healthy', health)
 
     original = verifier.hold_execution
 
@@ -467,7 +532,8 @@ async def test_unavailable_execution_provider_refuses_without_runtime_or_admissi
     assert await repository.load_mission_follow_ups(parent.id) == before
     assert ingress.auth_initializations == ingress.connector_calls == 0
     assert verifier.tokens == set()
-    await repository.close()
+    assert runtime_calls == health_calls == []
+    assert _state(case) == physical
 
 
 @pytest.mark.asyncio
