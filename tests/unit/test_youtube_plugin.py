@@ -85,6 +85,7 @@ async def test_returned_description_is_retained_without_inventing_missing_conten
     assert signals[0].raw_title == "Public tutorial"
     assert signals[0].source_url == "https://www.youtube.com/watch?v=description-video"
     assert signals[0].metadata["video_id"] == "description-video"
+    assert signals[0].metadata["source_access"] == "official_api"
     if description is None:
         assert "description" not in signals[0].metadata
     else:

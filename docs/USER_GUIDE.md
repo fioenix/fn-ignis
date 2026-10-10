@@ -86,6 +86,23 @@ when running an installed package (with a temporary-directory fallback if needed
 
 ### Mission Relay on the development branch
 
+On a caller-root-capable local stdio session, admitted mission ingress persists RUNNING before
+opening its selected mission/run dashboard and notifying that caller through the existing MCP
+logging notification channel. The automatic viewing lease expires 15 minutes after original run
+admission; reads and restart do not renew it. Presentation failure preserves the original
+collection outcome. Closing the viewer stops that view, not independent collection, and never
+deletes retained evidence. Server shutdown closes the listener and owned handles; reopening
+storage reads the same identity without resuming providers. Native client notification/root
+capability must be verified separately; configured server presence alone is not integration proof.
+
+Source policy appears against each original source/observation identity. Registered official
+YouTube API metadata with exact ingestion time shows its original capture and 30-calendar-day
+boundary; ambiguous historical access, missing capture time or future timestamps remain UNKNOWN.
+Publication dates, viewer clocks and restart never replace capture time. A boundary warning
+requires a source-specific owner decision; it grants no indefinite compliance, OAuth exception,
+collection authority or Market support. The viewer performs no refresh, deletion or quota calls.
+See [YouTube developer policies](https://developers.google.com/youtube/terms/developer-policies).
+
 Use `get_mission_relay_snapshot` for a bounded snapshot of the selected mission and optional run.
 Use `open_mission_relay` with an explicit UTC expiry to open a read-only localhost viewer.
 These reads validate installed storage without bootstrapping a database or starting collectors.

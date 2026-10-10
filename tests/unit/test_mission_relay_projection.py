@@ -9,7 +9,7 @@ not mock projection behavior or a substitute evidence policy.
 import importlib
 import json
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -450,3 +450,39 @@ def test_collection_state_projects_canonical_scope_without_inference(records, mi
         evidence = replace(evidence, outcomes=())
     payload, _ = _projection('snapshot', evidence, run, selected_run_id=RUN if selected_run else None)
     assert payload['collection_state'] == expected
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_source_policy_uses_original_capture_not_publication_or_read_clock(records, kind):
+    evidence, run = records
+    capture = NOW - timedelta(days=30)
+    signal = replace(evidence.signals[0], captured_at=capture, published_at=NOW,
+        metadata={"source_access": "official_api", "connector_surface": "youtube"})
+    outcome = replace(evidence.outcomes[0], connector_surface="youtube")
+    evidence = replace(evidence, signals=(signal,), outcomes=(outcome,))
+    payload, _ = _projection(kind, evidence, run)
+    row = _observation(kind, payload)
+    policy = row["source_policy"]
+    assert row["observation_id"] == str(OBSERVATION) and row["source_id"] == str(SOURCE)
+    assert policy["status"] == "REFRESH_OR_DELETE_REQUIRED"
+    assert policy["captured_at"] == capture.isoformat() and policy["boundary_at"] == NOW.isoformat()
+    assert policy["age_seconds"] == 30 * 86400 and policy["automatic_action"] is False
+    earlier, _ = _projection(kind, evidence, run, read_at=NOW-timedelta(microseconds=1))
+    assert _observation(kind, earlier)["source_policy"]["status"] == "WITHIN_30_DAY_WINDOW"
+
+
+@pytest.mark.parametrize("case,reason", [("historical", "UNKNOWN_SOURCE_SCOPE"),
+    ("unregistered", "UNKNOWN_SOURCE_SCOPE"), ("missing_time", "UNKNOWN_COLLECTION_TIME"),
+    ("future", "FUTURE_COLLECTION_TIME")])
+def test_source_policy_preserves_unknown_provenance_without_invented_age(records, case, reason):
+    evidence, run = records
+    signal = replace(evidence.signals[0], metadata={"source_access": "official_api", "connector_surface": "youtube"})
+    outcome = replace(evidence.outcomes[0], connector_surface="youtube")
+    if case == "historical": signal = replace(signal, metadata={})
+    if case == "unregistered": outcome = replace(outcome, connector_surface="youtube.search")
+    if case == "missing_time": signal = replace(signal, time_provenance="unknown", captured_at=None)
+    if case == "future": signal = replace(signal, captured_at=NOW+timedelta(seconds=1))
+    payload, _ = _projection("snapshot", replace(evidence, signals=(signal,), outcomes=(outcome,)), run)
+    policy = payload["evidence"][0]["source_policy"]
+    assert policy["status"] == "UNKNOWN" and policy["reason_code"] == reason
+    assert policy["age_seconds"] is None and policy["boundary_at"] is None

@@ -337,6 +337,34 @@ class MissionRelayEventPage:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RelaySourcePolicy:
+    """Read-only source-age facts; never a refresh, deletion or retention permission."""
+    status: str = "UNKNOWN"
+    reason_code: str = "UNKNOWN_SOURCE_SCOPE"
+    captured_at: datetime | None = None
+    boundary_at: datetime | None = None
+    age_seconds: int | None = None
+
+    def __post_init__(self):
+        if self.status not in ("UNKNOWN", "WITHIN_30_DAY_WINDOW", "REFRESH_OR_DELETE_REQUIRED"):
+            raise ValueError("Invalid source policy status")
+        if self.reason_code not in ("UNKNOWN_SOURCE_SCOPE", "UNKNOWN_COLLECTION_TIME", "FUTURE_COLLECTION_TIME", "PUBLIC_API_METADATA"):
+            raise ValueError("Invalid source policy reason")
+        _time(self.captured_at, "captured_at", optional=True)
+        _time(self.boundary_at, "boundary_at", optional=True)
+        if self.age_seconds is not None: _integer(self.age_seconds, "age_seconds")
+        if self.status != "UNKNOWN" and (self.captured_at is None or self.boundary_at is None or self.age_seconds is None):
+            raise ValueError("Known policy status requires original collection time")
+
+    def to_payload(self):
+        return {"status": self.status, "reason_code": self.reason_code,
+            "captured_at": self.captured_at.isoformat() if self.captured_at is not None else None,
+            "boundary_at": self.boundary_at.isoformat() if self.boundary_at is not None else None,
+            "age_seconds": self.age_seconds, "automatic_action": False,
+            "policy_url": "https://developers.google.com/youtube/terms/developer-policies"}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class RelayObservation:
     """Allowlisted observation facts; text and navigation are sanitized by projection."""
 
@@ -354,6 +382,7 @@ class RelayObservation:
     direction: EvidenceDirection | None
     qualification_relation: QualificationRelation | None = None
     qualification_frame_fingerprint: str | None = None
+    source_policy: "RelaySourcePolicy | None" = None
 
     def __post_init__(self) -> None:
         for name in ("mission_id", "observation_id", "source_id"):
@@ -374,6 +403,8 @@ class RelayObservation:
                     raise ValueError(f"{name} must be finite or unknown.")
         _time(self.published_at, "published_at", optional=True)
         _time(self.captured_at, "captured_at", optional=True)
+        if self.source_policy is not None:
+            _require_type(self.source_policy, RelaySourcePolicy, "source_policy")
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -393,6 +424,7 @@ class RelayObservation:
             if self.qualification_relation is not None
             else None,
             "qualification_frame_fingerprint": self.qualification_frame_fingerprint,
+            "source_policy": self.source_policy.to_payload() if self.source_policy is not None else None,
         }
 
 

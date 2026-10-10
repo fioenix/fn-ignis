@@ -134,7 +134,8 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
 <section role="region" aria-label="Output"><h3>Output</h3><p>{{ snapshot.evidence | length }} observations on this page; {{ snapshot.counts.observations }} in the selected corpus.</p>
 <h3>Measured channel coverage</h3>
 {% for channel in snapshot.channels %}<p data-channel-platform="{{ channel.platform }}">{{ channel.platform }} · {{ channel.status or 'Unknown' }} · <span data-testid="channel-count">{{ channel.signals_collected if channel.signals_collected is not none else 'Unknown' }}</span> observations · {{ channel.completed_at or 'Unknown' }} · {{ channel.note or 'Unknown' }}</p>{% else %}<p>Unknown — no measured channel outcomes in this selected view.</p>{% endfor %}
-<ul class="evidence-list">{% for row in snapshot.evidence %}<li><span>{{ row.title }}</span> <span class="identity">{{ row.observation_id }} · {{ row.evidence_role }} · {{ row.direction or 'Unknown' }}</span></li>{% else %}<li>No observations on this page.</li>{% endfor %}</ul></section>
+<p>Public API metadata status uses original capture time. A warning does not extend retention permission; no refresh or deletion runs from this viewer.</p>
+<ul class="evidence-list">{% for row in snapshot.evidence %}<li><span>{{ row.title }}</span> <span class="identity">{{ row.observation_id }} · {{ row.evidence_role }} · {{ row.direction or 'Unknown' }}</span><p>Source policy {{ row.source_policy.status if row.source_policy else 'UNKNOWN' }} · boundary {{ row.source_policy.boundary_at if row.source_policy else 'Unknown' }}</p></li>{% else %}<li>No observations on this page.</li>{% endfor %}</ul></section>
 <section role="region" aria-label="Failure reason"><h3>Failure reason</h3><p>Unmeasured channel availability is Unknown; absence of a receipt is not a measured empty result.</p></section>
 <section role="region" aria-label="Why it matters"><h3>Why it matters</h3><p>Source and observation identity preserve evidence lineage without promoting attention to Market support.</p></section>
 </section>
@@ -248,7 +249,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
     } else if (name === 'Sources') {
       values = {
         'Input': 'Canonical selected-mission observations and recorded channel outcomes.',
-        'Output': `${snapshot.evidence.length} observations on this page; ${snapshot.counts.observations} observations and ${snapshot.counts.sources} canonical sources in the full selected corpus.`,
+        'Output': `${snapshot.evidence.length} observations on this page; ${snapshot.counts.observations} observations and ${snapshot.counts.sources} canonical sources in the full selected corpus.\nPublic API metadata uses original capture time; no refresh or deletion runs from this viewer. Warnings do not extend retention permission.\n${snapshot.evidence.map(row => `${row.observation_id} · ${row.source_id} · source policy ${unknown(row.source_policy?.status)} · boundary ${unknown(row.source_policy?.boundary_at)}`).join('\n')}`,
         'Failure reason': 'Unmeasured channel availability remains Unknown. EMPTY_NO_DATA is a measured outcome with its recorded count; it is not inferred from a missing result.',
         'Why it matters': 'Source and observation identity retain lineage. Attention context does not become Market support.'
       };
@@ -449,7 +450,7 @@ button[aria-pressed="true"] { background: var(--color-primary); color: var(--col
       const observation = data.observation;
       const values = {
         'Input': `Mission ${data.mission_id} · revision ${data.revision} · observation ${observation.observation_id} · source ${observation.source_id}.`,
-        'Output': `${observation.title}\n${unknown(observation.excerpt)}\n${observation.evidence_role} · ${unknown(observation.direction)} · ${unknown(observation.qualification_relation)}\nQualification frame ${unknown(observation.qualification_frame_fingerprint)}\nMetric ${unknown(observation.metric_value)} · growth ${unknown(observation.growth_velocity)}\nPublished ${unknown(observation.published_at)} · captured ${unknown(observation.captured_at)}\nSource URL ${unknown(observation.source_url)}`,
+        'Output': `${observation.title}\n${unknown(observation.excerpt)}\n${observation.evidence_role} · ${unknown(observation.direction)} · ${unknown(observation.qualification_relation)}\nQualification frame ${unknown(observation.qualification_frame_fingerprint)}\nMetric ${unknown(observation.metric_value)} · growth ${unknown(observation.growth_velocity)}\nPublished ${unknown(observation.published_at)} · captured ${unknown(observation.captured_at)}\nSource policy ${unknown(observation.source_policy?.status)} · original capture ${unknown(observation.source_policy?.captured_at)} · boundary ${unknown(observation.source_policy?.boundary_at)}\nSource URL ${unknown(observation.source_url)}`,
         'Failure reason': 'Unknown unless a recorded channel or qualification refusal explains a gap. Current strategic claim permission is unavailable.',
         'Why it matters': 'Source association, qualification relation and metric provenance are distinct from claim support.'
       };

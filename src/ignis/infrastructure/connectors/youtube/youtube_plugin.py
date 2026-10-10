@@ -278,6 +278,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
             source_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else None
 
             metadata = {
+                "source_access": "official_api",
                 "video_id": video_id,
                 "channel_id": snippet.get("channelId"),
                 "channel_title": snippet.get("channelTitle"),
@@ -481,6 +482,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                 velocity = round(view_count / hours_diff, 2)
 
                                 meta = {
+                                    "source_access": "official_api",
                                     "keyword": raw_kw,
                                     "video_id": v_id,
                                     "channel_title": sanitize_pii_text(v_snippet.get("channelTitle") or ""),

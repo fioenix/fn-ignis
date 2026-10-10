@@ -7,7 +7,7 @@ frame from a bounded page or grants permission from unprojected ledger history.
 import json
 from collections.abc import Mapping
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, unquote, urlsplit
 from uuid import UUID
 
@@ -24,6 +24,7 @@ from ignis.domain.mission_relay import (
     MissionRelayReadFailure, MissionRelaySnapshot, RelayChannelOutcome, RelayCollectionState,
     RelayFramePendingReason, RelayObservation, RelayReadReason, RelayReadStatus,
     RelayClaimGate, RelayGateState,
+    RelaySourcePolicy,
 )
 from ignis.domain.research_workspace import (
     ClaimStatus, EvidenceRole, GapReport, InvalidMissionClaimError, QualificationContext,
@@ -109,7 +110,26 @@ def _scope_matches(evidence, run, mission_id, run_id, *, complete: bool) -> bool
     return True
 
 
-def _observation(signal, evidence, surface) -> RelayObservation:
+def _source_policy(signal, evidence, read_at):
+    # Access method is recorded by the existing API producer/registered surface, not a grant.
+    platform = getattr(signal.platform, "value", signal.platform)
+    measured = any(outcome.platform == "youtube" and outcome.connector_surface == "youtube"
+        and outcome.status.value == "HEALTHY" for outcome in evidence.outcomes)
+    if (platform != "youtube" or signal.metadata.get("source_access") != "official_api"
+            or signal.metadata.get("connector_surface") != "youtube" or not measured):
+        return RelaySourcePolicy()
+    if signal.time_provenance != "exact_ingestion" or signal.captured_at is None:
+        return RelaySourcePolicy(reason_code="UNKNOWN_COLLECTION_TIME")
+    captured = signal.captured_at.astimezone(timezone.utc)
+    if captured > read_at:
+        return RelaySourcePolicy(reason_code="FUTURE_COLLECTION_TIME")
+    boundary = captured + timedelta(days=30)
+    return RelaySourcePolicy(status="REFRESH_OR_DELETE_REQUIRED" if read_at >= boundary else "WITHIN_30_DAY_WINDOW",
+        reason_code="PUBLIC_API_METADATA", captured_at=captured, boundary_at=boundary,
+        age_seconds=int((read_at-captured).total_seconds()))
+
+
+def _observation(signal, evidence, surface, read_at) -> RelayObservation:
     if not isinstance(signal.metadata, Mapping):
         raise ValueError("Recorded observation metadata must be a mapping.")
     qualification = next((q for q in evidence.qualifications if q.observation_id == signal.observation_id), None)
@@ -124,6 +144,7 @@ def _observation(signal, evidence, surface) -> RelayObservation:
         direction=qualification.evidence_role if qualification is not None else None,
         qualification_relation=qualification.relation if qualification is not None else None,
         qualification_frame_fingerprint=qualification.frame_fingerprint if qualification is not None else None,
+        source_policy=_source_policy(signal, evidence, read_at),
     )
 
 
@@ -366,7 +387,7 @@ def _project(
                 return _failure(RelayReadReason.SCOPE_MISMATCH)
             return _bounded(MissionRelayInspection(
                 mission_id=selected_mission_id, run_id=selected_run_id, high_water=high_water,
-                read_at=read_at, observation=_observation(signal, evidence, surface),
+                read_at=read_at, observation=_observation(signal, evidence, surface, read_at),
             ))
         try:
             collection_state = RelayCollectionState(run.status if run is not None else evidence.mission.status)
@@ -378,7 +399,7 @@ def _project(
         return _bounded(MissionRelaySnapshot(
             mission_id=selected_mission_id, run_id=selected_run_id, high_water=high_water,
             read_at=read_at, page_size=page_size,
-            evidence=tuple(_observation(row, evidence, surface) for row in rows),
+            evidence=tuple(_observation(row, evidence, surface, read_at) for row in rows),
             total_observations=total, source_count=source_count, surface=surface,
             evidence_offset=evidence_offset,
             manifest_digest=evidence.manifest.manifest_digest if evidence.manifest is not None else None,

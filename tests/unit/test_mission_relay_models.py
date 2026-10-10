@@ -382,8 +382,10 @@ def test_safe_snapshot_and_inspection_have_concrete_nested_allowlists(relay):
         "direction",
         "qualification_relation",
         "qualification_frame_fingerprint",
+        "source_policy",
     }
     assert set(payload["evidence"][0]) == observation_keys
+    assert payload["evidence"][0]["source_policy"] is None
     assert set(payload["counts"]) == {"observations", "sources"}
     assert payload["counts"] == {"observations": 2, "sources": 1}
     assert payload["next_evidence_offset"] == 1

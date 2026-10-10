@@ -152,6 +152,36 @@ class _MissionRelayRuntime:
         self.closed = False
         self._projection = None
         self._reads = None
+        self._dashboards = {}
+
+    async def started_dashboard(self, mission, journal):
+        """Notify the same authorized caller after its canonical run has actually started."""
+        from fastmcp.server.dependencies import get_context
+        from ignis.application.ports.research_workspace_port import RunJournal
+        if (self.closed or self.caller_scope is None or type(journal) is not RunJournal
+                or journal.mission_id != mission.id or journal.workspace_id != mission.workspace_id
+                or type(journal.run_id) is not UUID or mission.status != "RUNNING"):
+            return {"status": "UNAVAILABLE", "reason_code": "DASHBOARD_SCOPE_REQUIRED"}
+        self.caller_scope.check()
+        ctx = get_context()
+        if ctx.request_context is None or _request_runtime(ctx) is not self:
+            return {"status": "UNAVAILABLE", "reason_code": "DASHBOARD_SCOPE_REQUIRED"}
+        if journal.run_id in self._dashboards:
+            return self._dashboards[journal.run_id]
+        # One fixed viewing lease from original run admission, distinct from collection authority.
+        deadline = journal.started_at + timedelta(minutes=15)
+        async with asyncio.timeout(3):
+            opened = await handle_open_mission_relay(str(mission.id), deadline.isoformat(),
+                str(journal.run_id), runtime=self)
+            from ignis.domain.mission_relay import MissionRelayOpenResult
+            if type(opened) is not MissionRelayOpenResult:
+                return {"status": "UNAVAILABLE", "reason_code": "DASHBOARD_START_FAILED"}
+            result = {"status": "AVAILABLE", **opened.to_payload()}
+            self._dashboards[journal.run_id] = result
+            # Send on the existing request channel directly; never log the bearer URL locally.
+            await ctx.session.send_log_message(level="info", logger="ignis.dashboard",
+                data={"event": "IGNIS_DASHBOARD_READY", **result}, related_request_id=ctx.request_id)
+            return result
 
     async def record(self, mission_id: str, command: dict[str, Any]) -> dict[str, Any]:
         from ignis.application.cancellation import await_settled
@@ -678,6 +708,8 @@ def _init_components(*, caller_scope=None):
         clusterer=clusterer,
         workspace_store=workspace_store,
         vocabulary_sync=vocabulary_synchronizer,
+        run_started=(lambda mission, journal: caller_scope.runtime.started_dashboard(mission, journal))
+            if caller_scope is not None else None,
     )
     create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store,
         research_directory=caller_scope.directory / "research" if caller_scope is not None else None,

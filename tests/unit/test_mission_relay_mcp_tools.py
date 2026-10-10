@@ -1,6 +1,7 @@
 """Additive MCP read seams; actual storage and browser acceptance stay in T030."""
 
 import inspect
+from contextlib import asynccontextmanager
 
 import pytest
 
@@ -70,18 +71,35 @@ def typed_projection(monkeypatch):
     return server, requests, runtimes
 
 
+@asynccontextmanager
+async def _unit_runtime(typed_projection, root):
+    """Explicit disposable caller scope for handler units; no native transport authority claim."""
+    from ignis.infrastructure.caller_storage import CallerStorageScope
+    server, _, _ = typed_projection
+    scope = CallerStorageScope(root)
+    runtime = server._MissionRelayRuntime(server.mcp, caller_scope=scope)
+    try:
+        yield runtime
+    finally:
+        await runtime.close()
+
+
+async def _unit_call(runtime, name, arguments):
+    from ignis.interfaces.mcp import server
+    return await getattr(server, "handle_" + name)(runtime=runtime, **arguments)
+
+
 @pytest.mark.asyncio
-async def test_actual_mcp_snapshot_preserves_selected_run_and_opens_no_listener(typed_projection):
-    from fastmcp import Client
+async def test_unit_snapshot_preserves_selected_run_and_opens_no_listener(typed_projection, tmp_path):
     from uuid import uuid4
     server, requests, runtimes = typed_projection
     mission, run = uuid4(), uuid4()
-    async with Client(server.mcp) as client:
-        result = await client.call_tool("get_mission_relay_snapshot", {
+    async with _unit_runtime(typed_projection, tmp_path) as runtime:
+        result = await _unit_call(runtime, "get_mission_relay_snapshot", {
             "mission_id": str(mission), "run_id": str(run), "page_size": 7,
             "after_revision": 0, "after_ordinal": 0,
         })
-        payload = result.structured_content
+        payload = result.to_payload()
         assert payload["status"] == "OK"
         assert payload["mission_id"] == str(mission) and payload["run_id"] == str(run)
         assert len(requests) == 1 and requests[0].page_size == 7
@@ -91,19 +109,18 @@ async def test_actual_mcp_snapshot_preserves_selected_run_and_opens_no_listener(
 
 
 @pytest.mark.asyncio
-async def test_actual_mcp_open_preserves_expiry_and_returns_explicit_read_authority(typed_projection):
+async def test_unit_open_preserves_expiry_and_returns_explicit_read_authority(typed_projection, tmp_path):
     from datetime import datetime, timedelta, timezone
     from urllib.parse import urlsplit
     from uuid import uuid4
-    from fastmcp import Client
     server, requests, runtimes = typed_projection
     mission, run = uuid4(), uuid4()
     deadline = datetime.now(timezone.utc) + timedelta(minutes=15)
-    async with Client(server.mcp) as client:
-        result = await client.call_tool("open_mission_relay", {
+    async with _unit_runtime(typed_projection, tmp_path) as runtime:
+        result = await _unit_call(runtime, "open_mission_relay", {
             "mission_id": str(mission), "run_id": str(run), "expires_at": deadline.isoformat(),
         })
-        payload = result.structured_content
+        payload = result.to_payload()
         assert set(payload) == {"schema_version", "status", "mission_id", "run_id", "url", "expires_at", "read_only", "inspection_supported"}
         assert payload["status"] == "OK" and payload["read_only"] is True
         assert payload["inspection_supported"] is True
@@ -124,13 +141,12 @@ async def test_actual_mcp_open_preserves_expiry_and_returns_explicit_read_author
     ("open_mission_relay", {"expires_at": "2026-01-01T00:00:00"}, "INVALID_EXPIRY"),
     ("open_mission_relay", {"expires_at": "2026-01-01T00:00:00Z"}, "INVALID_EXPIRY"),
 ))
-async def test_actual_mcp_refuses_invalid_input_without_read_or_listener(typed_projection, name, args, reason):
-    from fastmcp import Client
+async def test_unit_refuses_invalid_input_without_read_or_listener(typed_projection, tmp_path, name, args, reason):
     from uuid import uuid4
     server, requests, runtimes = typed_projection
-    async with Client(server.mcp) as client:
-        result = await client.call_tool(name, {"mission_id": str(uuid4()), **args})
-        assert result.structured_content == {"schema_version": 1, "status": "REFUSED", "reason_code": reason}
+    async with _unit_runtime(typed_projection, tmp_path) as runtime:
+        result = await _unit_call(runtime, name, {"mission_id": str(uuid4()), **args})
+        assert result.to_payload() == {"schema_version": 1, "status": "REFUSED", "reason_code": reason}
         assert requests == [] and runtimes == []
 
 
@@ -143,14 +159,13 @@ async def test_handler_without_owner_lifespan_is_unavailable_without_bootstrap(m
 
 
 @pytest.mark.asyncio
-async def test_mcp_and_http_share_four_process_slots_without_waiter_queue(typed_projection, monkeypatch):
+async def test_unit_handlers_and_http_share_four_process_slots_without_waiter_queue(typed_projection, monkeypatch, tmp_path):
     import asyncio
     import http.client
     import json
     from datetime import datetime, timedelta, timezone
     from urllib.parse import urlsplit
     from uuid import uuid4
-    from fastmcp import Client
     server, requests, runtimes = typed_projection
     mission = str(uuid4())
     original = server._MissionRelayRuntime.snapshot
@@ -166,21 +181,21 @@ async def test_mcp_and_http_share_four_process_slots_without_waiter_queue(typed_
             await release.wait()
         return await original(runtime, request)
     monkeypatch.setattr(server._MissionRelayRuntime, "snapshot", blocked)
-    async with Client(server.mcp) as client:
-        cap = (await client.call_tool("open_mission_relay", {
+    async with _unit_runtime(typed_projection, tmp_path) as runtime:
+        cap = (await _unit_call(runtime, "open_mission_relay", {
             "mission_id": mission, "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
-        })).structured_content
+        })).to_payload()
         assert cap["status"] == "OK"
         blocking = True
-        pending = [asyncio.create_task(client.call_tool("get_mission_relay_snapshot", {
+        pending = [asyncio.create_task(_unit_call(runtime, "get_mission_relay_snapshot", {
             "mission_id": mission, "page_size": 1,
         })) for _ in range(4)]
         try:
             await asyncio.wait_for(entered.wait(), 1)
-            fifth = await asyncio.wait_for(client.call_tool("get_mission_relay_snapshot", {
+            fifth = await asyncio.wait_for(_unit_call(runtime, "get_mission_relay_snapshot", {
                 "mission_id": mission, "page_size": 1,
             }), 1)
-            assert fifth.structured_content == {"schema_version": 1, "status": "UNAVAILABLE", "reason_code": "READ_BUSY"}
+            assert fifth.to_payload() == {"schema_version": 1, "status": "UNAVAILABLE", "reason_code": "READ_BUSY"}
             def http_read():
                 url = urlsplit(cap["url"])
                 connection = http.client.HTTPConnection("127.0.0.1", url.port, timeout=1)
@@ -191,19 +206,18 @@ async def test_mcp_and_http_share_four_process_slots_without_waiter_queue(typed_
                 finally:
                     connection.close()
             status, body = await asyncio.to_thread(http_read)
-            assert status == 503 and body == fifth.structured_content
+            assert status == 503 and body == fifth.to_payload()
             assert count == 4, "Busy refusal admitted an additional repository read"
         finally:
             release.set()
             results = await asyncio.gather(*pending)
-        assert all(result.structured_content["status"] == "OK" for result in results)
+        assert all(result.to_payload()["status"] == "OK" for result in results)
 
 
 @pytest.mark.asyncio
-async def test_browserless_read_timeout_keeps_capacity_until_underlying_cleanup(typed_projection, monkeypatch):
+async def test_browserless_read_timeout_keeps_capacity_until_underlying_cleanup(typed_projection, monkeypatch, tmp_path):
     import asyncio
     from uuid import uuid4
-    from fastmcp import Client
     server, requests, runtimes = typed_projection
     cancelled, cleanup = asyncio.Event(), asyncio.Event()
     count = 0
@@ -217,26 +231,25 @@ async def test_browserless_read_timeout_keeps_capacity_until_underlying_cleanup(
             await cleanup.wait()
             raise
     monkeypatch.setattr(server._MissionRelayRuntime, "snapshot", blocked)
-    async with Client(server.mcp) as client:
-        pending = [asyncio.create_task(client.call_tool("get_mission_relay_snapshot", {
+    async with _unit_runtime(typed_projection, tmp_path) as runtime:
+        pending = [asyncio.create_task(_unit_call(runtime, "get_mission_relay_snapshot", {
             "mission_id": str(uuid4()), "page_size": 1,
         })) for _ in range(4)]
         try:
             results = await asyncio.wait_for(asyncio.gather(*pending), 4)
-            assert all(result.structured_content == {"schema_version": 1, "status": "UNAVAILABLE", "reason_code": "READ_TIMEOUT"} for result in results)
+            assert all(result.to_payload() == {"schema_version": 1, "status": "UNAVAILABLE", "reason_code": "READ_TIMEOUT"} for result in results)
             assert cancelled.is_set()
-            fifth = await client.call_tool("get_mission_relay_snapshot", {"mission_id": str(uuid4()), "page_size": 1})
-            assert fifth.structured_content["reason_code"] == "READ_BUSY" and count == 4
+            fifth = await _unit_call(runtime, "get_mission_relay_snapshot", {"mission_id": str(uuid4()), "page_size": 1})
+            assert fifth.to_payload()["reason_code"] == "READ_BUSY" and count == 4
         finally:
             cleanup.set()
             await asyncio.gather(*pending, return_exceptions=True)
 
 
 @pytest.mark.asyncio
-async def test_browserless_read_revocation_discards_late_success(typed_projection, monkeypatch):
+async def test_browserless_read_revocation_discards_late_success(typed_projection, monkeypatch, tmp_path):
     import asyncio
     from uuid import uuid4
-    from fastmcp import Client
     server, requests, runtimes = typed_projection
     entered = asyncio.Event()
     original = server._MissionRelayRuntime.snapshot
@@ -248,11 +261,11 @@ async def test_browserless_read_revocation_discards_late_success(typed_projectio
         except asyncio.CancelledError:
             return recorded
     monkeypatch.setattr(server._MissionRelayRuntime, "snapshot", late_success)
-    async with Client(server.mcp) as client:
-        pending = asyncio.create_task(client.call_tool("get_mission_relay_snapshot", {
+    async with _unit_runtime(typed_projection, tmp_path) as runtime:
+        pending = asyncio.create_task(_unit_call(runtime, "get_mission_relay_snapshot", {
             "mission_id": str(uuid4()), "page_size": 1,
         }))
         await asyncio.wait_for(entered.wait(), 1)
         await runtimes[0].close()
         result = await pending
-        assert result.structured_content == {"schema_version": 1, "status": "UNAVAILABLE", "reason_code": "READ_UNAVAILABLE"}
+        assert result.to_payload() == {"schema_version": 1, "status": "UNAVAILABLE", "reason_code": "READ_UNAVAILABLE"}
