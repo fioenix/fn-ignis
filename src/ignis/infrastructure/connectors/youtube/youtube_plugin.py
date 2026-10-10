@@ -288,6 +288,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
                 "comments": comment_count,
                 "published_at": published_at_str,
             }
+            if isinstance(snippet.get("description"), str):
+                metadata["description"] = sanitize_pii_text(snippet["description"])
 
             signal = TrendSignal(
                 platform=PlatformType.YOUTUBE,
@@ -489,6 +491,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                     "published_at": pub_at_str,
                                     "timeframe_filter": tf_str,
                                 }
+                                if isinstance(v_snippet.get("description"), str):
+                                    meta["description"] = sanitize_pii_text(v_snippet["description"])
 
 
                                 sig = TrendSignal(

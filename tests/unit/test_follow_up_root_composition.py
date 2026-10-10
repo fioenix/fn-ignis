@@ -142,7 +142,9 @@ async def tutorial_parent_control(tmp_path, *, brief, receipt, instruction, desc
             return httpx.Response(200,json={'items':[{'id':{'videoId':'synthetic-tutorial'}}]})
         snippet={'title':'Hướng dẫn n8n: tạo workflow thử nghiệm','publishedAt':now.isoformat(),
             'channelTitle':'Synthetic tutorial channel'}
-        if description_present:snippet['description']='Synthetic public description; no quality or adoption proof.'
+        if description_present is not False:
+            snippet['description']=(description_present if isinstance(description_present,str)
+                else 'Synthetic public description; no quality or adoption proof.')
         return httpx.Response(200,json={'items':[{'id':'synthetic-tutorial','snippet':snippet,
             'statistics':{'viewCount':'10','likeCount':'1','commentCount':'0'}}]})
     def resolve():credentials.append('synthetic-lookup');return 'synthetic-only'
@@ -172,7 +174,41 @@ async def tutorial_parent_control(tmp_path, *, brief, receipt, instruction, desc
         assert result['bridge'].budget._used=={'search':1,'other':1}
         assert snapshot.signals[0].raw_title=='Hướng dẫn n8n: tạo workflow thử nghiệm'
         assert snapshot.signals[0].source_url=='https://www.youtube.com/watch?v=synthetic-tutorial'
-        assert 'description' not in snapshot.signals[0].metadata
+        signal=snapshot.signals[0]
+        expected_description=(description_present if isinstance(description_present,str)
+            else 'Synthetic public description; no quality or adoption proof.')
+        if description_present is False:
+            assert 'description' not in signal.metadata
+        else:
+            assert signal.metadata['description']==expected_description
+        assert signal.observation_id is not None and signal.source_id is not None
+        readback=await result['repository'].get_mission_signals(snapshot.mission.id)
+        assert len(readback)==1
+        assert (readback[0].observation_id,readback[0].source_id,readback[0].metadata)==(
+            signal.observation_id,signal.source_id,signal.metadata)
+        assert not snapshot.qualifications and not snapshot.claims
+        terminal_refusal=await driver.run_canonical_parent(host=host,bridge=result['bridge'],
+            executor=result['executor'],parent_work_id=result['work_id'])
+        assert terminal_refusal=={'status':'REFUSED','reason_code':'PARENT_ALREADY_TERMINAL'}
+        from ignis.domain.research_workspace import (EvidenceQualification,EvidencePurpose,
+            QualificationRelation,QualificationReason,EvidenceDirection,compute_frame_fingerprint,
+            StaleEvidenceQualificationError)
+        qualification=EvidenceQualification(mission_id=snapshot.mission.id,
+            observation_id=signal.observation_id,brief_revision_id=snapshot.brief.brief_revision_id,
+            frame_fingerprint=compute_frame_fingerprint(snapshot.mission,snapshot.brief),
+            relation=QualificationRelation.CONTEXT_ONLY,purpose=EvidencePurpose.CONTEXT,
+            confidence=1.0,reason_code=QualificationReason.ADJACENT_ONLY,
+            judged_by='offline-description-control',evidence_role=EvidenceDirection.CONTEXT)
+        with pytest.raises(StaleEvidenceQualificationError):
+            await result['repository'].commit_evidence_qualifications(snapshot.mission.id,
+                [replace(qualification,frame_fingerprint='f'*64)])
+        await result['repository'].commit_evidence_qualifications(snapshot.mission.id,[qualification])
+        qualified=await store.load_mission_evidence_snapshot(snapshot.mission.id)
+        assert len(qualified.qualifications)==1 and not qualified.claims
+        assert qualified.qualifications[0].observation_id==signal.observation_id
+        assert qualified.qualifications[0].frame_fingerprint==qualification.frame_fingerprint
+        assert qualified.qualifications[0].relation is QualificationRelation.CONTEXT_ONLY
+        assert qualified.signals[0].source_id==signal.source_id
         journal=await store.latest_run_journal(snapshot.mission.id)
         plan=json.loads(journal.journal_path.read_text())['collection_plan']
         assert result['executor']._collection_queries(plan)==instruction['queries'][:1]
@@ -182,16 +218,18 @@ async def tutorial_parent_control(tmp_path, *, brief, receipt, instruction, desc
         assert not follow_ups.work_items and not follow_ups.relationships
         refusal=await driver.run_canonical_parent(host=host,bridge=result['bridge'],
             executor=result['executor'],parent_work_id=result['work_id'])
-        assert refusal=={'status':'REFUSED','reason_code':'PARENT_ALREADY_TERMINAL'}
+        assert refusal=={'status':'REFUSED','reason_code':'CURRENT_CANONICAL_PARENT_FRAME_REQUIRED'}
         host.clock=lambda:bounds.retention_until
         audit=await driver.expire_owned_storage(host,result['canonical'],result['repository'],result['accounting'])
         assert audit['metadata_audit']['purged'] and host._revoked
         assert not result['canonical'].path.exists() and not journal.journal_path.exists()
         assert len(calls)==len(credentials)==2
         return {'status':'OFFLINE_CANONICAL_COMPOSITION_VERIFIED','observations':1,
-            'description_state':'DESCRIPTION_NOT_RETAINED','provider_fields_received':
-                ['title','description'] if description_present else ['title'],
-            'retained_content_fields':['raw_title'],'provider_endpoints':['search','videos'],
+            'description_state':('MISSING' if description_present is False else
+                'EMPTY' if expected_description=='' else 'RETAINED'),'provider_fields_received':
+                ['title','description'] if description_present is not False else ['title'],
+            'retained_content_fields':(['raw_title'] if description_present is False else
+                ['raw_title','description']),'provider_endpoints':['search','videos'],
             'search_calls':1,'other_calls':1,'child_status':'NOT_ADMITTED','expiry':'EXPLICIT_LOCAL_PURGE_VERIFIED',
             'brief_digest':digest(brief),'scope_digest':digest(instruction),'live_readiness':'NOT_ESTABLISHED'}
     finally:
@@ -199,7 +237,7 @@ async def tutorial_parent_control(tmp_path, *, brief, receipt, instruction, desc
         await result['repository'].close()
 
 
-@pytest.mark.parametrize('description_present',[False,True])
+@pytest.mark.parametrize('description_present',[False,True,''])
 @pytest.mark.asyncio
 async def test_tutorial_brief_is_bound_but_description_missingness_remains_explicit(tmp_path,description_present):
     brief=json.loads((Path(__file__).parents[1]/'fixtures'/'follow_up_tutorial_brief.json').read_text())
@@ -208,7 +246,8 @@ async def test_tutorial_brief_is_bound_but_description_missingness_remains_expli
         'collection_scope_digest':digest(INSTRUCTION),'confirmed_by':'synthetic-test-owner'}
     summary=await tutorial_parent_control(tmp_path,brief=brief,receipt=receipt,instruction=INSTRUCTION,
         description_present=description_present)
-    assert summary['description_state']=='DESCRIPTION_NOT_RETAINED'
+    assert summary['description_state']==('MISSING' if description_present is False else
+        'EMPTY' if description_present=='' else 'RETAINED')
 
 
 @pytest.mark.asyncio
