@@ -82,6 +82,74 @@ class _ClosedStartupRetention:
 
 
 
+class CanonicalAnalysisRetentionFailure(FollowUpExecutionBoundaryError):
+    """Analysis failed; only the original closed expiry disposition remains."""
+
+    def __init__(self, recovery):
+        super().__init__('Canonical analysis failed; original storage remains closed for expiry recovery.')
+        self.recovery = recovery
+
+
+async def finish_canonical_parent_analysis(result, *, assessments, candidates, judged_by):
+    """Finish explicit root judgments before disposing the original single-parent storage.
+
+    Source revocation does not dispose canonical storage or renew the existing ANALYZE
+    assignment. No judgment, candidate, child, or provider request is inferred here.
+    """
+    from ignis.application.use_cases.submit_evidence_qualifications import SubmitEvidenceQualificationsUseCase
+    from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaimsUseCase
+    from ignis.application.use_cases.get_mission_claims import GetMissionClaimsUseCase
+    from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
+    from ignis.domain.research_work import _admission_reason
+
+    host, repository, canonical = result['host'], result['repository'], result['canonical']
+    executor = result['executor']
+    if (executor._repo is not repository or executor._registry is not host.registry
+            or getattr(repository, 'enrollment', None) is not canonical
+            or canonical.confirmation != host.confirmation):
+        raise FollowUpExecutionBoundaryError()
+    canonical.check()
+    store = executor._workspace_store
+    metadata = canonical.generated_metadata
+    try:
+        await host.revoke()
+        snapshot = await store.load_mission_evidence_snapshot(host.confirmation.selected_parent_id)
+        research = await repository.load_research_work(snapshot.mission.id)
+        work = next((row for row in research.work_items if str(row.work_id) == result['work_id']), None)
+        assignment = next((row for row in research.assignments
+            if work is not None and row.assignment_id == work.assignment_id), None)
+        if (snapshot.mission.status != 'COMPLETED' or work is None or assignment is None
+                or work.epoch != research.current_epoch
+                or _admission_reason(assignment, work, host.clock()) is not None):
+            raise FollowUpExecutionBoundaryError()
+        outcomes = [ExecuteMissionUseCase._probe_outcome_payload(row) for row in snapshot.outcomes]
+        qualification = await SubmitEvidenceQualificationsUseCase(repository, store).execute(
+            result['mission_id'], compute_frame_fingerprint(snapshot.mission, snapshot.brief), assessments)
+        claim_submission = None
+        if candidates:
+            current = await store.load_mission_evidence_snapshot(snapshot.mission.id)
+            claim_submission = await SubmitMissionClaimsUseCase(repository, store).execute(
+                result['mission_id'], frame_from_snapshot(current).frame_digest,
+                candidates, created_by=judged_by)
+        ledger = await GetMissionClaimsUseCase(repository, store).execute(result['mission_id'])
+        analysis = await GetMissionAnalysisUseCase(repository, store).execute(result['mission_id'])
+    except BaseException as error:
+        await host.revoke()
+        await repository.close()
+        metadata.close()
+        recovery = _ClosedStartupRetention(canonical, metadata, host, result['accounting'])
+        if isinstance(error, Exception):
+            raise CanonicalAnalysisRetentionFailure(recovery) from None
+        error.recovery = recovery
+        raise
+    await repository.close()
+    metadata.close()
+    recovery = _ClosedStartupRetention(canonical, metadata, host, result['accounting'])
+    return {'outcomes': outcomes, 'qualification': qualification, 'claim_submission': claim_submission,
+        'claim_ledger': ledger, 'analysis': analysis, 'recovery': recovery}
+
+
+
 def _validate_instruction(record):
     """Keep this private pilot's exact supported source/window/budget contract."""
     required={'reference','credential_reference','queries','geo','timeframe','source','platform',

@@ -35,7 +35,7 @@ async def verify(packet_path, confirmation_path):
         StaleEvidenceQualificationError, compute_frame_fingerprint)
     from ignis.domain.youtube_quota import YouTubeQuotaPolicy
     from ignis.infrastructure.follow_up_root_composition import (
-        bootstrap_confirmed_parent, expire_owned_storage, run_canonical_parent)
+        bootstrap_confirmed_parent, finish_canonical_parent_analysis, run_canonical_parent)
     from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
     confirmation = json.loads(confirmation_path.read_text())
@@ -114,29 +114,28 @@ async def verify(packet_path, confirmation_path):
             pass
         else:
             raise AssertionError('Stale qualification was not refused.')
-        await repository.commit_evidence_qualifications(snapshot.mission.id, [qualification])
-        qualified = await store.load_mission_evidence_snapshot(snapshot.mission.id)
-        assert len(qualified.qualifications) == 1 and not qualified.claims
-        assert qualified.qualifications[0].observation_id == signal.observation_id
-        assert qualified.qualifications[0].frame_fingerprint == qualification.frame_fingerprint
-        refusal = await run_canonical_parent(host=host, bridge=result['bridge'],
-            executor=result['executor'], parent_work_id=result['work_id'])
-        assert refusal == {'status': 'REFUSED', 'reason_code': 'CURRENT_CANONICAL_PARENT_FRAME_REQUIRED'}
         journal = await store.latest_run_journal(snapshot.mission.id)
         canonical = result['canonical']
-        assert canonical.path.exists() and not canonical.closed
         original_identity = (canonical.path.stat().st_dev, canonical.path.stat().st_ino)
+        finished = await finish_canonical_parent_analysis(result, assessments=[{
+            'observation_id': str(signal.observation_id), 'relation': 'CONTEXT_ONLY',
+            'purpose': 'CONTEXT', 'confidence': 1.0, 'reason_code': 'ADJACENT_ONLY',
+            'judged_by': 'offline-invocation-control', 'evidence_role': 'CONTEXT'}],
+            candidates=[], judged_by='offline-invocation-control')
+        assert finished['qualification']['status'] == 'RECORDED'
+        assert finished['analysis']['analysis_status'] == 'INSUFFICIENT_EVIDENCE'
+        assert finished['claim_ledger']['counts']['permitted'] == 0
+        recovery = finished['recovery']
         try:
-            await expire_owned_storage(host, canonical, repository, result['accounting'])
+            await recovery.purge(now=bounds.started_at)
         except FollowUpExecutionBoundaryError:
             pass
         else:
             raise AssertionError('Before-expiry cleanup was not refused.')
         assert (canonical.path.stat().st_dev, canonical.path.stat().st_ino) == original_identity
-        assert not canonical.closed
-        host.clock = lambda: bounds.retention_until
-        audit = await expire_owned_storage(host, canonical, repository, result['accounting'])
-        assert audit['metadata_audit']['purged'] and host._revoked and canonical.closed
+        assert canonical.closed and host._revoked
+        audit = await recovery.purge(now=bounds.retention_until)
+        assert audit['metadata_audit']['purged']
         assert not canonical.path.exists() and not journal.journal_path.exists()
         assert foreign.read_text() == 'Synthetic foreign file must survive owned expiry.'
         assert len(calls) == len(resolutions) == 2
@@ -147,6 +146,9 @@ async def verify(packet_path, confirmation_path):
             'authority_kind': confirmation['authority_kind'], 'provider_mode': 'MOCK_TRANSPORT_ONLY',
             'description_state': 'RETAINED', 'source_bound_readback': True,
             'qualification': 'EXPLICIT_CURRENT_FRAME_CONTEXT_ONLY', 'permitted_claims': 0,
+            'analysis_status': finished['analysis']['analysis_status'],
+            'claim_render_status': finished['claim_ledger']['render_status'],
+            'source_revoked_before_analysis': host._revoked,
             'stale_qualification': 'REFUSED', 'credential_mode': 'DEFERRED_DUMMY_ONLY',
             'search_calls': 1, 'other_calls': 1, 'child_status': result['child_status'],
             'shutdown': 'REVOKED_CLOSED', 'owned_expiry': 'PHYSICAL_PURGE_VERIFIED',
