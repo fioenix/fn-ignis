@@ -6,6 +6,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 
 from ignis.application.ports.follow_up_execution_port import FollowUpExecutionContext
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
@@ -18,6 +19,7 @@ from ignis.infrastructure.persistence.follow_up_admission_rules import child_rec
 from tests.integration import test_follow_up_sqlite_admission as setup
 from tests.integration.test_follow_up_postgres_admission import AsyncVerifier
 from tests.integration.test_mission_follow_up import Ingress, OfflinePlugin, EmptyClusterer
+from tests.integration.test_mission_follow_up import relay_case
 
 
 class OfflineExecutionPlugin(OfflinePlugin):
@@ -75,6 +77,39 @@ async def execution_ready(tmp_path):
     service = ExecuteMissionFollowUpUseCase(repository, captured["executor"], selected_parent_id=mission.id,
                                             host_authorized=True, session_initializer=initialize)
     return repository, mission, work, service, ingress, verifier
+
+
+@pytest_asyncio.fixture
+async def executor_parity_case(relay_case, tmp_path):
+    """Retain SQLite recipe; bind native PG's exact youtube plugin and recorded plan."""
+    case, _, _ = relay_case
+    if case.name != 'postgres':
+        values = await execution_ready(tmp_path)
+        try:
+            yield replace(case, repository=values[0]), values, 'offline'
+        finally:
+            await values[0].close()
+        return
+    from tests.integration.follow_up_execution_setup import ready
+    ingress = Ingress()
+    registry = ConnectorPluginRegistry(case.repository)
+    registry.register(OfflinePlugin(ingress))
+    executor = ExecuteMissionUseCase(case.repository, registry, EmptyClusterer(), WorkspaceRepository(case.repository))
+    repository, parent, work, _, _ = await ready(case.repository, tmp_path, executor, ExecuteMissionFollowUpUseCase)
+
+    class NativeVerifier(OfflineExecutionVerifier):
+        hold_current = AsyncVerifier.hold_current
+
+    verifier = NativeVerifier()
+    repository.configure_follow_up_verifier(verifier)
+
+    async def initialize(sources):
+        assert sources == frozenset({'youtube'})
+        ingress.initialize_session()
+
+    service = ExecuteMissionFollowUpUseCase(repository, executor, selected_parent_id=parent.id,
+        host_authorized=True, session_initializer=initialize)
+    yield case, (repository, parent, work, service, ingress, verifier), 'youtube'
 
 
 @pytest.mark.asyncio
@@ -157,73 +192,109 @@ async def test_completed_retry_key_cannot_borrow_original_child_for_changed_epoc
 
 
 @pytest.mark.asyncio
-async def test_missing_execution_provider_never_resolves_credential_runtime(tmp_path, monkeypatch):
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
+async def test_missing_execution_provider_never_resolves_credential_runtime(executor_parity_case, monkeypatch):
     from ignis.application.ports.connector_port import IngestRuntime
-    repository, parent, work, service, ingress, verifier = await execution_ready(tmp_path)
+    from tests.integration.test_mission_relay_read_boundary import _state
+    case, values, source = executor_parity_case
+    repository, parent, work, service, ingress, verifier = values
+    physical = _state(case)
+    before = await repository.load_mission_follow_ups(parent.id)
     lookups = []
+    health_calls = []
 
     async def runtime():
         lookups.append("credential lookup")
         return IngestRuntime.HTTP_API
 
-    monkeypatch.setattr(service._executor._registry.get_plugin_by_id("offline"), "resolve_ingest_runtime", runtime)
+    async def health():
+        health_calls.append('health')
+        return None
+
+    plugin = service._executor._registry.get_plugin_by_id(source)
+    monkeypatch.setattr(plugin, "resolve_ingest_runtime", runtime)
+    monkeypatch.setattr(plugin, 'keyword_search_blocked_reason', health, raising=False)
+    monkeypatch.setattr(plugin, 'is_healthy', health)
     repository.configure_follow_up_verifier(setup.OfflineVerifier())
     result = await service.execute(str(parent.id), str(work.work_id), 1, "missing-provider")
     assert result.status == "REFUSED" and result.reason_code == "SESSION_AUTHORITY_REQUIRED"
     assert lookups == []
+    assert health_calls == []
     assert ingress.auth_initializations == ingress.connector_calls == 0
     assert (await repository.load_mission_follow_ups(parent.id)).relationships == ()
-    await repository.close()
+    assert await repository.load_mission_follow_ups(parent.id) == before
+    assert _state(case) == physical
 
 
 @pytest.mark.asyncio
-async def test_false_execution_proof_never_resolves_credential_runtime(tmp_path, monkeypatch):
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
+async def test_false_execution_proof_never_resolves_credential_runtime(executor_parity_case, monkeypatch):
     from ignis.application.ports.connector_port import IngestRuntime
-    repository, parent, work, service, ingress, verifier = await execution_ready(tmp_path)
+    from tests.integration.test_mission_relay_read_boundary import _state
+    case, values, source = executor_parity_case
+    repository, parent, work, service, ingress, verifier = values
+    physical = _state(case)
     lookups = []
+    health_calls = []
 
     async def runtime():
         lookups.append("credential lookup")
         return IngestRuntime.HTTP_API
 
-    monkeypatch.setattr(service._executor._registry.get_plugin_by_id("offline"), "resolve_ingest_runtime", runtime)
+    async def health():
+        health_calls.append('health')
+        return None
+
+    plugin = service._executor._registry.get_plugin_by_id(source)
+    monkeypatch.setattr(plugin, "resolve_ingest_runtime", runtime)
+    monkeypatch.setattr(plugin, 'keyword_search_blocked_reason', health, raising=False)
+    monkeypatch.setattr(plugin, 'is_healthy', health)
     verifier.allowed = False
     before = await repository.load_mission_follow_ups(parent.id)
     result = await service.execute(str(parent.id), str(work.work_id), 1, "false-provider")
     assert result.status == "REFUSED" and result.reason_code == "SESSION_AUTHORITY_REQUIRED"
     assert lookups == []
+    assert health_calls == []
     assert ingress.auth_initializations == ingress.connector_calls == 0
     assert await repository.load_mission_follow_ups(parent.id) == before
     assert verifier.tokens == set()
-    await repository.close()
+    assert _state(case) == physical
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
 @pytest.mark.parametrize("drift", ["tier", "revision", "paid", "sampling"])
-async def test_actual_runtime_metadata_drift_prevents_health_and_search(tmp_path, monkeypatch, drift):
+async def test_actual_runtime_metadata_drift_prevents_health_and_search(executor_parity_case, monkeypatch, drift):
     from ignis.application.ports.connector_port import IngestRuntime
     from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
-    repository, parent, work, service, ingress, verifier = await execution_ready(tmp_path)
+    from tests.integration.test_mission_relay_read_boundary import _state
+    case, values, source = executor_parity_case
+    repository, parent, work, service, ingress, verifier = values
+    physical = _state(case)
     context = await repository._follow_up_execution_context(parent.id, work.work_id)
     plan, _ = await service._plan(context)
     registry = service._executor._registry
-    plugin = registry.get_plugin_by_id("offline")
+    plugin = registry.get_plugin_by_id(source)
     health_calls = []
+    runtime_resolutions = []
+    original_runtime = plugin.resolve_ingest_runtime
+
+    async def runtime():
+        runtime_resolutions.append('runtime resolution')
+        return IngestRuntime.BROWSER if drift == 'tier' else await original_runtime()
 
     async def health():
         health_calls.append("health")
         return None
 
     monkeypatch.setattr(plugin, "keyword_search_blocked_reason", health, raising=False)
-    if drift == "tier":
-        async def runtime():
-            return IngestRuntime.BROWSER
-        monkeypatch.setattr(plugin, "resolve_ingest_runtime", runtime)
-    elif drift == "revision":
+    monkeypatch.setattr(plugin, 'is_healthy', health)
+    monkeypatch.setattr(plugin, 'resolve_ingest_runtime', runtime)
+    if drift == "revision":
         monkeypatch.setattr(type(plugin), "connector_revision", "changed-v2")
     elif drift == "paid":
         monkeypatch.setattr(type(plugin), "requires_paid_quota", True)
-    else:
+    elif drift == 'sampling':
         original = registry._search_requirement
         def requirement(*args):
             record = original(*args)
@@ -233,12 +304,13 @@ async def test_actual_runtime_metadata_drift_prevents_health_and_search(tmp_path
         monkeypatch.setattr(ConnectorPluginRegistry, "_search_requirement", staticmethod(requirement))
     with pytest.raises(FollowUpExecutionBoundaryError):
         await registry._search_with_outcomes_guarded(
-            keywords=list(plan.queries), target_platforms=[plugin.platform], target_surfaces=("offline",),
+            keywords=list(plan.queries), target_platforms=[plugin.platform], target_surfaces=(source,),
             boundary_guard=lambda: None, approved_plan=plan)
     assert health_calls == []
+    assert runtime_resolutions == ['runtime resolution']
     assert ingress.auth_initializations == ingress.connector_calls == 0
-    assert registry._breakers["offline"].failure_count == 0
-    await repository.close()
+    assert registry._breakers[source].failure_count == 0
+    assert _state(case) == physical
 
 
 @pytest.mark.asyncio
