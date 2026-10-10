@@ -674,6 +674,171 @@ async def _native_pg_ready(case, tmp_path, *, tight=False):
     return repository, parent, work, authority, service, ingress, verifier
 
 
+async def _persist_native_before_ingress_process(directory):
+    """Owned native child publishes only durable UUID scope before credential ingress."""
+    import asyncio
+    import json
+    import os
+    from pathlib import Path
+    from tests.integration.conftest import RepositoryCase
+    from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+    import ignis.config as config
+    directory = Path(directory)
+    assert config._ENV_ISOLATED and config._ENV_FILES == (str(directory / 'crash-test.env'),)
+    assert not any(config.reveal_secret(getattr(config.settings, name)) for name in (
+        'YOUTUBE_API_KEY', 'THREADS_APP_SECRET', 'INSTAGRAM_APP_SECRET',
+        'IGNIS_ENCRYPTION_KEY', 'PLAYWRIGHT_PROXY_SERVER'))
+    descriptor = json.loads((directory / 'native-connection.json').read_text())
+    repository = PostgresTimescaleRepository(descriptor['dsn'], min_pool_size=1, max_pool_size=2)
+    await repository._get_pool()
+    case = RepositoryCase('postgres', repository, descriptor['dsn'])
+    try:
+        _, parent, work, _, service, ingress, _ = await _native_pg_ready(case, directory)
+        original = service._executor._execute_authorized
+
+        async def execute(*args, **kwargs):
+            async def stop(journal):
+                snapshot = await repository.load_mission_follow_ups(parent.id)
+                assert len(snapshot.relationships) == len(snapshot.reservations) == 1
+                link = snapshot.relationships[0]
+                claim = await repository.get_mission_writer_claim(link.child_mission_id)
+                assert claim.run_id == journal.run_id and journal.status == 'STARTED'
+                assert ingress.auth_initializations == ingress.connector_calls == 0
+                marker = dict(parent=str(parent.id), work=str(work.work_id), child=str(link.child_mission_id),
+                    reservation=str(link.reservation_id), run=str(journal.run_id), workspace=str(journal.workspace_id),
+                    pid=os.getpid(), pgid=os.getpgrp(), auth=0, probe=0)
+                temporary = directory / 'native-durable-marker.tmp'
+                temporary.write_text(json.dumps(marker))
+                temporary.replace(directory / 'native-durable-marker.json')
+                await asyncio.wait_for(asyncio.Event().wait(), 30)
+            kwargs['scope_guard'] = stop
+            return await original(*args, **kwargs)
+
+        service._executor._execute_authorized = execute
+        await service.execute(str(parent.id), str(work.work_id), 1, 'native-process-death')
+    finally:
+        await repository.close()
+
+
+@pytest.mark.asyncio
+async def test_postgres_owned_process_death_retains_unknown_writer_and_allocation(pg_settlement_case, tmp_path):
+    """SIGKILL of this owned group is distinct from cooperative request cancellation."""
+    import asyncio
+    import json
+    import os
+    import signal
+    import sys
+    from pathlib import Path
+    from uuid import UUID
+    import psycopg
+    from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+    from ignis.application.use_cases.execute_mission_follow_up import ExecuteMissionFollowUpUseCase
+    from tests.integration.test_mission_follow_up import Ingress, _executor
+
+    descriptor = tmp_path / 'native-connection.json'
+    descriptor.write_text(json.dumps({'dsn': pg_settlement_case.dsn}))
+    descriptor.chmod(0o600)
+    isolated = tmp_path / 'crash-test.env'
+    isolated.write_text('DATABASE_URL=sqlite:///:memory:\nYOUTUBE_API_KEY=\nTHREADS_APP_SECRET=\n'
+        'INSTAGRAM_APP_SECRET=\nIGNIS_ENCRYPTION_KEY=\nPLAYWRIGHT_PROXY_SERVER=\n')
+    root = Path(__file__).resolve().parents[2]
+    env = {key: os.environ[key] for key in ('PATH',) if key in os.environ}
+    env.update(IGNIS_ENV_ISOLATED='1', IGNIS_ENV_FILE=str(isolated),
+        PYTHONPATH=os.pathsep.join(map(str, (root, root / 'src', root / 'tests/integration', root / 'tests'))))
+    # Separate child group has its own hard bound if the outer owned pilot dies.
+    script = ('import asyncio,json,sys,traceback,signal; from pathlib import Path; signal.alarm(45); '
+        '\ntry:'
+        '\n from tests.integration.test_follow_up_settlement import _persist_native_before_ingress_process'
+        '\n asyncio.run(_persist_native_before_ingress_process(sys.argv[1]))'
+        '\nexcept BaseException as error:'
+        '\n Path(sys.argv[1],"native-child-error.json").write_text(json.dumps({'
+        '"type":type(error).__name__,"frames":[[f.name,f.lineno] for f in traceback.extract_tb(error.__traceback__)]}))'
+        '\n raise SystemExit(1)')
+    process = await asyncio.create_subprocess_exec(sys.executable, '-c', script, str(tmp_path), env=env,
+        cwd=root, start_new_session=True, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    owner = tmp_path / 'native-process-owner.json'
+    owner.write_text(json.dumps({'pid': process.pid, 'pgid': process.pid, 'reaped': False}))
+    try:
+        async def ready():
+            while not (tmp_path / 'native-durable-marker.json').exists():
+                if process.returncode is not None:
+                    error = tmp_path / 'native-child-error.json'
+                    pytest.fail('Owned child exited before durable native boundary: ' +
+                        (error.read_text() if error.exists() else str(process.returncode)))
+                await asyncio.sleep(.02)
+        await asyncio.wait_for(ready(), 10)
+        marker = json.loads((tmp_path / 'native-durable-marker.json').read_text())
+        assert marker['pid'] == marker['pgid'] == process.pid
+        assert os.getpgid(process.pid) == process.pid
+        assert marker['auth'] == marker['probe'] == 0
+        with psycopg.connect(pg_settlement_case.dsn) as physical:
+            assert physical.execute('SELECT child_mission_id,reservation_id FROM mission_follow_ups '
+                'WHERE parent_mission_id=%s AND work_id=%s', (UUID(marker['parent']), UUID(marker['work']))).fetchone() == (
+                UUID(marker['child']), UUID(marker['reservation']))
+            assert physical.execute('SELECT mission_id,workspace_id,status,completed_at FROM mission_run_journals '
+                'WHERE id=%s', (UUID(marker['run']),)).fetchone() == (
+                UUID(marker['child']), UUID(marker['workspace']), 'STARTED', None)
+            assert physical.execute('SELECT run_id FROM mission_writer_claims WHERE mission_id=%s',
+                (UUID(marker['child']),)).fetchone() == (UUID(marker['run']),)
+            assert physical.execute('SELECT resource,allocated FROM mission_follow_up_reservation_resources '
+                'WHERE reservation_id=%s ORDER BY resource', (UUID(marker['reservation']),)).fetchall() == [
+                ('queries', 2), ('youtube_search_calls', 2)]
+        allocated_before, resources_before = _pg_reservation_rows(pg_settlement_case, UUID(marker['reservation']))
+        assert allocated_before['reserved_quota'] == allocated_before['reserved_cost'] == 2
+        assert allocated_before['measurement_receipt_id'] is None
+        os.killpg(process.pid, signal.SIGKILL)
+        assert await asyncio.wait_for(process.wait(), 5) == -signal.SIGKILL
+    finally:
+        if process.returncode is None:
+            assert os.getpgid(process.pid) == process.pid
+            os.killpg(process.pid, signal.SIGKILL)
+            await asyncio.wait_for(process.wait(), 5)
+        owner.write_text(json.dumps({'pid': process.pid, 'pgid': process.pid,
+            'reaped': process.returncode is not None, 'exit': process.returncode}))
+
+    reopened = PostgresTimescaleRepository(pg_settlement_case.dsn, min_pool_size=1, max_pool_size=2)
+    await reopened._get_pool()
+    ingress = Ingress()
+    executor = _executor(reopened, ingress)
+    recovery = ExecuteMissionFollowUpUseCase(reopened, executor, selected_parent_id=UUID(marker['parent']),
+        host_authorized=True)
+    try:
+        snapshot = await reopened.load_mission_follow_ups(UUID(marker['parent']))
+        assert len(snapshot.relationships) == len(snapshot.reservations) == 1
+        link = snapshot.relationships[0]
+        assert str(link.child_mission_id) == marker['child'] and str(link.reservation_id) == marker['reservation']
+        journals = await reopened.list_run_journals(link.child_mission_id)
+        claim = await reopened.get_mission_writer_claim(link.child_mission_id)
+        assert len(journals) == 1 and str(journals[0].run_id) == marker['run']
+        assert journals[0].status == 'STARTED' and journals[0].completed_at is None
+        assert claim.run_id == journals[0].run_id
+        parent = await reopened.get_mission(UUID(marker['parent']))
+        from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+        parent_evidence = await WorkspaceRepository(reopened).load_mission_evidence_snapshot(parent.id)
+        assert parent.status == 'COMPLETED'
+        for key in ('native-process-death', 'native-process-death-alias'):
+            result = await recovery.execute(marker['parent'], marker['work'], 1, key)
+            assert result.status == 'ADMITTED' and result.reason_code == 'EXECUTION_STATUS_UNKNOWN'
+            assert result.relationship == link and result.run_id == journals[0].run_id
+        after = await reopened.load_mission_follow_ups(UUID(marker['parent']))
+        assert after.relationships == snapshot.relationships
+        reservation = after.reservations[0]
+        assert reservation.state == 'UNRESOLVED' and reservation.encumbered == (2, 2)
+        assert reservation.measurement_receipt_id is None
+        assert reservation.measured_quota is None and reservation.measured_cost is None
+        allocated_after, resources_after = _pg_reservation_rows(pg_settlement_case, link.reservation_id)
+        assert {k: v for k, v in allocated_after.items() if k not in ('state', 'version')} == {
+            k: v for k, v in allocated_before.items() if k not in ('state', 'version')}
+        assert resources_after == resources_before
+        assert await reopened.get_mission_writer_claim(link.child_mission_id) == claim
+        assert await reopened.list_run_journals(link.child_mission_id) == journals
+        assert await reopened.get_mission(UUID(marker['parent'])) == parent
+        assert await WorkspaceRepository(reopened).load_mission_evidence_snapshot(parent.id) == parent_evidence
+        assert ingress.auth_initializations == ingress.connector_calls == 0
+    finally:
+        await reopened.close()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize('boundary', ['proof', 'storage', 'finalization', 'fresh-drift'])
 async def test_postgres_admitted_boundary_preserves_actual_trace_and_allocation(pg_settlement_case, tmp_path,
