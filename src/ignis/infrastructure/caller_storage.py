@@ -13,6 +13,7 @@ from urllib.parse import unquote, urlsplit
 
 from fastmcp.server.middleware import Middleware
 from fastmcp.exceptions import ToolError
+from mcp.types import ClientCapabilities
 from ignis.infrastructure.caller_configuration import load_caller_configuration
 
 
@@ -227,6 +228,19 @@ class CallerStorageScope:
             logging.getLogger().addHandler(self.log_handler)
 
 
+def _root_required(category, ctx, *, rpc_error="UNKNOWN", owner_state="UNKNOWN"):
+    """Expose fixed refusal facts only; never serialize client or exception payloads."""
+    capability = "UNKNOWN"
+    try:
+        declared = ctx.session.client_capabilities
+        if type(declared) is ClientCapabilities:
+            capability = "ADVERTISED" if declared.roots is not None else "NOT_ADVERTISED"
+    except Exception:
+        pass
+    return ToolError(f"ROOT_REQUIRED category={category} roots_capability={capability} "
+                     f"rpc_error={rpc_error} owner_state={owner_state}")
+
+
 class CallerStorageMiddleware(Middleware):
     """Scope existing mission tool schemas using actual request/session roots only."""
 
@@ -241,21 +255,38 @@ class CallerStorageMiddleware(Middleware):
                 or 'mission_id' in arguments or 'workspace_id' in arguments):
             return await call_next(context)
         ctx = context.fastmcp_context
-        if ctx is None or ctx.request_context is None:
-            raise ToolError('ROOT_REQUIRED')
+        if ctx is None or getattr(ctx, 'request_context', None) is None:
+            raise _root_required('REQUEST_CONTEXT_ABSENT', ctx)
         try:
             roots = (await ctx.session.list_roots()).roots
+        except Exception as error:
+            kind = 'UNSUPPORTED' if type(error) is NotImplementedError else 'UNKNOWN'
+            raise _root_required('ROOTS_RPC_UNAVAILABLE', ctx, rpc_error=kind) from None
+        try:
+            single = len(roots) == 1
         except Exception:
-            raise ToolError('ROOT_REQUIRED') from None
-        if len(roots) != 1: raise ToolError('ROOT_REQUIRED')
-        uri = urlsplit(str(roots[0].uri))
-        if uri.scheme != 'file' or uri.netloc not in ('','localhost') or uri.query or uri.fragment:
-            raise ToolError('ROOT_REQUIRED')
-        path = Path(unquote(uri.path))
-        if not path.is_absolute() or '..' in path.parts or not path.is_dir():
-            raise ToolError('ROOT_REQUIRED')
-        owner = ctx.lifespan_context.get('mission_relay')
-        if owner is None or owner.closed: raise ToolError('ROOT_REQUIRED')
+            single = False
+        if not single: raise _root_required('ROOT_COUNT_INVALID', ctx)
+        try:
+            uri = urlsplit(str(roots[0].uri))
+            valid_uri = uri.scheme == 'file' and uri.netloc in ('','localhost') and not uri.query and not uri.fragment
+        except Exception:
+            valid_uri = False
+        if not valid_uri: raise _root_required('ROOT_URI_INVALID', ctx) from None
+        try:
+            path = Path(unquote(uri.path))
+            valid_path = path.is_absolute() and '..' not in path.parts and path.is_dir()
+        except Exception:
+            valid_path = False
+        if not valid_path: raise _root_required('ROOT_PATH_INVALID', ctx) from None
+        try:
+            owner = ctx.lifespan_context.get('mission_relay')
+        except Exception:
+            owner = None
+        if owner is None:
+            raise _root_required('OWNER_LIFESPAN_UNAVAILABLE', ctx, owner_state='ABSENT')
+        if getattr(owner, 'closed', True):
+            raise _root_required('OWNER_LIFESPAN_UNAVAILABLE', ctx, owner_state='CLOSED')
         key = str(path)
         scope = owner.caller_scopes.get(key)
         if scope is None:
