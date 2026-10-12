@@ -228,8 +228,8 @@ class CallerStorageScope:
             logging.getLogger().addHandler(self.log_handler)
 
 
-def _root_required(category, ctx, *, rpc_error="UNKNOWN", owner_state="UNKNOWN"):
-    """Expose fixed refusal facts only; never serialize client or exception payloads."""
+def _declared_root_capability(ctx):
+    """Read only the canonical typed capability, never experimental client metadata."""
     capability = "UNKNOWN"
     try:
         declared = ctx.session.client_capabilities
@@ -237,6 +237,12 @@ def _root_required(category, ctx, *, rpc_error="UNKNOWN", owner_state="UNKNOWN")
             capability = "ADVERTISED" if declared.roots is not None else "NOT_ADVERTISED"
     except Exception:
         pass
+    return capability
+
+
+def _root_required(category, ctx, *, rpc_error="UNKNOWN", owner_state="UNKNOWN"):
+    """Expose fixed refusal facts only; never serialize client or exception payloads."""
+    capability = _declared_root_capability(ctx)
     return ToolError(f"ROOT_REQUIRED category={category} roots_capability={capability} "
                      f"rpc_error={rpc_error} owner_state={owner_state}")
 
@@ -247,6 +253,41 @@ class CallerStorageMiddleware(Middleware):
     def __init__(self, compose, runtime_for_scope):
         self.compose = compose
         self.runtime_for_scope = runtime_for_scope
+        # Construction occurs at server startup; request arguments and later env edits are not grants.
+        configured = os.environ.get('IGNIS_CALLER_ROOT')
+        self._configured_present = configured is not None
+        self._configured_root = None
+        self._configured_identities = ()
+        if self._configured_present:
+            try:
+                path = Path(configured)
+                if not path.is_absolute() or '..' in path.parts:
+                    raise ValueError
+                identities = []
+                for node in (*path.parents, path):
+                    info = node.lstat()
+                    if not stat.S_ISDIR(info.st_mode):
+                        raise ValueError
+                    identities.append((node, info.st_dev, info.st_ino))
+                self._configured_root = path
+                self._configured_identities = tuple(identities)
+            except (OSError, ValueError, TypeError):
+                # Invalid startup scope remains invalid; never silently switch to another grant.
+                pass
+
+    def _checked_configured_root(self, ctx):
+        if not self._configured_present:
+            raise _root_required('CONFIGURED_ROOT_REQUIRED', ctx)
+        if self._configured_root is None:
+            raise _root_required('CONFIGURED_ROOT_INVALID', ctx)
+        try:
+            for node, device, inode in self._configured_identities:
+                info = node.lstat()
+                if not stat.S_ISDIR(info.st_mode) or (info.st_dev, info.st_ino) != (device, inode):
+                    raise ValueError
+        except (OSError, ValueError):
+            raise _root_required('CONFIGURED_ROOT_CHANGED', ctx) from None
+        return self._configured_root
 
     async def on_call_tool(self, context, call_next):
         name = context.message.name
@@ -257,28 +298,35 @@ class CallerStorageMiddleware(Middleware):
         ctx = context.fastmcp_context
         if ctx is None or getattr(ctx, 'request_context', None) is None:
             raise _root_required('REQUEST_CONTEXT_ABSENT', ctx)
-        try:
-            roots = (await ctx.session.list_roots()).roots
-        except Exception as error:
-            kind = 'UNSUPPORTED' if type(error) is NotImplementedError else 'UNKNOWN'
-            raise _root_required('ROOTS_RPC_UNAVAILABLE', ctx, rpc_error=kind) from None
-        try:
-            single = len(roots) == 1
-        except Exception:
-            single = False
-        if not single: raise _root_required('ROOT_COUNT_INVALID', ctx)
-        try:
-            uri = urlsplit(str(roots[0].uri))
-            valid_uri = uri.scheme == 'file' and uri.netloc in ('','localhost') and not uri.query and not uri.fragment
-        except Exception:
-            valid_uri = False
-        if not valid_uri: raise _root_required('ROOT_URI_INVALID', ctx) from None
-        try:
-            path = Path(unquote(uri.path))
-            valid_path = path.is_absolute() and '..' not in path.parts and path.is_dir()
-        except Exception:
-            valid_path = False
-        if not valid_path: raise _root_required('ROOT_PATH_INVALID', ctx) from None
+        capability = _declared_root_capability(ctx)
+        if capability == 'NOT_ADVERTISED':
+            path = self._checked_configured_root(ctx)
+        else:
+            try:
+                roots = (await ctx.session.list_roots()).roots
+            except Exception as error:
+                kind = 'UNSUPPORTED' if type(error) is NotImplementedError else 'UNKNOWN'
+                raise _root_required('ROOTS_RPC_UNAVAILABLE', ctx, rpc_error=kind) from None
+            try:
+                single = len(roots) == 1
+            except Exception:
+                single = False
+            if not single: raise _root_required('ROOT_COUNT_INVALID', ctx)
+            try:
+                uri = urlsplit(str(roots[0].uri))
+                valid_uri = uri.scheme == 'file' and uri.netloc in ('','localhost') and not uri.query and not uri.fragment
+            except Exception:
+                valid_uri = False
+            if not valid_uri: raise _root_required('ROOT_URI_INVALID', ctx) from None
+            try:
+                path = Path(unquote(uri.path))
+                valid_path = path.is_absolute() and '..' not in path.parts and path.is_dir()
+            except Exception:
+                valid_path = False
+            if not valid_path: raise _root_required('ROOT_PATH_INVALID', ctx) from None
+            if capability == 'ADVERTISED' and self._configured_present:
+                if path != self._checked_configured_root(ctx):
+                    raise _root_required('ROOT_SCOPE_MISMATCH', ctx)
         try:
             owner = ctx.lifespan_context.get('mission_relay')
         except Exception:
@@ -287,6 +335,8 @@ class CallerStorageMiddleware(Middleware):
             raise _root_required('OWNER_LIFESPAN_UNAVAILABLE', ctx, owner_state='ABSENT')
         if getattr(owner, 'closed', True):
             raise _root_required('OWNER_LIFESPAN_UNAVAILABLE', ctx, owner_state='CLOSED')
+        if capability == 'UNKNOWN':
+            raise _root_required('ROOT_CAPABILITY_UNKNOWN', ctx)
         key = str(path)
         scope = owner.caller_scopes.get(key)
         if scope is None:

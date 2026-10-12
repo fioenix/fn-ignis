@@ -1,6 +1,18 @@
 # Caller-owned storage and configuration
 
-Mission tools require one authorized filesystem root from a roots-capable MCP session. They do not use installation CWD, `host_workspace`, or global database configuration as authority. Independent tactical operations retain their existing configuration. Installed native-client roots capability remains unverified; the legacy roots-capable stdio client is the exercised integration.
+Mission tools require one authorized filesystem root. A client that explicitly advertises roots uses exactly one valid native MCP root. If the canonical typed client capabilities explicitly do not advertise roots, an operator may supply exactly one `IGNIS_CALLER_ROOT` in the server launch environment. Missing or unknown capabilities refuse; caller arguments, installation CWD and global database settings never grant root authority. Independent tactical operations retain their existing configuration. Actual native Codex configured-root activation is unverified; offline controls are not native-client integration proof.
+
+## Operator startup scope
+
+Set the scope before starting the existing server entry point, for example:
+
+```sh
+IGNIS_CALLER_ROOT=/absolute/path/to/authorized/repository fn-ignis
+```
+
+This is an operator launch example, not an installed registration or permission inferred from the model's `host_workspace` argument. Do not put this authority key in caller `.fnignis/.env`; that file retains its strict settings allowlist. The middleware snapshots the launch value once when the server is constructed, validates an absolute existing directory without traversal or symlink ancestors, and pins root/ancestor identities. Later environment edits cannot change an active server's grant. Startup validation creates no `.fnignis` files. Missing, malformed, replaced or symlinked configured roots refuse with sanitized `ROOT_REQUIRED` details.
+
+Explicit non-advertisement selects the configured scope without an unsupported roots RPC. Advertising clients always use native roots: missing, malformed, ambiguous or failed native roots refuse, with no configured fallback. If a launch scope is also configured, it must be valid, unchanged and exactly match the selected native root. `host_workspace` and proposed paths remain assertions checked against that scope. A fresh launch may adopt another explicit operator scope; it does not migrate data, restore source grants or renew mission clocks/budgets. A same-account launch environment is operator authority, not independent proof of human identity.
 
 Workspace confirmation protects `.fnignis/` with a bounded `/.fnignis/` entry in the caller repository's `.gitignore`, preserving existing bytes. An already tracked `.fnignis/.env` refuses setup without changing the index. Generated `.env` has mode 0600 and contains only a comment; existing user configuration is preserved. `.env.example` contains commented placeholders only.
 

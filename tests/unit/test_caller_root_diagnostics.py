@@ -46,9 +46,9 @@ async def test_root_refusal_exposes_only_fixed_category_and_never_bypasses(case,
     with pytest.raises(ToolError) as error:
         await CallerStorageMiddleware(forbidden, forbidden).on_call_tool(context, next_call)
     text = str(error.value)
-    assert text.startswith("ROOT_REQUIRED")
-    assert "category=" + category in text
-    assert "roots_capability=UNKNOWN" in text
+    owner_state = "ABSENT" if case == "owner_absent" else "CLOSED" if case == "owner_closed" else "UNKNOWN"
+    assert text == (f"ROOT_REQUIRED category={category} roots_capability=UNKNOWN "
+                    f"rpc_error=UNKNOWN owner_state={owner_state}")
     assert protected not in text and str(tmp_path) not in text and "https://" not in text
     assert error.value.__cause__ is None
     assert calls == [] and current_caller_storage.get() is None
@@ -69,8 +69,9 @@ async def test_independent_tactical_call_needs_no_root_diagnostic_or_composition
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("advertised", (True, False))
-async def test_diagnostic_uses_only_public_typed_capability_presence(advertised):
+async def test_diagnostic_uses_only_public_typed_capability_presence(advertised, monkeypatch):
     from mcp.types import ClientCapabilities
+    monkeypatch.delenv("IGNIS_CALLER_ROOT", raising=False)
     protected = "PRIVATE_CAPABILITY_CANARY"
     async def unavailable(): raise NotImplementedError(protected)
     capabilities = ClientCapabilities(roots={} if advertised else None,
@@ -84,6 +85,9 @@ async def test_diagnostic_uses_only_public_typed_capability_presence(advertised)
     with pytest.raises(ToolError) as error:
         await CallerStorageMiddleware(forbidden, forbidden).on_call_tool(context, next_call)
     expected = "ADVERTISED" if advertised else "NOT_ADVERTISED"
-    assert str(error.value) == ("ROOT_REQUIRED category=ROOTS_RPC_UNAVAILABLE "
-        f"roots_capability={expected} rpc_error=UNSUPPORTED owner_state=UNKNOWN")
+    # Explicit non-advertisement now requires the separately approved startup-root grant.
+    category = "ROOTS_RPC_UNAVAILABLE" if advertised else "CONFIGURED_ROOT_REQUIRED"
+    rpc_error = "UNSUPPORTED" if advertised else "UNKNOWN"
+    assert str(error.value) == (f"ROOT_REQUIRED category={category} "
+        f"roots_capability={expected} rpc_error={rpc_error} owner_state=UNKNOWN")
     assert protected not in str(error.value) and error.value.__cause__ is None
