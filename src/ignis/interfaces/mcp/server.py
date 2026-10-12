@@ -140,9 +140,24 @@ The mission and Claim Ledger contracts, not this recipe, decide verdict eligibil
 class _MissionRelayRuntime:
     """Borrowed storage and viewer resources owned by one FastMCP async lifespan."""
 
-    def __init__(self, server: Optional[FastMCP] = None, *, caller_scope=None):
+    # Bound for joining, then cancelling, a pending source acquisition during shutdown.
+    _SOURCE_SETTLE_SECONDS = 5
+
+    def __init__(self, server: Optional[FastMCP] = None, *, caller_scope=None, source_activation_factory=None):
         self.owner_loop = asyncio.get_running_loop()
         self.caller_scope = caller_scope
+        # Private trusted-root injection only; the production lifespan supplies no factory.
+        self.source_activation_factory = source_activation_factory
+        self.source_activation = None
+        # Every returned activation not yet verified CLOSED stays owned here for close-only retry.
+        self.source_cleanup = []
+        self._source_acquisition = None
+        self._source_shutdown = None
+        # One owned shutdown task holds the whole hierarchy; observers never own cleanup.
+        self._shutdown = None
+        self._late = set()
+        self.source_state = "INACTIVE"
+        self.quiescent = asyncio.Event()
         self.caller_scopes = {}
         self.server = server
         self.transport = Context(server).transport if server is not None else None
@@ -176,7 +191,8 @@ class _MissionRelayRuntime:
             from ignis.domain.mission_relay import MissionRelayOpenResult
             if type(opened) is not MissionRelayOpenResult:
                 return {"status": "UNAVAILABLE", "reason_code": "DASHBOARD_START_FAILED"}
-            result = {"status": "AVAILABLE", **opened.to_payload()}
+            # The dashboard notification status wins over the viewer receipt's own status field.
+            result = {**opened.to_payload(), "status": "AVAILABLE"}
             self._dashboards[journal.run_id] = result
             # Send on the existing request channel directly; never log the bearer URL locally.
             await ctx.session.send_log_message(level="info", logger="ignis.dashboard",
@@ -215,6 +231,113 @@ class _MissionRelayRuntime:
         finally:
             self._writes.discard(worker)
 
+    async def activate_source(self):
+        """Attach an injected caller-bound source host; absent injection leaves execution refused."""
+        from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+        if self.closed or asyncio.get_running_loop() is not self.owner_loop:
+            raise FollowUpExecutionBoundaryError()
+        if self.source_activation is not None or self.source_activation_factory is None or self.caller_scope is None:
+            return self.source_activation
+        # Single flight: one owned acquisition per runtime; a failed one is never replaced by a new run.
+        if self._source_acquisition is None:
+            self._source_acquisition = asyncio.create_task(self._acquire_source())
+        return await asyncio.shield(self._source_acquisition)
+
+    async def _acquire_source(self):
+        """Factory contract: it owns resources it allocated until it returns an activation.
+
+        A factory that is cancelled or fails before returning releases its own partial
+        allocation. Once returned, the activation belongs to this runtime until CLOSED.
+        """
+        from ignis.infrastructure.follow_up_caller_activation import CallerSourceActivation
+        from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+        activation = None
+        try:
+            self.caller_scope.check()
+            activation = await self.source_activation_factory(self.caller_scope)
+            if type(activation) is not CallerSourceActivation or self.closed:
+                raise FollowUpExecutionBoundaryError()
+            activation.attach(self.caller_scope, self.owner_loop)
+            self.source_activation = activation
+            return activation
+        except BaseException:
+            # Every returned but unpublished activation is retained, then disposed by this owner.
+            if type(activation) is CallerSourceActivation and self.source_activation is not activation:
+                self.source_cleanup.append(activation)
+                try:
+                    await activation.close()
+                except Exception:
+                    pass
+                if activation.disposition == 'CLOSED':
+                    self.source_cleanup.remove(activation)
+            raise
+
+    async def _settle_source(self, acquisition):
+        if acquisition is not None and not acquisition.done():
+            await asyncio.wait({acquisition}, timeout=self._SOURCE_SETTLE_SECONDS)
+            if not acquisition.done():
+                acquisition.cancel()
+                await asyncio.wait({acquisition}, timeout=self._SOURCE_SETTLE_SECONDS)
+        if acquisition is not None and not acquisition.done():
+            # Not quiescent: retain the original task and borrowed storage until it actually ends.
+            self.source_state = "PENDING"
+            def late(_task):
+                worker = asyncio.get_running_loop().create_task(self._late_source_cleanup())
+                self._late.add(worker)
+                worker.add_done_callback(self._late.discard)
+            acquisition.add_done_callback(late)
+            return self.source_state
+        await self._close_owned_sources()
+        self.source_state = "QUIESCENT"
+        self.quiescent.set()
+        return self.source_state
+
+    async def _close_owned_sources(self):
+        owned = ([self.source_activation] if self.source_activation is not None else []) + list(self.source_cleanup)
+        for activation in owned:
+            try:
+                await activation.close()
+            except Exception:
+                pass
+        self.source_cleanup = [item for item in self.source_cleanup if item.disposition != 'CLOSED']
+
+    async def _late_source_cleanup(self):
+        # The abandoned acquisition observed closure and disposed any late result into cleanup.
+        await self._close_owned_sources()
+        self.source_state = "QUIESCENT"
+        self.quiescent.set()
+
+    def retry_source_close(self):
+        """Close-only retry for retained activations; never a new run, lease or count reset."""
+        owned = ([self.source_activation] if self.source_activation is not None else []) + list(self.source_cleanup)
+        dispositions = [activation.retry_close() for activation in owned]
+        self.source_cleanup = [item for item in self.source_cleanup if item.disposition != 'CLOSED']
+        return dispositions
+
+    async def source_parent(self, mission_id):
+        """Private trusted-root parent run through the injected guarded source; refused by default."""
+        from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+        try:
+            selected = UUID(str(mission_id))
+            if self.source_activation_factory is None or self.caller_scope is None:
+                raise FollowUpExecutionBoundaryError()
+            activation = await self.activate_source()
+            activation.check(self.caller_scope, self.owner_loop)
+        except (FollowUpExecutionBoundaryError, ValueError):
+            return {"status": "REFUSED", "reason_code": "SESSION_AUTHORITY_REQUIRED"}
+        if self.closed:
+            return {"status": "REFUSED", "reason_code": "STORAGE_FAILURE"}
+        worker = asyncio.create_task(activation.run_parent(selected))
+        self._executions.add(worker)
+        # Ownership ends only when the worker itself settles, never when an observer leaves.
+        worker.add_done_callback(self._executions.discard)
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            if not worker.done():
+                worker.cancel()
+            raise
+
     async def follow_up(self, request):
         from ignis.application.cancellation import await_settled
         from ignis.application.use_cases.execute_mission_follow_up import ExecuteMissionFollowUpUseCase
@@ -238,11 +361,29 @@ class _MissionRelayRuntime:
         else:
             ready = False
         executor = components.get("execute_mission_use_case")
-        if (not ready or type(executor) is not ExecuteMissionUseCase or executor._repo is not repository
+        expected_registry = components.get("registry")
+        activated_executor = None
+        if self.source_activation_factory is not None and self.caller_scope is not None:
+            try:
+                activation = await self.activate_source()
+                activation.check(self.caller_scope, self.owner_loop)
+            except Exception:
+                return _follow_up_refused("SESSION_AUTHORITY_REQUIRED")
+            if request.mission_id != activation.selected_parent_id:
+                return _follow_up_refused("SCOPE_MISMATCH")
+            if self.closed:
+                return _follow_up_refused("STORAGE_FAILURE")
+            # The guarded executor borrows the same caller repository and workspace store.
+            executor, expected_registry = activation.executor, activation.executor._registry
+            activated_executor = executor
+        # The activated branch accepts only the activation's own bounded executor object.
+        exact_executor = type(executor) is ExecuteMissionUseCase or (
+            activated_executor is not None and executor is activated_executor)
+        if (not ready or not exact_executor or executor._repo is not repository
                 or executor._workspace_store is not components.get("workspace_store")
                 or type(executor._workspace_store) is not WorkspaceRepository
                 or executor._workspace_store._repo is not repository
-                or executor._registry is not components.get("registry")):
+                or executor._registry is not expected_registry):
             return _follow_up_refused("STORAGE_FAILURE")
         # Selection is immutable per request. The repository's independent verifier still
         # proves source/session capability; stdio eligibility cannot substitute for it.
@@ -330,6 +471,16 @@ class _MissionRelayRuntime:
 
     async def close(self):
         self.closed = True
+        if self._shutdown is None:
+            self._shutdown = asyncio.create_task(self._close_owned())
+        await asyncio.shield(self._shutdown)
+
+    async def _close_after(self, runtime, repository):
+        await runtime.quiescent.wait()
+        await repository.close()
+
+    async def _close_owned(self):
+        acquisition = self._source_acquisition
         for worker in tuple(self._executions):
             if not worker.cancelling():
                 worker.cancel()
@@ -345,10 +496,26 @@ class _MissionRelayRuntime:
             for resource in resources:
                 if not await resource.wait_closed(timeout=None):
                     raise RuntimeError("Mission viewer reads did not settle during shutdown.")
-        await await_settled(settle())
+        try:
+            await await_settled(settle())
+        except BaseException:
+            pass
+        await self._settle_source(acquisition)
         for scope in self.caller_scopes.values():
-            if scope.runtime is not None: await scope.runtime.close()
-            if scope.components is not None: await scope.components["repository"].close()
+            runtime = scope.runtime
+            if runtime is not None:
+                try:
+                    await runtime.close()
+                except Exception:
+                    pass
+            if scope.components is not None:
+                # A borrowed repository closes only after its caller runtime is quiescent.
+                if runtime is None or runtime.quiescent.is_set():
+                    await scope.components["repository"].close()
+                else:
+                    closer = asyncio.create_task(self._close_after(runtime, scope.components["repository"]))
+                    self._late.add(closer)
+                    closer.add_done_callback(self._late.discard)
             if scope.log_handler is not None:
                 logging.getLogger().removeHandler(scope.log_handler)
                 scope.log_handler.close()
@@ -794,7 +961,8 @@ def _compose_caller_scope(scope):
 
 
 def _caller_runtime(scope, owner):
-    runtime = _MissionRelayRuntime(owner.server, caller_scope=scope)
+    runtime = _MissionRelayRuntime(owner.server, caller_scope=scope,
+        source_activation_factory=owner.source_activation_factory)
     runtime.transport = owner.transport
     return runtime
 

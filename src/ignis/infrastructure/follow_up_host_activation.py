@@ -65,6 +65,9 @@ class RootHostController:
         self._confirmed_facts = set()
         self._tokens = 0
         self._tasks = {}
+        # Exactly one durable accounting ledger may register this run's original bounds.
+        self._storage_registered = False
+        self._storage = None
         self._loop = asyncio.get_running_loop()
         self._settled = asyncio.Event()
         self._settled.set()
@@ -178,6 +181,15 @@ class RootHostController:
                 content_digest in self._confirmed_facts or any(
                     content_digest == digest((entry[0], self.confirmation.bounds)) for entry in self._enrollments.values()))
 
+    def enroll_storage(self, storage):
+        """Attest the original run ledger once, at trusted construction before registration."""
+        with self._lock:
+            if (self._storage is not None or self._storage_registered or self._revoked
+                    or getattr(storage.authorize, "__self__", None) is not self):
+                raise FollowUpExecutionBoundaryError()
+            stat = storage.path.stat()
+            self._storage = (storage, storage.path, (stat.st_dev, stat.st_ino))
+
     def authorize_storage(self, operation, run_id, bounds_digest):
         """No persisted scope authorizes a new session; constructor confirmation must be fresh."""
         with self._lock:
@@ -189,7 +201,12 @@ class RootHostController:
                 return False
             if (run_id, bounds_digest) != (self.confirmation.bounds.run_id, digest(self.confirmation.bounds)):
                 return False
-            return operation == "purge" or self.confirmation.bounds.started_at <= self.clock() < self.confirmation.bounds.deadline
+            allowed = operation == "purge" or self.confirmation.bounds.started_at <= self.clock() < self.confirmation.bounds.deadline
+            if allowed and operation == "register":
+                if self._storage_registered:
+                    return False
+                self._storage_registered = True
+            return allowed
 
     def _check(self, lease):
         self._current()

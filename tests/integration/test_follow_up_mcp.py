@@ -177,6 +177,12 @@ async def main():
     server.get_components = forbidden
     server._init_components = forbidden
     server.mcp.add_middleware(Proof())
+    # Test-only composition: the real caller middleware selects the explicit disposable root
+    # and borrows this descriptor's exact repository/store; its scope guards stay active.
+    from ignis.infrastructure.caller_storage import CallerStorageMiddleware
+    for middleware in server.mcp.middleware:
+        if isinstance(middleware, CallerStorageMiddleware):
+            middleware.compose = lambda scope: components
     try:
         await server.mcp.run_stdio_async(show_banner=False)
     finally:
@@ -206,7 +212,7 @@ def native_client(tmp_path, case, *, missing_provider=False):
         args=[str(runner), str(descriptor), str(tmp_path / 'transport-proof.json'), str(tmp_path / 'probes.json'),
               str(tmp_path / 'connector-identity.json')],
         cwd=str(tmp_path), keep_alive=False,
-        env={'IGNIS_ENV_FILE': str(isolated), 'IGNIS_ENV_ISOLATED': '1',
+        env={'IGNIS_ENV_FILE': str(isolated), 'IGNIS_ENV_ISOLATED': '1', 'IGNIS_CALLER_ROOT': str(tmp_path),
              'PYTHONPATH': os.pathsep.join(str(path) for path in (root / 'src', root, root / 'tests/integration', root / 'tests'))}, log_file=tmp_path / 'stdio.log'), timeout=20)
 
 
