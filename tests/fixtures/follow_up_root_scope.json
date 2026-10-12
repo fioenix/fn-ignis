@@ -15,5 +15,5 @@
   "search_calls": 2,
   "other_calls": 4,
   "run_minutes": 15,
-  "retention_days": 7
+  "retention": "UNTIL_EXPLICIT_USER_DELETION"
 }

@@ -21,8 +21,10 @@ def test_offline_consumer_refuses_nonisolated_config_before_provider_import(monk
 
 @pytest.mark.parametrize('candidate_mode', ['none', 'invalid'])
 @pytest.mark.asyncio
-async def test_durable_offline_consumer_exercises_original_scope_and_physical_expiry(tmp_path, monkeypatch, candidate_mode):
+async def test_durable_offline_consumer_exercises_original_scope_and_persistent_retention(tmp_path, monkeypatch, candidate_mode):
+    import tempfile
     consumer = runpy.run_path(str(SCRIPT))
+    monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
     monkeypatch.setattr(config, '_ENV_ISOLATED', True)
     monkeypatch.setattr(config.settings, 'DATABASE_URL', 'sqlite:///:memory:')
     fixtures = Path(__file__).parents[1] / 'fixtures'
@@ -84,21 +86,25 @@ async def test_durable_offline_consumer_exercises_original_scope_and_physical_ex
     assert summary['description_state'] == 'RETAINED'
     assert summary['qualification'] == 'EXPLICIT_CURRENT_FRAME_CONTEXT_ONLY'
     assert summary['permitted_claims'] == 0
-    assert summary['before_expiry_cleanup'] == 'REFUSED_WITH_ORIGINAL_INODE_PRESERVED'
-    assert summary['owned_expiry'] == 'PHYSICAL_PURGE_VERIFIED' and summary['foreign_preserved']
+    assert summary['retention'] == 'UNTIL_EXPLICIT_USER_DELETION'
+    assert summary['accounting_close'] == 'CLOSED' and summary['shutdown'] == 'REVOKED_CLOSED'
+    assert summary['expiry_purge'] == 'REFUSED_WITH_ORIGINAL_DATA_RETAINED' and summary['foreign_preserved']
+    assert Path(summary['temporary_root']).parent.parent == tmp_path
     assert summary['native_installation'] == 'NOT_ESTABLISHED'
     assert summary['live_provider_execution'] == 'NOT_EXECUTED'
 
 
 @pytest.mark.parametrize('failure', ['exception', 'cancellation'])
 @pytest.mark.asyncio
-async def test_analysis_failure_disposes_original_owner_without_another_source_call(tmp_path, monkeypatch, failure):
+async def test_analysis_failure_closes_original_owner_and_retains_data_without_another_source_call(tmp_path, monkeypatch, failure):
     import asyncio
+    import tempfile
     from datetime import timedelta
     from ignis.infrastructure import follow_up_root_composition as composition
     from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
     from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
     consumer = runpy.run_path(str(SCRIPT))
+    monkeypatch.setattr(tempfile, 'tempdir', str(tmp_path))
     monkeypatch.setattr(config, '_ENV_ISOLATED', True)
     monkeypatch.setattr(config.settings, 'DATABASE_URL', 'sqlite:///:memory:')
     fixtures = Path(__file__).parents[1] / 'fixtures'
@@ -141,14 +147,22 @@ async def test_analysis_failure_disposes_original_owner_without_another_source_c
     assert captured['host']._revoked and not captured['host']._tokens and not captured['host']._tasks
     assert recovery.confirmation is captured['host'].confirmation
     assert provider_calls == ['search', 'videos']
-    identity = (canonical.path.stat().st_dev, canonical.path.stat().st_ino)
+    bounds = recovery.confirmation.bounds
+    assert bounds.retention_until is None
+    metadata = canonical.generated_metadata
+    paths = [captured['accounting'].path] + [metadata.root / key for key in metadata._load()['files']]
+    assert canonical.path in paths and any(path.name == 'workspace.json' for path in paths) and len(paths) >= 4
+    retained = [(path.stat().st_ino, path.read_bytes()) for path in paths]
     with pytest.raises(FollowUpExecutionBoundaryError):
-        await recovery.purge(now=recovery.confirmation.bounds.retention_until - timedelta(seconds=1))
-    assert (canonical.path.stat().st_dev, canonical.path.stat().st_ino) == identity
+        await recovery.purge(now=bounds.deadline + timedelta(days=8))
+    assert [(path.stat().st_ino, path.read_bytes()) for path in paths] == retained
     with pytest.raises(FollowUpExecutionBoundaryError):
         await captured['repository'].get_mission(captured['mission_id'])
     foreign = canonical.root.parent / 'unregistered-foreign.txt'
     assert foreign.exists()
-    await recovery.purge(now=recovery.confirmation.bounds.retention_until)
-    assert not canonical.path.exists() and foreign.exists()
+    assert canonical.path.exists() and not (canonical.root / 'deletion.json').exists()
+    accounting = captured['accounting']
+    assert accounting.counts(bounds) == {'search': 1, 'other': 1}
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        accounting.current(bounds)
     assert provider_calls == ['search', 'videos']

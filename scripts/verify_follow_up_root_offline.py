@@ -73,7 +73,7 @@ async def verify(packet_path, confirmation_path):
         result = await bootstrap_confirmed_parent(root=root, brief=brief, receipt=receipt,
             instruction=instruction, resolve_credential=resolve, transport=httpx.MockTransport(response),
             quota_manager=quota, clusterer=OfflineClusterer())
-        foreign.write_text('Synthetic foreign file must survive owned expiry.')
+        foreign.write_text('Synthetic foreign file must survive owned retention checks.')
         host = result['host']
         bounds = host.confirmation.bounds
         store = result['executor']._workspace_store
@@ -91,7 +91,7 @@ async def verify(packet_path, confirmation_path):
         assert query['regionCode'] == 'VN' and query['relevanceLanguage'] == 'vi' and 'pageToken' not in query
         assert query['publishedAfter'] == (bounds.started_at - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ')
         assert bounds.deadline - bounds.started_at == timedelta(minutes=15)
-        assert bounds.retention_until - bounds.started_at == timedelta(days=7)
+        assert bounds.retention_until is None
         assert (bounds.search_calls, bounds.other_calls) == (2, 4)
         assert result['bridge'].budget._used == {'search': 1, 'other': 1}
         repository = result['repository']
@@ -126,18 +126,17 @@ async def verify(packet_path, confirmation_path):
         assert finished['analysis']['analysis_status'] == 'INSUFFICIENT_EVIDENCE'
         assert finished['claim_ledger']['counts']['permitted'] == 0
         recovery = finished['recovery']
+        retained = [(path.stat().st_ino, path.read_bytes()) for path in (canonical.path, journal.journal_path)]
         try:
-            await recovery.purge(now=bounds.started_at)
+            await recovery.purge(now=bounds.deadline + timedelta(days=8))
         except FollowUpExecutionBoundaryError:
             pass
         else:
-            raise AssertionError('Before-expiry cleanup was not refused.')
+            raise AssertionError('Persistent pilot data was purged without explicit user deletion.')
         assert (canonical.path.stat().st_dev, canonical.path.stat().st_ino) == original_identity
+        assert [(path.stat().st_ino, path.read_bytes()) for path in (canonical.path, journal.journal_path)] == retained
         assert canonical.closed and host._revoked
-        audit = await recovery.purge(now=bounds.retention_until)
-        assert audit['metadata_audit']['purged']
-        assert not canonical.path.exists() and not journal.journal_path.exists()
-        assert foreign.read_text() == 'Synthetic foreign file must survive owned expiry.'
+        assert foreign.read_text() == 'Synthetic foreign file must survive owned retention checks.'
         assert len(calls) == len(resolutions) == 2
         return {'status': 'OFFLINE_PRODUCTION_COMPOSITION_VERIFIED', 'packet_sha256': packet_hash,
             'consumer_sha256': sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -151,8 +150,10 @@ async def verify(packet_path, confirmation_path):
             'source_revoked_before_analysis': host._revoked,
             'stale_qualification': 'REFUSED', 'credential_mode': 'DEFERRED_DUMMY_ONLY',
             'search_calls': 1, 'other_calls': 1, 'child_status': result['child_status'],
-            'shutdown': 'REVOKED_CLOSED', 'owned_expiry': 'PHYSICAL_PURGE_VERIFIED',
-            'before_expiry_cleanup': 'REFUSED_WITH_ORIGINAL_INODE_PRESERVED',
+            'shutdown': ('REVOKED_CLOSED' if finished['accounting_close'] == 'CLOSED'
+                else 'REVOKED_ACCOUNTING_CLOSE_PENDING'),
+            'accounting_close': finished['accounting_close'], 'retention': instruction['retention'],
+            'expiry_purge': 'REFUSED_WITH_ORIGINAL_DATA_RETAINED',
             'foreign_preserved': True, 'native_installation': 'NOT_ESTABLISHED',
             'live_provider_execution': 'NOT_EXECUTED', 'temporary_root': str(root)}
     finally:

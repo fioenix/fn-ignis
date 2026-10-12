@@ -18,6 +18,14 @@ from ignis.domain.follow_up_admission import digest
 from ignis.domain.value_objects import GeoCode, PlatformType
 
 
+def _expiry(bounds):
+    """Persisted retention marker; persistent runs record no fabricated expiry date."""
+    if bounds.retention_until is None:
+        from ignis.infrastructure.follow_up_provider_bridge import RETAIN_UNTIL_EXPLICIT_USER_DELETION
+        return RETAIN_UNTIL_EXPLICIT_USER_DELETION
+    return bounds.retention_until.isoformat()
+
+
 class PrivateRunStorage:
     """Explicit create/reopen; authorization callbacks are supplied by the trusted host."""
 
@@ -84,7 +92,7 @@ class PrivateRunStorage:
     def _row(self, connection, bounds, *, active=True):
         row = connection.execute("SELECT bounds,expiry,searches,others,closed,purged FROM runs WHERE id=?",
                                  (str(bounds.run_id),)).fetchone()
-        if row is None or row[0] != digest(bounds) or row[1] != bounds.retention_until.isoformat():
+        if row is None or row[0] != digest(bounds) or row[1] != _expiry(bounds):
             raise FollowUpExecutionBoundaryError()
         registration = connection.execute("SELECT bounds FROM registrations WHERE id=?", (str(bounds.run_id),)).fetchone()
         if registration != (digest(bounds),):
@@ -102,7 +110,7 @@ class PrivateRunStorage:
         with self._connection() as connection:
             connection.execute("INSERT INTO registrations VALUES(?,?)", (str(bounds.run_id), digest(bounds)))
             connection.execute("INSERT INTO runs(id,bounds,expiry) VALUES(?,?,?)",
-                               (str(bounds.run_id), digest(bounds), bounds.retention_until.isoformat()))
+                               (str(bounds.run_id), digest(bounds), _expiry(bounds)))
 
     def reopen(self, bounds):
         if self.authorize("reopen", bounds.run_id, digest(bounds)) is not True:
@@ -135,6 +143,11 @@ class PrivateRunStorage:
             self._row(connection, bounds, active=False)
             connection.execute("UPDATE runs SET closed=1 WHERE id=?", (str(bounds.run_id),))
 
+    def is_closed(self, bounds):
+        """Read back durable closure of the original run row; grants nothing."""
+        with self._connection() as connection:
+            return self._row(connection, bounds, active=False)[4] == 1
+
     def cache(self, bounds, binding):
         return _ProviderCache(self, bounds, binding)
 
@@ -161,7 +174,8 @@ class PrivateRunStorage:
 
     def purge(self, bounds, *, now):
         """Explicit host lifecycle for authorized disposable data; no background deletion."""
-        if now < bounds.retention_until or self.authorize("purge", bounds.run_id, digest(bounds)) is not True:
+        if (bounds.retention_until is None or now < bounds.retention_until
+                or self.authorize("purge", bounds.run_id, digest(bounds)) is not True):
             raise FollowUpExecutionBoundaryError()
         # Persist closure first: failure/crash cannot reopen authority or reset attempts.
         self.close(bounds)

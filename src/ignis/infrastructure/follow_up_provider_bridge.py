@@ -35,12 +35,17 @@ def _plan_value(value, enum):
     return result.value
 
 
+# Persistent pilot data is retained until a separate explicit user deletion decision.
+RETAIN_UNTIL_EXPLICIT_USER_DELETION = "UNTIL_EXPLICIT_USER_DELETION"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RunBounds:
     run_id: UUID
     started_at: datetime
     deadline: datetime
-    retention_until: datetime
+    # None retains data until explicit user deletion; execution still ends at deadline.
+    retention_until: datetime | None
     queries: tuple[str, ...]
     video_limit: int
     search_calls: int
@@ -48,9 +53,12 @@ class RunBounds:
 
     def __post_init__(self):
         _uuid(self.run_id)
-        for value in (self.started_at, self.deadline, self.retention_until):
+        for value in (self.started_at, self.deadline):
             _time(value)
-        if not self.started_at < self.deadline <= self.retention_until:
+        if self.retention_until is not None:
+            _time(self.retention_until)
+        if not self.started_at < self.deadline or (
+                self.retention_until is not None and not self.deadline <= self.retention_until):
             raise ValueError("Invalid run expiry bounds.")
         if type(self.queries) is not tuple or not self.queries or len(set(self.queries)) != len(self.queries):
             raise ValueError("Explicit unique run queries required.")
@@ -116,7 +124,8 @@ class RunCallBudget:
 
     def current(self):
         now = self.clock()
-        return not self._closed and self.bounds.started_at <= now < self.bounds.deadline and now < self.bounds.retention_until
+        retained = self.bounds.retention_until is None or now < self.bounds.retention_until
+        return not self._closed and self.bounds.started_at <= now < self.bounds.deadline and retained
 
     def charge(self, bucket):
         with self._lock:
@@ -284,9 +293,11 @@ class _GuardedTransport(httpx.AsyncBaseTransport):
         private_request = httpx.Request(request.method, safe_url.copy_set_param("key", key),
             headers=request.headers, stream=request.stream, extensions=request.extensions)
         lease, _ = plugin._context()
-        remaining = (min(plugin._bridge.budget.bounds.deadline,
-                         plugin._bridge.budget.bounds.retention_until,
-                         lease.proof.fresh_until) - plugin._bridge.budget.clock()).total_seconds()
+        bounds = plugin._bridge.budget.bounds
+        limits = [bounds.deadline, lease.proof.fresh_until]
+        if bounds.retention_until is not None:
+            limits.append(bounds.retention_until)
+        remaining = (min(limits) - plugin._bridge.budget.clock()).total_seconds()
         response = None
         try:
             if remaining <= 0:

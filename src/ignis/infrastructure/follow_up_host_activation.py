@@ -415,6 +415,7 @@ class IsolatedCanonicalSQLite:
         record = self._ownership()
         if (host.confirmation != self.confirmation
                 or tuple(record["identity"]) != self._identity
+                or self.confirmation.bounds.retention_until is None
                 or host.clock() < self.confirmation.bounds.retention_until):
             raise FollowUpExecutionBoundaryError()
         if repository is not None:
@@ -447,7 +448,8 @@ class IsolatedCanonicalSQLite:
         record = self._ownership()
         request = self._request()
         state = self._disposition()
-        if (not self.closed or now < self.confirmation.bounds.retention_until
+        if (not self.closed or self.confirmation.bounds.retention_until is None
+                or now < self.confirmation.bounds.retention_until
                 or tuple(record['identity']) != self._identity
                 or (state is None and not self._deletion_only and self._delete_request != request)):
             raise FollowUpExecutionBoundaryError()

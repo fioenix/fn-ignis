@@ -20,6 +20,11 @@ def _hash(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _expiry(value):
+    """None records persistent retention until explicit user deletion."""
+    return None if value is None else value.isoformat()
+
+
 class GeneratedWorkspaceRetention:
     """Privileged explicit root creation, before bootstrap; reopen is deletion-only."""
 
@@ -36,7 +41,7 @@ class GeneratedWorkspaceRetention:
             self.root.mkdir(exist_ok=False)
             stat = self.root.stat()
             record = {'owner_reference':owner_reference,'scope_digest':scope_digest,
-                'retention_until':retention_until.isoformat(),'root_identity':[stat.st_dev,stat.st_ino],
+                'retention_until':_expiry(retention_until),'root_identity':[stat.st_dev,stat.st_ino],
                 'creation_token':uuid4().hex}
             with self.receipt.open('x') as stream:
                 json.dump(record,stream,sort_keys=True)
@@ -59,7 +64,7 @@ class GeneratedWorkspaceRetention:
         record=json.loads(self.receipt.read_text())
         stat=self.root.stat()
         if (record['owner_reference']!=self.owner_reference or record['scope_digest']!=self.scope_digest
-                or record['retention_until']!=self.retention_until.isoformat()
+                or record['retention_until']!=_expiry(self.retention_until)
                 or record['root_identity']!=[stat.st_dev,stat.st_ino]):
             raise FollowUpExecutionBoundaryError()
 
@@ -205,7 +210,7 @@ class GeneratedWorkspaceRetention:
         with self._lock:
             if self.active_run:raise FollowUpExecutionBoundaryError()
             self.closed=True
-            if now<self.retention_until:raise FollowUpExecutionBoundaryError()
+            if self.retention_until is None or now<self.retention_until:raise FollowUpExecutionBoundaryError()
             state=self._load()
             if state['purged']:return state['audit']
             # Validate exact producer directories and files before deleting; never inventory foreign entries.

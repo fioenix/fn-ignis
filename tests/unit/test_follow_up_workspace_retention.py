@@ -24,68 +24,25 @@ async def actual_parent(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_actual_canonical_expiry_removes_owned_workspace_metadata(tmp_path):
-    print('PHASE ACTUAL_PARENT_BEGIN',flush=True)
+async def test_explicit_expiry_call_retains_owned_workspace_metadata(tmp_path):
+    from datetime import timedelta
+    from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
     result,manifest,journal,calls,credentials=await actual_parent(tmp_path)
-    print('PHASE ACTUAL_PARENT_COMPLETE',flush=True)
     assert manifest.is_file() and journal.is_file()
     assert 'collection_plan' in journal.read_text()
     foreign=tmp_path/'foreign';foreign.write_bytes(b'Foreign owner bytes')
     host=result['host']
-    host.clock=lambda:host.confirmation.bounds.retention_until
-    print('PHASE EXPLICIT_EXPIRY_BEGIN',flush=True)
-    await driver.expire_owned_storage(host,result['canonical'],result['repository'],result['accounting'])
-    print('PHASE EXPLICIT_EXPIRY_COMPLETE',flush=True)
-    assert not result['canonical'].path.exists()
-    assert not manifest.exists(), 'Owned workspace manifest escaped explicit seven-day disposition'
-    assert not journal.exists(), 'Owned collection-plan journal escaped explicit seven-day disposition'
-    assert foreign.read_bytes()==b'Foreign owner bytes'
-    assert len(calls)==len(credentials)==2
-
-
-@pytest.mark.asyncio
-async def test_metadata_purge_failure_reopens_delete_only_preserving_foreign(tmp_path,monkeypatch):
-    from ignis.infrastructure.follow_up_workspace_retention import GeneratedWorkspaceRetention
-    result,manifest,journal,calls,credentials=await actual_parent(tmp_path)
-    metadata=result['canonical'].generated_metadata
-    original=metadata.receipt.read_bytes()
-    foreign=manifest.parent/'foreign-user-note.txt';foreign.write_bytes(b'Foreign owner bytes')
-    host=result['host'];host.clock=lambda:host.confirmation.bounds.retention_until
-    original_unlink=Path.unlink
-    def failed(path,*args,**kwargs):
-        if path==journal:raise OSError('Synthetic registered journal first deletion failure')
-        return original_unlink(path,*args,**kwargs)
-    with monkeypatch.context() as patch:
-        patch.setattr(Path,'unlink',failed)
-        with pytest.raises(OSError):
+    assert host.confirmation.bounds.retention_until is None
+    retained=[(path.stat().st_ino,path.read_bytes()) for path in (result['canonical'].path,manifest,journal)]
+    host.clock=lambda:host.confirmation.bounds.deadline+timedelta(days=8)
+    try:
+        with pytest.raises(FollowUpExecutionBoundaryError):
             await driver.expire_owned_storage(host,result['canonical'],result['repository'],result['accounting'])
-    assert host._revoked and result['canonical'].closed and metadata.closed
-    assert journal.exists() and metadata.receipt.read_bytes()==original
-    reopened=GeneratedWorkspaceRetention(metadata.root,owner_reference=metadata.owner_reference,
-        scope_digest=metadata.scope_digest,retention_until=metadata.retention_until)
-    result['canonical'].generated_metadata=reopened
-    audit=await driver.expire_owned_storage(host,result['canonical'],result['repository'],result['accounting'])
-    assert audit['metadata_audit']['purged'] and not manifest.exists() and not journal.exists()
-    assert metadata.receipt.read_bytes()==original and foreign.read_bytes()==b'Foreign owner bytes'
-    assert len(calls)==len(credentials)==2
-
-
-@pytest.mark.parametrize('change',['bytes','replacement','symlink'])
-@pytest.mark.asyncio
-async def test_changed_owned_metadata_refuses_and_preserves_foreign(tmp_path,change):
-    from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
-    result,manifest,journal,calls,credentials=await actual_parent(tmp_path)
-    original=manifest.read_bytes()
-    foreign=tmp_path/'foreign-change';foreign.write_bytes(b'Foreign changed payload')
-    if change=='bytes':manifest.write_bytes(b'Changed bytes after producer settlement')
-    elif change=='replacement':
-        replacement=tmp_path/'replacement';replacement.write_bytes(b'Foreign replaced payload');replacement.replace(manifest)
-    else:manifest.unlink();manifest.symlink_to(foreign)
-    host=result['host'];host.clock=lambda:host.confirmation.bounds.retention_until
-    with pytest.raises(FollowUpExecutionBoundaryError):
-        await driver.expire_owned_storage(host,result['canonical'],result['repository'],result['accounting'])
-    assert manifest.exists() and journal.exists() and host._revoked
-    assert foreign.read_bytes()==b'Foreign changed payload'
+    finally:
+        await host.revoke()
+        await result['repository'].close()
+    assert [(path.stat().st_ino,path.read_bytes()) for path in (result['canonical'].path,manifest,journal)]==retained
+    assert foreign.read_bytes()==b'Foreign owner bytes'
     assert len(calls)==len(credentials)==2
 
 

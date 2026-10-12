@@ -24,6 +24,11 @@ def framing():
     return brief, receipt
 
 
+def _retained(paths):
+    """Physical identity and exact bytes of retained owned files."""
+    return [(path.stat().st_dev,path.stat().st_ino,path.read_bytes()) for path in paths]
+
+
 @pytest.mark.parametrize('change', ['proposed','tampered','scope','missing'])
 @pytest.mark.asyncio
 async def test_unconfirmed_or_changed_brief_refuses_before_storage_or_credential(tmp_path,change):
@@ -116,7 +121,7 @@ def test_default_market_policy_includes_falsifier_query():
 
 
 @pytest.mark.parametrize('field,value', [('video_limit',6),('search_calls',3),('other_calls',5),
-    ('run_minutes',16),('retention_days',8),('source','unapproved'),('geo','GeoCode.US')])
+    ('run_minutes',16),('retention','SEVEN_DAYS'),('source','unapproved'),('geo','GeoCode.US')])
 @pytest.mark.asyncio
 async def test_private_root_scope_refuses_expansion_before_any_storage(tmp_path,field,value):
     instruction=dict(INSTRUCTION,**{field:value})
@@ -128,6 +133,126 @@ async def test_private_root_scope_refuses_expansion_before_any_storage(tmp_path,
             receipt=receipt,instruction=instruction,resolve_credential=resolve,
             transport=None,quota_manager=None,clusterer=None)
     assert not (tmp_path/'no-expanded-storage').exists()
+
+
+def _synthetic_tutorial_transport(calls):
+    import httpx
+    from datetime import datetime,timezone
+    now=datetime.now(timezone.utc)
+    async def response(request):
+        calls.append(request.url.path.rsplit('/',1)[-1])
+        if request.url.path.endswith('/search'):
+            return httpx.Response(200,json={'items':[{'id':{'videoId':'synthetic-retained'}}]})
+        return httpx.Response(200,json={'items':[{'id':'synthetic-retained','snippet':{
+            'title':'Hướng dẫn n8n: workflow được lưu giữ','description':'Synthetic retained description.',
+            'publishedAt':now.isoformat()},'statistics':{'viewCount':'10'}}]})
+    return httpx.MockTransport(response)
+
+
+@pytest.mark.asyncio
+async def test_obsolete_seven_day_instruction_cannot_enroll_new_pilot_data_for_deletion(tmp_path):
+    from tests.unit.test_follow_up_provider_bridge import Quota
+    seven_day={key:value for key,value in INSTRUCTION.items() if key!='retention'}|{'retention_days':7}
+    brief,receipt=framing()
+    receipt['collection_scope_digest']=digest(seven_day)
+    calls,credentials=[],[]
+    def resolve():credentials.append('synthetic-lookup');return 'synthetic-only'
+    class Clusterer:
+        async def cluster_signals(self,signals):return []
+    root=tmp_path/'no-seven-day-storage'
+    try:
+        result=await driver.bootstrap_confirmed_parent(root=root,brief=brief,receipt=receipt,
+            instruction=seven_day,resolve_credential=resolve,transport=_synthetic_tutorial_transport(calls),
+            quota_manager=Quota(),clusterer=Clusterer())
+    except ValueError as error:
+        refusal=str(error)
+    else:
+        refusal=None
+        await result['host'].revoke()
+        await result['repository'].close()
+    assert refusal=='OWNER_SCOPE_CONFIRMATION_REQUIRED' and not root.exists() and calls==credentials==[], (
+        'Obsolete seven-day retention admitted new pilot data for expiry deletion: '
+        f'deletion_receipt={(root/"canonical"/"ownership.json").exists()}, provider_calls={len(calls)}')
+
+
+@pytest.mark.asyncio
+async def test_persistent_pilot_completion_closes_resources_and_retains_data_across_restart(tmp_path):
+    import sqlite3
+    from datetime import timedelta
+    from tests.unit.test_follow_up_provider_bridge import Quota
+    from ignis.infrastructure.follow_up_host_activation import IsolatedCanonicalSQLite
+    from ignis.infrastructure.follow_up_run_storage import PrivateRunStorage, DurableRunCallBudget
+    from ignis.infrastructure.follow_up_workspace_retention import GeneratedWorkspaceRetention
+    brief=json.loads((Path(__file__).parents[1]/'fixtures'/'follow_up_tutorial_brief.json').read_text())
+    receipt={'status':'CONFIRMED','reference':'SYNTHETIC_ONLY_PERSISTENT_BINDING',
+        'owner_reference':INSTRUCTION['reference'],'payload_digest':digest(brief),
+        'collection_scope_digest':digest(INSTRUCTION),'confirmed_by':'synthetic-test-owner'}
+    calls,credentials=[],[]
+    def resolve():credentials.append('synthetic-lookup');return 'synthetic-only'
+    class Clusterer:
+        async def cluster_signals(self,signals):return []
+    root=tmp_path/'persistent-owned'
+    result=await driver.bootstrap_confirmed_parent(root=root,brief=brief,receipt=receipt,
+        instruction=INSTRUCTION,resolve_credential=resolve,transport=_synthetic_tutorial_transport(calls),
+        quota_manager=Quota(),clusterer=Clusterer())
+    host,canonical,accounting=result['host'],result['canonical'],result['accounting']
+    metadata=canonical.generated_metadata
+    try:
+        bounds=host.confirmation.bounds
+        assert bounds.retention_until is None
+        assert bounds.deadline-bounds.started_at==timedelta(minutes=15)
+        assert (bounds.queries,bounds.video_limit,bounds.search_calls,bounds.other_calls)==(
+            ('n8n Việt Nam','n8n tự động hóa'),5,2,4)
+        assert json.loads((root/'generated-ownership.json').read_text())['retention_until'] is None
+        store=result['executor']._workspace_store
+        snapshot=await store.load_mission_evidence_snapshot(host.confirmation.selected_parent_id)
+        assert snapshot.manifest.retention_policy=='caller-retained-until-explicit-user-deletion'
+        workspace=await store.get_research_workspace(snapshot.mission.workspace_id)
+        journal=await store.latest_run_journal(snapshot.mission.id)
+        signal=snapshot.signals[0]
+        finished=await driver.finish_canonical_parent_analysis(result,assessments=[{
+            'observation_id':str(signal.observation_id),'relation':'CONTEXT_ONLY','purpose':'CONTEXT',
+            'confidence':1.0,'reason_code':'ADJACENT_ONLY','judged_by':'synthetic-retention-control',
+            'evidence_role':'CONTEXT'}],candidates=[],judged_by='synthetic-retention-control')
+    finally:
+        await host.revoke()
+        await result['repository'].close()
+    recovery=finished['recovery']
+    assert finished['accounting_close']==recovery.accounting_close=='CLOSED'
+    assert host._revoked and not host._tokens and not host._tasks
+    assert canonical.closed and metadata.closed and not metadata.active_run
+    paths=(canonical.path,canonical.marker,workspace.manifest_path,journal.journal_path,accounting.path)
+    before=_retained(paths)
+    later=bounds.deadline+timedelta(days=8)
+    host.clock=lambda:later
+    with pytest.raises(FollowUpExecutionBoundaryError):await recovery.purge(now=later)
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        await driver.expire_owned_storage(host,canonical,result['repository'],accounting)
+    with pytest.raises(FollowUpExecutionBoundaryError):accounting.purge(bounds,now=later)
+    with pytest.raises(FollowUpExecutionBoundaryError):canonical._purge_closed(now=later)
+    with pytest.raises(FollowUpExecutionBoundaryError):metadata.purge(now=later)
+    assert _retained(paths)==before
+    assert not (canonical.root/'deletion.json').exists()
+    with sqlite3.connect(canonical.path.as_uri()+'?mode=ro',uri=True) as connection:
+        assert connection.execute('SELECT COUNT(*) FROM observations').fetchone()[0]==1
+        assert connection.execute('SELECT COUNT(*) FROM mission_evidence_qualifications').fetchone()[0]==1
+    with sqlite3.connect(accounting.path.as_uri()+'?mode=ro',uri=True) as connection:
+        assert connection.execute('SELECT searches,others,closed,purged FROM runs').fetchall()==[(1,1,1,0)]
+        assert connection.execute('SELECT COUNT(*) FROM cache').fetchone()[0]>=1
+        assert connection.execute('SELECT COUNT(*) FROM audit').fetchone()[0]==0
+    # A fresh process reads retained state; it restores no writer, source budget or deletion.
+    reopened=GeneratedWorkspaceRetention(root,owner_reference=metadata.owner_reference,
+        scope_digest=metadata.scope_digest,retention_until=None)
+    assert reopened.closed
+    with pytest.raises(FollowUpExecutionBoundaryError):reopened.write(root/'forbidden.json','Forbidden write')
+    with pytest.raises(FollowUpExecutionBoundaryError):reopened.purge(now=later)
+    with pytest.raises(FollowUpExecutionBoundaryError):IsolatedCanonicalSQLite(canonical.root,host.confirmation)
+    restarted=PrivateRunStorage(root/'accounting',authorize=lambda *args:False)
+    assert restarted.counts(bounds)=={'search':1,'other':1}
+    with pytest.raises(FollowUpExecutionBoundaryError):DurableRunCallBudget(bounds,storage=restarted)
+    with pytest.raises(FollowUpExecutionBoundaryError):restarted.purge(bounds,now=later)
+    assert _retained(paths)==before and not (root/'forbidden.json').exists()
+    assert calls==['search','videos'] and len(credentials)==2
 
 
 async def tutorial_parent_control(tmp_path, *, brief, receipt, instruction, description_present):
@@ -169,7 +294,7 @@ async def tutorial_parent_control(tmp_path, *, brief, receipt, instruction, desc
         assert 'pageToken' not in searches[0]
         assert searches[0]['publishedAfter']==(bounds.started_at-timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%SZ')
         assert bounds.deadline-bounds.started_at==timedelta(minutes=15)
-        assert bounds.retention_until-bounds.started_at==timedelta(days=7)
+        assert bounds.retention_until is None
         assert (bounds.search_calls,bounds.other_calls)==(2,4)
         assert result['bridge'].budget._used=={'search':1,'other':1}
         assert snapshot.signals[0].raw_title=='Hướng dẫn n8n: tạo workflow thử nghiệm'
@@ -219,10 +344,11 @@ async def tutorial_parent_control(tmp_path, *, brief, receipt, instruction, desc
         refusal=await driver.run_canonical_parent(host=host,bridge=result['bridge'],
             executor=result['executor'],parent_work_id=result['work_id'])
         assert refusal=={'status':'REFUSED','reason_code':'CURRENT_CANONICAL_PARENT_FRAME_REQUIRED'}
-        host.clock=lambda:bounds.retention_until
-        audit=await driver.expire_owned_storage(host,result['canonical'],result['repository'],result['accounting'])
-        assert audit['metadata_audit']['purged'] and host._revoked
-        assert not result['canonical'].path.exists() and not journal.journal_path.exists()
+        retained=_retained((result['canonical'].path,journal.journal_path))
+        host.clock=lambda:bounds.deadline+timedelta(days=8)
+        with pytest.raises(FollowUpExecutionBoundaryError):
+            await driver.expire_owned_storage(host,result['canonical'],result['repository'],result['accounting'])
+        assert _retained((result['canonical'].path,journal.journal_path))==retained
         assert len(calls)==len(credentials)==2
         return {'status':'OFFLINE_CANONICAL_COMPOSITION_VERIFIED','observations':1,
             'description_state':('MISSING' if description_present is False else
@@ -230,7 +356,7 @@ async def tutorial_parent_control(tmp_path, *, brief, receipt, instruction, desc
                 ['title','description'] if description_present is not False else ['title'],
             'retained_content_fields':(['raw_title'] if description_present is False else
                 ['raw_title','description']),'provider_endpoints':['search','videos'],
-            'search_calls':1,'other_calls':1,'child_status':'NOT_ADMITTED','expiry':'EXPLICIT_LOCAL_PURGE_VERIFIED',
+            'search_calls':1,'other_calls':1,'child_status':'NOT_ADMITTED','retention':'UNTIL_EXPLICIT_USER_DELETION',
             'brief_digest':digest(brief),'scope_digest':digest(instruction),'live_readiness':'NOT_ESTABLISHED'}
     finally:
         await result['host'].revoke()
@@ -248,50 +374,6 @@ async def test_tutorial_brief_is_bound_but_description_missingness_remains_expli
         description_present=description_present)
     assert summary['description_state']==('MISSING' if description_present is False else
         'EMPTY' if description_present=='' else 'RETAINED')
-
-
-@pytest.mark.asyncio
-async def test_after_seal_pre_host_failure_delivers_expiry_only_recovery(tmp_path,monkeypatch):
-    from datetime import datetime
-    from ignis.infrastructure.follow_up_workspace_retention import GeneratedWorkspaceRetention
-    root=tmp_path/'failed-sealed-startup'
-    original_open=Path.open
-    def fail_scope(path,*args,**kwargs):
-        if path==root/'root-scope.json':raise OSError('Synthetic original root-scope startup failure')
-        return original_open(path,*args,**kwargs)
-    calls=[]
-    def resolve():calls.append('forbidden-resolution');raise AssertionError('Startup failure reached credential')
-    brief,receipt=framing()
-    class Clusterer:
-        async def cluster_signals(self,signals):return []
-    with monkeypatch.context() as patch:
-        patch.setattr(Path,'open',fail_scope)
-        with pytest.raises(FollowUpExecutionBoundaryError) as failed:
-            await driver.bootstrap_confirmed_parent(root=root,brief=brief,receipt=receipt,instruction=INSTRUCTION,
-                resolve_credential=resolve,transport=None,quota_manager=None,clusterer=Clusterer())
-    canonical=root/'canonical'/'canonical.sqlite3'
-    marker=json.loads((canonical.parent/'ownership.json').read_text())
-    identity=(canonical.stat().st_dev,canonical.stat().st_ino)
-    assert identity==tuple(marker['identity']) and canonical.exists()
-    owned=json.loads((root/'generated-ownership.json').read_text())
-    expiry=datetime.fromisoformat(owned['retention_until'])
-    metadata=GeneratedWorkspaceRetention(root,owner_reference=owned['owner_reference'],
-        scope_digest=owned['scope_digest'],retention_until=expiry)
-    manifest=root/next(key for key in metadata._load()['files'] if key.endswith('/workspace.json'))
-    assert manifest.is_file() and calls==[]
-    assert metadata._load()['files']['canonical/canonical.sqlite3']['kind']=='canonical-delegated'
-    with pytest.raises(FollowUpExecutionBoundaryError):metadata.purge(now=expiry)
-    assert canonical.exists() and manifest.exists(), 'The original receipt alone cannot discharge delegated DB deletion'
-    recovery=getattr(failed.value,'recovery',None)
-    # Exercise whichever supported expiry action the failed call actually delivers.
-    # The oracle is physical removal, not existence of a new helper/API.
-    try:
-        if recovery is None:metadata.purge(now=expiry)
-        else:await recovery.purge(now=expiry)
-    except FollowUpExecutionBoundaryError:
-        pass
-    assert not canonical.exists(), 'Failed sealed startup cannot discharge its owned DB at expiry'
-    assert not manifest.exists() and calls==[]
 
 
 async def failed_startup_control(tmp_path,monkeypatch,phase='scope'):
@@ -320,69 +402,138 @@ async def failed_startup_control(tmp_path,monkeypatch,phase='scope'):
 
 @pytest.mark.parametrize('phase',['scope','registry'])
 @pytest.mark.asyncio
-async def test_failed_startup_recovery_refuses_early_ingress_and_preserves_foreign(tmp_path,monkeypatch,phase):
+async def test_failed_startup_closes_and_retains_owned_data_without_expiry_purge(tmp_path,monkeypatch,phase):
     from datetime import timedelta
     import sqlite3
     from ignis.infrastructure.follow_up_host_activation import open_owned_canonical_repository
     root,recovery,calls=await failed_startup_control(tmp_path,monkeypatch,phase)
     canonical=recovery._canonical
-    original=canonical.path.read_bytes();marker=canonical.marker.read_bytes()
+    bounds=recovery.confirmation.bounds
+    assert bounds.retention_until is None
+    manifest=root/next(key for key in recovery._metadata._load()['files'] if key.endswith('/workspace.json'))
+    paths=(canonical.path,canonical.marker,manifest)
+    before=_retained(paths)
     foreign=root/'foreign-user-note.txt';foreign.write_bytes(b'Foreign owner bytes')
     with sqlite3.connect(canonical.path.as_uri()+'?mode=ro',uri=True) as connection:
         assert connection.execute('SELECT id FROM research_missions').fetchall()==[(str(recovery.confirmation.selected_parent_id),)]
         assert connection.execute('SELECT COUNT(*) FROM observations').fetchone()[0]==0
     with pytest.raises(FollowUpExecutionBoundaryError):open_owned_canonical_repository(canonical)
     with pytest.raises(FollowUpExecutionBoundaryError):recovery._metadata.write(root/'new.json','Forbidden ingress')
+    later=bounds.deadline+timedelta(days=8)
+    with pytest.raises(FollowUpExecutionBoundaryError):await recovery.purge(now=later)
+    assert _retained(paths)==before and foreign.read_bytes()==b'Foreign owner bytes' and calls==[]
+    assert not (canonical.root/'deletion.json').exists() and not (root/'new.json').exists()
+    if phase=='scope':
+        assert recovery._host is None and recovery._accounting is None
+        assert recovery.accounting_close=='NOT_ALLOCATED'
+    else:
+        assert recovery._host._revoked and recovery._host._tokens==0
+        assert recovery.accounting_close=='CLOSED'
+        assert recovery._accounting.counts(bounds)=={'search':0,'other':0}
+        with pytest.raises(FollowUpExecutionBoundaryError):recovery._accounting.purge(bounds,now=later)
+        with pytest.raises(FollowUpExecutionBoundaryError):recovery._accounting.current(bounds)
+
+
+async def _persistent_parent(tmp_path,calls,credentials):
+    from tests.unit.test_follow_up_provider_bridge import Quota
+    brief=json.loads((Path(__file__).parents[1]/'fixtures'/'follow_up_tutorial_brief.json').read_text())
+    receipt={'status':'CONFIRMED','reference':'SYNTHETIC_ONLY_CLOSURE_BINDING',
+        'owner_reference':INSTRUCTION['reference'],'payload_digest':digest(brief),
+        'collection_scope_digest':digest(INSTRUCTION),'confirmed_by':'synthetic-test-owner'}
+    def resolve():credentials.append('synthetic-lookup');return 'synthetic-only'
+    class Clusterer:
+        async def cluster_signals(self,signals):return []
+    return await driver.bootstrap_confirmed_parent(root=tmp_path/'closure-owned',brief=brief,receipt=receipt,
+        instruction=INSTRUCTION,resolve_credential=resolve,transport=_synthetic_tutorial_transport(calls),
+        quota_manager=Quota(),clusterer=Clusterer())
+
+
+def _accounting_row(accounting):
+    import sqlite3
+    with sqlite3.connect(accounting.path.as_uri()+'?mode=ro',uri=True) as connection:
+        return (connection.execute('SELECT searches,others,closed,purged FROM runs').fetchone(),
+            connection.execute('SELECT COUNT(*) FROM cache').fetchone()[0])
+
+
+@pytest.mark.parametrize('outcome',['completed','exception','cancellation'])
+@pytest.mark.asyncio
+async def test_locked_accounting_close_reports_pending_then_close_only_retry_verifies_closed(tmp_path,monkeypatch,outcome):
+    import asyncio
+    import sqlite3
+    from datetime import timedelta
+    from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
+    calls,credentials=[],[]
+    result=await _persistent_parent(tmp_path,calls,credentials)
+    host,canonical,accounting=result['host'],result['canonical'],result['accounting']
+    bounds=host.confirmation.bounds
+    binding=next(iter(host._enrollments.values()))[0]
+    store=result['executor']._workspace_store
+    snapshot=await store.load_mission_evidence_snapshot(host.confirmation.selected_parent_id)
+    signal=snapshot.signals[0]
+    before_row=_accounting_row(accounting)
+    assert before_row==((1,1,0,0),before_row[1]) and before_row[1]>=1
+    if outcome!='completed':
+        async def fail(self,*args,**kwargs):
+            if outcome=='cancellation':raise asyncio.CancelledError()
+            raise ValueError('SYNTHETIC_ANALYSIS_FAILURE')
+        monkeypatch.setattr(GetMissionAnalysisUseCase,'execute',fail)
+    # A disposable second writer holds the accounting database during closure.
+    lock=sqlite3.connect(accounting.path,timeout=0)
+    lock.execute('BEGIN IMMEDIATE')
+    try:
+        expected=(driver.CanonicalAnalysisRetentionFailure if outcome=='exception'
+            else asyncio.CancelledError if outcome=='cancellation' else None)
+        assessments=[{'observation_id':str(signal.observation_id),'relation':'CONTEXT_ONLY','purpose':'CONTEXT',
+            'confidence':1.0,'reason_code':'ADJACENT_ONLY','judged_by':'synthetic-closure-control',
+            'evidence_role':'CONTEXT'}]
+        if expected is None:
+            finished=await driver.finish_canonical_parent_analysis(result,assessments=assessments,
+                candidates=[],judged_by='synthetic-closure-control')
+            recovery,disposition=finished['recovery'],finished.get('accounting_close')
+        else:
+            with pytest.raises(expected) as caught:
+                await driver.finish_canonical_parent_analysis(result,assessments=assessments,
+                    candidates=[],judged_by='synthetic-closure-control')
+            recovery=caught.value.recovery
+            disposition=getattr(recovery,'accounting_close',None)
+    finally:
+        lock.rollback();lock.close()
+    row=_accounting_row(accounting)
+    assert row==before_row, 'Failed closure changed counts, closure state or cache rows'
+    assert disposition=='PENDING', (
+        f'Accounting row closed={row[0][2]} after a failed durable close, but disposition={disposition!r}')
+    assert getattr(recovery,'accounting_close',None)=='PENDING'
+    assert host._revoked and canonical.closed and canonical.generated_metadata.closed
     with pytest.raises(FollowUpExecutionBoundaryError):
-        await recovery.purge(now=recovery.confirmation.bounds.retention_until-timedelta(seconds=1))
-    assert canonical.path.read_bytes()==original and canonical.marker.read_bytes()==marker
-    if phase=='scope':assert recovery._host is None and recovery._accounting is None
-    else:assert recovery._host._revoked and recovery._host._tokens==0
-    audit=await recovery.purge(now=recovery.confirmation.bounds.retention_until)
-    assert audit['canonical_audit']['purged'] and audit['metadata_audit']['purged']
-    assert not canonical.path.exists() and foreign.read_bytes()==b'Foreign owner bytes' and calls==[]
-    assert canonical.marker.read_bytes()==marker
-    if phase=='registry':
-        assert audit['private_audit'] and recovery._accounting.counts(recovery.confirmation.bounds)=={'search':0,'other':0}
-        with pytest.raises(FollowUpExecutionBoundaryError):recovery._accounting.current(recovery.confirmation.bounds)
-
-
-@pytest.mark.parametrize('change',['metadata-bytes','canonical-bytes','replacement','symlink','ownership-receipt'])
-@pytest.mark.asyncio
-async def test_failed_startup_expiry_refuses_changed_owned_state_before_deleting_db(tmp_path,monkeypatch,change):
-    root,recovery,calls=await failed_startup_control(tmp_path,monkeypatch)
-    canonical=recovery._canonical
-    original=canonical.path.read_bytes()
-    manifest=root/next(key for key in recovery._metadata._load()['files'] if key.endswith('/workspace.json'))
-    foreign=root/'foreign-state';foreign.write_bytes(b'Foreign state')
-    if change=='metadata-bytes':manifest.write_bytes(b'Changed registered manifest')
-    elif change=='canonical-bytes':
-        # Preserve physical identity while changing otherwise valid SQLite content.
-        import sqlite3
-        with sqlite3.connect(canonical.path) as connection:connection.execute('PRAGMA user_version=123')
-    elif change=='replacement':
-        replacement=root/'replacement';replacement.write_bytes(original);replacement.replace(canonical.path)
-    elif change=='symlink':canonical.path.unlink();canonical.path.symlink_to(foreign)
-    else:canonical.marker.write_bytes(canonical.marker.read_bytes()+b'\n')
-    with pytest.raises(FollowUpExecutionBoundaryError):await recovery.purge(now=recovery.confirmation.bounds.retention_until)
-    assert canonical.path.exists() and manifest.exists() and foreign.read_bytes()==b'Foreign state' and calls==[]
-    if change=='metadata-bytes':assert canonical.path.read_bytes()==original
+        async with host.hold_parent(binding):pass
+    paths=(canonical.path,canonical.marker,accounting.path)
+    retained=_retained(paths)
+    assert recovery.close_accounting()=='CLOSED'
+    assert recovery.accounting_close=='CLOSED'
+    assert _accounting_row(accounting)==((1,1,1,0),before_row[1])
+    assert recovery.close_accounting()=='CLOSED'
+    assert _accounting_row(accounting)==((1,1,1,0),before_row[1])
+    with pytest.raises(FollowUpExecutionBoundaryError):accounting.current(bounds)
+    with pytest.raises(FollowUpExecutionBoundaryError):await recovery.purge(now=bounds.deadline+timedelta(days=8))
+    assert _retained(paths)[:2]==retained[:2] and not (canonical.root/'deletion.json').exists()
+    assert calls==['search','videos'] and len(credentials)==2
 
 
 @pytest.mark.asyncio
-async def test_failed_startup_metadata_unlink_retry_remains_closed_after_canonical_purge(tmp_path,monkeypatch):
-    root,recovery,calls=await failed_startup_control(tmp_path,monkeypatch)
-    manifest=root/next(key for key in recovery._metadata._load()['files'] if key.endswith('/workspace.json'))
-    original_unlink=Path.unlink
-    def fail_manifest(path,*args,**kwargs):
-        if path==manifest:raise OSError('Synthetic retained manifest unlink failure')
-        return original_unlink(path,*args,**kwargs)
+async def test_failed_startup_with_failing_accounting_close_reports_pending_and_retry_closes(tmp_path,monkeypatch):
+    from ignis.infrastructure.follow_up_run_storage import PrivateRunStorage
+    original_close=PrivateRunStorage.close
+    def failing_close(self,bounds):raise FollowUpExecutionBoundaryError()
     with monkeypatch.context() as patch:
-        patch.setattr(Path,'unlink',fail_manifest)
-        with pytest.raises(OSError):await recovery.purge(now=recovery.confirmation.bounds.retention_until)
-    assert not recovery._canonical.path.exists() and manifest.exists()
-    assert recovery._canonical.closed and recovery._metadata.closed
-    with pytest.raises(FollowUpExecutionBoundaryError):recovery._canonical.check()
-    audit=await recovery.purge(now=recovery.confirmation.bounds.retention_until)
-    assert audit['canonical_audit']['purged'] and audit['metadata_audit']['purged'] and not manifest.exists()
+        patch.setattr(PrivateRunStorage,'close',failing_close)
+        root,recovery,calls=await failed_startup_control(tmp_path,monkeypatch,'registry')
+    bounds=recovery.confirmation.bounds
+    row=_accounting_row(recovery._accounting)
+    assert row[0]==(0,0,0,0)
+    assert getattr(recovery,'accounting_close',None)=='PENDING', (
+        f'Accounting row closed={row[0][2]} after startup failure, but disposition was not PENDING')
+    assert PrivateRunStorage.close is original_close
+    assert recovery.close_accounting()=='CLOSED'
+    assert _accounting_row(recovery._accounting)==((0,0,1,0),row[1])
+    with pytest.raises(FollowUpExecutionBoundaryError):recovery._accounting.current(bounds)
     assert calls==[]

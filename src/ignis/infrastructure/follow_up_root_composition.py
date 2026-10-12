@@ -14,7 +14,8 @@ from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
 from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
 from ignis.domain.follow_up_admission import SourceGrant, digest
 from ignis.infrastructure.follow_up_host_activation import RootOwnerConfirmation
-from ignis.infrastructure.follow_up_provider_bridge import TransportBinding, _plan_value
+from ignis.infrastructure.follow_up_provider_bridge import (
+    RETAIN_UNTIL_EXPLICIT_USER_DELETION, TransportBinding, _plan_value)
 from ignis.domain.value_objects import GeoCode, Timeframe
 from ignis.domain.research_workspace import compute_frame_fingerprint
 
@@ -23,20 +24,32 @@ class StartupRetentionFailure(FollowUpExecutionBoundaryError):
     """Safe failed-startup disposition; original scope survives only for explicit deletion."""
 
     def __init__(self, recovery):
-        super().__init__('Sealed startup failed; original storage remains closed for expiry recovery.')
+        super().__init__('Sealed startup failed; original storage remains closed and retained.')
         self.recovery = recovery
 
 
 class _ClosedStartupRetention:
     """Original settled root ownership, without writer, execution or fresh host capability."""
 
-    def __init__(self, canonical, metadata, host, accounting):
+    def __init__(self, canonical, metadata, host, accounting, *, accounting_close='NOT_ALLOCATED'):
         self.confirmation = canonical.confirmation
+        self.accounting_close = accounting_close
         self._canonical, self._metadata = canonical, metadata
         self._host, self._accounting = host, accounting
         self._request = canonical._request()
         self._database_hash = sha256(canonical.path.read_bytes()).hexdigest()
         self._accounting_identity = (accounting.path.stat().st_dev,accounting.path.stat().st_ino) if accounting else None
+
+    def close_accounting(self):
+        """Bounded close-only retry on the original run; no lease, count reset or deletion."""
+        if self._accounting is None:
+            return self.accounting_close
+        path = self._accounting.path
+        if (path.is_symlink() or path.parent.is_symlink() or not path.is_file()
+                or (path.stat().st_dev,path.stat().st_ino) != self._accounting_identity):
+            raise FollowUpExecutionBoundaryError()
+        self.accounting_close = _close_accounting(self._accounting, self.confirmation.bounds)
+        return self.accounting_close
 
     async def purge(self, *, now):
         """Consume the original ownership at expiry; never reopen a writer or source lease."""
@@ -44,6 +57,9 @@ class _ClosedStartupRetention:
         from ignis.infrastructure.follow_up_run_storage import PrivateRunStorage
         metadata = self._metadata
         bounds = self.confirmation.bounds
+        # Persistent retention has no expiry; deletion needs separate explicit user authority.
+        if bounds.retention_until is None:
+            raise FollowUpExecutionBoundaryError()
         if (now < bounds.retention_until or metadata.active_run or not metadata.closed
                 or not self._canonical.closed
                 or (self._host is not None and (not self._host._revoked or self._host._tokens or self._host._tasks))):
@@ -82,11 +98,23 @@ class _ClosedStartupRetention:
 
 
 
+def _close_accounting(accounting, bounds):
+    """Durably end spending authority; CLOSED only after readback, rows are never deleted."""
+    if accounting is None:
+        return 'NOT_ALLOCATED'
+    try:
+        accounting.close(bounds)
+        return 'CLOSED' if accounting.is_closed(bounds) else 'PENDING'
+    except FollowUpExecutionBoundaryError:
+        # The private store sanitizes SQLite failures; report pending closure, never success.
+        return 'PENDING'
+
+
 class CanonicalAnalysisRetentionFailure(FollowUpExecutionBoundaryError):
-    """Analysis failed; only the original closed expiry disposition remains."""
+    """Analysis failed; the original storage remains closed and retained."""
 
     def __init__(self, recovery):
-        super().__init__('Canonical analysis failed; original storage remains closed for expiry recovery.')
+        super().__init__('Canonical analysis failed; original storage remains closed and retained.')
         self.recovery = recovery
 
 
@@ -135,25 +163,29 @@ async def finish_canonical_parent_analysis(result, *, assessments, candidates, j
         analysis = await GetMissionAnalysisUseCase(repository, store).execute(result['mission_id'])
     except BaseException as error:
         await host.revoke()
+        closure = _close_accounting(result['accounting'], host.confirmation.bounds)
         await repository.close()
         metadata.close()
-        recovery = _ClosedStartupRetention(canonical, metadata, host, result['accounting'])
+        recovery = _ClosedStartupRetention(canonical, metadata, host, result['accounting'],
+            accounting_close=closure)
         if isinstance(error, Exception):
             raise CanonicalAnalysisRetentionFailure(recovery) from None
         error.recovery = recovery
         raise
+    closure = _close_accounting(result['accounting'], host.confirmation.bounds)
     await repository.close()
     metadata.close()
-    recovery = _ClosedStartupRetention(canonical, metadata, host, result['accounting'])
+    recovery = _ClosedStartupRetention(canonical, metadata, host, result['accounting'],
+        accounting_close=closure)
     return {'outcomes': outcomes, 'qualification': qualification, 'claim_submission': claim_submission,
-        'claim_ledger': ledger, 'analysis': analysis, 'recovery': recovery}
+        'claim_ledger': ledger, 'analysis': analysis, 'recovery': recovery, 'accounting_close': closure}
 
 
 
 def _validate_instruction(record):
     """Keep this private pilot's exact supported source/window/budget contract."""
     required={'reference','credential_reference','queries','geo','timeframe','source','platform',
-        'tier','revision','video_limit','search_calls','other_calls','run_minutes','retention_days'}
+        'tier','revision','video_limit','search_calls','other_calls','run_minutes','retention'}
     if (type(record) is not dict or set(record)!=required
             or any(type(record[key]) is not str or not record[key].strip()
                    for key in ('reference','credential_reference'))
@@ -162,8 +194,9 @@ def _validate_instruction(record):
             or len(set(record['queries']))!=2
             or (record['geo'],record['timeframe'],record['source'],record['platform'],record['tier'],record['revision'])
                 != ('GeoCode.VN','Timeframe.LAST_30D','youtube','youtube','official_api','unversioned')
+            or record['retention']!=RETAIN_UNTIL_EXPLICIT_USER_DELETION
             or any(type(record[key]) is not int or record[key]!=value for key,value in
-                (('video_limit',5),('search_calls',2),('other_calls',4),('run_minutes',15),('retention_days',7)))):
+                (('video_limit',5),('search_calls',2),('other_calls',4),('run_minutes',15)))):
         raise ValueError('OWNER_SCOPE_CONFIRMATION_REQUIRED')
 
 
@@ -175,7 +208,7 @@ def confirmation_at_approved_invocation(record, *, mission_id, run_id, started_a
     started = started_at or datetime.now(timezone.utc)
     bounds = RunBounds(run_id=UUID(str(run_id)), started_at=started,
         deadline=started+timedelta(minutes=record['run_minutes']),
-        retention_until=started+timedelta(days=record['retention_days']),
+        retention_until=None,
         queries=tuple(record['queries']), video_limit=record['video_limit'],
         search_calls=record['search_calls'], other_calls=record['other_calls'])
     return RootOwnerConfirmation(reference=record['reference'], credential_reference=record['credential_reference'],
@@ -259,6 +292,8 @@ async def run_canonical_parent(*, host, bridge, executor, parent_work_id):
 
 async def expire_owned_storage(host, canonical, repository, accounting):
     """Explicit root lifecycle, with durable phase readback and deletion-only retry."""
+    if host.confirmation.bounds.retention_until is None:
+        raise FollowUpExecutionBoundaryError()
     metadata = canonical.generated_metadata
     if metadata.active_run:
         raise ValueError('OWNED_EXECUTION_NOT_QUIESCENT')
@@ -314,8 +349,7 @@ async def bootstrap_confirmed_parent(*, root, brief, receipt, instruction, resol
     root = Path(root)
     invocation_started = datetime.now(timezone.utc)
     metadata = GeneratedWorkspaceRetention(root,owner_reference=instruction['reference'],
-        scope_digest=digest(instruction),retention_until=invocation_started+timedelta(days=instruction['retention_days']),
-        create=True)
+        scope_digest=digest(instruction),retention_until=None,create=True)
     prepared = PreparedCanonicalSQLite(root/'canonical', owner_reference=instruction['reference'],
                                        collection_scope_digest=digest(instruction))
     metadata.bind_bootstrap(prepared)
@@ -333,7 +367,7 @@ async def bootstrap_confirmed_parent(*, root, brief, receipt, instruction, resol
             quota_budget={'queries':2, 'youtube_search_calls':2},
             output_type=MissionOutputType.MARKET_ANALYSIS,
             stop_conditions=('deadline or aggregate budget or missing authority',),
-            analysis_policy='evidence-gated-v1', retention_policy='exclusive-owned-seven-day-host-disposition',
+            analysis_policy='evidence-gated-v1', retention_policy='caller-retained-until-explicit-user-deletion',
             created_by=receipt['confirmed_by'], confirmed_at=datetime.now(timezone.utc))
         mission, revision = await ConfirmMarketBriefUseCase(repository, store).execute(
             workspace_id=workspace.workspace_id, manifest=manifest,
@@ -438,12 +472,15 @@ async def bootstrap_confirmed_parent(*, root, brief, receipt, instruction, resol
     except BaseException as error:
         if 'host' in locals():
             await host.revoke()
+        closure = (_close_accounting(accounting, confirmation.bounds)
+                   if 'accounting' in locals() else 'NOT_ALLOCATED')
         await repository.close()
         prepared._closed = True
         metadata.close()
         if 'enrollment' in locals():
             enrollment.closed = True
-            recovery = _ClosedStartupRetention(enrollment,metadata,locals().get('host'),locals().get('accounting'))
+            recovery = _ClosedStartupRetention(enrollment,metadata,locals().get('host'),locals().get('accounting'),
+                accounting_close=closure)
             if isinstance(error,Exception):
                 raise StartupRetentionFailure(recovery) from None
             # Preserve cancellation semantics while still returning the original closed disposition.
