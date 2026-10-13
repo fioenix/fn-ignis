@@ -90,19 +90,19 @@ def _observe_chain(case, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_actual_mcp_http_selected_view_and_inspector_preserve_physical_storage(attention_case, monkeypatch):
+async def test_actual_mcp_http_selected_view_and_inspector_preserve_physical_storage(attention_case, monkeypatch, tmp_path):
     from ignis.interfaces.mcp import server
     case, missions, runs = attention_case
     before = _state(case)
     _setup_traps(monkeypatch, case.repository)
-    monkeypatch.setattr(server, '_COMPONENTS', {'repository': case.repository})
     def forbidden(*args, **kwargs):
         raise AssertionError('Read chain initialized writable components or credentials')
     monkeypatch.setattr(server, 'get_components', forbidden)
     monkeypatch.setattr(server, 'create_repository', forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
     observer = _observe_chain(case, monkeypatch)
     with observer as observed:
-        async with Client(server.mcp) as client:
+        async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client:
             snapshot = (await client.call_tool('get_mission_relay_snapshot', {
                 'mission_id': str(missions[0].id), 'run_id': str(runs[0]), 'page_size': 2,
             })).structured_content
@@ -134,7 +134,7 @@ async def test_actual_mcp_http_selected_view_and_inspector_preserve_physical_sto
             assert status == 200 and len(last['evidence']) == 1 and last['next_evidence_offset'] is None
             assert last['counts'] == snapshot['counts']
         observed.assert_no_writes()
-    assert _state(case) == before
+    owned.assert_closed_unchanged(case, before)
 
 
 @pytest.mark.asyncio
@@ -144,15 +144,15 @@ async def test_actual_mcp_http_browser_reads_and_inspects_without_writes(attenti
     case, missions, runs = attention_case
     before = _state(case)
     _setup_traps(monkeypatch, case.repository)
-    monkeypatch.setattr(server, '_COMPONENTS', {'repository': case.repository})
     def forbidden(*args, **kwargs):
         raise AssertionError('Browser viewer initialized writable components or credentials')
     monkeypatch.setattr(server, 'get_components', forbidden)
     monkeypatch.setattr(server, 'create_repository', forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
     observer = _observe_chain(case, monkeypatch)
     errors, requests, external = [], [], []
     with observer as observed:
-        async with Client(server.mcp) as client:
+        async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client:
             initial = (await client.call_tool('get_mission_relay_snapshot', {
                 'mission_id': str(missions[0].id), 'run_id': str(runs[0]), 'page_size': 100,
             })).structured_content
@@ -227,7 +227,7 @@ async def test_actual_mcp_http_browser_reads_and_inspects_without_writes(attenti
                 finally:
                     await browser.close()
         observed.assert_no_writes()
-    assert _state(case) == before
+    owned.assert_closed_unchanged(case, before)
 
 
 @pytest.mark.asyncio
@@ -241,6 +241,9 @@ async def test_actual_mcp_missing_schema_or_access_refuses_before_bootstrap(stor
         with sqlite3.connect(path) as connection:
             connection.execute('CREATE TABLE research_missions (id TEXT PRIMARY KEY)')
     before = path.read_bytes() if path.exists() else None
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    # A real, never-initialized owner repository: the dedicated reader must refuse it read-only.
+    repository = SqliteTrendRepository(str(path))
     monkeypatch.setattr(server.settings, 'DATABASE_URL', SecretStr(f'sqlite:///{path}'))
     monkeypatch.setattr(server, '_COMPONENTS', None)
     def forbidden(*args, **kwargs):
@@ -251,7 +254,7 @@ async def test_actual_mcp_missing_schema_or_access_refuses_before_bootstrap(stor
         def denied(*args, **kwargs):
             raise sqlite3.OperationalError('inert access denied')
         monkeypatch.setattr(sqlite3, 'connect', denied)
-    async with Client(server.mcp) as client:
+    async with _caller_client(monkeypatch, tmp_path, {'repository': repository}) as client:
         for tool, args in (
             ('get_mission_relay_snapshot', {'page_size': 2}),
             ('open_mission_relay', {'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()}),
@@ -263,7 +266,7 @@ async def test_actual_mcp_missing_schema_or_access_refuses_before_bootstrap(stor
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('state,label', (('PENDING', 'Idle'), ('RUNNING', 'RUNNING'), ('LEGACY_UNRECOGNIZED', 'Unknown')))
-async def test_actual_idle_is_canonical_not_inferred_from_unselected_run(attention_case, monkeypatch, state, label):
+async def test_actual_idle_is_canonical_not_inferred_from_unselected_run(attention_case, monkeypatch, state, label, tmp_path):
     from ignis.interfaces.mcp import server
     from playwright.async_api import async_playwright, expect
     case, missions, _ = attention_case
@@ -272,13 +275,13 @@ async def test_actual_idle_is_canonical_not_inferred_from_unselected_run(attenti
     await case.repository.save_mission(mission)
     before = _state(case)
     _setup_traps(monkeypatch, case.repository)
-    monkeypatch.setattr(server, '_COMPONENTS', {'repository': case.repository})
     def forbidden(*args, **kwargs):
         raise AssertionError('Idle viewer started collection or component bootstrap')
     monkeypatch.setattr(server, 'get_components', forbidden)
     monkeypatch.setattr(server, 'create_repository', forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
     with _observe_chain(case, monkeypatch) as observed:
-        async with Client(server.mcp) as client:
+        async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client:
             snapshot = (await client.call_tool('get_mission_relay_snapshot', {
                 'mission_id': str(mission.id), 'page_size': 100,
             })).structured_content
@@ -303,7 +306,86 @@ async def test_actual_idle_is_canonical_not_inferred_from_unselected_run(attenti
                 finally:
                     await browser.close()
         observed.assert_no_writes()
-    assert _state(case) == before
+    owned.assert_closed_unchanged(case, before)
+
+
+def _caller_client(monkeypatch, root, components):
+    """Initialized-owner readback through a validated caller root.
+
+    The real middleware validates the client's advertised root; the supported compose seam then binds
+    the owner-created repository to that caller scope. This covers readback of an already initialized
+    owner repository, not cold production composition of a caller store. The caller lifespan owns the
+    composed map and really closes its repository on exit.
+    """
+    from ignis.infrastructure.caller_storage import CallerStorageMiddleware
+    from ignis.interfaces.mcp import server
+    assert 'repository' in components, 'A caller composition map always owns a repository'
+    (root / '.fnignis').mkdir(exist_ok=True)
+
+    def compose(scope):
+        if scope.root.resolve() != root.resolve():
+            raise AssertionError('Compose received a foreign caller root')
+        return components
+    for middleware in server.mcp.middleware:
+        if isinstance(middleware, CallerStorageMiddleware):
+            monkeypatch.setattr(middleware, 'compose', compose)
+    return Client(server.mcp, roots=[root.as_uri()], mode='legacy')
+
+
+class _OwnedRepository:
+    """Spy on the caller lifespan's real close: physical state is captured right before it runs."""
+
+    def __init__(self, monkeypatch, case):
+        self.repository = case.repository
+        self.connection = getattr(case.repository, '_mem_conn', None)
+        self.closes = 0
+        self.state_at_close = None
+        original = case.repository.close
+
+        async def spying_close():
+            self.closes += 1
+            try:
+                if self.closes == 1:
+                    self.state_at_close = _state(case)
+            finally:
+                # A capture failure must never prevent the genuine shutdown close.
+                result = await original()
+            return result
+        monkeypatch.setattr(case.repository, 'close', spying_close)
+
+    def assert_closed_unchanged(self, case, before):
+        import sqlite3
+        assert self.closes == 1, 'The caller lifespan must close its composed repository exactly once'
+        assert self.state_at_close == before
+        if self.connection is not None:
+            # In-memory storage ends with its owner's close; the original connection is really closed.
+            assert self.repository._mem_conn is None
+            with pytest.raises(sqlite3.ProgrammingError):
+                self.connection.execute('SELECT 1')
+        else:
+            assert _state(case) == before
+
+
+@pytest.mark.asyncio
+async def test_owned_repository_spy_still_closes_when_state_capture_fails(monkeypatch):
+    import sqlite3
+    import sys
+    from types import SimpleNamespace
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    repository = SqliteTrendRepository(':memory:')
+    connection = repository._mem_conn
+    case = SimpleNamespace(name='memory', repository=repository)
+
+    def failing_state(_case):
+        raise RuntimeError('synthetic state capture failure')
+    monkeypatch.setattr(sys.modules[__name__], '_state', failing_state)
+    owned = _OwnedRepository(monkeypatch, case)
+    with pytest.raises(RuntimeError, match='synthetic state capture failure'):
+        await repository.close()
+    assert owned.closes == 1
+    assert repository._mem_conn is None, 'A state-capture failure prevented the genuine close'
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute('SELECT 1')
 
 
 @contextmanager
@@ -318,7 +400,7 @@ def _view_only(case, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_committed_changes_reach_actual_http_browser_once(attention_case, monkeypatch):
+async def test_committed_changes_reach_actual_http_browser_once(attention_case, monkeypatch, tmp_path):
     from ignis.interfaces.mcp import server
     from ignis.domain.research_workspace import (
         EvidenceDirection, EvidencePurpose, EvidenceQualification, QualificationReason,
@@ -327,12 +409,11 @@ async def test_committed_changes_reach_actual_http_browser_once(attention_case, 
     from playwright.async_api import async_playwright, expect
     case, missions, runs = attention_case
     mission, run = missions[0], runs[0]
-    monkeypatch.setattr(server, '_COMPONENTS', {'repository': case.repository})
     def forbidden(*args, **kwargs):
         raise AssertionError('Viewer started component bootstrap or credential initialization')
     monkeypatch.setattr(server, 'get_components', forbidden)
     monkeypatch.setattr(server, 'create_repository', forbidden)
-    async with Client(server.mcp) as client, async_playwright() as runtime:
+    async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client, async_playwright() as runtime:
         browser = await runtime.chromium.launch(headless=True)
         try:
             context = await browser.new_context(service_workers='block')
@@ -420,7 +501,7 @@ async def test_committed_changes_reach_actual_http_browser_once(attention_case, 
 
 
 @pytest.mark.asyncio
-async def test_us3_actual_mcp_channels_and_foreign_inspector_refuse_fallback(attention_case, monkeypatch):
+async def test_us3_actual_mcp_channels_and_foreign_inspector_refuse_fallback(attention_case, monkeypatch, tmp_path):
     from dataclasses import replace
     from tests.unit.test_mission_claims import _manifest
     from ignis.interfaces.mcp import server
@@ -441,13 +522,13 @@ async def test_us3_actual_mcp_channels_and_foreign_inspector_refuse_fallback(att
     foreign = (await case.repository.get_mission_signals(missions[1].id))[0]
     before = _state(case)
     _setup_traps(monkeypatch, case.repository)
-    monkeypatch.setattr(server, '_COMPONENTS', {'repository': case.repository})
     def forbidden(*args, **kwargs):
         raise AssertionError('Negative read started a connector, synthetic fallback or bootstrap')
     monkeypatch.setattr(server, 'get_components', forbidden)
     monkeypatch.setattr(server, 'create_repository', forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
     with _observe_chain(case, monkeypatch) as observed:
-        async with Client(server.mcp) as client:
+        async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client:
             snapshot = (await client.call_tool('get_mission_relay_snapshot', {
                 'mission_id': str(mission.id), 'run_id': str(run), 'page_size': 2,
             })).structured_content
@@ -468,4 +549,4 @@ async def test_us3_actual_mcp_channels_and_foreign_inspector_refuse_fallback(att
                 'mission_id': str(mission.id), 'run_id': str(runs[1]), 'page_size': 2})).structured_content
             assert refused == {'schema_version': 1, 'status': 'REFUSED', 'reason_code': 'SCOPE_MISMATCH'}
         observed.assert_no_writes()
-    assert _state(case) == before
+    owned.assert_closed_unchanged(case, before)

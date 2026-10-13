@@ -4,12 +4,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from fastmcp import Client
 from playwright.async_api import async_playwright, expect
 from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaimsUseCase
 from tests.unit.test_mission_claims import _eligible_mission, _observation_candidate, _signal_named
 from test_mission_relay_read_boundary import relay_case  # noqa: F401 -- fixture
-from test_mission_relay_mcp import _view_only
+from test_mission_relay_mcp import _caller_client, _view_only
 
 
 @pytest.mark.asyncio
@@ -22,12 +21,11 @@ async def test_us3_actual_read_to_display_latency_and_permission_readback(relay_
     result = await use_case.execute(str(mission.id), frame.frame_digest, [candidate], created_by='readback-control')
     assert result.get('permitted') == 1
     run = (await store.list_run_journals(mission.id))[0]
-    monkeypatch.setattr(server, '_COMPONENTS', {'repository': repository})
     def forbidden(*args, **kwargs):
         raise AssertionError('Readback initialized components or credentials')
     monkeypatch.setattr(server, 'get_components', forbidden)
     monkeypatch.setattr(server, 'create_repository', forbidden)
-    async with Client(server.mcp) as client:
+    async with _caller_client(monkeypatch, tmp_path, {'repository': repository}) as client:
         cap = (await client.call_tool('open_mission_relay', {'mission_id': str(mission.id),
             'run_id': str(run.run_id), 'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()})).structured_content
         async with async_playwright() as runtime:
