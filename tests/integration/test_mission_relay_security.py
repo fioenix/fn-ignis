@@ -112,3 +112,124 @@ async def test_actual_mcp_opened_viewer_serves_maintained_security_headers(atten
         observed.assert_no_writes()
     owned.assert_closed_unchanged(case, before)
     assert await asyncio.to_thread(_refused_after_close, url), "Listener still accepts connections after shutdown"
+
+
+REFUSED_SCOPE = {"schema_version": 1, "status": "REFUSED", "reason_code": "SCOPE_MISMATCH"}
+
+
+def _get(url, headers=None):
+    """GET with explicit request headers; a supplied Host replaces the automatic one."""
+    target = urlsplit(url)
+    connection = http.client.HTTPConnection(target.hostname, target.port, timeout=5)
+    try:
+        connection.request("GET", target.path + ("?" + target.query if target.query else ""), headers=headers or {})
+        response = connection.getresponse()
+        return response.status, response.read()
+    finally:
+        connection.close()
+
+
+def _open_payload(mission_id, run_id):
+    return {"mission_id": mission_id, "run_id": run_id,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relay_case", ("file",), indirect=True)
+async def test_actual_listener_refuses_nonexact_host_and_origin_before_storage_read(
+        attention_case, monkeypatch, tmp_path, caplog, capsys):
+    from ignis.interfaces.mcp import server
+    caplog.set_level("DEBUG")
+    case, missions, runs = attention_case
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Viewer initialized writable components or credentials")
+    monkeypatch.setattr(server, "get_components", forbidden)
+    monkeypatch.setattr(server, "create_repository", forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
+    with _observe_chain(case, monkeypatch) as observed:
+        async with _caller_client(monkeypatch, tmp_path, {"repository": case.repository}) as client:
+            cap = (await client.call_tool("open_mission_relay", _open_payload(
+                str(missions[0].id), str(runs[0])))).structured_content
+            assert cap["status"] == "OK"
+            url = cap["url"]
+            port = urlsplit(url).port
+            token = urlsplit(url).path.strip("/").split("/")[-1]
+            snapshot_url = url + "snapshot?page_size=2"
+            status, body = await asyncio.to_thread(_get, snapshot_url, {"Origin": f"http://127.0.0.1:{port}"})
+            assert status == 200, "exact-origin control did not succeed"
+            assert json.loads(body)["mission_id"] == str(missions[0].id)
+            reads = (len(observed.statements), len(observed.opens))
+            assert reads[0] > 0 and reads[1] > 0, "The observer must see the valid control's physical read"
+            refusals = (
+                {"Host": f"localhost:{port}"},
+                {"Host": f"attacker.invalid:{port}"},
+                {"Origin": "https://attacker.invalid"},
+                {"Origin": "null"},
+            )
+            for headers in refusals:
+                status, body = await asyncio.to_thread(_get, snapshot_url, headers)
+                assert (status, json.loads(body)) == (403, REFUSED_SCOPE), f"not refused: {headers}"
+                assert token.encode() not in body
+            assert (len(observed.statements), len(observed.opens)) == reads, "A refused request reached storage"
+        observed.assert_no_writes()
+    owned.assert_closed_unchanged(case, before)
+    captured = capsys.readouterr()
+    assert token not in caplog.text and token not in captured.out and token not in captured.err, "Capability token was logged"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relay_case", ("file",), indirect=True)
+async def test_parent_and_child_capabilities_inspect_only_their_own_observations(relay_case, monkeypatch, tmp_path):
+    from ignis.interfaces.mcp import server
+    from tests.integration.test_mission_follow_up_viewer import _link, _records
+    case, parent, child, foreign = await _records(relay_case, tmp_path)
+    await _link(case, parent, child)
+    # Linked child sightings reuse parent source identities; source equality must not grant membership.
+    shared_sources = sorted({pair[1] for pair in parent.pairs} & {pair[1] for pair in child.pairs})
+    assert shared_sources, "Fixture must link parent and child sightings through a shared source"
+    shared_source = shared_sources[0]
+    parent_observation = sorted(o for o, source in parent.pairs if source == shared_source)[0]
+    child_observation = sorted(o for o, source in child.pairs if source == shared_source)[0]
+    assert parent_observation != child_observation
+    foreign_observation, foreign_source = sorted(foreign.pairs)[0]
+    targets = {
+        "parent": (parent_observation, shared_source),
+        "child": (child_observation, shared_source),
+        "foreign": (foreign_observation, foreign_source),
+    }
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Viewer initialized writable components or credentials")
+    monkeypatch.setattr(server, "get_components", forbidden)
+    monkeypatch.setattr(server, "create_repository", forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
+    records = {"parent": parent, "child": child, "foreign": foreign}
+    with _observe_chain(case, monkeypatch) as observed:
+        async with _caller_client(monkeypatch, tmp_path, {"repository": case.repository}) as client:
+            for selected in ("parent", "child"):
+                record = records[selected]
+                cap = (await client.call_tool("open_mission_relay", _open_payload(
+                    str(record.mission.id), str(record.run.run_id)))).structured_content
+                assert cap["status"] == "OK"
+                status, body = await asyncio.to_thread(_get, cap["url"] + "snapshot?page_size=200")
+                snapshot = json.loads(body)
+                assert status == 200 and snapshot["mission_id"] == str(record.mission.id)
+                assert {(row["observation_id"], row["source_id"]) for row in snapshot["evidence"]} <= record.pairs
+                for target, (observation, source) in targets.items():
+                    assert (observation, source) in records[target].pairs
+                    status, body = await asyncio.to_thread(
+                        _get, cap["url"] + f"inspect/{observation}?page_size=200")
+                    if target == selected:
+                        inspected = json.loads(body)
+                        assert status == 200 and inspected["observation"]["observation_id"] == observation
+                        assert inspected["observation"]["source_id"] == source
+                        assert inspected["mission_id"] == str(record.mission.id)
+                    else:
+                        assert (status, json.loads(body)) == (403, REFUSED_SCOPE), f"{selected} inspected {target}"
+        observed.assert_no_writes()
+    owned.assert_closed_unchanged(case, before)
