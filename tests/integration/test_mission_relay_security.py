@@ -233,3 +233,141 @@ async def test_parent_and_child_capabilities_inspect_only_their_own_observations
                         assert (status, json.loads(body)) == (403, REFUSED_SCOPE), f"{selected} inspected {target}"
         observed.assert_no_writes()
     owned.assert_closed_unchanged(case, before)
+
+
+# Synthetic private values; observation text is persisted raw, so the projection's PII policy must redact it.
+PRIVATE_EMAIL = "relay.sentinel@example.com"
+PRIVATE_PHONE = "+84 931 405 002"
+PRIVATE_SECRET = "sk-RELAYSENTINELabcdefghijklmnop"
+STORED_MARKUP = '<img src=x onerror="window.untrustedExecuted=true">'
+
+# Trusted test instrumentation: observe CSP violations, then attempt one harmless unauthorized inline script.
+CSP_PROBE = """async () => {
+    window.cspMarker = 'initial';
+    const violations = [];
+    document.addEventListener('securitypolicyviolation', (event) => violations.push({
+        directive: event.effectiveDirective, disposition: event.disposition, blocked: event.blockedURI}));
+    const script = document.createElement('script');
+    script.textContent = "window.cspMarker = 'executed';";
+    document.body.appendChild(script);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return {marker: window.cspMarker, violations};
+}"""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relay_case", ("file",), indirect=True)
+async def test_browser_masks_private_research_text_and_enforces_inline_script_policy(
+        relay_case, monkeypatch, tmp_path):
+    from dataclasses import replace
+    from playwright.async_api import async_playwright, expect
+    from ignis.application.use_cases.record_mission_research_work import RecordMissionResearchWorkUseCase
+    from ignis.interfaces.mcp import server
+    from tests.integration.test_research_recording_mcp_boundary import public_handoff
+    from tests.integration.test_research_work_persistence import _arrange
+    case, mission, _, _, _, handoff, revision = await _arrange(relay_case, tmp_path)
+    private = f"Contact {PRIVATE_EMAIL} or {PRIVATE_PHONE} with {PRIVATE_SECRET}."
+    stored = replace(handoff, result=f"Recorded summary. {private} {STORED_MARKUP}",
+                     findings=(replace(handoff.findings[0], statement=f"Observations differ. {private}"),))
+    recorded = await RecordMissionResearchWorkUseCase(case.repository).execute(
+        str(mission.id), public_handoff(stored, revision), host_authorized=True)
+    assert recorded["disposition"] == "APPLIED"
+    # Research recording already redacts at write time; the stored markup is kept for text-safe rendering.
+    persisted = await case.repository.load_research_work(mission.id)
+    assert STORED_MARKUP in persisted.handoffs[0].result and PRIVATE_EMAIL not in persisted.handoffs[0].result
+    from ignis.domain.entities import TrendSignal
+    from ignis.domain.value_objects import PlatformType
+    await case.repository.save_signals([TrendSignal(platform=PlatformType.YOUTUBE,
+        raw_title=f"Public synthetic sighting {private}", source_url=f"https://example.invalid/{mission.id}/private",
+        mission_id=mission.id, captured_at=datetime.now(timezone.utc),
+        metadata={"excerpt": f"Public synthetic excerpt {private}"})])
+    # The persisted observation really holds the private values, so their absence below is not vacuous.
+    raw = next(s for s in await case.repository.get_mission_signals(mission.id)
+               if s.raw_title.startswith("Public synthetic sighting"))
+    assert all(value in raw.raw_title and value in raw.metadata["excerpt"]
+               for value in (PRIVATE_EMAIL, PRIVATE_PHONE, PRIVATE_SECRET))
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Viewer initialized writable components or credentials")
+    monkeypatch.setattr(server, "get_components", forbidden)
+    monkeypatch.setattr(server, "create_repository", forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
+    private_values = (PRIVATE_EMAIL, PRIVATE_PHONE, PRIVATE_SECRET)
+    with _observe_chain(case, monkeypatch) as observed:
+        async with _caller_client(monkeypatch, tmp_path, {"repository": case.repository}) as client:
+            cap = (await client.call_tool("open_mission_relay", {"mission_id": str(mission.id),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()})).structured_content
+            assert cap["status"] == "OK"
+            target = urlsplit(cap["url"])
+            token = target.path.strip("/").split("/")[-1]
+            unexpected, errors, responses = [], [], []
+            async with async_playwright() as runtime:
+                browser = await runtime.chromium.launch(headless=True)
+                try:
+                    context = await browser.new_context(service_workers="block")
+
+                    async def route(request_route):
+                        request = request_route.request
+                        parsed = urlsplit(request.url)
+                        if request.method == "GET" and parsed.scheme == "http" and parsed.netloc == target.netloc:
+                            await request_route.continue_()
+                        else:
+                            # Fonts and any other origin stay offline; nothing leaves loopback.
+                            if parsed.hostname not in ("fonts.googleapis.com", "fonts.gstatic.com"):
+                                unexpected.append((request.method, parsed.hostname))
+                            await request_route.abort()
+                    await context.route("**/*", route)
+                    page = await context.new_page()
+                    page.on("pageerror", lambda error: errors.append(str(error)))
+                    page.on("response", lambda response: responses.append(response))
+                    async with page.expect_response(
+                            lambda r: urlsplit(r.url).path.endswith("/snapshot"), timeout=10000) as first_snapshot:
+                        assert (await page.goto(cap["url"])).status == 200
+                    assert (await first_snapshot.value).status == 200
+                    snapshot_rows = []
+                    for response in [r for r in responses if urlsplit(r.url).path.endswith("/snapshot")]:
+                        snapshot_rows.extend(json.loads(await response.text())["evidence"])
+                    sighting = next(row for row in snapshot_rows if row["title"].startswith("Public synthetic sighting"))
+                    assert sighting["observation_id"] == str(raw.observation_id)
+                    async with page.expect_response(lambda r: "/inspect/" in urlsplit(r.url).path) as inspected:
+                        await page.get_by_test_id("stage-inspector").get_by_role(
+                            "button", name=sighting["title"], exact=True).click()
+                    inspect_payload = await (await inspected.value).text()
+                    assert json.loads(inspect_payload)["observation"]["observation_id"] == str(raw.observation_id)
+                    inspector = page.get_by_test_id("stage-inspector")
+                    await expect(inspector).to_contain_text("Public synthetic sighting Contact [REDACTED_EMAIL]")
+                    await expect(inspector).to_contain_text("Public synthetic excerpt")
+                    for value in (*private_values, token):
+                        assert value not in inspect_payload, f"Delivered inspection exposes {value[:12]}"
+                        assert value not in await page.evaluate("document.documentElement.outerHTML"), \
+                            f"Inspector DOM exposes {value[:12]}"
+                    await page.locator('[data-stage="Research"]').click()
+                    output = page.get_by_role("region", name="Output", exact=True)
+                    await expect(output).to_contain_text("Recorded summary.")
+                    await expect(output).to_contain_text("[REDACTED_EMAIL]")
+                    await expect(output).to_contain_text(STORED_MARKUP)
+                    assert await output.locator("img").count() == 0
+                    assert await page.evaluate("window.untrustedExecuted === undefined")
+                    dom = await page.evaluate("document.documentElement.outerHTML")
+                    for value in (*private_values, token):
+                        assert value not in dom, f"Rendered DOM exposes {value[:12]}"
+                    snapshots = [r for r in responses if urlsplit(r.url).path.endswith("/snapshot")]
+                    assert snapshots, "The viewer did not fetch its typed snapshot"
+                    for response in snapshots:
+                        payload = await response.text()
+                        assert json.loads(payload)["mission_id"] == str(mission.id)
+                        for value in (*private_values, token):
+                            assert value not in payload, f"Delivered snapshot exposes {value[:12]}"
+
+                    probe = await page.evaluate(CSP_PROBE)
+                    assert probe["marker"] == "initial", "Unauthorized inline script executed"
+                    assert any(item["directive"] == "script-src-elem" and item["disposition"] == "enforce"
+                               for item in probe["violations"]), probe["violations"]
+                    assert not unexpected and not errors
+                    await context.close()
+                finally:
+                    await browser.close()
+        observed.assert_no_writes()
+    owned.assert_closed_unchanged(case, before)
