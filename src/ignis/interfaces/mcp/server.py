@@ -435,11 +435,24 @@ class _MissionRelayRuntime:
             # Borrow initialized in-memory storage only when the owner already created it.
             components = self.caller_scope.components if self.caller_scope is not None else _COMPONENTS
             if self.caller_scope is not None: self.caller_scope.check()
-            repository = components.get("repository") if components is not None else None
+            if isinstance(components, _CallerComponents):
+                # Viewing never realizes the full provider composition; only an existing owner
+                # repository is borrowed.
+                repository = components.owner_repository()
+            else:
+                repository = components.get("repository") if components is not None else None
             if isinstance(repository, SqliteTrendRepository):
                 reader = SqliteMissionRelayReader(repository)
             elif isinstance(repository, PostgresTimescaleRepository):
                 reader = PostgresMissionRelayReader(repository)
+            elif self.caller_scope is not None:
+                # A cold caller read uses the caller's own configured storage through the dedicated
+                # read-only reader, never the global installation storage.
+                if self.caller_scope.database is not None:
+                    reader = SqliteMissionRelayReader(str(self.caller_scope.database))
+                else:
+                    reader = PostgresMissionRelayReader(
+                        self.caller_scope.configuration.DATABASE_URL.get_secret_value())
             else:
                 dsn = reveal_secret(settings.DATABASE_URL)
                 if dsn.startswith("sqlite:///"):
@@ -960,10 +973,12 @@ def _request_runtime(ctx):
 
 
 class _CallerComponents(MutableMapping):
-    """One caller root's components: the full map is built on first use, never by Market analysis.
+    """One caller root's components: the full map is built on first item access only.
 
     The Market qualification, claim and analysis tools take a separate provider-free composition
-    from analysis(). Every other tool, and a new or unprepared store, keeps the full composition and
+    from analysis(). Relay viewing never builds anything: it borrows an existing owner repository
+    through owner_repository(), or reads the caller's configured storage through a dedicated
+    read-only reader. Every other tool, and a new or unprepared store, keeps the full composition and
     its existing bootstrap contract unchanged.
     """
 
@@ -1004,6 +1019,14 @@ class _CallerComponents(MutableMapping):
                         return self
                     self._analysis = composed
         return self._analysis
+
+    def owner_repository(self):
+        """An already-created owner repository, full first; never builds the full composition."""
+        if self._full is not None:
+            return self._full["repository"]
+        if self._analysis is not None:
+            return self._analysis["repository"]
+        return None
 
     def repositories(self):
         owned = [] if self._full is None else [self._full["repository"]]
