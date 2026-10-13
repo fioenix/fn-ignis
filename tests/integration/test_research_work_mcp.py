@@ -51,11 +51,12 @@ async def native_client(tmp_path, case):
     runner.write_text(source)
     env = tmp_path / 'isolated.env'
     env.write_text('DATABASE_URL=sqlite:///:memory:\nYOUTUBE_API_KEY=\nIGNIS_ENCRYPTION_KEY=\n')
+    (tmp_path / '.fnignis').mkdir(exist_ok=True)
     client = Client(StdioTransport(command=sys.executable,
-        args=[str(runner), str(descriptor), str(tmp_path / 'transport-proof.json')],
+        args=[str(runner), str(descriptor), str(tmp_path / 'transport-proof.json'), str(tmp_path)],
         cwd=str(tmp_path), keep_alive=False,
         env={'IGNIS_ENV_FILE': str(env), 'IGNIS_ENV_ISOLATED': '1', 'PYTHONPATH': str(root / 'src')},
-        log_file=tmp_path / 'stdio.log'), timeout=20)
+        log_file=tmp_path / 'stdio.log'), timeout=20, roots=[tmp_path.as_uri()], mode='legacy')
     try:
         async with client:
             yield client

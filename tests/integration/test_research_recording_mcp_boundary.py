@@ -11,6 +11,7 @@ from fastmcp.client.transports import StdioTransport
 import pytest
 
 from tests.integration.test_mission_relay_read_boundary import relay_case as _relay_case, _state
+from tests.integration.test_mission_relay_mcp import _OwnedRepository, _caller_client
 
 from tests.integration.test_research_work_persistence import _arrange
 from tests.integration.test_research_work_command_service import command
@@ -26,6 +27,7 @@ from pathlib import Path
 from fastmcp.server.middleware import Middleware
 from mcp.server.session import ServerSession
 from ignis.interfaces.mcp import server
+from ignis.infrastructure.caller_storage import CallerStorageMiddleware
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
 class TransportProof(Middleware):
@@ -42,8 +44,18 @@ class TransportProof(Middleware):
 
 async def main():
     repository = SqliteTrendRepository(sys.argv[1])
-    server._init_components = lambda: {"repository": repository}
-    server.get_components()
+    caller_root = Path(sys.argv[3]).resolve()
+
+    # The real middleware validates the client's advertised root; only then does the supported compose
+    # seam bind the owner-initialized repository to that caller scope, whose lifespan closes it.
+    def compose(scope):
+        if scope.root.resolve() != caller_root:
+            raise AssertionError("Compose received a foreign caller root")
+        return {"repository": repository}
+
+    for middleware in server.mcp.middleware:
+        if isinstance(middleware, CallerStorageMiddleware):
+            middleware.compose = compose
     server.mcp.add_middleware(TransportProof())
     # Explicit disposable fixture initialization, never recording-handler bootstrap.
     await repository._ensure_schema()
@@ -64,13 +76,14 @@ def stdio_client(tmp_path, case):
     root = Path(__file__).resolve().parents[2]
     transport = StdioTransport(
         command=sys.executable,
-        args=[str(runner), case.repository._db_path, str(tmp_path / "transport-proof.json")],
+        args=[str(runner), case.repository._db_path, str(tmp_path / "transport-proof.json"), str(tmp_path)],
         cwd=str(tmp_path),
         keep_alive=False,
         env={"IGNIS_ENV_FILE": str(env_file), "IGNIS_ENV_ISOLATED": "1", "PYTHONPATH": str(root / "src")},
         log_file=tmp_path / "stdio.log",
     )
-    return Client(transport, timeout=15)
+    (tmp_path / ".fnignis").mkdir(exist_ok=True)
+    return Client(transport, timeout=15, roots=[tmp_path.as_uri()], mode="legacy")
 
 
 def public_handoff(handoff, revision):
@@ -283,14 +296,10 @@ async def test_actual_stdio_exact_scope_and_authority_rejections_retain_no_body(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("relay_case", ("file", "memory"), indirect=True)
 async def test_actual_inmemory_mcp_request_cannot_authorize_mutation(relay_case, tmp_path, monkeypatch):
-    from ignis.interfaces.mcp import server
-
     case, mission, _, _, _, handoff, revision = await _arrange(relay_case, tmp_path)
-    monkeypatch.setattr(server, "_COMPONENTS", None)
-    monkeypatch.setattr(server, "_init_components", lambda: {"repository": case.repository})
-    server.get_components()
     before = _state(case)
-    async with Client(server.mcp) as client:
+    owned = _OwnedRepository(monkeypatch, case)
+    async with _caller_client(monkeypatch, tmp_path, {"repository": case.repository}) as client:
         result = (
             await client.call_tool(
                 "record_mission_research_work",
@@ -299,7 +308,7 @@ async def test_actual_inmemory_mcp_request_cannot_authorize_mutation(relay_case,
         ).data
         assert result["disposition"] == "REFUSED" and result["reason_code"] == "UNAUTHORIZED_HOST"
         assert result["receipt_id"] is None
-    assert _state(case) == before
+    owned.assert_closed_unchanged(case, before)
 
 
 @pytest.mark.asyncio
