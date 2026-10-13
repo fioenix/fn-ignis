@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import MutableMapping
 from contextlib import asynccontextmanager
 import json
 import logging
@@ -17,6 +18,7 @@ if not hasattr(mcp.shared.exceptions, "McpError") and hasattr(mcp.shared.excepti
     mcp.shared.exceptions.McpError = mcp.shared.exceptions.MCPError
 
 from fastmcp import Context, FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware
 from fastmcp.tools.base import ToolResult
 
@@ -510,12 +512,13 @@ class _MissionRelayRuntime:
                     pass
             if scope.components is not None:
                 # A borrowed repository closes only after its caller runtime is quiescent.
-                if runtime is None or runtime.quiescent.is_set():
-                    await scope.components["repository"].close()
-                else:
-                    closer = asyncio.create_task(self._close_after(runtime, scope.components["repository"]))
-                    self._late.add(closer)
-                    closer.add_done_callback(self._late.discard)
+                for repository in _caller_repositories(scope.components):
+                    if runtime is None or runtime.quiescent.is_set():
+                        await repository.close()
+                    else:
+                        closer = asyncio.create_task(self._close_after(runtime, repository))
+                        self._late.add(closer)
+                        closer.add_done_callback(self._late.discard)
             if scope.log_handler is not None:
                 logging.getLogger().removeHandler(scope.log_handler)
                 scope.log_handler.close()
@@ -956,8 +959,128 @@ def _request_runtime(ctx):
     return scope.runtime if scope is not None else ctx.lifespan_context.get("mission_relay")
 
 
+class _CallerComponents(MutableMapping):
+    """One caller root's components: the full map is built on first use, never by Market analysis.
+
+    The Market qualification, claim and analysis tools take a separate provider-free composition
+    from analysis(). Every other tool, and a new or unprepared store, keeps the full composition and
+    its existing bootstrap contract unchanged.
+    """
+
+    def __init__(self, scope):
+        self._scope = scope
+        self._full = None
+        self._analysis = None
+        self._analysis_lock = asyncio.Lock()
+
+    def _realized(self):
+        if self._full is None:
+            self._full = _init_components(caller_scope=self._scope)
+        return self._full
+
+    def __getitem__(self, key):
+        return self._realized()[key]
+
+    def __setitem__(self, key, value):
+        self._realized()[key] = value
+
+    def __delitem__(self, key):
+        del self._realized()[key]
+
+    def __iter__(self):
+        return iter(self._realized())
+
+    def __len__(self):
+        return len(self._realized())
+
+    async def analysis(self):
+        # Only a validated prepared composition is cached: an unprepared store is re-evaluated, so
+        # preparation later in the same lifespan activates the narrow path, and refusals never stick.
+        if self._analysis is None:
+            async with self._analysis_lock:
+                if self._analysis is None:
+                    composed = await _compose_caller_analysis(self._scope)
+                    if composed is _UNPREPARED:
+                        return self
+                    self._analysis = composed
+        return self._analysis
+
+    def repositories(self):
+        owned = [] if self._full is None else [self._full["repository"]]
+        if self._analysis is not None:
+            owned.append(self._analysis["repository"])
+        return owned
+
+
+_UNPREPARED = object()
+
+
+async def _compose_caller_analysis(scope):
+    """Provider-free Market analysis components for a prepared caller store, or _UNPREPARED.
+
+    A store already holding parent progress objects is prepared: its exact supported core and progress
+    schema is validated before any read or write, and it is opened without bootstrap through the
+    narrow analysis grant. Partial or drifted schema refuses; it never falls back to bootstrap.
+    """
+    from ignis.domain.exceptions import RepositoryException
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+
+    database = scope.database
+    if database is None or not SqliteTrendRepository.has_progress_objects(str(database)):
+        return _UNPREPARED
+    try:
+        repository = await SqliteTrendRepository.open_existing_ready(
+            str(database),
+            expected_core_schema_digest=await SqliteTrendRepository.supported_core_schema_digest(),
+            analysis_writes=True,
+        )
+    except RepositoryException:
+        raise ToolError("CALLER_SCHEMA_UNSUPPORTED") from None
+    scope.guard_repository(repository)
+    workspace_store = WorkspaceRepository(repository=repository, path_guard=scope.check_path)
+    return {
+        "repository": repository,
+        "workspace_store": workspace_store,
+        "get_mission_analysis_use_case": GetMissionAnalysisUseCase(repository=repository, store=workspace_store),
+        "get_evidence_qualification_batch_use_case": GetEvidenceQualificationBatchUseCase(
+            repository=repository, store=workspace_store),
+        "submit_evidence_qualifications_use_case": SubmitEvidenceQualificationsUseCase(
+            repository=repository, store=workspace_store),
+        "submit_mission_claims_use_case": SubmitMissionClaimsUseCase(repository=repository, store=workspace_store),
+        "get_mission_claims_use_case": GetMissionClaimsUseCase(repository=repository, store=workspace_store),
+    }
+
+
+def _caller_repositories(components):
+    if isinstance(components, _CallerComponents):
+        return components.repositories()
+    return [components["repository"]]
+
+
+async def _analysis_components(mission_id):
+    """Components for the Market analysis tools: provider-free for a prepared caller store.
+
+    The mission's surface is read first through a read-only routing lookup: an existing non-Market
+    mission keeps the full composition before any Market readiness gate applies.
+    """
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+
+    scope = current_caller_storage.get()
+    if scope is None:
+        return get_components()
+    scope.check()
+    components = scope.components
+    if not isinstance(components, _CallerComponents):
+        return components
+    if scope.database is not None:
+        exists, surface = SqliteTrendRepository.mission_surface(str(scope.database), str(mission_id))
+        if exists and resolve_surface(surface) is not ResearchSurface.MARKET:
+            return components
+    return await components.analysis()
+
+
 def _compose_caller_scope(scope):
-    return _init_components(caller_scope=scope)
+    return _CallerComponents(scope)
 
 
 def _caller_runtime(scope, owner):
@@ -2469,7 +2592,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     external_refusal = _external_context_only_refusal(mission_id)
     if external_refusal is not None:
         return external_refusal
-    comp = get_components()
+    comp = await _analysis_components(mission_id)
     await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
@@ -2771,7 +2894,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
 async def handle_get_mission_evidence_qualification_batch(
     mission_id: str, cursor: Optional[str] = None, limit: int = DEFAULT_BATCH_LIMIT
 ) -> str:
-    comp = get_components()
+    comp = await _analysis_components(mission_id)
     result = await comp["get_evidence_qualification_batch_use_case"].execute(
         mission_id=mission_id, cursor=cursor, limit=limit
     )
@@ -2781,7 +2904,7 @@ async def handle_get_mission_evidence_qualification_batch(
 async def handle_submit_mission_evidence_qualifications(
     mission_id: str, frame_fingerprint: str, assessments: List[Dict[str, Any]]
 ) -> str:
-    comp = get_components()
+    comp = await _analysis_components(mission_id)
     result = await comp["submit_evidence_qualifications_use_case"].execute(
         mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments
     )
@@ -2794,7 +2917,7 @@ async def handle_submit_mission_claims(
     candidates: List[Dict[str, Any]],
     created_by: str,
 ) -> str:
-    comp = get_components()
+    comp = await _analysis_components(mission_id)
     result = await comp["submit_mission_claims_use_case"].execute(
         mission_id=mission_id,
         frame_digest=frame_digest,
@@ -2807,7 +2930,7 @@ async def handle_submit_mission_claims(
 async def handle_get_mission_claims(
     mission_id: str, include_superseded: bool = False
 ) -> str:
-    comp = get_components()
+    comp = await _analysis_components(mission_id)
     result = await comp["get_mission_claims_use_case"].execute(
         mission_id=mission_id, include_superseded=include_superseded
     )

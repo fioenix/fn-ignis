@@ -184,6 +184,8 @@ class CallerStorageScope:
             return await original_write(guarded)
         repository._get_connection = connection
         repository._run_write = write
+        # Borrowed snapshot readers keep this scope check without opening a connection of their own.
+        repository._connection_check = self.check
 
 
     def prepare_layout(self):

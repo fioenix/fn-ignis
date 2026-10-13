@@ -146,6 +146,7 @@ BRIEF_ALREADY_CONFIRMED = (
 _PROGRESS_TABLES = frozenset(
     {"mission_progress_revisions", "mission_progress_events", "mission_progress_commands"}
 )
+_SUPPORTED_CORE_DIGEST: Optional[str] = None
 
 # Tables an existing-ready connection may change: the finite parent's mission, journal, progress,
 # source, observation, quota and cluster records. Vocabulary, taxonomy, runtime configuration,
@@ -191,6 +192,31 @@ _EXISTING_READY_ALLOWED = frozenset(
 )
 
 
+# The Market analysis grant, selected only by the caller-bound analysis composition: typed
+# qualification judgments, claim candidates and their bindings, plus the progress facts those commits
+# record. It holds no collection, vocabulary, configuration, credential or workspace table, and the
+# finite parent's grant above is unchanged.
+_EXISTING_READY_ANALYSIS_WRITABLE = frozenset(
+    {
+        "mission_evidence_qualifications",
+        "mission_claims",
+        "mission_claim_evidence",
+        "mission_progress_revisions",
+        "mission_progress_events",
+        "mission_progress_commands",
+    }
+)
+
+
+def _existing_ready_analysis_authorizer(action, first, second, database, trigger) -> int:
+    """Same refusals as the parent grant; writes only to the Market analysis tables."""
+    if action in (sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE):
+        if database == "main" and first in _EXISTING_READY_ANALYSIS_WRITABLE:
+            return sqlite3.SQLITE_OK
+        return sqlite3.SQLITE_DENY
+    return _existing_ready_authorizer(action, first, second, database, trigger)
+
+
 def _existing_ready_authorizer(action, first, second, database, trigger) -> int:
     """Refuse DDL, ATTACH, setting pragmas and writes outside the finite parent's tables."""
     if action in (sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE):
@@ -224,6 +250,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
         self._initialized = False
         # Set only by open_existing_ready: the validated expected core digest and progress objects.
         self._existing_ready: Optional[Tuple[str, List[Tuple[str, str, str, Optional[str]]]]] = None
+        self._ready_authorizer = _existing_ready_authorizer
         self._lock = asyncio.Lock()
         self._mem_conn: Optional[sqlite3.Connection] = None
         if self._db_path == ":memory:":
@@ -403,12 +430,12 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
         # source_id would insert cleanly. Only the three tables from sql/016 declare any.
         conn.execute("PRAGMA foreign_keys = ON")
         if self._existing_ready is not None:
-            conn.set_authorizer(_existing_ready_authorizer)
+            conn.set_authorizer(self._ready_authorizer)
         return conn
 
     @classmethod
     async def open_existing_ready(
-        cls, db_path: str, *, expected_core_schema_digest: str
+        cls, db_path: str, *, expected_core_schema_digest: str, analysis_writes: bool = False
     ) -> "SqliteTrendRepository":
         """Open an existing store whose schema is already exactly ready; never bootstrap it.
 
@@ -441,6 +468,8 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
 
         await asyncio.to_thread(verify)
         repository._existing_ready = (expected_core_schema_digest, progress)
+        if analysis_writes:
+            repository._ready_authorizer = _existing_ready_analysis_authorizer
         repository._initialized = True
         return repository
 
@@ -462,6 +491,56 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
         return hashlib.sha256(
             json.dumps(core, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
+
+    @classmethod
+    async def supported_core_schema_digest(cls) -> str:
+        """Core digest this build's bootstrap produces, computed once on a private temporary store."""
+        global _SUPPORTED_CORE_DIGEST
+        if _SUPPORTED_CORE_DIGEST is None:
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as directory:
+                path = str(Path(directory) / "reference.sqlite3")
+                reference = cls(path)
+                await reference._ensure_schema()
+                await reference.close()
+                _SUPPORTED_CORE_DIGEST = cls.existing_core_schema_digest(path)
+        return _SUPPORTED_CORE_DIGEST
+
+    @staticmethod
+    def has_progress_objects(db_path: str) -> bool:
+        """Read-only: does an existing store already hold any parent progress object?"""
+        clean = db_path.replace("sqlite:///", "").replace("sqlite://", "")
+        if clean in ("", ":memory:") or not Path(clean).is_file():
+            return False
+        conn = sqlite3.connect(Path(clean).absolute().as_uri() + "?mode=ro", uri=True)
+        try:
+            names = ", ".join("?" for _ in _PROGRESS_TABLES)
+            return conn.execute(
+                f"SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE tbl_name IN ({names}))",
+                tuple(sorted(_PROGRESS_TABLES)),
+            ).fetchone()[0] == 1
+        finally:
+            conn.close()
+
+    @staticmethod
+    def mission_surface(db_path: str, mission_ref: str) -> Tuple[bool, Optional[str]]:
+        """Read-only routing lookup: (exists, surface) for a mission ID or shortcode, as get_mission matches."""
+        clean = db_path.replace("sqlite:///", "").replace("sqlite://", "")
+        if clean in ("", ":memory:") or not Path(clean).is_file():
+            return False, None
+        try:
+            conn = sqlite3.connect(Path(clean).absolute().as_uri() + "?mode=ro", uri=True)
+            try:
+                row = conn.execute(
+                    "SELECT surface FROM research_missions WHERE id = ? OR shortcode = ?",
+                    (str(mission_ref), str(mission_ref)),
+                ).fetchone()
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            return False, None
+        return (row is not None), (row[0] if row is not None else None)
 
     @classmethod
     def existing_core_schema_digest(cls, db_path: str) -> str:
@@ -508,7 +587,9 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
         except sqlite3.Error:
             raise RepositoryException("The existing store schema is not ready.") from None
         finally:
-            conn.close()
+            # A snapshot reader borrows its connection as _mem_conn; its owner closes it.
+            if self._mem_conn is None:
+                conn.close()
 
     async def _ensure_schema(self) -> None:
         if self._existing_ready is not None:
@@ -1837,11 +1918,29 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
         """Reuse canonical decoders on the held write transaction, without a second snapshot."""
         from ignis.infrastructure.persistence.evidence_snapshot import read_evidence_snapshot
 
-        reader = copy.copy(self)
-        reader._mem_conn = conn
+        reader = self._borrowing_reader(conn)
         # This method runs in the serialized worker thread; decoder coroutines only read
         # this connection and cannot release or commit the owning transaction.
         return asyncio.run(read_evidence_snapshot(reader, mission_id))
+
+    def _borrowing_reader(self, conn: sqlite3.Connection) -> "SqliteTrendRepository":
+        """A shallow reader bound to exactly one borrowed connection, which its owner closes.
+
+        A caller scope guard replaces _get_connection on the instance and still targets the original
+        receiver, so a plain copy would open fresh connections outside the borrowed one. The guard's
+        scope check still runs before every borrowed use.
+        """
+        check = getattr(self, "_connection_check", None)
+
+        def borrowed() -> sqlite3.Connection:
+            if check is not None:
+                check()
+            return conn
+
+        reader = copy.copy(self)
+        reader._mem_conn = conn
+        reader._get_connection = borrowed
+        return reader
 
     @staticmethod
     def _progress_reference(
@@ -2368,8 +2467,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
             return conn
 
         conn = await asyncio.to_thread(_open_snapshot)
-        reader = copy.copy(self)
-        reader._mem_conn = conn
+        reader = self._borrowing_reader(conn)
         try:
             return await read_evidence_snapshot(reader, mission_id)
         finally:
