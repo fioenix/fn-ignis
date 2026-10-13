@@ -757,3 +757,92 @@ def test_close_only_without_phase_record_never_infers_global_closure(tmp_path):
     final = json.loads(closure.read_text())
     assert final['disposition'] == 'PENDING' and final['phases']['host'] == 'UNKNOWN'
     assert _ledger(root, mission_id) == (1, 1, 1, 0)
+
+
+TRACED_RUNNER = r'''
+import json, sys
+from pathlib import Path
+import httpx
+from datetime import datetime, timezone
+from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+entered = []
+for name in ('_create_tables_and_seed', '_create_progress_tables', '_ensure_research_schema'):
+    original = getattr(SqliteTrendRepository, name)
+    def traced(self, *args, _original=original, _name=name):
+        entered.append([_name, str(Path(self._db_path).absolute())])
+        return _original(self, *args)
+    setattr(SqliteTrendRepository, name, traced)
+from ignis.interfaces.cli import caller_youtube_pilot as cli
+calls = []
+async def handler(request):
+    calls.append(request.url.path.rsplit('/', 1)[-1])
+    if request.url.path.endswith('/search'):
+        return httpx.Response(200, json={'items': [{'id': {'videoId': 'ready-video'}}]})
+    return httpx.Response(200, json={'items': [{'id': 'ready-video', 'snippet': {
+        'title': 'Hướng dẫn n8n ready', 'description': 'Synthetic ready description.',
+        'publishedAt': datetime.now(timezone.utc).isoformat()}, 'statistics': {'viewCount': '2'}}]})
+code = cli.main(sys.argv[2:], transport=httpx.MockTransport(handler), resolve_credential=lambda: sys.argv[1])
+print(json.dumps({'calls': calls, 'entered': entered}), file=sys.stderr)
+raise SystemExit(code)
+'''
+
+_PRESERVED = ('market_lexicons', 'industry_taxonomies', 'runtime_configs', 'platform_credentials', 'research_workspaces')
+
+
+def _traced(args, tmp_path):
+    result = subprocess.run([sys.executable, '-c', TRACED_RUNNER, SECRET, *args], capture_output=True, text=True,
+                            timeout=90, env=_env(tmp_path), cwd=str(REPO))
+    return result, json.loads(result.stderr.strip().splitlines()[-1])
+
+
+def _snapshot(store):
+    with sqlite3.connect(store.as_uri() + '?mode=ro', uri=True) as connection:
+        return (connection.execute('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY 1, 2').fetchall(),
+                {table: connection.execute(f'SELECT * FROM {table} ORDER BY 1').fetchall() for table in _PRESERVED})
+
+
+def test_full_parent_runs_through_ready_writer_without_bootstrap_seed_or_ddl(tmp_path):
+    root, mission_id = _caller_store(tmp_path)
+    store = root / '.fnignis' / 'canonical.sqlite3'
+    schema, preserved = _snapshot(store)
+    packet, confirmation = _packet(tmp_path)
+    result, trace = _traced(_args(root, mission_id, packet, confirmation), tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)['observations'] == 1 and trace['calls'] == ['search', 'videos']
+    touched = [name for name, path in trace['entered'] if path == str(store)]
+    assert touched == [], f'Caller store re-entered bootstrap, seed or DDL: {touched}'
+    assert _snapshot(store) == (schema, preserved), 'Schema objects or preserved vocabulary/config/workspace rows changed'
+
+
+@pytest.mark.parametrize('drift', [
+    'CREATE INDEX extra_mission_index ON research_missions (status)',
+    'DROP TRIGGER mission_progress_events_validate_update',
+])
+def test_core_or_progress_drift_refuses_before_allocation_and_source(tmp_path, drift):
+    root, mission_id = _caller_store(tmp_path)
+    store = root / '.fnignis' / 'canonical.sqlite3'
+    with sqlite3.connect(store) as connection:
+        connection.execute(drift)
+    before = _digest_file(store)
+    packet, confirmation = _packet(tmp_path)
+    result, trace = _traced(_args(root, mission_id, packet, confirmation), tmp_path)
+    assert json.loads(result.stdout) == {'status': 'REFUSED', 'reason_code': 'CALLER_SCHEMA_UNSUPPORTED'}
+    assert trace['calls'] == []
+    assert _digest_file(store) == before and not (root / '.fnignis' / 'follow-up').exists()
+
+
+def test_wrong_progress_definitions_with_expected_names_refuse(tmp_path):
+    root, mission_id = _caller_store(tmp_path, progress=False)
+    store = root / '.fnignis' / 'canonical.sqlite3'
+    with sqlite3.connect(store) as connection:
+        connection.executescript(
+            'CREATE TABLE mission_progress_revisions (mission_id TEXT PRIMARY KEY, revision INTEGER);'
+            'CREATE TABLE mission_progress_events (id TEXT PRIMARY KEY, mission_id TEXT);'
+            'CREATE TABLE mission_progress_commands (mission_id TEXT, command_key TEXT,'
+            ' PRIMARY KEY (mission_id, command_key));')
+    before = _digest_file(store)
+    packet, confirmation = _packet(tmp_path)
+    result, trace = _traced(_args(root, mission_id, packet, confirmation), tmp_path)
+    assert json.loads(result.stdout) == {'status': 'REFUSED', 'reason_code': 'CALLER_SCHEMA_UNSUPPORTED'}
+    assert trace['calls'] == []
+    assert _digest_file(store) == before and not (root / '.fnignis' / 'follow-up').exists()

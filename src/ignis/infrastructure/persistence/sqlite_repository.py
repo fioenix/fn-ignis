@@ -143,6 +143,74 @@ BRIEF_ALREADY_CONFIRMED = (
 )
 
 
+_PROGRESS_TABLES = frozenset(
+    {"mission_progress_revisions", "mission_progress_events", "mission_progress_commands"}
+)
+
+# Tables an existing-ready connection may change: the finite parent's mission, journal, progress,
+# source, observation, quota and cluster records. Vocabulary, taxonomy, runtime configuration,
+# credentials and workspace registrations are never written through this path.
+_EXISTING_READY_WRITABLE = frozenset(
+    {
+        "research_missions",
+        "market_brief_revisions",
+        "mission_manifests",
+        "mission_run_journals",
+        "mission_writer_claims",
+        "mission_probe_outcomes",
+        "mission_evidence",
+        "mission_progress_revisions",
+        "mission_progress_events",
+        "mission_progress_commands",
+        "sources",
+        "source_identity_aliases",
+        "observations",
+        "topic_clusters",
+        "youtube_quota_buckets",
+    }
+)
+# Consequences of the parent's own mission-scoped evidence prune, never direct writes: the
+# foreign-key cascade into qualifications, and the two canonical integrity triggers (pinned by the
+# core digest) that drop claim bindings and withhold a claim that lost its support.
+_EXISTING_READY_CASCADE_DELETE = frozenset({"mission_evidence_qualifications"})
+_EXISTING_READY_TRIGGER_WRITES = frozenset(
+    {
+        ("prune_claim_binding_with_mission_evidence", sqlite3.SQLITE_DELETE, "mission_claim_evidence"),
+        ("withhold_claim_without_support", sqlite3.SQLITE_UPDATE, "mission_claims"),
+    }
+)
+_EXISTING_READY_ALLOWED = frozenset(
+    {
+        sqlite3.SQLITE_SELECT,
+        sqlite3.SQLITE_READ,
+        sqlite3.SQLITE_TRANSACTION,
+        sqlite3.SQLITE_SAVEPOINT,
+        sqlite3.SQLITE_FUNCTION,
+        sqlite3.SQLITE_RECURSIVE,
+    }
+)
+
+
+def _existing_ready_authorizer(action, first, second, database, trigger) -> int:
+    """Refuse DDL, ATTACH, setting pragmas and writes outside the finite parent's tables."""
+    if action in (sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE):
+        if database == "main" and (
+            first in _EXISTING_READY_WRITABLE
+            or (action == sqlite3.SQLITE_DELETE and trigger is None and first in _EXISTING_READY_CASCADE_DELETE)
+            or (trigger, action, first) in _EXISTING_READY_TRIGGER_WRITES
+        ):
+            return sqlite3.SQLITE_OK
+        return sqlite3.SQLITE_DENY
+    if action in _EXISTING_READY_ALLOWED:
+        return sqlite3.SQLITE_OK
+    if action == sqlite3.SQLITE_PRAGMA and second is None and first in ("foreign_keys", "query_only"):
+        return sqlite3.SQLITE_OK
+    # Snapshot readers narrow their own connection to read-only; widening it is refused.
+    if action == sqlite3.SQLITE_PRAGMA and first == "query_only" and str(second).upper() in ("ON", "1"):
+        return sqlite3.SQLITE_OK
+    return sqlite3.SQLITE_DENY
+
+
 class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
     """
     Lightweight, zero-dependency SQLite repository adapter for fn-ignis.
@@ -154,6 +222,8 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
         clean_path = db_path.replace("sqlite:///", "").replace("sqlite://", "")
         self._db_path = clean_path if clean_path else "ignis.db"
         self._initialized = False
+        # Set only by open_existing_ready: the validated expected core digest and progress objects.
+        self._existing_ready: Optional[Tuple[str, List[Tuple[str, str, str, Optional[str]]]]] = None
         self._lock = asyncio.Lock()
         self._mem_conn: Optional[sqlite3.Connection] = None
         if self._db_path == ":memory:":
@@ -320,15 +390,131 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
 
         if self._mem_conn is not None:
             return self._mem_conn
-        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        if self._existing_ready is not None:
+            # mode=rw never creates a missing or replaced-away file.
+            conn = sqlite3.connect(
+                Path(self._db_path).absolute().as_uri() + "?mode=rw", uri=True, check_same_thread=False
+            )
+        else:
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         # SQLite defaults foreign keys off per connection, which would make every REFERENCES
         # clause in the schema decoration: ON DELETE SET NULL would never fire and a dangling
         # source_id would insert cleanly. Only the three tables from sql/016 declare any.
         conn.execute("PRAGMA foreign_keys = ON")
+        if self._existing_ready is not None:
+            conn.set_authorizer(_existing_ready_authorizer)
         return conn
 
+    @classmethod
+    async def open_existing_ready(
+        cls, db_path: str, *, expected_core_schema_digest: str
+    ) -> "SqliteTrendRepository":
+        """Open an existing store whose schema is already exactly ready; never bootstrap it.
+
+        The core schema must match the expected digest and the parent progress tables/triggers
+        must equal the shared progress DDL. Every later schema check only validates, and each
+        connection refuses schema changes and writes outside the finite parent's tables.
+        """
+        repository = cls(db_path)
+        if repository._mem_conn is not None:
+            await repository.close()
+            raise RepositoryException("An existing-ready store must be an existing database file.")
+        progress = cls._ready_progress_objects()
+
+        def verify() -> None:
+            try:
+                conn = sqlite3.connect(Path(repository._db_path).absolute().as_uri() + "?mode=ro", uri=True)
+            except sqlite3.Error:
+                raise RepositoryException("The existing store could not be opened read-only.") from None
+            try:
+                cls._require_existing_ready(conn, expected_core_schema_digest, progress)
+                row = conn.execute(
+                    "SELECT EXISTS (SELECT 1 FROM trend_signals), EXISTS (SELECT 1 FROM observations)"
+                ).fetchone()
+            except sqlite3.Error:
+                raise RepositoryException("The existing store schema is not ready.") from None
+            finally:
+                conn.close()
+            if is_unbackfilled(row[0], row[1]):
+                raise RepositoryException(UNBACKFILLED_CORPUS)
+
+        await asyncio.to_thread(verify)
+        repository._existing_ready = (expected_core_schema_digest, progress)
+        repository._initialized = True
+        return repository
+
+    @staticmethod
+    def _schema_objects(conn: sqlite3.Connection) -> List[Tuple[str, str, str, Optional[str]]]:
+        return [
+            tuple(row)
+            for row in conn.execute(
+                "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name"
+            ).fetchall()
+        ]
+
+    @classmethod
+    def _core_digest_of(cls, conn: sqlite3.Connection) -> str:
+        """Digest of every schema object outside the parent progress tables, autoindexes included."""
+        import hashlib
+
+        core = [list(row) for row in cls._schema_objects(conn) if row[2] not in _PROGRESS_TABLES]
+        return hashlib.sha256(
+            json.dumps(core, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    @classmethod
+    def existing_core_schema_digest(cls, db_path: str) -> str:
+        """Read-only core-schema digest of an existing database file."""
+        clean = db_path.replace("sqlite:///", "").replace("sqlite://", "")
+        conn = sqlite3.connect(Path(clean).absolute().as_uri() + "?mode=ro", uri=True)
+        try:
+            return cls._core_digest_of(conn)
+        finally:
+            conn.close()
+
+    @classmethod
+    def _ready_progress_objects(cls) -> List[Tuple[str, str, str, Optional[str]]]:
+        """Exact progress objects the shared DDL produces, built on a private in-memory database."""
+        conn = sqlite3.connect(":memory:")
+        try:
+            conn.executescript(
+                "CREATE TABLE research_missions (id TEXT PRIMARY KEY);"
+                "CREATE TABLE mission_run_journals (id TEXT PRIMARY KEY, mission_id TEXT);"
+                "CREATE TABLE mission_claims (id TEXT PRIMARY KEY, mission_id TEXT);"
+            )
+            conn.executescript(cls._progress_schema_script() + "COMMIT;")
+            return [row for row in cls._schema_objects(conn) if row[2] in _PROGRESS_TABLES]
+        finally:
+            conn.close()
+
+    @classmethod
+    def _require_existing_ready(
+        cls,
+        conn: sqlite3.Connection,
+        expected_core_schema_digest: str,
+        progress: List[Tuple[str, str, str, Optional[str]]],
+    ) -> None:
+        if cls._core_digest_of(conn) != expected_core_schema_digest:
+            raise RepositoryException("The existing store core schema is not the supported schema.")
+        if [row for row in cls._schema_objects(conn) if row[2] in _PROGRESS_TABLES] != progress:
+            raise RepositoryException("The existing store parent progress schema is missing or differs.")
+
+    def _verify_existing_ready(self) -> None:
+        expected, progress = self._existing_ready
+        conn = self._get_connection()
+        try:
+            self._require_existing_ready(conn, expected, progress)
+        except sqlite3.Error:
+            raise RepositoryException("The existing store schema is not ready.") from None
+        finally:
+            conn.close()
+
     async def _ensure_schema(self) -> None:
+        if self._existing_ready is not None:
+            # Validate only: an existing-ready store is never bootstrapped, upgraded or seeded.
+            await asyncio.to_thread(self._verify_existing_ready)
+            return
         if self._initialized:
             return
 
@@ -342,6 +528,9 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
 
     async def _ensure_progress_schema(self) -> None:
         """Explicit additive setup for authorized writers, never canonical bootstrap or reads."""
+        if self._existing_ready is not None:
+            await asyncio.to_thread(self._verify_existing_ready)
+            return
         await self._run_write(self._create_progress_tables)
 
     def _create_progress_tables(self) -> None:
@@ -365,20 +554,30 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     raise RepositoryException(
                         "Mission progress setup requires initialized canonical tables."
                     )
+            conn.executescript(self._progress_schema_script() + "COMMIT;")
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            if self._mem_conn is None:
+                conn.close()
 
-            uuid_pattern = "-".join("[0-9a-f]" * size for size in (8, 4, 4, 4, 12))
+    @staticmethod
+    def _progress_schema_script() -> str:
+        """The one parent progress DDL, shared by additive setup and ready-mode validation."""
+        uuid_pattern = "-".join("[0-9a-f]" * size for size in (8, 4, 4, 4, 12))
 
-            def uuid_check(expression: str) -> str:
-                return (
-                    f"(typeof({expression}) = 'text' AND instr({expression}, char(0)) = 0"
-                    f" AND {expression} GLOB '{uuid_pattern}')"
-                )
-
-            optional_ids = "\n".join(
-                f"CHECK ({name} IS NULL OR {uuid_check(name)}),"
-                for name in ("run_id", "work_id", "handoff_id", "finding_id", "claim_id")
+        def uuid_check(expression: str) -> str:
+            return (
+                f"(typeof({expression}) = 'text' AND instr({expression}, char(0)) = 0"
+                f" AND {expression} GLOB '{uuid_pattern}')"
             )
-            schema = f"""
+
+        optional_ids = "\n".join(
+            f"CHECK ({name} IS NULL OR {uuid_check(name)}),"
+            for name in ("run_id", "work_id", "handoff_id", "finding_id", "claim_id")
+        )
+        schema = f"""
                 BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS mission_progress_revisions (
                     mission_id TEXT PRIMARY KEY NOT NULL
@@ -464,7 +663,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     ) ON DELETE CASCADE
                 );
             """
-            reference_check = f"""
+        reference_check = f"""
                 (SELECT count(*) FROM json_each(reference.value)) = 7
                 AND NOT EXISTS (
                     SELECT 1 FROM json_each(reference.value) field
@@ -492,10 +691,10 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                         AND json_extract(reference.value, '$.qualification_frame_fingerprint')
                             NOT GLOB '*[^0-9a-f]*'))
             """
-            # Sequential guards and lazy CASE prevent malformed JSON/scalars from reaching
-            # object extraction. IS NOT TRUE refuses missing fields instead of accepting NULL.
-            for operation in ("INSERT", "UPDATE"):
-                schema += f"""
+        # Sequential guards and lazy CASE prevent malformed JSON/scalars from reaching
+        # object extraction. IS NOT TRUE refuses missing fields instead of accepting NULL.
+        for operation in ("INSERT", "UPDATE"):
+            schema += f"""
                     CREATE TRIGGER IF NOT EXISTS mission_progress_events_validate_{operation.lower()}
                     BEFORE {operation} ON mission_progress_events
                     BEGIN
@@ -520,13 +719,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                         ) THEN RAISE(ABORT, 'Progress reference has invalid typed fields') END;
                     END;
                 """
-            conn.executescript(schema + "COMMIT;")
-        except BaseException:
-            conn.rollback()
-            raise
-        finally:
-            if self._mem_conn is None:
-                conn.close()
+        return schema
 
     def _refuse_an_unbackfilled_corpus(self) -> None:
         """Checked once the schema is ready, which is this backend's equivalent of opening."""

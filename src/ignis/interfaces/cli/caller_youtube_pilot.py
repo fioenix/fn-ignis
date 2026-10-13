@@ -93,6 +93,7 @@ async def _preflight(store, mission_id, brief, instruction, root, scope):
     """Read-only checks on the existing caller store; no schema initialization or write."""
     import sqlite3
     import tempfile
+    from ignis.domain.exceptions import RepositoryException
     from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
     with tempfile.TemporaryDirectory() as directory:
         reference = SqliteTrendRepository(str(Path(directory) / 'reference.sqlite3'))
@@ -100,6 +101,7 @@ async def _preflight(store, mission_id, brief, instruction, root, scope):
         await reference.close()
         with sqlite3.connect(Path(directory, 'reference.sqlite3').as_uri() + '?mode=ro', uri=True) as connection:
             required = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        expected = SqliteTrendRepository.existing_core_schema_digest(str(Path(directory, 'reference.sqlite3')))
     try:
         connection = sqlite3.connect(store.as_uri() + '?mode=ro', uri=True)
     except sqlite3.Error:
@@ -112,6 +114,12 @@ async def _preflight(store, mission_id, brief, instruction, root, scope):
         # Optional child workflow tables are not required for a parent-only run.
         if not _PARENT_PROGRESS_TABLES <= present:
             raise _Refused('CALLER_PARENT_PROGRESS_SCHEMA_REQUIRED')
+        # Names are not readiness: exact core and progress definitions, validated read-only.
+        try:
+            await (await SqliteTrendRepository.open_existing_ready(
+                str(store), expected_core_schema_digest=expected)).close()
+        except RepositoryException:
+            raise _Refused('CALLER_SCHEMA_UNSUPPORTED') from None
         mission = connection.execute('SELECT status, keywords, platforms, geo_code, timeframe, workspace_id, '
             'brief_revision_id FROM research_missions WHERE id=?', (str(mission_id),)).fetchone()
         if mission is None:
@@ -151,7 +159,7 @@ async def _preflight(store, mission_id, brief, instruction, root, scope):
         raise _Refused('CONFIRMED_SCOPE_MISMATCH')
     if mission[0] != 'PENDING':
         raise _Refused('PARENT_NOT_UNEXECUTED')
-    return workspace_root
+    return workspace_root, expected
 
 
 async def _run(args, *, transport, resolve_credential):
@@ -180,7 +188,7 @@ async def _run(args, *, transport, resolve_credential):
     if run_root.exists() or run_root.is_symlink():
         # The original run exists; completed, expired or uncertain runs are never replaced.
         raise _Refused('ORIGINAL_RUN_ALREADY_ALLOCATED')
-    workspace_root = await _preflight(store_path, mission_id, brief, instruction, root, scope)
+    workspace_root, expected = await _preflight(store_path, mission_id, brief, instruction, root, scope)
     follow = root / '.fnignis' / 'follow-up'
     _checked(scope, follow / 'probe')
     follow.mkdir(exist_ok=True)
@@ -217,7 +225,9 @@ async def _run(args, *, transport, resolve_credential):
         recovery.write_text(json.dumps({'device': identity.st_dev, 'inode': identity.st_ino,
             'run_sha256': hashlib.sha256(marker.read_bytes()).hexdigest()}))
         scope.check()
-        repository = SqliteTrendRepository(str(store_path))
+        # Validated existing-schema writer: never bootstraps, upgrades or seeds the caller store.
+        repository = await SqliteTrendRepository.open_existing_ready(
+            str(store_path), expected_core_schema_digest=expected)
         scope.guard_repository(repository)
         def path_guard(path):
             # Revisit the admitted workspace branch before every workspace/journal path use.
