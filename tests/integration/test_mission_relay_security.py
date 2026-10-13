@@ -371,3 +371,171 @@ async def test_browser_masks_private_research_text_and_enforces_inline_script_po
                     await browser.close()
         observed.assert_no_writes()
     owned.assert_closed_unchanged(case, before)
+
+
+# Synthetic structured metadata on one public observation. Every value is a unique non-secret sentinel
+# that no PII rule redacts, so only the projection's field selection can keep it out of the viewer.
+PUBLIC_TITLE = "Public structured sighting for relay privacy"
+PUBLIC_EXCERPT = "Public structured excerpt for relay privacy"
+STRUCTURED_SENTINELS = {
+    "access_token": "SENTINELACCESSTOKENQ7RELAY",
+    "private_messages": "SENTINELPRIVATEMESSAGEQ7RELAY",
+    "hidden_reasoning": "SENTINELHIDDENREASONINGQ7RELAY",
+    "raw_source_owner_address": "SENTINELOWNERADDRESSQ7RELAY",
+    "unknown_nested": "SENTINELUNKNOWNNESTEDQ7RELAY",
+}
+STRUCTURED_METADATA = {
+    "excerpt": PUBLIC_EXCERPT,
+    "auth": {"session": {"access_token": STRUCTURED_SENTINELS["access_token"]}},
+    "private_messages": [{"direction": "inbound", "text": STRUCTURED_SENTINELS["private_messages"]}],
+    "hidden_reasoning": {"summary": STRUCTURED_SENTINELS["hidden_reasoning"]},
+    "raw_source": {"owner": {"address": STRUCTURED_SENTINELS["raw_source_owner_address"]}},
+    "vendor_extension": {"layer": {"opaque": STRUCTURED_SENTINELS["unknown_nested"]}},
+}
+
+
+def _assert_absent(text, where, forbidden):
+    """Report only safe labels, so a failure never echoes the payload, a sentinel or the capability."""
+    __tracebackhide__ = True  # The traceback would otherwise print the forbidden values themselves.
+    exposed = sorted(label for label, value in forbidden.items() if value in text)
+    assert not exposed, f"{where} exposes {', '.join(exposed)}"
+
+
+def _structured_row(rows, observation_id, source_id, where):
+    matches = [row for row in rows if row["observation_id"] == observation_id]
+    assert len(matches) == 1, f"{where} lacks the selected observation"
+    row = matches[0]
+    assert row["source_id"] == source_id, f"{where} changed the source identity"
+    assert row["title"] == PUBLIC_TITLE, f"{where} lacks the public title"
+    assert PUBLIC_EXCERPT in (row["excerpt"] or ""), f"{where} lacks the public excerpt"
+    return row
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relay_case", ("file",), indirect=True)
+async def test_browser_excludes_structured_private_observation_metadata(
+        relay_case, monkeypatch, tmp_path, caplog, capsys):
+    from playwright.async_api import async_playwright, expect
+    from ignis.domain.entities import TrendSignal
+    from ignis.domain.value_objects import PlatformType
+    from ignis.interfaces.mcp import server
+    from tests.unit.test_mission_claims import _eligible_mission
+    caplog.set_level("DEBUG")
+    case = relay_case[0]
+    _, _, mission, _, _ = await _eligible_mission(tmp_path, repository=case.repository)
+    mission_id = str(mission.id)
+    await case.repository.save_signals([TrendSignal(platform=PlatformType.YOUTUBE, raw_title=PUBLIC_TITLE,
+        source_url=f"https://example.invalid/{mission_id}/structured", mission_id=mission.id,
+        captured_at=datetime.now(timezone.utc), metadata=STRUCTURED_METADATA)])
+    # The canonical record really retains every private category, so the absence checks below are not vacuous.
+    stored = [s for s in await case.repository.get_mission_signals(mission.id) if s.raw_title == PUBLIC_TITLE]
+    assert len(stored) == 1 and stored[0].metadata == STRUCTURED_METADATA, "Storage did not retain the metadata"
+    assert stored[0].observation_id is not None and stored[0].source_id is not None
+    observation_id, source_id = str(stored[0].observation_id), str(stored[0].source_id)
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Viewer initialized writable components or credentials")
+    monkeypatch.setattr(server, "get_components", forbidden)
+    monkeypatch.setattr(server, "create_repository", forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
+    with _observe_chain(case, monkeypatch) as observed:
+        async with _caller_client(monkeypatch, tmp_path, {"repository": case.repository}) as client:
+            cap = (await client.call_tool("open_mission_relay", {"mission_id": mission_id, "expires_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()})).structured_content
+            assert cap["status"] == "OK"
+            target = urlsplit(cap["url"])
+            token = target.path.strip("/").split("/")[-1]
+            private = dict(STRUCTURED_SENTINELS, capability_token=token)
+            _assert_absent(json.dumps({k: v for k, v in cap.items() if k != "url"}), "MCP open result", private)
+
+            # Bounded refused reads: one malformed route, one observation outside the selected corpus.
+            status, body = await asyncio.to_thread(_get, cap["url"] + "inspect/not-an-observation?page_size=2")
+            assert (status, json.loads(body)) == (400, {"schema_version": 1, "status": "REFUSED",
+                                                       "reason_code": "INVALID_REQUEST"})
+            _assert_absent(body.decode("utf-8"), "Malformed refusal", private)
+            status, body = await asyncio.to_thread(
+                _get, cap["url"] + "inspect/00000000-0000-4000-8000-000000000000?page_size=200")
+            assert (status, json.loads(body)) == (403, REFUSED_SCOPE)
+            _assert_absent(body.decode("utf-8"), "Out-of-scope refusal", private)
+
+            unexpected, errors, console, responses = [], [], [], []
+            async with async_playwright() as runtime:
+                browser = await runtime.chromium.launch(headless=True)
+                try:
+                    context = await browser.new_context(service_workers="block")
+
+                    async def route(request_route):
+                        request = request_route.request
+                        parsed = urlsplit(request.url)
+                        if request.method == "GET" and parsed.scheme == "http" and parsed.netloc == target.netloc:
+                            await request_route.continue_()
+                        else:
+                            # Webfonts and any other origin stay offline; nothing leaves loopback.
+                            if parsed.hostname not in ("fonts.googleapis.com", "fonts.gstatic.com"):
+                                unexpected.append((request.method, parsed.hostname))
+                            await request_route.abort()
+                    await context.route("**/*", route)
+                    page = await context.new_page()
+                    page.on("pageerror", lambda error: errors.append(str(error)))
+                    page.on("console", lambda message: console.append(message.text))
+                    page.on("response", lambda response: responses.append(response))
+
+                    async with page.expect_response(
+                            lambda r: urlsplit(r.url).path.endswith("/snapshot"), timeout=10000) as first_snapshot:
+                        document = await page.goto(cap["url"])
+                        assert document.status == 200, "maintained HTML route did not succeed"
+                        html = await document.text()
+                        assert mission_id in html and observation_id in html and PUBLIC_TITLE in html
+                        _assert_absent(html, "Initial HTML", private)
+                    first = await first_snapshot.value
+                    assert first.status == 200, "first snapshot did not succeed"
+                    payload = await first.text()
+                    snapshot = json.loads(payload)
+                    assert snapshot["mission_id"] == mission_id and snapshot["run_id"] is None
+                    _structured_row(snapshot["evidence"], observation_id, source_id, "First snapshot")
+                    _assert_absent(payload, "First snapshot", private)
+
+                    async with page.expect_response(lambda r: "/inspect/" in urlsplit(r.url).path) as inspected:
+                        await page.get_by_test_id("stage-inspector").get_by_role(
+                            "button", name=PUBLIC_TITLE, exact=True).click()
+                    response = await inspected.value
+                    assert response.status == 200, "inspection did not succeed"
+                    payload = await response.text()
+                    inspection = json.loads(payload)
+                    assert inspection["mission_id"] == mission_id and inspection["run_id"] is None
+                    _structured_row([inspection["observation"]], observation_id, source_id, "Inspection")
+                    _assert_absent(payload, "Inspection", private)
+                    inspector = page.get_by_test_id("stage-inspector")
+                    await expect(inspector).to_contain_text(PUBLIC_TITLE)
+                    await expect(inspector).to_contain_text(PUBLIC_EXCERPT)
+                    await expect(inspector).to_contain_text(observation_id)
+                    _assert_absent(await page.evaluate("document.documentElement.outerHTML"), "Inspector DOM", private)
+
+                    # A later refresh settles only once the viewer shows that response's read receipt.
+                    async with page.expect_response(
+                            lambda r: urlsplit(r.url).path.endswith("/snapshot"), timeout=10000) as refreshed:
+                        pass
+                    response = await refreshed.value
+                    assert response.status == 200, "refresh did not succeed"
+                    payload = await response.text()
+                    snapshot = json.loads(payload)
+                    assert snapshot["mission_id"] == mission_id
+                    _structured_row(snapshot["evidence"], observation_id, source_id, "Refresh")
+                    _assert_absent(payload, "Refresh", private)
+                    await expect(page.get_by_test_id("snapshot-state")).to_contain_text(snapshot["read_at"])
+                    await expect(page.get_by_test_id("mission-authority")).to_contain_text(mission_id)
+                    _assert_absent(await page.evaluate("document.documentElement.outerHTML"), "Refreshed DOM", private)
+
+                    _assert_absent("\n".join(console), "Browser console", private)
+                    assert not unexpected and not errors, "Browser left loopback or raised a page error"
+                    await context.close()
+                finally:
+                    await browser.close()
+        observed.assert_no_writes()
+    owned.assert_closed_unchanged(case, before)
+    captured = capsys.readouterr()
+    diagnostics = dict(private, viewer_url=cap["url"])
+    _assert_absent(caplog.text, "Captured logs", diagnostics)
+    _assert_absent(captured.out + captured.err, "Captured output", diagnostics)
