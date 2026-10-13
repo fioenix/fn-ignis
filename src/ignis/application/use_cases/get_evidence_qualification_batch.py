@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
+from ignis.application.use_cases.recorded_content import recorded_excerpt
 from ignis.domain.entities import TrendSignal
 from ignis.domain.probe_provenance import PROBE_KEY_ALIASES
 from ignis.domain.research_workspace import (
@@ -233,7 +234,7 @@ class GetEvidenceQualificationBatchUseCase:
     @staticmethod
     def _evidence(signal: TrendSignal) -> Dict[str, Any]:
         metadata = signal.metadata or {}
-        excerpt = metadata.get("top_comment") or metadata.get("excerpt")
+        excerpt = metadata.get("top_comment") or recorded_excerpt(metadata)
         probe_keyword = next(
             (metadata[key].strip() for key in PROBE_KEY_ALIASES
              if isinstance(metadata.get(key), str) and metadata[key].strip()),

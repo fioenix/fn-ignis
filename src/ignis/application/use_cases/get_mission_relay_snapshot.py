@@ -16,6 +16,7 @@ from ignis.application.ports.mission_relay_port import (
 )
 from ignis.application.ports.research_workspace_port import MissionEvidenceSnapshot, RunJournal
 from ignis.application.ports.research_work_port import SAFE_REASONS
+from ignis.application.use_cases.recorded_content import recorded_excerpt
 from ignis.domain.relay_research import RelayResearchView
 from ignis.domain.research_work import project_work_activity
 from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
@@ -135,7 +136,7 @@ def _observation(signal, evidence, surface, read_at) -> RelayObservation:
     qualification = next((q for q in evidence.qualifications if q.observation_id == signal.observation_id), None)
     return RelayObservation(
         mission_id=signal.mission_id, observation_id=signal.observation_id, source_id=signal.source_id,
-        title=_safe_text(signal.raw_title), excerpt=_safe_text(signal.metadata.get("excerpt")),
+        title=_safe_text(signal.raw_title), excerpt=_safe_text(recorded_excerpt(signal.metadata)),
         source_url=_safe_url(signal.source_url),
         metric_value=None if signal.metadata.get("metric_known") is False else signal.metric_value,
         growth_velocity=None if signal.metadata.get("metric_known") is False else signal.growth_velocity,
