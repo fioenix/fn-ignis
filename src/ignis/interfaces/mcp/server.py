@@ -485,10 +485,15 @@ class _MissionRelayRuntime:
             return MissionRelayReadFailure(status=RelayReadStatus.UNAVAILABLE, reason_code=RelayReadReason.READ_UNAVAILABLE)
 
     async def close(self):
+        from ignis.application.cancellation import await_settled
         self.closed = True
         if self._shutdown is None:
             self._shutdown = asyncio.create_task(self._close_owned())
-        await asyncio.shield(self._shutdown)
+        # A cancelled caller still waits for the one owned shutdown to settle, then is cancelled.
+        await await_settled(self._join_shutdown())
+
+    async def _join_shutdown(self):
+        return await asyncio.shield(self._shutdown)
 
     async def _close_after(self, runtime, repository):
         await runtime.quiescent.wait()
@@ -511,20 +516,32 @@ class _MissionRelayRuntime:
             for resource in resources:
                 if not await resource.wait_closed(timeout=None):
                     raise RuntimeError("Mission viewer reads did not settle during shutdown.")
+        # Every later owned phase still runs; an unsettled viewer is reported once they have.
+        failure = None
         try:
             await await_settled(settle())
-        except BaseException:
-            pass
+        except BaseException as error:
+            failure = error
         await self._settle_source(acquisition)
+        viewer_settled = failure is None
+        cancellation = None
         for scope in self.caller_scopes.values():
             runtime = scope.runtime
+            # Each caller's read settlement is known only when this viewer and that caller's own
+            # runtime both settled; one failed or cancelled caller never retains a healthy sibling.
+            reads_settled = viewer_settled
             if runtime is not None:
                 try:
                     await runtime.close()
-                except Exception:
-                    pass
-            if scope.components is not None:
-                # A borrowed repository closes only after its caller runtime is quiescent.
+                except asyncio.CancelledError as error:
+                    reads_settled = False
+                    cancellation = cancellation or error
+                except Exception as error:
+                    reads_settled = False
+                    failure = failure or error
+            if scope.components is not None and reads_settled:
+                # A borrowed repository closes only after its caller runtime is quiescent. With
+                # unknown read settlement it stays owned and open rather than closed under a read.
                 for repository in _caller_repositories(scope.components):
                     if runtime is None or runtime.quiescent.is_set():
                         await repository.close()
@@ -535,6 +552,11 @@ class _MissionRelayRuntime:
             if scope.log_handler is not None:
                 logging.getLogger().removeHandler(scope.log_handler)
                 scope.log_handler.close()
+        # Cancellation propagates only after every safe source, sibling and log cleanup ran.
+        if cancellation is not None:
+            raise cancellation
+        if failure is not None:
+            raise failure
 
 
 @asynccontextmanager

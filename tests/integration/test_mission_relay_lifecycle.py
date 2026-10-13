@@ -89,6 +89,185 @@ async def test_unsettled_reads_cannot_be_reported_as_closed(monkeypatch):
     assert calls == ["revoke", "settle"]
 
 
+class _Handler:
+    """A caller log handler whose removal and close are observable."""
+
+    def __init__(self):
+        import logging
+        self.handler = logging.NullHandler()
+        self.closed = False
+        original = self.handler.close
+
+        def close():
+            self.closed = True
+            original()
+        self.handler.close = close
+
+
+def _caller_scope(repository, *, runtime=None, handler=None):
+    from types import SimpleNamespace
+    return SimpleNamespace(runtime=runtime, components={"repository": repository},
+                           log_handler=None if handler is None else handler.handler)
+
+
+@pytest.mark.asyncio
+async def test_unknown_read_settlement_retains_borrowed_storage_and_still_runs_safe_cleanup(monkeypatch):
+    import logging
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    server = _server()
+    settled_sources = []
+    original_settle = server._MissionRelayRuntime._settle_source
+
+    async def recording_settle(self, acquisition):
+        settled_sources.append(acquisition)
+        return await original_settle(self, acquisition)
+    monkeypatch.setattr(server._MissionRelayRuntime, "_settle_source", recording_settle)
+    repository = SqliteTrendRepository(":memory:")
+    handler = _Handler()
+    logging.getLogger().addHandler(handler.handler)
+    class Listener:
+        def close(self):
+            pass
+        async def wait_closed(self, *, timeout):
+            return False
+    try:
+        with pytest.raises(RuntimeError, match="settle"):
+            async with _lifespan(server) as state:
+                runtime = state["mission_relay"]
+                runtime.listener = Listener()
+                runtime.caller_scopes["caller"] = _caller_scope(repository, handler=handler)
+        assert settled_sources == [None], "Source settlement was skipped after a viewer settlement failure"
+        assert handler.closed and handler.handler not in logging.getLogger().handlers
+        assert repository._mem_conn is not None, "Borrowed storage was closed under unknown read settlement"
+        repository._mem_conn.execute("SELECT 1")
+    finally:
+        logging.getLogger().removeHandler(handler.handler)
+        await repository.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_caller_runtime_close_is_reported_and_retains_its_storage():
+    import logging
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    server = _server()
+    repository = SqliteTrendRepository(":memory:")
+    handler = _Handler()
+    logging.getLogger().addHandler(handler.handler)
+    class FailingCallerRuntime:
+        quiescent = asyncio.Event()
+        async def close(self):
+            raise RuntimeError("caller viewer reads did not settle")
+    try:
+        with pytest.raises(RuntimeError, match="caller viewer reads did not settle"):
+            async with _lifespan(server) as state:
+                state["mission_relay"].caller_scopes["caller"] = _caller_scope(
+                    repository, runtime=FailingCallerRuntime(), handler=handler)
+        assert handler.closed and handler.handler not in logging.getLogger().handlers
+        assert repository._mem_conn is not None, "Storage was closed after its caller runtime failed to settle"
+    finally:
+        logging.getLogger().removeHandler(handler.handler)
+        await repository.close()
+
+
+class _HealthyCallerRuntime:
+    def __init__(self):
+        self.quiescent = asyncio.Event()
+        self.quiescent.set()
+
+    async def close(self):
+        return None
+
+
+class _BrokenCallerRuntime:
+    def __init__(self, error):
+        self.quiescent = asyncio.Event()
+        self.error = error
+
+    async def close(self):
+        raise self.error
+
+
+@pytest.mark.asyncio
+async def test_one_failed_caller_runtime_does_not_retain_a_healthy_sibling():
+    import logging
+    import sqlite3
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    server = _server()
+    unsafe, healthy = SqliteTrendRepository(":memory:"), SqliteTrendRepository(":memory:")
+    healthy_connection = healthy._mem_conn
+    handler = _Handler()
+    logging.getLogger().addHandler(handler.handler)
+    try:
+        with pytest.raises(RuntimeError, match="caller A did not settle"):
+            async with _lifespan(server) as state:
+                scopes = state["mission_relay"].caller_scopes
+                scopes["a"] = _caller_scope(unsafe, runtime=_BrokenCallerRuntime(RuntimeError("caller A did not settle")))
+                scopes["b"] = _caller_scope(healthy, runtime=_HealthyCallerRuntime(), handler=handler)
+        assert unsafe._mem_conn is not None, "Storage of the unsettled caller runtime was closed"
+        assert healthy._mem_conn is None, "A healthy quiescent sibling was retained because another caller failed"
+        with pytest.raises(sqlite3.ProgrammingError):
+            healthy_connection.execute("SELECT 1")
+        assert handler.closed
+    finally:
+        logging.getLogger().removeHandler(handler.handler)
+        await unsafe.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_caller_runtime_close_still_cleans_siblings_then_propagates():
+    import logging
+    import sqlite3
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    server = _server()
+    cancelled, healthy = SqliteTrendRepository(":memory:"), SqliteTrendRepository(":memory:")
+    healthy_connection = healthy._mem_conn
+    cancelled_handler, healthy_handler = _Handler(), _Handler()
+    for handler in (cancelled_handler, healthy_handler):
+        logging.getLogger().addHandler(handler.handler)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            async with _lifespan(server) as state:
+                scopes = state["mission_relay"].caller_scopes
+                scopes["a"] = _caller_scope(cancelled, runtime=_BrokenCallerRuntime(asyncio.CancelledError()),
+                                            handler=cancelled_handler)
+                scopes["b"] = _caller_scope(healthy, runtime=_HealthyCallerRuntime(), handler=healthy_handler)
+        assert cancelled._mem_conn is not None, "Storage of the cancelled caller runtime was closed"
+        assert cancelled_handler.closed and healthy_handler.closed, "Cancellation skipped log cleanup"
+        assert healthy._mem_conn is None, "Cancellation skipped a later sibling's cleanup"
+        with pytest.raises(sqlite3.ProgrammingError):
+            healthy_connection.execute("SELECT 1")
+    finally:
+        for handler in (cancelled_handler, healthy_handler):
+            logging.getLogger().removeHandler(handler.handler)
+        await cancelled.close()
+
+
+@pytest.mark.asyncio
+async def test_repeated_shutdown_cancellation_still_waits_for_actual_cleanup():
+    server = _server()
+    release, entered = asyncio.Event(), asyncio.Event()
+    class Listener:
+        def close(self):
+            pass
+        async def wait_closed(self, *, timeout):
+            entered.set()
+            await release.wait()
+            return True
+    context = _lifespan(server)
+    state = await context.__aenter__()
+    state["mission_relay"].listener = Listener()
+    closing = asyncio.create_task(context.__aexit__(None, None, None))
+    await asyncio.wait_for(entered.wait(), 1)
+    for _ in range(3):
+        closing.cancel()
+        await asyncio.sleep(0.05)
+        assert not closing.done(), "A repeated cancellation abandoned the owned shutdown"
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(closing, 2)
+    assert state["mission_relay"]._shutdown.done() and not state["mission_relay"]._shutdown.cancelled()
+
+
 @pytest.mark.asyncio
 async def test_fastmcp_uses_registered_owner_lifespan():
     server = _server()
