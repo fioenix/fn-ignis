@@ -1,18 +1,29 @@
 # Validation Guide: Ignis Relay
 
-**Status**: Future feature acceptance guide; new tools and integrated runtime are not implemented yet. Setup T001–T003 ran existing baselines on 2026-10-04: 217 passed, 58 PostgreSQL cases skipped. T004/T005 RED deliverables have independent review; T006 models are in progress. Dedicated local PostgreSQL testing has begun; no live research mission, workflow migration or benchmark was run.
+**Status**: The four additive tools (`get_mission_relay_snapshot`, `open_mission_relay`, `record_mission_research_work`, `execute_mission_follow_up`) and their storage, viewer and follow-up runtime are implemented on this branch. Each has scoped, independently reviewed local engineering verification. That is not feature acceptance: real follow-up UAT, end-to-end security, PostgreSQL lifecycle parity, integrated performance, schema rehearsal, guidance/catalog synchronization, full regressions, review and integration remain open gates in [the Spec 014 task ledger](tasks.md), which is the only acceptance authority. This guide does not check off tasks.
+
+**Historical setup status (2026-10-04)**: Setup T001–T003 ran existing baselines on 2026-10-04: 217 passed, 58 PostgreSQL cases skipped. T004/T005 RED deliverables have independent review; T006 models are in progress. Dedicated local PostgreSQL testing has begun; no live research mission, workflow migration or benchmark was run.
 
 ## Prerequisites
 
 - Owner-approved technical plan and generated implementation tasks before coding.
-- Use the managed feature worktree and its locked environment; do not overwrite the owner's primary checkout or client configs.
+- Use the authoritative current checkout of the feature branch, or a worktree the owner designated, with its locked `.venv` environment. Do not overwrite the owner's uncommitted work or client configs.
+- A real, validated caller root for mission tools. Mission-scoped MCP calls (tool names containing `mission` or `research_workspace`, `confirm_market_brief`, or calls carrying `mission_id`/`workspace_id`) are admitted only through one validated caller root. When the client's MCP capabilities declare roots support, it must return exactly one existing absolute `file://` directory root; an empty, multiple, invalid or unavailable roots list is refused, and if `IGNIS_CALLER_ROOT` is also configured the returned root must match it exactly. The configured `IGNIS_CALLER_ROOT` (an absolute directory set at server startup and unchanged since) is used only when those capabilities explicitly declare no roots support. An unknown capability is refused. Each refusal fails with `ROOT_REQUIRED`. For an admitted call, canonical storage defaults to local SQLite at `<root>/.fnignis/canonical.sqlite3`. An explicit literal `DATABASE_URL` in an owner-only `<root>/.fnignis/.env` (see `src/ignis/infrastructure/templates/caller.env.example`) can instead select another SQLite file inside the root or a PostgreSQL database; caller configuration, logs, reports and research files stay under `<root>/.fnignis/` either way. `record_mission_research_work` additionally requires the local stdio transport.
 - Explicit database setup outside the viewer. SQLite is default; PostgreSQL is a separately authorized test backend. A missing schema must produce an unavailable viewer, never bootstrap it.
 - A real selected mission and explicit finite research assignment, with host capability and sources/budget recorded. Actual social session use or development database writes need applicable current authorization; this document is not that permission.
 - Named concurrency-capable host for actual overlapping research work, plus a sequential-capacity test. Record real host receipts and manual evidence; mocks alone do not satisfy concurrent-team UAT.
 
-## Existing regression commands
+## Regression commands
 
-These files currently exist. Run from repository root after implementation; report actual outputs/revision and unavailable gates rather than checking boxes from this guide.
+Validation scope matches CI: run the whole `tests/` tree, not `tests/unit/` alone, and report the actual outputs, revision, skips and unavailable gates rather than checking boxes from this guide.
+
+```bash
+.venv/bin/pytest tests/
+```
+
+PostgreSQL cases run only when `IGNIS_TEST_POSTGRES_DSN` points at a disposable test database (CI provides a service database). Without it they skip, and a skip is not PostgreSQL parity. Never print the DSN.
+
+The pre-feature baseline regressions from setup remain available as narrow checks:
 
 ```bash
 .venv/bin/pytest tests/unit/test_repo_conventions.py
@@ -20,15 +31,28 @@ These files currently exist. Run from repository root after implementation; repo
 .venv/bin/pytest tests/integration/test_workspace_concurrency.py tests/integration/test_mission_bound_idle.py tests/integration/test_host_browser_search_mcp.py tests/integration/test_host_browser_mission.py tests/integration/test_evidence_grounded_market_mission.py
 ```
 
-Run backend-specific integration procedures from the repository's existing test setup; do not put a credential-bearing connection string into command output. Capture skip reasons. The above regressions do not alone prove new feature acceptance. New test paths/commands belong to implementation tasks and must be updated here once they exist.
+Run backend-specific integration procedures from the repository's existing test setup; do not put a credential-bearing connection string into command output. Capture skip reasons. The above regressions do not alone prove new feature acceptance.
 
-Setup evidence is in ignored `.handoff/spec014/preflight.handoff.md` and `baseline.handoff.md`. The credential-free runner clears ambient environment, explicitly isolates a local SQLite env source and verifies inert Settings before invoking pytest. Root test quarantine removes `IGNIS_ENV_FILE`, so launching plain pytest with the isolation switch still set causes a later Settings import to fail closed; do not bypass the quarantine or restore real credentials. All 58 observed skips require `IGNIS_TEST_POSTGRES_DSN`; this baseline does not verify PostgreSQL or SC-012 host overlap.
+### Spec 014 suites
 
-## Feature scenarios once implemented
+These narrow suites exist on this branch. Select them with the same `.venv/bin/pytest` invocation; each passing run is engineering evidence for its own scope only, and open acceptance stays in [tasks.md](tasks.md).
 
-The current T004 test file is `tests/integration/test_mission_progress_persistence.py`. It calls real `record_probe_outcomes`, verifies durable rows, injects SQLite database write refusal and forces different-command transaction contention. After independent review and correction, SQLite-only observation was 6 behavioral failures, 2 passing controls and 8 missing-DSN skips. A subsequent actual run on SQLite and dedicated local PostgreSQL observed 10 failures, 3 passes and 3 PostgreSQL harness skips. The remaining skips require PostgreSQL fault injection and lock/commit scheduling, not a DSN. These are missing-runtime RED results, not a GREEN/parity gate.
+- Progress persistence and coherent reads: `tests/integration/test_mission_progress_persistence.py`, `tests/integration/test_mission_relay_read_boundary.py`, `tests/unit/test_mission_relay_projection.py`, `tests/unit/test_mission_relay_port.py`.
+- Relay viewer, MCP and HTTP: `tests/integration/test_mission_relay_mcp.py`, `tests/integration/test_mission_relay_lifecycle.py`, `tests/integration/test_mission_relay_us3_readback.py`, `tests/unit/test_mission_relay_mcp_tools.py`, `tests/unit/test_mission_relay_http.py`.
+- Viewer rendering, accessibility and responsive layout (Chromium): `tests/integration/test_mission_relay_browser.py`, `tests/integration/test_mission_relay_accessibility.py`, `tests/integration/test_mission_relay_responsive.py`, `tests/integration/test_mission_relay_visual.py`, `tests/integration/test_mission_relay_research_browser.py`.
+- Research work recording and lifecycle: `tests/unit/test_research_work.py`, `tests/integration/test_research_work_persistence.py`, `tests/integration/test_research_work_lifecycle.py`, `tests/integration/test_research_work_mcp.py`, `tests/integration/test_research_recording_mcp_boundary.py`, `tests/unit/test_research_recording_mcp_runtime.py`.
+- Gap-linked follow-up: `tests/integration/test_mission_follow_up.py`, `tests/integration/test_mission_follow_up_viewer.py`, `tests/integration/test_follow_up_mcp.py`, `tests/integration/test_follow_up_execution.py`, `tests/integration/test_follow_up_settlement.py`.
+- Caller-root admission: `tests/unit/test_caller_storage_native.py`, `tests/unit/test_configured_caller_root.py`, `tests/unit/test_caller_root_diagnostics.py`, `tests/integration/test_follow_up_caller_middleware.py`.
 
-T005 is `tests/unit/test_mission_relay_projection.py`: 59 cases collect, 58 fail at named absent projection API and one existing sanitizer control passes. No downstream projection masking, refusal or missingness branch has executed. Minor review coverage notes (UTF-8 byte bounds and exact typed key allowlists) remain assigned to T006/T023/T081. Re-evaluate all actual behavior once implementation exists; initial API RED is not security acceptance. New tests must become GREEN under the later implementation; do not xfail them or suppress their failure to prepare a release.
+Several of these use `relay_case`/`postgres` parametrization, and some write sanitized screenshots or receipts under `.handoff/`; run them from a disposable copy when existing evidence must be preserved. The scenario 8 end-to-end security suite is not yet present.
+
+**Historical setup evidence**: Setup evidence is in ignored `.handoff/spec014/preflight.handoff.md` and `baseline.handoff.md`. The credential-free runner clears ambient environment, explicitly isolates a local SQLite env source and verifies inert Settings before invoking pytest. Root test quarantine removes `IGNIS_ENV_FILE`, so launching plain pytest with the isolation switch still set causes a later Settings import to fail closed; do not bypass the quarantine or restore real credentials. All 58 observed skips require `IGNIS_TEST_POSTGRES_DSN`; this baseline does not verify PostgreSQL or SC-012 host overlap.
+
+## Feature scenarios
+
+**Historical RED setup (superseded by implementation)**: The T004 test file is `tests/integration/test_mission_progress_persistence.py`. It calls real `record_probe_outcomes`, verifies durable rows, injects SQLite database write refusal and forces different-command transaction contention. After independent review and correction, SQLite-only observation was 6 behavioral failures, 2 passing controls and 8 missing-DSN skips. A subsequent actual run on SQLite and dedicated local PostgreSQL observed 10 failures, 3 passes and 3 PostgreSQL harness skips. The remaining skips require PostgreSQL fault injection and lock/commit scheduling, not a DSN. These were missing-runtime RED results at the time, not a GREEN/parity gate.
+
+T005 was `tests/unit/test_mission_relay_projection.py`: at that time 59 cases collected, 58 failed at the named absent projection API and one existing sanitizer control passed. No downstream projection masking, refusal or missingness branch had executed. Minor review coverage notes (UTF-8 byte bounds and exact typed key allowlists) were then assigned to T006/T023/T081. The instruction at the time was to re-evaluate all actual behavior once implementation existed: initial API RED was not security acceptance, and the new tests had to become GREEN under the later implementation without xfail or suppressed failures. Current acceptance of those tasks is governed by [tasks.md](tasks.md).
 
 1. Select a real mission with no active research, call `open_mission_relay` with an explicit finite deadline, then inspect all six responsibilities. Compare before/after storage and spies: no mission/schema/seed writes, collector/auth/model calls or quota use. Repeat with missing schema and both databases.
 2. Execute explicitly authorized collection outside the viewer. Verify committed events and outcomes reach the five columns; roll back a failing write and prove it emits no durable result event. Reconnect/reorder responses and verify no duplicate arrivals/counts. Measure update time from successful coherent read, not connector start.

@@ -17,7 +17,7 @@ private current-input gaps, explicit finite budget/unit grants, narrowed source 
 command receipts and conservative resource allocations. SQLite admission requires an independently
 configured current capability provider and fails closed when it is absent; real host providers and
 child execution remain unverified. Migration 029 adds immutable parent/child follow-up links and
-conservative reservation storage. Neither migration backfills evidence or adopts old authority. Migration 028 adds bounded host research-work storage
+conservative reservation storage. Neither migration backfills evidence or adopts old authority. Migration 028 (`sql/028_research_work.sql`) adds bounded host research-work storage
 and progress-event kinds without transforming persisted evidence. Migration 027 adds only
 PostgreSQL revision, progress-event, and command-receipt tables, preserving canonical evidence.
 SQLite and PostgreSQL commit collection, qualification and claim facts together with matching
@@ -106,6 +106,16 @@ See [YouTube developer policies](https://developers.google.com/youtube/terms/dev
 Use `get_mission_relay_snapshot` for a bounded snapshot of the selected mission and optional run.
 Use `open_mission_relay` with an explicit UTC expiry to open a read-only localhost viewer.
 These reads validate installed storage without bootstrapping a database or starting collectors.
+Like every mission tool, they are admitted only through one validated caller root. When the
+client's MCP capabilities declare roots support, it must return exactly one existing absolute
+`file://` directory root; an empty, multiple, invalid or unavailable roots list is refused, and
+if `IGNIS_CALLER_ROOT` is also configured the returned root must match it exactly. The configured
+`IGNIS_CALLER_ROOT` (an absolute directory set at server startup and unchanged since) is used only
+when those capabilities explicitly declare no roots support. An unknown capability is refused.
+Each refusal fails with `ROOT_REQUIRED`. For an admitted call, canonical mission storage defaults
+to caller-local SQLite at `<root>/.fnignis/canonical.sqlite3`; an explicit `DATABASE_URL` in
+`<root>/.fnignis/.env` can select another SQLite file inside the root or a PostgreSQL database.
+Caller configuration, logs, reports and research files stay under `<root>/.fnignis/`.
 `record_mission_research_work` records an explicit bounded host command through the local stdio
 session, enforcing mission authority and exact revision, epoch and input bindings. Recording
 does not execute agents, invoke providers or collect sources.
@@ -126,9 +136,12 @@ The local MCP server exposes **48 tools**. Discover the running server's descrip
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
 The published OCI manifest is still v0.7.0, so neither it nor a public-image smoke test
 establishes that Spec 011 shipped. PyPI installation is not advertised. Run the branch's
-`.venv/bin/pytest tests/unit/` and `uv lock --check` for local checks, then consult
-[the task ledger](../specs/011-evidence-grounded-product-reset/tasks.md) for the outstanding
-PostgreSQL, pilot, integration, and owner-controlled release gates.
+`.venv/bin/pytest tests/` (the CI scope; PostgreSQL cases skip unless `IGNIS_TEST_POSTGRES_DSN`
+names a disposable test database) and `uv lock --check` for local checks. Consult
+[the Spec 011 task ledger](../specs/011-evidence-grounded-product-reset/tasks.md) for its outstanding
+PostgreSQL, pilot, integration, and owner-controlled release gates, and
+[the Spec 014 task ledger](../specs/014-evidence-factory/tasks.md) for the Mission Relay,
+research-work and follow-up gates that remain open.
 
 ### Explicit host-browser TikTok search (development branch)
 

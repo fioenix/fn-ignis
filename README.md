@@ -39,7 +39,7 @@ The current source tree contains migrations through
 `sql/030_mission_follow_up_admission.sql`. Migration 030 adds current-input gaps, finite budget
 grants, narrowed source authority, command receipts and conservative resource allocations.
 Migration 029 adds immutable parent/child follow-up links and reservation storage. Neither
-migration backfills evidence or adopts old authority. Migration 028 adds bounded host research-work storage
+migration backfills evidence or adopts old authority. Migration 028 (`sql/028_research_work.sql`) adds bounded host research-work storage
 and progress-event kinds without transforming persisted evidence. Migration 027 adds only PostgreSQL revision, progress-event,
 and command-receipt tables, preserving canonical evidence. SQLite and PostgreSQL now commit collection, qualification and claim facts together with
 their matching progress events. Relay provides a finite read-only local viewer and bounded snapshots of installed mission storage.

@@ -18,7 +18,7 @@ và phân bổ tài nguyên theo nguyên tắc thận trọng. Khi nhận nhiệ
 quyền hạn hiện tại được cấu hình độc lập và từ chối nếu thiếu bên này. Bên cấp quyền hạn thực tế của host và việc
 thực thi nhiệm vụ con chưa được xác minh. Migration 029 bổ sung liên kết bất biến giữa nhiệm vụ cha và nhiệm vụ con
 cùng dữ liệu dự trữ ngân sách. Hai migration này không bổ sung hồi tố bằng chứng hay kế thừa quyền hạn cũ.
-Migration 028 bổ sung các bảng lưu hoạt động nghiên cứu
+Migration 028 (`sql/028_research_work.sql`) bổ sung các bảng lưu hoạt động nghiên cứu
 của host trong phạm vi được duyệt và các loại sự kiện tiến độ, không chuyển đổi dữ liệu bằng chứng đã lưu.
 Migration 027 chỉ bổ sung các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
 chuẩn được giữ nguyên. SQLite và PostgreSQL hiện ghi dữ kiện thu thập, qualification và claim cùng sự kiện tiến độ
@@ -79,6 +79,17 @@ cần. Mã template chỉ nằm ở `src/ignis/infrastructure/templates/html/`.
 Dùng `get_mission_relay_snapshot` để đọc snapshot giới hạn của nhiệm vụ và run được chọn.
 Dùng `open_mission_relay` với thời hạn UTC được chỉ định để mở giao diện chỉ đọc trên localhost.
 Các thao tác đọc kiểm tra storage đã khởi tạo, không khởi tạo database hay chạy collector.
+Giống mọi tool của nhiệm vụ, hai thao tác này chỉ được chấp nhận qua đúng một caller root hợp lệ.
+Nếu capability MCP của client khai báo có hỗ trợ roots, client phải trả về đúng một thư mục `file://`
+tuyệt đối đang tồn tại; danh sách root rỗng, có nhiều root, không hợp lệ hoặc không đọc được đều bị
+từ chối. Khi server cũng được cấu hình `IGNIS_CALLER_ROOT`, root do client trả về phải trùng khớp
+với giá trị này. Server chỉ dùng `IGNIS_CALLER_ROOT` (thư mục tuyệt đối đặt lúc khởi động và không
+thay đổi sau đó) khi capability của client khai báo rõ là không hỗ trợ roots. Capability không xác
+định cũng bị từ chối. Mọi trường hợp bị từ chối đều trả về `ROOT_REQUIRED`. Khi lệnh gọi được chấp
+nhận, dữ liệu chuẩn của nhiệm vụ mặc định nằm trong SQLite cục bộ của caller tại
+`<root>/.fnignis/canonical.sqlite3`. Có thể khai báo `DATABASE_URL` trong `<root>/.fnignis/.env` để dùng
+một file SQLite khác nằm trong root hoặc một database PostgreSQL. Cấu hình, log, báo cáo và file nghiên
+cứu của caller vẫn nằm trong `<root>/.fnignis/`.
 `record_mission_research_work` ghi lệnh có phạm vi được chỉ định của host qua phiên stdio cục bộ,
 kiểm tra quyền của nhiệm vụ cùng revision, epoch và dữ liệu đầu vào chính xác. Việc ghi lệnh
 không chạy agent, gọi provider hay thu thập nguồn.
@@ -100,9 +111,12 @@ cấp quyền thực hiện.
 MCP server cục bộ có **48 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
 manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
-Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/unit/` và `uv lock --check`
-để kiểm tra cục bộ, rồi xem [danh sách việc](../specs/011-evidence-grounded-product-reset/tasks.md)
-cho các cổng PostgreSQL, pilot, tích hợp và phát hành cần chủ sở hữu quyết định.
+Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu
+`IGNIS_TEST_POSTGRES_DSN` không trỏ tới một database kiểm thử dùng một lần) và `uv lock --check`
+để kiểm tra cục bộ. Xem [danh sách việc của Spec 011](../specs/011-evidence-grounded-product-reset/tasks.md)
+cho các cổng PostgreSQL, pilot, tích hợp và phát hành cần chủ sở hữu quyết định. Các cổng còn mở
+của Mission Relay, công việc nghiên cứu và bổ sung chứng cứ nằm trong
+[danh sách việc của Spec 014](../specs/014-evidence-factory/tasks.md).
 ### Tìm kiếm TikTok qua trình duyệt host trên nhánh phát triển
 
 Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và

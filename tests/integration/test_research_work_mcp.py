@@ -351,6 +351,56 @@ async def test_native_new_epoch_independent_research_after_collection_complete_a
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
+async def test_native_collection_completion_keeps_assigned_analysis_until_research_end(relay_case, tmp_path):
+    from tests.integration.test_research_work_lifecycle import bound, activity
+    from tests.integration.test_research_work_persistence import _sql
+    case, mission, _, _, work, handoff, revision = await _arrange(relay_case, tmp_path)
+    assert (await case.repository.get_mission(mission.id)).status != 'COMPLETED'
+    async with native_client(tmp_path, case) as client:
+        # Collection completes while the separately authorized assignment and its work are still live.
+        await _sql(case, 'UPDATE research_missions SET status=? WHERE id=?', ('COMPLETED', str(mission.id)))
+        assert (await snapshot(client, mission))['collection_state'] == 'COMPLETED'
+        observed = await record(client, mission, command('RECORD_ACTIVITY', activity(work), revision))
+        assert observed['disposition'] == 'APPLIED', observed['reason_code']
+        submitted = await record(client, mission, public_handoff(
+            replace(handoff, expected_version=observed['work_version']), observed['revision']))
+        assert submitted['disposition'] == 'APPLIED', submitted['reason_code']
+        completed = await record(client, mission, command('END_WORK',
+            {**bound(work, submitted['work_version']), 'disposition': 'COMPLETED'}, submitted['revision']))
+        assert completed['disposition'] == 'APPLIED', completed['reason_code']
+        queued_id = str(uuid4())
+        queued = await record(client, mission, command('ASSIGN_WORK', {'assignment_id': str(work.assignment_id),
+            'work_id': queued_id, 'question': 'In-scope analysis queued after collection', 'expertise': 'Synthesis',
+            'assignee_ref': 'synthetic-worker', 'inputs': work.inputs.to_payload(), 'dependencies': [],
+            'ownership_fence': 'queued-fence'}, completed['revision']))
+        assert queued['disposition'] == 'APPLIED', queued['reason_code']
+        stored = await case.repository.load_research_work(mission.id)
+        assert stored.assignments[0].state == 'ACTIVE' and stored.current_epoch == 1
+        assert next(w for w in stored.work_items if w.work_id == work.work_id).state == 'COMPLETED'
+        assert stored.handoffs == (replace(handoff, expected_version=observed['work_version']),)
+        # Research end, not collection completion, is what stops admission of any further work.
+        ended = await record(client, mission, command('END_RESEARCH', {
+            'assignment_id': str(work.assignment_id), 'expected_version': stored.assignments[0].version,
+            'disposition': 'INTERRUPTED', 'reason': 'INVALID_INPUT'}, queued['revision']))
+        assert ended['disposition'] == 'APPLIED', ended['reason_code']
+        queued_work = next(w for w in stored.work_items if str(w.work_id) == queued_id)
+        start = {**activity(queued_work), 'work_id': queued_id, 'ownership_fence': 'queued-fence'}
+        await durable_refusal(client, case, mission, command('START_WORK', start, ended['revision']),
+            'ASSIGNMENT_TERMINAL')
+        await durable_refusal(client, case, mission, command('ASSIGN_WORK', {'assignment_id': str(work.assignment_id),
+            'work_id': str(uuid4()), 'question': 'REJECTED_PRIVATE_SENTINEL', 'expertise': 'Synthesis',
+            'assignee_ref': None, 'inputs': work.inputs.to_payload(), 'dependencies': [],
+            'ownership_fence': 'late-fence'}, ended['revision']), 'ASSIGNMENT_TERMINAL')
+        stored = await case.repository.load_research_work(mission.id)
+        assert stored.assignments[0].state == 'INTERRUPTED'
+        assert next(w for w in stored.work_items if str(w.work_id) == queued_id).state == 'ASSIGNED'
+        assert len(stored.work_items) == 2
+        assert (await case.repository.get_mission(mission.id)).status == 'COMPLETED'
+        assert_transport(tmp_path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
 async def test_native_permitted_narration_withdrawal_history_and_failed_http_refresh(relay_case, tmp_path):
     from playwright.async_api import async_playwright, expect
     from tests.unit.test_mission_claims import _observation_candidate
