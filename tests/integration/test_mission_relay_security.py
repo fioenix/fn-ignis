@@ -539,3 +539,261 @@ async def test_browser_excludes_structured_private_observation_metadata(
     diagnostics = dict(private, viewer_url=cap["url"])
     _assert_absent(caplog.text, "Captured logs", diagnostics)
     _assert_absent(captured.out + captured.err, "Captured output", diagnostics)
+
+
+# One dummy privacy class across the remaining outward-text consumers of a single disposable Market mission.
+OUTWARD_EMAIL = "outward.sentinel@example.com"
+OUTWARD_PUBLIC = "Outward public marker"
+# queried_window is free text on MissionProbeOutcome; the real Gap generator copies it into attempted probes.
+OUTWARD_WINDOW = f"{OUTWARD_PUBLIC} window {OUTWARD_EMAIL}"
+
+
+async def _outward_mission(relay_case, tmp_path, monkeypatch):
+    """Current permitted claim plus recorded research, through the existing fixture and owner write paths.
+
+    Channel note, probe queried window and claim wording keep the email in storage (read-time masking). Research labels, the host
+    receipt, ACK and the cancellation reason are redacted by the owner commit path at write time.
+    """
+    import tests.unit.test_mission_claims as claim_fixture
+    from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaimsUseCase
+    from ignis.domain.research_work import ReasonWorkPayload
+    from ignis.domain.research_workspace import MissionProbeOutcome
+    from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+    from tests.integration.test_research_work_persistence import _arrange, _commit
+    from tests.unit.test_mission_claims import _observation_candidate
+    from uuid import uuid4
+    from dataclasses import replace
+    with monkeypatch.context() as patch:
+        # The fixture's own probe outcomes carry a connector note and queried window through the real
+        # record_probe_outcomes path, before the frame and claim exist; surface/status/fingerprint stay as built.
+        def outcome(**fields):
+            return MissionProbeOutcome(**{**fields, "queried_window": OUTWARD_WINDOW,
+                                          "note": f"{OUTWARD_PUBLIC} channel note {OUTWARD_EMAIL}"})
+        patch.setattr(claim_fixture, "MissionProbeOutcome", outcome)
+        case, mission, domain, port, work, handoff, _ = await _arrange(relay_case, tmp_path)
+    store = WorkspaceRepository(repository=case.repository)
+    evidence = await store.load_mission_evidence_snapshot(mission.id)
+    signal = next(s for s in evidence.signals if s.raw_title == "Demand evidence")
+    submitted = await SubmitMissionClaimsUseCase(case.repository, store).execute(str(mission.id), work.inputs.frame_digest,
+        [_observation_candidate(signal, wording=f"{OUTWARD_PUBLIC} claim wording {OUTWARD_EMAIL}")], created_by="t081-outward")
+    assert submitted["permitted"] == 1
+    claim = (await store.load_mission_evidence_snapshot(mission.id)).claims[0]
+    revision = (await case.repository.load_research_work(mission.id)).revision
+    other = replace(work, work_id=uuid4(), state="ASSIGNED", version=1, dependencies=(), ownership_fence="outward-fence",
+                    question=f"{OUTWARD_PUBLIC} question {OUTWARD_EMAIL}", assignee_ref=f"assignee {OUTWARD_EMAIL}")
+    assigned = await _commit(case.repository, port, mission, "ASSIGN_WORK", other, revision=revision)
+    receipt = domain.ResearchActivityReceipt(work_id=other.work_id, epoch=1, ownership_fence=other.ownership_fence,
+        execution_ref=f"{OUTWARD_PUBLIC} execution", occurred_at=handoff.occurred_at,
+        fresh_until=handoff.occurred_at + timedelta(days=300), provenance="HOST_REPORTED")
+    started = await _commit(case.repository, port, mission, "START_WORK", port.ResearchWorkStartAdmission(
+        work_id=other.work_id, expected_version=1, ownership_fence=other.ownership_fence, receipt=receipt),
+        revision=assigned.revision)
+    finding = replace(handoff.findings[0], finding_id=uuid4(), handoff_id=uuid4(), work_id=other.work_id,
+        statement=f"{OUTWARD_PUBLIC} finding {OUTWARD_EMAIL}", limitations=(f"limit {OUTWARD_EMAIL}",),
+        open_questions=(f"open {OUTWARD_EMAIL}",), alternative_explanation=f"alternative {OUTWARD_EMAIL}")
+    result = replace(handoff, handoff_id=finding.handoff_id, work_id=other.work_id, expected_version=started.work_version,
+        ownership_fence=other.ownership_fence, consumer_ref=f"consumer {OUTWARD_EMAIL}",
+        result=f"{OUTWARD_PUBLIC} result {OUTWARD_EMAIL}", limitations=(f"handoff limit {OUTWARD_EMAIL}",),
+        open_questions=(f"handoff open {OUTWARD_EMAIL}",), findings=(finding,))
+    recorded = await _commit(case.repository, port, mission, "SUBMIT_HANDOFF", result, revision=started.revision)
+    acked = await _commit(case.repository, port, mission, "ACK_HANDOFF", port.ResearchHandoffAcknowledgement(
+        handoff_id=result.handoff_id, consumer_ref=result.consumer_ref, expected_version=recorded.work_version,
+        disposition="ACCEPTED", reason_code=None, inputs=result.inputs), revision=recorded.revision)
+    cancelled = await _commit(case.repository, port, mission, "REQUEST_CANCEL", ReasonWorkPayload(work_id=work.work_id,
+        expected_version=work.version, ownership_fence=work.ownership_fence,
+        reason=f"{OUTWARD_PUBLIC} cancel {OUTWARD_EMAIL}"), revision=acked.revision)
+    assert [r.disposition for r in (assigned, started, recorded, acked, cancelled)] == ["APPLIED"] * 5
+    run = (await store.list_run_journals(mission.id))[0]
+    return case, mission, run, signal, claim, other, result, finding, recorded.work_version, cancelled.revision
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relay_case", ("file",), indirect=True)
+async def test_browser_masks_outward_text_across_current_and_withdrawn_permission(
+        relay_case, monkeypatch, tmp_path, caplog, capsys):
+    from playwright.async_api import async_playwright, expect
+    from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+    from ignis.interfaces.mcp import server
+    from tests.integration.test_research_work_persistence import _sql
+    caplog.set_level("DEBUG")
+    case, mission, run, signal, claim, other, handoff, finding, ack_version, research_revision = await _outward_mission(
+        relay_case, tmp_path, monkeypatch)
+    mission_id, run_id = str(mission.id), str(run.run_id)
+    # Storage truth first: which values are raw (read-time masking) and which were redacted on write.
+    stored = await WorkspaceRepository(repository=case.repository).load_mission_evidence_snapshot(mission.id)
+    assert all(OUTWARD_EMAIL in outcome.note for outcome in stored.outcomes), "Channel note was not retained raw"
+    assert [o.queried_window for o in stored.outcomes] == [OUTWARD_WINDOW] * 2, "Queried window was not retained raw"
+    pairs = {(str(s.observation_id), str(s.source_id)) for s in stored.signals}
+    withdrawn = (str(signal.observation_id), str(signal.source_id))
+    assert len(pairs) == 6 and withdrawn in pairs
+    assert OUTWARD_EMAIL in stored.claims[0].wording, "Claim wording was not retained raw"
+    research = await case.repository.load_research_work(mission.id)
+    written = json.dumps([(w.question, w.assignee_ref) for w in research.work_items]
+                         + [(h.consumer_ref, h.result, h.limitations) for h in research.handoffs]
+                         + [(f.statement, f.alternative_explanation) for f in research.findings]
+                         + [a.consumer_ref for a in research.acknowledgements] + [e.reason for e in research.events])
+    assert OUTWARD_EMAIL not in written and "[REDACTED_EMAIL]" in written and OUTWARD_PUBLIC in written
+    _setup_traps(monkeypatch, case.repository)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Viewer initialized writable components or credentials")
+    monkeypatch.setattr(server, "get_components", forbidden)
+    monkeypatch.setattr(server, "create_repository", forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
+    console, errors, unexpected, snapshots = [], [], [], []
+    async with _caller_client(monkeypatch, tmp_path, {"repository": case.repository}) as client:
+        cap = (await client.call_tool("open_mission_relay", _open_payload(mission_id, run_id))).structured_content
+        assert cap["status"] == "OK"
+        target = urlsplit(cap["url"])
+        token = target.path.strip("/").split("/")[-1]
+        private = {"email": OUTWARD_EMAIL, "capability_token": token}
+        async with async_playwright() as runtime:
+            browser = await runtime.chromium.launch(headless=True)
+            try:
+                context = await browser.new_context(service_workers="block")
+
+                async def route(request_route):
+                    parsed = urlsplit(request_route.request.url)
+                    if request_route.request.method == "GET" and parsed.scheme == "http" and parsed.netloc == target.netloc:
+                        await request_route.continue_()
+                    else:
+                        if parsed.hostname not in ("fonts.googleapis.com", "fonts.gstatic.com"):
+                            unexpected.append(parsed.hostname)
+                        await request_route.abort()
+                await context.route("**/*", route)
+                page = await context.new_page()
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.on("console", lambda message: console.append(message.text))
+                inspector = page.get_by_test_id("stage-inspector")
+
+                async def visit(stage, *expected):
+                    await page.locator(f'[data-stage="{stage}"]').first.click()
+                    for text in expected:
+                        await expect(inspector).to_contain_text(text)
+                    for summary in await inspector.locator("details summary").all():
+                        await summary.click()
+                    _assert_absent(await page.evaluate("document.documentElement.outerHTML"), f"{stage} DOM", private)
+
+                async def settled_snapshot():
+                    async with page.expect_response(
+                            lambda r: urlsplit(r.url).path.endswith("/snapshot"), timeout=10000) as response:
+                        pass
+                    response = await response.value
+                    assert response.status == 200, "refresh did not succeed"
+                    payload = await response.text()
+                    data = json.loads(payload)
+                    await expect(page.get_by_test_id("snapshot-state")).to_contain_text(data["read_at"])
+                    snapshots.append(payload)
+                    return data, payload
+
+                # State 1: current permitted claim with recorded research.
+                with _observe_chain(case, monkeypatch) as observed:
+                    document = await page.goto(cap["url"])
+                    assert document.status == 200
+                    html = await document.text()
+                    assert mission_id in html and run_id in html and str(claim.claim_id) in html and OUTWARD_PUBLIC in html
+                    _assert_absent(html, "Initial HTML", private)
+                    data, payload = await settled_snapshot()
+                    assert (data["mission_id"], data["run_id"]) == (mission_id, run_id)
+                    assert data["counts"] == {"observations": 6, "sources": 6}
+                    assert {(e["observation_id"], e["source_id"]) for e in data["evidence"]} == pairs
+                    gate = data["claim_gate"]
+                    assert gate["state"] == "CURRENT" and [c["claim_id"] for c in gate["claims"]] == [str(claim.claim_id)]
+                    assert gate["claims"][0]["frame_digest"] == gate["frame_digest"] == claim.frame_digest
+                    assert gate["claims"][0]["wording"].startswith(f"{OUTWARD_PUBLIC} claim wording [REDACTED_EMAIL]")
+                    assert all(c["note"].startswith(f"{OUTWARD_PUBLIC} channel note [REDACTED") for c in data["channels"]
+                               if c["status"] is not None)
+                    view = data["research"]
+                    assert (view["mission_id"], view["revision"]) == (mission_id, research_revision)
+                    inputs = handoff.inputs.to_payload()
+                    sources = [{"observation_id": str(o), "source_id": str(s)} for o, s in handoff.observation_sources]
+                    [work] = [w for w in view["work_items"] if w["work_id"] == str(other.work_id)]
+                    assert work["inputs"] == inputs and work["question"].startswith(OUTWARD_PUBLIC)
+                    [recorded] = [h for h in view["handoffs"] if h["handoff_id"] == str(handoff.handoff_id)]
+                    assert (recorded["work_id"], recorded["inputs"], recorded["observation_sources"]) == (
+                        str(other.work_id), inputs, sources)
+                    assert recorded["result"].startswith(f"{OUTWARD_PUBLIC} result [REDACTED_EMAIL]")
+                    [found] = [f for f in view["findings"] if f["finding_id"] == str(finding.finding_id)]
+                    assert (found["revision"], found["work_id"], found["handoff_id"], found["inputs"]) == (
+                        1, str(other.work_id), str(handoff.handoff_id), inputs)
+                    assert [f["finding_id"] for f in recorded["findings"]] == [str(finding.finding_id)]
+                    [ack] = [a for a in view["acknowledgements"] if a["handoff_id"] == str(handoff.handoff_id)]
+                    assert (ack["consumer_ref"], ack["expected_version"], ack["disposition"]) == (
+                        "consumer [REDACTED_EMAIL]", ack_version, "ACCEPTED")
+                    # Refreshes page events after the delivered cursor; the cancellation is in the initial page.
+                    initial = json.loads(await page.evaluate("document.getElementById('relay-initial').textContent"))
+                    assert any(e["kind"] == "CANCELLATION_REQUESTED" and (e["reason"] or "").startswith(
+                        f"{OUTWARD_PUBLIC} cancel [REDACTED_EMAIL]") for e in initial["event_page"]["events"])
+                    _assert_absent(payload, "Current snapshot", private)
+                    await expect(page.get_by_test_id("event-timeline")).to_contain_text(f"{OUTWARD_PUBLIC} cancel")
+                    await visit("Sources", f"{OUTWARD_PUBLIC} channel note")
+                    async with page.expect_response(lambda r: "/inspect/" in urlsplit(r.url).path) as inspected:
+                        await inspector.get_by_role("button", name="Demand evidence", exact=True).click()
+                    response = await inspected.value
+                    assert response.status == 200, "inspection did not succeed"
+                    inspection = await response.text()
+                    inspected_data = json.loads(inspection)
+                    assert (inspected_data["mission_id"], inspected_data["run_id"]) == (mission_id, run_id)
+                    assert (inspected_data["observation"]["observation_id"],
+                            inspected_data["observation"]["source_id"]) == withdrawn
+                    _assert_absent(inspection, "Inspection", private)
+                    await expect(inspector).to_contain_text(str(signal.observation_id))
+                    await expect(inspector).to_contain_text("Demand evidence")
+                    _assert_absent(await page.evaluate("document.documentElement.outerHTML"), "Inspection DOM", private)
+                    await visit("Research", f"{OUTWARD_PUBLIC} result", f"{OUTWARD_PUBLIC} question",
+                                f"{OUTWARD_PUBLIC} execution", str(finding.finding_id),
+                                f"Work {other.work_id} → consumer consumer [REDACTED_EMAIL] · {handoff.handoff_id}",
+                                *(f"Observation {o['observation_id']} · source {o['source_id']}" for o in sources))
+                    await visit("Cross-check", str(signal.observation_id))
+                    await visit("Synthesis", f"{OUTWARD_PUBLIC} claim wording")
+                    current_claims = inspector.get_by_test_id("current-claims").locator("article")
+                    await expect(current_claims).to_have_count(1)
+                    await expect(current_claims).to_contain_text(f"claim {claim.claim_id}")
+                    await expect(inspector.get_by_test_id("claim-history").locator("article")).to_have_count(0)
+                observed.assert_no_writes()
+
+                # State 2: the existing fixture withdrawal invalidates current permission on the same mission.
+                await _sql(case, "DELETE FROM mission_evidence WHERE mission_id=? AND observation_id=?",
+                           (mission.id, signal.observation_id))
+                before = _state(case)
+                with _observe_chain(case, monkeypatch) as observed:
+                    data, payload = await settled_snapshot()
+                    for _ in range(2):  # a read already in flight at the withdrawal may still be current
+                        if data["claim_gate"]["state"] != "CURRENT":
+                            break
+                        data, payload = await settled_snapshot()
+                    gate = data["claim_gate"]
+                    assert (data["mission_id"], data["run_id"]) == (mission_id, run_id)
+                    assert data["counts"] == {"observations": 5, "sources": 5}
+                    assert {(e["observation_id"], e["source_id"]) for e in data["evidence"]} == pairs - {withdrawn}
+                    assert gate["state"] == "STALE" and gate["claims"] == []
+                    assert [h["claim_id"] for h in gate["history"]] == [str(claim.claim_id)]
+                    assert gate["history"][0]["wording"].startswith(f"{OUTWARD_PUBLIC} claim wording [REDACTED_EMAIL]")
+                    assert gate["gap_report"]["failed_gates"] == ["MISSING_DEMAND_EVIDENCE"]
+                    masked_window = f"{OUTWARD_PUBLIC} window [REDACTED_EMAIL]"
+                    assert sorted((p["connector_surface"], p["status"], p["queried_window"])
+                                  for p in gate["gap_report"]["attempted_probes"]) == [
+                        ("google", "HEALTHY", masked_window), ("youtube", "HEALTHY", masked_window)]
+                    _assert_absent(payload, "Withdrawn snapshot", private)
+                    await visit("Synthesis", "Gap Report", "MISSING_DEMAND_EVIDENCE")
+                    await expect(inspector.get_by_test_id("current-claims").locator("article")).to_have_count(0)
+                    history = inspector.get_by_test_id("claim-history").locator("article")
+                    await expect(history).to_have_count(1)
+                    await expect(history).to_contain_text(f"claim {claim.claim_id}")
+                    await expect(history).to_contain_text(f"{OUTWARD_PUBLIC} claim wording [REDACTED_EMAIL]")
+                    gap = inspector.get_by_test_id("gap-report")
+                    for surface in ("google", "youtube"):
+                        await expect(gap).to_contain_text(f"Attempted probe: {surface} · HEALTHY · {masked_window}")
+                    _assert_absent(await page.evaluate("document.documentElement.outerHTML"), "Synthesis ledger DOM", private)
+                    await visit("Research", f"{OUTWARD_PUBLIC} result")
+                observed.assert_no_writes()
+                _assert_absent("\n".join(console), "Browser console", private)
+                assert not unexpected and not errors, "Browser left loopback or raised a page error"
+                await context.close()
+            finally:
+                await browser.close()
+    owned.assert_closed_unchanged(case, before)
+    captured = capsys.readouterr()
+    diagnostics = dict(private, viewer_url=cap["url"])
+    _assert_absent(caplog.text, "Captured logs", diagnostics)
+    _assert_absent(captured.out + captured.err, "Captured output", diagnostics)
