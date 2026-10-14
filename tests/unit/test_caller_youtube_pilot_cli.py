@@ -313,13 +313,69 @@ def test_default_run_owns_and_closes_the_official_http_transport_after_preflight
     assert SECRET not in result.stdout and SECRET not in result.stderr
 
 
+def _settle_owned(processes):
+    """Kill and reap exactly these owned children; nothing else is signalled."""
+    for process in processes:
+        if process.poll() is None:
+            process.kill()
+    for process in processes:
+        process.wait(timeout=10)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+
+
+def _run_owned(commands, *, timeout, spawn=subprocess.Popen, **options):
+    """Start each command, keeping its handle at once, and settle every started child on any exit."""
+    processes = []
+    try:
+        for command in commands:
+            processes.append(spawn(command, **options))
+        return [process.communicate(timeout=timeout) for process in processes]
+    finally:
+        _settle_owned(processes)
+
+
+_SLEEPER = [sys.executable, '-c', 'import time; time.sleep(60)']
+
+
+def test_owned_children_are_reaped_when_communication_times_out():
+    started = []
+    def spawn(command, **options):
+        started.append(subprocess.Popen(command, **options))
+        return started[-1]
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            _run_owned([_SLEEPER, _SLEEPER], timeout=0.5, spawn=spawn,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert len(started) == 2
+        assert all(process.returncode is not None for process in started), 'An owned child was left running'
+    finally:
+        _settle_owned(started)
+
+
+def test_owned_children_are_reaped_when_a_later_spawn_fails():
+    started = []
+    def spawn(command, **options):
+        if started:
+            raise OSError('Synthetic second spawn failure')
+        started.append(subprocess.Popen(command, **options))
+        return started[-1]
+    try:
+        with pytest.raises(OSError, match='Synthetic second spawn failure'):
+            _run_owned([_SLEEPER, _SLEEPER], timeout=30, spawn=spawn)
+        assert len(started) == 1
+        assert started[0].returncode is not None, 'The child started before the failure was left running'
+    finally:
+        _settle_owned(started)
+
+
 def test_concurrent_invocations_allocate_exactly_one_original_run(tmp_path):
     root, mission_id = _caller_store(tmp_path)
     packet, confirmation = _packet(tmp_path)
     command = [sys.executable, '-c', RUNNER, SECRET, *_args(root, mission_id, packet, confirmation)]
-    processes = [subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                  env=_env(tmp_path), cwd=str(REPO)) for _ in range(2)]
-    outputs = [process.communicate(timeout=60) for process in processes]
+    outputs = _run_owned([command, command], timeout=60, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True, env=_env(tmp_path), cwd=str(REPO))
     statuses = sorted(json.loads(stdout)['status'] for stdout, _ in outputs)
     assert statuses == ['PARENT_EXECUTION_RETURNED', 'REFUSED'], outputs
     assert len(list((root / '.fnignis' / 'follow-up').iterdir())) == 1
@@ -567,9 +623,34 @@ def test_close_only_refuses_symlinked_recovery_files_without_touching_foreign_by
     assert _ledger(root, mission_id) == (1, 1, 0, 0)
 
 
-def test_cancellation_first_seen_during_cleanup_exits_nonzero_after_settlement(tmp_path):
+def _interrupt_after_marker(process, marker, *, timeout, clock=None, sleep=None):
+    """Send SIGINT only once the cleanup marker exists; a missing marker is a setup failure."""
     import signal
     import time
+    clock, sleep = clock or time.monotonic, sleep or time.sleep
+    deadline = clock() + timeout
+    while not marker.exists() and clock() < deadline:
+        sleep(0.02)
+    if not marker.exists():
+        pytest.fail('SETUP: the cleanup marker never appeared, so SIGINT was not sent and the '
+                    'cleanup-phase cancellation was not exercised', pytrace=False)
+    process.send_signal(signal.SIGINT)
+
+
+def test_missing_cleanup_marker_fails_as_setup_without_sending_sigint(tmp_path):
+    process = subprocess.Popen(_SLEEPER, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ticks = iter(range(1000))
+    try:
+        with pytest.raises(pytest.fail.Exception, match='SETUP: the cleanup marker never appeared'):
+            _interrupt_after_marker(process, tmp_path / 'absent-marker', timeout=5,
+                                    clock=lambda: next(ticks), sleep=lambda seconds: None)
+        assert process.poll() is None, 'SIGINT was sent although the cleanup marker never appeared'
+    finally:
+        _settle_owned([process])
+
+
+def test_cancellation_first_seen_during_cleanup_exits_nonzero_after_settlement(tmp_path):
+    import signal
     root, mission_id = _caller_store(tmp_path)
     packet, confirmation = _packet(tmp_path)
     marker = tmp_path / 'cleanup-marker'
@@ -577,10 +658,7 @@ def test_cancellation_first_seen_during_cleanup_exits_nonzero_after_settlement(t
         *_args(root, mission_id, packet, confirmation)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         env=_env(tmp_path), cwd=str(REPO), start_new_session=True)
     try:
-        deadline = time.monotonic() + 30
-        while not marker.exists() and time.monotonic() < deadline:
-            time.sleep(0.02)
-        process.send_signal(signal.SIGINT)
+        _interrupt_after_marker(process, marker, timeout=30)
         stdout, stderr = process.communicate(timeout=30)
     finally:
         if process.poll() is None:
