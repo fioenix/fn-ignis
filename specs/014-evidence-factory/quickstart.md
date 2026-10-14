@@ -1,6 +1,6 @@
 # Validation Guide: Ignis Relay
 
-**Status**: The four additive tools (`get_mission_relay_snapshot`, `open_mission_relay`, `record_mission_research_work`, `execute_mission_follow_up`) and their storage, viewer and follow-up runtime are implemented on this branch. Each has scoped, independently reviewed local engineering verification. That is not feature acceptance: real follow-up UAT, end-to-end security, PostgreSQL lifecycle parity, integrated performance, schema rehearsal, guidance/catalog synchronization, full regressions, review and integration remain open gates in [the Spec 014 task ledger](tasks.md), which is the only acceptance authority. This guide does not check off tasks.
+**Status**: The four additive tools (`get_mission_relay_snapshot`, `open_mission_relay`, `record_mission_research_work`, `execute_mission_follow_up`) and their storage, viewer and follow-up runtime are implemented on this branch. Each has scoped, independently reviewed local engineering verification. That is not feature acceptance: real follow-up UAT, end-to-end security, PostgreSQL lifecycle parity, integrated performance, schema rehearsal, full regressions, requirement-level acceptance and integration remain open gates (catalog synchronization, guidance synchronization and code/security review are complete in the ledger) in [the Spec 014 task ledger](tasks.md), which is the only acceptance authority. This guide does not check off tasks.
 
 **Historical setup status (2026-10-04)**: Setup T001–T003 ran existing baselines on 2026-10-04: 217 passed, 58 PostgreSQL cases skipped. T004/T005 RED deliverables have independent review; T006 models are in progress. Dedicated local PostgreSQL testing has begun; no live research mission, workflow migration or benchmark was run.
 
@@ -9,6 +9,7 @@
 - Owner-approved technical plan and generated implementation tasks before coding.
 - Use the authoritative current checkout of the feature branch, or a worktree the owner designated, with its locked `.venv` environment. Do not overwrite the owner's uncommitted work or client configs.
 - A real, validated caller root for mission tools. Mission-scoped MCP calls (tool names containing `mission` or `research_workspace`, `confirm_market_brief`, or calls carrying `mission_id`/`workspace_id`) are admitted only through one validated caller root. When the client's MCP capabilities declare roots support, it must return exactly one existing absolute `file://` directory root; an empty, multiple, invalid or unavailable roots list is refused, and if `IGNIS_CALLER_ROOT` is also configured the returned root must match it exactly. The configured `IGNIS_CALLER_ROOT` (an absolute directory set at server startup and unchanged since) is used only when those capabilities explicitly declare no roots support. An unknown capability is refused. Each refusal fails with `ROOT_REQUIRED`. For an admitted call, canonical storage defaults to local SQLite at `<root>/.fnignis/canonical.sqlite3`. An explicit literal `DATABASE_URL` in an owner-only `<root>/.fnignis/.env` (see `src/ignis/infrastructure/templates/caller.env.example`) can instead select another SQLite file inside the root or a PostgreSQL database; caller configuration, logs, reports and research files stay under `<root>/.fnignis/` either way. `record_mission_research_work` additionally requires the local stdio transport.
+- For a single-source question or a Threads source, read [the user guide](../../docs/USER_GUIDE.md) sections 2–3 first: they describe representative atomic calls, their missingness limits and the Threads `SELF_ONLY`/`NOT_PERMITTED` access boundary.
 - Explicit database setup outside the viewer. SQLite is default; PostgreSQL is a separately authorized test backend. A missing schema must produce an unavailable viewer, never bootstrap it.
 - A real selected mission and explicit finite research assignment, with host capability and sources/budget recorded. Actual social session use or development database writes need applicable current authorization; this document is not that permission.
 - Named concurrency-capable host for actual overlapping research work, plus a sequential-capacity test. Record real host receipts and manual evidence; mocks alone do not satisfy concurrent-team UAT.
@@ -22,6 +23,20 @@ Validation scope matches CI: run the whole `tests/` tree, not `tests/unit/` alon
 ```
 
 PostgreSQL cases run only when `IGNIS_TEST_POSTGRES_DSN` points at a disposable test database (CI provides a service database). Without it they skip, and a skip is not PostgreSQL parity. Never print the DSN.
+
+### Isolated settings
+
+The root `tests/conftest.py` replaces credentials with inert values and removes `IGNIS_ENV_FILE` before tests import Ignis. A plain run therefore still reads non-credential settings from the checkout's `.env`, and its default `DATABASE_URL` is `sqlite:///ignis.db` relative to the working directory. With `IGNIS_ENV_ISOLATED=1` set, a plain `pytest` run fails closed (`Isolated configuration requires IGNIS_ENV_FILE`) as soon as a collected test imports the settings, because the env file was removed first; tests that never import settings still run. To run with settings from a disposable file only, load the settings before pytest starts, from the repository root:
+
+```bash
+env_dir="$(mktemp -d)"
+printf 'DATABASE_URL=sqlite:///:memory:\nYOUTUBE_API_KEY=\nIGNIS_ENCRYPTION_KEY=\n' > "$env_dir/isolated.env"
+env -i PATH=/usr/bin:/bin HOME="$env_dir" IGNIS_ENV_ISOLATED=1 IGNIS_ENV_FILE="$env_dir/isolated.env" \
+  .venv/bin/python -c 'import sys, ignis.config, pytest; raise SystemExit(pytest.main(sys.argv[1:]))' \
+  -p no:cacheprovider tests/unit/test_repo_conventions.py
+```
+
+Replace the final path with the selection you need. This only isolates settings; it neither restores real credentials nor bypasses the root quarantine.
 
 The pre-feature baseline regressions from setup remain available as narrow checks:
 
@@ -45,7 +60,7 @@ These narrow suites exist on this branch. Select them with the same `.venv/bin/p
 - Caller-root admission: `tests/unit/test_caller_storage_native.py`, `tests/unit/test_configured_caller_root.py`, `tests/unit/test_caller_root_diagnostics.py`, `tests/integration/test_follow_up_caller_middleware.py`.
 - Scenario 8 end-to-end security (partial; T081 remains open): `tests/integration/test_mission_relay_security.py`. It covers the MCP-opened viewer headers, Host/Origin, parent/child isolation, browser masking with inline-script CSP enforcement, structured private metadata, outward-text consumers across permission withdrawal, and HEAD reads with real-clock expiry, on disposable SQLite files through the in-process MCP transport. Its browser cases need an installed Chromium.
 
-Several of these use `relay_case`/`postgres` parametrization, and some write sanitized screenshots or receipts under `.handoff/`; run them from a disposable copy when existing evidence must be preserved.
+Several of these use `relay_case`/`postgres` parametrization, and some write sanitized screenshots or receipts under `.handoff/` (for example, `test_mission_relay_responsive.py` writes `evidence-*.png`, `research-*.png` and `layout-*.json` into `.handoff/spec014/t065/`, overwriting earlier files); run them from a disposable copy when existing evidence must be preserved.
 
 **Historical setup evidence**: Setup evidence is in ignored `.handoff/spec014/preflight.handoff.md` and `baseline.handoff.md`. The credential-free runner clears ambient environment, explicitly isolates a local SQLite env source and verifies inert Settings before invoking pytest. Root test quarantine removes `IGNIS_ENV_FILE`, so launching plain pytest with the isolation switch still set causes a later Settings import to fail closed; do not bypass the quarantine or restore real credentials. All 58 observed skips require `IGNIS_TEST_POSTGRES_DSN`; this baseline does not verify PostgreSQL or SC-012 host overlap.
 
@@ -81,6 +96,6 @@ All FR-001–029 and SC-001–017 are covered; mapping is a design check, not ex
 
 ## Evidence and shipping record
 
-Store temporary run/review material in `.handoff/`; runtime exports in ignored `reports/`; never commit credentials, raw protected content or local generated screenshots by default. Attach sanitized visual/runtime evidence to review as appropriate. Record tested revision, commands, observed outcomes, skipped/unavailable checks, host overlap proof, backend coverage and UAT limitations.
+Store temporary run/review material in `.handoff/`; admitted `generate_mission_artifact` exports go to the caller root's `<root>/.fnignis/reports/` (the checkout's ignored `reports/` is only the fallback for calls without a caller root); never commit credentials, raw protected content or local generated screenshots by default. Attach sanitized visual/runtime evidence to review as appropriate. Record tested revision, commands, observed outcomes, skipped/unavailable checks, host overlap proof, backend coverage and UAT limitations.
 
 After converge and review, focused PR integration and post-merge readback settle canonical backlog. Release requires its own approval and version gate. Do not close the spec for only slice 1 or report local success as shipping.

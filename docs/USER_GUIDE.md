@@ -43,6 +43,34 @@ For a single source question, ask the agent for an atomic probe and specify a qu
 time window, and stop condition. The response should identify the source, request, collection
 time, observed count, and channel state. It need not open a Market mission or produce a verdict.
 
+Representative registered atomic calls are listed below (exact signatures are in the running
+server's tool descriptions). They are registered options, not verified live availability. Invoke
+one only for the bounded task the user explicitly requested, and only with the owner, source,
+browser or session authority that task needs, obtained before use. A stored credential, browser
+session or authentication status does not by itself grant that permission.
+
+- `get_tiktok_video_comments(video_url, limit=30)` reads public comments under one TikTok video in
+  a headless browser, using a stored TikTok session if one exists. It returns `status`,
+  `video_url`, `total_comments` and the comments. A URL without a `/video/<id>` segment or a
+  missing Playwright install returns `SUCCESS` with zero comments. A blocked or unparsed page can
+  also yield zero parsed comments, or fail with `ERROR`, depending on where it breaks. Zero is
+  therefore not proof that the video has no discussion.
+- `get_tiktok_search_suggestions(keywords, geo="VN")` and
+  `get_threads_search_suggestions(keyword, geo="VN", limit=10)` (capped at 20) return autocomplete
+  expansions. `get_threads_trending_topics(geo="VN", limit=15)` (capped at 30) and
+  `get_tiktok_creative_center_trends(geo="VN", period=7, limit=20, industry=None)` (`limit` capped
+  at 50) return macro trend lists. The Threads calls return `AUTH_REQUIRED` without a session and
+  `PARSE_EMPTY` when the page yields nothing. Suggestions and trends expand keywords or topics;
+  they are not search volume, demand or a market verdict.
+- `execute_mission_ingress(mission_id)` is the separate option for a confirmed mission: it runs only
+  that mission's recorded plan and records a channel outcome for each requested source.
+
+None of these calls forces a collection-then-analysis workflow or schedules further collection,
+and they need not be chained. Each still has its own preconditions: actual source access, the
+source and mission scope, and resource limits. `execute_mission_ingress` additionally requires a
+confirmed mission and its recorded plan (for a Market mission, a confirmed Market Brief). `verify_connectors_health` runs synthetic diagnostics and authentication tools can run
+an access probe, so do not call either merely to check whether a source is available.
+
 For a market decision, state the decision you face, target audience, geography, time window,
 hypothesis, plausible alternative, and what observation would change your mind. The agent
 creates an Attention mission or confirms a Market Brief with you before collecting. Once the
@@ -56,10 +84,21 @@ separate method for testing the Market hypothesis. Ask for either or both.
 ## 3. Understand evidence and analysis
 
 Ignis records a channel outcome for every requested source. `HEALTHY`, `EMPTY_NO_DATA`,
-`AUTH_REQUIRED`, `RATE_LIMITED`, and `DEGRADED` are not interchangeable: an inaccessible
-channel is a coverage gap, not proof that the market is empty. The agent reviews an evidence
+`AUTH_REQUIRED`, `RATE_LIMITED`, `DEGRADED`, `FAILED`, and `NOT_REQUESTED` are not
+interchangeable: an inaccessible or failed channel is a coverage gap, and a surface outside the
+requested plan was not measured; neither is proof that the market is empty. The agent reviews an evidence
 qualification batch, records typed support, contradiction, or context judgments, and checks
 that the current frame is terminal before making Market claims.
+
+Threads access needs its own check. A stored Graph token can be valid while its keyword-search
+probe reports `SELF_ONLY` (the endpoint returns the account's own posts) or `NOT_PERMITTED`. Both
+mean the token cannot answer a public-market question, and Ignis refuses those results rather than
+presenting the account's own timeline as market evidence. `get_threads_auth_status` reports stored
+credentials and tier, not proven public access; `authenticate_threads` called with an `auth_code`
+reports the probe as `keyword_search_access`. When the token is blocked, an existing browser
+session takes precedence, and it may be used only where the source, session and mission authority
+permit. Otherwise record the coverage gap and stay within the approved source scope; do not
+broaden the scope or recollect.
 
 Google Trends RSS supplies current macro topics and feed-reported traffic, not a keyword
 time series. Keyword Trends measurement is currently unavailable and reports `DEGRADED`
@@ -118,6 +157,12 @@ Each refusal fails with `ROOT_REQUIRED`. For an admitted call, canonical mission
 to caller-local SQLite at `<root>/.fnignis/canonical.sqlite3`; an explicit `DATABASE_URL` in
 `<root>/.fnignis/.env` can select another SQLite file inside the root or a PostgreSQL database.
 Caller configuration, logs, reports and research files stay under `<root>/.fnignis/`.
+That file must be a regular file with no group or other permissions (Ignis creates it as 0600),
+at most 32 KiB, holding only literal values (no `${...}` interpolation) for the keys listed in the
+generated `<root>/.fnignis/.env.example`. A file, key, value or syntax violation fails with
+`CALLER_CONFIG_REFUSED`; a SQLite path that is relative or outside the root fails with
+`ROOT_SCOPE_REQUIRED`. The server's own `.env` and the `DATABASE_URL` written by bootstrap do not
+select caller mission storage, and settings never authorize a source probe.
 `record_mission_research_work` records an explicit bounded host command through the local stdio
 session, enforcing mission authority and exact revision, epoch and input bindings. Recording
 does not execute agents, invoke providers or collect sources.
@@ -139,7 +184,9 @@ signatures; removed daily-discovery and unguided-research tools are not part of 
 The published OCI manifest is still v0.7.0, so neither it nor a public-image smoke test
 establishes that Spec 011 shipped. PyPI installation is not advertised. Run the branch's
 `.venv/bin/pytest tests/` (the CI scope; PostgreSQL cases skip unless `IGNIS_TEST_POSTGRES_DSN`
-names a disposable test database) and `uv lock --check` for local checks. Consult
+names a disposable test database) and `uv lock --check` for local checks. The test suite
+replaces credentials with inert values; to also keep the checkout's `.env` out of a run, use the
+[isolated-settings pattern](../specs/014-evidence-factory/quickstart.md#isolated-settings). Consult
 [the Spec 011 task ledger](../specs/011-evidence-grounded-product-reset/tasks.md) for its outstanding
 PostgreSQL, pilot, integration, and owner-controlled release gates, and
 [the Spec 014 task ledger](../specs/014-evidence-factory/tasks.md) for the Mission Relay,
