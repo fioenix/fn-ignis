@@ -83,7 +83,6 @@ signature authority. Representative operations:
   `open_mission_relay` opens its finite read-only localhost viewer with an explicit UTC deadline.
 - `record_mission_research_work` records a bounded host command with mission authority,
   revision, epoch and input checks. Recording does not run agents, invoke providers or collect sources.
-
 - `execute_mission_follow_up` executes one recorded gap-linked work item under its current
   assignment and independently authorized source capability. It preserves child provenance and
   reservations; viewing does not grant execution authority and uncertainty does not trigger reprobes.

@@ -86,15 +86,14 @@ packages = ["src/ignis"]
 "sql" = "ignis/sql"
 
 [tool.hatch.build.targets.sdist]
-exclude = [
-    ".specify",
-    ".pytest_cache",
-    ".ruff_cache",
-    ".agents",
-    "BACKLOG.md",
-    "backlog.local.md",
-    "specs",
-    "/reports",
+# A closed member contract: the runtime package, the SQL the wheel force-includes, and the metadata
+# the backend needs. Tests, docs, examples, reports and agent or local settings never ship.
+only-include = [
+    "src/ignis",
+    "sql",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE",
 ]
 
 
