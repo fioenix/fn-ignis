@@ -4,6 +4,7 @@ The trusted root validates existing owner authority before supplying the explici
 and Brief receipt. These functions check matching bindings; a receipt is not independent
 proof of human consent. Mission content and credentials are never embedded here.
 """
+import asyncio
 from datetime import datetime, timedelta, timezone
 import os
 from hashlib import sha256
@@ -24,20 +25,28 @@ class StartupRetentionFailure(FollowUpExecutionBoundaryError):
     """Safe failed-startup disposition; original scope survives only for explicit deletion."""
 
     def __init__(self, recovery):
-        super().__init__('Sealed startup failed; original storage remains closed and retained.')
+        super().__init__('Sealed startup failed; original storage is retained pending explicit settlement.')
         self.recovery = recovery
 
 
 class _ClosedStartupRetention:
-    """Original settled root ownership, without writer, execution or fresh host capability."""
+    """Original root ownership, without writer, execution or fresh host capability.
 
-    def __init__(self, canonical, metadata, host, accounting, *, accounting_close='NOT_ALLOCATED'):
+    Phases that could not be observed settled stay PENDING; ``settle`` retries close-only.
+    """
+
+    def __init__(self, canonical, metadata, host, accounting, *, accounting_close='NOT_ALLOCATED',
+                 host_close=None, storage_close='CLOSED', close_storage=None):
         self.confirmation = canonical.confirmation
         self.accounting_close = accounting_close
+        self.host_close = _host_state(host) if host_close is None else host_close
+        self.storage_close = storage_close
+        self._close_storage = close_storage
         self._canonical, self._metadata = canonical, metadata
         self._host, self._accounting = host, accounting
         self._request = canonical._request()
-        self._database_hash = sha256(canonical.path.read_bytes()).hexdigest()
+        # Only settled storage is attested; a pending digest stays unavailable and refuses purge.
+        self._database_hash = _stable_digest(canonical) if storage_close == 'CLOSED' else None
         self._accounting_identity = (accounting.path.stat().st_dev,accounting.path.stat().st_ino) if accounting else None
 
     def close_accounting(self):
@@ -51,6 +60,31 @@ class _ClosedStartupRetention:
         self.accounting_close = _close_accounting(self._accounting, self.confirmation.bounds)
         return self.accounting_close
 
+    async def settle(self):
+        """Close-only retry of pending phases; never renews authority, accounting or retention.
+
+        The retry is owned: observer cancellation is re-raised, with this recovery, only after
+        every attempted phase has recorded its observed state.
+        """
+        async def retry():
+            if self.host_close == 'PENDING' or self.storage_close == 'PENDING':
+                host, _, storage = await _settle_owned(
+                    self._host, None, self.confirmation.bounds,
+                    self._close_storage if self.storage_close == 'PENDING' else None)
+                self.host_close = host
+                if self.storage_close == 'PENDING' and storage == 'CLOSED':
+                    self.storage_close = 'CLOSED'
+                    self._database_hash = _stable_digest(self._canonical)
+            if self.accounting_close == 'PENDING':
+                self.close_accounting()
+            return {'host': self.host_close, 'accounting': self.accounting_close, 'storage': self.storage_close}
+        phases, cancelled = await _owned_settlement(retry)
+        if cancelled:
+            cancellation = asyncio.CancelledError()
+            cancellation.recovery = self
+            raise cancellation from None
+        return phases
+
     async def purge(self, *, now):
         """Consume the original ownership at expiry; never reopen a writer or source lease."""
         from ignis.infrastructure.follow_up_host_activation import IsolatedCanonicalSQLite
@@ -61,6 +95,7 @@ class _ClosedStartupRetention:
         if bounds.retention_until is None:
             raise FollowUpExecutionBoundaryError()
         if (now < bounds.retention_until or metadata.active_run or not metadata.closed
+                or self.storage_close != 'CLOSED' or self._database_hash is None
                 or not self._canonical.closed
                 or (self._host is not None and (not self._host._revoked or self._host._tokens or self._host._tasks))):
             raise FollowUpExecutionBoundaryError()
@@ -110,11 +145,82 @@ def _close_accounting(accounting, bounds):
         return 'PENDING'
 
 
+def _stable_digest(canonical):
+    """Digest closed canonical bytes; an unreadable file is unavailable, never a masking error."""
+    try:
+        return sha256(canonical.path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _host_state(host):
+    """CLOSED only when revocation is published and no guarded holder or task remains."""
+    if host is None:
+        return 'NOT_ALLOCATED'
+    with host._lock:
+        return 'CLOSED' if host._revoked and not host._tokens and not host._tasks else 'PENDING'
+
+
+async def _settle_owned(host, accounting, bounds, close_storage):
+    """Revoke first, then attempt each later phase independently of earlier failures.
+
+    Storage closes only once revocation is published and quiescence observed: before publication an
+    original lease can still be admitted, and an unsettled holder may still use it.
+    """
+    if host is not None:
+        try:
+            await host.revoke()
+        except Exception:
+            pass
+    host_state = _host_state(host)
+    try:
+        closure = _close_accounting(accounting, bounds)
+    except Exception:
+        closure = 'PENDING'
+    storage = 'NOT_ALLOCATED'
+    if close_storage is not None:
+        storage = 'PENDING'
+        if host_state in ('CLOSED', 'NOT_ALLOCATED'):
+            try:
+                await close_storage()
+                storage = 'CLOSED'
+            except Exception:
+                pass
+    return host_state, closure, storage
+
+
+async def _owned_settlement(cleanup):
+    """Run cleanup to completion even under repeated cancellation; report any cancellation seen."""
+    settlement = asyncio.ensure_future(cleanup())
+    cancelled = False
+    while not settlement.done():
+        try:
+            await asyncio.shield(settlement)
+        except asyncio.CancelledError:
+            cancelled = True
+    return settlement.result(), cancelled
+
+
+def _raise_retained(error, recovery, failure, cancelled):
+    """Preserve the original failure; cancellation first seen during cleanup is re-raised after it."""
+    if recovery is not None:
+        if isinstance(error, Exception) and not cancelled:
+            raise failure(recovery) from None
+        if isinstance(error, Exception):
+            cancellation = asyncio.CancelledError()
+            cancellation.recovery = recovery
+            raise cancellation from None
+        error.recovery = recovery
+    elif cancelled and isinstance(error, Exception):
+        raise asyncio.CancelledError() from None
+    raise error
+
+
 class CanonicalAnalysisRetentionFailure(FollowUpExecutionBoundaryError):
-    """Analysis failed; the original storage remains closed and retained."""
+    """Analysis failed; the original storage is retained pending explicit settlement."""
 
     def __init__(self, recovery):
-        super().__init__('Canonical analysis failed; original storage remains closed and retained.')
+        super().__init__('Canonical analysis failed; original storage is retained pending explicit settlement.')
         self.recovery = recovery
 
 
@@ -162,16 +268,19 @@ async def finish_canonical_parent_analysis(result, *, assessments, candidates, j
         ledger = await GetMissionClaimsUseCase(repository, store).execute(result['mission_id'])
         analysis = await GetMissionAnalysisUseCase(repository, store).execute(result['mission_id'])
     except BaseException as error:
-        await host.revoke()
-        closure = _close_accounting(result['accounting'], host.confirmation.bounds)
-        await repository.close()
-        metadata.close()
-        recovery = _ClosedStartupRetention(canonical, metadata, host, result['accounting'],
-            accounting_close=closure)
-        if isinstance(error, Exception):
-            raise CanonicalAnalysisRetentionFailure(recovery) from None
-        error.recovery = recovery
-        raise
+        async def close_storage():
+            try:
+                await repository.close()
+            finally:
+                metadata.close()
+        async def cleanup():
+            host_state, closure, storage = await _settle_owned(
+                host, result['accounting'], host.confirmation.bounds, close_storage)
+            return _ClosedStartupRetention(canonical, metadata, host, result['accounting'],
+                accounting_close=closure, host_close=host_state, storage_close=storage,
+                close_storage=close_storage)
+        recovery, cancelled = await _owned_settlement(cleanup)
+        _raise_retained(error, recovery, CanonicalAnalysisRetentionFailure, cancelled)
     closure = _close_accounting(result['accounting'], host.confirmation.bounds)
     await repository.close()
     metadata.close()
@@ -470,21 +579,29 @@ async def bootstrap_confirmed_parent(*, root, brief, receipt, instruction, resol
             'executor_status':result.get('status','UNKNOWN'),'canonical':enrollment,'repository':repository,
             'host':host,'accounting':accounting,'executor':executor,'bridge':bridge}
     except BaseException as error:
-        if 'host' in locals():
-            await host.revoke()
-        closure = (_close_accounting(accounting, confirmation.bounds)
-                   if 'accounting' in locals() else 'NOT_ALLOCATED')
-        await repository.close()
-        prepared._closed = True
-        metadata.close()
-        if 'enrollment' in locals():
-            enrollment.closed = True
-            recovery = _ClosedStartupRetention(enrollment,metadata,locals().get('host'),locals().get('accounting'),
-                accounting_close=closure)
-            if isinstance(error,Exception):
-                raise StartupRetentionFailure(recovery) from None
-            # Preserve cancellation semantics while still returning the original closed disposition.
-            error.recovery = recovery
-        raise
+        owned_host, owned_accounting = locals().get('host'), locals().get('accounting')
+        owned_enrollment = locals().get('enrollment')
+        owned_repository = repository
+        async def close_storage():
+            try:
+                await owned_repository.close()
+                # Claim canonical closure only after the repository actually closed.
+                prepared._closed = True
+                if owned_enrollment is not None:
+                    owned_enrollment.closed = True
+            finally:
+                metadata.close()
+        async def cleanup():
+            host_state, closure, storage = await _settle_owned(
+                owned_host, owned_accounting, confirmation.bounds if owned_accounting is not None else None,
+                close_storage)
+            if owned_enrollment is None:
+                return None
+            return _ClosedStartupRetention(owned_enrollment, metadata, owned_host, owned_accounting,
+                accounting_close=closure, host_close=host_state, storage_close=storage,
+                close_storage=close_storage)
+        recovery, cancelled = await _owned_settlement(cleanup)
+        # Preserve cancellation semantics while still returning the original retained disposition.
+        _raise_retained(error, recovery, StartupRetentionFailure, cancelled)
     finally:
         metadata.active_run = False

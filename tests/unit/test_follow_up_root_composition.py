@@ -537,3 +537,254 @@ async def test_failed_startup_with_failing_accounting_close_reports_pending_and_
     assert _accounting_row(recovery._accounting)==((0,0,1,0),row[1])
     with pytest.raises(FollowUpExecutionBoundaryError):recovery._accounting.current(bounds)
     assert calls==[]
+
+
+async def _registry_startup_failure(tmp_path,failures):
+    """Fail bootstrap after host and accounting allocation; return the propagated failure."""
+    from tests.unit.test_follow_up_provider_bridge import Quota
+    calls=[]
+    def resolve():
+        calls.append('forbidden')
+        raise AssertionError('Failed startup resolved a credential')
+    brief,receipt=framing()
+    with pytest.raises(driver.StartupRetentionFailure) as failed:
+        await driver.bootstrap_confirmed_parent(root=tmp_path/'startup-recovery',brief=brief,receipt=receipt,
+            instruction=INSTRUCTION,resolve_credential=resolve,transport=None,quota_manager=Quota(),clusterer=None)
+    assert calls==[]
+    # The typed wrapper keeps the exact original failure as its private context, never a cleanup error.
+    assert failed.value.__context__ is failures[0] and failed.value.__suppress_context__
+    return failed.value.recovery
+
+
+def _failing_registration(failures):
+    def fail_registration(*args,**kwargs):
+        failures.append(OSError('Synthetic registry startup failure'))
+        raise failures[-1]
+    return fail_registration
+
+
+@pytest.mark.asyncio
+async def test_failed_startup_revoke_failure_keeps_original_failure_and_retains_unrevoked_storage(tmp_path,monkeypatch):
+    from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+    from ignis.infrastructure.follow_up_host_activation import RootHostController
+    original_revoke=RootHostController.revoke
+    attempts,failures=[],[]
+    async def failing_revoke(self,*,timeout=5):
+        attempts.append(self)
+        if len(attempts)==1:
+            raise RuntimeError('Synthetic revoke failure before publication')
+        await original_revoke(self,timeout=timeout)
+    monkeypatch.setattr(RootHostController,'revoke',failing_revoke)
+    with monkeypatch.context() as patch:
+        patch.setattr(ConnectorPluginRegistry,'register',_failing_registration(failures))
+        recovery=await _registry_startup_failure(tmp_path,failures)
+    host,bounds=recovery._host,recovery.confirmation.bounds
+    assert attempts==[host] and host.confirmation==recovery.confirmation
+    # Authority was never revoked, so storage stays open and pending; accounting closes independently.
+    assert not host._revoked and recovery.host_close=='PENDING'
+    assert recovery.accounting_close=='CLOSED' and recovery.storage_close=='PENDING'
+    assert not recovery._metadata.closed and not recovery._canonical.closed
+    assert recovery._database_hash is None
+    assert _accounting_row(recovery._accounting)[0]==(0,0,1,0)
+    assert await recovery.settle()=={'host':'CLOSED','accounting':'CLOSED','storage':'CLOSED'}
+    assert attempts==[host,host] and host._revoked
+    assert recovery._metadata.closed and recovery._canonical.closed
+    assert recovery._database_hash==driver.sha256(recovery._canonical.path.read_bytes()).hexdigest()
+    assert _accounting_row(recovery._accounting)[0]==(0,0,1,0)
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        recovery._accounting.current(bounds)
+
+
+async def _pending_holder_recovery(tmp_path,monkeypatch,reads):
+    """Startup failure whose published revocation times out on a still-held original token."""
+    from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+    from ignis.infrastructure.follow_up_host_activation import RootHostController
+    original_revoke=RootHostController.revoke
+    original_read=Path.read_bytes
+    holders,failures=[],[]
+    def guarded_read(path):
+        # Pending cleanup must not attest active canonical bytes.
+        if holders and holders[0]._tokens and path.name=='canonical.sqlite3':
+            reads.append(path)
+            raise OSError('Synthetic refusal of a pending canonical read')
+        return original_read(path)
+    async def unsettled_revoke(self,*,timeout=5):
+        if not holders:
+            # Disposable stand-in for a guarded holder that has not settled when revocation publishes.
+            with self._lock:
+                self._tokens+=1
+                self._settled.clear()
+            holders.append(self)
+        await original_revoke(self,timeout=0.05)
+    monkeypatch.setattr(RootHostController,'revoke',unsettled_revoke)
+    if reads is not None:
+        monkeypatch.setattr(Path,'read_bytes',guarded_read)
+    with monkeypatch.context() as patch:
+        patch.setattr(ConnectorPluginRegistry,'register',_failing_registration(failures))
+        recovery=await _registry_startup_failure(tmp_path,failures)
+    assert holders==[recovery._host]
+    return recovery
+
+
+def _release_holder(host):
+    with host._lock:
+        host._tokens-=1
+    host._settled.set()
+
+
+@pytest.mark.asyncio
+async def test_failed_startup_revoke_timeout_retains_storage_and_digests_only_after_holder_settles(tmp_path,monkeypatch):
+    import sqlite3
+    from datetime import timedelta
+    reads=[]
+    recovery=await _pending_holder_recovery(tmp_path,monkeypatch,reads)
+    host,bounds=recovery._host,recovery.confirmation.bounds
+    # Revocation is published, but quiescence is not observed: host and storage remain pending.
+    assert host._revoked and host._tokens==1 and recovery.host_close=='PENDING'
+    assert recovery.accounting_close=='CLOSED' and recovery.storage_close=='PENDING'
+    assert not recovery._metadata.closed and not recovery._canonical.closed
+    assert recovery._database_hash is None and reads==[]
+    with pytest.raises(FollowUpExecutionBoundaryError):
+        await recovery.purge(now=bounds.deadline+timedelta(days=8))
+    # The admitted original holder finishes a final write before settlement.
+    with sqlite3.connect(recovery._canonical.path) as connection:
+        connection.execute('PRAGMA user_version=7')
+    _release_holder(host)
+    assert await recovery.settle()=={'host':'CLOSED','accounting':'CLOSED','storage':'CLOSED'}
+    assert recovery._metadata.closed and recovery._canonical.closed and reads==[]
+    final=recovery._canonical.path.read_bytes()
+    assert recovery._database_hash==driver.sha256(final).hexdigest()
+    assert _accounting_row(recovery._accounting)[0]==(0,0,1,0)
+
+
+@pytest.mark.asyncio
+async def test_close_only_retry_survives_repeated_cancellation_with_truthful_phases(tmp_path,monkeypatch):
+    import asyncio
+    from ignis.infrastructure.follow_up_host_activation import RootHostController
+    recovery=await _pending_holder_recovery(tmp_path,monkeypatch,None)
+    host,accounting=recovery._host,recovery._accounting
+    identity=(host,accounting,recovery._canonical,recovery._metadata,recovery.confirmation)
+    _release_holder(host)
+    blocked=RootHostController.revoke
+    entered,release=asyncio.Event(),asyncio.Event()
+    async def blocking_revoke(self,*,timeout=5):
+        entered.set()
+        await release.wait()
+        await blocked(self,timeout=timeout)
+    monkeypatch.setattr(RootHostController,'revoke',blocking_revoke)
+    retry=asyncio.ensure_future(recovery.settle())
+    await asyncio.wait_for(entered.wait(),5)
+    for _ in range(2):
+        retry.cancel()
+        await asyncio.sleep(0)
+    assert not retry.done(), 'Repeated cancellation abandoned the owned close-only retry'
+    release.set()
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await retry
+    assert caught.value.recovery is recovery
+    assert (recovery._host,recovery._accounting,recovery._canonical,recovery._metadata,recovery.confirmation)==identity
+    assert (recovery.host_close,recovery.accounting_close,recovery.storage_close)==('CLOSED','CLOSED','CLOSED')
+    assert recovery._metadata.closed and recovery._canonical.closed
+    monkeypatch.setattr(RootHostController,'revoke',blocked)
+    assert await recovery.settle()=={'host':'CLOSED','accounting':'CLOSED','storage':'CLOSED'}
+    assert _accounting_row(accounting)[0]==(0,0,1,0)
+
+
+@pytest.mark.parametrize('mode',['revoke-failure','repeated-cancellation','original-cancellation',
+                                  'unpublished-initial-revoke'])
+@pytest.mark.asyncio
+async def test_analysis_failure_cleanup_survives_revoke_failure_and_repeated_cancellation(tmp_path,monkeypatch,mode):
+    import asyncio
+    from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
+    from ignis.infrastructure.follow_up_host_activation import RootHostController
+    calls,credentials=[],[]
+    result=await _persistent_parent(tmp_path,calls,credentials)
+    host,canonical,accounting=result['host'],result['canonical'],result['accounting']
+    binding=next(iter(host._enrollments.values()))[0]
+    snapshot=await result['executor']._workspace_store.load_mission_evidence_snapshot(host.confirmation.selected_parent_id)
+    signal=snapshot.signals[0]
+    before_row=_accounting_row(accounting)
+    originals=[]
+    async def fail(self,*args,**kwargs):
+        originals.append(asyncio.CancelledError() if mode=='original-cancellation'
+                         else ValueError('SYNTHETIC_ANALYSIS_FAILURE'))
+        raise originals[-1]
+    monkeypatch.setattr(GetMissionAnalysisUseCase,'execute',fail)
+    original_revoke=RootHostController.revoke
+    entered,release,revocations=asyncio.Event(),asyncio.Event(),[]
+    async def cleanup_revoke(self,*,timeout=5):
+        revocations.append(self)
+        if mode=='unpublished-initial-revoke':
+            originals.append(RuntimeError('Synthetic revoke failure before publication'))
+            raise originals[-1]
+        await original_revoke(self,timeout=timeout)
+        if len(revocations)>1:
+            if mode=='revoke-failure':
+                raise RuntimeError('Synthetic revoke failure after publication')
+            if mode=='repeated-cancellation':
+                entered.set()
+                await release.wait()
+    monkeypatch.setattr(RootHostController,'revoke',cleanup_revoke)
+    assessments=[{'observation_id':str(signal.observation_id),'relation':'CONTEXT_ONLY','purpose':'CONTEXT',
+        'confidence':1.0,'reason_code':'ADJACENT_ONLY','judged_by':'synthetic-cleanup-control',
+        'evidence_role':'CONTEXT'}]
+    task=asyncio.ensure_future(driver.finish_canonical_parent_analysis(result,assessments=assessments,
+        candidates=[],judged_by='synthetic-cleanup-control'))
+    if mode=='repeated-cancellation':
+        await asyncio.wait_for(entered.wait(),5)
+        for _ in range(2):
+            task.cancel()
+            await asyncio.sleep(0)
+        assert not task.done(), 'Repeated cancellation abandoned owned cleanup before settlement'
+        release.set()
+    expected=asyncio.CancelledError if 'cancellation' in mode else driver.CanonicalAnalysisRetentionFailure
+    with pytest.raises(expected) as caught:
+        await task
+    recovery=caught.value.recovery
+    if mode=='original-cancellation':
+        assert caught.value is originals[0]
+    elif mode!='repeated-cancellation':
+        assert caught.value.__context__ is originals[0] and caught.value.__suppress_context__
+    assert revocations==[host,host] and recovery._accounting is accounting
+    assert recovery.accounting_close=='CLOSED'
+    assert _accounting_row(accounting)==((1,1,1,0),before_row[1])
+    if mode=='unpublished-initial-revoke':
+        # Neither revoke published: the original lease is still admissible, so storage stays open.
+        assert not host._revoked and recovery.host_close=='PENDING' and recovery.storage_close=='PENDING'
+        assert not canonical.closed and not canonical.generated_metadata.closed
+        assert recovery._database_hash is None
+        async with host.hold_parent(binding):
+            pass
+        monkeypatch.setattr(RootHostController,'revoke',original_revoke)
+        assert await recovery.settle()=={'host':'CLOSED','accounting':'CLOSED','storage':'CLOSED'}
+        with pytest.raises(FollowUpExecutionBoundaryError):
+            async with host.hold_parent(binding):
+                pass
+    # Observed state, not the revoke call outcome: published and quiescent.
+    assert host._revoked and recovery.host_close=='CLOSED' and recovery.storage_close=='CLOSED'
+    assert canonical.closed and canonical.generated_metadata.closed
+    assert calls==['search','videos'] and len(credentials)==2
+
+
+@pytest.mark.asyncio
+async def test_failed_startup_metadata_close_failure_keeps_canonical_closure_and_retries(tmp_path,monkeypatch):
+    from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+    from ignis.infrastructure.follow_up_workspace_retention import GeneratedWorkspaceRetention
+    original_close=GeneratedWorkspaceRetention.close
+    closes,failures=[],[]
+    def failing_close(self):
+        closes.append(self)
+        if len(closes)==1:
+            raise OSError('Synthetic metadata close failure')
+        original_close(self)
+    monkeypatch.setattr(GeneratedWorkspaceRetention,'close',failing_close)
+    with monkeypatch.context() as patch:
+        patch.setattr(ConnectorPluginRegistry,'register',_failing_registration(failures))
+        recovery=await _registry_startup_failure(tmp_path,failures)
+    # A later metadata failure leaves only that phase pending; canonical closure is not stranded.
+    assert recovery.host_close=='CLOSED' and recovery.accounting_close=='CLOSED'
+    assert recovery.storage_close=='PENDING' and recovery._canonical.closed and not recovery._metadata.closed
+    assert recovery._database_hash is None
+    assert await recovery.settle()=={'host':'CLOSED','accounting':'CLOSED','storage':'CLOSED'}
+    assert closes==[recovery._metadata,recovery._metadata] and recovery._metadata.closed
+    assert recovery._database_hash==driver.sha256(recovery._canonical.path.read_bytes()).hexdigest()
