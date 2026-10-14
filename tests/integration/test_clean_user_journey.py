@@ -28,7 +28,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-EXPECTED_TOOL_COUNT = 47
+EXPECTED_TOOL_COUNT = 48
 EXPECTED_TOOL_NAMES = {
     "authenticate_instagram",
     "authenticate_threads",
@@ -43,6 +43,7 @@ EXPECTED_TOOL_NAMES = {
     "diagnose_system_health",
     "discover_market_opportunities",
     "evaluate_mission_quality",
+    "execute_mission_follow_up",
     "execute_mission_ingress",
     "extract_customer_pain_points",
     "generate_mission_artifact",

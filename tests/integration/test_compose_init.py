@@ -85,10 +85,11 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "028_research_work.sql"
+NEWEST_MIGRATION = "030_mission_follow_up_admission.sql"
 
 # Exact full-chain identities: 027 adds three tables/one UUID default; 028 adds fifteen
-# tables with caller-bound identities. Counts alone cannot detect a swapped table or default.
+# tables, 029 three and 030 six, all with caller-bound identities and no UUID default.
+# Counts alone cannot detect a swapped table or default.
 EXPECTED_PUBLIC_TABLES = (
     "industry_taxonomies",
     "market_brief_revisions",
@@ -97,6 +98,15 @@ EXPECTED_PUBLIC_TABLES = (
     "mission_claims",
     "mission_evidence",
     "mission_evidence_qualifications",
+    "mission_follow_up_assignment_budgets",
+    "mission_follow_up_authorities",
+    "mission_follow_up_commands",
+    "mission_follow_up_gaps",
+    "mission_follow_up_parent_budgets",
+    "mission_follow_up_reservation_resources",
+    "mission_follow_up_reservations",
+    "mission_follow_up_work",
+    "mission_follow_ups",
     "mission_manifests",
     "mission_probe_outcomes",
     "mission_progress_commands",
@@ -159,7 +169,7 @@ def _assert_readback(readback):
         "retired_present": "0",
         "rls_market_lexicons": "t",
         "public_policies": "0",
-        "public_tables": "41",
+        "public_tables": "50",
         "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
         "public_tables_without_rls": "0",
         "supabase_roles": "0",
@@ -368,7 +378,7 @@ def test_readback_oracle_rejects_identity_substitution_and_access_widening(contr
     """Correct counts cannot hide the wrong schema or a widened access policy."""
     readback = {
         "later_objects": "13", "ui_noise_terms": "10", "retired_present": "0",
-        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "41",
+        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "50",
         "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
         "public_tables_without_rls": "0", "supabase_roles": "0",
         "builtin_uuid_defaults": "16", "builtin_uuid_columns": ",".join(EXPECTED_UUID_COLUMNS),
@@ -387,3 +397,63 @@ def test_readback_oracle_rejects_identity_substitution_and_access_widening(contr
         readback["public_policies"] = "1"
     with pytest.raises(AssertionError):
         _assert_readback(readback)
+
+
+def _migration_sources():
+    return [re.sub(r"--[^\n]*", "", (REPO / "sql" / name).read_text(encoding="utf-8"))
+            for name in all_postgres_migrations()]
+
+
+def _declared_public_tables():
+    """Tables the chain's own CREATE/DROP statements leave behind, independent of the oracle."""
+    created, dropped = set(), set()
+    for source in _migration_sources():
+        created.update(re.findall(
+            r"CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?([a-z_0-9]+)\s*\(",
+            source, re.I))
+        dropped.update(re.findall(
+            r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:public\.)?([a-z_0-9]+)", source, re.I))
+    return created - dropped
+
+
+def _declared_builtin_uuid_columns():
+    """UUID columns given a generator default, by CREATE TABLE body or by a later ALTER."""
+    generator = r"(?:gen_random_uuid|(?:public\.|extensions\.)?uuid_generate_v4)\(\)"
+    columns = set()
+    for source in _migration_sources():
+        for table in re.finditer(
+                r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?([a-z_0-9]+)\s*\(", source, re.I):
+            depth, end = 1, table.end()
+            while depth:
+                depth += {"(": 1, ")": -1}.get(source[end], 0)
+                end += 1
+            body = source[table.end():end - 1]
+            for column in re.finditer(
+                    r"(?:^|,)\s*([a-z_0-9]+)\s+UUID\b[^,]*?DEFAULT\s+" + generator, body, re.I | re.S):
+                columns.add(f"{table.group(1)}.{column.group(1)}")
+        for altered in re.finditer(
+                r"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?:public\.)?([a-z_0-9]+)"
+                r"\s+ALTER\s+COLUMN\s+([a-z_0-9]+)\s+SET\s+DEFAULT\s+" + generator, source, re.I):
+            columns.add(f"{altered.group(1)}.{altered.group(2)}")
+    return columns
+
+
+def test_full_chain_oracle_matches_every_declared_table_and_uuid_default():
+    """The readback oracle must name the whole current chain, not the chain as it once ended.
+
+    Read statically from sql/ without a database, so a stale endpoint, table list or count fails
+    here even where the Docker init cannot run. The fixed literals stay the oracle; this only
+    proves they are current.
+    """
+    assert NEWEST_MIGRATION == all_postgres_migrations()[-1]
+    tables = sorted(_declared_public_tables())
+    columns = sorted(_declared_builtin_uuid_columns())
+    assert list(EXPECTED_PUBLIC_TABLES) == tables
+    assert list(EXPECTED_UUID_COLUMNS) == columns
+    _assert_readback({
+        "later_objects": "13", "ui_noise_terms": "10", "retired_present": "0",
+        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": str(len(tables)),
+        "public_table_names": ",".join(tables), "public_tables_without_rls": "0",
+        "supabase_roles": "0", "builtin_uuid_defaults": str(len(columns)),
+        "builtin_uuid_columns": ",".join(columns), "uuid_ossp_defaults": "0",
+    })
