@@ -797,3 +797,117 @@ async def test_browser_masks_outward_text_across_current_and_withdrawn_permissio
     diagnostics = dict(private, viewer_url=cap["url"])
     _assert_absent(caplog.text, "Captured logs", diagnostics)
     _assert_absent(captured.out + captured.err, "Captured output", diagnostics)
+
+
+EXPIRED = {"schema_version": 1, "status": "REFUSED", "reason_code": "CAPABILITY_EXPIRED"}
+
+
+def _exact_refusal(status, body, expected_status, payload, label, private):
+    """Exact typed refusal, checked after a privacy guard; failures report only the label and expectation."""
+    __tracebackhide__ = True
+    _assert_absent(body.decode("utf-8", "replace"), label, private)
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        parsed = None
+    matched = status == expected_status and parsed == payload
+    assert matched, f"{label}: expected {expected_status} {payload['reason_code']}"
+
+
+def _raw(url, method, suffix):
+    """One request on a raw socket, so a HEAD response is checked for bytes the server actually sent."""
+    import socket
+    target = urlsplit(url)
+    with socket.create_connection((target.hostname, target.port), timeout=5) as sock:
+        sock.sendall(f"{method} {target.path}{suffix} HTTP/1.1\r\nHost: {target.netloc}\r\n"
+                     f"Connection: close\r\n\r\n".encode("ascii"))
+        data = b""
+        while chunk := sock.recv(65536):
+            data += chunk
+    head, _, body = data.partition(b"\r\n\r\n")
+    lines = head.decode("ascii").split("\r\n")
+    headers = dict(line.split(": ", 1) for line in lines[1:])
+    return int(lines[0].split(" ")[1]), headers, body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relay_case", ("file",), indirect=True)
+async def test_actual_head_reads_and_real_clock_expiry_refuse_before_storage(attention_case, monkeypatch, tmp_path):
+    from ignis.interfaces.mcp import server
+    case, missions, runs = attention_case
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Viewer initialized writable components or credentials")
+    monkeypatch.setattr(server, "get_components", forbidden)
+    monkeypatch.setattr(server, "create_repository", forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
+    mission_id, run_id = str(missions[0].id), str(runs[0])
+    with _observe_chain(case, monkeypatch) as observed:
+        async with _caller_client(monkeypatch, tmp_path, {"repository": case.repository}) as client:
+            # A genuinely short real wall-clock capability; nothing patches time or the token.
+            expires = datetime.now(timezone.utc) + timedelta(seconds=4)
+            cap = (await client.call_tool("open_mission_relay", {"mission_id": mission_id, "run_id": run_id,
+                                                                 "expires_at": expires.isoformat()})).structured_content
+            # Exact checks are folded into booleans so a regression reports safe labels, never a payload or capability.
+            opened = (cap["status"] == "OK" and datetime.fromisoformat(cap["expires_at"]) == expires
+                      and (cap["mission_id"], cap["run_id"]) == (mission_id, run_id))
+            assert opened, "MCP open did not return the exact selected scope and deadline"
+            url = cap["url"]
+            token = urlsplit(url).path.strip("/").split("/")[-1]
+            private = {"capability_token": token}
+
+            def before_deadline():
+                # Setup guard, not product behavior: each pre-expiry request must start well inside the window.
+                assert datetime.now(timezone.utc) < expires - timedelta(seconds=1), "Pre-expiry window consumed by setup"
+
+            before_deadline()
+            status, headers, body = await asyncio.to_thread(_raw, url, "GET", "snapshot?page_size=2")
+            _assert_absent(body.decode("utf-8", "replace"), "Initial snapshot body", private)
+            snapshot = json.loads(body)
+            selected = status == 200 and (snapshot["mission_id"], snapshot["run_id"]) == (mission_id, run_id)
+            assert selected, "Initial snapshot did not return the selected scope"
+            observation = snapshot["evidence"][0]["observation_id"]
+            routes = {"document": "", "snapshot": "snapshot?page_size=2", "inspect": f"inspect/{observation}?page_size=2"}
+            for name, suffix in routes.items():
+                before_deadline()
+                status, got, body = await asyncio.to_thread(_raw, url, "GET", suffix)
+                text = body.decode("utf-8", "replace")
+                _assert_absent(text, f"{name} GET body", private)
+                identified = status == 200 and mission_id in text and (name != "inspect" or observation in text)
+                assert identified, f"{name}: GET did not return the selected identity"
+                before_deadline()
+                status, head, head_body = await asyncio.to_thread(_raw, url, "HEAD", suffix)
+                bodiless = status == 200 and head_body == b""
+                assert bodiless, f"{name}: HEAD sent a body or failed"
+                for field in ("Content-Type", "Cache-Control", "Referrer-Policy", "X-Content-Type-Options"):
+                    assert head.get(field) == got.get(field), f"{name}: HEAD {field} differs from GET"
+                assert int(head["Content-Length"]) > 0
+                assert ("Content-Security-Policy" in head) == (name == "document")
+            # Unsupported forms with a valid capability: exact typed refusals, HEAD still bodiless.
+            before_deadline()
+            status, _, body = await asyncio.to_thread(_raw, url, "POST", "snapshot?page_size=2")
+            _exact_refusal(status, body, 405, {"schema_version": 1, "status": "REFUSED",
+                                               "reason_code": "METHOD_NOT_ALLOWED"}, "POST snapshot", private)
+            before_deadline()
+            status, head, head_body = await asyncio.to_thread(_raw, url, "HEAD", "?page_size=2")
+            refused = (status, head_body, head.get("Content-Type")) == (400, b"", "application/json")
+            assert refused, "HEAD document with a query was not a bodiless 400"
+            reads = (len(observed.statements), len(observed.opens))
+            assert reads[0] > 0 and reads[1] > 0, "The observer must see the successful physical reads"
+
+            # Cross the explicit deadline once on the real clock (bounded by the 4 s window).
+            await asyncio.sleep(max(0.0, (expires - datetime.now(timezone.utc)).total_seconds()) + 0.25)
+            assert datetime.now(timezone.utc) > expires
+            for name, suffix in routes.items():
+                status, _, body = await asyncio.to_thread(_raw, url, "GET", suffix)
+                _exact_refusal(status, body, 403, EXPIRED, f"{name} GET after expiry", private)
+                status, head, head_body = await asyncio.to_thread(_raw, url, "HEAD", suffix)
+                bodiless = status == 403 and head_body == b""
+                assert bodiless, f"{name}: HEAD not refused after expiry"
+                assert int(head["Content-Length"]) == len(json.dumps(EXPIRED, separators=(",", ":")))
+            assert (len(observed.statements), len(observed.opens)) == reads, "An expired request reached storage"
+        observed.assert_no_writes()
+    owned.assert_closed_unchanged(case, before)
+    assert await asyncio.to_thread(_refused_after_close, url), "Listener still accepts connections after shutdown"
