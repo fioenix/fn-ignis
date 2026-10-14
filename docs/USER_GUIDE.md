@@ -79,9 +79,11 @@ not a substitute for that gate.
 Uploaded files and purchased datasets can help phrase a question or identify a competitor.
 Without mission-scoped provenance and qualification, they remain context rather than primary
 Market evidence. The analysis should show disconfirming evidence and state when its conclusion
-would change. Export HTML with `generate_mission_artifact` only when a saved report is wanted;
-runtime output goes to gitignored `reports/` in a source checkout, or `~/.ignis/reports/`
-when running an installed package (with a temporary-directory fallback if needed). Templates live in
+would change. Export HTML with `generate_mission_artifact` only when a saved report is wanted.
+Like every mission tool, it is admitted only through one validated caller root, and the report is
+written to `<root>/.fnignis/reports/`. The server keeps a fallback for calls made without a caller
+root: gitignored `reports/` in a source checkout, `~/.ignis/reports/` for an installed package, or a
+temporary directory if needed; admitted MCP calls do not use it. Templates live in
 `src/ignis/infrastructure/templates/html/`.
 
 ### Mission Relay on the development branch

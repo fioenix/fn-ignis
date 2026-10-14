@@ -4,9 +4,9 @@
 
 ## MCP read operations
 
-`open_mission_relay(mission_id, expires_at)` explicitly selects a mission and finite viewing deadline. Validate authorized mission access and installed schema without lazy bootstrap. Return a capability URL, mission ID, session expiry, read-only statement and supported inspection state. Unknown mission/access/schema/lifespan returns a typed refusal, not initialization, diagnostics or collector invocation.
+`open_mission_relay(mission_id, expires_at, run_id?)` explicitly selects a mission, an optional run and a finite viewing deadline. Validate authorized mission access and installed schema without lazy bootstrap. Return a capability URL, mission ID, session expiry, read-only statement and supported inspection state. Unknown mission/access/schema/lifespan returns a typed refusal, not initialization, diagnostics or collector invocation.
 
-`get_mission_relay_snapshot(mission_id, cursor?, page_size)` returns the same allowlisted projection used by HTTP, subject to host mission authorization. A positive bounded page size is required. No raw repository object serialization. This operation is independent of opening a browser.
+`get_mission_relay_snapshot(mission_id, page_size, run_id?, after_revision?, after_ordinal?, evidence_offset?)` returns the same allowlisted projection used by HTTP, subject to host mission authorization. `mission_id` and a bounded `page_size` (1–200) are required. `run_id` optionally selects a run; the event cursor is the explicit pair `after_revision`/`after_ordinal`, supplied together; `evidence_offset` (default 0) selects the evidence page. No raw repository object serialization. This operation is independent of opening a browser.
 
 ## T001 — Initial resource limits to implement and measure
 

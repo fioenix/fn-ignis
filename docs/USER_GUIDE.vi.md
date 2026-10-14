@@ -70,9 +70,12 @@ nhỏ nhất nên làm tiếp. Điểm số hoặc tín hiệu thô không thay 
 File tải lên và dataset mua ngoài có thể giúp đặt câu hỏi hoặc nhận diện đối thủ. Nếu chưa
 có xuất xứ và đánh giá gắn với nhiệm vụ, chúng chỉ là bối cảnh, không phải chứng cứ Market
 chính. Phân tích cần nêu chứng cứ phản bác và điều kiện khiến kết luận thay đổi. Chỉ dùng
-`generate_mission_artifact` khi cần lưu báo cáo HTML. Bản chạy từ mã nguồn ghi vào `reports/`
-không được commit; bản cài bằng package ghi vào `~/.ignis/reports/`, hoặc thư mục tạm nếu
-cần. Mã template chỉ nằm ở `src/ignis/infrastructure/templates/html/`.
+`generate_mission_artifact` khi cần lưu báo cáo HTML. Giống mọi tool của nhiệm vụ, lệnh này chỉ
+được chấp nhận qua đúng một caller root hợp lệ và báo cáo được ghi vào `<root>/.fnignis/reports/`.
+Server vẫn giữ phương án dự phòng cho lệnh gọi không có caller root: bản chạy từ mã nguồn ghi vào
+`reports/` không được commit; bản cài bằng package ghi vào `~/.ignis/reports/`, hoặc thư mục tạm
+nếu cần. Lệnh gọi MCP đã được chấp nhận không dùng phương án này. Mã template chỉ nằm ở
+`src/ignis/infrastructure/templates/html/`.
 
 ### Mission Relay trên nhánh phát triển
 
