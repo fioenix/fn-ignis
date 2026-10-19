@@ -76,6 +76,7 @@ async def bootstrap_database() -> Tuple[bool, str]:
                 # Explicit CLI setup owns additive DDL; canonical reads remain unchanged.
                 await repo._ensure_progress_schema()
                 await repo._ensure_research_schema()
+                await repo._ensure_follow_up_schema()
             lexicons = await repo.get_domain_lexicons()
             return True, f"Database initialized successfully with {len(lexicons)} seed lexicons."
         finally:

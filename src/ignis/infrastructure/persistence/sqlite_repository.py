@@ -4844,6 +4844,12 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
 
         await self._run_write(setup)
 
+    async def _ensure_follow_up_schema(self) -> None:
+        """Only authorized writers install additive follow-up and admission storage."""
+        from ignis.infrastructure.persistence.sqlite_follow_up_admission import install
+
+        await install(self)
+
     @staticmethod
     def _research_receipt(row):
         from ignis.application.ports.research_work_port import ResearchWorkCommitReceipt

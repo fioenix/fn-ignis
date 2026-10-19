@@ -8,12 +8,15 @@ import pytest
 from ignis.infrastructure import persistence
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 from ignis.interfaces.cli.setup_bundle import bootstrap_database
+from tests.integration.test_follow_up_admission_schema import TABLES as ADMISSION_TABLES
+from tests.integration.test_mission_follow_up_schema import TABLES as FOLLOW_UP_TABLES
 from tests.integration.test_mission_relay_read_boundary import _sqlite_state
 from tests.integration.test_research_work_schema import TABLES
 
-OPERATIONAL_TABLES = set(TABLES) | {
+OPERATIONAL_TABLES = set(TABLES) | set(FOLLOW_UP_TABLES) | set(ADMISSION_TABLES) | {
     "mission_progress_revisions", "mission_progress_events", "mission_progress_commands",
 }
+SETUP_HELPERS = ("_ensure_progress_schema", "_ensure_research_schema", "_ensure_follow_up_schema")
 
 
 @pytest.mark.asyncio
@@ -65,7 +68,7 @@ async def test_explicit_bootstrap_repeatedly_preserves_canonical_rows_and_empty_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("helper", ("_ensure_progress_schema", "_ensure_research_schema"))
+@pytest.mark.parametrize("helper", SETUP_HELPERS)
 async def test_explicit_bootstrap_setup_failure_is_not_ready_and_closes_repository(tmp_path, monkeypatch, helper):
     repository = SqliteTrendRepository(str(tmp_path / "failure.sqlite"))
     monkeypatch.setattr(persistence, "create_repository", lambda: repository)
@@ -82,9 +85,10 @@ async def test_explicit_bootstrap_setup_failure_is_not_ready_and_closes_reposito
 @pytest.mark.asyncio
 async def test_postgres_bootstrap_never_applies_sqlite_operational_setup(monkeypatch):
     repository = persistence.PostgresTimescaleRepository("postgresql://invalid.invalid/bootstrap-control")
-    progress, research = AsyncMock(), AsyncMock()
+    progress, research, follow_up = AsyncMock(), AsyncMock(), AsyncMock()
     monkeypatch.setattr(repository, "_ensure_progress_schema", progress, raising=False)
     monkeypatch.setattr(repository, "_ensure_research_schema", research, raising=False)
+    monkeypatch.setattr(repository, "_ensure_follow_up_schema", follow_up, raising=False)
     monkeypatch.setattr(repository, "get_domain_lexicons", AsyncMock(return_value=[]))
     close = AsyncMock(wraps=repository.close)
     monkeypatch.setattr(repository, "close", close)
@@ -92,10 +96,11 @@ async def test_postgres_bootstrap_never_applies_sqlite_operational_setup(monkeyp
     assert (await bootstrap_database())[0] is True
     progress.assert_not_awaited()
     research.assert_not_awaited()
+    follow_up.assert_not_awaited()
     close.assert_awaited_once()
 
 
-@pytest.mark.parametrize("helper", ("_ensure_progress_schema", "_ensure_research_schema"))
+@pytest.mark.parametrize("helper", SETUP_HELPERS)
 @pytest.mark.parametrize("json_output", (False, True))
 def test_setup_caller_never_reports_ready_after_operational_failure(
     tmp_path, monkeypatch, capsys, helper, json_output,
