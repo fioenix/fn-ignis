@@ -76,7 +76,7 @@ Resolution is per mission-scoped call and creates no persisted row; the resolved
 |---|---|---|---|
 | Legacy (before 2026-07-28) | ADVERTISED | `roots/list`; exactly one valid `file://` directory; must equal a configured root if one is set | existing categories |
 | Any | NOT_ADVERTISED | startup-configured `IGNIS_CALLER_ROOT`, identity-pinned | existing categories |
-| Any | UNKNOWN | refuse | `ROOT_CAPABILITY_UNKNOWN` |
+| Any | UNKNOWN | refuse; a modern connection sends no `roots/list` | `ROOT_CAPABILITY_UNKNOWN` |
 | 2026-07-28+ | ADVERTISED, `IGNIS_CALLER_ROOT` configured | the configured root, identity-pinned; the client is not asked and its roots are not compared | `CONFIGURED_ROOT_INVALID`, `CONFIGURED_ROOT_CHANGED` |
 | 2026-07-28+ | ADVERTISED, no configured root | first round returns `InputRequiredResult` with a `ListRootsRequest`; the retry's `ListRootsResult` is validated with the legacy rules | root-count/URI/path categories; `ROOTS_REQUEST_FORBIDDEN` when the retry carries no roots |
 
