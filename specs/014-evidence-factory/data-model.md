@@ -1,6 +1,6 @@
 # Data Model: Research Observability
 
-**Status**: Additive schema/typed design approved with the technical plan; no SQL written or applied.
+**Status**: R1 additive schema and typed design approved with the R1 plan and implemented on this branch. R2 (2026-10-19) adds no persisted record: it replaces the viewer session with a host-side tracking artifact and specifies caller-root resolution.
 
 Canonical sources, immutable observations, mission evidence, manifest/Brief, probe outcomes, qualifications and Claim Ledger remain authoritative. New rows reference them. No raw content, transcript, credential or hidden model reasoning is copied into an event/result payload.
 
@@ -50,11 +50,37 @@ Atomic admission persists child identity, authority and quota reservation before
 
 Child observations are canonically owned by child evidence membership. Child frame/claims are displayed under child identity. Parent findings can reference a labeled related result but cannot claim permission from a composite parent/child frame. Inspecting the child requires an explicitly scoped child viewer. New source/credential/Brief/budget demands owner authority, not inherited broad permission.
 
-## Viewer session — transient, not research truth
+## Tracking artifact — host-side, not persisted by Ignis (R2)
 
-Fields: cryptographically random capability, selected mission, creation/expiry boundary, permitted read scope and process lifecycle identity. Process-local storage only; restart revokes sessions. No token in logs, redirects, external requests or generated reports. No new persisted mission row is written to open a viewer.
+An agent renders one artifact from one successful coherent snapshot. Ignis stores nothing for it and never reads it back.
 
-Client state: last successful coherent cursor/read time, refresh and motion settings, visibility, expiry, selected inspection item. It never grants research authority. Hide/refresh-pause/expiry aborts in-flight delivery and prevents new automatic reads; one already admitted read may settle but cannot create mission writes or apply a late UI update.
+Required content, each taken from the snapshot and never inferred: mission ID, run ID or unknown, `read_at`, frame digest or `frame_pending_reason`, collection state, per-channel outcome, claim gate (permitted claims with bindings, or withheld with gaps), research work states and finding revisions with current or historical status, and observation totals with the evidence page shown.
+
+Artifact metadata: generation trigger (`USER_REQUEST` or one of the milestones in FR-007), storage location (local path by default) and, if published, the user's consent for that publication.
+
+Display-state mapping:
+
+| Artifact state | Snapshot source |
+|---|---|
+| Permitted claim | `claim_gate.state` is `CURRENT` and the claim in `claim_gate.claims` is permitted for `claim_gate.frame_digest` |
+| Withheld / gap | `claim_gate.state` is `PENDING` or `UNAVAILABLE`, `claim_gate.gap_report` is present, or a claim is not permitted; `reason_code` is shown |
+| Missing / unavailable | `RelayChannelOutcome.status` not healthy or null, `frame_pending_reason` set, or an unknown time or metric |
+| Stale | `claim_gate.state` is `STALE` or `HISTORY`, or a later read returned a typed refusal or a different frame digest; the earlier artifact's permission is withdrawn |
+| Point-in-time | always; `read_at` is shown and the artifact never claims to be live |
+
+## Caller-root resolution (R2)
+
+Resolution is per mission-scoped call and creates no persisted row; the resolved root selects the existing caller scope.
+
+| Protocol era | Declared roots capability | Resolution | Refusal category when it fails |
+|---|---|---|---|
+| Legacy (before 2026-07-28) | ADVERTISED | `roots/list`; exactly one valid `file://` directory; must equal a configured root if one is set | existing categories |
+| Any | NOT_ADVERTISED | startup-configured `IGNIS_CALLER_ROOT`, identity-pinned | existing categories |
+| Any | UNKNOWN | refuse | `ROOT_CAPABILITY_UNKNOWN` |
+| 2026-07-28+ | ADVERTISED | first round returns `InputRequiredResult` with a `ListRootsRequest`; the retry's `ListRootsResult` is validated with the legacy rules | existing root-count/URI/path categories |
+| 2026-07-28+ | ADVERTISED, retry carries no roots | startup-configured `IGNIS_CALLER_ROOT`, identity-pinned | `ROOTS_REQUEST_FORBIDDEN` when none is configured |
+
+`ROOTS_RPC_UNAVAILABLE` remains for a legacy connection whose `roots/list` actually fails.
 
 ## Backend and migration invariants
 
@@ -62,4 +88,4 @@ Client state: last successful coherent cursor/read time, refresh and motion sett
 - Additive bootstrap/migrations occur only in explicit setup, never viewer reads. Old/missing schema returns unavailable with a setup action outside the viewer.
 - Canonical source, observation, legacy timestamp, qualification and claim data remain unchanged by schema installation. Verify before/after counts/digests and FK/access invariants.
 - Evidence transformations, dropping legacy data or changing existing qualification uniqueness are outside this plan and require a separate owner decision.
-- Rollback disables new tools/viewer while retaining additive data; do not delete historical evidence or workflow receipts to make old code start.
+- Rollback restores removed files from git while retaining additive data; do not delete historical evidence or workflow receipts to make old code start.

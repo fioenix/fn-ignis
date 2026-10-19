@@ -1,82 +1,59 @@
 # Implementation Plan: Ignis Relay — Observable Research Mission
 
-**Branch**: `codex/ignis-evidence-factory` | **Date**: 2026-10-04 | **Spec**: [approved R1](spec.md)
+**Branch**: `codex/ignis-relay-checkout` | **Date**: 2026-10-19 | **Spec**: [R2](spec.md)
 
-**Status**: Current task ledger (`tasks.md`, 2026-10-14): T001–T078, T080, T085, T086, T088 and T089 accepted: 83/92; T079, T081–T084, T087 and T090–T092 remain open. Historical snapshot at T058, retained unchanged: T001–T058 accepted:58/92. US4 pure domain and atomic recording port contracts implemented and independently reviewed locally: 189 targeted tests passed. T041/T042 test-design acceptance does not establish storage behavior. T047 SQLite lifecycle verified with 339 scoped offline tests and independently reviewed. T048 PostgreSQL core lifecycle independently reviewed after one timing repair:118 scoped current-source PG tests passed, plus11 fresh convention tests; cleanup verified. T049 SQLite result settlement independently reviewed:416 scoped current-source offline tests passed; separate66 actualPG schema companion passed, cleanup verified. T050 PostgreSQL result parity independently reviewed:137 scopedPG,66schema,416offline and separate35 updated owner/result/convention cases passed without overlapping totals; final temporary DB/role cleanup verified. T051 typed recording service independently reviewed:396 scoped offline and32 actualPG tests passed, zero failure/error/skip; temporary DB/role cleanup verified. T052 persisted lifecycle independently reviewed:117 new/convention,385 disjoint regression and53 nativePG cases passed; zero failure/error/skip and temporary DB/roles. The final review correction strengthens the stale-activity assertion to exact REFUSED/STALE_REVISION with unchanged state and replay checks; its focused SQLite run passed2 cases, while1 PostgreSQL case was skipped without a loaded DSN. T053 record-only MCP independently reviewed through actual stdio/SQLite:37 boundary/convention cases passed;506 regression cases passed with2 localhost setup denials separately corrected2PASS, no fresh508-green claim. Canonical contract companion reviewed. T054 coherent research projection independently accepted after one schema compatibility repair: 777 scoped offline, 153 PostgreSQL, 66 schema and 34 MCP consumer cases passed, zero failure/error/skip; final temporary DB/role cleanup verified. Viewer contract companion reviewed. T055 recorded research UI independently accepted:78 browser and165 separate consumer cases passed with zero failure/error/skip; simulated GET scope disclosed. T056 native stdio MCP/HTTP/Chromium chain independently accepted:12 native and11 convention cases passed on SQLite file/local PostgreSQL; zero failure/error/skip and disposable DB/role cleanup verified. T057 actual native engineering overlap and separate sequential scenario independently accepted:four source-bearing results, exact stdio/HTTP readback and44 hashes verified. T058 actual native counterevidence revision/history independently accepted:39 hashes and exact source bindings verified; fresh-page actual HTTP response-to-DOM68.523ms single sample, prior version noncurrent, obsolete replay unchanged42tables. Retained-page wait timed out before result recording and is not passing display evidence. Synthetic engineering UAT only; controller closed, recoverable store retained. US4 engineering acceptance complete, review PR pending; no real-market validation or shipment. A broad unit attempt was network-aborted; no full-unit GREEN claimed. US3 T032–T040 accepted locally. Exact-frame permission, actual Gap/missingness and immediate stale removal verified through canonical stores, actual MCP/HTTP and isolated Chromium. Broad US1/US3 plus mission/Task Relay gate1390PASS3SKIP0FAIL0ERROR237.65s,149 frozen hashes; three known conditional skips disclosed. A final one-line receipt-directory setup amendment has separate3PASS0SKIP17.86s verification; all other148 hashes unchanged. Latest local read-to-display samples3.1msSQLite-file/1.3msmemory/2.7msPostgreSQL are not real-mission UAT or p95 proof. Final independent T040 review accepted; zero disposable PostgreSQL databases left. Evidence .handoff/spec014/us3.handoff.md and t040/{scoped.xml,final-readback.xml,final-source-settled.json,review.handoff.md}. T059–T092 remain open. Commit each accepted task; create a review PR after the current user story is fully accepted, per owner instruction on 2026-10-06. Real-mission UAT and shipment remain pending.
+**Status**: R2 re-plan approved by the owner on 2026-10-19 ("Duyệt plan R2 của Spec 014"). The owner-approved R1 plan (2026-10-04) and its execution history remain in this file's git history at `b455322`. The task ledger in [tasks.md](tasks.md) (83/92 on 2026-10-14) predates R2 and must be regenerated with `speckit-tasks` after this plan is approved. No product code changes in this phase.
 
 ## Summary
 
-Current acceptance update (2026-10-05): T001–T031 independently accepted:31/92. The first internal slice (US1) is implemented and automatically verified on frozen source:1348PASS3 disclosed conditional skips, zero failures/errors; final independent correction gate18PASS0SKIP. Canonical idle/STARTED/Unknown and actual persisted observation/qualification transitions pass through FastMCP, real HTTP and isolated Chromium on disposable SQLite file/private memory/local PostgreSQL. Unsupported research remains unavailable and strategic permission withheld. Changes are explicitly parked uncommitted/unmerged. This closes US1 only; later stories, full-feature UAT and shipment remain unaccepted.
+Outcome: a person follows a real mission, and sees why a conclusion is permitted or withheld, through a tracking artifact their own agent generates. Ignis supplies a truthful bounded snapshot and the `ignis-track` guidance. Claude Code, the primary host, can actually call the mission tools.
 
-Historical T022 acceptance follows.
+R2 changes three things relative to R1:
 
-Current acceptance update (2026-10-05): T022 joins both submission use cases to narrow atomic fact/event operations through a structural port and workspace delegates. Typed transaction-window stale errors retain CONFLICT/STALE_FRAME, with no submission write; existing final-readback withholding and audit history remain unchanged. Independent re-review closes the sole P2; all314 scoped cases pass with no skip, including6 new RED-before-fix race controls. Full3375 cases:3168PASS187FAIL10ERROR10SKIP2warnings598.10s. Exact36 original producer RED nodes pass; no new failed/error node. Remaining failures belong to future HTTP/projection/browser implementations or inherited isolated-settings/doc checks; clean-user bootstrap setup remains unaccepted. Canonical ledger22/92; T023 next, no integration/release action.
+1. **Retire the built-in viewer.** Remove the `open_mission_relay` tool, the loopback HTTP listener, the `mission_relay.html` template and its builder, and the automatic dashboard start after run admission. Keep the relay runtime owner that serves snapshot reads and caller scopes.
+2. **Add `ignis-track`.** One maintained guidance text, served as MCP prompt `ignis_track` and resource `fn-ignis://guide/ignis-track`, and mirrored to `.agents/skills/ignis-track/SKILL.md`. It tells agents how to read the snapshot, which display rules hold, when to regenerate and where the artifact may go.
+3. **Resolve caller roots on MCP 2026-07-28+ connections.** Server-initiated `roots/list` is forbidden there (SEP-2577), which is why Claude Code currently gets `ROOT_REQUIRED category=ROOTS_RPC_UNAVAILABLE`. Request roots through `InputRequiredResult`; when none are returned, fall back only to the startup-configured `IGNIS_CALLER_ROOT`.
 
-Historical T021 acceptance follows.
-
-Current acceptance update (2026-10-05): T001–T021 accepted,21/92. T021 resolves all24 collection producer failures; final producer plus18 added controls:75PASS12FAIL0ERROR0SKIP. All12 residual failures are unchanged T022 qualification/claim cases. Independent cancellation finding resolved; host test gate adaptation preserves assertions and passes independent review. Final related regression135PASS2SQLite-specificSKIP. Full before host gate adaptation:3148PASS201FAIL10ERROR10SKIP2warnings542.96s; no full-suite GREEN. Two host gate timeouts were subsequently resolved by the focused run;10 clean-install setup errors and inherited environment/doc checks remain explicitly disclosed. Work is local/uncommitted and parked at the accepted task boundary; T022, old-schema, minimum-runtime, UAT and integration remain open. Historical T020:direct32PASS, covering273PASS0SKIP, unit146PASS; T016 then33PASS36FAIL. Historical T019:direct56PASS, covering591PASS11SKIP, full2501PASS231FAIL587SKIP2warnings. Historical T017 acceptance follows.
-T017 initial review found four Important test gaps; scoped R1 review addressed all four
-without new breakage. Final source77f7311e..., reporte4f15e71..., review90e8a33b....
-Earlier R1 selected28:17 missing-listener RED/11 assertion-readiness PASS; final logging-only
-selected4:4 missing-listener RED, zero errors/skips. These are distinct tested revisions,
-not HTTP/security GREEN. Short-expiry stability and HEAD security/refusal Minor controls
-remain T024/final review. Runtime, browser, lifecycle, security and integration stay open.
-
-Historical T016 acceptance (2026-10-05):
-T016 initial review found five Important test-contract gaps; R1 addressed four and R2
-closed the zero-delta preservation residual, with no new breakage. R1 actual66 nodes:
-36 expected missing-producer RED/30 PASS; final R2 narrow6:3 no-op PASS/3 positive-delta
-missing-receipt RED, cleanup verified. Final source253333a8..., report0b440ed3...,
-scoped review02c83702.... Historical T015 evidence remains revision-specific.
-T016 accepts test design only; T019–T022 producer/schema compatibility, viewer, UAT,
-full regression and integration remain open. No broader final-revision GREEN claim.
-
-The outcome is an inspectable, light-mode observatory of a real assigned research mission: collection facts, specialist work, counterevidence and evolving findings reach the viewer without manufacturing activity or bypassing Claim Ledger. Acceptance requires a real concurrent research scenario, sequential fallback, one bounded follow-up, privacy tests and rendered UAT; a static animation is insufficient.
-
-Add typed operational records alongside canonical evidence, an explicit host-work protocol and a separate finite GET-only loopback viewer. The host performs semantic research and actual delegation; Ignis records and validates receipts, performs deterministic authorized collection and builds the display. Operational events are committed with the facts they describe. The viewer uses a coherent no-bootstrap read boundary and never starts work.
-
-Implement in three vertical slices after plan approval and task generation:
-
-1. Coherent persisted telemetry, no-write viewer and the evidence journey.
-2. Host research assignments, real work/handoffs, finding revisions and current-frame claim gates.
-3. Bounded child-mission follow-up, complete lifecycle/security/concurrency UAT and integration.
-
-The first slice is useful but does not close Spec 014. New APIs below are proposals, not installed tools. No release version is selected.
+Kept from R1 as delivered: progress facts and events committed with their data, coherent no-bootstrap readers on both backends, the allowlisted projection, `get_mission_relay_snapshot`, research-work recording and gap-linked follow-up.
 
 ## Technical Context
 
-**Language/Version**: Python >=3.11; existing typed domain/application ports; plain browser JavaScript, SVG and CSS. Local planning environment is Python 3.13; minimum-version CI remains required.
+**Language/Version**: Python >= 3.11; minimum-version CI remains required.
 
-**Primary Dependencies**: Existing FastMCP, Jinja2, psycopg, SQLite and template infrastructure. Lock and installed package inspection found FastMCP 4.0.4; uv.lock records Jinja2 3.1.6. No new dependency, frontend framework, model SDK or hosted server is proposed. Standard-library HTTP is restricted to loopback and is not a public deployment solution.
+**Primary Dependencies**: Installed FastMCP 4.0.4 and `mcp` 2.2.0 (with `mcp_types`). No new dependency. R2 removes the standard-library loopback HTTP viewer; Jinja2 stays for maintained reports.
 
-**Storage**: Configured SQLite or PostgreSQL, canonical source/observation/mission evidence and Claim Ledger retained. Add operational tables and narrow transactional write/read ports on both backends. No legacy evidence rewrite, backfill of imaginary timestamps or replacement corpus.
+**Storage**: Unchanged. No migration, no table removal. Viewer-only state was process-local and disappears with the listener.
 
-**Testing**: pytest regressions and dual-backend behavioral contracts; Playwright rendered scenarios using existing tooling; actual declared host concurrency UAT; live-source UAT only under separate current authorization. A recorded replay is not the acceptance substitute.
+**Testing**: pytest across `tests/`. In-process MCP client tests that negotiate both the 2026-07-28 and a legacy protocol version. One live probe from Claude Code for SC-018, recorded under `.handoff/`. PostgreSQL parity cases need `IGNIS_TEST_POSTGRES_DSN`; a skip is not parity.
 
-**Target Platform**: Local MCP process with browser-accessible loopback viewer. No remote multi-tenant service, desktop-client config change or always-on worker.
+**Target Platform**: Local MCP server over stdio. Hosts render artifacts; Ignis renders none for tracking.
 
-**Project Type**: Existing agent harness plus local read-only product surface, not a new agent platform.
+**Project Type**: Existing agent harness. R2 removes a product surface and adds guidance; no new runtime service.
 
-**Performance Goals**: SC-008/013 rendering <=5 seconds after successful coherent read; SC-005 >=50 FPS over 30 seconds on a named reference machine. Bound packet rendering with disclosed aggregation, not fabricated throughput. Polling cadence and render cap are implementation constants to be selected and measured during task design, not claims of achieved performance.
+**Performance Goals**: R1's 50 FPS and five-second display goals are retired. Snapshot bounds stay as implemented: page size 1–200, serialized response at most 1,048,576 bytes, typed refusal on overflow.
 
-**Constraints**: Finite viewer capability; no automatic reads/motion when hidden, closed, refresh-paused or expired; no bootstrapping on viewer open; stale strategic permission withheld; finite host authority and cumulative collection reservations; masked typed projections; no private reasoning. Maintain all existing tool signatures and connector tiers.
+**Constraints**: No polling or background refresh (FR-007). Local-file default and consent before publication (FR-031). Tool count goes from 48 to 47; the removal of `open_mission_relay` is the only signature change and is owner-approved. No connector tier, schema or persisted-evidence change.
 
-**Scale/Scope**: One explicitly selected mission per viewer capability. Related child missions require separately scoped inspection. Events and inspection are bounded/paged; animation aggregates large sets while exposing exact counts and identities. No full-corpus DOM or unrestricted event dump.
+**Scale/Scope**: One explicitly selected mission per snapshot read; related child missions keep separate scope.
+
+**Unknowns resolved in [research.md](research.md)**: whether FastMCP 4.0.4 middleware can return `InputRequiredResult` for any mission-scoped tool (R2-5, needs a spike before implementation); whether Claude Code answers a `ListRootsRequest` inside `InputRequiredResult` (R2-5, needs a live probe; the configured-root fallback covers a negative result).
 
 ## Constitution Check
 
-Pre-research and post-design checks are design checks, not runtime acceptance results.
+Pre-design and post-design checks are design checks, not runtime acceptance.
 
-| Principle | Pre-research | Post-design obligation |
+| Principle | Status | Obligation |
 |---|---|---|
-| I — Mission-bound autonomy | Compatible with approved R1 | Explicit assignment, finite authority, no viewer-triggered work, deterministic collectors; research end fences all new work. |
-| II — User-controlled connectors | Preserve tiers/contracts | No new source/session permissions; child follow-up admission checks source, credential, scope and cumulative budget before any probe. |
-| III — Evidence and falsification | Reuse canonical identities | Atomic durable-fact events, coherent read high-water, immutable input references, alternatives/counterevidence, fail-closed current-frame claims; SQLite/PostgreSQL parity. |
-| IV — Maintained artifacts | Preserve report-source boundary | Runtime template and FINOLABS partial under maintained HTML directory; generated exports remain ignored. No parallel Mermaid/ad hoc report. |
-| V — Simplicity and type safety | Existing stack sufficient | Four additive typed MCP operations; existing composition and evidence ports extended narrowly; no model runtime or agent scheduler. |
-| VI — Migration/release evidence | No evidence-transforming change now | Schema scripts planned only after approval; publish additive-schema invariants and rollback/read compatibility. Any evidence transformation needs separate owner ruling. Integration and release remain separately evidenced. |
+| I — Mission-bound autonomy | Pass | Snapshot reads happen only on a user request or an agent milestone inside its turn; reading never starts collection. |
+| II — User-controlled connectors | Pass | No connector, session or quota change. |
+| III — Evidence and falsification | Pass | The snapshot already carries claim gate, frame pending reason, channel outcomes and unknowns; the guidance forbids inferring missing states or rendering withheld claims as permitted. |
+| IV — Deterministic report builders | Pass (amended) | Constitution 2.1.0, amended 2026-10-19 per R2-4: the template rule governs Ignis research reports; tracking artifacts follow the shipped `ignis-track` rules, which the amended IV now names. |
+| V — Simplicity and type safety | Pass with obligation | Removing a tool is an intentional breaking boundary: every consumer is listed in Project Structure and each must be updated or removed with proof. The guidance is one source served three ways, not three copies. |
+| VI — Migration and release | Pass | No migration. Rollback is restoring the removed files from git; retained tables are untouched. |
 
-No constitution exception is requested. A review finding that requires an exception blocks implementation until recorded owner approval.
+Product reasoning: outcome is the user's ability to follow a mission and see the claim gate; design targets Claude Code first because that is where the owner works and where the current refusal sits; critical thinking is enforced by display rules that forbid inferring support, demand or liveness.
+
+Post-design re-check: all principles pass against constitution 2.1.0.
 
 ## Project Structure
 
@@ -84,56 +61,92 @@ No constitution exception is requested. A review finding that requires an except
 
 ```text
 specs/014-evidence-factory/
-  spec.md                         # Approved requirements
-  plan.md                         # Owner-approved technical design
-  research.md                     # Repository-grounded choices and alternatives
-  data-model.md                   # Workflow, revision and transaction boundaries
-  contracts/relay-viewer.md        # Read tools, HTTP and UI protocol
-  contracts/research-work.md       # Host work and findings protocol
-  contracts/follow-up.md           # Child collection admission and provenance
-  quickstart.md                   # Validation guide and acceptance mapping
-  checklists/requirements.md       # Existing scope checklist
-  tasks.md                        # Dependency-ordered implementation work
+  spec.md                    # R2 requirements and clarifications
+  plan.md                    # This R2 plan
+  research.md                # R1 decisions plus R2-1..R2-5
+  data-model.md              # R1 records; tracking artifact and caller-root resolution added
+  contracts/tracking.md      # New: snapshot use and ignis-track delivery
+  contracts/caller-root.md   # New: root resolution by protocol era
+  contracts/relay-viewer.md  # Retired in R2; kept as history
+  contracts/research-work.md # Unchanged
+  contracts/follow-up.md     # Unchanged
+  quickstart.md              # R2 validation guide
+  checklists/requirements.md # Re-validated after R2 clarify
+  tasks.md                   # To be regenerated by speckit-tasks
 ```
 
-`tasks.md` is generated under Spec Kit after explicit plan approval; unchecked tasks are not implementation evidence.
+### Source changes (proposed, not made in planning)
 
-### Proposed source locations, not created in planning
+Remove (viewer consumers found by repository search on 2026-10-19):
 
 ```text
-src/ignis/domain/                  # Typed work/event/finding/lifecycle models
-src/ignis/application/ports/       # Narrow workflow transactions and read projection
-src/ignis/application/use_cases/   # Record work, project viewer, admit follow-up
-src/ignis/infrastructure/persistence/
-                                  # SQLite/PostgreSQL atomic operations and read adapters
-src/ignis/infrastructure/templates/html/
-                                  # Maintained relay template; existing FINOLABS partial
-src/ignis/interfaces/mcp/          # Four additive tool handlers and lifespan ownership
-src/ignis/infrastructure/          # Separate bounded loopback viewer service
-sql/                              # Future additive PostgreSQL schema, no evidence rewrite
-tests/unit/                       # Domain, masking, transitions, template/security contracts
-tests/integration/                # DB parity, MCP, lifecycle, viewer and follow-up tests
+src/ignis/infrastructure/mission_relay.py                  # loopback HTTP listener
+src/ignis/infrastructure/templates/html/mission_relay.html # viewer template
+src/ignis/infrastructure/templates/html_builder.py         # build_mission_relay_artifact only
+src/ignis/interfaces/mcp/server.py                         # open_mission_relay tool and handler,
+                                                           # listener creation, started_dashboard
+                                                           # and the run_started dashboard hook
+tests/unit/test_mission_relay_http.py
+tests/unit/test_mission_relay_template.py
+tests/integration/test_mission_relay_browser.py, _visual.py, _accessibility.py,
+  _responsive.py, _research_browser.py, test_mission_follow_up_browser.py,
+  test_mission_follow_up_viewer.py, and viewer cases in _lifecycle.py, _security.py
 ```
 
-Follow existing file naming/composition after tasks identify exact ownership. Extend existing evidence decoders rather than creating another source policy.
+Modify:
 
-## Design and delivery boundaries
+```text
+src/ignis/interfaces/mcp/server.py           # ignis_track prompt and resource
+src/ignis/infrastructure/caller_storage.py   # modern-era root resolution (contracts/caller-root.md)
+src/ignis/interfaces/mcp/guides/ignis_track.md  # new packaged guidance source
+.agents/skills/ignis-track/SKILL.md          # mirror of the packaged guidance
+.hermes/tools.json, hermes_manifest.json     # tool catalog 48 -> 47
+scripts/wheel_mcp_smoke.py                   # expected tool count
+README.md, README.vi.md, docs/USER_GUIDE.md, docs/USER_GUIDE.vi.md
+tests/unit/test_public_mcp_contract.py, test_public_distribution_contract.py,
+  test_mission_relay_mcp_tools.py, test_caller_relay_read_composition.py
+tests/integration/test_mission_relay_mcp.py, test_mission_relay_us3_readback.py,
+  test_research_work_mcp.py, test_clean_user_journey.py
+```
 
-- Proposed tools: `open_mission_relay`, `get_mission_relay_snapshot`, `record_mission_research_work`, `execute_mission_follow_up`. No existing tool is renamed, removed or widened.
-- Viewer transport owns only capabilities and rendering; host-work writes are MCP operations outside HTTP. Task Relay's one-answer POST transport is untouched.
-- FastMCP lifespan owns the async loop and viewer shutdown. HTTP threads submit bounded read coroutines to that loop; they never borrow a PostgreSQL pool across loops. Cancel pending reads and revoke capabilities before loop teardown.
-- A read-only adapter refuses absent/old schema. SQLite file connections use read-only access; in-memory support uses a coherent snapshot of the already initialized store without bootstrapping canonical storage. PostgreSQL reads use read-only repeatable-read transactions. Do not call lazy repository initialization from viewer opening or refreshing.
-- Progress mutation and related evidence/work/finding mutation share one transaction. Existing multi-commit mission execution must receive narrow transaction operations; filesystem journals are not the event bus. No promise of a globally atomic collection pass.
-- Collection status, research authority and viewer lifetime remain independent. A recorded writer claim is not proof of active work. Bounded host activity receipts distinguish host-reported from harness-observed facts.
-- Follow-up uses a new child collection mission with inherited/tightened authority and a persisted parent relationship; the completed parent is never reopened. A child frame does not permit a parent claim. Related results are labeled with their mission/frame, not blended into one apparent permission context.
-- No host semantic classification or provider call occurs in the viewer. Host judgment uses existing analysis/qualification/claim responsibilities; deterministic admission and lifecycle validation stay in code.
+Packaging needs no `pyproject.toml` change: the wheel ships all of `src/ignis`. The existing distribution asset check must instead prove the wheel contains the guide and no viewer template.
+
+Keep `_MissionRelayRuntime` and its `read_service` and `caller_scopes`: the snapshot tool and the caller-storage middleware depend on them. Renaming it is out of scope.
+
+## Delivery slices
+
+1. **Caller root on modern protocol** (FR-032, SC-018). Spike first: prove middleware can return `InputRequiredResult` and read `input_responses`; then implement and test both eras; then the live Claude Code probe. Delivers value on its own: every mission tool works from Claude Code.
+2. **`ignis-track` guidance** (FR-007, FR-008, FR-014, FR-030, FR-031; SC-002, SC-003). Packaged guide, prompt, resource, SKILL mirror with an equality test, and an audit that every display rule maps to a snapshot field or a typed refusal.
+3. **Viewer retirement** (FR-006, FR-013). Remove the listed consumers, update catalogs and docs to 47 tools, and prove no remaining reference.
+4. **Acceptance** (SC-001, SC-004–SC-018). A real mission tracked from Claude Code at two or more milestones with artifact-to-snapshot readback, plus the still-valid R1 gates.
+
+Disposition of open R1 tasks for `speckit-tasks`:
+
+| R1 task | R2 disposition |
+|---|---|
+| T079 real follow-up UAT | Keep; evidence is the tracking artifact instead of the viewer. |
+| T081 end-to-end security | Narrow to snapshot and artifact surfaces: cross-mission and child scope, masking, bounds, publication consent. Drop Host/Origin/CSP/browser cases. |
+| T082 lifecycle races | Keep. |
+| T083 desktop FPS | Drop. |
+| T084 schema parity | Keep. |
+| T087 regressions | Keep, against the R2 tree. |
+| T090 acceptance | Rescope to R2 FR/SC. |
+| T091, T092 PR and merge | Keep, owner-gated. |
+
+The uncommitted Relay canvas work in the main checkout serves only the retired viewer. Park it on its own branch before slice 3; do not merge it.
 
 ## Integration and approval gates
 
-Owner approved this plan on 2026-10-04 in response to the question explicitly covering the four additive public tools and workflow schema. Proceed to `speckit-tasks`; runtime execution remains the next phase. Applying schema to Supabase or using actual social sessions follows the applicable explicit authority boundary. No such operation occurs during planning or task generation.
+1. Owner approves this R2 plan. Done on 2026-10-19.
+2. `speckit-constitution` executes the IV amendment. Done: constitution 2.1.0 on 2026-10-19.
+3. `speckit-tasks` regenerates `tasks.md`.
+4. Implementation follows the slices; live probes and real missions use only current authority.
 
-Before calling the feature integrated: converge against all FR/SC, review/security findings resolved or explicitly accepted, actual UAT evidence attached, focused PR merged and post-merge checks verified in canonical backlog. Do not equate local checks with shipping or silently select a release/version.
+Before calling R2 integrated: converge against FR-001–032 and SC-001–018, resolve or explicitly accept review and security findings, attach the Claude Code probe and real-mission tracking evidence, merge a focused PR and verify post-merge checks in the canonical backlog. No release or version is selected here.
 
 ## Complexity Tracking
 
-No exception. The added workflow tables and four tools pay for requirements FR-019–029, not a speculative scheduler. The cost falls on repository transaction implementations and hosts recording trustworthy receipts; the benefit is a truthful viewer and bounded research handoffs.
+| Item | Why it is needed | Cost and expiry |
+|---|---|---|
+| Two root-resolution paths (legacy `roots/list` and modern `InputRequiredResult`) | Clients on both protocol eras exist today; Codex and Claude Code may differ. | Paid in `caller_storage.py` and its tests. Remove the legacy path once no supported host negotiates a pre-2026-07-28 version. |
+| Configured-root fallback on modern connections | Claude Code's support for roots inside `InputRequiredResult` is unverified. | Requires the operator to set `IGNIS_CALLER_ROOT`. Revisit when the live probe shows Claude Code returns roots. |

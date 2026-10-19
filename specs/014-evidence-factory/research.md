@@ -1,6 +1,6 @@
 # Research: Observable Research Mission
 
-**Date**: 2026-10-04 | **Status**: Design decisions approved with the technical plan; not runtime verification.
+**Date**: 2026-10-04, R2 additions 2026-10-19 | **Status**: R1 decisions approved with the R1 plan; R2-1..R2-5 drafted with the R2 plan and awaiting its approval. Sections 3, 4 and 8 are superseded by R2-1 where they concern the built-in viewer. Not runtime verification.
 
 Two read-only research branches inspected persistence and host integration in the managed worktree. They changed no files, ran no tests and accessed no sessions/databases. Findings below are code evidence, not executed acceptance.
 
@@ -73,3 +73,58 @@ Two read-only research branches inspected persistence and host integration in th
 All architecture unknowns needed for planning have a proposed resolution. Runtime feasibility and acceptance remain to be demonstrated: dual-backend transactions, lifespan shutdown races, truly read-only SQLite opening, host concurrency and child-frame UI boundaries. They are implementation verification gates, not claimed solved by documentation.
 
 No dependency installed, product code changed, schema applied, live connector used, test suite run or benchmark performed in this planning phase.
+
+## R2 decisions (2026-10-19)
+
+Evidence for R2 came from repository search, installed package source in `.venv` and this session's Claude Code MCP log. No product code changed and no test ran for these decisions.
+
+### R2-1. Retire the built-in viewer
+
+**Decision**: Remove `open_mission_relay`, the loopback HTTP listener, the viewer template and builder, and the automatic dashboard start. Keep the snapshot tool and every storage, reader and projection layer behind it.
+
+**Rationale**: Owner decision after a product review: Ignis's value is the collection and evidence mechanism; a UI is one way to visualize it, and agents can render that view for the user. The viewer had no eligible real-mission trace, and its remaining gates (FPS, browser security, visual acceptance) were the most expensive open work.
+
+**Alternatives considered**: Keep the viewer as an optional extra (keeps the maintenance and security surface for a feature the owner no longer wants). Leave it unmaintained (a stale tool keeps advertising a surface that no longer meets its spec). Both rejected.
+
+### R2-2. Deliver `ignis-track` as MCP prompt and resource from one packaged source
+
+**Decision**: One markdown guide inside the package, served as prompt `ignis_track` and resource `fn-ignis://guide/ignis-track`, mirrored to `.agents/skills/ignis-track/SKILL.md` and kept equal by a test.
+
+**Rationale**: The wheel ships `src/ignis` only; `.agents/skills` never reaches package or image users. The server already serves `market_research_pipeline` and `fn-ignis://sop/market-research` this way, so no new mechanism is needed. A packaged file rather than a Python string keeps prose out of code.
+
+**Alternatives considered**: A SKILL.md alone (absent from installs). A new tool returning guidance (adds a tool signature for static text). Rejected.
+
+### R2-3. Point-in-time artifacts, no polling, local by default
+
+**Decision**: Regenerate only on user request or at milestones inside the agent's turn. Write a local file by default; publish only with explicit consent for that publication.
+
+**Rationale**: Constitution I forbids background loops; an agent polling a snapshot is the same loop by another name. A published artifact sends mission data off the machine, which the user must decide.
+
+**Alternatives considered**: Periodic agent refresh (background loop, cost, and drift from the mission boundary). Host default publishing (silent data egress). Rejected by owner decision.
+
+### R2-4. Scope Constitution IV to Ignis research reports
+
+**Decision**: Amend IV so its maintained-template rule governs Ignis research reports (mission reports, Gap Reports) and not host-side tracking artifacts, which follow the `ignis-track` display rules instead. Executed through `speckit-constitution` before implementation.
+
+**Rationale**: IV exists so that a report Ignis issues has reproducible layout and cannot be rewritten ad hoc into a different claim. A tracking artifact is the host's presentation of a snapshot; its integrity comes from snapshot states and display rules, not from a template.
+
+**Alternatives considered**: A time-limited exception (leaves a standing conflict). Forbidding HTML in artifacts (limits hosts without improving integrity). Rejected by owner decision.
+
+### R2-5. Caller roots on MCP 2026-07-28+ connections
+
+**Decision**: On a connection whose negotiated protocol is 2026-07-28 or later and whose client advertises roots, request roots by returning `InputRequiredResult` with a `ListRootsRequest`, and validate the returned `ListRootsResult` with the existing single-root rules. If the client re-calls without roots, use only a valid, unchanged, startup-configured `IGNIS_CALLER_ROOT`; otherwise refuse with a reason naming the protocol-forbidden case. Legacy connections keep `roots/list`.
+
+**Evidence**:
+- This session's Claude Code MCP log records `negotiatedProtocolVersion "2026-07-28"` and an immediate `ROOT_REQUIRED category=ROOTS_RPC_UNAVAILABLE roots_capability=ADVERTISED rpc_error=UNKNOWN` for `list_research_missions` and `list_research_workspaces`.
+- `caller_storage.py` calls `ctx.session.list_roots()` and classifies every exception other than `NotImplementedError` as `UNKNOWN`.
+- Installed `mcp` 2.2.0: `ServerSession.list_roots` is marked deprecated as of 2026-07-28 (SEP-2577) and raises `NoBackChannelError`; `connection.py` states that a modern duplex connection refuses `send_raw_request` "because the protocol forbids server-initiated requests".
+- Installed `mcp_types`: `InputRequests` admits `ListRootsRequest`, and `InputResponses` admits `ListRootsResult`.
+- Installed FastMCP 4.0.4: `Context.input_responses` and `Context.request_state` exist, and its own guidance names the guard pattern ("return an InputRequiredResult from the tool ... and read ctx.input_responses").
+
+**Unknowns, verified before implementation**:
+- Whether FastMCP 4.0.4 lets the `on_call_tool` middleware return `InputRequiredResult` for any mission-scoped tool, or only a tool function. A spike settles this; if only tools can, each mission-scoped handler needs a shared guard.
+- Whether Claude Code answers a `ListRootsRequest` inside `InputRequiredResult`. A live probe settles this; a negative result leaves the configured-root fallback as the working path.
+
+**Rationale**: The protocol now forbids the request Ignis depends on, so the 2026-10-11 rule "RPC failure refuses without fallback" no longer describes a failure. It describes a request that can never succeed. The owner narrowed that rule for this case only.
+
+**Alternatives considered**: InputRequired only (Claude Code stays refused if it does not answer). Configured root only (ignores the client's real roots). Downgrading the negotiated protocol (not under Ignis's control and moves against the client). Rejected.
