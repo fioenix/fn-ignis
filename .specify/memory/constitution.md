@@ -1,16 +1,18 @@
 <!--
 Sync Impact Report
-- Version change: 1.1.0 -> 2.0.0
+- Version change: 2.0.0 -> 2.1.0
 - Modified principles:
-  - I. Zero-Token Ingress and Separation of Concerns -> I. Mission-Bound Autonomy and Zero-Token Collection
-  - II. Pluggable and Isolated Connector Architecture -> II. Pluggable and User-Controlled Connector Architecture
-  - III. Storage-First Evidence and Time Semantics -> III. Evidence-First Research and Falsification
-  - IV. Deterministic Artifact Builders (clarified as report-source boundary)
-  - V. Simplicity, Surgical Changes, and Type Safety (retained)
-  - VI. Evidence-Gated Migration and Release (retained)
-- Added sections: Product Reasoning Constraints
+  - IV. Deterministic Artifact Builders -> IV. Deterministic Report Builders (scope limited to Ignis
+    research reports; new guidance for host-rendered tracking artifacts)
+- Added sections: none
 - Removed sections: none
-- Removed commitments: optional always-on worker, scheduled ingress, continuous baseline collection
+- Technology Constraints: "Artifacts" line narrowed to research reports
+- Bump rationale: MINOR. No principle is removed or made incompatible; IV gains explicit guidance
+  for a new artifact class (owner decision 2026-10-19, Spec 014 R2 research R2-4).
+- Templates checked: .specify/templates/plan-template.md, spec-template.md, tasks-template.md and
+  checklist-template.md carry no Principle IV wording; no template change needed.
+- Dependent documents checked: AGENTS.md section 7 ("only report source committed as code") stays
+  accurate. Historical plans (specs/007, 009, 011) keep their dated checks unchanged.
 - Follow-up TODOs: none
 -->
 # fn-ignis Constitution
@@ -66,16 +68,26 @@ principles for `fn-ignis`.
   separate fact and MUST NOT silently substitute for ingestion time. Legacy observations whose
   ingestion time was never recorded keep `observed_at = NULL` with explicit provenance.
 
-### IV. Deterministic Artifact Builders
+### IV. Deterministic Report Builders
 
-- The MCP server MUST use maintained builders and templates for runtime HTML reports.
-- HTML templates in `src/ignis/infrastructure/templates/html/` are the only report source committed
-  as code. Agents MUST NOT regenerate a report's full HTML/CSS ad hoc.
+- Research reports that Ignis issues, such as mission reports and Gap Reports exported through the
+  MCP server, MUST be built from maintained builders and templates.
+- HTML templates in `src/ignis/infrastructure/templates/html/` are the only research-report source
+  committed as code. Agents MUST NOT regenerate a research report's full HTML/CSS ad hoc.
+- A tracking artifact is a host agent's point-in-time rendering of a mission snapshot, not an Ignis
+  research report, and this template rule does not govern it. Agents MAY render it in any form, but
+  MUST follow the tracking guidance Ignis ships: show only states present in the snapshot, never
+  present a withheld or stale claim as permitted, label the artifact as point-in-time, and keep it
+  on the user's machine unless the user consents to each publication.
 - Standalone documentation diagrams MAY live outside the report-template directory when they are not
   runtime report sources. HTML remains the canonical diagram source; exported SVG/PNG MAY be embedded
   in documents, and parallel Mermaid sources are prohibited.
-- Builders and templates MUST preserve layout fidelity, reproducibility, accessible output, and the
-  vendored FINOLABS design tokens.
+- Report builders and templates MUST preserve layout fidelity, reproducibility, accessible output,
+  and the vendored FINOLABS design tokens.
+
+Rationale: a report Ignis issues must be reproducible and must not be rewritten into a different
+claim. A tracking artifact draws its integrity from snapshot states and the shipped display rules,
+not from a template.
 
 ### V. Simplicity, Surgical Changes, and Type Safety
 
@@ -125,7 +137,8 @@ does not authorize claims of universal geographic or industry coverage.
 - **Protocol:** Model Context Protocol through FastMCP.
 - **Ingress libraries:** `google-api-python-client`, `feedparser`, `httpx`, and `playwright` where a
   user-requested connector requires a browser.
-- **Artifacts:** maintained single-file HTML templates using the vendored FINOLABS design tokens.
+- **Research reports:** maintained single-file HTML templates using the vendored FINOLABS design
+  tokens. Tracking artifacts are host-rendered under Principle IV.
 
 ---
 
@@ -149,4 +162,4 @@ pays the cost, its expiry condition, and the owner approval that permits it. Tes
 labels, and remembered command output are not evidence by themselves: run the command against the
 surface that owns the claim, read the output, and record what was not checked.
 
-**Version**: 2.0.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-09-29
+**Version**: 2.1.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-10-19
