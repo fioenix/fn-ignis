@@ -853,7 +853,7 @@
     "type": "function",
     "function": {
       "name": "propose_research_workspace",
-      "description": "Propose where a new research would live: `<host-workspace>/.ignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.",
+      "description": "Propose caller-owned research storage under the uniquely authorized native repository `.fnignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
