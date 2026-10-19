@@ -12,7 +12,7 @@ R2 changes three things relative to R1:
 
 1. **Retire the built-in viewer.** Remove the `open_mission_relay` tool, the loopback HTTP listener, the `mission_relay.html` template and its builder, and the automatic dashboard start after run admission. Keep the relay runtime owner that serves snapshot reads and caller scopes.
 2. **Add `ignis-track`.** One maintained guidance text, served as MCP prompt `ignis_track` and resource `fn-ignis://guide/ignis-track`, and mirrored to `.agents/skills/ignis-track/SKILL.md`. It tells agents how to read the snapshot, which display rules hold, when to regenerate and where the artifact may go.
-3. **Resolve caller roots on MCP 2026-07-28+ connections.** Server-initiated `roots/list` is forbidden there (SEP-2577), which is why Claude Code currently gets `ROOT_REQUIRED category=ROOTS_RPC_UNAVAILABLE`. Use the startup-configured `IGNIS_CALLER_ROOT` when present; otherwise request roots through `InputRequiredResult` (owner decision after the T094 spike).
+3. **Use the folder the agent was opened in as the caller root.** Server-initiated `roots/list` is forbidden on MCP 2026-07-28 (SEP-2577), which is why Claude Code got `ROOT_REQUIRED category=ROOTS_RPC_UNAVAILABLE`. After T098 the owner chose the server's startup folder as the root, with `IGNIS_CALLER_ROOT` as an optional override (research R2-6).
 
 Kept from R1 as delivered: progress facts and events committed with their data, coherent no-bootstrap readers on both backends, the allowlisted projection, `get_mission_relay_snapshot`, research-work recording and gap-linked follow-up.
 
@@ -148,5 +148,4 @@ Before calling R2 integrated: converge against FR-001–032 and SC-001–018, re
 
 | Item | Why it is needed | Cost and expiry |
 |---|---|---|
-| Two root-resolution paths (legacy `roots/list` and modern `InputRequiredResult`) | Clients on both protocol eras exist today; Codex and Claude Code may differ. | Paid in `caller_storage.py` and its tests. Remove the legacy path once no supported host negotiates a pre-2026-07-28 version. |
-| Configured root before client roots on modern connections | The T094 spike showed a client that cannot answer a roots request fails the call itself, so the server cannot fall back after asking; Claude Code's answer is still unverified. | Requires the operator to set `IGNIS_CALLER_ROOT`, and on modern connections it is not compared with client roots. Revisit after T098 shows whether Claude Code returns roots. |
+| Startup-folder root with an optional override | One rule for every host and protocol era; replaces the T096 client-roots paths. | Hosts that start servers outside the opened folder need `IGNIS_CALLER_ROOT`; the home and filesystem-root refusal is the only guard. |

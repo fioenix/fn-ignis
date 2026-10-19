@@ -68,19 +68,16 @@ Display-state mapping:
 | Stale | `claim_gate.state` is `STALE` or `HISTORY`, or a later read returned a typed refusal or a different frame digest; the earlier artifact's permission is withdrawn |
 | Point-in-time | always; `read_at` is shown and the artifact never claims to be live |
 
-## Caller-root resolution (R2)
+## Caller-root resolution (R2, revised 2026-10-19)
 
 Resolution is per mission-scoped call and creates no persisted row; the resolved root selects the existing caller scope.
 
-| Protocol era | Declared roots capability | Resolution | Refusal category when it fails |
-|---|---|---|---|
-| Legacy (before 2026-07-28) | ADVERTISED | `roots/list`; exactly one valid `file://` directory; must equal a configured root if one is set | existing categories |
-| Any | NOT_ADVERTISED | startup-configured `IGNIS_CALLER_ROOT`, identity-pinned | existing categories |
-| Any | UNKNOWN | refuse; a modern connection sends no `roots/list` | `ROOT_CAPABILITY_UNKNOWN` |
-| 2026-07-28+ | ADVERTISED, `IGNIS_CALLER_ROOT` configured | the configured root, identity-pinned; the client is not asked and its roots are not compared | `CONFIGURED_ROOT_INVALID`, `CONFIGURED_ROOT_CHANGED` |
-| 2026-07-28+ | ADVERTISED, no configured root | first round returns `InputRequiredResult` with a `ListRootsRequest`; the retry's `ListRootsResult` is validated with the legacy rules | root-count/URI/path categories; `ROOTS_REQUEST_FORBIDDEN` when the retry carries no roots |
+| Source | Used when | Refusal category when it fails |
+|---|---|---|
+| `IGNIS_CALLER_ROOT` set at server start | always, when present | `CONFIGURED_ROOT_INVALID`, `CONFIGURED_ROOT_CHANGED` |
+| Server working directory at startup (the folder the agent was opened in) | no override is set | `STARTUP_ROOT_REFUSED` (filesystem root or home directory), `STARTUP_ROOT_INVALID`, `STARTUP_ROOT_CHANGED` |
 
-`ROOTS_RPC_UNAVAILABLE` remains for a legacy connection whose `roots/list` actually fails.
+Client roots and the negotiated protocol era are not consulted.
 
 ## Backend and migration invariants
 

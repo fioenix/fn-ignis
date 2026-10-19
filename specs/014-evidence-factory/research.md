@@ -130,3 +130,15 @@ Evidence for R2 came from repository search, installed package source in `.venv`
 **Rationale**: The protocol now forbids the request Ignis depends on, so the 2026-10-11 rule "RPC failure refuses without fallback" no longer describes a failure. It describes a request that can never succeed. The owner narrowed that rule for this case only.
 
 **Alternatives considered**: InputRequired only (Claude Code stays refused if it does not answer). Configured root only (ignores the client's real roots). Downgrading the negotiated protocol (not under Ignis's control and moves against the client). Rejected.
+
+### R2-6. The caller root is the folder the agent was opened in
+
+**Decision** (owner, 2026-10-19, superseding R2-5): The caller root is the folder the agent session was opened in, which is the MCP server's working directory at startup, snapshotted and identity-pinned. `IGNIS_CALLER_ROOT` is an optional override. Client roots and the protocol era are no longer consulted, and no roots request is sent. A startup folder equal to the filesystem root or the user's home directory refuses, so a globally installed server never creates `.fnignis/` there.
+
+**Evidence**: T098 showed Claude Code answers a roots request but a session with an extra working directory is refused by the single-root rule (`ROOT_COUNT_INVALID`). The fn-ignis server Claude Code started for this repository runs with working directory `/Users/fioenix/Projects/fn-ignis` (PID 86495, `lsof` cwd).
+
+**Rationale**: Users create a repository folder and open their agent in it; `.fnignis/` belongs there. Client roots add a protocol dependency (forbidden server requests on 2026-07-28, multi-root sessions) without improving that common case. The refused home and filesystem-root folders keep a globally installed server from scattering `.fnignis/`.
+
+**Alternatives considered**: Selecting among client roots (first root, or the root holding `.fnignis/`): more rules, still host-dependent. Requiring `IGNIS_CALLER_ROOT`: manual setup for every user. Rejected.
+
+**Unverified**: which working directory Codex and other hosts give stdio servers; `IGNIS_CALLER_ROOT` covers a host that starts servers elsewhere.
