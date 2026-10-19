@@ -148,4 +148,4 @@ Before calling R2 integrated: converge against FR-001–032 and SC-001–018, re
 
 | Item | Why it is needed | Cost and expiry |
 |---|---|---|
-| Startup-folder root with an optional override | One rule for every host and protocol era; replaces the T096 client-roots paths. | Hosts that start servers outside the opened folder need `IGNIS_CALLER_ROOT`; the home and filesystem-root refusal is the only guard. |
+| Startup-folder root with an optional override | One rule for every host and protocol era; replaces the T096 client-roots paths. | Hosts that start servers outside the opened folder need `IGNIS_CALLER_ROOT`; the startup-folder refusal (filesystem root, home or a parent of it, shared, sticky or foreign-owned directories) and identity pinning are the only guards. |

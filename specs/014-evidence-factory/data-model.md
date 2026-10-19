@@ -75,7 +75,7 @@ Resolution is per mission-scoped call and creates no persisted row; the resolved
 | Source | Used when | Refusal category when it fails |
 |---|---|---|
 | `IGNIS_CALLER_ROOT` set at server start | always, when present | `CONFIGURED_ROOT_INVALID`, `CONFIGURED_ROOT_CHANGED` |
-| Server working directory at startup (the folder the agent was opened in) | no override is set | `STARTUP_ROOT_REFUSED` (filesystem root or home directory), `STARTUP_ROOT_INVALID`, `STARTUP_ROOT_CHANGED` |
+| Server working directory at startup (the folder the agent was opened in) | no override is set | `STARTUP_ROOT_REFUSED` (filesystem root, home or a parent of it, a world-writable or sticky directory, or one the server's user does not own), `STARTUP_ROOT_INVALID`, `STARTUP_ROOT_CHANGED` |
 
 Client roots and the negotiated protocol era are not consulted.
 
