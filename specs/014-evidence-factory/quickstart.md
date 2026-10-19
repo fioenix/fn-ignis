@@ -77,7 +77,7 @@ T005 was `tests/unit/test_mission_relay_projection.py`: at that time 59 cases co
 6. Exercise collection completion while assigned analysis remains valid; separately end/cancel/fail/expire/insufficient research. New starts/follow-ups are refused after termination. Writer ownership without actual activity shows unknown, not active work.
 7. Between milestones and after the agent's turn ends, count snapshot reads: zero. Interrupt the agent mid-mission: the underlying research is not cancelled, and no read follows.
 8. Attack the snapshot: cross-mission and child scope, unsafe text, oversized pagination. Inspect artifacts, JSON and logs for credentials, protected content and reasoning. Attempt to publish an artifact without consent: the agent must ask first.
-9. From Claude Code on a negotiated 2026-07-28 connection, call a mission tool three ways: client returns roots; client returns none with `IGNIS_CALLER_ROOT` set; neither. Record the negotiated version and which path resolved. Repeat one call from a legacy-protocol client.
+9. From Claude Code on a negotiated 2026-07-28 connection, call a mission tool with `IGNIS_CALLER_ROOT` set (expect the configured root, no roots request), then without it (expect a roots request; record whether Claude Code answers it), and with neither working (expect `ROOTS_REQUEST_FORBIDDEN` or a client-side failure). Record the negotiated version and which path resolved. Repeat one call from a legacy-protocol client.
 10. Read the `ignis_track` prompt and `fn-ignis://guide/ignis-track` resource from an installed wheel, and compare them with `.agents/skills/ignis-track/SKILL.md`.
 
 ## Requirement-to-validation coverage

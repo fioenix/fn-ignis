@@ -112,7 +112,7 @@ Evidence for R2 came from repository search, installed package source in `.venv`
 
 ### R2-5. Caller roots on MCP 2026-07-28+ connections
 
-**Decision**: On a connection whose negotiated protocol is 2026-07-28 or later and whose client advertises roots, request roots by returning `InputRequiredResult` with a `ListRootsRequest`, and validate the returned `ListRootsResult` with the existing single-root rules. If the client re-calls without roots, use only a valid, unchanged, startup-configured `IGNIS_CALLER_ROOT`; otherwise refuse with a reason naming the protocol-forbidden case. Legacy connections keep `roots/list`.
+**Decision** (revised 2026-10-19 after the T094 spike): On a connection whose negotiated protocol is 2026-07-28 or later and whose client advertises roots, use a valid, identity-unchanged startup-configured `IGNIS_CALLER_ROOT` directly, without asking the client. Without one, request roots by returning `InputRequiredResult` with a `ListRootsRequest` and validate the returned `ListRootsResult` with the existing single-root rules; a retry without roots refuses with a reason naming the protocol-forbidden case. Legacy connections keep `roots/list` and the configured-equals-native check.
 
 **Evidence**:
 - This session's Claude Code MCP log records `negotiatedProtocolVersion "2026-07-28"` and an immediate `ROOT_REQUIRED category=ROOTS_RPC_UNAVAILABLE roots_capability=ADVERTISED rpc_error=UNKNOWN` for `list_research_missions` and `list_research_workspaces`.
@@ -124,6 +124,8 @@ Evidence for R2 came from repository search, installed package source in `.venv`
 **Unknowns, verified before implementation**:
 - Whether FastMCP 4.0.4 lets the `on_call_tool` middleware return `InputRequiredResult` for any mission-scoped tool, or only a tool function. A spike settles this; if only tools can, each mission-scoped handler needs a shared guard.
 - Whether Claude Code answers a `ListRootsRequest` inside `InputRequiredResult`. A live probe settles this; a negative result leaves the configured-root fallback as the working path.
+
+**Spike outcome (T094)**: the middleware seam works and the era is read from `ctx.session.protocol_version`. A client that cannot answer a roots request fails the call itself, so a server-side fallback after asking is unreachable; hence the configured root is checked before asking.
 
 **Rationale**: The protocol now forbids the request Ignis depends on, so the 2026-10-11 rule "RPC failure refuses without fallback" no longer describes a failure. It describes a request that can never succeed. The owner narrowed that rule for this case only.
 
