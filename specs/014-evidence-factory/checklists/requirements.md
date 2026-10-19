@@ -14,14 +14,14 @@
 ## Requirement Completeness
 
 - [x] No unresolved requirement placeholder remains; expanded written scope is presented for owner review, not inferred approved.
-- [x] Mission authority plus five visual columns preserve all six evidence responsibilities and failure/withholding paths.
+- [ ] Mission authority plus five visual columns preserve all six evidence responsibilities and failure/withholding paths.
 - [x] Requirements preserve source lineage, role separation, unknown values and critical thinking.
-- [x] Keyboard, reduced-motion, responsive and actual visual acceptance are specified.
+- [ ] Keyboard, reduced-motion, responsive and actual visual acceptance are specified.
 - [x] Live viewer cannot start a collector, fabricate stage progress or silently promote stale claims.
 - [x] Current-run coherence, duplicate/reordered reads, freshness, terminal collection versus later analysis and finite viewing boundaries are defined.
 - [x] Existing signatures, sessions, persisted evidence and release scope are protected.
-- [x] Collection completion, research termination and viewer expiry have distinct behavior.
-- [x] Motion-only pause, refresh pause and mission execution have distinct behavior.
+- [ ] Collection completion, research termination and viewer expiry have distinct behavior.
+- [ ] Motion-only pause, refresh pause and mission execution have distinct behavior.
 - [x] Actual concurrent work, sequential fallback and unavailable capacity are distinguished.
 - [x] Evidence-bearing handoffs, shared-source identity, findings history and obsolete-result rejection are specified.
 - [x] Provisional strategic claims still require current-frame permission.
@@ -49,12 +49,12 @@ These references identify required future acceptance evidence, not results alrea
 
 ## Feature Readiness
 
-- [x] Owner selects FR-006's scope: real mission dashboard.
-- [x] Owner approved the light-mode mock direction.
-- [x] Five user stories and 29 requirements have reviewable acceptance coverage.
+- [ ] Owner selects FR-006's scope: real mission dashboard.
+- [ ] Owner approved the light-mode mock direction.
+- [ ] Five user stories and 29 requirements have reviewable acceptance coverage.
 - [x] Self-review resolves pause/lifecycle wording conflicts without narrowing the research-team scope.
 - [x] Owner explicitly approves written scope R1, including observable research work, findings revisions and bounded follow-up: "Duyệt written scope R1" on 2026-10-04.
-- [x] Owner approval is recorded in spec and canonical backlog.
+- [ ] Owner approval is recorded in spec and canonical backlog.
 - [x] Completion audit verifies both approval records and unchanged no-plan/no-runtime boundary.
 
 ## Notes

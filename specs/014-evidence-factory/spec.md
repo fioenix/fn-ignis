@@ -4,17 +4,17 @@
 
 **Created**: 2026-10-04
 
-**Status**: Current task ledger (`tasks.md`, 2026-10-14): T001–T078, T080, T085, T086, T088 and T089 accepted: 83/92; T079, T081–T084, T087 and T090–T092 remain open. Historical snapshot at T058, retained unchanged: T001–T058 accepted:58/92. US4 pure domain and atomic recording port contracts implemented and independently reviewed locally: 189 targeted tests passed. T041/T042 test-design acceptance does not establish storage behavior. T047 SQLite lifecycle verified with 339 scoped offline tests and independently reviewed. T048 PostgreSQL core lifecycle independently reviewed after one timing repair:118 scoped current-source PG tests passed, plus11 fresh convention tests; cleanup verified. T049 SQLite result settlement independently reviewed:416 scoped current-source offline tests passed; separate66 actualPG schema companion passed, cleanup verified. T050 PostgreSQL result parity independently reviewed:137 scopedPG,66schema,416offline and separate35 updated owner/result/convention cases passed without overlapping totals; final temporary DB/role cleanup verified. T051 typed recording service independently reviewed:396 scoped offline and32 actualPG tests passed, zero failure/error/skip; temporary DB/role cleanup verified. T052 persisted lifecycle independently reviewed:117 new/convention,385 disjoint regression and53 nativePG cases passed; zero failure/error/skip and temporary DB/roles. The final review correction strengthens the stale-activity assertion to exact REFUSED/STALE_REVISION with unchanged state and replay checks; its focused SQLite run passed2 cases, while1 PostgreSQL case was skipped without a loaded DSN. T053 record-only MCP independently reviewed through actual stdio/SQLite:37 boundary/convention cases passed;506 regression cases passed with2 localhost setup denials separately corrected2PASS, no fresh508-green claim. Canonical contract companion reviewed. T054 coherent research projection independently accepted after one schema compatibility repair: 777 scoped offline, 153 PostgreSQL, 66 schema and 34 MCP consumer cases passed, zero failure/error/skip; final temporary DB/role cleanup verified. Viewer contract companion reviewed. T055 recorded research UI independently accepted:78 browser and165 separate consumer cases passed with zero failure/error/skip; simulated GET scope disclosed. T056 native stdio MCP/HTTP/Chromium chain independently accepted:12 native and11 convention cases passed on SQLite file/local PostgreSQL; zero failure/error/skip and disposable DB/role cleanup verified. T057 actual native engineering overlap and separate sequential scenario independently accepted:four source-bearing results, exact stdio/HTTP readback and44 hashes verified. T058 actual native counterevidence revision/history independently accepted:39 hashes and exact source bindings verified; fresh-page actual HTTP response-to-DOM68.523ms single sample, prior version noncurrent, obsolete replay unchanged42tables. Retained-page wait timed out before result recording and is not passing display evidence. Synthetic engineering UAT only; controller closed, recoverable store retained. US4 engineering acceptance complete, review PR pending; no real-market validation or shipment. A broad unit attempt was network-aborted; no full-unit GREEN claimed. US3 T032–T040 accepted locally. Exact-frame permission, actual Gap/missingness and immediate stale removal verified through canonical stores, actual MCP/HTTP and isolated Chromium. Broad US1/US3 plus mission/Task Relay gate1390PASS3SKIP0FAIL0ERROR237.65s,149 frozen hashes; three known conditional skips disclosed. A final one-line receipt-directory setup amendment has separate3PASS0SKIP17.86s verification; all other148 hashes unchanged. Latest local read-to-display samples3.1msSQLite-file/1.3msmemory/2.7msPostgreSQL are not real-mission UAT or p95 proof. Final independent T040 review accepted; zero disposable PostgreSQL databases left. Evidence .handoff/spec014/us3.handoff.md and t040/{scoped.xml,final-readback.xml,final-source-settled.json,review.handoff.md}. T059–T092 remain open. Commit each accepted task; create a review PR after the current user story is fully accepted, per owner instruction on 2026-10-06. Real-mission UAT and shipment remain pending.
+**Status**: Scope revision R2 (2026-10-19, owner decision) retires the built-in viewer and the `open_mission_relay` tool; tracking becomes an agent-generated artifact built from `get_mission_relay_snapshot` under `ignis-track` guidance (see Clarifications, Session 2026-10-19). The task ledger below predates R2 and must be re-planned. Current task ledger (`tasks.md`, 2026-10-14): T001–T078, T080, T085, T086, T088 and T089 accepted: 83/92; T079, T081–T084, T087 and T090–T092 remain open. Historical snapshot at T058, retained unchanged: T001–T058 accepted:58/92. US4 pure domain and atomic recording port contracts implemented and independently reviewed locally: 189 targeted tests passed. T041/T042 test-design acceptance does not establish storage behavior. T047 SQLite lifecycle verified with 339 scoped offline tests and independently reviewed. T048 PostgreSQL core lifecycle independently reviewed after one timing repair:118 scoped current-source PG tests passed, plus11 fresh convention tests; cleanup verified. T049 SQLite result settlement independently reviewed:416 scoped current-source offline tests passed; separate66 actualPG schema companion passed, cleanup verified. T050 PostgreSQL result parity independently reviewed:137 scopedPG,66schema,416offline and separate35 updated owner/result/convention cases passed without overlapping totals; final temporary DB/role cleanup verified. T051 typed recording service independently reviewed:396 scoped offline and32 actualPG tests passed, zero failure/error/skip; temporary DB/role cleanup verified. T052 persisted lifecycle independently reviewed:117 new/convention,385 disjoint regression and53 nativePG cases passed; zero failure/error/skip and temporary DB/roles. The final review correction strengthens the stale-activity assertion to exact REFUSED/STALE_REVISION with unchanged state and replay checks; its focused SQLite run passed2 cases, while1 PostgreSQL case was skipped without a loaded DSN. T053 record-only MCP independently reviewed through actual stdio/SQLite:37 boundary/convention cases passed;506 regression cases passed with2 localhost setup denials separately corrected2PASS, no fresh508-green claim. Canonical contract companion reviewed. T054 coherent research projection independently accepted after one schema compatibility repair: 777 scoped offline, 153 PostgreSQL, 66 schema and 34 MCP consumer cases passed, zero failure/error/skip; final temporary DB/role cleanup verified. Viewer contract companion reviewed. T055 recorded research UI independently accepted:78 browser and165 separate consumer cases passed with zero failure/error/skip; simulated GET scope disclosed. T056 native stdio MCP/HTTP/Chromium chain independently accepted:12 native and11 convention cases passed on SQLite file/local PostgreSQL; zero failure/error/skip and disposable DB/role cleanup verified. T057 actual native engineering overlap and separate sequential scenario independently accepted:four source-bearing results, exact stdio/HTTP readback and44 hashes verified. T058 actual native counterevidence revision/history independently accepted:39 hashes and exact source bindings verified; fresh-page actual HTTP response-to-DOM68.523ms single sample, prior version noncurrent, obsolete replay unchanged42tables. Retained-page wait timed out before result recording and is not passing display evidence. Synthetic engineering UAT only; controller closed, recoverable store retained. US4 engineering acceptance complete, review PR pending; no real-market validation or shipment. A broad unit attempt was network-aborted; no full-unit GREEN claimed. US3 T032–T040 accepted locally. Exact-frame permission, actual Gap/missingness and immediate stale removal verified through canonical stores, actual MCP/HTTP and isolated Chromium. Broad US1/US3 plus mission/Task Relay gate1390PASS3SKIP0FAIL0ERROR237.65s,149 frozen hashes; three known conditional skips disclosed. A final one-line receipt-directory setup amendment has separate3PASS0SKIP17.86s verification; all other148 hashes unchanged. Latest local read-to-display samples3.1msSQLite-file/1.3msmemory/2.7msPostgreSQL are not real-mission UAT or p95 proof. Final independent T040 review accepted; zero disposable PostgreSQL databases left. Evidence .handoff/spec014/us3.handoff.md and t040/{scoped.xml,final-readback.xml,final-source-settled.json,review.handoff.md}. T059–T092 remain open. Commit each accepted task; create a review PR after the current user story is fully accepted, per owner instruction on 2026-10-06. Real-mission UAT and shipment remain pending.
 
-**Review revision**: R1 — 2026-10-04
+**Review revision**: R2 — 2026-10-19 (R1 — 2026-10-04 superseded where it requires a built-in viewer)
 
-**Input**: Owner-requested Goal 2: visualize a real mission as a social listening and market research team. Collect within an assigned mission, clean and preserve evidence, distribute work to concurrent specialists, cross-check and challenge findings, and update analysis, insights and reports. On 2026-10-04 the owner approved the light, minimal, spacious, motion-rich Relay mock and requested discovery followed by execution of the next step.
+**Input**: Owner-requested Goal 2: visualize a real mission as a social listening and market research team. Collect within an assigned mission, clean and preserve evidence, distribute work to concurrent specialists, cross-check and challenge findings, and update analysis, insights and reports. On 2026-10-04 the owner approved the light, minimal, spacious, motion-rich Relay mock and requested discovery followed by execution of the next step. On 2026-10-19 the owner decided that Ignis ships no UI of its own: agents generate a tracking artifact for the user from the bounded mission snapshot, guided by an `ignis-track` capability delivered through the MCP server.
 
 ## Outcome and audience
 
-A person monitoring an explicitly selected real Ignis mission can follow observed collection and research work, inspect an observation's evidence role, identify actual specialist handoffs and understand why a conclusion is permitted or withheld. The page is a light-mode research observatory: fine paths, small geometric packets, restrained specialist nodes and generous space, rather than machines, a dark cinematic factory or a dense card grid. The owner selected a live mission dashboard rather than a synthetic explanatory page.
+A person monitoring an explicitly selected real Ignis mission can follow observed collection and research work, inspect an observation's evidence role, identify actual specialist handoffs and understand why a conclusion is permitted or withheld. They do so through a tracking artifact that their research agent generates from a bounded read-only mission snapshot, on request or at milestones of the agent's own work. Ignis ships the snapshot contract and the `ignis-track` guidance, not a viewer; the agent and its host choose the artifact's form.
 
-The viewer remains read-only. Collection and analysis run outside the viewer under the existing explicit mission authority. Supporting observable research work and findings is part of this feature's revised proposed scope; it is not permission for an always-on service or a separate general-purpose agent platform.
+Tracking remains read-only. Collection and analysis run outside the artifact under the existing explicit mission authority. Supporting observable research work and findings is part of this feature's revised proposed scope; it is not permission for an always-on service or a separate general-purpose agent platform.
 
 The intended audience is founders, operators and analysts following their assigned research mission. They need to see genuine progress, source failures, qualification backlog and remaining decision gaps without interpreting internal logs. This audience is an assumption, not an independently measured user-research result.
 
@@ -22,35 +22,35 @@ The intended audience is founders, operators and analysts following their assign
 
 ### User Story 1 — Follow the evidence journey (Priority: P1)
 
-A viewer explicitly selects a real mission, opens a bounded read-only viewing session and follows evidence through collection, provenance, qualification, falsification and the claim gate as persisted facts change. Five visual columns may organize the journey without collapsing these six evidence responsibilities.
+A user asks their agent to track an explicitly selected real mission. The agent reads a bounded snapshot and generates a tracking artifact that follows evidence through collection, provenance, qualification, falsification and the claim gate as persisted facts change. The artifact's layout is the agent's choice but must not collapse these six evidence responsibilities.
 
-**Why this priority**: Motion must explain Ignis's differentiator: critical research on traceable observations, not automatic confirmation of a preferred idea.
+**Why this priority**: Tracking must explain Ignis's differentiator: critical research on traceable observations, not automatic confirmation of a preferred idea.
 
-**Independent Test**: Inspect all six evidence responsibilities (mission authority, collection, provenance, qualification, falsification and claim permission), organized through the header and five visual columns, and identify each input, output and reason for rejection or withholding without reading product documentation.
-
-**Acceptance Scenarios**:
-
-1. **Given** no task has started, **When** the page opens, **Then** collection is visibly idle and no real collector or quota operation starts.
-2. **Given** a new coherent mission snapshot, **When** an observation or qualification changes, **Then** the corresponding transition is animated once with its actual provenance and evidence role.
-3. **Given** conflicting observations, **When** the falsification stage is inspected, **Then** support and contradiction remain visible under the same qualification standard.
-
-### User Story 2 — Inspect without being forced to watch (Priority: P2)
-
-A viewer pauses visual motion or live refresh, selects a stage or observation, reads its real facts and resumes the viewer without starting, cancelling or repeating the research mission.
-
-**Why this priority**: Constant movement without inspection would obscure the actual method and exclude users sensitive to motion.
-
-**Independent Test**: Complete stage navigation and evidence inspection using only a keyboard and again with reduced motion enabled.
+**Independent Test**: From one generated artifact, identify all six evidence responsibilities (mission authority, collection, provenance, qualification, falsification and claim permission) and each input, output and reason for rejection or withholding without reading product documentation.
 
 **Acceptance Scenarios**:
 
-1. **Given** an active viewer, **When** motion is paused, **Then** moving blocks stop while real state remains inspectable; stopping refresh separately freezes the last snapshot and labels it paused, not live.
-2. **Given** reduced motion, **When** the page opens, **Then** the complete method is accessible without continuous movement or camera sweeps.
-3. **Given** a narrow viewport, **When** a stage is selected, **Then** controls and explanations remain readable without horizontal page overflow.
+1. **Given** no task has started, **When** an artifact is generated, **Then** collection is shown idle and no real collector or quota operation starts.
+2. **Given** an observation or qualification changed since the previous artifact, **When** the agent regenerates from a new coherent snapshot, **Then** the change appears once with its actual provenance and evidence role, without duplicate arrivals or counts.
+3. **Given** conflicting observations, **When** the falsification stage is read, **Then** support and contradiction remain visible under the same qualification standard.
+
+### User Story 2 — Track on demand without starting work (Priority: P2)
+
+A user asks for an update, or the agent reaches a milestone in its own active work, and the agent regenerates the tracking artifact. Reading the snapshot and generating the artifact never start, cancel or repeat the research mission, and nothing keeps reading after the agent's turn ends.
+
+**Why this priority**: Tracking must stay inside Ignis's mission-bound boundary: no background loop, and no read that a user did not ask for or that the agent's own work did not trigger.
+
+**Independent Test**: Generate artifacts on request and at two milestones of a mission; verify each is a labeled point-in-time snapshot and that no snapshot read occurs between them.
+
+**Acceptance Scenarios**:
+
+1. **Given** a running mission, **When** the user asks for an update, **Then** the regenerated artifact states its read time and that it is a point-in-time snapshot, not live.
+2. **Given** the agent completes collection, qualification or a claim/gap change within its turn, **When** it regenerates the artifact, **Then** no read is scheduled beyond that turn.
+3. **Given** scripts, motion, fonts or network are unavailable, **When** the artifact is opened, **Then** all essential content remains readable and color is never the only signal.
 
 ### User Story 3 — Recognize the data and conclusion boundary (Priority: P1)
 
-A viewer can distinguish a current mission snapshot from a paused, stale or terminal snapshot, and understand why missing evidence does not become a recommendation.
+A reader can distinguish a current mission snapshot from a stale or terminal snapshot, and understand why missing evidence does not become a recommendation.
 
 **Why this priority**: A convincing research visual must not manufacture a convincing market claim.
 
@@ -58,18 +58,19 @@ A viewer can distinguish a current mission snapshot from a paused, stale or term
 
 **Acceptance Scenarios**:
 
-1. **Given** a selected mission, **When** any scene is viewed, **Then** mission/run identity, last successful read time and freshness state are visible; no synthetic data is substituted if reads fail.
+1. **Given** a selected mission, **When** any artifact is generated, **Then** mission/run identity, snapshot read time and freshness state are visible; no synthetic data is substituted if reads fail.
 2. **Given** unknown publication time or reach, **When** an observation is inspected, **Then** the value remains explicitly unknown, not zero or fresh.
 3. **Given** insufficient evidence, **When** the final gate is reached, **Then** a gap and next validation action appear rather than a commercial verdict.
 
 ### Edge Cases
 
 - Empty, unavailable and degraded channels must be distinguishable from healthy measured absence.
-- Closing or hiding the page, ending its bounded viewing session or stopping refresh must stop viewer reads and unnecessary presentation work; the underlying mission is not cancelled or started by these actions.
-- Missing fonts, network access or animation support must not remove the explanatory content.
+- Not regenerating an artifact performs no reads; reading a snapshot or generating an artifact neither cancels nor starts the underlying mission.
+- Missing fonts, scripts, network access or animation support must not remove the explanatory content.
+- Publishing an artifact outside the user's machine requires the user's explicit consent for that publication; a local file is the default.
 - An excluded block remains inspectable; it does not silently disappear into a visually successful output.
-- A collection terminal state stops intake animation but does not imply qualification or claim work has completed: those facts can be recorded later within the explicit viewing session.
-- A dashboard reconnect, identical snapshot or repeated observation must not animate a duplicate arrival or duplicate count.
+- A collection terminal state stops intake but does not imply qualification or claim work has completed: those facts can be recorded later and appear in a later artifact.
+- Regenerating from an identical snapshot or a repeated observation must not add a duplicate arrival or duplicate count.
 - A newer Brief/frame must invalidate displayed claim permission; records from different missions, runs or incompatible revisions must not be mixed into one apparent pipeline.
 - Active-run progress without a complete evidence frame must remain pending; the preceding completed run must not masquerade as current-run success.
 - Viewing an observation must not expose credentials, private messages or unmasked personal data.
@@ -77,27 +78,27 @@ A viewer can distinguish a current mission snapshot from a paused, stale or term
 - Multiple specialists reading the same observation must retain its identity; this is not independent corroboration.
 - Operational progress can exist before a complete evidence frame. It must not confer claim permission or fabricate an observation that has not been persisted.
 - A late specialist result bound to an older revision remains history, not a current finding.
-- A host interruption must leave work visibly interrupted or unknown; the viewer must not silently retry work or continue a pulse indefinitely without valid activity evidence.
+- A host interruption must leave work visibly interrupted or unknown; tracking must not silently retry work or show activity without valid activity evidence.
 - A suggested new source, expired authority or exhausted budget must not cause automatic recollection.
 
 ### User Story 4 — Follow real specialist work and evolving findings (Priority: P1)
 
-A viewer sees the research questions assigned to actual specialists, their work states and evidence-bearing handoffs, and how those results change the synthesis panel. A host performing work needs a bounded record of the assigned question, current revision and completion receipt rather than an imagined topology.
+A reader sees the research questions assigned to actual specialists, their work states and evidence-bearing handoffs, and how those results change the synthesis. A host performing work needs a bounded record of the assigned question, current revision and completion receipt rather than an imagined topology.
 
-**Why this priority**: The approved concept is a working research team, not only an animated evidence inventory.
+**Why this priority**: The intended concept is a working research team, not only an evidence inventory.
 
 **Independent Test**: Execute two bounded research work items on a selected mission, inspect each handoff and resulting finding revision, then submit an obsolete result and verify it cannot appear current.
 
 **Acceptance Scenarios**:
 
 1. **Given** two assigned specialists actually work concurrently, **When** their activity is recorded, **Then** both active work items and independent handoffs are visible without duplicating shared evidence.
-2. **Given** the host supports only sequential execution, **When** the same research questions run, **Then** the viewer shows the actual sequence rather than simultaneous activity.
-3. **Given** a source-bound provisional finding, **When** counterevidence changes it, **Then** the panel identifies the new version, changed evidence and limitations; the previous version remains inspectable history.
-4. **Given** a provisional finding contains a strategic commercial claim, **When** the panel renders it, **Then** current-frame Claim Ledger permission is required despite the provisional label.
+2. **Given** the host supports only sequential execution, **When** the same research questions run, **Then** the artifact shows the actual sequence rather than simultaneous activity.
+3. **Given** a source-bound provisional finding, **When** counterevidence changes it, **Then** the artifact identifies the new version, changed evidence and limitations; the previous version remains inspectable history.
+4. **Given** a provisional finding contains a strategic commercial claim, **When** the artifact renders it, **Then** current-frame Claim Ledger permission is required despite the provisional label.
 
 ### User Story 5 — Close a research gap without exceeding authority (Priority: P2)
 
-The research host converts an actual gap into a bounded follow-up question, continues only while scope and authority remain valid, and hands new results back for review. The viewer explains this return loop without initiating it.
+The research host converts an actual gap into a bounded follow-up question, continues only while scope and authority remain valid, and hands new results back for review. The tracking artifact explains this return loop without initiating it.
 
 **Why this priority**: A research gap must lead to a useful bounded action, not an endless collection loop or an unsupported verdict.
 
@@ -107,45 +108,48 @@ The research host converts an actual gap into a bounded follow-up question, cont
 
 1. **Given** an explicit gap and sufficient existing authority, **When** the host starts an in-scope follow-up, **Then** its purpose, parent work and result are traceable and synthesis is revised only from recorded evidence.
 2. **Given** a follow-up needs a new source, credential, cost or scope, **When** it is proposed, **Then** work waits for owner authority instead of silently widening the mission.
-3. **Given** terminated research or expired/exhausted authority, **When** a follow-up remains open, **Then** work stops and the gap remains visible; viewing it does not restart research. Collection-run completion alone is not proof of termination of separately authorized analysis.
+3. **Given** terminated research or expired/exhausted authority, **When** a follow-up remains open, **Then** work stops and the gap remains visible; tracking it does not restart research. Collection-run completion alone is not proof of termination of separately authorized analysis.
 
 ## Requirements
 
 ### Functional Requirements
 
-- **FR-001**: The page MUST present collection, provenance, qualification, falsification and the claim gate within a recognizable light-mode research network. The five visual columns are Sources, Cleaning, Research, Cross-check and Synthesis; their grouping MUST preserve every evidence responsibility.
-- **FR-002**: Small geometric evidence packets MUST travel through visible processing layers and separate by their actual persisted evidence roles. Transitions MUST correspond to observed changes, not a repeating synthetic throughput loop. If particles aggregate observations, the mapping and exact total MUST be disclosed.
+- **FR-001**: The tracking artifact MUST present collection, provenance, qualification, falsification and the claim gate. Its layout is the agent's choice; any grouping MUST preserve every evidence responsibility.
+- **FR-002**: Changes shown between artifacts MUST correspond to recorded changes between coherent snapshots, separated by their actual persisted evidence roles, never a synthetic throughput. Aggregated observations MUST disclose the mapping and exact total.
 - **FR-003**: Each stage MUST expose what it receives, what it produces, why it matters and what can fail.
-- **FR-004**: The page MUST preserve provenance, counterevidence, context-only and excluded roles; raw popularity MUST NOT become demand or claim permission.
-- **FR-005**: A persistent header MUST identify the selected mission, current run when known, last successful read, displayed frame when available and current/paused/stale/terminal viewer status. Unknown runtime facts MUST be identified as unknown.
-- **FR-006**: The initial product MUST be a read-only dashboard for a real explicitly selected Ignis mission, as selected by the owner on 2026-10-04. Synthetic demonstration and recorded replay are not substitutes for this acceptance scope.
-- **FR-007**: The page MUST provide independent motion and live-refresh controls plus direct stage/observation inspection, with visible keyboard focus and no hover-only essential content. Controls MUST distinguish viewer actions from mission actions; no mission restart/cancel/collect button is included in this scope.
-- **FR-008**: Reduced-motion viewing MUST preserve all information while disabling continuous packet flow, pulsing and spatial/camera movement.
+- **FR-004**: The artifact MUST preserve provenance, counterevidence, context-only and excluded roles; raw popularity MUST NOT become demand or claim permission.
+- **FR-005**: Each artifact MUST identify the selected mission, current run when known, snapshot read time, displayed frame when available and point-in-time/stale/terminal status. Unknown runtime facts MUST be identified as unknown.
+- **FR-006**: Ignis MUST NOT ship a built-in viewer. Its tracking surface is the bounded read-only `get_mission_relay_snapshot` tool plus `ignis-track` guidance; the agent generates the artifact for a real explicitly selected mission. The `open_mission_relay` tool and its local HTTP viewer are retired (owner decision, 2026-10-19). Synthetic demonstration and recorded replay are not substitutes for this acceptance scope.
+- **FR-007**: The agent MUST generate or regenerate an artifact only on the user's request or at a milestone within its own active turn (collection settled, qualification recorded, claim/gap changed, research work ended). It MUST NOT poll, schedule refreshes or keep reading after its turn ends. The artifact MUST contain no mission controls.
+- **FR-008**: All essential artifact content MUST be readable as static, semantically structured text without scripts, motion, external fonts or network access.
 - **FR-009**: Unknown metrics, unmeasured source windows, channel failures and missing hypothesis coverage MUST stay visible rather than being assigned flattering numbers.
 - **FR-010**: The final gate MUST show an actual permitted claim with its bindings only when allowed by the current coherent evidence frame, or show a clear Gap Report. An incomplete/changed frame MUST withhold permission rather than reuse a stale claim.
-- **FR-011**: The presentation MUST use the maintained FINOLABS product design system; mint is the everyday flow accent, while violet marks one high-stakes claim gate. Colour MUST have accompanying labels/shapes.
-- **FR-012**: Merely opening, replaying or restarting the presentation MUST NOT start a connector, scheduler, authentication flow or paid operation.
-- **FR-013**: No existing MCP signatures, connector tiers, persisted evidence, release versions or owner-client settings may change solely to implement the presentation.
-- **FR-014**: The viewer MUST use a coherent mission-state boundary with freshness and revision identity; it MUST reject mismatched mission/run/frame snapshots. Observation arrivals, qualifications and claims MUST be idempotent across refresh, reconnect and reordered responses.
-- **FR-015**: A missing persisted stage event MUST appear as unavailable or pending; the dashboard MUST NOT invent stage timestamps, active-processing status, completion percentages or confidence to fill the research network.
-- **FR-016**: A viewing session MUST have a visible finite boundary. Hidden/closed/expired viewers and refresh-paused viewers MUST perform no automatic refresh reads or continuous motion. Motion-only pause MUST stop animation while allowing otherwise authorized refresh reads. Intake stops at collection terminal state; subsequent separately authorized qualification/claim updates remain distinct facts within the valid viewing session.
+- **FR-011**: Colour MUST NOT be the only signal; every state carries a text label. The guidance MAY recommend maintained FINOLABS tokens when the host renders HTML, but no visual system is required.
+- **FR-012**: Reading a snapshot or generating, opening or regenerating an artifact MUST NOT start a connector, scheduler, authentication flow or paid operation.
+- **FR-013**: No existing MCP signatures, connector tiers, persisted evidence, release versions or owner-client settings may change solely to implement tracking, except the owner-approved retirement of `open_mission_relay` (2026-10-19).
+- **FR-014**: The snapshot MUST use a coherent mission-state boundary with freshness and revision identity, and MUST carry explicit permitted/withheld, current/stale and missing/unavailable states so an artifact never infers them. The guidance MUST direct agents to reject mismatched mission/run/frame snapshots. Observation arrivals, qualifications and claims MUST be idempotent across regenerations and reordered pages.
+- **FR-015**: A missing persisted stage event MUST appear as unavailable or pending; the artifact MUST NOT invent stage timestamps, active-processing status, completion percentages or confidence to fill the research network.
+- **FR-016**: Every artifact MUST be a labeled point-in-time snapshot; none may present itself as live. Intake stops at collection terminal state; subsequent separately authorized qualification/claim updates remain distinct facts that appear in a later artifact.
 - **FR-017**: The read surface MUST protect selected mission scope, mask public-observation text as required and refuse unauthorized access. It MUST expose neither secrets nor write/collection operations.
 - **FR-018**: ATTENTION and MARKET MUST retain their distinct semantics; an Attention observation or attractive animation MUST NOT be represented as qualified Market support.
 - **FR-019**: Each research work item MUST identify its mission, run when applicable, question, expertise, assignee when known, revision/evidence bindings, authority boundary, recorded state and result or interruption reason. Unsupported states MUST remain unknown, not inferred from a visual lane.
 - **FR-020**: Assignment, start, waiting, handoff, completion, failure and cancellation MUST be distinguishable when recorded. Concurrent activity MUST reflect real overlapping work; specialist roles and replica counts MUST follow actual work rather than a fixed number of agents.
 - **FR-021**: Specialist results MUST carry evidence references, limitations, open questions and revision identity. Shared observations MUST keep one identity across fan-out/fan-in and MUST NOT count as independent sources.
-- **FR-022**: The synthesis panel MUST distinguish source-bound descriptive provisional findings from permitted strategic claims. Each finding MUST identify its version, evidence, recorded update time and limitations. Frame changes and obsolete results MUST remove current status; the provisional label MUST NOT bypass strategic permission.
-- **FR-023**: Research gaps MAY lead to bounded follow-up tasks only under valid mission authority and remaining budget. The host MUST stop or request owner authority when the new work exceeds a source, credential, scope, time or cost boundary. The read-only viewer MUST NOT initiate the follow-up.
-- **FR-024**: Every arrival animation and active-work indicator MUST have an inspectable recorded basis. Idle, pending, stale, interrupted and unavailable work MUST NOT display fabricated throughput. Animation speed and particle quantity MUST NOT imply an unmeasured rate.
+- **FR-022**: The artifact MUST distinguish source-bound descriptive provisional findings from permitted strategic claims. Each finding MUST identify its version, evidence, recorded update time and limitations. Frame changes and obsolete results MUST remove current status; the provisional label MUST NOT bypass strategic permission.
+- **FR-023**: Research gaps MAY lead to bounded follow-up tasks only under valid mission authority and remaining budget. The host MUST stop or request owner authority when the new work exceeds a source, credential, scope, time or cost boundary. Reading a snapshot or generating an artifact MUST NOT initiate the follow-up.
+- **FR-024**: Every arrival and active-work indicator in an artifact MUST have an inspectable recorded basis. Idle, pending, stale, interrupted and unavailable work MUST NOT display fabricated throughput, and visual emphasis MUST NOT imply an unmeasured rate.
 - **FR-025**: Operational progress and eligible evidence frames MUST remain separate. A collection-start or work-start event MUST NOT be treated as a persisted observation, qualified evidence or permitted conclusion. Failed/uncommitted work MUST remain distinguishable from durable results.
-- **FR-026**: The interface MUST follow the approved light-mode mock's hierarchy, spacing and restrained motion language. It MUST use maintained FINOLABS tokens, avoid heavy machine imagery and expose source availability without pretending that the mock's future catalog is supported.
+- **FR-026**: An artifact MUST expose source availability as recorded, without presenting unsupported or planned sources as available. (The 2026-10-04 mock's visual requirements are retired in R2.)
 - **FR-027**: The scope MUST NOT create an independent general-purpose agent platform. The research host remains responsible for assigned analysis; its supported concurrency and authority MUST be explicit. Connector execution remains deterministic and independent of semantic judgment.
 - **FR-028**: Events, work items, findings and evidence inspection MUST apply the same mission access and masking boundaries. They MUST expose inspectable inputs, outputs and recorded reasons, not credentials, private content or hidden model reasoning.
 - **FR-029**: Research work MUST have explicit completion, cancellation, failure, insufficient-evidence and authority-expiry stopping conditions. A completed collection run MUST NOT silently terminate separately authorized analysis, and an ended research task MUST NOT admit a new follow-up without a new explicit assignment.
+- **FR-030**: The MCP server MUST deliver `ignis-track` guidance as an MCP prompt or resource, so installed packages and images expose it, not only source checkouts. It MUST cover reading the snapshot, the display rules of FR-001–FR-026, the generation triggers of FR-007 and the publication rule of FR-031.
+- **FR-031**: An agent MUST write the tracking artifact to a local file by default. Publishing it to any host or service outside the user's machine requires the user's explicit consent for that publication.
+- **FR-032**: Mission-scoped tools, including `get_mission_relay_snapshot`, MUST resolve the caller root on MCP 2026-07-28+ connections without server-initiated requests: request roots through an `InputRequiredResult`; if none are returned, use only the startup-configured `IGNIS_CALLER_ROOT` under the existing pinning rules; otherwise refuse with a typed reason distinguishing a protocol-forbidden request from an RPC failure.
 
 ### Key Entities
 
-- **Viewing session**: Explicitly selected mission, finite observation boundary, refresh status and last successful read.
+- **Tracking artifact**: An agent-generated, point-in-time rendering of one coherent mission snapshot, with its read time, generation trigger and storage location.
 - **Mission snapshot**: Coherent mission/run identity, current persisted facts, freshness and evidence-frame identity where available.
 - **Research stage**: A named transformation with an input, output, explanation and visible failure state.
 - **Evidence block**: An inspectable observation with source/query identity, time/metric missingness and qualification role.
@@ -160,60 +164,71 @@ The research host converts an actual gap into a bounded follow-up question, cont
 
 ### Measurable Outcomes
 
-- **SC-001**: Every one of the six stages can be selected directly; a viewer can complete the explanatory journey in at most two minutes without waiting for animations.
-- **SC-002**: All essential controls and explanations are available using a keyboard and in reduced-motion mode.
-- **SC-003**: At 390, 768 and 1440-pixel viewport widths, all stage explanations and controls remain available without horizontal page overflow or clipped essential text.
-- **SC-004**: Mission identity, freshness and viewer state are visible in every scene; no unsupported market verdict is emitted in the insufficient-evidence scenario.
-- **SC-005**: On the declared reference machine, a 30-second presentation sample maintains at least 50 frames per second in its normal desktop mode; measurements must identify the machine and viewing conditions rather than claiming universal performance.
-- **SC-006**: Source observations, exclusions, contradiction and gaps remain readable with animation paused and external resources unavailable.
-- **SC-007**: Final acceptance includes actual rendered screenshots at the three viewport sizes, a keyboard/reduced-motion walkthrough, mode/data-integrity readback and complete regression results; a successful file open is not pixel proof.
-- **SC-008**: In a controlled real mission run, collection, qualification and claim/gap changes appear within five seconds of a successful coherent viewer read of those recorded changes, with zero invented arrivals or duplicated transitions after reconnect/reordered snapshots. This is not a promise that uncommitted connector results are already visible.
-- **SC-009**: A refresh-paused, hidden, closed or expired viewer makes zero subsequent automatic reads until explicitly resumed within valid scope; it never invokes collection, credential use or mission writes. Motion-only pause stops animation and preserves authorized refresh.
-- **SC-010**: During a failed refresh or incompatible frame transition, all stale claims lose displayed current permission immediately and the actual last successful read remains visible.
-- **SC-011**: Every visible active specialist and every packet arrival in acceptance samples resolves to a recorded work/progress fact; unsupported activity, duplicate evidence counts and fabricated handoffs are zero.
+- **SC-001**: From one generated artifact, a reader identifies all six evidence responsibilities and the current gate outcome in at most two minutes without other documentation.
+- **SC-002**: All essential content of acceptance artifacts is readable without scripts, motion or network, and no state is conveyed by colour alone.
+- **SC-003**: `ignis-track` guidance is listed and readable through MCP prompt/resource discovery from an installed package, not only a source checkout.
+- **SC-004**: Mission identity, read time and point-in-time status are visible in every artifact; no unsupported market verdict is emitted in the insufficient-evidence scenario.
+- **SC-005**: Across acceptance runs, snapshot reads occur only on explicit user requests or recorded agent milestones; reads after the agent's turn ends are zero.
+- **SC-006**: Source observations, exclusions, contradiction and gaps remain readable with external resources unavailable.
+- **SC-007**: Final acceptance includes artifacts generated by at least one supported agent host from a real mission at two or more milestones, a data-integrity readback of each artifact against its snapshot, and complete regression results; a successful file open is not readback.
+- **SC-008**: In a controlled real mission run, every recorded collection, qualification and claim/gap change appears in the next artifact generated from a coherent snapshot, with zero invented arrivals or duplicated transitions across regenerations or reordered pages. This is not a promise that uncommitted connector results are already visible.
+- **SC-009**: Reading snapshots and generating artifacts never invoke collection, credential use or mission writes.
+- **SC-010**: After a failed snapshot read or incompatible frame transition, the next artifact withdraws current permission from every stale claim and labels the last successful read as stale.
+- **SC-011**: Every active specialist and every arrival shown in acceptance artifacts resolves to a recorded work/progress fact; unsupported activity, duplicate evidence counts and fabricated handoffs are zero.
 - **SC-012**: Acceptance includes two actually overlapping specialist work items on a declared concurrency-capable host, plus a sequential-capacity scenario. Both retain shared observation identity and inspectable results. Sequential fallback alone does not prove concurrent-team acceptance.
-- **SC-013**: A counterevidence-driven finding revision appears within five seconds of a successful read of its recorded result, with source bindings, prior-version history and limits. An obsolete result never regains current permission.
+- **SC-013**: A counterevidence-driven finding revision appears in the next artifact generated after its recorded result, with source bindings, prior-version history and limits. An obsolete result never regains current permission.
 - **SC-014**: One bounded follow-up can be traced from gap to task to evidence/result to revised synthesis; exhausted or changed authority causes zero additional unauthorized work.
-- **SC-015**: Rendered acceptance at 390, 768 and 1440 pixels demonstrates the approved light visual hierarchy, inspectable work and clear separation of provisional findings, reviewed claims and gaps. The approved raster's fabricated metrics are not copied into live output.
-- **SC-016**: Cross-mission access and sensitive-data acceptance cases cover observation inspectors, progress events, work handoffs and finding history; all unauthorized reads are refused and no tested surface reveals credentials, unmasked protected content or hidden model reasoning.
+- **SC-015**: Acceptance artifacts clearly separate provisional findings, permitted claims and gaps, and contain no metric absent from the snapshot.
+- **SC-016**: Cross-mission access and sensitive-data acceptance cases cover snapshot evidence pages, progress events, work handoffs, finding history and generated artifacts; all unauthorized reads are refused, no tested surface reveals credentials, unmasked protected content or hidden model reasoning, and zero artifacts are published outside the user's machine without explicit consent.
 - **SC-017**: Lifecycle acceptance distinguishes collection completion with valid remaining analysis authority from completed/cancelled/failed/insufficient-evidence research and expired authority. The first allows only the already assigned in-scope analysis; the others start zero new work without a new valid assignment.
+- **SC-018**: From Claude Code on a negotiated MCP 2026-07-28 connection, `get_mission_relay_snapshot` and the other mission-scoped tools succeed through returned roots or a configured startup root, and refuse with the protocol-forbidden reason when neither exists; legacy-era clients keep their existing outcomes.
 
 ## Assumptions and boundaries
 
 - Goal 1 source integration is PR #50/main a94db308. Accepted historical test-first and pixel-proof exceptions in that goal do not waive new Goal 2 visual acceptance.
-- The owner selected real live monitoring, not demonstration. The viewer is read-only and opt-in; written scope R1 is approved. Technical planning and implementation remain separate subsequent goals.
+- The owner selected tracking of real missions, not demonstration. Written scope R1 (2026-10-04) selected a built-in viewer; scope R2 (2026-10-19) replaces it with agent-generated artifacts. Re-planning and implementation of R2 remain separate subsequent steps.
 - No dependency, new backend or real social account access is assumed. Technical choices belong in the subsequent plan after scope and design approval.
 - Maintained report templates remain the only report source committed as code; generated exports remain local runtime output.
 - Vietnamese is the audience-facing narrative; developer specifications and identifiers remain English.
-- The approved mock is a visual direction, not approval of its illustrative counts, confidence, timestamps, source availability or exact topology. Its five columns do not remove the six evidence responsibilities.
-- Delivery is staged: observable read-only mission slice; actual specialist work and finding revisions; bounded follow-up loop. Completion of only the first slice does not close this full specification.
+- The 2026-10-04 approved mock is retired as a requirement in R2. Its illustrative counts, confidence, timestamps, source availability and topology were never evidence.
+- Delivery is staged: bounded snapshot with `ignis-track` guidance; actual specialist work and finding revisions; bounded follow-up loop. Completion of only the first slice does not close this full specification.
 - Existing contract/signature changes, dependency choices, storage design and any migration belong to the technical plan and applicable owner boundaries. None is selected by this specification.
 - This feature instruments explicitly assigned research work; it does not expand source availability, introduce a paid model/provider, hosted multi-tenancy or automatic mission controls. Such expansion requires separate scope approval.
-- "Terminal" is qualified by what ended: collection-run completion stops intake, research termination stops new research work, and viewing-session expiry stops viewer reads. Remaining analysis needs its own still-valid assignment and authority; no UI state extends it.
+- "Terminal" is qualified by what ended: collection-run completion stops intake, and research termination stops new research work. Remaining analysis needs its own still-valid assignment and authority; no UI state extends it.
 
-## Approved visual direction — proposed runtime behavior
+## Tracking artifact guidance (R2)
 
-| Area | Composition and movement | Meaning and inspection |
-|---|---|---|
-| Mission header | Slim header on light ground; mission identity, authority and freshness are persistent. Motion and refresh pause are distinct viewer controls. | A viewing action is not permission to start, pause or cancel mission work. |
-| Sources | Compact source labels feed fine paths with small geometric packets. Unavailable/unrequested sources have no fabricated stream. | Actual channel, query and outcome; planned source expansion is explicitly separate. |
-| Cleaning and provenance | Restrained processing layers separate roles; an evidence inspector retains raw/source/time lineage and unknowns. | Recorded transformations and qualifications, not a promise that noise filtering establishes market relevance. |
-| Research | Open parallel lanes show actual specialist work and bounded handoffs. Small pulses indicate supported active state; unknown capacity stays visible. | Demand, behavior, competition, trends and counterargument are expertise examples, not fixed agent replicas. |
-| Cross-check | Results converge for source-independence and contradiction review. A recorded gap can lead to a traceable return path. | Shared observations are not independent corroboration; follow-up remains authority-bound. |
-| Synthesis panel | A quiet side panel updates source-bound finding revisions and separately displays permitted claims or gaps. Violet marks the high-stakes gate. | No commercial recommendation bypasses Claim Ledger by being called provisional. |
-| Event strip | A restrained timeline of actual receipts and handoffs. | Recorded timestamps and current/historical state, not illustrative throughput copied from the mock. |
+R2 replaces the 2026-10-04 visual direction. `ignis-track` turns the former meaning column into display rules for any artifact form:
 
-The approved local reference is `/Users/fioenix/Documents/Ignis_Relay_Discovery_20261004/approved-light-mock.png`, SHA-256 `bbbbaf967e6995c411d50be9ab2f6aabbd344d82bae5d7ae29dbf737a4fd4702`. It is a local review artifact, not a portable runtime dependency or a committed report source. The written requirements above remain the portable behavior contract.
+| Area | Display rule |
+|---|---|
+| Mission identity | Mission, run, frame, snapshot read time and point-in-time status are always shown. Tracking is not permission to start, pause or cancel mission work. |
+| Sources | Actual channel, query and outcome; unavailable or unrequested sources are shown as such, never as zero demand. |
+| Cleaning and provenance | Recorded transformations and qualifications with raw/source/time lineage and unknowns; noise filtering does not establish market relevance. |
+| Research | Actual specialist work and handoffs only; unknown capacity stays visible; expertise labels are not fixed agent replicas. |
+| Cross-check | Shared observations are not independent corroboration; a recorded gap may show its authority-bound follow-up. |
+| Synthesis | Source-bound finding revisions are separate from permitted claims and gaps; nothing provisional bypasses the Claim Ledger. |
+| Timeline | Recorded receipts and handoffs with recorded timestamps and current/historical state. |
 
 ### Scope alternatives
 
-The following alternatives were considered before the owner selected option 3; options 1 and 2 are not an approved replacement.
+Option 3 was selected on 2026-10-04 and superseded by option 4 on 2026-10-19; options 1 and 2 are not an approved replacement.
 
 1. **Explanatory cinematic demonstration**: Smallest presentation scope, synthetic data clearly labeled, no runtime wiring. Cost: it explains the method but cannot report an actual task's progress.
 2. **Recorded mission replay**: Real persisted lineage with an explicit snapshot/replay boundary. Cost: privacy, sanitization and frame-binding requirements; cannot be called live.
-3. **Live operations dashboard — owner selected**: Actual ongoing mission state, failures and freshness in a read-only viewer. Cost: a coherent live read/authority contract and explicit unavailable-stage handling, broader than presentation alone. Mission mutation controls remain excluded.
+3. **Live operations dashboard — owner selected 2026-10-04, superseded**: Actual ongoing mission state, failures and freshness in a read-only viewer. Cost: a coherent live read/authority contract and explicit unavailable-stage handling, broader than presentation alone. Mission mutation controls remain excluded. Superseded by option 4.
+4. **Agent-generated tracking artifact — owner selected 2026-10-19**: Ignis supplies the bounded snapshot and `ignis-track` guidance; the agent renders the artifact on request or at its own milestones. Cost: presentation quality depends on the host, so the display rules and snapshot states carry the integrity guarantees.
 
 ## Clarifications
+
+### Session 2026-10-19 — R2 tracking artifact replaces the built-in viewer
+
+- Q: Does Ignis keep a built-in viewer? → A: No. Retire `open_mission_relay`, its local HTTP viewer and template; keep `get_mission_relay_snapshot` and the fact/event/snapshot storage; add `ignis-track` guidance so agents generate the tracking artifact (owner decision). This supersedes the viewer-specific parts of Session 2026-10-11 (automatic local dashboard) and every viewer refresh rule; the storage, caller-root and source-policy decisions of that session stay in force.
+- Q: How is `ignis-track` distributed so installed packages and images have it? → A: As an MCP prompt or resource served by the Ignis server; a repository SKILL.md may mirror the same content (owner decision).
+- Q: When is a tracking artifact updated while a mission runs? → A: On the user's request or at milestones within the agent's own active turn; no polling or background refresh, and no five-second display commitment (owner decision).
+- Q: Where may an artifact containing mission data go by default? → A: To a local file; publishing outside the user's machine needs the user's explicit consent for that publication (owner decision).
+- Q: Constitution IV forbids agents from regenerating a report's full HTML/CSS ad hoc; how does an agent-generated tracking artifact comply? → A: Amend IV to clarify its scope: it governs Ignis research reports (mission reports, Gap Reports), not host-side tracking artifacts, which instead follow the `ignis-track` display rules. The amendment needs its own impact report and version bump through `speckit-constitution` before implementation (owner decision).
+- Q: How are caller roots resolved on MCP 2026-07-28+ connections, where server-initiated `roots/list` is forbidden (SEP-2577)? → A: Request roots through an `InputRequiredResult` and validate the returned roots with the existing rules. If the client returns none, use only the startup-configured `IGNIS_CALLER_ROOT` under the existing NOT_ADVERTISED pinning rules; otherwise refuse with a reason that names the protocol-forbidden case. This narrowly amends Session 2026-10-11 (startup root): a protocol that forbids the request is not an RPC failure. Legacy-era connections keep the existing native-roots rules (owner decision; basis: observed Claude Code refusal `ROOTS_RPC_UNAVAILABLE` on negotiated protocol 2026-07-28 and installed `mcp` 2.2.0 `NoBackChannelError` semantics).
 
 ### Session 2026-10-10
 
