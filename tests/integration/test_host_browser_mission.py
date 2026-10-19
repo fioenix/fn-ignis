@@ -168,12 +168,15 @@ async def test_cancelled_writer_acquisition_releases_committed_claim(repository_
     repo = repository_case.repository
     store, workspace, mission, executor = await assignment(repo, tmp_path)
     acquired = asyncio.Event()
+    resume = asyncio.Event()
     original = store.require_mission_writer
 
     async def pause_after_claim(*args):
         await original(*args)
         acquired.set()
-        await asyncio.Event().wait()
+        # Setup is settled, not abandoned, on cancellation: the committed claim returns only
+        # after the caller's cancellation arrives, and setup must then give the claim back.
+        await resume.wait()
 
     monkeypatch.setattr(store, "require_mission_writer", pause_after_claim)
 
@@ -184,8 +187,12 @@ async def test_cancelled_writer_acquisition_releases_committed_claim(repository_
     task = asyncio.create_task(run())
     await asyncio.wait_for(acquired.wait(), 2)
     task.cancel()
+    await asyncio.sleep(0)
+    resume.set()
+    done, _ = await asyncio.wait({task}, timeout=2)
+    assert done, "Cancelled acquisition did not settle after its claim committed"
     with pytest.raises(asyncio.CancelledError):
-        await task
+        task.result()
     assert await store.get_mission_writer_claim(mission.id) is None
 
 
