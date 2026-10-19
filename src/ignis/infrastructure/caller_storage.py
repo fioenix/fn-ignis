@@ -13,8 +13,15 @@ from urllib.parse import unquote, urlsplit
 
 from fastmcp.server.middleware import Middleware
 from fastmcp.exceptions import ToolError
-from mcp.types import ClientCapabilities
+from fastmcp.tools.base import InputRequiredToolResult
+from mcp.types import ClientCapabilities, InputRequiredResult, ListRootsRequest, ListRootsResult
+from mcp_types.version import MODERN_PROTOCOL_VERSIONS
 from ignis.infrastructure.caller_configuration import load_caller_configuration
+
+# The input-request key and request_state prefix of the 2026-07-28 roots request; the state names
+# the tool, so roots answered for one call cannot authorize a different tool.
+ROOTS_INPUT_KEY = 'ignis_caller_roots'
+_ROOTS_REQUEST_STATE_PREFIX = 'ignis-caller-roots/v1/'
 
 
 current_caller_storage = ContextVar('ignis_caller_storage', default=None)
@@ -242,6 +249,36 @@ def _declared_root_capability(ctx):
     return capability
 
 
+def _modern_connection(ctx):
+    """Whether the negotiated protocol forbids server-initiated requests such as roots/list."""
+    try:
+        return ctx.session.protocol_version in MODERN_PROTOCOL_VERSIONS
+    except Exception:
+        return False
+
+
+def _single_root_path(roots, ctx):
+    """Accept exactly one existing absolute local directory root, whichever era delivered it."""
+    try:
+        single = len(roots) == 1
+    except Exception:
+        single = False
+    if not single: raise _root_required('ROOT_COUNT_INVALID', ctx)
+    try:
+        uri = urlsplit(str(roots[0].uri))
+        valid_uri = uri.scheme == 'file' and uri.netloc in ('','localhost') and not uri.query and not uri.fragment
+    except Exception:
+        valid_uri = False
+    if not valid_uri: raise _root_required('ROOT_URI_INVALID', ctx) from None
+    try:
+        path = Path(unquote(uri.path))
+        valid_path = path.is_absolute() and '..' not in path.parts and path.is_dir()
+    except Exception:
+        valid_path = False
+    if not valid_path: raise _root_required('ROOT_PATH_INVALID', ctx) from None
+    return path
+
+
 def _root_required(category, ctx, *, rpc_error="UNKNOWN", owner_state="UNKNOWN"):
     """Expose fixed refusal facts only; never serialize client or exception payloads."""
     capability = _declared_root_capability(ctx)
@@ -303,29 +340,35 @@ class CallerStorageMiddleware(Middleware):
         capability = _declared_root_capability(ctx)
         if capability == 'NOT_ADVERTISED':
             path = self._checked_configured_root(ctx)
+        elif capability == 'ADVERTISED' and _modern_connection(ctx):
+            # 2026-07-28 forbids server-initiated roots/list. A configured startup root wins without
+            # asking; otherwise the roots come back on the retry of an InputRequiredResult.
+            if self._configured_present:
+                path = self._checked_configured_root(ctx)
+            else:
+                # The SDK's request-state boundary seals and verifies this value (tool, arguments,
+                # audience, expiry); the roots in the answer, not the state, are the authority.
+                expected_state = _ROOTS_REQUEST_STATE_PREFIX + name
+                state = getattr(ctx, 'request_state', None)
+                if state is None:
+                    return InputRequiredToolResult(InputRequiredResult(
+                        input_requests={ROOTS_INPUT_KEY: ListRootsRequest()}, request_state=expected_state))
+                if state != expected_state:
+                    raise _root_required('ROOTS_REQUEST_STATE_INVALID', ctx)
+                answer = (getattr(ctx, 'input_responses', None) or {}).get(ROOTS_INPUT_KEY)
+                if not isinstance(answer, ListRootsResult):
+                    raise _root_required('ROOTS_REQUEST_FORBIDDEN', ctx)
+                path = _single_root_path(answer.roots, ctx)
+        elif capability == 'UNKNOWN' and _modern_connection(ctx):
+            # No forbidden roots/list: fall through to the owner check and the UNKNOWN refusal.
+            path = None
         else:
             try:
                 roots = (await ctx.session.list_roots()).roots
             except Exception as error:
                 kind = 'UNSUPPORTED' if type(error) is NotImplementedError else 'UNKNOWN'
                 raise _root_required('ROOTS_RPC_UNAVAILABLE', ctx, rpc_error=kind) from None
-            try:
-                single = len(roots) == 1
-            except Exception:
-                single = False
-            if not single: raise _root_required('ROOT_COUNT_INVALID', ctx)
-            try:
-                uri = urlsplit(str(roots[0].uri))
-                valid_uri = uri.scheme == 'file' and uri.netloc in ('','localhost') and not uri.query and not uri.fragment
-            except Exception:
-                valid_uri = False
-            if not valid_uri: raise _root_required('ROOT_URI_INVALID', ctx) from None
-            try:
-                path = Path(unquote(uri.path))
-                valid_path = path.is_absolute() and '..' not in path.parts and path.is_dir()
-            except Exception:
-                valid_path = False
-            if not valid_path: raise _root_required('ROOT_PATH_INVALID', ctx) from None
+            path = _single_root_path(roots, ctx)
             if capability == 'ADVERTISED' and self._configured_present:
                 if path != self._checked_configured_root(ctx):
                     raise _root_required('ROOT_SCOPE_MISMATCH', ctx)
