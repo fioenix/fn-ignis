@@ -25,9 +25,9 @@ async def test_native_dashboard_available_during_actual_running_delayed_collecti
         if isinstance(message.data,dict):notices.append(message.data)
     repository=Path(__file__).resolve().parents[2]
     client=Client(StdioTransport(command=sys.executable,args=[str(repository/'tests/fixtures/dashboard_native_host.py')],
-        cwd=str(tmp_path),keep_alive=False,env={'IGNIS_ENV_FILE':str(isolated),'IGNIS_ENV_ISOLATED':'1',
+        cwd=str(root),keep_alive=False,env={'IGNIS_ENV_FILE':str(isolated),'IGNIS_ENV_ISOLATED':'1',
         'IGNIS_OFFLINE_CONTROL':str(control),'PYTHONPATH':str(repository/'src')},log_file=tmp_path/'stdio.log'),
-        roots=[root.as_uri()],mode='legacy',log_handler=notice,timeout=25)
+        mode='legacy',log_handler=notice,timeout=25)
     async with client:
         proposal=_payload(await client.call_tool('propose_research_workspace',{'host_workspace':str(root),'research_name':'Offline dashboard'}))
         workspace=_payload(await client.call_tool('confirm_research_workspace',{'proposed_path':proposal['proposed_path'],'confirmation':True}))

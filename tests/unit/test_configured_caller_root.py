@@ -47,52 +47,41 @@ async def test_explicit_not_advertised_uses_only_snapshotted_operator_startup_ro
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('case',('missing','unknown','model_path'))
-async def test_configured_authority_never_comes_from_missing_capability_or_model_arguments(tmp_path, monkeypatch, case):
+@pytest.mark.parametrize('capability',('ADVERTISED','NOT_ADVERTISED','UNKNOWN'))
+async def test_configured_authority_never_comes_from_capability_or_model_arguments(tmp_path, monkeypatch, capability):
     root=tmp_path/'approved';root.mkdir();foreign=tmp_path/'foreign';foreign.mkdir()
-    if case=='missing':monkeypatch.delenv('IGNIS_CALLER_ROOT',raising=False)
-    else:monkeypatch.setenv('IGNIS_CALLER_ROOT',str(root))
-    middleware,context,dispatch,calls=_consumer(root,'UNKNOWN' if case=='unknown' else 'NOT_ADVERTISED',
-        arguments={'host_workspace':str(foreign)})
+    monkeypatch.setenv('IGNIS_CALLER_ROOT',str(root))
+    middleware,context,dispatch,calls=_consumer(root,capability,arguments={'host_workspace':str(foreign)})
     with pytest.raises(ToolError) as error:await middleware.on_call_tool(context,dispatch)
-    expected = {
-        'missing': 'ROOT_REQUIRED category=CONFIGURED_ROOT_REQUIRED roots_capability=NOT_ADVERTISED rpc_error=UNKNOWN owner_state=UNKNOWN',
-        'unknown': 'ROOT_REQUIRED category=ROOT_COUNT_INVALID roots_capability=UNKNOWN rpc_error=UNKNOWN owner_state=UNKNOWN',
-        'model_path': 'CALLER_STORAGE_SCOPE_REFUSED',
-    }
-    assert str(error.value) == expected[case]
-    assert all(value not in calls for value in ('compose','runtime','dispatch'))
+    assert str(error.value) == 'CALLER_STORAGE_SCOPE_REFUSED'
+    assert all(value not in calls for value in ('roots_rpc','compose','runtime','dispatch'))
     assert not (root/'.fnignis').exists() and not (foreign/'.fnignis').exists()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('case,category',(
-    ('valid',None),('missing','ROOT_COUNT_INVALID'),('ambiguous','ROOT_COUNT_INVALID'),
-    ('rpc','ROOTS_RPC_UNAVAILABLE'),('malformed','ROOT_URI_INVALID'),
-    ('mismatch','ROOT_SCOPE_MISMATCH'),('bad_config','CONFIGURED_ROOT_INVALID'),
-    ('unknown','ROOT_CAPABILITY_UNKNOWN'),
-))
-async def test_advertised_native_roots_remain_authoritative_without_configured_fallback(tmp_path, monkeypatch, case, category):
+@pytest.mark.parametrize('case',('foreign','ambiguous','malformed','rpc','none','unknown'))
+async def test_configured_root_wins_and_client_roots_are_never_requested(tmp_path, monkeypatch, case):
     root=tmp_path/'approved';root.mkdir();foreign=tmp_path/'foreign';foreign.mkdir()
-    monkeypatch.setenv('IGNIS_CALLER_ROOT','relative/PRIVATE_CONFIG_CANARY' if case=='bad_config' else str(root))
-    native=[root.as_uri()]
-    if case=='missing':native=[]
-    if case=='ambiguous':native.append(foreign.as_uri())
-    if case=='malformed':native=['https://PRIVATE_URI_CANARY/']
-    if case=='mismatch':native=[foreign.as_uri()]
+    monkeypatch.setenv('IGNIS_CALLER_ROOT',str(root))
+    native={'foreign':[foreign.as_uri()],'ambiguous':[root.as_uri(),foreign.as_uri()],
+            'malformed':['https://PRIVATE_URI_CANARY/'],'rpc':[],'none':[],'unknown':[foreign.as_uri()]}[case]
     middleware,context,dispatch,calls=_consumer(root,'UNKNOWN' if case=='unknown' else 'ADVERTISED',
         native_roots=native,rpc_failure=case=='rpc')
-    if category is None:
-        assert (await middleware.on_call_tool(context,dispatch))['selected_root']==root
-        assert calls==['roots_rpc','compose','runtime','dispatch']
-    else:
-        with pytest.raises(ToolError) as error:await middleware.on_call_tool(context,dispatch)
-        capability = 'UNKNOWN' if case == 'unknown' else 'ADVERTISED'
-        assert str(error.value) == (f'ROOT_REQUIRED category={category} roots_capability={capability} '
-                                   'rpc_error=UNKNOWN owner_state=UNKNOWN')
-        assert 'PRIVATE_' not in str(error.value) and str(root) not in str(error.value)
-        assert all(value not in calls for value in ('compose','runtime','dispatch'))
-    assert not (root/'.fnignis').exists() and not (foreign/'.fnignis').exists()
+    assert (await middleware.on_call_tool(context,dispatch))['selected_root']==root
+    assert calls==['compose','runtime','dispatch']
+    assert not (foreign/'.fnignis').exists()
+
+
+@pytest.mark.asyncio
+async def test_invalid_configured_root_refuses_without_using_client_roots(tmp_path, monkeypatch):
+    root=tmp_path/'approved';root.mkdir()
+    monkeypatch.setenv('IGNIS_CALLER_ROOT','relative/PRIVATE_CONFIG_CANARY')
+    middleware,context,dispatch,calls=_consumer(root,'ADVERTISED',native_roots=[root.as_uri()])
+    with pytest.raises(ToolError) as error:await middleware.on_call_tool(context,dispatch)
+    assert str(error.value) == ('ROOT_REQUIRED category=CONFIGURED_ROOT_INVALID roots_capability=ADVERTISED '
+                                'rpc_error=UNKNOWN owner_state=UNKNOWN')
+    assert 'PRIVATE_' not in str(error.value)
+    assert calls==[] and not (root/'.fnignis').exists()
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 import os
 from collections.abc import MutableMapping
+from pathlib import Path
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -39,6 +40,38 @@ quarantine_ambient_credentials(os.environ)
 
 from ignis.domain.entities import TrendSignal, TopicCluster  # noqa: E402
 from ignis.domain.value_objects import PlatformType, GeoCode  # noqa: E402
+
+
+CHECKOUT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def never_use_the_checkout_as_caller_root(monkeypatch):
+    """Fail a test that would place caller storage in this checkout's own .fnignis/.
+
+    The caller root is the folder the server started in, and pytest runs from the checkout. A test
+    that forgets to bind a temporary root must fail here instead of writing the owner's real store.
+    The tool call is refused before storage opens, and the test fails at teardown even when the MCP
+    server turns the refusal into an error result the test never inspects. A stdio server process
+    is not covered; those tests start the server in a temporary folder.
+    """
+    from fastmcp.exceptions import ToolError
+    from ignis.infrastructure.caller_storage import CallerStorageMiddleware
+    resolved = []
+    for name in ("_checked_startup_root", "_checked_configured_root"):
+        original = getattr(CallerStorageMiddleware, name)
+
+        def guarded(self, ctx, _original=original):
+            path = _original(self, ctx)
+            if Path(path).resolve() == CHECKOUT_ROOT:
+                resolved.append(path)
+                raise ToolError("CHECKOUT_CALLER_ROOT_GUARD")
+            return path
+        monkeypatch.setattr(CallerStorageMiddleware, name, guarded)
+    yield
+    if resolved:
+        pytest.fail("A test resolved the checkout as its caller root; "
+                    "bind a temporary root with tests.caller_roots.bind_caller_root")
 
 
 @pytest.fixture

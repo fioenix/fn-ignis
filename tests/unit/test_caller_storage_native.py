@@ -10,16 +10,17 @@ from ignis.interfaces.mcp import server
 import ignis.config as config
 
 
-def native_client(tmp_path, roots):
-    """Exercise the supported stdio backchannel in a fresh isolated process."""
+def native_client(tmp_path, opened, client_roots=()):
+    """Start the server in ``opened``, as an agent host does for the folder a session was opened in."""
     repository = Path(__file__).resolve().parents[2]
     isolated = tmp_path / 'native-isolated.env'
     isolated.write_text('DATABASE_URL=sqlite:///' + str(tmp_path / 'unselected.sqlite3') + '\nYOUTUBE_API_KEY=\nIGNIS_ENCRYPTION_KEY=\n')
     return Client(StdioTransport(command=sys.executable,
-        args=['-m', 'ignis.interfaces.mcp.server'], cwd=str(tmp_path), keep_alive=False,
+        args=['-m', 'ignis.interfaces.mcp.server'], cwd=str(opened), keep_alive=False,
         env={'IGNIS_ENV_FILE':str(isolated), 'IGNIS_ENV_ISOLATED':'1',
              'PYTHONPATH':os.pathsep.join((str(repository/'src'),str(repository)))},
-        log_file=tmp_path/'native-stdio.log'), roots=[root.as_uri() for root in roots], mode="legacy", timeout=20)
+        log_file=tmp_path/'native-stdio.log'), roots=[root.as_uri() for root in client_roots] or None,
+        mode="legacy", timeout=20)
 
 
 def payload(result):
@@ -31,7 +32,7 @@ async def test_native_single_root_proposes_caller_fnignis_not_legacy_install_sto
     root = tmp_path / 'caller'; root.mkdir()
     monkeypatch.setattr(server, '_COMPONENTS', None)
     monkeypatch.setattr(config.settings, 'DATABASE_URL', 'sqlite:///:memory:')
-    async with native_client(tmp_path, [root]) as client:
+    async with native_client(tmp_path, root) as client:
         result = payload(await client.call_tool('propose_research_workspace',
             {'host_workspace':str(root),'research_name':'Synthetic native storage'}))
     assert result['proposed_path'] == str(root / '.fnignis/research/synthetic-native-storage')
@@ -40,23 +41,26 @@ async def test_native_single_root_proposes_caller_fnignis_not_legacy_install_sto
 
 
 @pytest.mark.asyncio
-async def test_native_ambiguous_roots_refuse_before_components_or_workspace_write(tmp_path, monkeypatch):
-    first, second = tmp_path/'first',tmp_path/'second'
-    first.mkdir(); second.mkdir()
+async def test_native_client_roots_never_redirect_storage_away_from_the_opened_folder(tmp_path, monkeypatch):
+    opened, other = tmp_path/'opened', tmp_path/'other'
+    opened.mkdir(); other.mkdir()
     monkeypatch.setattr(server, '_COMPONENTS', None)
     monkeypatch.setattr(config.settings, 'DATABASE_URL', 'sqlite:///:memory:')
-    async with native_client(tmp_path, [first,second]) as client:
-        result = await client.call_tool('propose_research_workspace',
-            {'host_workspace':str(first),'research_name':'Synthetic native storage'},raise_on_error=False)
-    assert result.is_error and 'ROOT_REQUIRED' in result.content[0].text
+    async with native_client(tmp_path, opened, [other, opened]) as client:
+        result = payload(await client.call_tool('propose_research_workspace',
+            {'host_workspace':str(opened),'research_name':'Synthetic native storage'}))
+        refused = await client.call_tool('propose_research_workspace',
+            {'host_workspace':str(other),'research_name':'Synthetic native storage'},raise_on_error=False)
+    assert result['proposed_path'] == str(opened / '.fnignis/research/synthetic-native-storage')
+    assert refused.is_error and 'CALLER_STORAGE_SCOPE_REFUSED' in refused.content[0].text
     assert server._COMPONENTS is None
-    assert not (first/'.fnignis').exists() and not (second/'.fnignis').exists()
+    assert not (other/'.fnignis').exists()
 
 
 @pytest.mark.asyncio
 async def test_native_workspace_and_mission_survive_fresh_process_without_ingress(tmp_path):
     root = tmp_path/'caller'; root.mkdir()
-    async with native_client(tmp_path, [root]) as client:
+    async with native_client(tmp_path, root) as client:
         proposal = payload(await client.call_tool('propose_research_workspace',
             {'host_workspace':str(root),'research_name':'Offline retained evidence'}))
         workspace = payload(await client.call_tool('confirm_research_workspace',
@@ -85,7 +89,7 @@ async def test_native_workspace_and_mission_survive_fresh_process_without_ingres
     await repository.close()
     first['mission']['status']='COMPLETED'
     first['mission']['summary']=retained.summary
-    async with native_client(tmp_path,[root]) as client:
+    async with native_client(tmp_path,root) as client:
         terminal=await client.call_tool('execute_mission_ingress',{'mission_id':mission['mission_id']},raise_on_error=False)
         terminal_payload=payload(terminal)
         assert terminal_payload['status']=='TERMINAL'
@@ -107,17 +111,17 @@ async def test_native_symlink_and_root_replacement_refuse_without_writing_foreig
     root=tmp_path/'caller';root.mkdir()
     foreign=tmp_path/'foreign';foreign.mkdir()
     (root/'.fnignis').symlink_to(foreign,target_is_directory=True)
-    async with native_client(tmp_path,[root]) as client:
+    async with native_client(tmp_path,root) as client:
         result=await client.call_tool('propose_research_workspace',
             {'host_workspace':str(root),'research_name':'Refused'},raise_on_error=False)
         assert result.is_error and 'CALLER_STORAGE_SCOPE_REFUSED' in result.content[0].text
     assert list(foreign.iterdir())==[]
     (root/'.fnignis').unlink()
-    async with native_client(tmp_path,[root]) as client:
+    async with native_client(tmp_path,root) as client:
         await client.call_tool('propose_research_workspace',{'host_workspace':str(root),'research_name':'Pinned'})
         root.rename(tmp_path/'original-caller');root.mkdir()
         result=await client.call_tool('list_research_workspaces',{},raise_on_error=False)
-        assert result.is_error and 'CALLER_STORAGE_SCOPE_REFUSED' in result.content[0].text
+        assert result.is_error and 'ROOT_REQUIRED category=STARTUP_ROOT_CHANGED' in result.content[0].text
     assert list(root.iterdir())==[]
 
 

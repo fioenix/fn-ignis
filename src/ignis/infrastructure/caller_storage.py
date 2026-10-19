@@ -7,21 +7,15 @@ import logging
 import copy
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+import pwd
 import stat
 from threading import RLock
 from urllib.parse import unquote, urlsplit
 
 from fastmcp.server.middleware import Middleware
 from fastmcp.exceptions import ToolError
-from fastmcp.tools.base import InputRequiredToolResult
-from mcp.types import ClientCapabilities, InputRequiredResult, ListRootsRequest, ListRootsResult
-from mcp_types.version import MODERN_PROTOCOL_VERSIONS
+from mcp.types import ClientCapabilities
 from ignis.infrastructure.caller_configuration import load_caller_configuration
-
-# The input-request key and request_state prefix of the 2026-07-28 roots request; the state names
-# the tool, so roots answered for one call cannot authorize a different tool.
-ROOTS_INPUT_KEY = 'ignis_caller_roots'
-_ROOTS_REQUEST_STATE_PREFIX = 'ignis-caller-roots/v1/'
 
 
 current_caller_storage = ContextVar('ignis_caller_storage', default=None)
@@ -249,34 +243,63 @@ def _declared_root_capability(ctx):
     return capability
 
 
-def _modern_connection(ctx):
-    """Whether the negotiated protocol forbids server-initiated requests such as roots/list."""
+def _directory_identities(path):
+    """Pin every component of an absolute directory path so a later swap or symlink is detected."""
+    if not path.is_absolute() or '..' in path.parts:
+        raise ValueError
+    identities = []
+    for node in (*path.parents, path):
+        info = node.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError
+        identities.append((node, info.st_dev, info.st_ino))
+    return tuple(identities)
+
+
+def _identities_unchanged(identities):
     try:
-        return ctx.session.protocol_version in MODERN_PROTOCOL_VERSIONS
-    except Exception:
+        for node, device, inode in identities:
+            info = node.lstat()
+            if not stat.S_ISDIR(info.st_mode) or (info.st_dev, info.st_ino) != (device, inode):
+                return False
+    except OSError:
         return False
+    return True
 
 
-def _single_root_path(roots, ctx):
-    """Accept exactly one existing absolute local directory root, whichever era delivered it."""
+def _home_directories():
+    homes = [Path.home()]
     try:
-        single = len(roots) == 1
-    except Exception:
-        single = False
-    if not single: raise _root_required('ROOT_COUNT_INVALID', ctx)
+        homes.append(Path(pwd.getpwuid(os.getuid()).pw_dir))
+    except (KeyError, OSError):
+        pass
+    return homes
+
+
+def _startup_folder_refused(path):
+    """Refuse a folder that cannot be one project: the filesystem root, home or any parent of it,
+    a shared or sticky directory, or a directory another user owns and could pre-seed."""
+    if path == Path(path.anchor):
+        return True
+    info = path.lstat()
+    if info.st_uid != os.getuid() or info.st_mode & (stat.S_IWOTH | stat.S_ISVTX):
+        return True
+    for home in _home_directories():
+        try:
+            home = home.resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        if any(os.path.samefile(node, path) for node in (home, *home.parents)):
+            return True
+    return False
+
+
+def _names_root(value, root):
     try:
-        uri = urlsplit(str(roots[0].uri))
-        valid_uri = uri.scheme == 'file' and uri.netloc in ('','localhost') and not uri.query and not uri.fragment
-    except Exception:
-        valid_uri = False
-    if not valid_uri: raise _root_required('ROOT_URI_INVALID', ctx) from None
-    try:
-        path = Path(unquote(uri.path))
-        valid_path = path.is_absolute() and '..' not in path.parts and path.is_dir()
-    except Exception:
-        valid_path = False
-    if not valid_path: raise _root_required('ROOT_PATH_INVALID', ctx) from None
-    return path
+        path = Path(value)
+        return path.is_absolute() and os.path.samefile(path, root)
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def _root_required(category, ctx, *, rpc_error="UNKNOWN", owner_state="UNKNOWN"):
@@ -287,12 +310,14 @@ def _root_required(category, ctx, *, rpc_error="UNKNOWN", owner_state="UNKNOWN")
 
 
 class CallerStorageMiddleware(Middleware):
-    """Scope existing mission tool schemas using actual request/session roots only."""
+    """Scope mission tools to the folder the agent was opened in, or an operator override."""
 
     def __init__(self, compose, runtime_for_scope):
         self.compose = compose
         self.runtime_for_scope = runtime_for_scope
         # Construction occurs at server startup; request arguments and later env edits are not grants.
+        # The agent host starts the server in the folder the session was opened in, so that working
+        # directory is the caller root unless IGNIS_CALLER_ROOT overrides it.
         configured = os.environ.get('IGNIS_CALLER_ROOT')
         self._configured_present = configured is not None
         self._configured_root = None
@@ -300,33 +325,41 @@ class CallerStorageMiddleware(Middleware):
         if self._configured_present:
             try:
                 path = Path(configured)
-                if not path.is_absolute() or '..' in path.parts:
-                    raise ValueError
-                identities = []
-                for node in (*path.parents, path):
-                    info = node.lstat()
-                    if not stat.S_ISDIR(info.st_mode):
-                        raise ValueError
-                    identities.append((node, info.st_dev, info.st_ino))
+                self._configured_identities = _directory_identities(path)
                 self._configured_root = path
-                self._configured_identities = tuple(identities)
             except (OSError, ValueError, TypeError):
                 # Invalid startup scope remains invalid; never silently switch to another grant.
                 pass
+        self._startup_root = None
+        self._startup_identities = ()
+        self._startup_refused = False
+        try:
+            path = Path(os.getcwd())
+            # A globally installed server may start in home, the filesystem root or a shared
+            # directory; never scatter caller storage there.
+            if _startup_folder_refused(path):
+                self._startup_refused = True
+            else:
+                self._startup_identities = _directory_identities(path)
+                self._startup_root = path
+        except (OSError, ValueError, RuntimeError):
+            pass
 
     def _checked_configured_root(self, ctx):
-        if not self._configured_present:
-            raise _root_required('CONFIGURED_ROOT_REQUIRED', ctx)
         if self._configured_root is None:
             raise _root_required('CONFIGURED_ROOT_INVALID', ctx)
-        try:
-            for node, device, inode in self._configured_identities:
-                info = node.lstat()
-                if not stat.S_ISDIR(info.st_mode) or (info.st_dev, info.st_ino) != (device, inode):
-                    raise ValueError
-        except (OSError, ValueError):
-            raise _root_required('CONFIGURED_ROOT_CHANGED', ctx) from None
+        if not _identities_unchanged(self._configured_identities):
+            raise _root_required('CONFIGURED_ROOT_CHANGED', ctx)
         return self._configured_root
+
+    def _checked_startup_root(self, ctx):
+        if self._startup_refused:
+            raise _root_required('STARTUP_ROOT_REFUSED', ctx)
+        if self._startup_root is None:
+            raise _root_required('STARTUP_ROOT_INVALID', ctx)
+        if not _identities_unchanged(self._startup_identities):
+            raise _root_required('STARTUP_ROOT_CHANGED', ctx)
+        return self._startup_root
 
     async def on_call_tool(self, context, call_next):
         name = context.message.name
@@ -337,41 +370,7 @@ class CallerStorageMiddleware(Middleware):
         ctx = context.fastmcp_context
         if ctx is None or getattr(ctx, 'request_context', None) is None:
             raise _root_required('REQUEST_CONTEXT_ABSENT', ctx)
-        capability = _declared_root_capability(ctx)
-        if capability == 'NOT_ADVERTISED':
-            path = self._checked_configured_root(ctx)
-        elif capability == 'ADVERTISED' and _modern_connection(ctx):
-            # 2026-07-28 forbids server-initiated roots/list. A configured startup root wins without
-            # asking; otherwise the roots come back on the retry of an InputRequiredResult.
-            if self._configured_present:
-                path = self._checked_configured_root(ctx)
-            else:
-                # The SDK's request-state boundary seals and verifies this value (tool, arguments,
-                # audience, expiry); the roots in the answer, not the state, are the authority.
-                expected_state = _ROOTS_REQUEST_STATE_PREFIX + name
-                state = getattr(ctx, 'request_state', None)
-                if state is None:
-                    return InputRequiredToolResult(InputRequiredResult(
-                        input_requests={ROOTS_INPUT_KEY: ListRootsRequest()}, request_state=expected_state))
-                if state != expected_state:
-                    raise _root_required('ROOTS_REQUEST_STATE_INVALID', ctx)
-                answer = (getattr(ctx, 'input_responses', None) or {}).get(ROOTS_INPUT_KEY)
-                if not isinstance(answer, ListRootsResult):
-                    raise _root_required('ROOTS_REQUEST_FORBIDDEN', ctx)
-                path = _single_root_path(answer.roots, ctx)
-        elif capability == 'UNKNOWN' and _modern_connection(ctx):
-            # No forbidden roots/list: fall through to the owner check and the UNKNOWN refusal.
-            path = None
-        else:
-            try:
-                roots = (await ctx.session.list_roots()).roots
-            except Exception as error:
-                kind = 'UNSUPPORTED' if type(error) is NotImplementedError else 'UNKNOWN'
-                raise _root_required('ROOTS_RPC_UNAVAILABLE', ctx, rpc_error=kind) from None
-            path = _single_root_path(roots, ctx)
-            if capability == 'ADVERTISED' and self._configured_present:
-                if path != self._checked_configured_root(ctx):
-                    raise _root_required('ROOT_SCOPE_MISMATCH', ctx)
+        path = self._checked_configured_root(ctx) if self._configured_present else self._checked_startup_root(ctx)
         try:
             owner = ctx.lifespan_context.get('mission_relay')
         except Exception:
@@ -380,16 +379,17 @@ class CallerStorageMiddleware(Middleware):
             raise _root_required('OWNER_LIFESPAN_UNAVAILABLE', ctx, owner_state='ABSENT')
         if getattr(owner, 'closed', True):
             raise _root_required('OWNER_LIFESPAN_UNAVAILABLE', ctx, owner_state='CLOSED')
-        if capability == 'UNKNOWN':
-            raise _root_required('ROOT_CAPABILITY_UNKNOWN', ctx)
         key = str(path)
         scope = owner.caller_scopes.get(key)
         if scope is None:
             scope = CallerStorageScope(path)
             owner.caller_scopes[key] = scope
         scope.check()
-        if 'host_workspace' in arguments and Path(arguments['host_workspace']) != scope.root:
-            raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
+        if 'host_workspace' in arguments:
+            if not _names_root(arguments['host_workspace'], scope.root):
+                raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
+            # A symlinked spelling of the root still names it; proposals use the pinned path.
+            arguments['host_workspace'] = str(scope.root)
         if 'proposed_path' in arguments:
             scope.check_path(arguments['proposed_path'])
         token = current_caller_storage.set(scope)

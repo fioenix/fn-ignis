@@ -9,7 +9,7 @@ async def test_native_explicit_caller_sqlite_connection_wins_and_restarts_stably
     root=tmp_path/'caller';root.mkdir();storage=root/'.fnignis';storage.mkdir()
     target=storage/'selected.sqlite3'
     config=storage/'.env';config.write_text('DATABASE_URL=sqlite:///'+str(target)+'\n');config.chmod(0o600)
-    async with native_client(tmp_path,[root]) as client:
+    async with native_client(tmp_path,root) as client:
         proposal=payload(await client.call_tool('propose_research_workspace',
             {'host_workspace':str(root),'research_name':'Configured local store'}))
         workspace=payload(await client.call_tool('confirm_research_workspace',
@@ -17,7 +17,7 @@ async def test_native_explicit_caller_sqlite_connection_wins_and_restarts_stably
         assert workspace['status']=='CREATED'
     assert target.is_file(), 'Caller connection was ignored in favor of default storage.'
     assert not (storage/'canonical.sqlite3').exists()
-    async with native_client(tmp_path,[root]) as client:
+    async with native_client(tmp_path,root) as client:
         result=payload(await client.call_tool('list_research_workspaces',{}))
         assert workspace['workspace_id'] in str(result)
     assert not (tmp_path/'unselected.sqlite3').exists()
@@ -27,7 +27,7 @@ async def test_native_explicit_caller_sqlite_connection_wins_and_restarts_stably
 async def test_native_invalid_caller_connection_refuses_without_fallback_or_secret_output(tmp_path):
     root=tmp_path/'caller';root.mkdir();storage=root/'.fnignis';storage.mkdir()
     config=storage/'.env';config.write_text('DATABASE_URL=unsupported://dummy-user:SECRET_CANARY@invalid/database\n');config.chmod(0o600)
-    async with native_client(tmp_path,[root]) as client:
+    async with native_client(tmp_path,root) as client:
         result=await client.call_tool('propose_research_workspace',
             {'host_workspace':str(root),'research_name':'Refused config'},raise_on_error=False)
     assert result.is_error and 'CALLER_CONFIG_REFUSED' in result.content[0].text
@@ -41,7 +41,7 @@ async def test_native_invalid_caller_connection_refuses_without_fallback_or_secr
 async def test_native_changed_configuration_refuses_cached_backend(tmp_path):
     root=tmp_path/'caller';root.mkdir();storage=root/'.fnignis';storage.mkdir()
     config=storage/'.env';config.write_text('# Original\n');config.chmod(0o600)
-    async with native_client(tmp_path,[root]) as client:
+    async with native_client(tmp_path,root) as client:
         proposal=payload(await client.call_tool('propose_research_workspace',
             {'host_workspace':str(root),'research_name':'Stable config'}))
         config.write_text('# Changed in place\n')
@@ -56,7 +56,7 @@ async def test_native_failing_connection_never_creates_default_database(tmp_path
     root=tmp_path/'caller';root.mkdir();storage=root/'.fnignis';storage.mkdir()
     target=storage/'not-a-database';target.mkdir()
     config=storage/'.env';config.write_text('DATABASE_URL=sqlite:///'+str(target)+'\n');config.chmod(0o600)
-    async with native_client(tmp_path,[root]) as client:
+    async with native_client(tmp_path,root) as client:
         result=await client.call_tool('propose_research_workspace',
             {'host_workspace':str(root),'research_name':'Failed connection'},raise_on_error=False)
         assert result.is_error and 'CALLER_DATABASE_REFUSED' in result.content[0].text
@@ -204,7 +204,7 @@ async def test_native_existing_manifest_confirmation_runs_protected_setup(tmp_pa
     workspace=ResearchWorkspace(name='Existing research',slug='existing',root_path=root/'.fnignis/research/existing')
     WorkspaceRepository.write_manifest(workspace)
     manifest=workspace.root_path/'workspace.json';before=manifest.read_bytes()
-    async with native_client(tmp_path,[root]) as client:
+    async with native_client(tmp_path,root) as client:
         proposal=payload(await client.call_tool('propose_research_workspace',
             {'host_workspace':str(root),'research_name':'Existing research','slug':'existing'}))
         declined=await client.call_tool('confirm_research_workspace',
@@ -230,7 +230,7 @@ async def test_native_existing_manifest_refuses_tracked_config_on_confirmation(t
     config=root/'.fnignis/.env';config.write_text('# Owner config\n');config.chmod(0o600)
     subprocess.run(['git','-C',str(root),'add','.fnignis/.env'],check=True)
     manifest=workspace.root_path/'workspace.json';before=manifest.read_bytes()
-    async with native_client(tmp_path,[root]) as client:
+    async with native_client(tmp_path,root) as client:
         proposal=payload(await client.call_tool('propose_research_workspace',
             {'host_workspace':str(root),'research_name':'Existing research','slug':'existing'}))
         result=await client.call_tool('confirm_research_workspace',

@@ -9,33 +9,32 @@ from ignis.infrastructure.caller_storage import CallerStorageMiddleware, current
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case,category", (
     ("context", "REQUEST_CONTEXT_ABSENT"),
-    ("rpc", "ROOTS_RPC_UNAVAILABLE"),
-    ("count", "ROOT_COUNT_INVALID"),
-    ("uri", "ROOT_URI_INVALID"),
-    ("path", "ROOT_PATH_INVALID"),
+    ("filesystem_root", "STARTUP_ROOT_REFUSED"),
+    ("home", "STARTUP_ROOT_REFUSED"),
+    ("replaced", "STARTUP_ROOT_CHANGED"),
     ("owner_absent", "OWNER_LIFESPAN_UNAVAILABLE"),
     ("owner_closed", "OWNER_LIFESPAN_UNAVAILABLE"),
 ))
-async def test_root_refusal_exposes_only_fixed_category_and_never_bypasses(case, category, tmp_path):
+async def test_root_refusal_exposes_only_fixed_category_and_never_bypasses(case, category, tmp_path, monkeypatch):
     protected = "PRIVATE_PAYLOAD_CANARY_credential_transcript"
     calls = []
+    opened = tmp_path / "repository"
+    opened.mkdir()
+    monkeypatch.delenv("IGNIS_CALLER_ROOT", raising=False)
+    monkeypatch.setenv("HOME", str(opened if case == "home" else tmp_path / "elsewhere"))
+    monkeypatch.chdir("/" if case == "filesystem_root" else opened)
 
     def forbidden(*_args):
         calls.append("compose")
-        raise AssertionError("Refused roots reached storage composition")
+        raise AssertionError("Refused root reached storage composition")
 
     async def next_call(_context):
         calls.append("dispatch")
-        raise AssertionError("Refused roots reached mission dispatch")
+        raise AssertionError("Refused root reached mission dispatch")
 
     async def roots():
-        if case == "rpc":
-            error_type = type(protected, (RuntimeError,), {})
-            raise error_type(protected)
-        values = [] if case == "count" else [SimpleNamespace(uri=tmp_path.as_uri())]
-        if case == "uri": values = [SimpleNamespace(uri="https://" + protected + "/")]
-        if case == "path": values = [SimpleNamespace(uri=(tmp_path/protected).as_uri())]
-        return SimpleNamespace(roots=values)
+        calls.append("roots_rpc")
+        raise AssertionError("Client roots must never be requested")
 
     owner = None if case == "owner_absent" else SimpleNamespace(closed=case == "owner_closed", caller_scopes={})
     ctx = SimpleNamespace(request_context=object(), session=SimpleNamespace(list_roots=roots),
@@ -43,13 +42,18 @@ async def test_root_refusal_exposes_only_fixed_category_and_never_bypasses(case,
     if case == "context": ctx = None
     context = SimpleNamespace(message=SimpleNamespace(name="get_mission_analysis",
         arguments={"mission_id": protected}), fastmcp_context=ctx)
+    middleware = CallerStorageMiddleware(forbidden, forbidden)
+    if case == "replaced":
+        monkeypatch.chdir(tmp_path)
+        opened.rename(tmp_path / "original")
+        opened.mkdir()
     with pytest.raises(ToolError) as error:
-        await CallerStorageMiddleware(forbidden, forbidden).on_call_tool(context, next_call)
+        await middleware.on_call_tool(context, next_call)
     text = str(error.value)
     owner_state = "ABSENT" if case == "owner_absent" else "CLOSED" if case == "owner_closed" else "UNKNOWN"
     assert text == (f"ROOT_REQUIRED category={category} roots_capability=UNKNOWN "
                     f"rpc_error=UNKNOWN owner_state={owner_state}")
-    assert protected not in text and str(tmp_path) not in text and "https://" not in text
+    assert protected not in text and str(tmp_path) not in text
     assert error.value.__cause__ is None
     assert calls == [] and current_caller_storage.get() is None
 
@@ -72,8 +76,9 @@ async def test_independent_tactical_call_needs_no_root_diagnostic_or_composition
 async def test_diagnostic_uses_only_public_typed_capability_presence(advertised, monkeypatch):
     from mcp.types import ClientCapabilities
     monkeypatch.delenv("IGNIS_CALLER_ROOT", raising=False)
+    monkeypatch.chdir("/")
     protected = "PRIVATE_CAPABILITY_CANARY"
-    async def unavailable(): raise NotImplementedError(protected)
+    async def unavailable(): raise AssertionError("Client roots must never be requested")
     capabilities = ClientCapabilities(roots={} if advertised else None,
         experimental={protected: {"payload": protected}})
     ctx = SimpleNamespace(request_context=object(), session=SimpleNamespace(
@@ -85,9 +90,6 @@ async def test_diagnostic_uses_only_public_typed_capability_presence(advertised,
     with pytest.raises(ToolError) as error:
         await CallerStorageMiddleware(forbidden, forbidden).on_call_tool(context, next_call)
     expected = "ADVERTISED" if advertised else "NOT_ADVERTISED"
-    # Explicit non-advertisement now requires the separately approved startup-root grant.
-    category = "ROOTS_RPC_UNAVAILABLE" if advertised else "CONFIGURED_ROOT_REQUIRED"
-    rpc_error = "UNSUPPORTED" if advertised else "UNKNOWN"
-    assert str(error.value) == (f"ROOT_REQUIRED category={category} "
-        f"roots_capability={expected} rpc_error={rpc_error} owner_state=UNKNOWN")
+    assert str(error.value) == (f"ROOT_REQUIRED category=STARTUP_ROOT_REFUSED "
+        f"roots_capability={expected} rpc_error=UNKNOWN owner_state=UNKNOWN")
     assert protected not in str(error.value) and error.value.__cause__ is None

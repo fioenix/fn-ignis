@@ -19,6 +19,7 @@ from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.harness_models import ChannelHealthStatus
 from ignis.domain.research_workspace import MissionProbeOutcome
 from ignis.domain.value_objects import PlatformType
+from tests.caller_roots import bind_caller_root
 
 from test_mission_relay_read_boundary import (
     _assert_postgres_reads,
@@ -312,7 +313,7 @@ async def test_actual_idle_is_canonical_not_inferred_from_unselected_run(attenti
 def _caller_client(monkeypatch, root, components):
     """Initialized-owner readback through a validated caller root.
 
-    The real middleware validates the client's advertised root; the supported compose seam then binds
+    The real middleware resolves the bound startup folder as the caller root; the supported compose seam then binds
     the owner-created repository to that caller scope. This covers readback of an already initialized
     owner repository, not cold production composition of a caller store. The caller lifespan owns the
     composed map and really closes its repository on exit.
@@ -329,7 +330,8 @@ def _caller_client(monkeypatch, root, components):
     for middleware in server.mcp.middleware:
         if isinstance(middleware, CallerStorageMiddleware):
             monkeypatch.setattr(middleware, 'compose', compose)
-    return Client(server.mcp, roots=[root.as_uri()], mode='legacy')
+    bind_caller_root(monkeypatch, root)
+    return Client(server.mcp, mode='legacy')
 
 
 class _OwnedRepository:
