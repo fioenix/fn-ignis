@@ -1,6 +1,7 @@
 # Decision: Listening-First Ignis with Host-Scheduled Routines
 
-**Status:** Proposed
+**Status:** Accepted by the owner on 2026-10-21, including the review refinements in PR #54
+(per-channel completeness; replaying one evidence frame unless a change touches collection)
 **Date:** 2026-10-21
 **Scope:** Default product behaviour, recurring collection, period analysis, product measurement and
 delivery order

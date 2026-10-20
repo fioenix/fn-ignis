@@ -21,8 +21,8 @@
 
 ## Hướng sản phẩm — 21/10/2026
 
-Chủ sở hữu chốt hướng mới qua buổi grilling ngày 20–21/10/2026. Bản ghi quyết định ở trạng thái
-Proposed: [listening-first product direction](docs/decisions/2026-10-21-listening-first-product-direction.md).
+Chủ sở hữu chốt hướng mới qua buổi grilling ngày 20–21/10/2026 và duyệt bản ghi quyết định ngày
+21/10/2026: [listening-first product direction](docs/decisions/2026-10-21-listening-first-product-direction.md).
 Mặc định Ignis nghe mạng xã hội theo watchlist có phiên bản và so sánh theo ngày, tuần, tháng.
 Chế độ phán quyết vẫn giữ nhưng đóng băng. Lịch thu thập định kỳ chạy bằng cơ chế có sẵn của host
 khi người dùng yêu cầu; server Ignis không có lịch hay worker riêng. Thứ tự làm: Spec 015, Spec 016
