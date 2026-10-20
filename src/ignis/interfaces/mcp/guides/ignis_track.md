@@ -99,6 +99,53 @@ The next artifact withdraws current permission from every claim shown earlier an
 successful read as stale, with its `read_at`. Show the failure `reason_code` or the new
 `frame_digest`. Do not carry earlier permitted claims forward.
 
+## Replay
+
+A replay is an optional form of the artifact for a person who wants to watch how a mission
+reached the state of one read. It plays back that read's event journal and ends on the read
+itself. Everything in "What to show" and "Display rules" holds at every step.
+
+1. Build from one coherent read, as in "Read", with its complete event journal: page events until
+   `event_page.next_cursor` is null. A read whose event journal is missing or incomplete gets the
+   static artifact only.
+2. Make one step per event in `(revision, ordinal)` order, timed by its `recorded_at`; show
+   `occurred_at`, when set, as a labelled detail. A step changes the picture only through its
+   event's `kind`, `provenance`, `reason`, `run_id`, `work_id`, `handoff_id`, `finding_id`,
+   `claim_id` and `evidence_references`:
+   - `OBSERVATIONS_COMMITTED` adds the observations it references, except that a `reason` of
+     `MEMBERSHIP_PRUNED` removes them; `MEMBERSHIP_REATTACHED` adds them back.
+   - An observation takes its qualification colour at the event that records its
+     `qualification_relation`, labelled with its frame when that event's
+     `qualification_frame_fingerprint` is not the read's `frame_digest`.
+   - A claim's status at a step is the `reason` of its latest `CLAIM_GATE_CHANGED` event, shown as
+     recorded history with that event's time.
+3. End on the read step at `read_at`, showing the read's own `claim_gate`, `counts`, `channels`,
+   `research` and `related_results`. Current permission appears only here, and only for claims
+   in `claim_gate.claims`.
+4. Put the read's complete static content beside the replay; the read step matches it. When the
+   person prefers reduced motion, open on the final step.
+
+Keep every replayed value traceable to the read:
+
+- Label the artifact a replay of the read at `read_at`. Its clock shows recorded event times and
+  stops at `read_at`.
+- Each figure names its source: a snapshot field, or a count of the distinct identifiers present
+  after the step, such as observations committed and not pruned. A figure changes only at the
+  step whose event changes it and holds still between steps. A bar or percentage names both
+  counts it divides.
+- A value that no event establishes, such as a channel's `signals_collected`, first appears at
+  the read step and shows as not yet recorded before it. A channel or research state that is null
+  or unavailable in the read keeps that state from the first step.
+- Unless spacing is proportional to `recorded_at`, say the replay is paced by event order, not
+  elapsed time, and show the actual elapsed time separately, for example as a timeline with each
+  event at its `recorded_at` and the longest gap labelled.
+- Motion traces recorded events. Ambient motion, such as a glow or a slow rotation, stays
+  constant through the replay and is labelled decorative.
+- Draw a node only for a stage, channel or specialist the read contains, and attach work,
+  handoff and finding steps to it by their identifiers.
+- Playback controls, such as play, pause or jump to a step, move only the replay and show step
+  numbers rather than percent complete.
+
 ## Where it goes
 
 Write the artifact to a local file by default and tell the person its path. Before publishing it

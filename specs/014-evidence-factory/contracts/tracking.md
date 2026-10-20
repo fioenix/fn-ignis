@@ -1,6 +1,6 @@
 # Tracking Contract (R2)
 
-**Status**: Drafted with the R2 plan on 2026-10-19; not implemented. Supersedes the viewer parts of [relay-viewer.md](relay-viewer.md). Requirements: FR-005–FR-008, FR-014, FR-016, FR-024, FR-026, FR-030, FR-031.
+**Status**: Drafted with the R2 plan on 2026-10-19; not implemented. Supersedes the viewer parts of [relay-viewer.md](relay-viewer.md). Requirements: FR-005–FR-008, FR-014, FR-016, FR-024, FR-026, FR-030, FR-031, FR-033.
 
 ## Snapshot read — existing, unchanged
 
@@ -28,6 +28,7 @@ Serving the guide starts no read, collection or write.
 4. **Display rules**: the table in [spec.md](../spec.md) "Tracking artifact guidance (R2)", plus: show `reason_code` for withheld claims; never render a withheld or stale claim as permitted; never turn an unavailable channel into zero demand; never add metrics, confidence or activity absent from the snapshot; colour always carries a text label; all essential content readable without scripts, motion, fonts or network.
 5. **After a failed read or a frame change**: the next artifact withdraws current permission from earlier claims and labels the last successful read as stale.
 6. **Where it goes**: write a local file by default. Before publishing to any host or service off the user's machine, ask the user for that specific publication.
+7. **Replay** (optional form, FR-033): build from one coherent read with its complete event journal; one step per event in `(revision, ordinal)` order, each changing the picture only through that event's fields (an `OBSERVATIONS_COMMITTED` event with `reason` `MEMBERSHIP_PRUNED` removes its observations; claim statuses before the read step are recorded history), then a final step showing the read's own `claim_gate`, `counts`, `channels`, `research` and `related_results`; the read's static content sits beside it and the final step matches it. Every figure names its snapshot source and holds still between steps; a value no event establishes appears only at the read step; event-order pacing is disclosed and actual elapsed time shown; ambient motion is constant and labelled decorative; nodes appear only for stages, channels and specialists the read contains; reduced motion opens on the final step; the replay is labelled a replay at `read_at` and its controls move only playback.
 
 ## Out of scope
 

@@ -49,13 +49,35 @@ def quiet_server(monkeypatch):
 def test_packaged_guide_has_the_required_sections_and_rules():
     guide = _packaged_guide()
     for heading in ("Read", "When to generate", "What to show", "Display rules",
-                    "After a failed read or a frame change", "Where it goes"):
+                    "After a failed read or a frame change", "Where it goes", "Replay"):
         assert f"## {heading}" in guide, f"The guide is missing the section: {heading}"
     for term in ("get_mission_relay_snapshot", "page_size", "next_evidence_offset", "same `revision`",
                  "reason_code", "Do not poll", "point-in-time", "never call the artifact live",
                  "not zero demand", "raw popularity, not demand", "text_withheld",
                  "local file by default", "ask for consent"):
         assert term in guide, f"The guide is missing a required rule: {term}"
+
+
+def test_replay_section_states_the_rules_that_keep_a_replay_from_inventing_figures():
+    """FR-033: a replay plays back one read and adds no figure, activity or liveness of its own."""
+    guide = _packaged_guide()
+    assert "\n## Replay\n" in guide, "The guide is missing the section: Replay"
+    replay = " ".join(guide.split("\n## Replay\n", 1)[1].split("\n## ", 1)[0].split())
+    for term in ("one coherent read", "`event_page.next_cursor` is null", "gets the static artifact only",
+                 "one step per event", "(revision, ordinal)", "timed by its `recorded_at`",
+                 "a `reason` of `MEMBERSHIP_PRUNED` removes them", "shown as recorded history",
+                 "Current permission appears only here, and only for claims in `claim_gate.claims`",
+                 "names its source", "distinct identifiers present after the step",
+                 "holds still between steps", "names both counts it divides",
+                 "first appears at the read step and shows as not yet recorded",
+                 "keeps that state from the first step",
+                 "Unless spacing is proportional to `recorded_at`",
+                 "paced by event order, not elapsed time", "show the actual elapsed time",
+                 "stays constant through the replay and is labelled decorative",
+                 "Draw a node only for a stage, channel or specialist the read contains",
+                 "open on the final step", "a replay of the read at `read_at`",
+                 "move only the replay", "rather than percent complete"):
+        assert term in replay, f"The Replay section is missing a required rule: {term}"
 
 
 @pytest.mark.asyncio
