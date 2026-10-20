@@ -26,7 +26,7 @@ hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đ�
 kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
 các cổng pilot và release vẫn giữ nguyên.
 
-Nhánh hiện tại `codex/ignis-relay-checkout` có **47 tools** (20/10/2026): Spec 014 R2 đã bỏ
+`main` có **47 tools** từ ngày 20/10/2026, khi PR #51 (Spec 014) được merge tại `474916f`: Spec 014 R2 đã bỏ
 `open_mission_relay` nhưng vẫn giữ `get_mission_relay_snapshot` và `execute_mission_follow_up`;
 migration mới nhất là `sql/030_mission_follow_up_admission.sql`; các con số 47 tools, worker, quota
 scheduled và migration `024` trong phần lịch sử dưới đây là của bản v0.7.0 đã phát hành, khác bộ tool
@@ -167,6 +167,19 @@ T028–T029 đã qua review độc lập và nghiệm thu cục bộ. Gate cuố
 
 T030 đã nối viewer được duy trì qua MCP → HTTP → Chromium thật trên SQLite file, SQLite memory và PostgreSQL tạm. Gate đạt **139/139 ca**; reviewer chạy lại **139/139 ca**, không bỏ qua. Schema và dữ liệu không thay đổi khi mở, refresh hoặc inspect; storage thiếu, schema cũ và lỗi truy cập đều bị từ chối trước bootstrap. Probe riêng xác nhận capability hết hạn sau render nhận **403 / CAPABILITY_EXPIRED**. Ở mốc T030, **30/92** task đã nghiệm thu; khi đó US1 còn **T031**. Đây là bằng chứng trước gate US1 cuối; chưa nghiệm thu UAT, merge hoặc triển khai.
 
+
+
+### Tích hợp — 20/10/2026
+
+Ngày 20/10/2026, chủ sở hữu duyệt push nhánh `codex/ignis-relay-checkout` và merge
+[PR #51](https://github.com/fioenix/fn-ignis/pull/51) khi CI xanh. Trước khi push, nhánh đã nhận
+bản sửa guard đọc secret; lỗi ruff được dọn hết mà không đổi cấu hình lint; 4 test chỉ lỗi trên
+PostgreSQL đã được sửa. Cả 4 check bắt buộc đều đạt trên `a836cf0`; PR được merge bằng merge commit
+`474916f`. Mô tả PR vẫn là bản R1 cũ (viewer, 58/92 task), chưa cập nhật theo R2.
+
+Tại mốc này, ledger có 109/116 task đã nghiệm thu. Còn mở T079, T082, T084, T087, T092 (CI sau
+merge còn đang chạy khi ghi mục này), T112 và T113. Chưa có UAT với nhiệm vụ thật; chưa bump
+version, tag hay phát hành.
 
 
 ## Nghiên cứu riêng — benchmark đối thủ
