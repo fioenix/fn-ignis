@@ -28,14 +28,12 @@ async def _caller_components(tmp_path):
     await repository._ensure_schema()
     store = WorkspaceRepository(repository=repository)
     registry = ConnectorPluginRegistry(repository=repository)
-    async def run_started(mission, journal):
-        return {'status': 'UNAVAILABLE'}
     class Clusterer:
         async def cluster_signals(self, signals):
             return []
     clusterer = Clusterer()
     executor = ExecuteMissionUseCase(repository=repository, registry=registry, clusterer=clusterer,
-        workspace_store=store, run_started=run_started)
+        workspace_store=store)
     return {'repository': repository, 'workspace_store': store, 'registry': registry,
             'execute_mission_use_case': executor, 'clusterer': clusterer}
 
@@ -124,7 +122,6 @@ async def test_lifespan_factory_binds_genuine_host_to_exact_caller_storage(tmp_p
         assert activation.workspace_store is components['workspace_store']
         assert activation.executor._repo is components['repository']
         assert activation.executor._workspace_store is components['workspace_store']
-        assert activation.executor._run_started is components['execute_mission_use_case']._run_started
         assert activation.executor._registry is not components['registry']
         assert [plugin.plugin_id for plugin in activation.executor._registry.list_plugins()] == ['youtube']
         assert components['registry'].list_plugins() == []
@@ -559,12 +556,6 @@ async def _genuine_for(scope, mission_id, tmp_path, calls, resolutions):
 async def test_caller_parent_runs_guarded_route_on_borrowed_canonical_storage(tmp_path):
     from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
     components = await _caller_components(tmp_path)
-    started = []
-    base = components['execute_mission_use_case']
-    async def run_started(mission, journal):
-        started.append((mission.status, journal.mission_id))
-        return {'status': 'UNAVAILABLE'}
-    base._run_started = run_started
     scope = _Scope(components)
     calls, resolutions, made = [], [], {}
     try:
@@ -578,7 +569,6 @@ async def test_caller_parent_runs_guarded_route_on_borrowed_canonical_storage(tm
         snapshot = await components['workspace_store'].load_mission_evidence_snapshot(mission.id)
         assert snapshot.mission.status == 'COMPLETED' and len(snapshot.signals) == 1
         assert snapshot.signals[0].metadata['description'] == 'Synthetic caller description.'
-        assert started == [('RUNNING', mission.id)]
         assert [endpoint for endpoint, _ in calls] == ['search', 'videos'] and len(resolutions) == 2
         assert calls[0][1]['q'] == 'n8n Việt Nam' and calls[0][1]['maxResults'] == '5'
         assert calls[0][1]['regionCode'] == 'VN' and calls[0][1]['relevanceLanguage'] == 'vi'

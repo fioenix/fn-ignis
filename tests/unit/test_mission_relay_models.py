@@ -391,24 +391,6 @@ def test_safe_snapshot_and_inspection_have_concrete_nested_allowlists(relay):
     assert payload["next_evidence_offset"] == 1
     assert payload["frame_digest"] is None
     assert payload["frame_pending_reason"] == "UNKNOWN"
-    inspection = relay.MissionRelayInspection(
-        mission_id=MISSION,
-        run_id=RUN,
-        high_water=cursor(relay),
-        read_at=NOW,
-        observation=observation(relay),
-    ).to_payload()
-    assert set(inspection) == {
-        "schema_version",
-        "status",
-        "mission_id",
-        "run_id",
-        "revision",
-        "read_at",
-        "high_water",
-        "observation",
-    }
-    assert set(inspection["observation"]) == observation_keys
     encoded = json.dumps(payload, allow_nan=False)
     assert "metadata" not in encoded
     assert "journal_path" not in encoded
@@ -565,37 +547,13 @@ def test_association_direction_and_recorded_qualification_remain_distinct(relay)
         observation(relay, qualification_relation="EXCLUDED_IRRELEVANT", qualification_frame_fingerprint="c" * 64)
 
 
-def test_inspection_refuses_foreign_scope_and_unknown_constructor_fields(relay):
-    values = dict(mission_id=MISSION, run_id=RUN, high_water=cursor(relay), read_at=NOW)
-    with pytest.raises(ValueError):
-        relay.MissionRelayInspection(**values, observation=observation(relay, mission_id=FOREIGN))
-    with pytest.raises(TypeError):
-        relay.MissionRelayInspection(**values, observation=observation(relay), metadata={})
-
-
 def test_unknown_run_is_not_replaced_by_a_fabricated_identity(relay):
     initial = cursor(relay, 0, 0)
     safe = snapshot(relay, run_id=None, high_water=initial)
     assert safe.to_payload()["run_id"] is None
     assert safe.to_payload()["mission_id"] == str(MISSION)
-    inspected = relay.MissionRelayInspection(
-        mission_id=MISSION,
-        run_id=None,
-        high_water=initial,
-        read_at=NOW,
-        observation=observation(relay),
-    )
-    assert inspected.to_payload()["run_id"] is None
     with pytest.raises(ValueError):
         snapshot(relay, run_id=str(RUN))
-    with pytest.raises(ValueError):
-        relay.MissionRelayInspection(
-            mission_id=MISSION,
-            run_id=str(RUN),
-            high_water=initial,
-            read_at=NOW,
-            observation=observation(relay),
-        )
 
 
 def test_models_refuse_raw_shapes_and_are_immutable(relay):

@@ -177,35 +177,21 @@ async def test_cancellation_during_terminal_transaction_retains_physical_settlem
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("terminal", ("completed", "source_error", "cancelled"))
-async def test_dashboard_failure_preserves_original_collection_terminal(ingress_case, tmp_path, terminal):
-    """Presentation failure cannot replace the real source outcome or cancellation."""
+@pytest.mark.parametrize("terminal", ("completed", "source_error"))
+async def test_collection_terminal_is_the_source_outcome_without_presentation_payload(ingress_case, tmp_path, terminal):
+    """Ignis serves no tracking page, so a run result carries only the collection outcome."""
     case = ingress_case
     store, mission, executor = await _attention(case, tmp_path)
-    admitted = []
-
-    async def failed_dashboard(current, journal):
-        persisted = await case.repository.get_mission(current.id)
-        assert persisted.status == "RUNNING" and journal.mission_id == current.id
-        admitted.append(journal.run_id)
-        if terminal == "cancelled":
-            raise asyncio.CancelledError
-        raise RuntimeError("Offline presentation failure")
-
-    executor._run_started = failed_dashboard
     if terminal == "source_error":
         async def failed_source(**_kwargs):
             raise RuntimeError("Original offline source failure")
         executor._registry.search_with_outcomes = failed_source
         with pytest.raises(RuntimeError, match="Original offline source failure"):
             await executor.execute(mission.id)
-    elif terminal == "cancelled":
-        with pytest.raises(asyncio.CancelledError):
-            await executor.execute(mission.id)
     else:
         result = await executor.execute(mission.id)
         assert result["status"] == "COMPLETED"
-        assert result["dashboard"] == {"status": "UNAVAILABLE", "reason_code": "DASHBOARD_START_FAILED"}
-    assert len(admitted) == 1
+        assert "dashboard" not in result
+    assert len(await store.list_run_journals(mission.id)) == 1
     assert (await case.repository.get_mission(mission.id)).status == ("COMPLETED" if terminal == "completed" else "FAILED")
     assert [event[7] for event in _events(case, mission.id) if event[0] in ("COLLECTION_STARTED", "COLLECTION_STATE_CHANGED")] == ["RUNNING", "COMPLETED" if terminal == "completed" else "FAILED"]

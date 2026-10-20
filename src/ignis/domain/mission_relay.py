@@ -75,12 +75,7 @@ class RelayReadReason(str, Enum):
     INVALID_PAGE_SIZE = "INVALID_PAGE_SIZE"
     RESPONSE_TOO_LARGE = "RESPONSE_TOO_LARGE"
     READ_UNAVAILABLE = "READ_UNAVAILABLE"
-    INVALID_EXPIRY = "INVALID_EXPIRY"
-    METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
-    ROUTE_NOT_FOUND = "ROUTE_NOT_FOUND"
-    CAPABILITY_EXPIRED = "CAPABILITY_EXPIRED"
     INVALID_REQUEST = "INVALID_REQUEST"
-    REQUEST_TOO_LARGE = "REQUEST_TOO_LARGE"
     READ_BUSY = "READ_BUSY"
     READ_TIMEOUT = "READ_TIMEOUT"
 
@@ -659,27 +654,6 @@ class MissionRelaySnapshot:
             "collection_state": self.collection_state.value if self.collection_state is not None else None,
             "claim_gate": self.claim_gate.to_payload(),
             "research": self.research.to_payload(),
-        }
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class MissionRelayInspection:
-    mission_id: UUID
-    run_id: UUID | None
-    high_water: MissionRelayCursor
-    read_at: datetime
-    observation: RelayObservation
-
-    def __post_init__(self) -> None:
-        _read_identity(self.mission_id, self.run_id, self.high_water, self.read_at)
-        _require_type(self.observation, RelayObservation, "observation")
-        if self.observation.mission_id != self.mission_id:
-            raise ValueError("Inspected observation belongs to a different mission.")
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            **_receipt(self.mission_id, self.run_id, self.high_water, self.read_at),
-            "observation": self.observation.to_payload(),
         }
 
 
