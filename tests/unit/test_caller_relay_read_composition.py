@@ -17,8 +17,7 @@ from tests.unit import test_caller_analysis_composition as composition
 from tests.unit import test_caller_youtube_pilot_cli as cli_tests
 
 COLD = r'''
-import asyncio, json, sys, urllib.request
-from datetime import datetime, timedelta, timezone
+import asyncio, json, sys
 import httpx
 store, mission_id, run_id = sys.argv[1], sys.argv[2], sys.argv[3]
 log = {'init_components': 0, 'create_repository': 0, 'constructed': [], 'network': []}
@@ -48,20 +47,11 @@ async def main():
     out = {}
     async with Client(server.mcp) as client:
         snapshot = {'mission_id': mission_id, 'page_size': 2}
-        opened = {'mission_id': mission_id, 'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()}
         if run_id != '-':
-            snapshot['run_id'] = opened['run_id'] = run_id
+            snapshot['run_id'] = run_id
         result = await client.call_tool('get_mission_relay_snapshot', snapshot, raise_on_error=False)
         out['snapshot'] = None if result.is_error else (result.structured_content or {}).get('status')
         out['snapshot_reason'] = None if result.is_error else (result.structured_content or {}).get('reason_code')
-        result = await client.call_tool('open_mission_relay', opened, raise_on_error=False)
-        payload = None if result.is_error else result.structured_content
-        out['open'] = None if payload is None else payload.get('status')
-        if payload and payload.get('status') == 'OK':
-            def fetch(url):
-                with urllib.request.urlopen(url, timeout=5) as response:
-                    return response.status
-            out['viewer_http'] = await asyncio.to_thread(fetch, payload['url'])
     return out
 
 result = asyncio.run(main())
@@ -87,11 +77,11 @@ def _run_id(store):
         return connection.execute('SELECT id FROM mission_run_journals').fetchone()[0]
 
 
-def test_cold_snapshot_and_open_read_the_caller_store_without_full_composition(tmp_path):
+def test_cold_snapshot_reads_the_caller_store_without_full_composition(tmp_path):
     root, mission_id, store = composition._prepared_completed_parent(tmp_path)
     before = _sha(store)
     trip = _cold(tmp_path, root, mission_id, _run_id(store))
-    assert trip['result'] == {'snapshot': 'OK', 'snapshot_reason': None, 'open': 'OK', 'viewer_http': 200}
+    assert trip['result'] == {'snapshot': 'OK', 'snapshot_reason': None}
     assert trip['log']['init_components'] == 0, 'A cold relay read realized the full provider composition'
     assert trip['log']['create_repository'] == 0 and trip['log']['constructed'] == []
     assert trip['log']['network'] == [] and _sha(store) == before
@@ -108,7 +98,7 @@ def test_cold_unavailable_caller_store_refuses_read_only_without_composition(tmp
             connection.execute('CREATE TABLE research_missions (id TEXT PRIMARY KEY)')
     before = _sha(store)
     trip = _cold(tmp_path, root, uuid4())
-    assert trip['result'] == {'snapshot': 'UNAVAILABLE', 'snapshot_reason': 'READ_UNAVAILABLE', 'open': 'UNAVAILABLE'}
+    assert trip['result'] == {'snapshot': 'UNAVAILABLE', 'snapshot_reason': 'READ_UNAVAILABLE'}
     assert trip['log']['init_components'] == 0 and trip['log']['constructed'] == []
     assert _sha(store) == before and store.exists() == (before is not None)
 

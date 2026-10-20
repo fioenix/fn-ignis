@@ -20,18 +20,4 @@ async def response(request):
         'channelId':'offline-channel','publishedAt':datetime.now(timezone.utc).isoformat()},
         'statistics':{'viewCount':'10','likeCount':'1','commentCount':'0'}}]})
 YouTubeDataPlugin._client=lambda self,**kwargs:httpx.AsyncClient(transport=httpx.MockTransport(response),**kwargs)
-original_dashboard=server._MissionRelayRuntime.started_dashboard
-async def observed_dashboard(self,mission,journal):
-    try:
-        result=await original_dashboard(self,mission,journal)
-        (control/'dashboard-diagnostic.json').write_text(json.dumps({
-            'status':result.get('status'),'reason_code':result.get('reason_code')}))
-        return result
-    except Exception as error:
-        import traceback
-        frames=[{'file':Path(frame.filename).name,'line':frame.lineno,'name':frame.name}
-            for frame in traceback.extract_tb(error.__traceback__)]
-        (control/'dashboard-diagnostic.json').write_text(json.dumps({'error_type':type(error).__name__,'frames':frames}))
-        raise
-server._MissionRelayRuntime.started_dashboard=observed_dashboard
 server.main()

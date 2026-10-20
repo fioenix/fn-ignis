@@ -3,7 +3,6 @@
 Fixture composition initializes disposable storage before server startup. It never
 stands in for a host specialist, collection execution or live-market research.
 """
-import asyncio
 from copy import deepcopy
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -11,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sys
-from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastmcp import Client
@@ -23,7 +21,6 @@ from tests.integration.test_mission_relay_read_boundary import relay_case as _re
 from tests.integration.test_research_work_persistence import _arrange
 from tests.integration.test_research_work_command_service import command
 from tests.integration.test_research_recording_mcp_boundary import RUNNER, public_handoff
-from tests.integration.test_mission_relay_mcp import _http
 
 relay_case = _relay_case
 
@@ -82,8 +79,7 @@ def assert_transport(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
-async def test_native_record_read_open_http_chromium_result_and_original_receipt(relay_case, tmp_path):
-    from playwright.async_api import async_playwright, expect
+async def test_native_record_read_back_and_original_receipt(relay_case, tmp_path):
     case, mission, _, _, work, handoff, revision = await _arrange(relay_case, tmp_path)
     malicious = '<img src=x onerror="window.untrustedExecuted=true">'
     handoff = replace(handoff, result=malicious, findings=(replace(handoff.findings[0], statement=malicious),))
@@ -104,55 +100,9 @@ async def test_native_record_read_open_http_chromium_result_and_original_receipt
         before = _state(case)
         assert await record(client, mission, deepcopy(body)) == first
         assert _state(case) == before
-        cap = (await client.call_tool('open_mission_relay', {'mission_id': str(mission.id),
-            'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()})).data
-        assert cap['status'] == 'OK'
-        status, headers, response = await asyncio.to_thread(_http, cap['url'] + 'snapshot?page_size=100')
-        actual = json.loads(response)
-        assert status == 200 and headers['Cache-Control'] == 'no-store'
+        actual = await snapshot(client, mission)
         assert actual['high_water'] == initial['high_water']
         assert actual['research'] == initial['research']
-        unexpected, errors = [], []
-        async with async_playwright() as runtime:
-            browser = await runtime.chromium.launch(headless=True)
-            try:
-                context = await browser.new_context(service_workers='block')
-                target = urlsplit(cap['url'])
-                async def route(route):
-                    request = route.request
-                    parsed = urlsplit(request.url)
-                    if parsed.hostname in ('fonts.googleapis.com', 'fonts.gstatic.com'):
-                        await route.abort()
-                    elif request.method == 'GET' and parsed.netloc == target.netloc and parsed.scheme == 'http':
-                        await route.continue_()
-                    else:
-                        unexpected.append((request.method, parsed.hostname))
-                        await route.abort()
-                await context.route('**/*', route)
-                page = await context.new_page()
-                page.on('pageerror', lambda error: errors.append(str(error)))
-                assert (await page.goto(cap['url'])).status == 200
-                await page.locator('[data-stage="Research"]').click()
-                output = page.get_by_role('region', name='Output', exact=True)
-                await expect(output).to_contain_text(malicious)
-                await expect(output).to_contain_text('COMPLETED')
-                await expect(output).to_contain_text('ACCEPTED')
-                assert await output.locator('[data-work-id]').count() == 1
-                assert await output.locator('[data-handoff-id]').count() == 1
-                assert await output.locator('img').count() == 0
-                assert await page.evaluate('window.untrustedExecuted === undefined')
-                await expect(output.get_by_test_id('research-observation-count')).to_have_text('6')
-                await expect(output.get_by_test_id('research-source-count')).to_have_text('6')
-                await page.get_by_role('button', name='Pause refresh', exact=True).click()
-                for width in (390, 768, 1440):
-                    await page.set_viewport_size({'width': width, 'height': 1000})
-                    assert await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
-                    EVIDENCE.mkdir(parents=True, exist_ok=True)
-                    await page.screenshot(path=str(EVIDENCE / f'native-{case.name}-{width}.png'), full_page=True)
-                assert not unexpected and not errors
-                await context.close()
-            finally:
-                await browser.close()
         assert _state(case) == before
         assert_transport(tmp_path)
         # No capability URL or private storage descriptor enters retained evidence.
@@ -401,8 +351,7 @@ async def test_native_collection_completion_keeps_assigned_analysis_until_resear
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
-async def test_native_permitted_narration_withdrawal_history_and_failed_http_refresh(relay_case, tmp_path):
-    from playwright.async_api import async_playwright, expect
+async def test_native_permitted_narration_withdrawal_and_history(relay_case, tmp_path):
     from tests.unit.test_mission_claims import _observation_candidate
     from ignis.application.use_cases.submit_mission_claims import SubmitMissionClaimsUseCase
     from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
@@ -447,51 +396,21 @@ async def test_native_permitted_narration_withdrawal_history_and_failed_http_ref
         assert claim.wording in json.dumps(initial['research'])
         assert 'UNLICENSED_CANDIDATE_PROSE' not in json.dumps(initial['research'])
         assert 'UNLICENSED_AGGREGATE_PROSE' not in json.dumps(initial['research'])
-        cap = (await client.call_tool('open_mission_relay', {'mission_id': str(mission.id), 'run_id': str(run.run_id),
-            'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()})).data
-        assert cap['status'] == 'OK'
-        async with async_playwright() as runtime:
-            browser = await runtime.chromium.launch(headless=True)
-            try:
-                context = await browser.new_context(service_workers='block')
-                await context.route('https://fonts.googleapis.com/**', lambda route: route.abort())
-                await context.route('https://fonts.gstatic.com/**', lambda route: route.abort())
-                page = await context.new_page()
-                await page.clock.install(time=datetime.now(timezone.utc))
-                assert (await page.goto(cap['url'])).status == 200
-                await page.locator('[data-stage="Research"]').click()
-                output = page.get_by_role('region', name='Output', exact=True)
-                await expect(output).to_contain_text(claim.wording)
-                await expect(output).to_contain_text('CURRENT_CLAIM_LEDGER')
-                assert 'UNLICENSED_CANDIDATE_PROSE' not in await output.inner_text()
-                assert 'UNLICENSED_AGGREGATE_PROSE' not in await output.inner_text()
-                # Actual owner fixture pruning changes canonical frame; HTTP is never replaced.
-                await _sql(case, 'DELETE FROM mission_evidence WHERE mission_id=? AND observation_id=?',
-                    (str(mission.id), str(signal.observation_id)))
-                async with page.expect_response(lambda response: urlsplit(response.url).path.endswith('/snapshot')):
-                    await page.clock.run_for(2100)
-                await expect(output).not_to_contain_text(claim.wording)
-                await expect(output).to_contain_text('Text withheld')
-                await expect(output).to_contain_text('current eligible false')
-                assert await output.get_by_test_id('finding-history').locator('article').count() == 1
-                # Original result replay cannot restore its obsolete permission or membership.
-                before = _state(case)
-                assert await record(client, mission, deepcopy(strategic_body)) == recorded
-                assert _state(case) == before
-                fresh = await snapshot(client, mission)
-                assert claim.wording not in json.dumps(fresh['research'])
-                assert fresh['counts'] == {'observations': 5, 'sources': 5}
-                # A deliberate browser transport fault is a failed read, not successful HTTP.
-                await page.route('**/snapshot?**', lambda route: route.abort())
-                async with page.expect_event('requestfailed', predicate=lambda request: '/snapshot?' in request.url):
-                    await page.clock.run_for(2100)
-                await expect(page.get_by_test_id('snapshot-state')).to_contain_text('Stale')
-                assert await output.locator('[data-work-id]').count() == 0
-                assert claim.wording not in await output.inner_text()
-                await expect(output).to_contain_text('Unknown')
-                await context.close()
-            finally:
-                await browser.close()
+        # Actual owner fixture pruning changes canonical frame; the earlier read is never reused.
+        await _sql(case, 'DELETE FROM mission_evidence WHERE mission_id=? AND observation_id=?',
+            (str(mission.id), str(signal.observation_id)))
+        changed = await snapshot(client, mission, run.run_id)
+        assert claim.wording not in json.dumps(changed['research'])
+        findings = changed['research']['findings']
+        assert findings and not any(row['current_eligible'] for row in findings)
+        assert any(row['text_withheld'] for row in findings)
+        # Original result replay cannot restore its obsolete permission or membership.
+        before = _state(case)
+        assert await record(client, mission, deepcopy(strategic_body)) == recorded
+        assert _state(case) == before
+        fresh = await snapshot(client, mission)
+        assert claim.wording not in json.dumps(fresh['research'])
+        assert fresh['counts'] == {'observations': 5, 'sources': 5}
         assert_transport(tmp_path)
 
 

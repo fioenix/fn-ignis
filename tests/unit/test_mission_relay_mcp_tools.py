@@ -1,4 +1,4 @@
-"""Additive MCP read seams; actual storage and browser acceptance stay in T030."""
+"""MCP snapshot read seams; actual storage acceptance stays in the integration suites."""
 
 import inspect
 from contextlib import asynccontextmanager
@@ -6,20 +6,12 @@ from contextlib import asynccontextmanager
 import pytest
 
 
-@pytest.mark.parametrize("name", ("handle_open_mission_relay", "handle_get_mission_relay_snapshot"))
-def test_typed_read_handler_exists_and_requires_selected_mission(name):
+def test_typed_read_handler_exists_and_requires_selected_mission():
     from ignis.interfaces.mcp import server
-    handler = getattr(server, name, None)
-    assert callable(handler), "T026 API RED: additive viewer handler is absent"
+    handler = getattr(server, "handle_get_mission_relay_snapshot", None)
+    assert callable(handler), "T026 API RED: snapshot handler is absent"
     parameter = inspect.signature(handler).parameters["mission_id"]
     assert parameter.default is inspect.Parameter.empty
-
-
-def test_open_handler_requires_explicit_deadline():
-    from ignis.interfaces.mcp import server
-    handler = getattr(server, "handle_open_mission_relay", None)
-    assert callable(handler), "T026 API RED: open handler is absent"
-    assert inspect.signature(handler).parameters["expires_at"].default is inspect.Parameter.empty
 
 
 def test_snapshot_handler_requires_explicit_page_size():
@@ -30,13 +22,12 @@ def test_snapshot_handler_requires_explicit_page_size():
 
 
 @pytest.mark.asyncio
-async def test_two_additive_tools_are_registered_with_required_read_inputs():
+async def test_snapshot_tool_is_registered_with_required_read_inputs_and_no_viewer():
     from ignis.interfaces.mcp import server
     tools = {tool.name: tool for tool in await server.mcp.list_tools()}
-    for name, required in (("open_mission_relay", {"mission_id", "expires_at"}),
-                           ("get_mission_relay_snapshot", {"mission_id", "page_size"})):
-        assert name in tools, "T026 registration RED: additive read tool is absent"
-        assert required <= set(tools[name].parameters.get("required", []))
+    assert "get_mission_relay_snapshot" in tools, "T026 registration RED: additive read tool is absent"
+    assert {"mission_id", "page_size"} <= set(tools["get_mission_relay_snapshot"].parameters.get("required", []))
+    assert "open_mission_relay" not in tools, "R2 retired the built-in viewer"
 
 
 @pytest.fixture
@@ -104,32 +95,8 @@ async def test_unit_snapshot_preserves_selected_run_and_opens_no_listener(typed_
         assert payload["mission_id"] == str(mission) and payload["run_id"] == str(run)
         assert len(requests) == 1 and requests[0].page_size == 7
         assert requests[0].after_cursor.position == (0, 0)
-        assert len(runtimes) == 1 and runtimes[0].listener is None
+        assert len(runtimes) == 1 and not hasattr(runtimes[0], "listener")
     assert runtimes[0].closed
-
-
-@pytest.mark.asyncio
-async def test_unit_open_preserves_expiry_and_returns_explicit_read_authority(typed_projection, tmp_path):
-    from datetime import datetime, timedelta, timezone
-    from urllib.parse import urlsplit
-    from uuid import uuid4
-    server, requests, runtimes = typed_projection
-    mission, run = uuid4(), uuid4()
-    deadline = datetime.now(timezone.utc) + timedelta(minutes=15)
-    async with _unit_runtime(typed_projection, tmp_path) as runtime:
-        result = await _unit_call(runtime, "open_mission_relay", {
-            "mission_id": str(mission), "run_id": str(run), "expires_at": deadline.isoformat(),
-        })
-        payload = result.to_payload()
-        assert set(payload) == {"schema_version", "status", "mission_id", "run_id", "url", "expires_at", "read_only", "inspection_supported"}
-        assert payload["status"] == "OK" and payload["read_only"] is True
-        assert payload["inspection_supported"] is True
-        assert payload["mission_id"] == str(mission) and payload["run_id"] == str(run)
-        assert payload["expires_at"] == deadline.isoformat()
-        assert urlsplit(payload["url"]).hostname == "127.0.0.1"
-        assert all(r.mission_id == mission and r.run_id == run for r in requests)
-    assert runtimes[0].closed
-    assert await runtimes[0].listener.wait_closed(timeout=1)
 
 
 @pytest.mark.asyncio
@@ -138,16 +105,27 @@ async def test_unit_open_preserves_expiry_and_returns_explicit_read_authority(ty
     ("get_mission_relay_snapshot", {"page_size": 201}, "INVALID_PAGE_SIZE"),
     ("get_mission_relay_snapshot", {"page_size": 1, "after_revision": 1}, "INVALID_REQUEST"),
     ("get_mission_relay_snapshot", {"page_size": 1, "evidence_offset": -1}, "INVALID_REQUEST"),
-    ("open_mission_relay", {"expires_at": "2026-01-01T00:00:00"}, "INVALID_EXPIRY"),
-    ("open_mission_relay", {"expires_at": "2026-01-01T00:00:00Z"}, "INVALID_EXPIRY"),
 ))
-async def test_unit_refuses_invalid_input_without_read_or_listener(typed_projection, tmp_path, name, args, reason):
+async def test_unit_refuses_invalid_input_without_read(typed_projection, tmp_path, name, args, reason):
     from uuid import uuid4
     server, requests, runtimes = typed_projection
     async with _unit_runtime(typed_projection, tmp_path) as runtime:
         result = await _unit_call(runtime, name, {"mission_id": str(uuid4()), **args})
         assert result.to_payload() == {"schema_version": 1, "status": "REFUSED", "reason_code": reason}
         assert requests == [] and runtimes == []
+
+
+@pytest.mark.asyncio
+async def test_oversized_snapshot_is_a_typed_refusal_not_a_truncated_read(typed_projection, monkeypatch, tmp_path):
+    from uuid import uuid4
+    from ignis.infrastructure import mission_relay
+    server, requests, runtimes = typed_projection
+    # The empty fixture snapshot serializes to a few hundred bytes; a 64-byte limit must refuse it whole.
+    monkeypatch.setattr(mission_relay, "_RESPONSE_LIMIT", 64)
+    async with _unit_runtime(typed_projection, tmp_path) as runtime:
+        result = await _unit_call(runtime, "get_mission_relay_snapshot", {"mission_id": str(uuid4()), "page_size": 1})
+    assert result.to_payload() == {"schema_version": 1, "status": "REFUSED", "reason_code": "RESPONSE_TOO_LARGE"}
+    assert len(requests) == 1
 
 
 @pytest.mark.asyncio
@@ -159,12 +137,8 @@ async def test_handler_without_owner_lifespan_is_unavailable_without_bootstrap(m
 
 
 @pytest.mark.asyncio
-async def test_unit_handlers_and_http_share_four_process_slots_without_waiter_queue(typed_projection, monkeypatch, tmp_path):
+async def test_unit_handlers_share_four_process_slots_without_waiter_queue(typed_projection, monkeypatch, tmp_path):
     import asyncio
-    import http.client
-    import json
-    from datetime import datetime, timedelta, timezone
-    from urllib.parse import urlsplit
     from uuid import uuid4
     server, requests, runtimes = typed_projection
     mission = str(uuid4())
@@ -182,10 +156,6 @@ async def test_unit_handlers_and_http_share_four_process_slots_without_waiter_qu
         return await original(runtime, request)
     monkeypatch.setattr(server._MissionRelayRuntime, "snapshot", blocked)
     async with _unit_runtime(typed_projection, tmp_path) as runtime:
-        cap = (await _unit_call(runtime, "open_mission_relay", {
-            "mission_id": mission, "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
-        })).to_payload()
-        assert cap["status"] == "OK"
         blocking = True
         pending = [asyncio.create_task(_unit_call(runtime, "get_mission_relay_snapshot", {
             "mission_id": mission, "page_size": 1,
@@ -196,17 +166,6 @@ async def test_unit_handlers_and_http_share_four_process_slots_without_waiter_qu
                 "mission_id": mission, "page_size": 1,
             }), 1)
             assert fifth.to_payload() == {"schema_version": 1, "status": "UNAVAILABLE", "reason_code": "READ_BUSY"}
-            def http_read():
-                url = urlsplit(cap["url"])
-                connection = http.client.HTTPConnection("127.0.0.1", url.port, timeout=1)
-                try:
-                    connection.request("GET", url.path + "snapshot?page_size=1")
-                    response = connection.getresponse()
-                    return response.status, json.loads(response.read())
-                finally:
-                    connection.close()
-            status, body = await asyncio.to_thread(http_read)
-            assert status == 503 and body == fifth.to_payload()
             assert count == 4, "Busy refusal admitted an additional repository read"
         finally:
             release.set()

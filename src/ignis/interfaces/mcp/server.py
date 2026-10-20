@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import json
 import logging
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import uuid
@@ -140,7 +140,7 @@ The mission and Claim Ledger contracts, not this recipe, decide verdict eligibil
 """
 
 class _MissionRelayRuntime:
-    """Borrowed storage and viewer resources owned by one FastMCP async lifespan."""
+    """Borrowed storage and read resources owned by one FastMCP async lifespan."""
 
     # Bound for joining, then cancelling, a pending source acquisition during shutdown.
     _SOURCE_SETTLE_SECONDS = 5
@@ -165,41 +165,9 @@ class _MissionRelayRuntime:
         self.transport = Context(server).transport if server is not None else None
         self._writes: set[asyncio.Task] = set()
         self._executions: set[asyncio.Task] = set()
-        self.listener = None
         self.closed = False
         self._projection = None
         self._reads = None
-        self._dashboards = {}
-
-    async def started_dashboard(self, mission, journal):
-        """Notify the same authorized caller after its canonical run has actually started."""
-        from fastmcp.server.dependencies import get_context
-        from ignis.application.ports.research_workspace_port import RunJournal
-        if (self.closed or self.caller_scope is None or type(journal) is not RunJournal
-                or journal.mission_id != mission.id or journal.workspace_id != mission.workspace_id
-                or type(journal.run_id) is not UUID or mission.status != "RUNNING"):
-            return {"status": "UNAVAILABLE", "reason_code": "DASHBOARD_SCOPE_REQUIRED"}
-        self.caller_scope.check()
-        ctx = get_context()
-        if ctx.request_context is None or _request_runtime(ctx) is not self:
-            return {"status": "UNAVAILABLE", "reason_code": "DASHBOARD_SCOPE_REQUIRED"}
-        if journal.run_id in self._dashboards:
-            return self._dashboards[journal.run_id]
-        # One fixed viewing lease from original run admission, distinct from collection authority.
-        deadline = journal.started_at + timedelta(minutes=15)
-        async with asyncio.timeout(3):
-            opened = await handle_open_mission_relay(str(mission.id), deadline.isoformat(),
-                str(journal.run_id), runtime=self)
-            from ignis.domain.mission_relay import MissionRelayOpenResult
-            if type(opened) is not MissionRelayOpenResult:
-                return {"status": "UNAVAILABLE", "reason_code": "DASHBOARD_START_FAILED"}
-            # The dashboard notification status wins over the viewer receipt's own status field.
-            result = {**opened.to_payload(), "status": "AVAILABLE"}
-            self._dashboards[journal.run_id] = result
-            # Send on the existing request channel directly; never log the bearer URL locally.
-            await ctx.session.send_log_message(level="info", logger="ignis.dashboard",
-                data={"event": "IGNIS_DASHBOARD_READY", **result}, related_request_id=ctx.request_id)
-            return result
 
     async def record(self, mission_id: str, command: dict[str, Any]) -> dict[str, Any]:
         from ignis.application.cancellation import await_settled
@@ -415,7 +383,7 @@ class _MissionRelayRuntime:
 
     def read_service(self):
         if self.closed or asyncio.get_running_loop() is not self.owner_loop:
-            raise RuntimeError("Mission viewer requires an active owning lifespan.")
+            raise RuntimeError("Mission relay reads require an active owning lifespan.")
         if self._reads is None:
             from ignis.infrastructure.mission_relay import MissionRelayReadService
             self._reads = MissionRelayReadService(provider=self, owner_loop=self.owner_loop)
@@ -424,7 +392,7 @@ class _MissionRelayRuntime:
     def _use_case(self):
         if self.caller_scope is not None: self.caller_scope.check()
         if self.closed or asyncio.get_running_loop() is not self.owner_loop:
-            raise RuntimeError("Mission viewer requires an active owning lifespan.")
+            raise RuntimeError("Mission relay reads require an active owning lifespan.")
         if self._projection is None:
             from ignis.application.use_cases.get_mission_relay_snapshot import GetMissionRelaySnapshotUseCase
             from ignis.infrastructure.persistence.mission_relay_reader import (
@@ -460,27 +428,14 @@ class _MissionRelayRuntime:
                 elif dsn.startswith(("postgresql://", "postgres://")):
                     reader = PostgresMissionRelayReader(dsn)
                 else:
-                    raise ValueError("Unsupported viewer storage identity.")
+                    raise ValueError("Unsupported relay storage identity.")
             self._projection = GetMissionRelaySnapshotUseCase(reader)
         return self._projection
-
-    async def authorize_view(self, mission_id, run_id):
-        from ignis.application.ports.mission_relay_port import MissionRelayReadRequest
-        from ignis.domain.mission_relay import MissionRelayReadFailure
-        result = await self.snapshot(MissionRelayReadRequest(mission_id=mission_id, run_id=run_id, page_size=1))
-        return result if type(result) is MissionRelayReadFailure else None
 
     async def snapshot(self, request):
         from ignis.domain.mission_relay import MissionRelayReadFailure, RelayReadReason, RelayReadStatus
         try:
             return await self._use_case().execute(request)
-        except (ValueError, RuntimeError):
-            return MissionRelayReadFailure(status=RelayReadStatus.UNAVAILABLE, reason_code=RelayReadReason.READ_UNAVAILABLE)
-
-    async def inspect(self, request, observation_id):
-        from ignis.domain.mission_relay import MissionRelayReadFailure, RelayReadReason, RelayReadStatus
-        try:
-            return await self._use_case().inspect(request, observation_id)
         except (ValueError, RuntimeError):
             return MissionRelayReadFailure(status=RelayReadStatus.UNAVAILABLE, reason_code=RelayReadReason.READ_UNAVAILABLE)
 
@@ -504,7 +459,7 @@ class _MissionRelayRuntime:
         for worker in tuple(self._executions):
             if not worker.cancelling():
                 worker.cancel()
-        resources = [resource for resource in (self.listener, self._reads) if resource is not None]
+        resources = [self._reads] if self._reads is not None else []
         for resource in resources:
             resource.close()
         from ignis.application.cancellation import await_settled
@@ -515,21 +470,21 @@ class _MissionRelayRuntime:
                 await asyncio.gather(*tuple(self._writes), return_exceptions=True)
             for resource in resources:
                 if not await resource.wait_closed(timeout=None):
-                    raise RuntimeError("Mission viewer reads did not settle during shutdown.")
-        # Every later owned phase still runs; an unsettled viewer is reported once they have.
+                    raise RuntimeError("Mission relay reads did not settle during shutdown.")
+        # Every later owned phase still runs; unsettled reads are reported once they have.
         failure = None
         try:
             await await_settled(settle())
         except BaseException as error:
             failure = error
         await self._settle_source(acquisition)
-        viewer_settled = failure is None
+        owner_reads_settled = failure is None
         cancellation = None
         for scope in self.caller_scopes.values():
             runtime = scope.runtime
-            # Each caller's read settlement is known only when this viewer and that caller's own
+            # Each caller's read settlement is known only when these reads and that caller's own
             # runtime both settled; one failed or cancelled caller never retains a healthy sibling.
-            reads_settled = viewer_settled
+            reads_settled = owner_reads_settled
             if runtime is not None:
                 try:
                     await runtime.close()
@@ -673,41 +628,6 @@ def _relay_failure(reason, unavailable=False):
                                    reason_code=reason)
 
 
-async def handle_open_mission_relay(mission_id: str, expires_at: str, run_id: Optional[str] = None,
-                                    *, runtime: Optional[_MissionRelayRuntime] = None):
-    """Validate finite selected scope before any listener or component work."""
-    from ignis.domain.mission_relay import MissionRelayOpenResult, RelayReadReason
-    try:
-        mission = UUID(mission_id)
-        run = UUID(run_id) if run_id is not None else None
-    except (ValueError, TypeError, AttributeError):
-        return _relay_failure(RelayReadReason.SCOPE_MISMATCH)
-    try:
-        deadline = datetime.fromisoformat(expires_at)
-        now = datetime.now(timezone.utc)
-        if deadline.tzinfo is None or deadline.utcoffset() != timedelta(0) or not now < deadline <= now + timedelta(minutes=60):
-            raise ValueError
-    except (ValueError, TypeError):
-        return _relay_failure(RelayReadReason.INVALID_EXPIRY)
-    if runtime is None or runtime.closed or runtime.owner_loop is not asyncio.get_running_loop():
-        return _relay_failure(RelayReadReason.READ_UNAVAILABLE, True)
-    refusal = await runtime.read_service().authorize_view(mission, run, deadline)
-    if refusal is not None:
-        return refusal
-    if runtime.closed:
-        return _relay_failure(RelayReadReason.READ_UNAVAILABLE, True)
-    if deadline <= datetime.now(timezone.utc):
-        return _relay_failure(RelayReadReason.INVALID_EXPIRY)
-    if runtime.listener is None:
-        from ignis.infrastructure.mission_relay import MissionRelayHTTP
-        runtime.listener = MissionRelayHTTP(provider=runtime, owner_loop=runtime.owner_loop)
-    capability = await runtime.listener.open_view(mission_id=mission, run_id=run, expires_at=deadline)
-    from ignis.domain.mission_relay import MissionRelayReadFailure
-    if type(capability) is MissionRelayReadFailure:
-        return capability
-    return MissionRelayOpenResult(mission_id=mission, run_id=run, url=capability.url, expires_at=capability.expires_at)
-
-
 async def handle_get_mission_relay_snapshot(mission_id: str, page_size: int, run_id: Optional[str] = None,
         after_revision: Optional[int] = None, after_ordinal: Optional[int] = None, evidence_offset: int = 0,
         *, runtime: Optional[_MissionRelayRuntime] = None):
@@ -734,14 +654,7 @@ async def handle_get_mission_relay_snapshot(mission_id: str, page_size: int, run
     return await runtime.read_service().read_snapshot(request)
 
 
-@mcp.tool(name="open_mission_relay", description="Open a finite read-only local viewer for one explicitly selected mission and optional run. Requires an explicit UTC deadline; validates installed storage without bootstrap or collectors.")
-async def open_mission_relay(mission_id: str, expires_at: str, ctx: Context, run_id: Optional[str] = None) -> dict:
-    result = await handle_open_mission_relay(mission_id, expires_at, run_id,
-                                           runtime=_request_runtime(ctx))
-    return result.to_payload()
-
-
-@mcp.tool(name="get_mission_relay_snapshot", description="Read an allowlisted bounded coherent snapshot for one selected mission and optional run, without opening a viewer. Page size is explicit; cursors and evidence offsets remain selected-scope reads.")
+@mcp.tool(name="get_mission_relay_snapshot", description="Read an allowlisted bounded coherent snapshot for one selected mission and optional run. Page size is explicit; cursors and evidence offsets remain selected-scope reads. The ignis-track guide explains how to build a tracking artifact from it.")
 async def get_mission_relay_snapshot(mission_id: str, page_size: int, ctx: Context,
         run_id: Optional[str] = None, after_revision: Optional[int] = None,
         after_ordinal: Optional[int] = None, evidence_offset: int = 0) -> dict:
@@ -913,8 +826,6 @@ def _init_components(*, caller_scope=None):
         clusterer=clusterer,
         workspace_store=workspace_store,
         vocabulary_sync=vocabulary_synchronizer,
-        run_started=(lambda mission, journal: caller_scope.runtime.started_dashboard(mission, journal))
-            if caller_scope is not None else None,
     )
     create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store,
         research_directory=caller_scope.directory / "research" if caller_scope is not None else None,

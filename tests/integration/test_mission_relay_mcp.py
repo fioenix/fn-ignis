@@ -1,11 +1,8 @@
-"""Actual MCP/HTTP read chain over disposable canonical storage."""
+"""Actual MCP snapshot read chain over disposable canonical storage."""
 
-import asyncio
-import http.client
 import json
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
-from urllib.parse import urlsplit
+from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
@@ -29,17 +26,6 @@ from test_mission_relay_read_boundary import (
     _state,
     relay_case,  # noqa: F401 -- expose the actual disposable storage fixture
 )
-
-
-def _http(url):
-    target = urlsplit(url)
-    connection = http.client.HTTPConnection(target.hostname, target.port, timeout=5)
-    try:
-        connection.request('GET', target.path + ('?' + target.query if target.query else ''))
-        response = connection.getresponse()
-        return response.status, dict(response.getheaders()), response.read()
-    finally:
-        connection.close()
 
 
 @pytest_asyncio.fixture
@@ -91,7 +77,7 @@ def _observe_chain(case, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_actual_mcp_http_selected_view_and_inspector_preserve_physical_storage(attention_case, monkeypatch, tmp_path):
+async def test_actual_mcp_selected_snapshot_pages_preserve_physical_storage(attention_case, monkeypatch, tmp_path):
     from ignis.interfaces.mcp import server
     case, missions, runs = attention_case
     before = _state(case)
@@ -110,123 +96,20 @@ async def test_actual_mcp_http_selected_view_and_inspector_preserve_physical_sto
             assert snapshot['status'] == 'OK'
             assert snapshot['counts'] == {'observations': 3, 'sources': 3}
             assert len(snapshot['evidence']) == 2 and snapshot['next_evidence_offset'] == 2
-            cap = (await client.call_tool('open_mission_relay', {
-                'mission_id': str(missions[0].id), 'run_id': str(runs[0]),
-                'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
+            last = (await client.call_tool('get_mission_relay_snapshot', {
+                'mission_id': str(missions[0].id), 'run_id': str(runs[0]), 'page_size': 2, 'evidence_offset': 2,
             })).structured_content
-            assert cap['status'] == 'OK'
-            status, headers, html = await asyncio.to_thread(_http, cap['url'])
-            assert status == 200 and headers['Cache-Control'] == 'no-store'
-            assert b'data-testid="mission-authority"' in html, 'Real HTTP root still serves the temporary shell'
-            assert str(missions[0].id).encode() in html and str(runs[0]).encode() in html
-            assert str(missions[1].id).encode() not in html and str(runs[1]).encode() not in html
-            assert urlsplit(cap['url']).path.strip('/').split('/')[-1].encode() not in html
-            status, _, body = await asyncio.to_thread(_http, cap['url'] + 'snapshot?page_size=2')
-            projected = json.loads(body)
-            assert status == 200 and projected['high_water'] == snapshot['high_water']
-            assert projected['counts'] == snapshot['counts']
-            row = projected['evidence'][0]
-            status, _, body = await asyncio.to_thread(_http, cap['url'] + 'inspect/' + row['observation_id'] + '?page_size=2')
-            inspected = json.loads(body)
-            assert status == 200 and inspected['observation'] == row
-            assert inspected['mission_id'] == snapshot['mission_id'] and inspected['run_id'] == snapshot['run_id']
-            status, _, body = await asyncio.to_thread(_http, cap['url'] + 'snapshot?page_size=2&evidence_offset=2')
-            last = json.loads(body)
-            assert status == 200 and len(last['evidence']) == 1 and last['next_evidence_offset'] is None
+            assert last['status'] == 'OK' and last['high_water'] == snapshot['high_water']
+            assert len(last['evidence']) == 1 and last['next_evidence_offset'] is None
             assert last['counts'] == snapshot['counts']
-        observed.assert_no_writes()
-    owned.assert_closed_unchanged(case, before)
-
-
-@pytest.mark.asyncio
-async def test_actual_mcp_http_browser_reads_and_inspects_without_writes(attention_case, monkeypatch, tmp_path):
-    from ignis.interfaces.mcp import server
-    from playwright.async_api import async_playwright, expect
-    case, missions, runs = attention_case
-    before = _state(case)
-    _setup_traps(monkeypatch, case.repository)
-    def forbidden(*args, **kwargs):
-        raise AssertionError('Browser viewer initialized writable components or credentials')
-    monkeypatch.setattr(server, 'get_components', forbidden)
-    monkeypatch.setattr(server, 'create_repository', forbidden)
-    owned = _OwnedRepository(monkeypatch, case)
-    observer = _observe_chain(case, monkeypatch)
-    errors, requests, external = [], [], []
-    with observer as observed:
-        async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client:
-            initial = (await client.call_tool('get_mission_relay_snapshot', {
-                'mission_id': str(missions[0].id), 'run_id': str(runs[0]), 'page_size': 100,
-            })).structured_content
-            assert initial['status'] == 'OK'
+            first_page = {row['observation_id'] for row in snapshot['evidence']}
+            assert first_page.isdisjoint(row['observation_id'] for row in last['evidence'])
+            serialized = json.dumps([snapshot, last])
+            assert str(missions[1].id) not in serialized and str(runs[1]) not in serialized
             # Fresh PostgreSQL includes migration 028; these SQLite fixtures
             # intentionally initialize only canonical/progress storage.
             expected_research = 'AVAILABLE' if case.name == 'postgres' else 'SCHEMA_UNAVAILABLE'
-            assert initial['research']['availability'] == expected_research
-            cap = (await client.call_tool('open_mission_relay', {
-                'mission_id': str(missions[0].id), 'run_id': str(runs[0]),
-                'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
-            })).structured_content
-            assert cap['status'] == 'OK'
-            target = urlsplit(cap['url'])
-            async with async_playwright() as runtime:
-                browser = await runtime.chromium.launch(headless=True)
-                try:
-                    context = await browser.new_context(service_workers='block')
-                    async def route_read(route):
-                        request = route.request
-                        url = urlsplit(request.url)
-                        if url.hostname in ('fonts.googleapis.com', 'fonts.gstatic.com'):
-                            await route.abort()
-                        elif request.method == 'GET' and url.scheme == 'http' and url.netloc == target.netloc:
-                            requests.append(url.path)
-                            await route.continue_()
-                        else:
-                            external.append((request.method, url.hostname))
-                            await route.abort()
-                    await context.route('**/*', route_read)
-                    page = await context.new_page()
-                    page.on('pageerror', lambda error: errors.append(str(error)))
-                    await page.clock.install(time=datetime.now(timezone.utc))
-                    response = await page.goto(cap['url'])
-                    assert response.status == 200
-                    await expect(page.get_by_test_id('mission-authority')).to_contain_text(str(missions[0].id))
-                    await expect(page.get_by_test_id('observation-count')).to_have_text('3')
-                    await expect(page.get_by_test_id('source-count')).to_have_text('3')
-                    for _ in range(2):
-                        async with page.expect_response(lambda response: urlsplit(response.url).path.endswith('/snapshot')):
-                            await page.clock.run_for(2100)
-                        await expect(page.get_by_test_id('snapshot-state')).to_contain_text('particle motion encodes receipts')
-                    await expect(page.get_by_test_id('relay-packet')).to_have_count(0)
-                    row = initial['evidence'][0]
-                    async with page.expect_response(lambda response: '/inspect/' in urlsplit(response.url).path):
-                        await page.get_by_test_id('stage-inspector').get_by_role('button', name=row['title'], exact=True).click()
-                    inspector = page.get_by_test_id('stage-inspector')
-                    for value in (row['observation_id'], row['source_id'], row['title'], 'ATTENTION_CONTEXT'):
-                        await expect(inspector).to_contain_text(value)
-                    await page.get_by_role('button', name='Research', exact=True).click()
-                    research = inspector.get_by_test_id('research-view')
-                    if expected_research == 'AVAILABLE':
-                        assert initial['research']['work_items'] == []
-                        assert initial['research']['assignments'] == []
-                        await expect(research).to_contain_text('MISSION_CURRENT')
-                        await expect(research).to_contain_text('No recorded work items in this available snapshot.')
-                        await expect(research.get_by_test_id('research-observation-count')).to_have_text('3')
-                        await expect(research.get_by_test_id('research-source-count')).to_have_text('3')
-                        await expect(research).to_contain_text('strategic gate UNAVAILABLE')
-                    else:
-                        await expect(research).to_have_text('SCHEMA_UNAVAILABLE · records, observations and sources Unknown.')
-                        await expect(research.get_by_test_id('research-observation-count')).to_have_count(0)
-                        await expect(research.get_by_test_id('research-source-count')).to_have_count(0)
-                    await expect(research.locator('[data-work-id], [data-assignment-id]')).to_have_count(0)
-                    await page.get_by_role('button', name='Synthesis', exact=True).click()
-                    await expect(inspector).to_contain_text('Withheld')
-                    await page.screenshot(path=str(tmp_path / 'actual-viewer.png'), full_page=True)
-                    assert not errors and not external
-                    assert len([path for path in requests if path.endswith('/snapshot')]) == 2
-                    assert any('/inspect/' in path for path in requests)
-                    await context.close()
-                finally:
-                    await browser.close()
+            assert snapshot['research']['availability'] == expected_research
         observed.assert_no_writes()
     owned.assert_closed_unchanged(case, before)
 
@@ -256,20 +139,16 @@ async def test_actual_mcp_missing_schema_or_access_refuses_before_bootstrap(stor
             raise sqlite3.OperationalError('inert access denied')
         monkeypatch.setattr(sqlite3, 'connect', denied)
     async with _caller_client(monkeypatch, tmp_path, {'repository': repository}) as client:
-        for tool, args in (
-            ('get_mission_relay_snapshot', {'page_size': 2}),
-            ('open_mission_relay', {'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()}),
-        ):
-            result = (await client.call_tool(tool, {'mission_id': str(uuid4()), **args})).structured_content
-            assert result == {'schema_version': 1, 'status': 'UNAVAILABLE', 'reason_code': 'READ_UNAVAILABLE'}
+        result = (await client.call_tool('get_mission_relay_snapshot', {
+            'mission_id': str(uuid4()), 'page_size': 2})).structured_content
+        assert result == {'schema_version': 1, 'status': 'UNAVAILABLE', 'reason_code': 'READ_UNAVAILABLE'}
     assert (path.read_bytes() if path.exists() else None) == before
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('state,label', (('PENDING', 'Idle'), ('RUNNING', 'RUNNING'), ('LEGACY_UNRECOGNIZED', 'Unknown')))
-async def test_actual_idle_is_canonical_not_inferred_from_unselected_run(attention_case, monkeypatch, state, label, tmp_path):
+@pytest.mark.parametrize('state', ('PENDING', 'RUNNING', 'LEGACY_UNRECOGNIZED'))
+async def test_actual_idle_is_canonical_not_inferred_from_unselected_run(attention_case, monkeypatch, state, tmp_path):
     from ignis.interfaces.mcp import server
-    from playwright.async_api import async_playwright, expect
     case, missions, _ = attention_case
     mission = ResearchMission(title='Canonical collection state', keywords=['synthetic'],
         surface='ATTENTION', status=state, workspace_id=missions[0].workspace_id)
@@ -277,7 +156,7 @@ async def test_actual_idle_is_canonical_not_inferred_from_unselected_run(attenti
     before = _state(case)
     _setup_traps(monkeypatch, case.repository)
     def forbidden(*args, **kwargs):
-        raise AssertionError('Idle viewer started collection or component bootstrap')
+        raise AssertionError('Idle read started collection or component bootstrap')
     monkeypatch.setattr(server, 'get_components', forbidden)
     monkeypatch.setattr(server, 'create_repository', forbidden)
     owned = _OwnedRepository(monkeypatch, case)
@@ -288,24 +167,7 @@ async def test_actual_idle_is_canonical_not_inferred_from_unselected_run(attenti
             })).structured_content
             assert snapshot['run_id'] is None
             assert snapshot['collection_state'] == (state if state != 'LEGACY_UNRECOGNIZED' else None)
-            cap = (await client.call_tool('open_mission_relay', {
-                'mission_id': str(mission.id),
-                'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
-            })).structured_content
-            async with async_playwright() as runtime:
-                browser = await runtime.chromium.launch(headless=True)
-                try:
-                    page = await browser.new_page()
-                    await page.route('https://fonts.googleapis.com/**', lambda route: route.abort())
-                    await page.route('https://fonts.gstatic.com/**', lambda route: route.abort())
-                    assert (await page.goto(cap['url'])).status == 200
-                    await expect(page.get_by_test_id('collection-state')).to_contain_text(label)
-                    if state != 'PENDING':
-                        await expect(page.get_by_test_id('collection-state')).not_to_contain_text('Idle')
-                    await expect(page.get_by_test_id('relay-packet')).to_have_count(0)
-                    await expect(page.get_by_test_id('observation-count')).to_have_text('0')
-                finally:
-                    await browser.close()
+            assert snapshot['counts']['observations'] == 0 and snapshot['event_page']['events'] == []
         observed.assert_no_writes()
     owned.assert_closed_unchanged(case, before)
 
@@ -402,108 +264,73 @@ def _view_only(case, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_committed_changes_reach_actual_http_browser_once(attention_case, monkeypatch, tmp_path):
+async def test_committed_changes_reach_snapshot_reads_once(attention_case, monkeypatch, tmp_path):
     from ignis.interfaces.mcp import server
     from ignis.domain.research_workspace import (
         EvidenceDirection, EvidencePurpose, EvidenceQualification, QualificationReason,
         QualificationRelation, compute_frame_fingerprint,
     )
-    from playwright.async_api import async_playwright, expect
     case, missions, runs = attention_case
     mission, run = missions[0], runs[0]
     def forbidden(*args, **kwargs):
-        raise AssertionError('Viewer started component bootstrap or credential initialization')
+        raise AssertionError('A snapshot read started component bootstrap or credential initialization')
     monkeypatch.setattr(server, 'get_components', forbidden)
     monkeypatch.setattr(server, 'create_repository', forbidden)
-    async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client, async_playwright() as runtime:
-        browser = await runtime.chromium.launch(headless=True)
-        try:
-            context = await browser.new_context(service_workers='block')
-            await context.add_init_script('''(() => {
-                window.receipts = [];
-                new MutationObserver(changes => {
-                    for (const change of changes) for (const node of change.addedNodes) {
-                        if (node instanceof Element && node.matches('[data-testid="relay-packet"]')) {
-                            receipts.push({event:node.dataset.eventId, role:node.dataset.evidenceRole,
-                                direction:node.dataset.direction || null,
-                                observations:JSON.parse(node.dataset.observationIds),
-                                provenance:node.dataset.provenance});
-                        }
-                    }
-                }).observe(document, {childList:true, subtree:true});
-            })();''')
-            await context.route('https://fonts.googleapis.com/**', lambda route: route.abort())
-            await context.route('https://fonts.gstatic.com/**', lambda route: route.abort())
-            page = await context.new_page()
-            clock_time = datetime.now(timezone.utc)
-            await page.clock.install(time=clock_time)
-            await page.clock.pause_at(clock_time + timedelta(seconds=1))
-            with _view_only(case, monkeypatch):
-                cap = (await client.call_tool('open_mission_relay', {
-                    'mission_id': str(mission.id), 'run_id': str(run),
-                    'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
-                })).structured_content
-                assert cap['status'] == 'OK'
-                assert (await page.goto(cap['url'])).status == 200
-                await expect(page.get_by_test_id('observation-count')).to_have_text('3')
-                assert await page.evaluate('receipts') == []
-            # Deliberate control-plane fixture writes occur outside the guarded
-            # viewer phases. Only these authorized commits may change storage.
-            signals = [TrendSignal(platform=PlatformType.YOUTUBE,
-                raw_title=f'New committed observation {number}',
-                source_url=f'https://example.invalid/new/{mission.id}/{number}',
-                mission_id=mission.id, captured_at=datetime.now(timezone.utc)) for number in range(2)]
-            assert await case.repository.commit_collection_observations(mission.id, run, signals) == 2
-            assert all(signal.observation_id is not None for signal in signals)
-            with _view_only(case, monkeypatch):
-                async with page.expect_response(lambda response: urlsplit(response.url).path.endswith('/snapshot')):
-                    await page.clock.run_for(2100)
-                await expect(page.get_by_test_id('observation-count')).to_have_text('5')
-                await expect(page.get_by_test_id('source-count')).to_have_text('5')
-                arrivals = await page.evaluate('receipts')
-                assert len(arrivals) == 1 and set(arrivals[0]['observations']) == {str(signal.observation_id) for signal in signals}
-                assert arrivals[0]['role'] == 'ATTENTION_CONTEXT' and arrivals[0]['provenance'] == 'HARNESS_OBSERVED'
-                async with page.expect_response(lambda response: urlsplit(response.url).path.endswith('/snapshot')):
-                    await page.clock.run_for(2100)
-                assert await page.evaluate('receipts') == arrivals
-            directions = (EvidenceDirection.SUPPORT, EvidenceDirection.CONTRADICTION)
-            relations = (QualificationRelation.QUALIFIED_SUPPORT, QualificationRelation.QUALIFIED_CONTRADICTION)
-            qualifications = [EvidenceQualification(mission_id=mission.id,
-                observation_id=signal.observation_id, frame_fingerprint=compute_frame_fingerprint(mission, None),
-                relation=relation, purpose=EvidencePurpose.VOC, confidence=0.9,
-                reason_code=QualificationReason.DIRECT_TO_FRAME, judged_by='fixture',
-                evidence_role=direction, evidence_contract_version=2,
-                hypothesis_target='synthetic observation check', created_at=datetime.now(timezone.utc))
-                for signal, direction, relation in zip(signals, directions, relations)]
-            assert await case.repository.commit_evidence_qualifications(mission.id, qualifications) == 2
-            with _view_only(case, monkeypatch):
-                async with page.expect_response(lambda response: urlsplit(response.url).path.endswith('/snapshot')):
-                    await page.clock.run_for(2100)
-                await expect(page.get_by_test_id('snapshot-state')).to_contain_text('particle motion encodes receipts')
-                packets = await page.evaluate('receipts')
-                assert len(packets) == 3 and packets[:1] == arrivals
-                assert {packet['direction'] for packet in packets[1:]} == {'SUPPORT', 'CONTRADICTION'}
-                assert len({packet['event'] for packet in packets[1:]}) == 1
-                assert packets[1]['event'] != arrivals[0]['event']
-                for signal, relation in zip(signals, relations):
-                    async with page.expect_response(lambda response: '/inspect/' in urlsplit(response.url).path):
-                        await page.get_by_test_id('stage-inspector').get_by_role('button', name=signal.raw_title, exact=True).click()
-                    await expect(page.get_by_test_id('stage-inspector')).to_contain_text(relation.value)
-                    await page.get_by_role('button', name='Sources', exact=True).click()
-                async with page.expect_response(lambda response: urlsplit(response.url).path.endswith('/snapshot')):
-                    await page.clock.run_for(2100)
-                assert await page.evaluate('receipts') == packets
-                await expect(page.get_by_test_id('observation-count')).to_have_text('5')
-                await page.reload()
-                assert await page.evaluate('receipts') == []
-                await expect(page.get_by_test_id('observation-count')).to_have_text('5')
-                await context.close()
-        finally:
-            await browser.close()
+
+    async def read(client, after=None):
+        cursor = {'after_revision': after['revision'], 'after_ordinal': after['ordinal']} if after else {}
+        result = (await client.call_tool('get_mission_relay_snapshot', {
+            'mission_id': str(mission.id), 'run_id': str(run), 'page_size': 100, **cursor})).structured_content
+        assert result['status'] == 'OK', result
+        return result
+
+    def observations(event):
+        return {reference['observation_id'] for reference in event['evidence_references']}
+
+    async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client:
+        with _view_only(case, monkeypatch):
+            initial = await read(client)
+            assert initial['counts']['observations'] == 3
+            assert (await read(client, initial['high_water']))['event_page']['events'] == []
+        # Deliberate control-plane fixture writes occur outside the guarded read phases.
+        signals = [TrendSignal(platform=PlatformType.YOUTUBE,
+            raw_title=f'New committed observation {number}',
+            source_url=f'https://example.invalid/new/{mission.id}/{number}',
+            mission_id=mission.id, captured_at=datetime.now(timezone.utc)) for number in range(2)]
+        assert await case.repository.commit_collection_observations(mission.id, run, signals) == 2
+        committed = {str(signal.observation_id) for signal in signals}
+        with _view_only(case, monkeypatch):
+            arrived = await read(client, initial['high_water'])
+            assert arrived['counts'] == {'observations': 5, 'sources': 5}
+            arrivals = arrived['event_page']['events']
+            assert len(arrivals) == 1 and observations(arrivals[0]) == committed
+            assert arrivals[0]['provenance'] == 'HARNESS_OBSERVED'
+            assert {ref['evidence_role'] for ref in arrivals[0]['evidence_references']} == {'ATTENTION_CONTEXT'}
+            assert (await read(client, arrived['high_water']))['event_page']['events'] == []
+        directions = (EvidenceDirection.SUPPORT, EvidenceDirection.CONTRADICTION)
+        relations = (QualificationRelation.QUALIFIED_SUPPORT, QualificationRelation.QUALIFIED_CONTRADICTION)
+        qualifications = [EvidenceQualification(mission_id=mission.id,
+            observation_id=signal.observation_id, frame_fingerprint=compute_frame_fingerprint(mission, None),
+            relation=relation, purpose=EvidencePurpose.VOC, confidence=0.9,
+            reason_code=QualificationReason.DIRECT_TO_FRAME, judged_by='fixture',
+            evidence_role=direction, evidence_contract_version=2,
+            hypothesis_target='synthetic observation check', created_at=datetime.now(timezone.utc))
+            for signal, direction, relation in zip(signals, directions, relations)]
+        assert await case.repository.commit_evidence_qualifications(mission.id, qualifications) == 2
+        with _view_only(case, monkeypatch):
+            qualified = await read(client, arrived['high_water'])
+            events = qualified['event_page']['events']
+            assert len({event['event_id'] for event in events}) == 1 and events[0]['event_id'] != arrivals[0]['event_id']
+            assert {ref['direction'] for event in events for ref in event['evidence_references']} == {'SUPPORT', 'CONTRADICTION'}
+            rows = {row['observation_id']: row for row in qualified['evidence']}
+            for signal, relation in zip(signals, relations):
+                assert rows[str(signal.observation_id)]['qualification_relation'] == relation.value
+            assert (await read(client, qualified['high_water']))['event_page']['events'] == []
+            assert (await read(client))['counts'] == {'observations': 5, 'sources': 5}
 
 
 @pytest.mark.asyncio
-async def test_us3_actual_mcp_channels_and_foreign_inspector_refuse_fallback(attention_case, monkeypatch, tmp_path):
+async def test_us3_actual_mcp_channels_and_foreign_scope_refuse_fallback(attention_case, monkeypatch, tmp_path):
     from dataclasses import replace
     from tests.unit.test_mission_claims import _manifest
     from ignis.interfaces.mcp import server
@@ -541,12 +368,7 @@ async def test_us3_actual_mcp_channels_and_foreign_inspector_refuse_fallback(att
             assert channels['threads']['completed_at'] is None
             assert snapshot['claim_gate']['claims'] == [] and snapshot['claim_gate']['render_status'] == 'WITHHELD'
             assert snapshot['counts'] == {'observations': 3, 'sources': 3}, 'Empty probe must not synthesize or erase committed corpus'
-            cap = (await client.call_tool('open_mission_relay', {'mission_id': str(mission.id), 'run_id': str(run),
-                'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()})).structured_content
-            for identifier in (foreign.observation_id, uuid4()):
-                status, _, body = await asyncio.to_thread(_http, cap['url'] + f'inspect/{identifier}?page_size=2')
-                assert status == 403
-                assert json.loads(body) == {'schema_version': 1, 'status': 'REFUSED', 'reason_code': 'SCOPE_MISMATCH'}
+            assert str(foreign.observation_id) not in json.dumps(snapshot), 'A foreign observation entered the selected read'
             refused = (await client.call_tool('get_mission_relay_snapshot', {
                 'mission_id': str(mission.id), 'run_id': str(runs[1]), 'page_size': 2})).structured_content
             assert refused == {'schema_version': 1, 'status': 'REFUSED', 'reason_code': 'SCOPE_MISMATCH'}

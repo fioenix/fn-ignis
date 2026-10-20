@@ -853,7 +853,7 @@
     "type": "function",
     "function": {
       "name": "propose_research_workspace",
-      "description": "Propose where a new research would live: `<host-workspace>/.ignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.",
+      "description": "Propose caller-owned research storage under the uniquely authorized native repository `.fnignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -1471,7 +1471,7 @@
     "type": "function",
     "function": {
       "name": "get_mission_relay_snapshot",
-      "description": "Read an allowlisted bounded coherent snapshot for one selected mission and optional run, without opening a viewer. Page size is explicit; cursors and evidence offsets remain selected-scope reads.",
+      "description": "Read an allowlisted bounded coherent snapshot for one selected mission and optional run. Page size is explicit; cursors and evidence offsets remain selected-scope reads. The ignis-track guide explains how to build a tracking artifact from it.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -1522,40 +1522,6 @@
         "required": [
           "mission_id",
           "page_size"
-        ],
-        "type": "object"
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "open_mission_relay",
-      "description": "Open a finite read-only local viewer for one explicitly selected mission and optional run. Requires an explicit UTC deadline; validates installed storage without bootstrap or collectors.",
-      "parameters": {
-        "additionalProperties": false,
-        "properties": {
-          "mission_id": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string"
-          },
-          "run_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          }
-        },
-        "required": [
-          "mission_id",
-          "expires_at"
         ],
         "type": "object"
       }

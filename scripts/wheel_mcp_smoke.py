@@ -4,7 +4,7 @@
 An editable install reads the source tree, so it cannot tell whether the wheel actually ships the
 HTML templates and SQL seeds the server needs. Importing the module cannot tell whether a client
 can use it. This does both: it starts the server, completes the JSON-RPC handshake, discovers the
-tool catalog, calls a local read-only tool, and then closes stdin and requires the server to exit.
+tool catalog, calls a local read-only tool, reads the packaged ignis-track guide, and then closes stdin and requires the server to exit.
 
 With no command it starts this interpreter's installed server, which is the built-wheel gate:
 run it with the interpreter of the environment the wheel was installed into. After `--` it starts
@@ -31,7 +31,7 @@ import sys
 import threading
 from dataclasses import dataclass
 
-EXPECTED_TOOL_COUNT = 48
+EXPECTED_TOOL_COUNT = 47
 EXPECTED_TOOL_NAMES = {
     "authenticate_instagram",
     "authenticate_threads",
@@ -68,7 +68,6 @@ EXPECTED_TOOL_NAMES = {
     "list_domain_lexicons",
     "list_research_missions",
     "list_research_workspaces",
-    "open_mission_relay",
     "prepare_host_browser_search",
     "propose_research_workspace",
     "record_mission_research_work",
@@ -83,6 +82,8 @@ EXPECTED_TOOL_NAMES = {
     "verify_connectors_health",
 }
 PROTOCOL_VERSION = "2024-11-05"
+TRACKING_GUIDE_URI = "fn-ignis://guide/ignis-track"
+TRACKING_GUIDE_HEADING = "# Ignis tracking artifact"
 RESPONSE_TIMEOUT_SECONDS = 120.0
 # A stdio server has nothing left to do once its client hangs up. One that keeps running holds a
 # client's process table and, in a container, the container itself.
@@ -267,6 +268,14 @@ def run_smoke(
         if payload.get("status") != "SUCCESS":
             raise SmokeFailure(f"get_runtime_config returned {payload}")
         log(f"tool call ok, {payload.get('total_configs')} runtime configs read")
+
+        # The guide is read from package data, so this proves the distribution ships it.
+        session.send({"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {"uri": TRACKING_GUIDE_URI}})
+        guide = session.response(4)
+        contents = guide.get("result", {}).get("contents") or [{}]
+        if not str(contents[0].get("text", "")).startswith(TRACKING_GUIDE_HEADING):
+            raise SmokeFailure(f"the packaged ignis-track guide is unavailable: {guide.get('error', guide)}")
+        log("ignis-track guide ok")
 
         session.close_and_wait(exit_timeout)
         log("server exited when stdin closed")

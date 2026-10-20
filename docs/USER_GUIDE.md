@@ -21,7 +21,7 @@ conservative reservation storage. Neither migration backfills evidence or adopts
 and progress-event kinds without transforming persisted evidence. Migration 027 adds only
 PostgreSQL revision, progress-event, and command-receipt tables, preserving canonical evidence.
 SQLite and PostgreSQL commit collection, qualification and claim facts together with matching
-progress events. Relay provides a finite read-only local viewer and bounded snapshots of installed mission storage.
+progress events. Relay provides bounded snapshots of installed mission storage; Ignis serves no tracking page.
 Migration 026
 changes only the count CHECK and retains partial DEGRADED observations without treating them
 as complete measurements or measured absence. Fresh local
@@ -127,33 +127,32 @@ temporary directory if needed; admitted MCP calls do not use it. Templates live 
 
 ### Mission Relay on the development branch
 
-On a caller-root-capable local stdio session, admitted mission ingress persists RUNNING before
-opening its selected mission/run dashboard and notifying that caller through the existing MCP
-logging notification channel. The automatic viewing lease expires 15 minutes after original run
-admission; reads and restart do not renew it. Presentation failure preserves the original
-collection outcome. Closing the viewer stops that view, not independent collection, and never
-deletes retained evidence. Server shutdown closes the listener and owned handles; reopening
-storage reads the same identity without resuming providers. Native client notification/root
-capability must be verified separately; configured server presence alone is not integration proof.
+Ignis serves no tracking page. To follow a mission, ask your agent to read
+`get_mission_relay_snapshot` and build a tracking artifact with the `ignis-track` guide: the MCP
+prompt `ignis_track`, the resource `fn-ignis://guide/ignis-track`, or the repository skill
+[`ignis-track`](../.agents/skills/ignis-track/SKILL.md). The agent regenerates the artifact only
+when you ask or at a milestone inside its own turn, and never polls. Each artifact is a
+point-in-time snapshot that keeps withheld, stale and unavailable states visible. It is saved as a
+local file; publishing it anywhere else needs your consent for that publication. Reading never
+starts, pauses or cancels collection, and server shutdown leaves retained evidence in place.
 
 Source policy appears against each original source/observation identity. Registered official
 YouTube API metadata with exact ingestion time shows its original capture and 30-calendar-day
 boundary; ambiguous historical access, missing capture time or future timestamps remain UNKNOWN.
-Publication dates, viewer clocks and restart never replace capture time. A boundary warning
+Publication dates, artifact clocks and restart never replace capture time. A boundary warning
 requires a source-specific owner decision; it grants no indefinite compliance, OAuth exception,
-collection authority or Market support. The viewer performs no refresh, deletion or quota calls.
+collection authority or Market support. Snapshot reads perform no deletion or quota calls.
 See [YouTube developer policies](https://developers.google.com/youtube/terms/developer-policies).
 
 Use `get_mission_relay_snapshot` for a bounded snapshot of the selected mission and optional run.
-Use `open_mission_relay` with an explicit UTC expiry to open a read-only localhost viewer.
-These reads validate installed storage without bootstrapping a database or starting collectors.
-Like every mission tool, they are admitted only through one validated caller root. When the
-client's MCP capabilities declare roots support, it must return exactly one existing absolute
-`file://` directory root; an empty, multiple, invalid or unavailable roots list is refused, and
-if `IGNIS_CALLER_ROOT` is also configured the returned root must match it exactly. The configured
-`IGNIS_CALLER_ROOT` (an absolute directory set at server startup and unchanged since) is used only
-when those capabilities explicitly declare no roots support. An unknown capability is refused.
-Each refusal fails with `ROOT_REQUIRED`. For an admitted call, canonical mission storage defaults
+It validates installed storage without bootstrapping a database or starting collectors. Like
+every mission tool, it is admitted only through one caller root: the folder your agent was opened
+in, which is the MCP server's working directory at startup. Set `IGNIS_CALLER_ROOT` (an absolute
+directory, unchanged since startup) only when your host starts the server somewhere else. Client
+roots are not consulted. A startup folder that cannot be one project is refused: the filesystem
+root, your home directory or a parent of it, a world-writable or sticky directory, or one owned by
+another user. A folder replaced since startup is refused too. Each refusal fails with
+`ROOT_REQUIRED`. For an admitted call, canonical mission storage defaults
 to caller-local SQLite at `<root>/.fnignis/canonical.sqlite3`; an explicit `DATABASE_URL` in
 `<root>/.fnignis/.env` can select another SQLite file inside the root or a PostgreSQL database.
 Caller configuration, logs, reports and research files stay under `<root>/.fnignis/`.
@@ -175,11 +174,11 @@ are accepted. A missing capability provider refuses before auth/collection. Admi
 identify the actual parent/work/gap/assignment/child/reservation/run and channel outcomes; retries
 recover the same child, while uncertain execution retains its reservation and cannot reprobe.
 Caller cancellation stops the owned execution and waits for cleanup. The parent lifecycle stays
-unchanged, and viewer tokens confer no execution authority.
+unchanged, and reading a snapshot confers no execution authority.
 
 ## 4. Tool and deployment boundaries
 
-The local MCP server exposes **48 tools**. Discover the running server's descriptions for exact
+The local MCP server exposes **47 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
 The published OCI manifest is still v0.7.0, so neither it nor a public-image smoke test
 establishes that Spec 011 shipped. PyPI installation is not advertised. Run the branch's

@@ -1,7 +1,7 @@
-"""Loop ownership and no-bootstrap acceptance for the mission viewer lifecycle."""
+"""Loop ownership and no-bootstrap acceptance for the mission relay read lifecycle."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -21,20 +21,20 @@ def _lifespan(server):
 
 
 @pytest.mark.asyncio
-async def test_lifespan_start_and_stop_perform_no_storage_or_listener_work(monkeypatch):
+async def test_lifespan_start_and_stop_perform_no_storage_or_read_work(monkeypatch):
     server = _server()
     calls = []
     def forbidden(*args, **kwargs):
         calls.append(True)
-        raise AssertionError("Viewer startup performed component, storage or listener work")
+        raise AssertionError("Lifespan startup performed component, storage or read work")
     monkeypatch.setattr(server, "get_components", forbidden)
     monkeypatch.setattr(server, "create_repository", forbidden)
     async with _lifespan(server) as state:
         runtime = state["mission_relay"]
         assert runtime.owner_loop is asyncio.get_running_loop()
-        assert runtime.listener is None
+        assert runtime._reads is None and not hasattr(runtime, "listener")
     assert calls == []
-    assert runtime.closed and runtime.listener is None
+    assert runtime.closed and runtime._reads is None
 
 
 @pytest.mark.asyncio
@@ -44,24 +44,24 @@ async def test_missing_storage_refuses_without_component_bootstrap_or_file_creat
     from pydantic import SecretStr
     monkeypatch.setattr(server.settings, "DATABASE_URL", SecretStr(f"sqlite:///{missing}"))
     def forbidden():
-        raise AssertionError("Viewer initialized writable components")
+        raise AssertionError("A snapshot read initialized writable components")
     monkeypatch.setattr(server, "get_components", forbidden)
     monkeypatch.setattr(server, "create_repository", forbidden)
     monkeypatch.setattr(server, "_COMPONENTS", None)
     async with _lifespan(server) as state:
         runtime = state["mission_relay"]
-        failure = await runtime.authorize_view(uuid4(), None)
+        from ignis.application.ports.mission_relay_port import MissionRelayReadRequest
+        failure = await runtime.snapshot(MissionRelayReadRequest(mission_id=uuid4(), run_id=None, page_size=1))
         assert type(failure) is MissionRelayReadFailure
         assert failure.status.value == "UNAVAILABLE"
-        assert runtime.listener is None
     assert not missing.exists()
 
 
 @pytest.mark.asyncio
-async def test_lifespan_cleanup_revokes_listener_before_returning(monkeypatch):
+async def test_lifespan_cleanup_revokes_reads_before_returning(monkeypatch):
     server = _server()
     calls = []
-    class Listener:
+    class Reads:
         def close(self):
             calls.append("revoke")
         async def wait_closed(self, *, timeout):
@@ -69,7 +69,7 @@ async def test_lifespan_cleanup_revokes_listener_before_returning(monkeypatch):
             return True
     async with _lifespan(server) as state:
         runtime = state["mission_relay"]
-        runtime.listener = Listener()
+        runtime._reads = Reads()
     assert runtime.closed and calls == ["revoke", "settle"]
 
 
@@ -77,7 +77,7 @@ async def test_lifespan_cleanup_revokes_listener_before_returning(monkeypatch):
 async def test_unsettled_reads_cannot_be_reported_as_closed(monkeypatch):
     server = _server()
     calls = []
-    class Listener:
+    class Reads:
         def close(self):
             calls.append("revoke")
         async def wait_closed(self, *, timeout):
@@ -85,7 +85,7 @@ async def test_unsettled_reads_cannot_be_reported_as_closed(monkeypatch):
             return False
     with pytest.raises(RuntimeError, match="settle"):
         async with _lifespan(server) as state:
-            state["mission_relay"].listener = Listener()
+            state["mission_relay"]._reads = Reads()
     assert calls == ["revoke", "settle"]
 
 
@@ -125,7 +125,7 @@ async def test_unknown_read_settlement_retains_borrowed_storage_and_still_runs_s
     repository = SqliteTrendRepository(":memory:")
     handler = _Handler()
     logging.getLogger().addHandler(handler.handler)
-    class Listener:
+    class Reads:
         def close(self):
             pass
         async def wait_closed(self, *, timeout):
@@ -134,9 +134,9 @@ async def test_unknown_read_settlement_retains_borrowed_storage_and_still_runs_s
         with pytest.raises(RuntimeError, match="settle"):
             async with _lifespan(server) as state:
                 runtime = state["mission_relay"]
-                runtime.listener = Listener()
+                runtime._reads = Reads()
                 runtime.caller_scopes["caller"] = _caller_scope(repository, handler=handler)
-        assert settled_sources == [None], "Source settlement was skipped after a viewer settlement failure"
+        assert settled_sources == [None], "Source settlement was skipped after a read settlement failure"
         assert handler.closed and handler.handler not in logging.getLogger().handlers
         assert repository._mem_conn is not None, "Borrowed storage was closed under unknown read settlement"
         repository._mem_conn.execute("SELECT 1")
@@ -156,9 +156,9 @@ async def test_failed_caller_runtime_close_is_reported_and_retains_its_storage()
     class FailingCallerRuntime:
         quiescent = asyncio.Event()
         async def close(self):
-            raise RuntimeError("caller viewer reads did not settle")
+            raise RuntimeError("caller reads did not settle")
     try:
-        with pytest.raises(RuntimeError, match="caller viewer reads did not settle"):
+        with pytest.raises(RuntimeError, match="caller reads did not settle"):
             async with _lifespan(server) as state:
                 state["mission_relay"].caller_scopes["caller"] = _caller_scope(
                     repository, runtime=FailingCallerRuntime(), handler=handler)
@@ -246,7 +246,7 @@ async def test_cancelled_caller_runtime_close_still_cleans_siblings_then_propaga
 async def test_repeated_shutdown_cancellation_still_waits_for_actual_cleanup():
     server = _server()
     release, entered = asyncio.Event(), asyncio.Event()
-    class Listener:
+    class Reads:
         def close(self):
             pass
         async def wait_closed(self, *, timeout):
@@ -255,7 +255,7 @@ async def test_repeated_shutdown_cancellation_still_waits_for_actual_cleanup():
             return True
     context = _lifespan(server)
     state = await context.__aenter__()
-    state["mission_relay"].listener = Listener()
+    state["mission_relay"]._reads = Reads()
     closing = asyncio.create_task(context.__aexit__(None, None, None))
     await asyncio.wait_for(entered.wait(), 1)
     for _ in range(3):
@@ -273,7 +273,7 @@ async def test_fastmcp_uses_registered_owner_lifespan():
     server = _server()
     async with server.mcp._lifespan_manager():
         state = server.mcp._lifespan_result
-        assert "mission_relay" in state, "T025 registration RED: FastMCP does not own the viewer"
+        assert "mission_relay" in state, "T025 registration RED: FastMCP does not own the relay runtime"
         runtime = state["mission_relay"]
         assert runtime.owner_loop is asyncio.get_running_loop()
     assert runtime.closed
@@ -281,26 +281,22 @@ async def test_fastmcp_uses_registered_owner_lifespan():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_shutdown", (False, True))
-async def test_actual_listener_shutdown_waits_for_owner_read_cleanup(cancel_shutdown):
-    import http.client
-    from urllib.parse import urlsplit
+async def test_actual_read_shutdown_waits_for_owner_read_cleanup(cancel_shutdown):
+    from ignis.application.ports.mission_relay_port import MissionRelayReadRequest
     from ignis.domain.mission_relay import MissionRelayCursor, MissionRelaySnapshot
     from ignis.domain.research_workspace import ResearchSurface
-    from ignis.infrastructure.mission_relay import MissionRelayHTTP
     server = _server()
     entered, cancelled, cleanup = asyncio.Event(), asyncio.Event(), asyncio.Event()
     class Projection:
-        block = False
         async def execute(self, request):
             assert asyncio.get_running_loop() is owner
-            if self.block:
-                entered.set()
-                try:
-                    await asyncio.Event().wait()
-                except asyncio.CancelledError:
-                    cancelled.set()
-                    await cleanup.wait()
-                    raise
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await cleanup.wait()
+                raise
             return MissionRelaySnapshot(
                 mission_id=request.mission_id, run_id=request.run_id,
                 high_water=MissionRelayCursor(mission_id=request.mission_id, revision=0, ordinal=0),
@@ -311,21 +307,10 @@ async def test_actual_listener_shutdown_waits_for_owner_read_cleanup(cancel_shut
     context = _lifespan(server)
     state = await context.__aenter__()
     runtime = state["mission_relay"]
-    projection = Projection()
-    runtime._projection = projection
-    runtime.listener = MissionRelayHTTP(provider=runtime, owner_loop=owner)
-    cap = await runtime.listener.open_view(mission_id=uuid4(), run_id=None,
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=15))
-    projection.block = True
-    def fetch():
-        destination = urlsplit(cap.url)
-        connection = http.client.HTTPConnection("127.0.0.1", destination.port, timeout=5)
-        try:
-            connection.request("GET", destination.path + "snapshot?page_size=1")
-            return connection.getresponse().status
-        finally:
-            connection.close()
-    pending = asyncio.create_task(asyncio.to_thread(fetch))
+    runtime._projection = Projection()
+    reads = runtime.read_service()
+    pending = asyncio.create_task(reads.read_snapshot(
+        MissionRelayReadRequest(mission_id=uuid4(), run_id=None, page_size=1)))
     closing = None
     try:
         await asyncio.wait_for(entered.wait(), 1)
@@ -347,5 +332,5 @@ async def test_actual_listener_shutdown_waits_for_owner_read_cleanup(cancel_shut
                 await asyncio.wait_for(closing, 2)
         else:
             await asyncio.wait_for(closing, 2)
-        assert await pending != 200
-    assert await runtime.listener.wait_closed(timeout=1)
+        assert type(await pending) is MissionRelayReadFailure, "A read cut short by shutdown must not look successful"
+    assert await reads.wait_closed(timeout=1)

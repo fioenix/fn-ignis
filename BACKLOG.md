@@ -26,10 +26,11 @@ hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đ�
 kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
 các cổng pilot và release vẫn giữ nguyên.
 
-Nhánh hiện tại `codex/ignis-relay-checkout` có **48 tools** (09/10/2026), gồm các tool Relay và
-`execute_mission_follow_up`, và migration tới `sql/030_mission_follow_up_admission.sql`; các con số 47 tools,
-worker, quota scheduled và migration `024` trong phần lịch sử dưới đây mô tả v0.7.0 đã
-phát hành. Tại mốc Spec 011 ngày 02/10/2026, nhánh `codex/evidence-grounded-product-reset`
+Nhánh hiện tại `codex/ignis-relay-checkout` có **47 tools** (20/10/2026): Spec 014 R2 đã bỏ
+`open_mission_relay` nhưng vẫn giữ `get_mission_relay_snapshot` và `execute_mission_follow_up`;
+migration mới nhất là `sql/030_mission_follow_up_admission.sql`; các con số 47 tools, worker, quota
+scheduled và migration `024` trong phần lịch sử dưới đây là của bản v0.7.0 đã phát hành, khác bộ tool
+hiện tại. Tại mốc Spec 011 ngày 02/10/2026, nhánh `codex/evidence-grounded-product-reset`
 có 44 tool theo nhiệm vụ và migration mới nhất là `sql/025_evidence_grounded_claim_ledger.sql`.
 Ngày 02/10/2026, chủ sở hữu xác nhận Supabase
 là môi trường dev và cho phép thao tác trong phạm vi triển khai. Migration 023–025 đã áp dụng;

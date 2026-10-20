@@ -51,12 +51,7 @@ async def main():
             entry = {'status': mission.status, 'mission_id': str(journal.mission_id),
                      'run_id': str(journal.run_id), 'journal_status': journal.status}
             started.append(entry)
-            dashboard = await scope.runtime.started_dashboard(mission, journal)
-            from urllib.parse import urlsplit
-            url = (dashboard or {}).get('url') or ''
-            # Record only the dashboard status and loopback host, never the bearer URL itself.
-            entry.update(dashboard_status=(dashboard or {}).get('status'), dashboard_host=urlsplit(url).hostname)
-            return dashboard
+            return None
         base._run_started = run_started
         owned['scope'] = scope
         return components
@@ -194,7 +189,6 @@ async def test_middleware_parent_and_genuine_gap_child_share_original_budget(tmp
         first = state['started'][0]
         assert first['status'] == 'RUNNING' and first['mission_id'] == mission_id
         assert first['journal_status'] == 'STARTED' and first['run_id']
-        assert first['dashboard_status'] == 'AVAILABLE' and first['dashboard_host'] in ('127.0.0.1', 'localhost')
         assert len(state['started']) == 2 and state['started'][1]['run_id'] != first['run_id']
     final = json.loads((tmp_path / 'state.json').read_text())
     assert final['after_lifespan'] and final['revoked'] and final['row'] == [2, 2, 1, 0]

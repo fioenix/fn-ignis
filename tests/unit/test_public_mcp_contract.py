@@ -30,7 +30,6 @@ EXPECTED_TOOLS = {
     "get_instagram_auth_status",
     "get_mission_analysis",
     "get_mission_relay_snapshot",
-    "open_mission_relay",
     "record_mission_research_work",
     "get_mission_claims",
     "get_mission_evidence_qualification_batch",
@@ -66,6 +65,8 @@ REMOVED_TOOLS = {
     "trigger_ingress_refresh",
     "trigger_autonomous_discovery",
     "get_latest_daily_discovery",
+    # R2 retires the built-in viewer; agents build tracking artifacts with ignis-track instead.
+    "open_mission_relay",
 }
 
 

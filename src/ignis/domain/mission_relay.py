@@ -698,25 +698,3 @@ class MissionRelayReadFailure:
 
     def to_payload(self) -> dict[str, object]:
         return {"schema_version": 1, "status": self.status.value, "reason_code": self.reason_code.value}
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class MissionRelayOpenResult:
-    """Allowlisted finite viewing receipt; the URL carries selected read authority."""
-
-    mission_id: UUID
-    run_id: UUID | None
-    url: str
-    expires_at: datetime
-
-    def __post_init__(self) -> None:
-        _require_type(self.mission_id, UUID, "mission_id")
-        _optional_uuid(self.run_id, "run_id")
-        _text(self.url, "url")
-        _time(self.expires_at, "expires_at")
-
-    def to_payload(self) -> dict[str, object]:
-        return {"schema_version": 1, "status": "OK", "mission_id": str(self.mission_id),
-                "run_id": str(self.run_id) if self.run_id is not None else None,
-                "url": self.url, "expires_at": self.expires_at.isoformat(),
-                "read_only": True, "inspection_supported": True}

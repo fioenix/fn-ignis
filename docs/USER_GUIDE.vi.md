@@ -22,7 +22,7 @@ Migration 028 (`sql/028_research_work.sql`) bổ sung các bảng lưu hoạt đ
 của host trong phạm vi được duyệt và các loại sự kiện tiến độ, không chuyển đổi dữ liệu bằng chứng đã lưu.
 Migration 027 chỉ bổ sung các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
 chuẩn được giữ nguyên. SQLite và PostgreSQL hiện ghi dữ kiện thu thập, qualification và claim cùng sự kiện tiến độ
-tương ứng trong một giao dịch. Relay cung cấp giao diện chỉ đọc cục bộ có thời hạn và snapshot giới hạn từ dữ liệu nhiệm vụ đã khởi tạo.
+tương ứng trong một giao dịch. Relay cung cấp snapshot giới hạn từ dữ liệu nhiệm vụ đã khởi tạo; Ignis không tự dựng trang theo dõi.
 Migration 026 chỉ sửa constraint số quan sát, giữ kết quả thu thập một phần ở trạng thái
 DEGRADED; không coi đó là phép đo hoàn chỉnh hay bằng chứng về sự vắng mặt.
 Khởi tạo SQLite mới đã được kiểm tra tại máy; rehearsal PostgreSQL tạm không xác minh database
@@ -118,16 +118,24 @@ nếu cần. Lệnh gọi MCP đã được chấp nhận không dùng phương 
 
 ### Mission Relay trên nhánh phát triển
 
-Dùng `get_mission_relay_snapshot` để đọc snapshot giới hạn của nhiệm vụ và run được chọn.
-Dùng `open_mission_relay` với thời hạn UTC được chỉ định để mở giao diện chỉ đọc trên localhost.
-Các thao tác đọc kiểm tra storage đã khởi tạo, không khởi tạo database hay chạy collector.
-Giống mọi tool của nhiệm vụ, hai thao tác này chỉ được chấp nhận qua đúng một caller root hợp lệ.
-Nếu capability MCP của client khai báo có hỗ trợ roots, client phải trả về đúng một thư mục `file://`
-tuyệt đối đang tồn tại; danh sách root rỗng, có nhiều root, không hợp lệ hoặc không đọc được đều bị
-từ chối. Khi server cũng được cấu hình `IGNIS_CALLER_ROOT`, root do client trả về phải trùng khớp
-với giá trị này. Server chỉ dùng `IGNIS_CALLER_ROOT` (thư mục tuyệt đối đặt lúc khởi động và không
-thay đổi sau đó) khi capability của client khai báo rõ là không hỗ trợ roots. Capability không xác
-định cũng bị từ chối. Mọi trường hợp bị từ chối đều trả về `ROOT_REQUIRED`. Khi lệnh gọi được chấp
+Ignis không tự dựng trang theo dõi. Muốn theo dõi một nhiệm vụ, hãy yêu cầu agent đọc
+`get_mission_relay_snapshot` rồi dựng artifact theo dõi theo hướng dẫn `ignis-track`: prompt MCP
+`ignis_track`, resource `fn-ignis://guide/ignis-track` hoặc skill
+[`ignis-track`](../.agents/skills/ignis-track/SKILL.md) trong repo. Agent chỉ dựng lại artifact khi
+bạn yêu cầu hoặc tại một mốc trong chính lượt làm việc của nó, chứ không đọc lặp theo chu kỳ. Mỗi
+artifact là ảnh chụp tại một thời điểm, luôn hiển thị rõ những gì bị giữ lại, đã cũ hoặc chưa có
+dữ liệu. Artifact được lưu thành file cục bộ; muốn công bố ở nơi khác, agent phải xin phép bạn
+trước mỗi lần. Đọc snapshot không làm khởi động, tạm dừng hay huỷ việc thu thập.
+
+Dùng `get_mission_relay_snapshot` để đọc snapshot giới hạn của nhiệm vụ và run được chọn. Thao tác
+đọc kiểm tra storage đã khởi tạo, không khởi tạo database hay chạy collector. Giống mọi tool của
+nhiệm vụ, thao tác này chỉ được chấp nhận qua đúng một caller root: thư mục bạn mở agent, cũng là
+thư mục làm việc của MCP server lúc khởi động. Chỉ đặt `IGNIS_CALLER_ROOT` (thư mục tuyệt đối,
+không đổi kể từ lúc khởi động) khi host khởi động server ở nơi khác. Ignis không dùng danh sách
+root do client gửi. Ignis từ chối thư mục khởi động không thể là thư mục của một dự án, gồm: thư
+mục gốc của hệ thống; thư mục home hoặc thư mục cha của nó; thư mục ai cũng ghi được hoặc có sticky
+bit; thư mục thuộc người dùng khác. Thư mục bị thay thế sau khi khởi động cũng bị từ chối. Mọi trường hợp bị từ
+chối đều trả về `ROOT_REQUIRED`. Khi lệnh gọi được chấp
 nhận, dữ liệu chuẩn của nhiệm vụ mặc định nằm trong SQLite cục bộ của caller tại
 `<root>/.fnignis/canonical.sqlite3`. Có thể khai báo `DATABASE_URL` trong `<root>/.fnignis/.env` để dùng
 một file SQLite khác nằm trong root hoặc một database PostgreSQL. Cấu hình, log, báo cáo và file nghiên
@@ -150,12 +158,12 @@ bị từ chối trước khi khởi tạo xác thực hoặc thu thập.
 Kết quả đã được tiếp nhận nêu đúng nhiệm vụ cha, công việc, khoảng trống, phân công, nhiệm vụ con,
 phần ngân sách giữ chỗ, lượt chạy và kết quả từng kênh. Yêu cầu lặp đọc lại cùng nhiệm vụ con;
 kết quả chưa rõ vẫn giữ chỗ ngân sách và không mở lượt thu thập mới. Khi người gọi hủy yêu cầu,
-Ignis dừng tác vụ đang sở hữu và chờ dọn dẹp. Vòng đời nhiệm vụ cha giữ nguyên; quyền xem không
+Ignis dừng tác vụ đang sở hữu và chờ dọn dẹp. Vòng đời nhiệm vụ cha giữ nguyên; đọc snapshot không
 cấp quyền thực hiện.
 
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **48 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **47 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
 manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu
