@@ -48,6 +48,22 @@ production data:
 The local caller database inspected held five observations and none carried a username. The dev
 PostgreSQL corpus was not inspected because no connection was available in that session.
 
+## Clarifications
+
+### Session 2026-10-20
+
+- Q: When the author is a business account (a brand's official channel, a marketplace shop or a
+  fanpage), may Ignis keep that account's identity? → A: Only for brand or competitor accounts the
+  user declares in the mission; every other account, including ones a platform marks as a
+  business, keeps no identity.
+- Q: What does Ignis do with an observation that has neither a content identifier nor an
+  identity-free link? → A: Keep it as context labelled "source not verifiable"; it is counted and
+  shown but cannot support a permitted claim.
+- Q: When comment or review text @mentions an account the user declared, is the mention kept?
+  → A: Yes; mentions of declared accounts are kept, every other mention is replaced.
+- Q: Must this spec remove personal names written in free text? → A: No; document the limitation
+  and defer name removal to a later spec with its own Vietnamese evaluation set.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Research without keeping who said it (Priority: P1)
@@ -73,7 +89,8 @@ and the mission still produces its observations and claims.
    opens the evidence from a report or tracking artifact, **Then** the link they receive contains no
    handle and still opens the original content where the platform supports that.
 3. **Given** a research report or Gap Report is generated, **When** the user reads a citation,
-   **Then** it shows platform, content reference, time and metrics, and no author or channel.
+   **Then** it shows platform, content reference, time and metrics, and no author or channel
+   unless the author is an account the user declared in that mission.
 4. **Given** the operator configured their own accounts for self-content exclusion, **When** their
    own content appears in collection, **Then** it is still excluded and no author identity is kept.
 5. **Given** an agent submits host browser results that include author fields, **When** Ignis
@@ -124,7 +141,10 @@ wording is unchanged.
 
 1. **Given** a comment "@linh.nguyen mua ở đâu vậy", **When** it is kept, **Then** the stored text
    reads "@[user] mua ở đâu vậy".
-2. **Given** a review containing an email address or phone number, **When** it is kept, **Then**
+2. **Given** the user declared the account `brandx` in the mission, **When** the comment
+   "@brandx hàng lỗi rồi @linh.nguyen" is kept, **Then** the stored text reads
+   "@brandx hàng lỗi rồi @[user]".
+3. **Given** a review containing an email address or phone number, **When** it is kept, **Then**
    the existing redaction still applies.
 
 ---
@@ -153,13 +173,21 @@ fields; it reports counts per store and field, displays no identity value and wr
 
 ### Edge Cases
 
-- A source offers neither a content identifier nor a link free of identity: the observation is
-  refused with a visible reason and counted as a collection limitation, never kept with identity.
+- A source offers neither a content identifier nor a link free of identity: the observation is kept
+  without identity as context labelled "source not verifiable". It is counted and shown, but it
+  cannot support a permitted claim; a claim resting only on such observations is withheld.
 - A platform cannot open content from an identity-free link: the evidence shows platform and
   content identifier with an explicit "link unavailable" label.
-- The account behind a post is a brand or a shop, not a person: it is treated like any other
-  author. Brand presence is derived from the content and from the market lexicons, not from the
-  posting account.
+- The account behind a post is a brand or a shop the user did not declare: it is treated like any
+  other author, even when the platform marks it as a business, because many Vietnamese shops are
+  household businesses run from personal accounts. Brand presence is derived from the content and
+  from the market lexicons.
+- A declared account is never seen during collection: nothing is kept for it and the mission shows
+  it as not observed.
+- A declared account turns out to be a person rather than a business: the user can remove it from
+  the declaration, and its kept identity is removed from that mission.
+- An account is declared after collection has started: the declaration applies only to content
+  collected afterwards, because earlier observations no longer hold the identity needed to match.
 - An error or log line echoes a raw platform payload: author fields are removed before it is
   written.
 - A follow-up run or a later run of the same mission adds observations: markers stay consistent
@@ -174,7 +202,9 @@ fields; it reports counts per store and field, displays no identity value and wr
 - **FR-001**: Ignis MUST NOT keep the identity of a content author (handle, display name, platform
   account identifier, profile link or avatar) in any durable store it writes: canonical database,
   caller storage files, run journals, follow-up storage, generated reports and artifacts, and logs.
-- **FR-002**: Ignis MUST NOT return author identity in any tool response, prompt or resource.
+  The only exception is a declared account under FR-018.
+- **FR-002**: Ignis MUST NOT return author identity in any tool response, prompt or resource,
+  except a declared account under FR-018.
 - **FR-003**: Author identity MUST be removed where collected data enters Ignis, before its first
   durable write, for every connector and for agent-submitted host browser results.
 - **FR-004**: Self-content exclusion of the operator's own accounts MUST keep working, decided
@@ -183,7 +213,8 @@ fields; it reports counts per store and field, displays no identity value and wr
   platform's content identifier. Any link shown to the user MUST be produced from that reference
   and MUST NOT contain author identity.
 - **FR-006**: When neither a content identifier nor an identity-free link can be obtained, Ignis
-  MUST refuse the observation with a visible, countable reason.
+  MUST keep the observation without identity, labelled "source not verifiable", count it
+  separately, and MUST NOT let it support a permitted claim.
 - **FR-007**: Within one mission, Ignis MUST give each observation an author marker that is the same
   for the same author across every run and follow-up of that mission, and different across
   missions.
@@ -195,21 +226,30 @@ fields; it reports counts per store and field, displays no identity value and wr
 - **FR-010**: An observation with no reported author MUST carry an explicit unknown marker that is
   never counted as the same author as another observation.
 - **FR-011**: Kept content text MUST have platform handles and @mentions replaced by a neutral
-  placeholder; existing redaction of email addresses, phone numbers and secrets MUST continue.
-- **FR-012**: User documentation MUST state that personal names written in free text are not
-  guaranteed to be removed, and MUST state what is removed.
+  placeholder, except mentions of an account declared in that mission, which are kept; existing
+  redaction of email addresses, phone numbers and secrets MUST continue.
+- **FR-012**: This feature MUST NOT attempt to remove personal names written in free text. User
+  documentation MUST state that such names are not removed and MUST state what is removed.
 - **FR-013**: An automated conformance check MUST fail when any connector, ingress path, report,
   response or log produced from a fixture carrying author identity in every known author field
-  contains any of those values. Every connector, including future ones, MUST pass it.
+  contains any of those values, other than declared accounts. Every connector, including future
+  ones, MUST pass it.
 - **FR-014**: Ignis MUST provide a read-only inventory of author identity already held in caller
   storage and in a configured PostgreSQL database, reporting counts per store and field without
   displaying values.
 - **FR-015**: Existing data MUST NOT be changed without an explicit owner disposition. An approved
   change MUST publish a manifest of its targets before acting and a readback after.
 - **FR-016**: Report and tracking citations MUST show platform, content reference, time and
-  metrics, and MUST NOT show an author or channel.
+  metrics, and MUST NOT show an author or channel other than a declared account under FR-019.
 - **FR-017**: Operator account identities supplied for self-content exclusion MAY remain in runtime
   configuration as the operator's own data, and MUST NOT be copied into observations.
+- **FR-018**: A user MAY declare, per mission, brand or competitor accounts by platform and account.
+  Ignis MUST keep author identity only for observations authored by a declared account in that
+  mission, MUST NOT infer declarations from platform business labels, and MUST NOT carry a
+  declaration into another mission. Removing a declaration MUST remove the kept identity from that
+  mission's observations.
+- **FR-019**: Reports and tracking MUST attribute content to a declared account by its declared
+  name, and MUST be able to compare what declared accounts publish with how the market responds.
 
 ### Key Entities
 
@@ -221,8 +261,10 @@ fields; it reports counts per store and field, displays no identity value and wr
   and reveals nothing else. Known or unknown.
 - **Mission marker secret**: the caller-held secret that makes one mission's markers; lives and
   dies with that mission's evidence.
-- **Refusal reason**: a visible, counted record that a sighting was not kept because no
-  identity-free reference existed.
+- **Unverifiable-source observation**: an observation kept as context without a content
+  reference; counted and shown, never support for a permitted claim.
+- **Declared account**: a brand or competitor account the user names in one mission, by platform
+  and account; the only author whose identity Ignis keeps, and only within that mission.
 - **Legacy identity inventory**: counts of author identity per store and field in existing data,
   without values.
 
@@ -245,16 +287,23 @@ fields; it reports counts per store and field, displays no identity value and wr
   check is not vacuous.
 - **SC-008**: An existing mission fixture produces the same claims, permissions and Gap Report
   outcome before and after the change, apart from removed author fields.
+- **SC-009**: In a fixture mission with two declared accounts and undeclared business-labelled
+  accounts, identity is kept for 100% of observations from the declared accounts and 0% from every
+  other account, and a second mission without declarations keeps none.
+- **SC-010**: In a fixture mission where a claim's only support is unverifiable-source
+  observations, the claim is withheld in 100% of cases and those observations remain counted and
+  visible.
 
 ## Assumptions
 
 - The owner principle of 20/10/2026 governs: Ignis serves aggregate market and taste analysis and
   never needs to know who said something.
-- Brand and shop accounts are treated as authors and are not kept. Analysis of competitor accounts
-  as accounts is out of scope; brand presence comes from content and lexicons. This is the main
-  scope choice to confirm in clarification.
-- Personal names in free text are handled on a best-effort basis and are outside the strict
-  invariant (FR-012).
+- Declared brand or competitor accounts (FR-018) are business identities the user deliberately
+  names for competitor analysis. Ignis does not verify that a declared account is a business; the
+  user is responsible for the declaration and can withdraw it.
+- Personal names in free text are outside this feature and outside the invariant (FR-012).
+  Removing them reliably in Vietnamese needs its own evaluation set, because common names such as
+  Hoa, Lan or Mai are also ordinary words; that work belongs to a later spec.
 - Processing identity in memory during collection is still processing under Law 91/2025/QH15.
   This feature minimises what is kept; it does not by itself establish legal compliance, which
   needs separate legal review.
