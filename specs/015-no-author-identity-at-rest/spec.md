@@ -63,6 +63,9 @@ PostgreSQL corpus was not inspected because no connection was available in that 
   → A: Yes; mentions of declared accounts are kept, every other mention is replaced.
 - Q: Must this spec remove personal names written in free text? → A: No; document the limitation
   and defer name removal to a later spec with its own Vietnamese evaluation set.
+- Q: Which MCP surface carries declared accounts? → A: A new tool, `set_mission_declared_accounts`,
+  replacing the mission's declaration set (owner approved OG-1 on 2026-10-20; one more tool: 47 → 48 once PR #51 merges,
+  44 → 45 on today's `main`).
 
 ## User Scenarios & Testing *(mandatory)*
 

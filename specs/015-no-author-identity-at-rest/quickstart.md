@@ -32,7 +32,6 @@ missions share no marker; a missing encryption key yields `UNAVAILABLE` and a vi
 
 Expected: identity kept only for declared accounts, rendered by declared name; undeclared
 business-labelled accounts keep none; withdrawal removes the name from reports and mentions.
-Blocked until the owner approves the tool surface (contracts/mcp-surface.md).
 
 ## 4. Unverifiable sources (SC-010)
 

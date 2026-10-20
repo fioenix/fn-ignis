@@ -39,7 +39,7 @@ That is negligible next to network collection; no stated target is affected.
 
 **Constraints**:
 - no identity in any durable store, response, report or log;
-- no new MCP tool without owner approval;
+- exactly one new MCP tool, `set_mission_declared_accounts` (OG-1 approved);
 - no change to legacy data without an owner disposition.
 
 **Scale/Scope**:
@@ -69,7 +69,7 @@ Post-design re-check: PASS. The design introduced no further deviation.
 
 | Gate | Decision needed | Blocks |
 |---|---|---|
-| OG-1 | Approve new MCP tool `set_mission_declared_accounts` (47 → 48 tools) per [contracts/mcp-surface.md](contracts/mcp-surface.md), or choose another surface | User Story 1 scenario on declared accounts, FR-018, FR-019, SC-009 |
+| OG-1 | **Approved 2026-10-20 by the owner**: new MCP tool `set_mission_declared_accounts` (one more tool: 47 → 48 after PR #51; 44 on today's `main`) per [contracts/mcp-surface.md](contracts/mcp-surface.md) | User Story 1 scenario on declared accounts, FR-018, FR-019, SC-009 |
 | OG-2 | Merge order: implement after PR #51 (Spec 014) merges, rebased on `main`, so migration `031` follows `030` and Spec 014's snapshot rows fall under FR-002 and FR-016 | Migration numbering and Spec 014 snapshot coverage |
 | OG-3 | Disposition of legacy identity found by the inventory (dev PostgreSQL, caller SQLite) | FR-015 apply step only; the inventory itself is not gated |
 
@@ -114,7 +114,7 @@ src/ignis/
 │   ├── persistence/postgres_repository.py     # guard, key and declaration storage
 │   ├── security/pii_sanitizer.py              # mention tokenisation helper
 │   └── templates/html/mission_report.html
-└── interfaces/mcp/server.py        # response shapes; new tool only after OG-1
+└── interfaces/mcp/server.py        # response shapes; new tool (OG-1 approved)
 
 sql/031_author_identity_at_rest.sql
 scripts/inventory_author_identity.py
