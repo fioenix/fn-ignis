@@ -64,6 +64,13 @@ def test_a_handle_bearing_video_url_is_removed():
     assert "video_url" not in stripped
 
 
+def test_a_handle_bearing_link_inside_a_list_is_removed_and_other_items_kept():
+    link = f"https://www.tiktok.com/share/video/{s.TIKTOK_ITEM_ID}"
+    stripped = strip_author_identity({"related": [s.TIKTOK_HANDLE_URL, link, "áo thun"]})
+
+    assert stripped["related"] == [link, "áo thun"]
+
+
 def test_a_handle_free_video_url_is_kept():
     link = f"https://www.tiktok.com/share/video/{s.TIKTOK_ITEM_ID}"
     stripped = strip_author_identity({"item_id": s.TIKTOK_ITEM_ID, "video_url": link})

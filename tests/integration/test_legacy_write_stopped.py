@@ -155,7 +155,7 @@ async def test_the_return_value_is_still_the_observations_recorded(repository_ca
                 300.0,
                 hour=3,
                 platform=PlatformType.THREADS,
-                source_url="https://www.threads.net/@a/post/P1",
+                source_url="https://www.threads.com/t/P1",
                 metadata={"post_id": "P1"},
             ),
         ]
@@ -171,9 +171,13 @@ async def test_the_return_value_is_still_the_observations_recorded(repository_ca
 
 
 async def test_a_sighting_that_identifies_nothing_is_still_refused_quietly(repository_case):
-    """Unchanged by this commit, asserted here because the legacy INSERT used to accept it."""
+    """Asserted here because the legacy INSERT used to accept it.
+
+    Since Spec 015 a sighting with text but no reference is kept as unverifiable content, so
+    "identifies nothing" now means no reference and no text either.
+    """
     written = await repository_case.repository.save_signals(
-        [_sighting(100.0, source_url=None, metadata={})]
+        [_sighting(100.0, source_url=None, metadata={}, raw_title="  ")]
     )
 
     assert written == 0

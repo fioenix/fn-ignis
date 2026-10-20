@@ -55,6 +55,11 @@ from ignis.application.ports.research_workspace_port import (
     MissionWriterClaim,
     RunJournal,
 )
+from ignis.infrastructure.persistence.author_identity_guard import (
+    author_evidence_values,
+    refuse_author_identity,
+    refuse_identity_bearing_key,
+)
 from ignis.infrastructure.persistence.identifiers import (
     ambiguous_platform_message as _ambiguous_platform_message,
     log_level as _log_level,
@@ -2341,6 +2346,9 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 recorded = self._record_observations(cur, signals)
                 conn.commit()
                 return recorded
+            except BaseException:
+                conn.rollback()
+                raise
             finally:
                 if self._mem_conn is None:
                     conn.close()
@@ -2809,15 +2817,23 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
         the two backends speak different SQL. What is shared is the part that must never diverge:
         both resolve identity through ignis.domain.source_identity.
         """
+        refuse_author_identity(signals)
         written = 0
         for signal in signals:
             platform = (
                 signal.platform.value if hasattr(signal.platform, "value") else str(signal.platform)
             )
-            identity = resolve_source_identity(platform, signal.source_url, signal.metadata)
+            identity = resolve_source_identity(
+                platform,
+                signal.source_url,
+                signal.metadata,
+                content_text=signal.raw_title,
+                published_at=signal.published_at,
+            )
             if identity is None:
                 logger.warning("Signal has no resolvable external identity, skipped: %s", platform)
                 continue
+            refuse_identity_bearing_key(identity)
 
             identity = self._reconcile_through_aliases(cur, platform, signal, identity)
 
@@ -2868,14 +2884,16 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
 
             if signal.mission_id:
                 cur.execute(
-                    "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at)"
-                    " VALUES (?, ?, ?, ?)"
+                    "INSERT INTO mission_evidence (id, mission_id, observation_id, recorded_at,"
+                    " author_state, author_marker, declared_account_id)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?)"
                     " ON CONFLICT (mission_id, observation_id) DO NOTHING;",
                     (
                         str(uuid4()),
                         str(signal.mission_id),
                         observation_id,
                         datetime.now(timezone.utc).isoformat(),
+                        *author_evidence_values(signal),
                     ),
                 )
         return written

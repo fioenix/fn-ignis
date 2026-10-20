@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from uuid import UUID, uuid4
 
+from ignis.domain.author_identity import AuthorAssignment
 from ignis.domain.value_objects import PlatformType, GeoCode, MomentumCategory
 
 
@@ -54,6 +55,10 @@ class TrendSignal:
     # this week" is not "what was posted this week", and holding both in one column made a
     # 30-day window mean video publish dates for YouTube and scrape dates for Threads.
     published_at: Optional[datetime] = None
+    # What the mission pass learned about the author before it stripped the identity (Spec 015).
+    # Not a column of the observation: it is written per mission onto mission_evidence, because
+    # one observation can serve several missions and a marker must never link them.
+    author_assignment: Optional[AuthorAssignment] = field(default=None, compare=False, repr=False)
 
 
 @dataclass

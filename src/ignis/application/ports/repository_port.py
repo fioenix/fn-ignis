@@ -144,6 +144,14 @@ class ITrendRepository(ABC):
         """
         pass
 
+    async def get_or_create_mission_author_key(self, mission_id: UUID) -> Optional[bytes]:
+        """The mission's key for author markers, created on first use (Spec 015).
+
+        None means markers cannot be computed -- no persistent encryption key, or a store that
+        keeps no keys -- and every undeclared known author is then recorded as UNAVAILABLE.
+        """
+        return None
+
     @abstractmethod
     async def log_event(
         self,

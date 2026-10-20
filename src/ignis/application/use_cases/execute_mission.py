@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, cast
 from uuid import UUID
 
+from ignis.application.author_policy import apply_author_policy
 from ignis.application.cancellation import await_settled
 from ignis.application.ports.clustering_port import IClusteringEngine
 from ignis.application.ports.mission_relay_port import ICollectionRelayWriter
@@ -580,6 +581,18 @@ class ExecuteMissionUseCase:
             ],
         )
 
+    async def _apply_author_policy(self, mission_id, signals: List[TrendSignal]) -> None:
+        """Keep no author identity, only what this mission may know about the author (Spec 015).
+
+        Runs before clustering, which names clusters from what the signals carry, and before
+        any write. Each author is classified first, because the marker needs the identity; the
+        identity is then removed, and a link that names an account is replaced by an
+        identity-free link or dropped. The repositories refuse anything this step missed.
+        """
+        if not signals:
+            return
+        apply_author_policy(signals, await self._repo.get_or_create_mission_author_key(mission_id))
+
     async def _execute_pass(
         self, mission, journal=None, manifest=None, execution_requirements=None, search_provider=None, expiry_guard=None
     ) -> Dict[str, Any]:
@@ -644,9 +657,10 @@ class ExecuteMissionUseCase:
                     logger.warning(f"Preserving {len(kept)} signals for platform {missing_plat} due to ingress quota fallback.")
                     preserved.extend(kept)
 
-            # 2. Tag signals with mission_id
+            # 2. Tag signals with mission_id, then remove who said what before anything sees it
             for s in signals:
                 s.mission_id = mission.id
+            await self._apply_author_policy(mission.id, signals)
 
             # 3. Semantic clustering, over what the mission will hold in total
             clusters = (

@@ -31,7 +31,7 @@ async def test_polling_one_source_twice_keeps_one_source_and_both_metrics(tmp_pa
     that the earlier metric is a row of its own rather than a value overwritten in place.
     """
     repo = SqliteTrendRepository(db_path=str(tmp_path / "test_dedup.db"))
-    url = "https://www.tiktok.com/@creator/video/123456789"
+    url = "https://www.tiktok.com/share/video/123456789"
 
     for metric, velocity, hour in ((1000.0, 10.0, 10), (2500.0, 25.0, 11)):
         await repo.save_signals(

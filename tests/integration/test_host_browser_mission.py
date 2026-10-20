@@ -333,10 +333,12 @@ async def test_host_excerpt_is_masked_in_persisted_evidence_and_analysis(reposit
         held = await repository_case.repository.get_mission_signals(mission.id)
         assert held[0].raw_title == "Túi đi làm: [REDACTED_EMAIL]; [REDACTED_PHONE]"
         assert held[0].metadata["excerpt"] == "Túi đi làm: [REDACTED_EMAIL]; [REDACTED_PHONE]"
-        assert held[0].source_url == "https://www.tiktok.com/@fixture/video/7492034084227599623"
+        # The handle is the poster's; the stored link is rebuilt from the content id (Spec 015).
+        assert held[0].source_url == "https://www.tiktok.com/share/video/7492034084227599623"
         from ignis.application.use_cases.get_mission_analysis import GetMissionAnalysisUseCase
         analysis = await GetMissionAnalysisUseCase(repository_case.repository, store).execute(mission.id)
-        assert analysis["top_signals"][0]["url"] == "https://www.tiktok.com/@fixture/video/7492034084227599623"
+        assert analysis["top_signals"][0]["url"] == "https://www.tiktok.com/share/video/7492034084227599623"
+        assert "@fixture" not in str(analysis)
         assert "seller@example.test" not in str(analysis)
         assert "0931.405.002" not in str(analysis)
     finally:
@@ -555,7 +557,7 @@ async def test_persisted_scope_changes_reject_host_answer_before_ingress(reposit
         else:
             await repo.save_signals([TrendSignal(
                 platform=PlatformType.TIKTOK, raw_title="Existing independently collected evidence",
-                metric_value=0.0, source_url="https://www.tiktok.com/@fixture/video/123",
+                metric_value=0.0, source_url="https://www.tiktok.com/share/video/123",
                 mission_id=mission.id,
             )])
         counts_before_submit = repository_case.counts()

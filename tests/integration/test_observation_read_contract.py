@@ -198,7 +198,7 @@ async def test_save_signals_counts_the_observations_it_wrote(repository_case):
     # A signal identifying nothing is skipped, so it is not counted as written either.
     unidentifiable = TrendSignal(
         platform=PlatformType.YOUTUBE,
-        raw_title="Nothing identifies this",
+        raw_title="",  # Text alone is unverifiable content since Spec 015.
         metric_value=1.0,
         source_url=None,
         geo_code=GeoCode.VN,

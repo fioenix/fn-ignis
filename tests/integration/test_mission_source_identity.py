@@ -221,7 +221,7 @@ async def test_a_signal_identifying_nothing_is_skipped_not_given_a_key(repositor
         [
             TrendSignal(
                 platform=PlatformType.YOUTUBE,
-                raw_title="Nothing identifies this",
+                raw_title="",  # Text alone is unverifiable content since Spec 015.
                 metric_value=100.0,
                 source_url=None,
                 geo_code=GeoCode.VN,

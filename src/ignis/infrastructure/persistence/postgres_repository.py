@@ -64,6 +64,11 @@ from ignis.application.ports.research_workspace_port import (
     MissionWriterClaim,
     RunJournal,
 )
+from ignis.infrastructure.persistence.author_identity_guard import (
+    author_evidence_values,
+    refuse_author_identity,
+    refuse_identity_bearing_key,
+)
 from ignis.infrastructure.persistence.identifiers import (
     ambiguous_platform_message as _ambiguous_platform_message,
     log_level as _log_level,
@@ -581,6 +586,8 @@ class PostgresTimescaleRepository(ITrendRepository):
                     recorded = await self._record_observations(cur, signals)
             logger.info(f"Recorded {recorded} observations from {len(signals)} signals.")
             return recorded
+        except RepositoryException:
+            raise
         except Exception as e:
             logger.error(f"Error saving signals to database: {e}", exc_info=True)
             raise RepositoryException(f"Failed to record observations: {e}") from e
@@ -602,17 +609,25 @@ class PostgresTimescaleRepository(ITrendRepository):
           One source is observed by many missions, and the legacy mission_id column could only
           record the last one, which is why the second mission lost its evidence.
         """
+        refuse_author_identity(signals)
         written = 0
         for signal in signals:
             platform = (
                 signal.platform.value if hasattr(signal.platform, "value") else str(signal.platform)
             )
-            identity = resolve_source_identity(platform, signal.source_url, signal.metadata)
+            identity = resolve_source_identity(
+                platform,
+                signal.source_url,
+                signal.metadata,
+                content_text=signal.raw_title,
+                published_at=signal.published_at,
+            )
             if identity is None:
                 # Nothing identifies this sighting. Counted by the audit rather than given an
                 # invented key, and skipped here for the same reason.
                 logger.warning("Signal has no resolvable external identity, skipped: %s", platform)
                 continue
+            refuse_identity_bearing_key(identity)
 
             identity = await self._reconcile_through_aliases(cur, platform, signal, identity)
 
@@ -659,9 +674,10 @@ class PostgresTimescaleRepository(ITrendRepository):
 
             if signal.mission_id:
                 await cur.execute(
-                    "INSERT INTO mission_evidence (mission_id, observation_id) VALUES (%s, %s)"
+                    "INSERT INTO mission_evidence (mission_id, observation_id, author_state,"
+                    " author_marker, declared_account_id) VALUES (%s, %s, %s, %s, %s)"
                     " ON CONFLICT (mission_id, observation_id) DO NOTHING;",
-                    (str(signal.mission_id), str(observation_id)),
+                    (str(signal.mission_id), str(observation_id), *author_evidence_values(signal)),
                 )
         return written
 

@@ -569,7 +569,7 @@ async def test_query_overlap_survives_storage_and_qualification_batch(research):
     signal = TrendSignal(
         platform=PlatformType.THREADS,
         raw_title="Public fixture post",
-        source_url="https://www.threads.net/@fixture/post/overlap",
+        source_url="https://www.threads.com/t/overlap",
         captured_at=NOW,
         mission_id=mission.id,
         metadata={"post_id": "overlap", "matched_keyword": queries[0], "matched_keywords": queries},

@@ -110,7 +110,7 @@ def _strip(value: Any) -> Any:
             if key not in AUTHOR_FIELD_KEYS and not (isinstance(item, str) and has_handle_segment(item))
         }
     if isinstance(value, list):
-        return [_strip(item) for item in value]
+        return [_strip(item) for item in value if not (isinstance(item, str) and has_handle_segment(item))]
     return copy.deepcopy(value)
 
 
@@ -123,6 +123,19 @@ def strip_author_identity(metadata: Optional[Mapping[str, Any]]) -> Dict[str, An
     if not isinstance(metadata, Mapping):
         return {}
     return _strip(metadata)
+
+
+def author_identity_violation(metadata: Optional[Mapping[str, Any]], source_url: Optional[str]) -> Optional[str]:
+    """What kind of author identity a sighting still carries, or None when it carries none.
+
+    The answer names the kind only, never the value, so a refusal built from it cannot itself
+    leak the identity it refused to store.
+    """
+    if has_handle_segment(source_url):
+        return "a source_url that names an account"
+    if isinstance(metadata, Mapping) and strip_author_identity(metadata) != dict(metadata):
+        return "metadata holding an author field or a link that names an account"
+    return None
 
 
 def _first_present(metadata: Mapping[str, Any], keys: Iterable[str]) -> Optional[str]:
@@ -242,6 +255,7 @@ __all__: List[str] = [
     "AuthorConcentration",
     "AuthorState",
     "assign_author",
+    "author_identity_violation",
     "author_marker",
     "has_handle_segment",
     "strip_author_identity",
