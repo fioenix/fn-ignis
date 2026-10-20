@@ -28,7 +28,7 @@ test-first: each test task must be observed failing before its implementation ta
 **Purpose**: Settle the base revision and shared fixtures.
 
 - [x] T001 Wait for PR #51 to merge (OG-2 approved 2026-10-20: Spec 015 lands after Spec 014), then rebase `codex/no-author-identity-at-rest` on `main`. Record in `specs/015-no-author-identity-at-rest/plan.md` the base commit, the latest migration (expected `030`) and the tool count (expected 47). If either differs, stop and report before T006. Done 20/10/2026: PR #51 merged as `474916f`; the branch is rebased on it; latest migration `030_mission_follow_up_admission.sql`; 47 tools in `server.py` and README.md.
-- [ ] T002 [P] Create sentinel identity fixtures in `tests/fixtures/author_identity_sentinels.py`. Cover one recognisable value per author field from research R2, per platform. Add handle-bearing URLs for TikTok and Threads, `@mention` text with Vietnamese diacritics, and one operator self-account.
+- [x] T002 [P] Create sentinel identity fixtures in `tests/fixtures/author_identity_sentinels.py`. Cover one recognisable value per author field from research R2, per platform. Add handle-bearing URLs for TikTok and Threads, `@mention` text with Vietnamese diacritics, and one operator self-account. Done 21/10/2026: also covers Reels, Google Trends (publisher only) and the host browser path, plus one declared brand account.
 
 ---
 
@@ -36,13 +36,13 @@ test-first: each test task must be observed failing before its implementation ta
 
 **Purpose**: Domain policy, marker, schema, key storage and the repository guard.
 
-- [ ] T003 [P] Write failing unit tests for field stripping in `tests/unit/test_author_identity_policy.py`. Cover every key in research R2, nested comment authors, `video_url` handles, and confirm that non-author metadata is preserved unchanged.
-- [ ] T004 [P] Write failing unit tests for markers in `tests/unit/test_author_marker.py`:
+- [x] T003 [P] Write failing unit tests for field stripping in `tests/unit/test_author_identity_policy.py`. Cover every key in research R2, nested comment authors, `video_url` handles, and confirm that non-author metadata is preserved unchanged.
+- [x] T004 [P] Write failing unit tests for markers in `tests/unit/test_author_marker.py`:
   - the marker is stable within one mission and differs across missions;
   - ten thousand distinct authors are counted exactly;
   - a missing author gives `UNKNOWN`;
   - a missing encryption key gives `UNAVAILABLE`.
-- [ ] T005 Implement `src/ignis/domain/author_identity.py`. It holds:
+- [x] T005 Implement `src/ignis/domain/author_identity.py`. It holds:
   - the author field list, reusing the key lists in `src/ignis/domain/self_content.py`;
   - `strip_author_identity`;
   - the HMAC-SHA256 marker truncated to 16 hex characters;
@@ -50,6 +50,8 @@ test-first: each test task must be observed failing before its implementation ta
   - `AuthorConcentration`.
 
   T003 and T004 must pass.
+
+  Done 21/10/2026: RED observed as `ModuleNotFoundError` for both test files; then 56 passed. Stripping removes author keys and handle-bearing links at any depth, and keeps comment counts. `assign_author` also returns `DECLARED` for a declared account, tested here. Deviation: `@mention` tokenisation is not in this module yet. It moves to T030, after its failing tests in T029, so that it is written test-first.
 - [ ] T006 Write `sql/031_author_identity_at_rest.sql` per data-model.md. It covers:
   - the tables `mission_author_keys` and `mission_declared_accounts`;
   - the `mission_evidence` columns `author_state`, `author_marker` and `declared_account_id`;
