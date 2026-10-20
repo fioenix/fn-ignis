@@ -6,9 +6,9 @@ restates its schema in _ensure_schema and Postgres reads sql/, which is exactly 
 divergence these tests exist to catch.
 """
 
-import hashlib
 import os
 import sqlite3
+import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -344,89 +344,91 @@ def _apply_postgres_schema(dsn: str) -> None:
             conn.execute((repo_root / "sql" / migration).read_text(encoding="utf-8"))
 
 
-# Template databases built or reused by this test session, dropped when the session ends.
-_SCHEMA_TEMPLATES: dict[str, str] = {}
-# One arbitrary key, so concurrent sessions on one server build a template only once.
-_TEMPLATE_LOCK_KEY = 0x1617_0015
+# The template database each server got in this test session, or None where none could be made
+# and every database applies SCHEMA_MIGRATIONS itself.
+_SCHEMA_TEMPLATES: dict[str, str | None] = {}
+# Every template this session created, usable or not, dropped when the session ends.
+_CREATED_TEMPLATES: set[tuple[str, str]] = set()
 
 
-def _schema_template_name() -> str:
-    """A name bound to the exact SCHEMA_MIGRATIONS bytes, so an edited migration gets a new template."""
-    repo_root = Path(__file__).resolve().parents[2]
-    digest = hashlib.sha256()
-    for migration in SCHEMA_MIGRATIONS:
-        digest.update(migration.encode())
-        digest.update((repo_root / "sql" / migration).read_bytes())
-    return f"ignis_template_{digest.hexdigest()[:16]}"
-
-
-def _close_database_to_connections(conn, database_name: str) -> None:
-    """Refuse new sessions, then end the ones open, so the database can be renamed or copied.
+def _close_database_to_connections(conn, database_name: str, timeout: float = 30.0) -> bool:
+    """Refuse new sessions, end the open ones and wait until they are gone; False if some stay.
 
     TimescaleDB's job scheduler connects to every database that has the extension and allows
-    connections; a copy fails while any session is open on its source.
+    connections, and a copy fails while any session is open on its source. A terminate only
+    sends the signal, so the wait is what makes the database copyable. A role that is not
+    superuser cannot signal a superuser's session -- routine for background workers on a hosted
+    server -- so each terminate is best-effort and the wait decides.
     """
     conn.execute(
         sql.SQL("ALTER DATABASE {} WITH ALLOW_CONNECTIONS false").format(sql.Identifier(database_name))
     )
-    conn.execute(
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
-        " WHERE datname = %s AND pid <> pg_backend_pid()",
-        (database_name,),
+    others = (
+        "SELECT pid FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()"
     )
+    for (pid,) in conn.execute(others, (database_name,)).fetchall():
+        try:
+            conn.execute("SELECT pg_terminate_backend(%s)", (pid,))
+        except psycopg.Error:
+            pass
+    deadline = time.monotonic() + timeout
+    while conn.execute(others, (database_name,)).fetchone():
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.1)
+    return True
 
 
-def _schema_template(admin_dsn: str) -> str:
+def _schema_template(admin_dsn: str) -> str | None:
     """Apply SCHEMA_MIGRATIONS once per server and session; tests copy the result.
 
-    The migrations run in a scratch database that is renamed to the template name only once they
-    all succeeded, so an existing template is always a complete one.
+    None when the template cannot be closed to connections, so callers fall back to migrating
+    each database themselves rather than failing every test on that server.
     """
-    name = _schema_template_name()
-    if _SCHEMA_TEMPLATES.get(admin_dsn) == name:
-        return name
+    if admin_dsn in _SCHEMA_TEMPLATES:
+        return _SCHEMA_TEMPLATES[admin_dsn]
+    # Unique to this session, so another session on the same server never uses or drops it.
+    template = f"ignis_template_{uuid4().hex[:16]}"
     with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        conn.execute("SELECT pg_advisory_lock(%s)", (_TEMPLATE_LOCK_KEY,))
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(template)))
+        _CREATED_TEMPLATES.add((admin_dsn, template))
         try:
-            exists = conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone()
-            if not exists:
-                building = f"{name}_building_{uuid4().hex[:8]}"
-                conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(building)))
-                try:
-                    _apply_postgres_schema(
-                        make_conninfo(**{**conninfo_to_dict(admin_dsn), "dbname": building})
-                    )
-                    _close_database_to_connections(conn, building)
-                    conn.execute(
-                        sql.SQL("ALTER DATABASE {} RENAME TO {}").format(
-                            sql.Identifier(building), sql.Identifier(name)
-                        )
-                    )
-                except BaseException:
-                    _drop_test_database(admin_dsn, building)
-                    raise
-        finally:
-            conn.execute("SELECT pg_advisory_unlock(%s)", (_TEMPLATE_LOCK_KEY,))
-    _SCHEMA_TEMPLATES[admin_dsn] = name
-    return name
+            _apply_postgres_schema(make_conninfo(**{**conninfo_to_dict(admin_dsn), "dbname": template}))
+            usable = _close_database_to_connections(conn, template)
+        except BaseException:
+            _drop_test_database(admin_dsn, template)
+            _CREATED_TEMPLATES.discard((admin_dsn, template))
+            raise
+    # An unusable template holds a session this role cannot end; it is dropped at session end.
+    _SCHEMA_TEMPLATES[admin_dsn] = template if usable else None
+    return _SCHEMA_TEMPLATES[admin_dsn]
 
 
 def _create_schema_database(admin_dsn: str, database_name: str) -> None:
     """A new database holding exactly what _apply_postgres_schema would have built, copied from the template."""
     template = _schema_template(admin_dsn)
     with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        conn.execute(
-            sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
-                sql.Identifier(database_name), sql.Identifier(template)
+        if template is None:
+            conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+        else:
+            conn.execute(
+                sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                    sql.Identifier(database_name), sql.Identifier(template)
+                )
             )
-        )
+    if template is None:
+        _apply_postgres_schema(make_conninfo(**{**conninfo_to_dict(admin_dsn), "dbname": database_name}))
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Leave no template behind on a shared server."""
-    for admin_dsn, name in list(_SCHEMA_TEMPLATES.items()):
-        _drop_test_database(admin_dsn, name)
-        _SCHEMA_TEMPLATES.pop(admin_dsn, None)
+    """Leave no template behind on a shared server, and say so if one could not be dropped."""
+    for admin_dsn, name in sorted(_CREATED_TEMPLATES):
+        try:
+            _drop_test_database(admin_dsn, name)
+        except AssertionError as exc:
+            sys.stderr.write(f"\n{exc}\n")
+    _CREATED_TEMPLATES.clear()
+    _SCHEMA_TEMPLATES.clear()
 
 
 def _drop_test_database(admin_dsn: str, database_name: str, attempts: int = 5) -> None:

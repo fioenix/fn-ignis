@@ -87,8 +87,8 @@ jobs:
 
       # The migration-chain tests (pytest marker `migration_chain`) build the PostgreSQL migration
       # chain themselves and cost about three minutes. A pull request skips them unless it changes
-      # sql/, the integration conftest or one of those tests; pushes to the branches above, release
-      # tags and manual runs always include them. The pull request's HEAD is its merge commit, so a
+      # sql/, the PostgreSQL persistence code, the integration conftest or one of those tests;
+      # pushes to the branches above, release tags and manual runs always include them. The pull request's HEAD is its merge commit, so a
       # two-dot diff against the base tip is exactly what the pull request changes.
       - name: Decide whether this run includes the migration-chain tests
         id: scope
@@ -101,7 +101,7 @@ jobs:
             exit 0
           fi
           git fetch --no-tags --depth=1 origin "$BASE_REF"
-          chain='^(sql/|tests/integration/(conftest|test_postgres_rls_coverage|test_postgres_migration_contract|test_mission_progress_schema|test_research_work_schema)\.py$)'
+          chain='^(sql/|src/ignis/infrastructure/persistence/postgres_|tests/integration/(conftest|test_postgres_rls_coverage|test_postgres_migration_contract|test_mission_progress_schema|test_research_work_schema)\.py$)'
           if git diff --name-only FETCH_HEAD HEAD | grep -qE "$chain"; then
             echo "marker=" >> "$GITHUB_OUTPUT"
           else
