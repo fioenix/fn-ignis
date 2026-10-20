@@ -98,12 +98,36 @@ whereas the association row is per mission by construction.
 |---|---|---|
 | YouTube | `video_id` | `https://www.youtube.com/watch?v=<id>`, already in use |
 | Instagram Reels | `reel_id` / shortcode | `https://www.instagram.com/reel/<code>/`, already in use |
-| TikTok | `item_id` | **Unverified**: a link without `@handle` must be probed live |
-| Threads | `post_id` / code | **Unverified**: a link without `@handle` must be probed live |
+| TikTok | `item_id` | `https://www.tiktok.com/share/video/<item_id>`, verified 20/10/2026 |
+| Threads | shortcode | `https://www.threads.com/t/<shortcode>`, verified 20/10/2026 |
 
-Until a live probe proves a handle-free form, that platform shows its content identifier with the
-label "link unavailable" (SC-004). The probe uses a public page and no signed-in session; this is
-not a real-session use under AGENTS.md Section 8.
+A platform without a verified handle-free form shows its content identifier with the label "link
+unavailable" (SC-004).
+
+**Live probe (T014, 20/10/2026)**: the probe ran in the built-in browser on public pages with no
+signed-in session, so it is not a real-session use under AGENTS.md Section 8. The controls were
+TikTok video `7694797676306615583` from `@tiktok` and Threads posts `DeZtp-TkQHh` and
+`DeZtrvAEfEr` from `@zuck`. The handle-bearing control link opened the video or post in each case.
+
+| Form | Result |
+|---|---|
+| `tiktok.com/video/<id>` | Redirects to `/404`. Fails. |
+| `tiktok.com/@/video/<id>` | Blank page, no video element. Fails. |
+| `tiktok.com/@_/video/<id>` | Blank page, no video element. Fails. |
+| `m.tiktok.com/v/<id>.html` | Fetch failed. Not usable. |
+| `tiktok.com/embed/v2/<id>` | Embed player with the same video. Works, but shows the embed player rather than the page. |
+| `tiktok.com/share/video/<id>` | Redirects to the canonical `@<handle>/video/<id>` and plays the video. **Chosen.** |
+| `threads.com/t/<code>` | Redirects to the canonical `@<handle>/post/<code>`, with the matching post title. **Chosen.** |
+| `threads.net/t/<code>` | Redirects to the same canonical post on `threads.com`. Works. |
+
+Consequences:
+- The platform reveals the author only after the user opens the link; Ignis stores and returns no
+  handle.
+- The redirects are platform behaviour and can change. The conformance suite therefore checks link
+  shape only. A live recheck belongs to release verification, not to unit tests.
+- Threads links need the shortcode, not the numeric media `post_id` that `METADATA_KEYS` resolves
+  today. The shortcode is in the permalink the connector already receives. T013 must keep the
+  shortcode as the content reference, or keep it beside the media id.
 
 **Rationale**: The resolver already prefers content identifiers. Only the URL fallback can put a
 handle into `external_id`.
