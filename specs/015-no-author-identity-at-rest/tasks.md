@@ -27,7 +27,7 @@ test-first: each test task must be observed failing before its implementation ta
 
 **Purpose**: Settle the base revision and shared fixtures.
 
-- [ ] T001 OWNER GATE OG-2: confirm the merge order in plan.md. After PR #51 merges, rebase `codex/no-author-identity-at-rest` on `main`. Record in `specs/015-no-author-identity-at-rest/plan.md` the base commit, the latest migration (expected `030`) and the tool count (expected 47). If the owner chooses to land before PR #51, record `026` and 44 instead and renumber the migration in T006.
+- [ ] T001 Wait for PR #51 to merge (OG-2 approved 2026-10-20: Spec 015 lands after Spec 014), then rebase `codex/no-author-identity-at-rest` on `main`. Record in `specs/015-no-author-identity-at-rest/plan.md` the base commit, the latest migration (expected `030`) and the tool count (expected 47). If either differs, stop and report before T006.
 - [ ] T002 [P] Create sentinel identity fixtures in `tests/fixtures/author_identity_sentinels.py`. Cover one recognisable value per author field from research R2, per platform. Add handle-bearing URLs for TikTok and Threads, `@mention` text with Vietnamese diacritics, and one operator self-account.
 
 ---

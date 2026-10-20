@@ -66,6 +66,8 @@ PostgreSQL corpus was not inspected because no connection was available in that 
 - Q: Which MCP surface carries declared accounts? → A: A new tool, `set_mission_declared_accounts`,
   replacing the mission's declaration set (owner approved OG-1 on 2026-10-20; one more tool: 47 → 48 once PR #51 merges,
   44 → 45 on today's `main`).
+- Q: Does this feature land before or after Spec 014 (PR #51)? → A: After; implementation starts once
+  PR #51 merges, rebased on `main`, with migration `031` (owner approved OG-2 on 2026-10-20).
 
 ## User Scenarios & Testing *(mandatory)*
 

@@ -70,7 +70,7 @@ Post-design re-check: PASS. The design introduced no further deviation.
 | Gate | Decision needed | Blocks |
 |---|---|---|
 | OG-1 | **Approved 2026-10-20 by the owner**: new MCP tool `set_mission_declared_accounts` (one more tool: 47 → 48 after PR #51; 44 on today's `main`) per [contracts/mcp-surface.md](contracts/mcp-surface.md) | User Story 1 scenario on declared accounts, FR-018, FR-019, SC-009 |
-| OG-2 | Merge order: implement after PR #51 (Spec 014) merges, rebased on `main`, so migration `031` follows `030` and Spec 014's snapshot rows fall under FR-002 and FR-016 | Migration numbering and Spec 014 snapshot coverage |
+| OG-2 | **Approved 2026-10-20 by the owner**. Merge order: implement after PR #51 (Spec 014) merges, rebased on `main`, so migration `031` follows `030` and Spec 014's snapshot rows fall under FR-002 and FR-016 | Migration numbering and Spec 014 snapshot coverage |
 | OG-3 | Disposition of legacy identity found by the inventory (dev PostgreSQL, caller SQLite) | FR-015 apply step only; the inventory itself is not gated |
 
 ## Project Structure
