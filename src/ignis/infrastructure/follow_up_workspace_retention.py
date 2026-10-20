@@ -45,7 +45,8 @@ class GeneratedWorkspaceRetention:
                 'creation_token':uuid4().hex}
             with self.receipt.open('x') as stream:
                 json.dump(record,stream,sort_keys=True)
-                stream.flush();os.fsync(stream.fileno())
+                stream.flush()
+                os.fsync(stream.fileno())
             self._sync_directory()
             self._publish({'receipt_hash':_hash(self.receipt),'files':{},'directories':{},'purged':False})
         self._check_root()
@@ -55,8 +56,10 @@ class GeneratedWorkspaceRetention:
 
     def _sync_directory(self):
         descriptor = os.open(self.root,os.O_RDONLY)
-        try:os.fsync(descriptor)
-        finally:os.close(descriptor)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def _check_root(self):
         if self.root.is_symlink() or self.receipt.is_symlink() or self.registry.is_symlink():
@@ -71,7 +74,8 @@ class GeneratedWorkspaceRetention:
     def _load(self):
         self._check_root()
         state=json.loads(self.registry.read_text())
-        if state['receipt_hash']!=_hash(self.receipt):raise FollowUpExecutionBoundaryError()
+        if state['receipt_hash']!=_hash(self.receipt):
+            raise FollowUpExecutionBoundaryError()
         return state
 
     def _publish(self,state):
@@ -79,31 +83,38 @@ class GeneratedWorkspaceRetention:
         try:
             with temporary.open('x') as stream:
                 json.dump(state,stream,sort_keys=True)
-                stream.flush();os.fsync(stream.fileno())
+                stream.flush()
+                os.fsync(stream.fileno())
             os.replace(temporary,self.registry)
             self._sync_directory()
         finally:
-            if temporary.exists():temporary.unlink()
+            if temporary.exists():
+                temporary.unlink()
 
     def _relative(self,path):
         path=Path(path)
         relative=path.relative_to(self.root)
-        if '..' in relative.parts or not relative.parts:raise FollowUpExecutionBoundaryError()
+        if '..' in relative.parts or not relative.parts:
+            raise FollowUpExecutionBoundaryError()
         for ancestor in (path,*path.parents):
-            if ancestor==self.root.parent:break
-            if ancestor.is_symlink():raise FollowUpExecutionBoundaryError()
+            if ancestor==self.root.parent:
+                break
+            if ancestor.is_symlink():
+                raise FollowUpExecutionBoundaryError()
         return str(relative)
 
     def _parents(self,path,state):
         parents=list(path.parent.relative_to(self.root).parents)
         targets=[self.root/p for p in reversed(parents) if str(p)!='.']+[path.parent]
         for directory in targets:
-            if directory==self.root:continue
+            if directory==self.root:
+                continue
             key=self._relative(directory)
             if directory.exists():
                 identity=state['directories'].get(key)
                 stat=directory.stat()
-                if identity!=[stat.st_dev,stat.st_ino]:raise FollowUpExecutionBoundaryError()
+                if identity!=[stat.st_dev,stat.st_ino]:
+                    raise FollowUpExecutionBoundaryError()
             else:
                 directory.mkdir()
                 stat=directory.stat()
@@ -129,15 +140,20 @@ class GeneratedWorkspaceRetention:
     def write(self,path,content,*,replace_existing=False):
         data=content.encode('utf-8')
         with self._lock:
-            if self.closed:raise FollowUpExecutionBoundaryError()
-            path=Path(path);key=self._relative(path);state=self._load()
+            if self.closed:
+                raise FollowUpExecutionBoundaryError()
+            path=Path(path)
+            key=self._relative(path)
+            state=self._load()
             if replace_existing:
                 old=state['files'].get(key)
-                if old is None or not path.exists():raise FollowUpExecutionBoundaryError()
+                if old is None or not path.exists():
+                    raise FollowUpExecutionBoundaryError()
                 self._validate(path,old)
                 temporary=path.with_suffix(path.suffix+'.tmp')
                 self.write(temporary,content)
-                state=self._load();fresh=state['files'][self._relative(temporary)]
+                state=self._load()
+                fresh=state['files'][self._relative(temporary)]
                 state['files'][key]={'kind':'generated','state':'pending-replacement',
                     'bindings':old['bindings']+fresh['bindings']}
                 self._publish(state)
@@ -159,7 +175,9 @@ class GeneratedWorkspaceRetention:
                 # Identity and the allowed complete bytes are durable before payload writing.
                 self._publish(state)
                 with os.fdopen(descriptor,'wb',closefd=False) as stream:
-                    stream.write(data);stream.flush();os.fsync(stream.fileno())
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
                 state['files'][key]={'kind':'generated','state':'settled','bindings':[binding]}
                 self._publish(state)
             except BaseException:
@@ -168,11 +186,13 @@ class GeneratedWorkspaceRetention:
                 if path.exists() and self._file_identity(path)==[stat.st_dev,stat.st_ino]:
                     path.unlink()
                 raise
-            finally:os.close(descriptor)
+            finally:
+                os.close(descriptor)
 
     def bind_bootstrap(self,prepared):
         with self._lock:
-            if self.closed:raise FollowUpExecutionBoundaryError()
+            if self.closed:
+                raise FollowUpExecutionBoundaryError()
             prepared._check()
             if (prepared.owner_reference!=self.owner_reference
                     or prepared.collection_scope_digest!=self.scope_digest
@@ -191,41 +211,51 @@ class GeneratedWorkspaceRetention:
             state=self._load()
             record=state['files'][self._relative(prepared.path)]
             self._validate(prepared.path,record)
-            if record['bootstrap_receipt_hash']!=_hash(prepared.receipt):raise FollowUpExecutionBoundaryError()
+            if record['bootstrap_receipt_hash']!=_hash(prepared.receipt):
+                raise FollowUpExecutionBoundaryError()
             record['kind']='canonical-delegated'
             self._publish(state)
 
     def record_phase(self,name,value):
-        if name != 'private_audit':raise FollowUpExecutionBoundaryError()
+        if name != 'private_audit':
+            raise FollowUpExecutionBoundaryError()
         with self._lock:
             state=self._load()
-            if name in state and state[name]!=value:raise FollowUpExecutionBoundaryError()
+            if name in state and state[name]!=value:
+                raise FollowUpExecutionBoundaryError()
             state[name]=value
             self._publish(state)
 
     def close(self):
-        with self._lock:self.closed=True
+        with self._lock:
+            self.closed=True
 
     def purge(self,*,now):
         with self._lock:
-            if self.active_run:raise FollowUpExecutionBoundaryError()
+            if self.active_run:
+                raise FollowUpExecutionBoundaryError()
             self.closed=True
-            if self.retention_until is None or now<self.retention_until:raise FollowUpExecutionBoundaryError()
+            if self.retention_until is None or now<self.retention_until:
+                raise FollowUpExecutionBoundaryError()
             state=self._load()
-            if state['purged']:return state['audit']
+            if state['purged']:
+                return state['audit']
             # Validate exact producer directories and files before deleting; never inventory foreign entries.
             for key,identity in state['directories'].items():
                 directory=self.root/key
                 self._relative(directory)
                 if directory.exists():
                     stat=directory.stat()
-                    if [stat.st_dev,stat.st_ino]!=identity:raise FollowUpExecutionBoundaryError()
+                    if [stat.st_dev,stat.st_ino]!=identity:
+                        raise FollowUpExecutionBoundaryError()
             for key,record in state['files'].items():
                 path=self.root/key
                 self._relative(path)
-                if not path.exists():continue
+                if not path.exists():
+                    continue
                 self._validate(path,record)
-                if record['kind']=='canonical-delegated':raise FollowUpExecutionBoundaryError()
+                if record['kind']=='canonical-delegated':
+                    raise FollowUpExecutionBoundaryError()
                 if record['kind']=='bootstrap-database':
                     from ignis.infrastructure.follow_up_host_activation import PreparedCanonicalSQLite
                     PreparedCanonicalSQLite.purge_owned_bootstrap(
@@ -240,14 +270,17 @@ class GeneratedWorkspaceRetention:
             for key in sorted(state['directories'],key=lambda value:len(Path(value).parts),reverse=True):
                 directory=self.root/key
                 if directory.exists():
-                    try:directory.rmdir()
+                    try:
+                        directory.rmdir()
                     except OSError as error:
                         import errno
-                        if error.errno not in (errno.ENOTEMPTY,errno.EEXIST):raise
+                        if error.errno not in (errno.ENOTEMPTY,errno.EEXIST):
+                            raise
             self._sync_directory()
             audit={'receipt_hash':state['receipt_hash'],'registered_files':len(state['files']),
                    'purged':True,'purged_at':now.isoformat()}
-            state['purged']=True;state['audit']=audit
+            state['purged']=True
+            state['audit']=audit
             self._publish(state)
             return audit
 
@@ -261,25 +294,31 @@ class RetainedWorkspaceRepository(WorkspaceRepository):
 
     async def create_owned_workspace(self,proposal):
         from ignis.domain.research_workspace import ResearchWorkspace
-        if proposal.exists or proposal.requires_adoption:raise FollowUpExecutionBoundaryError()
+        if proposal.exists or proposal.requires_adoption:
+            raise FollowUpExecutionBoundaryError()
         workspace=ResearchWorkspace(slug=proposal.slug,root_path=proposal.proposed_path,name=proposal.research_name)
         self.retention.write(workspace.manifest_path,workspace.manifest_json())
         return await self.save_research_workspace(workspace)
 
     async def allocate_run_journal(self,workspace,mission_id,run_id=None):
-        started=_utc_now();stamp=started.strftime('%Y%m%d-%H%M%S');run_id=run_id or uuid4()
+        started=_utc_now()
+        stamp=started.strftime('%Y%m%d-%H%M%S')
+        run_id=run_id or uuid4()
         for sequence in range(1,JOURNAL_SEQUENCE_LIMIT):
             path=workspace.root_path/JOURNAL_DIRNAME/f'{JOURNAL_PREFIX}{stamp}-{sequence:03d}.json'
             journal=RunJournal(run_id=run_id,mission_id=mission_id,workspace_id=workspace.workspace_id,
                 journal_path=path,sequence=sequence,status='STARTED',started_at=started)
-            try:self.retention.write(path,_journal_payload(journal))
-            except FileExistsError:continue
+            try:
+                self.retention.write(path,_journal_payload(journal))
+            except FileExistsError:
+                continue
             return await self.record_run_journal(journal)
         raise RunJournalExhaustedError('The exact owned journal allocation range is exhausted.')
 
     async def record_collection_plan(self,journal,plan):
         payload=json.loads(journal.journal_path.read_text())
-        payload['collection_plan']=plan;payload['collection_plan_digest']=plan['plan_digest']
+        payload['collection_plan']=plan
+        payload['collection_plan_digest']=plan['plan_digest']
         self.retention.write(journal.journal_path,json.dumps(payload,indent=2,sort_keys=True)+'\n',replace_existing=True)
 
     async def _finish_run_journal(self,journal,status):

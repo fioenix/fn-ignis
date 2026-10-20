@@ -80,7 +80,8 @@ def seal_cleanup_manifest(*, root, copies, authority, manifest_path):
     for key in required:
         if type(authority[key]) is not str or not authority[key]:
             _refuse()
-    UUID(authority['mission_id']); UUID(authority['run_id'])
+    UUID(authority['mission_id'])
+    UUID(authority['run_id'])
     for key in ('scope_digest', 'packet_sha256', 'confirmation_sha256'):
         _hash(authority[key])
     if not (_time(authority['started_at']) < _time(authority['deadline']) < _time(authority['retention_until'])):
@@ -110,7 +111,8 @@ def seal_cleanup_manifest(*, root, copies, authority, manifest_path):
                     {'identity': actual['identity'], 'hash': actual['sha256']}]):
                 _refuse()
         elif registration['kind'] == 'canonical-delegated':
-            if registration['identities'] != [actual['identity']]: _refuse()
+            if registration['identities'] != [actual['identity']]:
+                _refuse()
         else:
             _refuse()
     copy_paths = [Path(copy) for copy in copies]
@@ -127,7 +129,9 @@ def seal_cleanup_manifest(*, root, copies, authority, manifest_path):
     _validate(record)
     data = (json.dumps(record, sort_keys=True, indent=2) + '\n').encode()
     with manifest_path.open('xb') as output:
-        output.write(data); output.flush(); os.fsync(output.fileno())
+        output.write(data)
+        output.flush()
+        os.fsync(output.fileno())
     return sha256(data).hexdigest()
 
 
@@ -143,8 +147,10 @@ def _validate(record):
         _refuse()
     if any(type(authority[key]) is not str or not authority[key] for key in required):
         _refuse()
-    UUID(authority['mission_id']); UUID(authority['run_id'])
-    for key in ('scope_digest', 'packet_sha256', 'confirmation_sha256'): _hash(authority[key])
+    UUID(authority['mission_id'])
+    UUID(authority['run_id'])
+    for key in ('scope_digest', 'packet_sha256', 'confirmation_sha256'):
+        _hash(authority[key])
     if (authority['closed_disposition'] != 'SOURCE_REVOKED_QUIESCENT_STORAGE_CLOSED'
             or not _time(authority['started_at']) < _time(authority['deadline']) < _time(authority['retention_until'])):
         _refuse()
@@ -233,13 +239,18 @@ def _publish(path, audit):
     temporary = path.parent / ('.' + uuid4().hex + '.cleanup.tmp')
     try:
         with temporary.open('x') as output:
-            json.dump(audit, output, sort_keys=True); output.flush(); os.fsync(output.fileno())
+            json.dump(audit, output, sort_keys=True)
+            output.flush()
+            os.fsync(output.fileno())
         os.replace(temporary, path)
         descriptor = os.open(path.parent, os.O_RDONLY)
-        try: os.fsync(descriptor)
-        finally: os.close(descriptor)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
     finally:
-        if temporary.exists(): temporary.unlink()
+        if temporary.exists():
+            temporary.unlink()
 
 
 def preflight_cleanup(manifest_path, expected_sha256):
@@ -275,16 +286,20 @@ def purge_confirmed_cleanup(manifest_path, expected_sha256, confirmation):
         audit = _audit(audit_path, expected_sha256, record)
         _check(record, audit)
         for name in record['files']:
-            if name in audit['completed']: continue
+            if name in audit['completed']:
+                continue
             audit.update(intent=name, updated_at=now.isoformat())
             _publish(audit_path, audit)
             path = Path(name)
             if path.exists() or path.is_symlink():
-                if _file(path) != record['files'][name]: _refuse()
+                if _file(path) != record['files'][name]:
+                    _refuse()
                 path.unlink()
                 directory = os.open(path.parent, os.O_RDONLY)
-                try: os.fsync(directory)
-                finally: os.close(directory)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
             audit['completed'].append(name)
             audit['intent'] = None
             _publish(audit_path, audit)

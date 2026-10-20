@@ -478,10 +478,14 @@ def test_source_policy_preserves_unknown_provenance_without_invented_age(records
     evidence, run = records
     signal = replace(evidence.signals[0], metadata={"source_access": "official_api", "connector_surface": "youtube"})
     outcome = replace(evidence.outcomes[0], connector_surface="youtube")
-    if case == "historical": signal = replace(signal, metadata={})
-    if case == "unregistered": outcome = replace(outcome, connector_surface="youtube.search")
-    if case == "missing_time": signal = replace(signal, time_provenance="unknown", captured_at=None)
-    if case == "future": signal = replace(signal, captured_at=NOW+timedelta(seconds=1))
+    if case == "historical":
+        signal = replace(signal, metadata={})
+    if case == "unregistered":
+        outcome = replace(outcome, connector_surface="youtube.search")
+    if case == "missing_time":
+        signal = replace(signal, time_provenance="unknown", captured_at=None)
+    if case == "future":
+        signal = replace(signal, captured_at=NOW+timedelta(seconds=1))
     payload, _ = _projection("snapshot", replace(evidence, signals=(signal,), outcomes=(outcome,)), run)
     policy = payload["evidence"][0]["source_policy"]
     assert policy["status"] == "UNKNOWN" and policy["reason_code"] == reason

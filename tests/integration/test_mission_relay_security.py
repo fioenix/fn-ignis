@@ -43,7 +43,7 @@ async def _read(client, mission_id, run_id=None, page_size=200, **extra):
 
 
 @pytest.mark.asyncio
-async def test_parent_and_child_snapshots_expose_only_their_own_observations(relay_case, monkeypatch, tmp_path):
+async def test_parent_and_child_snapshots_expose_only_their_own_observations(relay_case, monkeypatch, tmp_path):  # noqa: F811 -- fixture
     from tests.integration.test_mission_follow_up_viewer import _link, _records
     case, parent, child, foreign = await _records(relay_case, tmp_path)
     await _link(case, parent, child)
@@ -80,7 +80,7 @@ STORED_MARKUP = '<img src=x onerror="window.untrustedExecuted=true">'
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("relay_case", ("file",), indirect=True)
-async def test_snapshot_masks_private_research_and_observation_text(relay_case, monkeypatch, tmp_path):
+async def test_snapshot_masks_private_research_and_observation_text(relay_case, monkeypatch, tmp_path):  # noqa: F811 -- fixture
     from dataclasses import replace
     from ignis.application.use_cases.record_mission_research_work import RecordMissionResearchWorkUseCase
     from ignis.domain.entities import TrendSignal
@@ -167,7 +167,7 @@ def _structured_row(rows, observation_id, source_id, where):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("relay_case", ("file",), indirect=True)
 async def test_snapshot_excludes_structured_private_observation_metadata(
-        relay_case, monkeypatch, tmp_path, caplog, capsys):
+        relay_case, monkeypatch, tmp_path, caplog, capsys):  # noqa: F811 -- fixture
     from ignis.domain.entities import TrendSignal
     from ignis.domain.value_objects import PlatformType
     from tests.unit.test_mission_claims import _eligible_mission
@@ -209,7 +209,7 @@ OUTWARD_PUBLIC = "Outward public marker"
 OUTWARD_WINDOW = f"{OUTWARD_PUBLIC} window {OUTWARD_EMAIL}"
 
 
-async def _outward_mission(relay_case, tmp_path, monkeypatch):
+async def _outward_mission(relay_case, tmp_path, monkeypatch):  # noqa: F811 -- fixture
     """Current permitted claim plus recorded research, through the existing fixture and owner write paths.
 
     Channel note, probe queried window and claim wording keep the email in storage (read-time masking). Research labels, the host
@@ -271,7 +271,7 @@ async def _outward_mission(relay_case, tmp_path, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("relay_case", ("file",), indirect=True)
 async def test_snapshot_masks_outward_text_across_current_and_withdrawn_permission(
-        relay_case, monkeypatch, tmp_path, caplog, capsys):
+        relay_case, monkeypatch, tmp_path, caplog, capsys):  # noqa: F811 -- fixture
     from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
     from tests.integration.test_research_work_persistence import _sql
     caplog.set_level("DEBUG")
@@ -345,7 +345,7 @@ READ_FAILURE_KEYS = {"schema_version", "status", "reason_code"}
 
 
 @pytest.mark.asyncio
-async def test_cross_mission_reads_refuse_or_stay_inside_the_selected_mission(attention_case, monkeypatch, tmp_path):
+async def test_cross_mission_reads_refuse_or_stay_inside_the_selected_mission(attention_case, monkeypatch, tmp_path):  # noqa: F811 -- fixture
     case, missions, runs = attention_case
     selected = {str(s.observation_id) for s in await case.repository.get_mission_signals(missions[0].id)}
     foreign = {str(s.observation_id) for s in await case.repository.get_mission_signals(missions[1].id)}
@@ -378,7 +378,7 @@ async def test_cross_mission_reads_refuse_or_stay_inside_the_selected_mission(at
 
 
 @pytest.mark.asyncio
-async def test_page_bounds_are_typed_and_never_an_empty_success_past_the_end(attention_case, monkeypatch, tmp_path):
+async def test_page_bounds_are_typed_and_never_an_empty_success_past_the_end(attention_case, monkeypatch, tmp_path):  # noqa: F811 -- fixture
     case, missions, runs = attention_case
     mission, run = str(missions[0].id), str(runs[0])
     before = _state(case)
@@ -407,7 +407,7 @@ async def test_page_bounds_are_typed_and_never_an_empty_success_past_the_end(att
 
 @pytest.mark.asyncio
 async def test_oversized_response_is_refused_whole_without_logging_its_rows(
-        attention_case, monkeypatch, tmp_path, caplog, capsys):
+        attention_case, monkeypatch, tmp_path, caplog, capsys):  # noqa: F811 -- fixture
     from ignis.infrastructure import mission_relay
     caplog.set_level("DEBUG")
     case, missions, runs = attention_case

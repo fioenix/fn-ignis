@@ -2,6 +2,7 @@
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
+from contextlib import asynccontextmanager
 from tests.unit.test_mission_claims import _eligible_mission
 from tests.integration.test_follow_up_sqlite_admission import register, OfflineVerifier
 
@@ -359,7 +360,6 @@ async def sibling(repository, mission, authority):
     return following
 
 
-from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def postgres_case(case):

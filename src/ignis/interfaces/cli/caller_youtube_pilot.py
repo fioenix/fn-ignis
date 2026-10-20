@@ -173,7 +173,7 @@ async def _run(args, *, transport, resolve_credential):
     from ignis.infrastructure.follow_up_caller_activation import CallerSourceActivation
     from ignis.infrastructure.follow_up_host_activation import RootHostController
     from ignis.infrastructure.follow_up_provider_bridge import HostBoundYouTubePlugin, HostProviderBridge
-    from ignis.infrastructure.follow_up_root_composition import _close_accounting, confirmation_at_approved_invocation
+    from ignis.infrastructure.follow_up_root_composition import confirmation_at_approved_invocation
     from ignis.infrastructure.follow_up_run_storage import DurableRunCallBudget, PrivateRunStorage
     from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
     from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository

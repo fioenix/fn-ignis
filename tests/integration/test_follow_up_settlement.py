@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 
 from ignis.application.ports.research_work_port import FollowUpAdmissionCommand
 from ignis.domain.mission_follow_up import FollowUpExecutionRequest
@@ -636,7 +637,6 @@ async def test_fresh_actual_success_rechecks_canonical_journal_before_reporting_
         await repository.close()
 
 
-import pytest_asyncio
 
 
 @pytest_asyncio.fixture(params=['postgres'])

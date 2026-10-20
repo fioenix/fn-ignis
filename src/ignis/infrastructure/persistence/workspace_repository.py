@@ -111,12 +111,14 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     # ------------------------------------------------------------------
 
     async def save_research_workspace(self, workspace: ResearchWorkspace) -> ResearchWorkspace:
-        if self._path_guard is not None: self._path_guard(workspace.manifest_path)
+        if self._path_guard is not None:
+            self._path_guard(workspace.manifest_path)
         return await self._repo.save_research_workspace(workspace)
 
     async def get_research_workspace(self, workspace_id: UUID) -> Optional[ResearchWorkspace]:
         result = await self._repo.get_research_workspace(workspace_id)
-        if result is not None and self._path_guard is not None: self._path_guard(result.manifest_path)
+        if result is not None and self._path_guard is not None:
+            self._path_guard(result.manifest_path)
         return result
 
     async def find_research_workspace_by_slug(
@@ -250,7 +252,8 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         The claim is per mission. Two missions of one research take two different rows and
         never wait for each other.
         """
-        if self._path_guard is not None: self._path_guard(workspace.manifest_path)
+        if self._path_guard is not None:
+            self._path_guard(workspace.manifest_path)
         run_id = run_id or uuid4()
         caller = asyncio.current_task()
         ownership = {"acquired": False, "journal": None}
@@ -438,7 +441,8 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         )
 
     async def record_run_journal(self, journal: RunJournal) -> RunJournal:
-        if self._path_guard is not None: self._path_guard(journal.journal_path)
+        if self._path_guard is not None:
+            self._path_guard(journal.journal_path)
         return await self._repo.record_run_journal(journal)
 
     async def record_collection_plan(
@@ -448,7 +452,8 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         digest = plan.get("plan_digest") if isinstance(plan, dict) else None
         if not isinstance(digest, str) or len(digest) != 64:
             raise ValueError("A run journal collection plan needs its canonical plan_digest.")
-        if self._path_guard is not None: self._path_guard(journal.journal_path)
+        if self._path_guard is not None:
+            self._path_guard(journal.journal_path)
         current = json.loads(journal.journal_path.read_text(encoding="utf-8"))
         current["collection_plan"] = plan
         current["collection_plan_digest"] = digest
@@ -466,7 +471,8 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
         result = await self._repo.list_run_journals(mission_id, limit)
         if self._path_guard is not None:
-            for journal in result: self._path_guard(journal.journal_path)
+            for journal in result:
+                self._path_guard(journal.journal_path)
         return result
 
     async def latest_run_journal(self, mission_id: UUID) -> Optional[RunJournal]:

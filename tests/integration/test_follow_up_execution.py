@@ -19,7 +19,7 @@ from ignis.infrastructure.persistence.follow_up_admission_rules import child_rec
 from tests.integration import test_follow_up_sqlite_admission as setup
 from tests.integration.test_follow_up_postgres_admission import AsyncVerifier
 from tests.integration.test_mission_follow_up import Ingress, OfflinePlugin, EmptyClusterer
-from tests.integration.test_mission_follow_up import relay_case
+from tests.integration.test_mission_follow_up import relay_case  # noqa: F401 -- fixture
 
 
 class OfflineExecutionPlugin(OfflinePlugin):
@@ -80,7 +80,7 @@ async def execution_ready(tmp_path):
 
 
 @pytest_asyncio.fixture
-async def executor_parity_case(relay_case, tmp_path):
+async def executor_parity_case(relay_case, tmp_path):  # noqa: F811 -- fixture
     """Retain SQLite recipe; bind native PG's exact youtube plugin and recorded plan."""
     case, _, _ = relay_case
     if case.name != 'postgres':

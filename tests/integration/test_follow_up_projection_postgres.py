@@ -14,7 +14,7 @@ from tests.integration.follow_up_execution_setup import ready, corrupt_disposabl
 from tests.integration.follow_up_mcp_setup import native_executor
 from tests.integration.test_follow_up_execution import OfflineExecutionVerifier
 from tests.integration.test_follow_up_postgres_admission import AsyncVerifier
-from tests.integration.test_mission_follow_up import relay_case
+from tests.integration.test_mission_follow_up import relay_case  # noqa: F401 -- fixture
 from tests.integration.test_mission_relay_read_boundary import _reader, _state
 from tests.unit.test_mission_claims import _observation_candidate
 
@@ -27,7 +27,7 @@ class NativeVerifier(OfflineExecutionVerifier):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('relay_case', ('postgres',), indirect=True)
 @pytest.mark.parametrize('control', ['eventless', 'orphan-revision', 'fingerprint', 'wrong-parent', 'aligned-fingerprint', 'partial-commands-schema'])
-async def test_native_postgres_follow_up_projection_receipt_proof(relay_case, tmp_path, control):
+async def test_native_postgres_follow_up_projection_receipt_proof(relay_case, tmp_path, control):  # noqa: F811 -- fixture
     case, _, _ = relay_case
     repository = case.repository
     probe_file = tmp_path / 'private-offline-probes.json'

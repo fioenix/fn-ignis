@@ -108,13 +108,16 @@ class CallerStorageScope:
 
     def _pin(self, path, *, require_directory=False):
         for node in reversed((path, *path.parents)):
-            if node.is_symlink(): raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
+            if node.is_symlink():
+                raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
             if not node.exists():
-                if node in self._identities: raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
+                if node in self._identities:
+                    raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
                 continue
             info = node.lstat()
             if node != path or require_directory:
-                if not stat.S_ISDIR(info.st_mode): raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
+                if not stat.S_ISDIR(info.st_mode):
+                    raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
             elif not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
                 raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
             identity = (info.st_dev, info.st_ino)
@@ -124,7 +127,8 @@ class CallerStorageScope:
 
     def check(self):
         with self._lock:
-            if not self.root.is_dir(): raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
+            if not self.root.is_dir():
+                raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
             self._pin(self.root, require_directory=True)
             self._pin(self.directory, require_directory=True)
             self._pin(self.config_path)
@@ -147,7 +151,8 @@ class CallerStorageScope:
             self.check()
             # Payload files may be atomically replaced by their owner; pin ancestry only.
             self._pin(path.parent, require_directory=True)
-            if path.is_symlink(): raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
+            if path.is_symlink():
+                raise ToolError('CALLER_STORAGE_SCOPE_REFUSED')
         return path
 
     def guard_repository(self, repository):
@@ -211,8 +216,10 @@ class CallerStorageScope:
             # Roll back only our exact append; never rewrite a concurrent owner edit.
             appended = (before or b'') + (b'\n' if before and not before.endswith(b'\n') else b'') + line + b'\n'
             if ignore.read_bytes() == appended:
-                if before is None: ignore.unlink()
-                else: ignore.write_bytes(before)
+                if before is None:
+                    ignore.unlink()
+                else:
+                    ignore.write_bytes(before)
             raise ToolError('CALLER_LAYOUT_REFUSED')
         self.directory.mkdir(exist_ok=True)
         self.check_path(self.config_path)
@@ -224,7 +231,8 @@ class CallerStorageScope:
         example = self.check_path(self.directory / '.env.example')
         if not example.exists():
             template = Path(__file__).parent / 'templates' / 'caller.env.example'
-            with example.open('x') as opened: opened.write(template.read_text())
+            with example.open('x') as opened:
+                opened.write(template.read_text())
         self.check()
         if self.log_handler is None:
             self.log_handler = _CallerLog(self)

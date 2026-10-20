@@ -109,7 +109,8 @@ class _ClosedStartupRetention:
         for key,record in state['files'].items():
             path = metadata.root/key
             metadata._relative(path)
-            if path.exists():metadata._validate(path,record)
+            if path.exists():
+                metadata._validate(path,record)
         canonical = (self._canonical if self._canonical._deletion_only else
             IsolatedCanonicalSQLite.reopen_for_deletion(self._canonical.root,self.confirmation))
         if canonical._request() != self._request:

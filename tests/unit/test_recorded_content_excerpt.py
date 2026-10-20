@@ -52,7 +52,7 @@ async def _with_description(repository, mission, metadata):
 
 
 @pytest.mark.asyncio
-async def test_batch_shows_a_recorded_description_masked_when_no_excerpt_was_recorded(research):
+async def test_batch_shows_a_recorded_description_masked_when_no_excerpt_was_recorded(research):  # noqa: F811 -- fixture
     repository, store, workspace = research
     mission, _brief, _held = await _market(repository, store, workspace, titles=())
     await _with_description(repository, mission, {"description": DESCRIPTION})
@@ -70,7 +70,7 @@ async def test_batch_shows_a_recorded_description_masked_when_no_excerpt_was_rec
     ({"description": 42}, None),
 ])
 @pytest.mark.asyncio
-async def test_batch_keeps_recorded_excerpt_precedence(research, metadata, expected):
+async def test_batch_keeps_recorded_excerpt_precedence(research, metadata, expected):  # noqa: F811 -- fixture
     repository, store, workspace = research
     mission, _brief, _held = await _market(repository, store, workspace, titles=())
     await _with_description(repository, mission, metadata)
@@ -92,7 +92,7 @@ def test_relay_snapshot_shows_a_recorded_description_masked():
 
 
 @pytest.mark.asyncio
-async def test_restored_excerpt_changes_no_frame_and_relabels_no_prior_judgment(research):
+async def test_restored_excerpt_changes_no_frame_and_relabels_no_prior_judgment(research):  # noqa: F811 -- fixture
     repository, store, workspace = research
     mission, _brief, _held = await _market(repository, store, workspace, titles=())
     signals = await _with_description(repository, mission, {"description": DESCRIPTION})

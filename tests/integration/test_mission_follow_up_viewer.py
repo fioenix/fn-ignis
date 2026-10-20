@@ -24,7 +24,7 @@ from tests.integration.test_mission_relay_read_boundary import (
 )
 from tests.integration.test_research_work_persistence import _api, _commit, _sql
 from tests.unit.test_mission_claims import _eligible_mission, _observation_candidate, _manifest
-from tests.integration.test_mission_follow_up import relay_case
+from tests.integration.test_mission_follow_up import relay_case  # noqa: F401 -- fixture
 
 @dataclass
 class Record:
@@ -141,7 +141,7 @@ async def _record(case, tmp_path, ordinal, *, permitted, admitted_child=None, se
     return Record(mission, run, frame, evidence, finding, assignment, work)
 
 
-async def _records(relay_case, tmp_path, *, parent_permitted=True, child_permitted=True):
+async def _records(relay_case, tmp_path, *, parent_permitted=True, child_permitted=True):  # noqa: F811 -- fixture
     case, _, _ = relay_case
     parent = await _record(case, tmp_path, 0, permitted=parent_permitted)
     from tests.integration.follow_up_viewer_setup import admit_child
@@ -250,7 +250,7 @@ def _readonly(monkeypatch, case):
 
 
 @pytest.mark.asyncio
-async def test_canonical_fixture_has_separate_frames_and_real_permission(relay_case, tmp_path):
+async def test_canonical_fixture_has_separate_frames_and_real_permission(relay_case, tmp_path):  # noqa: F811 -- fixture
     case, parent, child, foreign = await _records(relay_case, tmp_path)
     use_case = GetMissionRelaySnapshotUseCase(_reader(case.repository))
     for record in (parent, child, foreign):
@@ -260,7 +260,7 @@ async def test_canonical_fixture_has_separate_frames_and_real_permission(relay_c
 
 
 @pytest.mark.asyncio
-async def test_parent_permission_cannot_authorize_unpermitted_child(relay_case, tmp_path):
+async def test_parent_permission_cannot_authorize_unpermitted_child(relay_case, tmp_path):  # noqa: F811 -- fixture
     case, parent, child, _ = await _records(relay_case, tmp_path, child_permitted=False)
     await _link(case, parent, child)
     use_case = GetMissionRelaySnapshotUseCase(_reader(case.repository))
@@ -275,7 +275,7 @@ async def test_parent_permission_cannot_authorize_unpermitted_child(relay_case, 
 
 
 @pytest.mark.asyncio
-async def test_child_permission_cannot_authorize_unpermitted_parent(relay_case, tmp_path):
+async def test_child_permission_cannot_authorize_unpermitted_parent(relay_case, tmp_path):  # noqa: F811 -- fixture
     case, parent, child, _ = await _records(relay_case, tmp_path, parent_permitted=False)
     await _link(case, parent, child)
     use_case = GetMissionRelaySnapshotUseCase(_reader(case.repository))
@@ -290,7 +290,7 @@ async def test_child_permission_cannot_authorize_unpermitted_parent(relay_case, 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('selected,target', (('parent', 'child'), ('child', 'parent'), ('child', 'foreign')))
-async def test_related_link_does_not_expose_foreign_observation(relay_case, tmp_path, selected, target):
+async def test_related_link_does_not_expose_foreign_observation(relay_case, tmp_path, selected, target):  # noqa: F811 -- fixture
     case, parent, child, foreign = await _records(relay_case, tmp_path)
     await _link(case, parent, child)
     records = {'parent': parent, 'child': child, 'foreign': foreign}
@@ -306,7 +306,7 @@ async def test_related_link_does_not_expose_foreign_observation(relay_case, tmp_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('page_size', (1, 200))
-async def test_selected_child_and_labeled_relation_never_create_composite_frame(relay_case, tmp_path, page_size):
+async def test_selected_child_and_labeled_relation_never_create_composite_frame(relay_case, tmp_path, page_size):  # noqa: F811 -- fixture
     case, parent, child, _ = await _records(relay_case, tmp_path)
     await _link(case, parent, child)
     use_case = GetMissionRelaySnapshotUseCase(_reader(case.repository))
@@ -324,7 +324,7 @@ async def test_selected_child_and_labeled_relation_never_create_composite_frame(
 
 
 @pytest.mark.asyncio
-async def test_changed_child_frame_withholds_child_permission_without_changing_parent(relay_case, tmp_path):
+async def test_changed_child_frame_withholds_child_permission_without_changing_parent(relay_case, tmp_path):  # noqa: F811 -- fixture
     case, parent, child, _ = await _records(relay_case, tmp_path)
     await _link(case, parent, child)
     use_case = GetMissionRelaySnapshotUseCase(_reader(case.repository))
@@ -344,7 +344,7 @@ async def test_changed_child_frame_withholds_child_permission_without_changing_p
 
 
 @pytest.mark.asyncio
-async def test_readonly_child_view_cannot_execute_followup_or_mutate_authority(relay_case, tmp_path, monkeypatch):
+async def test_readonly_child_view_cannot_execute_followup_or_mutate_authority(relay_case, tmp_path, monkeypatch):  # noqa: F811 -- fixture
     case, parent, child, foreign = await _records(relay_case, tmp_path)
     await _link(case, parent, child)
     before = _state(case)

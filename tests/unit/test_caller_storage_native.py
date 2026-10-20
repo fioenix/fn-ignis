@@ -29,7 +29,8 @@ def payload(result):
 
 @pytest.mark.asyncio
 async def test_native_single_root_proposes_caller_fnignis_not_legacy_install_storage(tmp_path, monkeypatch):
-    root = tmp_path / 'caller'; root.mkdir()
+    root = tmp_path / 'caller'
+    root.mkdir()
     monkeypatch.setattr(server, '_COMPONENTS', None)
     monkeypatch.setattr(config.settings, 'DATABASE_URL', 'sqlite:///:memory:')
     async with native_client(tmp_path, root) as client:
@@ -43,7 +44,8 @@ async def test_native_single_root_proposes_caller_fnignis_not_legacy_install_sto
 @pytest.mark.asyncio
 async def test_native_client_roots_never_redirect_storage_away_from_the_opened_folder(tmp_path, monkeypatch):
     opened, other = tmp_path/'opened', tmp_path/'other'
-    opened.mkdir(); other.mkdir()
+    opened.mkdir()
+    other.mkdir()
     monkeypatch.setattr(server, '_COMPONENTS', None)
     monkeypatch.setattr(config.settings, 'DATABASE_URL', 'sqlite:///:memory:')
     async with native_client(tmp_path, opened, [other, opened]) as client:
@@ -59,7 +61,8 @@ async def test_native_client_roots_never_redirect_storage_away_from_the_opened_f
 
 @pytest.mark.asyncio
 async def test_native_workspace_and_mission_survive_fresh_process_without_ingress(tmp_path):
-    root = tmp_path/'caller'; root.mkdir()
+    root = tmp_path/'caller'
+    root.mkdir()
     async with native_client(tmp_path, root) as client:
         proposal = payload(await client.call_tool('propose_research_workspace',
             {'host_workspace':str(root),'research_name':'Offline retained evidence'}))
@@ -108,8 +111,10 @@ async def test_native_workspace_and_mission_survive_fresh_process_without_ingres
 
 @pytest.mark.asyncio
 async def test_native_symlink_and_root_replacement_refuse_without_writing_foreign(tmp_path):
-    root=tmp_path/'caller';root.mkdir()
-    foreign=tmp_path/'foreign';foreign.mkdir()
+    root=tmp_path/'caller'
+    root.mkdir()
+    foreign=tmp_path/'foreign'
+    foreign.mkdir()
     (root/'.fnignis').symlink_to(foreign,target_is_directory=True)
     async with native_client(tmp_path,root) as client:
         result=await client.call_tool('propose_research_workspace',
@@ -119,7 +124,8 @@ async def test_native_symlink_and_root_replacement_refuse_without_writing_foreig
     (root/'.fnignis').unlink()
     async with native_client(tmp_path,root) as client:
         await client.call_tool('propose_research_workspace',{'host_workspace':str(root),'research_name':'Pinned'})
-        root.rename(tmp_path/'original-caller');root.mkdir()
+        root.rename(tmp_path/'original-caller')
+        root.mkdir()
         result=await client.call_tool('list_research_workspaces',{},raise_on_error=False)
         assert result.is_error and 'ROOT_REQUIRED category=STARTUP_ROOT_CHANGED' in result.content[0].text
     assert list(root.iterdir())==[]
@@ -136,7 +142,8 @@ async def test_scoped_journal_writer_never_changes_foreign_symlink_target(tmp_pa
     from ignis.application.ports.research_workspace_port import RunJournal
     from ignis.domain.research_workspace import ResearchWorkspace, JOURNAL_DIRNAME
     from fastmcp.exceptions import ToolError
-    root=tmp_path/'caller';root.mkdir()
+    root=tmp_path/'caller'
+    root.mkdir()
     scope=CallerStorageScope(root)
     repository=SqliteTrendRepository(str(scope.database))
     scope.guard_repository(repository)
@@ -144,7 +151,8 @@ async def test_scoped_journal_writer_never_changes_foreign_symlink_target(tmp_pa
     workspace=ResearchWorkspace(workspace_id=uuid4(),slug='offline',name='Offline',
         root_path=root/'.fnignis/research/offline')
     workspace.root_path.mkdir(parents=True)
-    foreign=tmp_path/'foreign';foreign.mkdir()
+    foreign=tmp_path/'foreign'
+    foreign.mkdir()
     try:
         if attack=='journal_directory':
             (workspace.root_path/JOURNAL_DIRNAME).symlink_to(foreign,target_is_directory=True)
@@ -156,7 +164,8 @@ async def test_scoped_journal_writer_never_changes_foreign_symlink_target(tmp_pa
         else:
             journal_path=workspace.root_path/'journal.json'
             journal_path.write_text('{}')
-            target=foreign/'retained.txt';target.write_text('Foreign original')
+            target=foreign/'retained.txt'
+            target.write_text('Foreign original')
             identity=(target.stat().st_dev,target.stat().st_ino)
             journal_path.with_suffix('.json.tmp').symlink_to(target)
             journal=RunJournal(run_id=uuid4(),mission_id=uuid4(),workspace_id=workspace.workspace_id,
@@ -180,16 +189,19 @@ async def test_finalization_scope_refusal_preserves_original_outcome_and_foreign
     from ignis.infrastructure.caller_storage import CallerStorageScope
     from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
     from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
-    root=tmp_path/'caller';root.mkdir()
+    root=tmp_path/'caller'
+    root.mkdir()
     scope=CallerStorageScope(root)
-    repository=SqliteTrendRepository(str(scope.database));scope.guard_repository(repository)
+    repository=SqliteTrendRepository(str(scope.database))
+    scope.guard_repository(repository)
     store=WorkspaceRepository(repository,path_guard=scope.check_path)
     workspace=ResearchWorkspace(slug='finalization',root_path=scope.directory/'research/finalization')
     workspace.root_path.mkdir(parents=True)
     await store.save_research_workspace(workspace)
     mission=ResearchMission(title='Offline finalization',keywords=['offline'],workspace_id=workspace.workspace_id)
     await repository.create_mission(mission)
-    foreign=tmp_path/'foreign.txt';foreign.write_text('Foreign original bytes')
+    foreign=tmp_path/'foreign.txt'
+    foreign.write_text('Foreign original bytes')
     identity=(foreign.stat().st_dev,foreign.stat().st_ino)
     original_error=RuntimeError('Original offline source failure')
     expected_cancel=[]
@@ -212,7 +224,8 @@ async def test_finalization_scope_refusal_preserves_original_outcome_and_foreign
         return 'Original completed result'
     worker=asyncio.create_task(run())
     try:
-        result=None;raised=None
+        result=None
+        raised=None
         try:
             result=await worker
         except BaseException as exc:

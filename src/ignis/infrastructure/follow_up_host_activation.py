@@ -19,6 +19,7 @@ from ignis.domain.follow_up_admission import CapabilityProof, WorkAuthority, dig
 from ignis.domain.research_work import _text
 from ignis.infrastructure.follow_up_provider_bridge import RunBounds, TransportBinding, _plan_value
 from ignis.domain.value_objects import GeoCode, Timeframe
+from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -428,7 +429,6 @@ class IsolatedCanonicalSQLite:
             raise FollowUpExecutionBoundaryError()
 
     async def purge(self, host, repository=None):
-        import sqlite3
         record = self._ownership()
         if (host.confirmation != self.confirmation
                 or tuple(record["identity"]) != self._identity
@@ -504,7 +504,6 @@ class IsolatedCanonicalSQLite:
         return audit
 
 
-from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
 
 def open_owned_canonical_repository(enrollment):

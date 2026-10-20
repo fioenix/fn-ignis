@@ -39,14 +39,10 @@ async def _caller_components(tmp_path):
 
 
 def _host_objects(mission_id):
-    from datetime import datetime, timezone
     from tests.unit.test_follow_up_root_composition import INSTRUCTION
     from tests.unit.test_follow_up_provider_bridge import Quota
     from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
-    from ignis.infrastructure.follow_up_host_activation import RootHostController
-    from ignis.infrastructure.follow_up_provider_bridge import HostProviderBridge, HostBoundYouTubePlugin, RunCallBudget
     from ignis.infrastructure.follow_up_root_composition import confirmation_at_approved_invocation
-    import httpx
     confirmation = confirmation_at_approved_invocation(INSTRUCTION, mission_id=mission_id, run_id=uuid4())
     host_registry = ConnectorPluginRegistry()
     calls, resolutions = [], []
@@ -355,7 +351,8 @@ async def test_pending_accounting_close_is_retained_with_close_only_retry(tmp_pa
         try:
             await runtime.close()
         finally:
-            lock.rollback(); lock.close()
+            lock.rollback()
+            lock.close()
         assert runtime.source_activation is activation, 'Runtime dropped the only cleanup handle'
         assert activation.accounting_close == 'PENDING'
         assert _closed_row(made['objects'].accounting) == (0, 0, 0, 0)
@@ -389,7 +386,8 @@ async def test_rejected_attach_with_locked_ledger_keeps_cleanup_until_runtime_cl
         await runtime.activate_source()
     assert _closed_row_unlocked_later(locks) is None
     for lock in locks:
-        lock.rollback(); lock.close()
+        lock.rollback()
+        lock.close()
     try:
         await runtime.close()
         assert made['objects'].host._revoked
@@ -554,7 +552,6 @@ async def _genuine_for(scope, mission_id, tmp_path, calls, resolutions):
 
 @pytest.mark.asyncio
 async def test_caller_parent_runs_guarded_route_on_borrowed_canonical_storage(tmp_path):
-    from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
     components = await _caller_components(tmp_path)
     scope = _Scope(components)
     calls, resolutions, made = [], [], {}
@@ -608,7 +605,6 @@ async def test_caller_parent_refuses_without_injection_or_for_foreign_mission(tm
 
 @pytest.mark.asyncio
 async def test_caller_child_from_genuine_gap_shares_original_aggregate_budget(tmp_path):
-    from datetime import timedelta
     from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
     from ignis.application.ports.follow_up_admission_port import FollowUpFactCommand
     from ignis.application.ports.research_work_port import (ResearchWorkCommitCommand,

@@ -7,6 +7,8 @@ import pytest
 from fastmcp.tools.base import ToolResult
 
 from ignis.interfaces.mcp import server
+from tests.integration.follow_up_mcp_setup import native_executor
+from tests.integration.test_mission_follow_up import relay_case  # noqa: F401 -- fixture
 
 
 MISSION_ID = '00000000-0000-0000-0000-000000000001'
@@ -119,7 +121,6 @@ async def test_follow_up_extension_preserves_recording_malformed_refusal():
     assert PRIVATE_SENTINEL not in json.dumps(result.structured_content)
 
 
-from tests.integration.follow_up_mcp_setup import native_executor
 
 
 NATIVE_RUNNER = '''
@@ -216,7 +217,6 @@ def native_client(tmp_path, case, *, missing_provider=False):
              'PYTHONPATH': os.pathsep.join(str(path) for path in (root / 'src', root, root / 'tests/integration', root / 'tests'))}, log_file=tmp_path / 'stdio.log'), timeout=20)
 
 
-from tests.integration.test_mission_follow_up import relay_case
 
 
 async def _native_arrange(case, tmp_path):
@@ -235,8 +235,7 @@ async def _native_arrange(case, tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
-async def test_native_follow_up_schema_child_provenance_and_original_alias_retry(relay_case, tmp_path):
-    from pathlib import Path
+async def test_native_follow_up_schema_child_provenance_and_original_alias_retry(relay_case, tmp_path):  # noqa: F811 -- fixture
     case, _, _ = relay_case
     parent, work = await _native_arrange(case, tmp_path)
     arguments = dict(mission_id=str(parent.id), follow_up_work_id=work['work_id'],
@@ -289,7 +288,7 @@ async def test_native_follow_up_schema_child_provenance_and_original_alias_retry
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
-async def test_actual_stdio_channel_cannot_replace_independent_execution_provider(relay_case, tmp_path):
+async def test_actual_stdio_channel_cannot_replace_independent_execution_provider(relay_case, tmp_path):  # noqa: F811 -- fixture
     from tests.integration.test_mission_relay_read_boundary import _state
     case, _, _ = relay_case
     parent, work = await _native_arrange(case, tmp_path)
@@ -323,7 +322,7 @@ async def test_in_process_follow_up_refuses_without_resource_initialization(monk
 @pytest.mark.asyncio
 @pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
 @pytest.mark.parametrize('operation', ['caller-cancel', 'lifespan-close'])
-async def test_owned_actual_collector_cancellation_settles_before_release(relay_case, tmp_path, monkeypatch, operation):
+async def test_owned_actual_collector_cancellation_settles_before_release(relay_case, tmp_path, monkeypatch, operation):  # noqa: F811 -- fixture
     """Actual accepted execution, synthetic blocked probe; ownership survives repeated cancellation."""
     import asyncio
     from tests.integration.test_follow_up_execution import OfflineExecutionVerifier
@@ -430,7 +429,7 @@ async def test_owned_actual_collector_cancellation_settles_before_release(relay_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('relay_case', ('file', 'postgres'), indirect=True)
-async def test_actual_stdio_pre_admission_refusals_preserve_physical_state(relay_case, tmp_path):
+async def test_actual_stdio_pre_admission_refusals_preserve_physical_state(relay_case, tmp_path):  # noqa: F811 -- fixture
     """Actual MCP rejects hostile/stale/unbound arguments before any child or probe exists."""
     from tests.integration.test_mission_relay_read_boundary import _state
     case, missions, _ = relay_case

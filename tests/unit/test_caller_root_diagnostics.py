@@ -39,7 +39,8 @@ async def test_root_refusal_exposes_only_fixed_category_and_never_bypasses(case,
     owner = None if case == "owner_absent" else SimpleNamespace(closed=case == "owner_closed", caller_scopes={})
     ctx = SimpleNamespace(request_context=object(), session=SimpleNamespace(list_roots=roots),
         lifespan_context={"mission_relay": owner})
-    if case == "context": ctx = None
+    if case == "context":
+        ctx = None
     context = SimpleNamespace(message=SimpleNamespace(name="get_mission_analysis",
         arguments={"mission_id": protected}), fastmcp_context=ctx)
     middleware = CallerStorageMiddleware(forbidden, forbidden)

@@ -177,7 +177,8 @@ class _MissionRelayRuntime:
         if self.closed or asyncio.get_running_loop() is not self.owner_loop:
             return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
         components = self.caller_scope.components if self.caller_scope is not None else _COMPONENTS
-        if self.caller_scope is not None: self.caller_scope.check()
+        if self.caller_scope is not None:
+            self.caller_scope.check()
         repository = components.get("repository") if components is not None else None
         owner = (components, repository, self.owner_loop) if self.caller_scope is not None else _COMPONENTS_OWNER
         if owner is None or owner[0] is not components or owner[1] is not repository or owner[2] is not self.owner_loop:
@@ -319,7 +320,8 @@ class _MissionRelayRuntime:
         if self.closed or asyncio.get_running_loop() is not self.owner_loop:
             return _follow_up_refused("STORAGE_FAILURE")
         components = self.caller_scope.components if self.caller_scope is not None else _COMPONENTS
-        if self.caller_scope is not None: self.caller_scope.check()
+        if self.caller_scope is not None:
+            self.caller_scope.check()
         repository = components.get("repository") if components is not None else None
         owner = (components, repository, self.owner_loop) if self.caller_scope is not None else _COMPONENTS_OWNER
         if owner is None or owner[0] is not components or owner[1] is not repository or owner[2] is not self.owner_loop:
@@ -390,7 +392,8 @@ class _MissionRelayRuntime:
         return self._reads
 
     def _use_case(self):
-        if self.caller_scope is not None: self.caller_scope.check()
+        if self.caller_scope is not None:
+            self.caller_scope.check()
         if self.closed or asyncio.get_running_loop() is not self.owner_loop:
             raise RuntimeError("Mission relay reads require an active owning lifespan.")
         if self._projection is None:
@@ -402,7 +405,8 @@ class _MissionRelayRuntime:
             from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
             # Borrow initialized in-memory storage only when the owner already created it.
             components = self.caller_scope.components if self.caller_scope is not None else _COMPONENTS
-            if self.caller_scope is not None: self.caller_scope.check()
+            if self.caller_scope is not None:
+                self.caller_scope.check()
             if isinstance(components, _CallerComponents):
                 # Viewing never realizes the full provider composition; only an existing owner
                 # repository is borrowed.

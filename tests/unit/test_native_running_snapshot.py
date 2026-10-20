@@ -21,10 +21,17 @@ def _snapshot(result):return result.structured_content
 
 @pytest.mark.asyncio
 async def test_native_snapshot_reads_an_actually_running_delayed_collection(tmp_path):
-    root=tmp_path/'caller';root.mkdir();storage=root/'.fnignis';storage.mkdir()
-    config=storage/'.env';config.write_text('YOUTUBE_API_KEY=DUMMY_OFFLINE\n');config.chmod(0o600)
-    isolated=tmp_path/'isolated.env';isolated.write_text('DATABASE_URL=sqlite:///'+str(tmp_path/'unselected.sqlite3')+'\n')
-    control=tmp_path/'control';control.mkdir()
+    root=tmp_path/'caller'
+    root.mkdir()
+    storage=root/'.fnignis'
+    storage.mkdir()
+    config=storage/'.env'
+    config.write_text('YOUTUBE_API_KEY=DUMMY_OFFLINE\n')
+    config.chmod(0o600)
+    isolated=tmp_path/'isolated.env'
+    isolated.write_text('DATABASE_URL=sqlite:///'+str(tmp_path/'unselected.sqlite3')+'\n')
+    control=tmp_path/'control'
+    control.mkdir()
     repository=Path(__file__).resolve().parents[2]
     client=Client(StdioTransport(command=sys.executable,args=[str(repository/'tests/fixtures/offline_native_host.py')],
         cwd=str(root),keep_alive=False,env={'IGNIS_ENV_FILE':str(isolated),'IGNIS_ENV_ISOLATED':'1',
@@ -42,7 +49,8 @@ async def test_native_snapshot_reads_an_actually_running_delayed_collection(tmp_
         try:
             async with asyncio.timeout(12):
                 while not (control/'collector-entered').exists():
-                    if execution.done():raise AssertionError('Execution ended before delayed collector admission')
+                    if execution.done():
+                        raise AssertionError('Execution ended before delayed collector admission')
                     await asyncio.sleep(.02)
             with sqlite3.connect('file:'+str(storage/'canonical.sqlite3')+'?mode=ro',uri=True) as database:
                 state=database.execute('SELECT status FROM research_missions WHERE id=?',(mission['mission_id'],)).fetchone()[0]

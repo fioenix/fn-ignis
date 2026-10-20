@@ -9,11 +9,14 @@ from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPl
 from ignis.interfaces.mcp import server
 control=Path(os.environ['IGNIS_OFFLINE_CONTROL'])
 async def response(request):
-    if request.url.host!='www.googleapis.com':raise AssertionError('Unexpected offline destination')
-    with (control/'calls.jsonl').open('a') as out:out.write(json.dumps({'path':request.url.path})+'\n')
+    if request.url.host!='www.googleapis.com':
+        raise AssertionError('Unexpected offline destination')
+    with (control/'calls.jsonl').open('a') as out:
+        out.write(json.dumps({'path':request.url.path})+'\n')
     if request.url.path.endswith('/search'):
         (control/'collector-entered').touch()
-        while not (control/'release-collector').exists():await asyncio.sleep(.02)
+        while not (control/'release-collector').exists():
+            await asyncio.sleep(.02)
         return httpx.Response(200,json={'items':[{'id':{'videoId':'offline-video'}}]})
     return httpx.Response(200,json={'items':[{'id':'offline-video','snippet':{
         'title':'Offline tutorial','description':'Offline public description','channelTitle':'Offline channel',

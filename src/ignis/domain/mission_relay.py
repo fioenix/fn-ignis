@@ -347,7 +347,8 @@ class RelaySourcePolicy:
             raise ValueError("Invalid source policy reason")
         _time(self.captured_at, "captured_at", optional=True)
         _time(self.boundary_at, "boundary_at", optional=True)
-        if self.age_seconds is not None: _integer(self.age_seconds, "age_seconds")
+        if self.age_seconds is not None:
+            _integer(self.age_seconds, "age_seconds")
         if self.status != "UNKNOWN" and (self.captured_at is None or self.boundary_at is None or self.age_seconds is None):
             raise ValueError("Known policy status requires original collection time")
 

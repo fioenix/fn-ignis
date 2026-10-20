@@ -20,7 +20,8 @@ async def disposition(tmp_path, monkeypatch):
     root = tmp_path / 'owned-runtime'
     original = Path.open
     def fail(path, *args, **kwargs):
-        if path == root / 'root-scope.json': raise OSError('SYNTHETIC_AFTER_SEAL_FAILURE')
+        if path == root / 'root-scope.json':
+            raise OSError('SYNTHETIC_AFTER_SEAL_FAILURE')
         return original(path, *args, **kwargs)
     brief, receipt = framing()
     with monkeypatch.context() as patch:
@@ -54,7 +55,8 @@ async def disposition(tmp_path, monkeypatch):
     confirmation = {'operation':'PURGE_EXPIRED_ORIGINAL','owner_decision':authority['owner_decision'],
         'coordinator':authority['coordinator'],'run_id':authority['run_id'],'manifest_sha256':checksum,
         'confirmed_at':datetime.now(timezone.utc).isoformat()}
-    confirm_path = tmp_path / 'action.json'; confirm_path.write_text(json.dumps(confirmation))
+    confirm_path = tmp_path / 'action.json'
+    confirm_path.write_text(json.dumps(confirmation))
     return root, copy, manifest, checksum, confirmation, confirm_path
 
 
@@ -86,19 +88,29 @@ async def test_whole_scope_refusal_precedes_any_original_deletion(disposition, c
     canonical = root / 'canonical/canonical.sqlite3'
     before = canonical.read_bytes()
     if change == 'replaced':
-        replacement = copy.with_suffix('.replacement'); replacement.write_bytes(copy.read_bytes()); replacement.replace(copy)
-    elif change == 'changed': copy.write_text('Changed synthetic payload')
+        replacement = copy.with_suffix('.replacement')
+        replacement.write_bytes(copy.read_bytes())
+        replacement.replace(copy)
+    elif change == 'changed':
+        copy.write_text('Changed synthetic payload')
     elif change == 'symlink':
-        copy.unlink(); copy.symlink_to(canonical)
+        copy.unlink()
+        copy.symlink_to(canonical)
     elif change == 'parent':
-        directory = root / '.ignis'; directory.rename(root / '.ignis-original'); directory.symlink_to(root / '.ignis-original')
-    elif change == 'foreign': (root / 'unregistered.txt').write_text('Foreign preserved')
-    elif change == 'missing': copy.unlink()
+        directory = root / '.ignis'
+        directory.rename(root / '.ignis-original')
+        directory.symlink_to(root / '.ignis-original')
+    elif change == 'foreign':
+        (root / 'unregistered.txt').write_text('Foreign preserved')
+    elif change == 'missing':
+        copy.unlink()
     else:
-        confirmation['run_id'] = str(uuid4()); confirm_path.write_text(json.dumps(confirmation))
+        confirmation['run_id'] = str(uuid4())
+        confirm_path.write_text(json.dumps(confirmation))
     assert invoke(manifest,checksum,confirm_path).returncode == 2
     assert canonical.read_bytes() == before
-    if change == 'foreign': assert (root / 'unregistered.txt').read_text() == 'Foreign preserved'
+    if change == 'foreign':
+        assert (root / 'unregistered.txt').read_text() == 'Foreign preserved'
 
 
 @pytest.mark.asyncio
@@ -110,7 +122,8 @@ async def test_before_expiry_original_identity_is_preserved_without_audit(dispos
             return datetime.fromisoformat(json.loads(manifest.read_text())['authority']['retention_until'])-timedelta(seconds=1)
     monkeypatch.setattr(cleanup, 'datetime', BeforeExpiry)
     inode = copy.stat().st_ino
-    with pytest.raises(cleanup.CleanupRefused): cleanup.purge_confirmed_cleanup(manifest,checksum,confirmation)
+    with pytest.raises(cleanup.CleanupRefused):
+        cleanup.purge_confirmed_cleanup(manifest,checksum,confirmation)
     assert copy.stat().st_ino == inode and (root/'canonical/canonical.sqlite3').exists()
     assert not manifest.with_suffix('.audit.json').exists()
 
@@ -130,7 +143,8 @@ async def test_restart_retry_consumes_original_durable_intent_only(disposition, 
             raise OSError('SYNTHETIC_PROCESS_INTERRUPTION')
     with monkeypatch.context() as patch:
         patch.setattr(cleanup,'_publish',interrupt)
-        with pytest.raises(OSError): cleanup.purge_confirmed_cleanup(manifest,checksum,confirmation)
+        with pytest.raises(OSError):
+            cleanup.purge_confirmed_cleanup(manifest,checksum,confirmation)
     assert invoke(manifest,checksum,confirm_path).returncode == 0
     assert not (root/'canonical/canonical.sqlite3').exists() and not copy.exists()
 
