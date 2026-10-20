@@ -14,6 +14,12 @@ from ignis.application.use_cases.record_mission_research_work import RecordMissi
 
 relay_case = _relay_case
 
+# Tests stamp receipts with the host clock, but PostgreSQL admits them against its own
+# clock_timestamp(), and the two drift apart (the database ran 70 ms behind on Docker for macOS).
+# Backdating by a margin far inside every freshness window keeps a just-taken receipt
+# current, and an expired deadline expired, on either side of that skew.
+CLOCK_SKEW_MARGIN = timedelta(seconds=30)
+
 
 def command(operation, payload, revision, key=None):
     return {
@@ -247,7 +253,7 @@ async def test_public_assign_start_wait_resume_activity_records_only_actual_tran
         "expected_version": 1,
         "ownership_fence": "new-fence",
         "execution_ref": "synthetic-new-execution",
-        "occurred_at": now.isoformat(),
+        "occurred_at": (now - CLOCK_SKEW_MARGIN).isoformat(),
         "fresh_until": (now + timedelta(hours=1)).isoformat(),
     }
     started = await execute(case, mission, command("START_WORK", activity, assigned["revision"]))

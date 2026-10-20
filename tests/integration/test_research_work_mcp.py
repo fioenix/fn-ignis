@@ -19,7 +19,7 @@ import pytest
 from tests.integration.test_mission_relay_read_boundary import relay_case as _relay_case, _state
 
 from tests.integration.test_research_work_persistence import _arrange
-from tests.integration.test_research_work_command_service import command
+from tests.integration.test_research_work_command_service import CLOCK_SKEW_MARGIN, command
 from tests.integration.test_research_recording_mcp_boundary import RUNNER, public_handoff
 
 relay_case = _relay_case
@@ -129,7 +129,7 @@ async def test_native_finite_lifecycle_stop_after_end_and_nonretained_refusal(re
         assigned = await record(client, mission, assigned_body)
         assert assigned['disposition'] == 'APPLIED' and assigned['work_version'] == 1
         activity = {'work_id': identity, 'expected_version': 1, 'ownership_fence': 'new-fence',
-            'execution_ref': 'synthetic-new-execution', 'occurred_at': now.isoformat(),
+            'execution_ref': 'synthetic-new-execution', 'occurred_at': (now - CLOCK_SKEW_MARGIN).isoformat(),
             'fresh_until': (now + timedelta(minutes=3)).isoformat()}
         last = await record(client, mission, command('START_WORK', activity, assigned['revision']))
         assert last['disposition'] == 'APPLIED' and last['work_version'] == 2
@@ -221,7 +221,7 @@ async def test_native_expired_authority_completion_requires_result_and_original_
     # A distinct mission has a genuinely expired persisted authority, not a projected clock.
     case, mission, _, _, work, handoff, revision = await _arrange(relay_case, tmp_path)
     await _sql(case, 'UPDATE research_assignments SET deadline=? WHERE assignment_id=?',
-        ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(), str(work.assignment_id)))
+        ((datetime.now(timezone.utc) - CLOCK_SKEW_MARGIN).isoformat(), str(work.assignment_id)))
     async with native_client(tmp_path, case) as client:
         for operation, payload in [('START_WORK', activity(work)), ('RESUME_WORK', bound(work)),
             ('RECORD_ACTIVITY', activity(work)), ('SUBMIT_HANDOFF', public_handoff(handoff, revision)['payload'])]:

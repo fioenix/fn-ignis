@@ -11,7 +11,7 @@ import pytest
 
 from tests.integration.test_mission_relay_read_boundary import relay_case as _relay_case, _state
 from tests.integration.test_research_work_persistence import _arrange, _sql
-from tests.integration.test_research_work_command_service import command, execute
+from tests.integration.test_research_work_command_service import CLOCK_SKEW_MARGIN, command, execute
 from tests.unit.test_record_mission_research_work import assignment_command
 
 relay_case = _relay_case
@@ -41,7 +41,7 @@ def activity(work, version=None):
     return {
         **payload,
         "execution_ref": "synthetic-execution",
-        "occurred_at": now.isoformat(),
+        "occurred_at": (now - CLOCK_SKEW_MARGIN).isoformat(),
         "fresh_until": (now + timedelta(minutes=5)).isoformat(),
     }
 
@@ -243,7 +243,7 @@ async def test_current_deadline_fences_execution_but_preserves_closure(relay_cas
     await _sql(
         case,
         "UPDATE research_assignments SET deadline=? WHERE assignment_id=?",
-        ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(), str(work.assignment_id)),
+        ((datetime.now(timezone.utc) - CLOCK_SKEW_MARGIN).isoformat(), str(work.assignment_id)),
     )
     payload = (
         activity(work)
