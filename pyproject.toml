@@ -104,6 +104,9 @@ addopts = "-v"
 # The repository root, so tests can import the maintenance tools under scripts/. The package
 # itself is installed from src/ and is unaffected.
 pythonpath = ["."]
+markers = [
+    "migration_chain: builds the PostgreSQL migration chain itself; CI skips it on pull requests that change neither sql/ nor these tests",
+]
 
 [tool.ruff]
 line-length = 120
