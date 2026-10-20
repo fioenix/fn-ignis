@@ -106,6 +106,8 @@ async def test_native_record_read_back_and_original_receipt(relay_case, tmp_path
         assert _state(case) == before
         assert_transport(tmp_path)
         # No capability URL or private storage descriptor enters retained evidence.
+        # .handoff/ is gitignored, so a fresh checkout such as CI does not have it yet.
+        EVIDENCE.mkdir(parents=True, exist_ok=True)
         (EVIDENCE / f'native-{case.name}-receipt.json').write_text(json.dumps({
             'transport': json.loads((tmp_path / 'transport-proof.json').read_text()),
             'record': first, 'ack': accepted, 'mission_id': str(mission.id),

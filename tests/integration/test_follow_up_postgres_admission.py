@@ -120,7 +120,10 @@ async def pg_repository(supabase_like_dsn):
                 if isinstance(cause, psycopg.Error):
                     import json
 
-                    Path(".handoff/spec014/t073/native-error-classifier.json").write_text(
+                    classifier = Path(".handoff/spec014/t073/native-error-classifier.json")
+                    # .handoff/ is gitignored, so a fresh checkout such as CI does not have it yet.
+                    classifier.parent.mkdir(parents=True, exist_ok=True)
+                    classifier.write_text(
                         json.dumps(
                             {
                                 "operation": "record_fact",

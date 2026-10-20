@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 
 from test_mission_relay_read_boundary import _setup_traps, _state, relay_case  # noqa: F401 -- fixture
 from test_mission_relay_mcp import (  # noqa: F401 -- attention_case is a fixture
@@ -42,10 +43,18 @@ async def _read(client, mission_id, run_id=None, page_size=200, **extra):
     return result.structured_content, text
 
 
+@pytest_asyncio.fixture(params=("file", "memory", "postgres"))
+async def follow_up_relay_case(request, tmp_path):
+    """The follow-up relay case: on PostgreSQL it also installs the follow-up admission owner role."""
+    from tests.integration.test_mission_follow_up import relay_case as follow_up
+    async for values in follow_up.__wrapped__(request, tmp_path):
+        yield values
+
+
 @pytest.mark.asyncio
-async def test_parent_and_child_snapshots_expose_only_their_own_observations(relay_case, monkeypatch, tmp_path):  # noqa: F811 -- fixture
+async def test_parent_and_child_snapshots_expose_only_their_own_observations(follow_up_relay_case, monkeypatch, tmp_path):
     from tests.integration.test_mission_follow_up_viewer import _link, _records
-    case, parent, child, foreign = await _records(relay_case, tmp_path)
+    case, parent, child, foreign = await _records(follow_up_relay_case, tmp_path)
     await _link(case, parent, child)
     # Linked child sightings reuse parent source identities; source equality must not grant membership.
     shared_sources = {pair[1] for pair in parent.pairs} & {pair[1] for pair in child.pairs}
