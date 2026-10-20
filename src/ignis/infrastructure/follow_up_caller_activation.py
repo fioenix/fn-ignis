@@ -86,7 +86,7 @@ class CallerSourceActivation:
         # The host's private one-source registry; the caller's shared registry stays unchanged.
         self.executor = _bounded_executor_class()(repository=repository, registry=host.registry,
             clusterer=base._clusterer, workspace_store=store, vocabulary_sync=base._vocabulary_sync,
-            run_started=base._run_started, approved_queries=self.bounds.queries)
+            approved_queries=self.bounds.queries)
         self.attached = False
 
     async def run_parent(self, mission_id):

@@ -54,14 +54,12 @@ class ExecuteMissionUseCase:
         clusterer: IClusteringEngine,
         workspace_store: Optional[IResearchWorkspaceStore] = None,
         vocabulary_sync: Optional[VocabularySynchronizer] = None,
-        run_started=None,
     ):
         self._repo = repository
         self._registry = registry
         self._clusterer = clusterer
         self._workspace_store = workspace_store
         self._vocabulary_sync = vocabulary_sync
-        self._run_started = run_started
 
     async def _require_confirmed_brief(self, mission) -> None:
         """A Market mission does not probe until the requester has confirmed its Brief.
@@ -590,16 +588,9 @@ class ExecuteMissionUseCase:
             expiry_guard()
         logger.info(f"Executing Research Mission '{mission.title}' [ID: {mission_id}] with keywords: {mission.keywords} (Timeframe: {mission.timeframe})...")
         mission.status = "RUNNING"
-        dashboard = None
 
         try:
             await self._update_collection_state(mission, journal)
-            if journal is not None and self._run_started is not None:
-                try:
-                    dashboard = await self._run_started(mission, journal)
-                except Exception:
-                    # Optional presentation must not replace the original mission outcome.
-                    dashboard = {"status": "UNAVAILABLE", "reason_code": "DASHBOARD_START_FAILED"}
             collection_plan_digest = None
             collection_plan = None
             if manifest is not None:
@@ -741,8 +732,6 @@ class ExecuteMissionUseCase:
             if collection_plan_digest is not None:
                 result["collection_plan_digest"] = collection_plan_digest
                 result["collection_plan"] = collection_plan
-            if dashboard is not None:
-                result["dashboard"] = dashboard
             return result
         except (Exception, asyncio.CancelledError) as e:
             safe_error = (

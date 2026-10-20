@@ -379,5 +379,4 @@ class IMissionRelayReader(ABC):
         high-water to one read transaction; no event may exceed it. Missing/old
         schema or failed read returns typed unavailable/refusal, not an empty
         successful read. Unknown/missed cursors return resync without replay.
-        Inspection uses this selected membership, never a global observation lookup.
         """

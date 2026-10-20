@@ -23,11 +23,11 @@ from ignis.infrastructure.caller_storage import CallerStorageMiddleware, current
 from tests.unit import test_follow_up_caller_activation as helpers
 
 root, state_path, mode = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
-calls, resolutions, started, made, owned = [], [], [], {}, {}
+calls, resolutions, made, owned = [], [], {}, {}
 
 def dump(extra=None):
     objects = made.get('objects')
-    state = {'calls': calls, 'resolutions': len(resolutions), 'started': started}
+    state = {'calls': calls, 'resolutions': len(resolutions)}
     if objects is not None:
         state['counts'] = objects.accounting.counts(objects.host.confirmation.bounds)
         state['row'] = list(helpers._closed_row(objects.accounting))
@@ -38,7 +38,6 @@ def dump(extra=None):
 
 async def main():
     components = await helpers._caller_components(root / 'storage')
-    base = components['execute_mission_use_case']
     events = []
     original_close = components['repository'].close
     async def recorded_close():
@@ -47,12 +46,6 @@ async def main():
         await original_close()
     components['repository'].close = recorded_close
     def compose(scope):
-        async def run_started(mission, journal):
-            entry = {'status': mission.status, 'mission_id': str(journal.mission_id),
-                     'run_id': str(journal.run_id), 'journal_status': journal.status}
-            started.append(entry)
-            return None
-        base._run_started = run_started
         owned['scope'] = scope
         return components
     async def factory(scope):
@@ -128,6 +121,13 @@ async def main():
                 'verifier_detached': getattr(components['repository'], '_follow_up_verifier', None) is None,
                 'events': events, 'executions_after': len(scope.runtime._executions)}
 
+    @server.mcp.tool(name='test_root_run_journals')
+    async def run_journals(mission_ids: list[str]) -> dict:
+        store = components['workspace_store']
+        return {mission_id: [{'run_id': str(journal.run_id), 'mission_id': str(journal.mission_id)}
+                             for journal in await store.list_run_journals(UUID(mission_id))]
+                for mission_id in mission_ids}
+
     @server.mcp.tool(name='test_root_mission_state')
     async def state() -> dict:
         dump()
@@ -186,10 +186,12 @@ async def test_middleware_parent_and_genuine_gap_child_share_original_budget(tmp
         assert [call[1]['q'] for call in state['calls'] if call[0] == 'search'] == ['n8n Việt Nam', 'n8n tự động hóa']
         assert all(call[1]['maxResults'] == '5' for call in state['calls'] if call[0] == 'search')
         assert state['resolutions'] == 4 and state['counts'] == {'search': 2, 'other': 2}
-        first = state['started'][0]
-        assert first['status'] == 'RUNNING' and first['mission_id'] == mission_id
-        assert first['journal_status'] == 'STARTED' and first['run_id']
-        assert len(state['started']) == 2 and state['started'][1]['run_id'] != first['run_id']
+        journals = _data(await client.call_tool('test_root_run_journals',
+            {'mission_ids': [mission_id, child['child_mission_id']]}))
+        parent_runs, child_runs = journals[mission_id], journals[child['child_mission_id']]
+        assert [run['mission_id'] for run in parent_runs] == [mission_id]
+        assert [run['mission_id'] for run in child_runs] == [child['child_mission_id']]
+        assert parent_runs[0]['run_id'] != child_runs[0]['run_id']
     final = json.loads((tmp_path / 'state.json').read_text())
     assert final['after_lifespan'] and final['revoked'] and final['row'] == [2, 2, 1, 0]
     assert len(final['calls']) == 4

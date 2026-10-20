@@ -21,7 +21,7 @@ from ignis.domain.relay_research import RelayResearchView
 from ignis.domain.research_work import project_work_activity
 from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
 from ignis.domain.mission_relay import (
-    MissionRelayCursor, MissionRelayInspection,
+    MissionRelayCursor,
     MissionRelayReadFailure, MissionRelaySnapshot, RelayChannelOutcome, RelayCollectionState,
     RelayFramePendingReason, RelayObservation, RelayReadReason, RelayReadStatus,
     RelayClaimGate, RelayGateState,
@@ -35,7 +35,7 @@ from ignis.infrastructure.security.pii_sanitizer import SENSITIVE_FIELD_NAMES, s
 
 
 _MAX_RESPONSE_BYTES = 1_048_576
-RelayResult = MissionRelaySnapshot | MissionRelayInspection | MissionRelayReadFailure
+RelayResult = MissionRelaySnapshot | MissionRelayReadFailure
 
 
 def _failure(reason: RelayReadReason, *, unavailable: bool = False) -> MissionRelayReadFailure:
@@ -341,7 +341,6 @@ def _project(
     *, selected_mission_id: UUID, selected_run_id: UUID | None,
     evidence: MissionEvidenceSnapshot | None, run: RunJournal | None,
     revision: int, read_at: datetime, page_size: int,
-    observation_id: UUID | None = None, inspection: bool = False,
     evidence_offset: int = 0, coherent_read: MissionRelayRead | None = None,
     high_water: MissionRelayCursor | None = None,
 ) -> RelayResult:
@@ -382,14 +381,6 @@ def _project(
             source_count = len({signal.source_id for signal in evidence.signals})
             rows = evidence.signals[evidence_offset:evidence_offset + page_size]
             events = None
-        if inspection:
-            signal = next((row for row in rows if row.observation_id == observation_id), None)
-            if type(observation_id) is not UUID or signal is None:
-                return _failure(RelayReadReason.SCOPE_MISMATCH)
-            return _bounded(MissionRelayInspection(
-                mission_id=selected_mission_id, run_id=selected_run_id, high_water=high_water,
-                read_at=read_at, observation=_observation(signal, evidence, surface, read_at),
-            ))
         try:
             collection_state = RelayCollectionState(run.status if run is not None else evidence.mission.status)
         except (ValueError, TypeError):
@@ -432,28 +423,13 @@ def project_mission_relay_snapshot(
     )
 
 
-def project_mission_relay_inspection(
-    *, selected_mission_id: UUID, selected_run_id: UUID | None,
-    evidence: MissionEvidenceSnapshot | None, run: RunJournal | None,
-    revision: int, read_at: datetime, page_size: int, observation_id: UUID,
-    evidence_offset: int = 0, high_water: MissionRelayCursor | None = None,
-) -> MissionRelayInspection | MissionRelayReadFailure:
-    """Inspect only an observation on the explicitly selected membership page."""
-    return _project(
-        selected_mission_id=selected_mission_id, selected_run_id=selected_run_id,
-        evidence=evidence, run=run, revision=revision, read_at=read_at,
-        page_size=page_size, evidence_offset=evidence_offset, high_water=high_water,
-        observation_id=observation_id, inspection=True,
-    )
-
-
 class GetMissionRelaySnapshotUseCase:
     """Own one coherent reader call; never perform a second evidence lookup."""
 
     def __init__(self, reader: IMissionRelayReader):
         self._reader = reader
 
-    async def _read(self, request: MissionRelayReadRequest, observation_id: UUID | None = None, *, inspection: bool = False) -> RelayResult:
+    async def execute(self, request: MissionRelayReadRequest) -> RelayResult:
         read = await self._reader.load_snapshot(request)
         if type(read) is MissionRelayReadFailure:
             return read
@@ -463,11 +439,5 @@ class GetMissionRelaySnapshotUseCase:
             selected_mission_id=request.mission_id, selected_run_id=request.run_id,
             evidence=read.evidence, run=read.run, revision=read.high_water.revision,
             read_at=read.read_at, page_size=request.page_size, evidence_offset=request.evidence_offset,
-            coherent_read=read, observation_id=observation_id, inspection=inspection,
+            coherent_read=read,
         )
-
-    async def execute(self, request: MissionRelayReadRequest) -> MissionRelaySnapshot | MissionRelayReadFailure:
-        return await self._read(request)
-
-    async def inspect(self, request: MissionRelayReadRequest, observation_id: UUID) -> MissionRelayInspection | MissionRelayReadFailure:
-        return await self._read(request, observation_id, inspection=True)

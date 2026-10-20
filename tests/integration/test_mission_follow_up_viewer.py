@@ -8,7 +8,7 @@ import json
 import importlib
 from dataclasses import dataclass, replace
 from datetime import timedelta
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -290,7 +290,7 @@ async def test_child_permission_cannot_authorize_unpermitted_parent(relay_case, 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('selected,target', (('parent', 'child'), ('child', 'parent'), ('child', 'foreign')))
-async def test_related_link_does_not_grant_foreign_observation_inspection(relay_case, tmp_path, selected, target):
+async def test_related_link_does_not_expose_foreign_observation(relay_case, tmp_path, selected, target):
     case, parent, child, foreign = await _records(relay_case, tmp_path)
     await _link(case, parent, child)
     records = {'parent': parent, 'child': child, 'foreign': foreign}
@@ -298,8 +298,9 @@ async def test_related_link_does_not_grant_foreign_observation_inspection(relay_
     # These sightings share a source ID: source equality must not grant membership.
     target_signal = next(signal for signal in records[target].evidence.signals if signal.raw_title == 'Demand evidence')
     use_case = GetMissionRelaySnapshotUseCase(_reader(case.repository))
-    result = (await use_case.inspect(_request(records[selected]), target_signal.observation_id)).to_payload()
-    assert result == {'schema_version': 1, 'status': 'REFUSED', 'reason_code': 'SCOPE_MISMATCH'}
+    result = (await use_case.execute(_request(records[selected]))).to_payload()
+    assert result['status'] == 'OK'
+    assert str(target_signal.observation_id) not in {row['observation_id'] for row in result['evidence']}
     assert _state(case) == before
 
 
@@ -320,10 +321,6 @@ async def test_selected_child_and_labeled_relation_never_create_composite_frame(
     _assert_summary(row, parent, child)
     assert parent.finding.statement not in json.dumps(child_payload)
     assert child.finding.statement not in json.dumps(parent_payload)
-    # Explicit child selection, not an inherited parent request, permits detail.
-    observation = child_payload['evidence'][0]
-    detail = (await use_case.inspect(_request(child), UUID(observation['observation_id']))).to_payload()
-    assert detail['mission_id'] == str(child.mission.id) and detail['observation'] == observation
 
 
 @pytest.mark.asyncio
@@ -358,11 +355,8 @@ async def test_readonly_child_view_cannot_execute_followup_or_mutate_authority(r
     _assert_selected(parent_payload, parent)
     _assert_selected(child_payload, child)
     assert _related(parent_payload)
-    observation = child_payload['evidence'][0]
-    inspected = (await use_case.inspect(_request(child), UUID(observation['observation_id']))).to_payload()
-    assert inspected['observation'] == observation
     for selected, target in ((parent, child), (child, foreign)):
-        rejected = (await use_case.inspect(_request(selected), target.evidence.signals[0].observation_id)).to_payload()
-        assert rejected == {'schema_version': 1, 'status': 'REFUSED', 'reason_code': 'SCOPE_MISMATCH'}
+        visible = (await use_case.execute(_request(selected))).to_payload()
+        assert str(target.evidence.signals[0].observation_id) not in {row['observation_id'] for row in visible['evidence']}
     assert counters == {'execute': 0, 'probe': 0, 'auth': 0}
     assert _state(case) == before

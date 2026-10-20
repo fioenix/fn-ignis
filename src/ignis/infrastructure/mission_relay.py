@@ -8,10 +8,7 @@ tracking artifacts from these reads with the ignis-track guidance.
 import asyncio
 import json
 import threading
-from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Protocol
-from uuid import UUID
 
 from ignis.application.ports.mission_relay_port import MissionRelayReadRequest
 from ignis.domain.mission_relay import (
@@ -29,14 +26,6 @@ _process_reads = 0
 
 class MissionRelayProvider(Protocol):
     async def snapshot(self, request: MissionRelayReadRequest) -> MissionRelaySnapshot | MissionRelayReadFailure: ...
-
-
-@dataclass(slots=True)
-class _Scope:
-    mission_id: UUID
-    run_id: UUID | None
-    expires_at: datetime
-    task: asyncio.Task | None = None
 
 
 def _failure(reason: RelayReadReason, unavailable: bool = False) -> MissionRelayReadFailure:
@@ -60,42 +49,28 @@ class MissionRelayReadService:
         self._tasks: set[asyncio.Task] = set()
         self._closed = False
 
-    async def read_snapshot(self, request: MissionRelayReadRequest):
-        _, result = await self._read(
-            _Scope(request.mission_id, request.run_id, datetime.max.replace(tzinfo=timezone.utc)), request
-        )
-        return result
-
-    def _require_owner(self):
-        if asyncio.get_running_loop() is not self.owner_loop:
-            raise RuntimeError("Mission relay operation requires its owning loop.")
-
-    async def _read(self, scope, request):
+    async def read_snapshot(self, request: MissionRelayReadRequest) -> MissionRelaySnapshot | MissionRelayReadFailure:
         global _process_reads
         self._require_owner()
-        if scope.expires_at <= datetime.now(timezone.utc):
-            return 403, _failure(RelayReadReason.CAPABILITY_EXPIRED)
         with _PROCESS_LOCK:
-            if self._closed or scope.task is not None or _process_reads >= 4:
-                return 503, _failure(RelayReadReason.READ_BUSY, True)
+            if self._closed or _process_reads >= 4:
+                return _failure(RelayReadReason.READ_BUSY, True)
             _process_reads += 1
 
         async def execute():
-            global _process_reads
             try:
                 value = await self.provider.snapshot(request)
                 if type(value) is MissionRelayReadFailure:
-                    return (503 if value.status is RelayReadStatus.UNAVAILABLE else 403), value
-                if type(value) is not MissionRelaySnapshot or value.mission_id != scope.mission_id or value.run_id != scope.run_id:
-                    return 503, _failure(RelayReadReason.READ_UNAVAILABLE, True)
+                    return value
+                if type(value) is not MissionRelaySnapshot or value.mission_id != request.mission_id or value.run_id != request.run_id:
+                    return _failure(RelayReadReason.READ_UNAVAILABLE, True)
                 if len(_encode(value)) > _RESPONSE_LIMIT:
-                    return 413, _failure(RelayReadReason.RESPONSE_TOO_LARGE)
-                return 200, value
+                    return _failure(RelayReadReason.RESPONSE_TOO_LARGE)
+                return value
             except Exception:
-                return 503, _failure(RelayReadReason.READ_UNAVAILABLE, True)
+                return _failure(RelayReadReason.READ_UNAVAILABLE, True)
 
         task = self.owner_loop.create_task(execute())
-        scope.task = task
         self._tasks.add(task)
 
         def release(settled):
@@ -103,7 +78,6 @@ class MissionRelayReadService:
             # Done callbacks also run if shutdown cancels a task before its first step.
             with _PROCESS_LOCK:
                 _process_reads -= 1
-            scope.task = None
             self._tasks.discard(settled)
 
         task.add_done_callback(release)
@@ -112,13 +86,17 @@ class MissionRelayReadService:
             if not done:
                 if not task.cancelling():
                     task.cancel()
-                return 504, _failure(RelayReadReason.READ_TIMEOUT, True)
+                return _failure(RelayReadReason.READ_TIMEOUT, True)
             if self._closed or task.cancelled():
-                return 503, _failure(RelayReadReason.READ_UNAVAILABLE, True)
+                return _failure(RelayReadReason.READ_UNAVAILABLE, True)
             return task.result()
         finally:
             if not task.done() and not task.cancelling():
                 task.cancel()
+
+    def _require_owner(self):
+        if asyncio.get_running_loop() is not self.owner_loop:
+            raise RuntimeError("Mission relay operation requires its owning loop.")
 
     def close(self):
         with self._lock:

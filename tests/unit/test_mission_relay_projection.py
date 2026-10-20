@@ -44,7 +44,7 @@ SOURCE = UUID("44444444-5555-4666-8777-888888888888")
 FOREIGN = UUID("55555555-6666-4777-8888-999999999999")
 WORKSPACE = UUID("66666666-7777-4888-8999-aaaaaaaaaaaa")
 MODULE = "ignis.application.use_cases.get_mission_relay_snapshot"
-KINDS = ("snapshot", "inspection")
+KINDS = ("snapshot",)
 
 
 @pytest.fixture
@@ -115,8 +115,6 @@ def _projection(kind, evidence, run, **overrides):
         "page_size": 100,
         "high_water": MissionRelayCursor(mission_id=MISSION, revision=7, ordinal=3),
     }
-    if kind == "inspection":
-        arguments["observation_id"] = OBSERVATION
     arguments.update(overrides)
     result = project(**arguments)
     assert not isinstance(result, dict), "The consuming API must return a typed safe result"
@@ -127,7 +125,7 @@ def _projection(kind, evidence, run, **overrides):
 
 
 def _observation(kind, payload):
-    return payload["evidence"][0] if kind == "snapshot" else payload["observation"]
+    return payload["evidence"][0]
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -284,14 +282,6 @@ def test_projection_preserves_a_measured_zero(records, kind):
     evidence.signals[0].metric_value = 0
     payload, _ = _projection(kind, evidence, run)
     assert _observation(kind, payload)["metric_value"] == 0
-
-
-def test_inspection_refuses_an_observation_outside_selected_membership(records):
-    """Catch resolving an arbitrary global observation ID outside this snapshot."""
-    payload, serialized = _projection("inspection", *records, observation_id=FOREIGN)
-    assert payload["status"] == "REFUSED"
-    assert payload["reason_code"] == "SCOPE_MISMATCH"
-    assert "Work bag review" not in serialized
 
 
 def test_unavailable_snapshot_does_not_become_successful_measured_emptiness(records):
