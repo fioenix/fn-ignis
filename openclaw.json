@@ -31,11 +31,13 @@
     "tools_count": 48,
     "prompts": [
       "market_research_pipeline",
-      "voice_of_customer_audit"
+      "voice_of_customer_audit",
+      "ignis_track"
     ],
     "resources": [
       "fn-ignis://sop/market-research",
-      "fn-ignis://methodology/opportunity-index"
+      "fn-ignis://methodology/opportunity-index",
+      "fn-ignis://guide/ignis-track"
     ]
   }
 }

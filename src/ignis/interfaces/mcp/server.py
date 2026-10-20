@@ -4155,6 +4155,31 @@ only permitted claims; otherwise return the Gap Report. Export HTML only if requ
 """
 
 
+def _ignis_track_guide() -> str:
+    # One packaged source, shipped in the wheel and mirrored by .agents/skills/ignis-track/SKILL.md.
+    from importlib import resources
+    return resources.files("ignis.interfaces.mcp").joinpath("guides/ignis_track.md").read_text(encoding="utf-8")
+
+
+@mcp.resource("fn-ignis://guide/ignis-track")
+def get_ignis_track_guide() -> str:
+    """How an agent reads the mission snapshot and generates a tracking artifact for a person."""
+    return _ignis_track_guide()
+
+
+@mcp.prompt(name="ignis_track")
+def prompt_ignis_track(mission_id: Optional[str] = None) -> str:
+    """Guide the agent to build a point-in-time tracking artifact; reads nothing by itself."""
+    guide = _ignis_track_guide()
+    if mission_id is None:
+        return guide
+    try:
+        selected = UUID(mission_id)
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("mission_id must be a mission UUID") from None
+    return f"Selected mission: `{selected}`\n\n{guide}"
+
+
 @mcp.prompt(name="voice_of_customer_audit")
 def prompt_voice_of_customer_audit(keywords: str = "Chatbot AI") -> str:
     """Frame a bounded source-specific customer-voice probe."""
