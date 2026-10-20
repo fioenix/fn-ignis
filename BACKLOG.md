@@ -177,8 +177,8 @@ bản sửa guard đọc secret; lỗi ruff được dọn hết mà không đ�
 PostgreSQL đã được sửa. Cả 4 check bắt buộc đều đạt trên `a836cf0`; PR được merge bằng merge commit
 `474916f`. Mô tả PR vẫn là bản R1 cũ (viewer, 58/92 task), chưa cập nhật theo R2.
 
-Tại mốc này, ledger có 109/116 task đã nghiệm thu. Còn mở T079, T082, T084, T087, T092 (CI sau
-merge còn đang chạy khi ghi mục này), T112 và T113. Chưa có UAT với nhiệm vụ thật; chưa bump
+Tại mốc này, ledger có 108/116 task đã nghiệm thu. Còn mở T079, T082, T084, T087, T091 (mô tả
+PR #51 chưa cập nhật theo R2), T092 (CI sau merge còn đang chạy khi ghi mục này), T112 và T113. Chưa có UAT với nhiệm vụ thật; chưa bump
 version, tag hay phát hành.
 
 
