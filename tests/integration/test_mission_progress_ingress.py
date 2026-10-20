@@ -17,7 +17,7 @@ from psycopg import sql
 
 from conftest import (
     RepositoryCase,
-    _apply_postgres_schema,
+    _create_schema_database,
     _drop_test_database,
     _postgres_dsns,
 )
@@ -76,10 +76,8 @@ async def ingress_case(request, tmp_path):
         return
 
     admin_dsn, test_dsn, database_name = _postgres_dsns()
-    with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+    _create_schema_database(admin_dsn, database_name)
     try:
-        _apply_postgres_schema(test_dsn)
         repository = PostgresTimescaleRepository(dsn=test_dsn, min_pool_size=1, max_pool_size=2)
         try:
             yield RepositoryCase(name="postgres", repository=repository, dsn=test_dsn)

@@ -12,6 +12,10 @@ from psycopg.types.json import Jsonb
 from conftest import REPO_SQL, all_postgres_migrations, runtime_owner
 from test_postgres_rls_coverage import MISSION, OBSERVATION, RUN, SOURCE, SPARE_MISSION, _attempt, _seed
 
+# Builds the migration chain itself; CI runs it on main, release tags and pull requests that change
+# sql/ or these chain tests (.github/workflows/ci.yml).
+pytestmark = pytest.mark.migration_chain
+
 MIGRATION = "027_mission_progress.sql"
 TABLES = ("mission_progress_revisions", "mission_progress_events", "mission_progress_commands")
 CANONICAL = (

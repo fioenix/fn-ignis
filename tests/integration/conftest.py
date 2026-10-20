@@ -6,6 +6,7 @@ restates its schema in _ensure_schema and Postgres reads sql/, which is exactly 
 divergence these tests exist to catch.
 """
 
+import hashlib
 import os
 import sqlite3
 import time
@@ -343,6 +344,91 @@ def _apply_postgres_schema(dsn: str) -> None:
             conn.execute((repo_root / "sql" / migration).read_text(encoding="utf-8"))
 
 
+# Template databases built or reused by this test session, dropped when the session ends.
+_SCHEMA_TEMPLATES: dict[str, str] = {}
+# One arbitrary key, so concurrent sessions on one server build a template only once.
+_TEMPLATE_LOCK_KEY = 0x1617_0015
+
+
+def _schema_template_name() -> str:
+    """A name bound to the exact SCHEMA_MIGRATIONS bytes, so an edited migration gets a new template."""
+    repo_root = Path(__file__).resolve().parents[2]
+    digest = hashlib.sha256()
+    for migration in SCHEMA_MIGRATIONS:
+        digest.update(migration.encode())
+        digest.update((repo_root / "sql" / migration).read_bytes())
+    return f"ignis_template_{digest.hexdigest()[:16]}"
+
+
+def _close_database_to_connections(conn, database_name: str) -> None:
+    """Refuse new sessions, then end the ones open, so the database can be renamed or copied.
+
+    TimescaleDB's job scheduler connects to every database that has the extension and allows
+    connections; a copy fails while any session is open on its source.
+    """
+    conn.execute(
+        sql.SQL("ALTER DATABASE {} WITH ALLOW_CONNECTIONS false").format(sql.Identifier(database_name))
+    )
+    conn.execute(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+        " WHERE datname = %s AND pid <> pg_backend_pid()",
+        (database_name,),
+    )
+
+
+def _schema_template(admin_dsn: str) -> str:
+    """Apply SCHEMA_MIGRATIONS once per server and session; tests copy the result.
+
+    The migrations run in a scratch database that is renamed to the template name only once they
+    all succeeded, so an existing template is always a complete one.
+    """
+    name = _schema_template_name()
+    if _SCHEMA_TEMPLATES.get(admin_dsn) == name:
+        return name
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        conn.execute("SELECT pg_advisory_lock(%s)", (_TEMPLATE_LOCK_KEY,))
+        try:
+            exists = conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,)).fetchone()
+            if not exists:
+                building = f"{name}_building_{uuid4().hex[:8]}"
+                conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(building)))
+                try:
+                    _apply_postgres_schema(
+                        make_conninfo(**{**conninfo_to_dict(admin_dsn), "dbname": building})
+                    )
+                    _close_database_to_connections(conn, building)
+                    conn.execute(
+                        sql.SQL("ALTER DATABASE {} RENAME TO {}").format(
+                            sql.Identifier(building), sql.Identifier(name)
+                        )
+                    )
+                except BaseException:
+                    _drop_test_database(admin_dsn, building)
+                    raise
+        finally:
+            conn.execute("SELECT pg_advisory_unlock(%s)", (_TEMPLATE_LOCK_KEY,))
+    _SCHEMA_TEMPLATES[admin_dsn] = name
+    return name
+
+
+def _create_schema_database(admin_dsn: str, database_name: str) -> None:
+    """A new database holding exactly what _apply_postgres_schema would have built, copied from the template."""
+    template = _schema_template(admin_dsn)
+    with psycopg.connect(admin_dsn, autocommit=True) as conn:
+        conn.execute(
+            sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                sql.Identifier(database_name), sql.Identifier(template)
+            )
+        )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Leave no template behind on a shared server."""
+    for admin_dsn, name in list(_SCHEMA_TEMPLATES.items()):
+        _drop_test_database(admin_dsn, name)
+        _SCHEMA_TEMPLATES.pop(admin_dsn, None)
+
+
 def _drop_test_database(admin_dsn: str, database_name: str, attempts: int = 5) -> None:
     """Drop the throwaway contract database, even behind a pooler and without SUPERUSER.
 
@@ -415,10 +501,8 @@ async def repository_case(request, tmp_path):
         return
 
     admin_dsn, test_dsn, database_name = _postgres_dsns()
-    with psycopg.connect(admin_dsn, autocommit=True) as conn:
-        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database_name)))
+    _create_schema_database(admin_dsn, database_name)
     try:
-        _apply_postgres_schema(test_dsn)
         repository = PostgresTimescaleRepository(dsn=test_dsn, min_pool_size=1, max_pool_size=2)
         try:
             yield RepositoryCase(name="postgres", repository=repository, dsn=test_dsn)
@@ -451,6 +535,17 @@ class RedactedDsn(str):
 
     def __repr__(self) -> str:
         return "'<redacted dsn>'"
+
+
+@pytest.fixture
+def schema_postgres_dsn():
+    """A new PostgreSQL database already holding SCHEMA_MIGRATIONS, copied from the session template."""
+    admin_dsn, test_dsn, database_name = _postgres_dsns()
+    _create_schema_database(admin_dsn, database_name)
+    try:
+        yield RedactedDsn(test_dsn)
+    finally:
+        _drop_test_database(admin_dsn, database_name)
 
 
 @pytest.fixture

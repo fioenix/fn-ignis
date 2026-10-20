@@ -32,6 +32,10 @@ from ignis.infrastructure.persistence.postgres_repository import PostgresTimesca
 from ignis.domain.value_objects import IngressTrigger
 from ignis.domain.youtube_quota import YouTubeQuotaBucket
 
+# Builds the migration chain itself; CI runs it on main, release tags and pull requests that change
+# sql/ or these chain tests (.github/workflows/ci.yml).
+pytestmark = pytest.mark.migration_chain
+
 SECURITY_MIGRATION = "006_supabase_security_hardening.sql"
 RETIREMENT = "020_retire_ambiguous_tiktok_ui_noise.sql"
 # The objects later migrations add; if init stopped early, these are what is missing.

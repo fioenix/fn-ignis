@@ -9,6 +9,10 @@ from psycopg import sql
 
 from tests.integration.conftest import SCHEMA_MIGRATIONS, runtime_owner
 
+# Builds the migration chain itself; CI runs it on main, release tags and pull requests that change
+# sql/ or these chain tests (.github/workflows/ci.yml).
+pytestmark = pytest.mark.migration_chain
+
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / 'sql/028_research_work.sql'
 TABLES = ('research_assignments', 'research_work_items', 'research_input_sets',

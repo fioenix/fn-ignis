@@ -312,8 +312,7 @@ def _guard_caller_close(monkeypatch, repository):
 @pytest_asyncio.fixture(params=("file", "memory", "postgres"))
 async def relay_case(request, tmp_path):
     if request.param == "postgres":
-        dsn = request.getfixturevalue("empty_postgres_dsn")
-        _apply_postgres_schema(dsn)
+        dsn = request.getfixturevalue("schema_postgres_dsn")
         repository = PostgresTimescaleRepository(dsn, min_pool_size=1, max_pool_size=2)
         case = RepositoryCase("postgres", repository, dsn)
     else:
