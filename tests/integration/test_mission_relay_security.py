@@ -7,11 +7,17 @@ mission and must never carry private text, structured private metadata or unmask
 
 import json
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import pytest
 
 from test_mission_relay_read_boundary import _setup_traps, _state, relay_case  # noqa: F401 -- fixture
-from test_mission_relay_mcp import _OwnedRepository, _caller_client, _observe_chain
+from test_mission_relay_mcp import (  # noqa: F401 -- attention_case is a fixture
+    _OwnedRepository,
+    _caller_client,
+    _observe_chain,
+    attention_case,
+)
 
 REFUSED_SCOPE = {"schema_version": 1, "status": "REFUSED", "reason_code": "SCOPE_MISMATCH"}
 
@@ -25,12 +31,15 @@ def _forbid_bootstrap(monkeypatch):
     monkeypatch.setattr(server, "create_repository", forbidden)
 
 
-async def _read(client, mission_id, run_id=None, page_size=200):
-    arguments = {"mission_id": mission_id, "page_size": page_size}
+async def _read(client, mission_id, run_id=None, page_size=200, **extra):
+    """Return the structured result and the text channel an agent may read instead; both must agree."""
+    arguments = {"mission_id": mission_id, "page_size": page_size, **extra}
     if run_id is not None:
         arguments["run_id"] = run_id
-    result = (await client.call_tool("get_mission_relay_snapshot", arguments)).structured_content
-    return result, json.dumps(result, ensure_ascii=False)
+    result = await client.call_tool("get_mission_relay_snapshot", arguments)
+    text = result.content[0].text
+    assert json.loads(text) == result.structured_content, "Text and structured results diverge"
+    return result.structured_content, text
 
 
 @pytest.mark.asyncio
@@ -330,3 +339,108 @@ async def test_snapshot_masks_outward_text_across_current_and_withdrawn_permissi
     captured = capsys.readouterr()
     _assert_absent(caplog.text, "Captured logs", private)
     _assert_absent(captured.out + captured.err, "Captured output", private)
+
+
+READ_FAILURE_KEYS = {"schema_version", "status", "reason_code"}
+
+
+@pytest.mark.asyncio
+async def test_cross_mission_reads_refuse_or_stay_inside_the_selected_mission(attention_case, monkeypatch, tmp_path):
+    case, missions, runs = attention_case
+    selected = {str(s.observation_id) for s in await case.repository.get_mission_signals(missions[0].id)}
+    foreign = {str(s.observation_id) for s in await case.repository.get_mission_signals(missions[1].id)}
+    assert selected and foreign and not selected & foreign, "Fixture must hold two disjoint missions"
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+    _forbid_bootstrap(monkeypatch)
+    owned = _OwnedRepository(monkeypatch, case)
+    with _observe_chain(case, monkeypatch) as observed:
+        async with _caller_client(monkeypatch, tmp_path, {"repository": case.repository}) as client:
+            snapshot, text = await _read(client, str(missions[0].id), str(runs[0]))
+            assert snapshot["status"] == "OK"
+            assert {row["observation_id"] for row in snapshot["evidence"]} == selected
+            assert all(row["mission_id"] == str(missions[0].id) for row in snapshot["evidence"])
+            assert not any(identity in text for identity in foreign), "A foreign observation entered the read"
+            assert str(missions[1].id) not in text and str(runs[1]) not in text
+            for label, arguments in (
+                ("foreign run", {"mission_id": str(missions[0].id), "run_id": str(runs[1])}),
+                ("unknown mission", {"mission_id": str(uuid4())}),
+                ("malformed mission", {"mission_id": "../" + str(missions[1].id)}),
+            ):
+                refused, refusal = await _read(client, page_size=2, **arguments)
+                assert refused == REFUSED_SCOPE, label
+                assert set(json.loads(refusal)) == READ_FAILURE_KEYS, label
+            cursor, _ = await _read(client, str(missions[0].id), str(runs[0]), page_size=2,
+                                    after_revision=snapshot["revision"] + 1000, after_ordinal=0)
+            assert cursor == {"schema_version": 1, "status": "REFUSED", "reason_code": "INVALID_REQUEST"}
+        observed.assert_no_writes()
+    owned.assert_closed_unchanged(case, before)
+
+
+@pytest.mark.asyncio
+async def test_page_bounds_are_typed_and_never_an_empty_success_past_the_end(attention_case, monkeypatch, tmp_path):
+    case, missions, runs = attention_case
+    mission, run = str(missions[0].id), str(runs[0])
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+    _forbid_bootstrap(monkeypatch)
+    owned = _OwnedRepository(monkeypatch, case)
+    with _observe_chain(case, monkeypatch) as observed:
+        async with _caller_client(monkeypatch, tmp_path, {"repository": case.repository}) as client:
+            for page_size in (0, 201):
+                refused, _ = await _read(client, mission, run, page_size=page_size)
+                assert refused == {"schema_version": 1, "status": "REFUSED", "reason_code": "INVALID_PAGE_SIZE"}
+            negative, _ = await _read(client, mission, run, page_size=2, evidence_offset=-1)
+            assert negative == {"schema_version": 1, "status": "REFUSED", "reason_code": "INVALID_REQUEST"}
+            first, _ = await _read(client, mission, run, page_size=2)
+            total = first["counts"]["observations"]
+            assert len(first["evidence"]) == 2 and first["next_evidence_offset"] == 2
+            end, _ = await _read(client, mission, run, page_size=2, evidence_offset=total)
+            assert end["status"] == "OK" and end["evidence"] == [] and end["next_evidence_offset"] is None
+            assert end["counts"] == first["counts"], "The end of the corpus must keep its measured totals"
+            # Past the end is a typed failure, never an empty page that could read as zero evidence.
+            past, _ = await _read(client, mission, run, page_size=2, evidence_offset=total + 1)
+            assert past["status"] != "OK" and set(past) == READ_FAILURE_KEYS
+        observed.assert_no_writes()
+    owned.assert_closed_unchanged(case, before)
+
+
+@pytest.mark.asyncio
+async def test_oversized_response_is_refused_whole_without_logging_its_rows(
+        attention_case, monkeypatch, tmp_path, caplog, capsys):
+    from ignis.infrastructure import mission_relay
+    caplog.set_level("DEBUG")
+    case, missions, runs = attention_case
+    titles = {"title_" + str(index): s.raw_title
+              for index, s in enumerate(await case.repository.get_mission_signals(missions[0].id))}
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+    _forbid_bootstrap(monkeypatch)
+    owned = _OwnedRepository(monkeypatch, case)
+    async with _caller_client(monkeypatch, tmp_path, {"repository": case.repository}) as client:
+        allowed, text = await _read(client, str(missions[0].id), str(runs[0]))
+        assert allowed["status"] == "OK" and len(text.encode("utf-8")) > 256
+        monkeypatch.setattr(mission_relay, "_RESPONSE_LIMIT", 256)
+        refused, refusal = await _read(client, str(missions[0].id), str(runs[0]))
+        assert refused == {"schema_version": 1, "status": "REFUSED", "reason_code": "RESPONSE_TOO_LARGE"}
+        _assert_absent(refusal, "Oversized refusal", titles)
+    owned.assert_closed_unchanged(case, before)
+    captured = capsys.readouterr()
+    _assert_absent(caplog.text, "Captured logs", titles)
+    _assert_absent(captured.out + captured.err, "Captured output", titles)
+
+
+@pytest.mark.asyncio
+async def test_packaged_tracking_guide_requires_consent_before_any_publication():
+    from fastmcp import Client
+    from ignis.interfaces.mcp import server
+    async with Client(server.mcp) as client:
+        guide = (await client.read_resource("fn-ignis://guide/ignis-track"))[0].text
+        prompt = (await client.get_prompt("ignis_track")).messages[0].content.text
+    assert prompt == guide
+    rule = " ".join(guide.split("## Where it goes", 1)[1].split())
+    guide = " ".join(guide.split())
+    assert "Write the artifact to a local file by default" in rule
+    assert "ask for consent for that specific publication" in rule
+    assert "Consent for one publication does not cover the next" in rule
+    assert "Do not poll" in guide and "Never render a withheld, stale or historical claim as permitted" in guide
