@@ -175,11 +175,12 @@ Ngày 20/10/2026, chủ sở hữu duyệt push nhánh `codex/ignis-relay-checko
 [PR #51](https://github.com/fioenix/fn-ignis/pull/51) khi CI xanh. Trước khi push, nhánh đã nhận
 bản sửa guard đọc secret; lỗi ruff được dọn hết mà không đổi cấu hình lint; 4 test chỉ lỗi trên
 PostgreSQL đã được sửa. Cả 4 check bắt buộc đều đạt trên `a836cf0`; PR được merge bằng merge commit
-`474916f`. Mô tả PR vẫn là bản R1 cũ (viewer, 58/92 task), chưa cập nhật theo R2.
+`474916f`. Cả ba workflow chạy sau merge trên `main` tại `474916f` (CI, Compose Init, Performance)
+đều đạt. Mô tả PR đã được viết lại theo R2 cùng ngày; bản R1 cũ vẫn còn trong lịch sử chỉnh sửa
+của PR.
 
-Tại mốc này, ledger có 108/116 task đã nghiệm thu. Còn mở T079, T082, T084, T087, T091 (mô tả
-PR #51 chưa cập nhật theo R2), T092 (CI sau merge còn đang chạy khi ghi mục này), T112 và T113. Chưa có UAT với nhiệm vụ thật; chưa bump
-version, tag hay phát hành.
+Tại mốc này, ledger có 110/116 task đã nghiệm thu. Còn mở T079, T082, T084, T087, T112 và T113.
+Chưa có UAT với nhiệm vụ thật; chưa bump version, tag hay phát hành.
 
 
 ## Nghiên cứu riêng — benchmark đối thủ
