@@ -398,9 +398,9 @@ async def test_page_bounds_are_typed_and_never_an_empty_success_past_the_end(att
             end, _ = await _read(client, mission, run, page_size=2, evidence_offset=total)
             assert end["status"] == "OK" and end["evidence"] == [] and end["next_evidence_offset"] is None
             assert end["counts"] == first["counts"], "The end of the corpus must keep its measured totals"
-            # Past the end is a typed failure, never an empty page that could read as zero evidence.
+            # Past the end is a caller error, never an empty page or an apparent storage failure.
             past, _ = await _read(client, mission, run, page_size=2, evidence_offset=total + 1)
-            assert past["status"] != "OK" and set(past) == READ_FAILURE_KEYS
+            assert past == {"schema_version": 1, "status": "REFUSED", "reason_code": "INVALID_REQUEST"}
         observed.assert_no_writes()
     owned.assert_closed_unchanged(case, before)
 

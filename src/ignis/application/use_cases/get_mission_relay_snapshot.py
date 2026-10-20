@@ -382,6 +382,9 @@ def _project(
             source_count = len({signal.source_id for signal in evidence.signals})
             rows = evidence.signals[evidence_offset:evidence_offset + page_size]
             events = None
+        if evidence_offset > total and not inspection:
+            # A page beyond the corpus is a caller error, not missing storage or an empty page.
+            return _failure(RelayReadReason.INVALID_REQUEST)
         if inspection:
             signal = next((row for row in rows if row.observation_id == observation_id), None)
             if type(observation_id) is not UUID or signal is None:

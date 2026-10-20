@@ -392,6 +392,16 @@ def test_projection_pages_without_substituting_page_counts_for_corpus_totals(rec
     assert last["evidence"][0]["observation_id"] == str(FOREIGN)
     assert last["counts"] == {"observations": 2, "sources": 1}
     assert last["next_evidence_offset"] is None
+    end, _ = _projection("snapshot", evidence, run, page_size=1, evidence_offset=2)
+    assert end["evidence"] == [] and end["next_evidence_offset"] is None
+    assert end["counts"] == {"observations": 2, "sources": 1}
+
+
+def test_offset_past_the_end_is_a_caller_error_not_unavailable_storage(records):
+    """An agent must not read an offset beyond the corpus as a storage failure or an empty page."""
+    evidence, run = records
+    payload, _ = _projection("snapshot", evidence, run, page_size=1, evidence_offset=len(evidence.signals) + 1)
+    assert payload == {"schema_version": 1, "status": "REFUSED", "reason_code": "INVALID_REQUEST"}
 
 
 def test_unknown_selected_run_is_not_replaced_by_a_completed_run(records):

@@ -278,7 +278,8 @@ class MissionRelayRead:
         _count(self.source_count, "source_count")
         visible = len(self.evidence.signals)
         offset = self.request.evidence_offset
-        if visible > self.request.page_size or offset + visible > self.total_observations:
+        # An empty page past the end stays representable so the projection can refuse it as a caller error.
+        if visible > self.request.page_size or visible and offset + visible > self.total_observations:
             raise ValueError("Evidence page exceeds its declared bounds.")
         if not visible and offset < self.total_observations:
             raise ValueError("An incomplete evidence page must make forward progress.")

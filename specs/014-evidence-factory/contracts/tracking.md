@@ -4,7 +4,7 @@
 
 ## Snapshot read — existing, unchanged
 
-`get_mission_relay_snapshot(mission_id, page_size, run_id?, after_revision?, after_ordinal?, evidence_offset?)` keeps its current signature, bounds and typed refusals, as documented in [relay-viewer.md](relay-viewer.md) "MCP read operations" and "T001 resource limits". It requires a resolved caller root ([caller-root.md](caller-root.md)). It never opens a browser, starts collection or writes mission state.
+`get_mission_relay_snapshot(mission_id, page_size, run_id?, after_revision?, after_ordinal?, evidence_offset?)` keeps its current signature, bounds and typed refusals, as documented in [relay-viewer.md](relay-viewer.md) "MCP read operations" and "T001 resource limits". It requires a resolved caller root ([caller-root.md](caller-root.md)). It never opens a browser, starts collection or writes mission state. Evidence paging: `evidence_offset` equal to the corpus total returns an `OK` page with no rows and `next_evidence_offset` null; an offset past the total refuses with `REFUSED`/`INVALID_REQUEST` (owner decision, 2026-10-20), never `UNAVAILABLE` or an empty success.
 
 The display states an artifact may show come only from snapshot fields; the mapping is in [data-model.md](../data-model.md) "Tracking artifact".
 

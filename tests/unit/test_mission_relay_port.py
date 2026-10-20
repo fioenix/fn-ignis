@@ -424,6 +424,9 @@ def test_read_page_preserves_global_totals_and_exact_continuation():
     assert page.evidence.signals[0].observation_id == FACT
     end = read(request=request(evidence_offset=3), total_observations=3, source_count=2)
     assert end.next_evidence_offset is None
+    # An empty page past the end is recorded faithfully; the projection refuses it as a caller error.
+    past = read(request=request(evidence_offset=4), total_observations=3, source_count=2)
+    assert past.evidence.signals == () and past.next_evidence_offset is None
 
 
 def test_unknown_cursor_resync_preserves_snapshot_high_water_without_arrival_replay():
@@ -474,7 +477,11 @@ def test_read_envelope_refuses_incoherent_identity_or_receipt(change):
     elif change == "sources":
         changes["source_count"] = 1
     else:
-        changes["request"] = request(evidence_offset=1)
+        # A non-empty page that overruns the corpus; an empty page past the end stays representable.
+        signal = TrendSignal(platform=PlatformType.YOUTUBE, raw_title="Public evidence", mission_id=MISSION,
+                             observation_id=FACT, source_id=OTHER, captured_at=None)
+        changes.update(request=request(evidence_offset=1), total_observations=1, source_count=1,
+                       evidence=replace(item.evidence, signals=(signal,)))
     with pytest.raises(ValueError):
         read(**changes)
 
