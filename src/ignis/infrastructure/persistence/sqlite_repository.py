@@ -148,6 +148,93 @@ _PROGRESS_TABLES = frozenset(
 )
 _SUPPORTED_CORE_DIGEST: Optional[str] = None
 
+# The two evidence tables sql/031 changed, written once and used both to create a fresh store and
+# to rebuild an older one. The rebuilt table must carry exactly the text a fresh one does, or the
+# core schema digest of an upgraded caller store would never match this build's and the store
+# would be refused as unsupported.
+_OBSERVATIONS_DDL = """
+            CREATE TABLE IF NOT EXISTS observations (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+                cluster_id TEXT REFERENCES topic_clusters(id) ON DELETE SET NULL,
+                observed_at TEXT,
+                published_at TEXT,
+                time_provenance TEXT NOT NULL
+                    CHECK (time_provenance IN ('exact_ingestion', 'legacy_publish_only', 'unknown')),
+                identity_source TEXT NOT NULL
+                    CHECK (identity_source IN ('metadata_external_id', 'url_external_id',
+                                               'normalized_url_fallback', 'unverifiable_content')),
+                observed_title TEXT,
+                metric_value REAL DEFAULT 0.0,
+                growth_velocity REAL DEFAULT 0.0,
+                geo_code TEXT DEFAULT 'VN',
+                source_url TEXT,
+                metadata TEXT,
+                CHECK (time_provenance <> 'exact_ingestion' OR observed_at IS NOT NULL)
+            );
+"""
+_MISSION_EVIDENCE_DDL = """
+            CREATE TABLE IF NOT EXISTS mission_evidence (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
+                recorded_at TEXT NOT NULL,
+                -- sql/031: who wrote the observation, as far as one mission may know. NULL state
+                -- marks a row written before it. SQLite cannot null one column of a composite
+                -- key on delete, so the same-mission rule is a trigger here.
+                author_state TEXT
+                    CHECK (author_state IS NULL
+                           OR author_state IN ('KNOWN', 'UNKNOWN', 'UNAVAILABLE', 'DECLARED')),
+                author_marker TEXT,
+                declared_account_id TEXT
+                    REFERENCES mission_declared_accounts(id) ON DELETE SET NULL,
+                UNIQUE (mission_id, observation_id),
+                CHECK ((author_state IS 'KNOWN') = (author_marker IS NOT NULL)),
+                CHECK (author_marker IS NULL
+                       OR (length(author_marker) = 16 AND author_marker NOT GLOB '*[^0-9a-f]*')),
+                CHECK (declared_account_id IS NULL OR author_state = 'DECLARED')
+            );
+"""
+# Tables sql/031 added; plain CREATE ... IF NOT EXISTS is enough for them.
+_AUTHOR_IDENTITY_TABLES_DDL = """
+            CREATE TABLE IF NOT EXISTS mission_author_keys (
+                mission_id TEXT PRIMARY KEY REFERENCES research_missions(id) ON DELETE CASCADE,
+                encrypted_key TEXT NOT NULL CHECK (length(encrypted_key) > 0),
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS mission_declared_accounts (
+                id TEXT PRIMARY KEY,
+                mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
+                platform TEXT NOT NULL CHECK (platform <> '' AND platform = lower(platform)),
+                account_key TEXT NOT NULL
+                    CHECK (account_key <> '' AND account_key = lower(account_key)
+                           AND substr(account_key, 1, 1) <> '@'),
+                declared_name TEXT NOT NULL CHECK (trim(declared_name) <> ''),
+                declared_at TEXT NOT NULL,
+                UNIQUE (mission_id, platform, account_key),
+                UNIQUE (mission_id, id)
+            );
+"""
+# Installed only once mission_evidence has the sql/031 columns the triggers read.
+_AUTHOR_IDENTITY_TRIGGERS_DDL = """
+            CREATE TRIGGER IF NOT EXISTS mission_evidence_declared_account_same_mission
+            BEFORE INSERT ON mission_evidence
+            WHEN NEW.declared_account_id IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM mission_declared_accounts
+                WHERE id = NEW.declared_account_id AND mission_id = NEW.mission_id)
+            BEGIN
+                SELECT RAISE(ABORT, 'declared account belongs to another mission');
+            END;
+            CREATE TRIGGER IF NOT EXISTS mission_evidence_declared_account_same_mission_update
+            BEFORE UPDATE OF declared_account_id, mission_id ON mission_evidence
+            WHEN NEW.declared_account_id IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM mission_declared_accounts
+                WHERE id = NEW.declared_account_id AND mission_id = NEW.mission_id)
+            BEGIN
+                SELECT RAISE(ABORT, 'declared account belongs to another mission');
+            END;
+"""
+
 # Tables an existing-ready connection may change: the finite parent's mission, journal, progress,
 # source, observation, quota and cluster records. Vocabulary, taxonomy, runtime configuration,
 # credentials and workspace registrations are never written through this path.
@@ -1123,6 +1210,66 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
             cur.execute("PRAGMA foreign_keys = ON")
 
     @staticmethod
+    def _upgrade_author_identity_schema(conn: sqlite3.Connection) -> None:
+        """Rebuild observations and mission_evidence of a store created before sql/031.
+
+        SQLite cannot alter a CHECK, so both tables are rebuilt; no stored value changes. The new
+        table is created under its own name from the same DDL a fresh store uses, which keeps the
+        upgraded store's core schema digest equal to this build's. Renaming the old table first
+        needs legacy_alter_table, or SQLite would rewrite every child table's foreign keys to the
+        old name. Indexes and triggers on the table are captured and recreated as they were.
+        """
+        cur = conn.cursor()
+
+        def _table_sql(table: str) -> str:
+            row = cur.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+            ).fetchone()
+            return (row[0] or "") if row else ""
+
+        rebuilds = [
+            (table, ddl)
+            for table, ddl, marker in (
+                ("observations", _OBSERVATIONS_DDL, "'unverifiable_content'"),
+                ("mission_evidence", _MISSION_EVIDENCE_DDL, "author_state"),
+            )
+            if marker not in _table_sql(table)
+        ]
+        if not rebuilds:
+            return
+
+        conn.commit()
+        cur.execute("PRAGMA foreign_keys = OFF")
+        cur.execute("PRAGMA legacy_alter_table = ON")
+        try:
+            cur.execute("BEGIN IMMEDIATE")
+            for table, ddl in rebuilds:
+                dependents = [
+                    row[0]
+                    for row in cur.execute(
+                        "SELECT sql FROM sqlite_master"
+                        " WHERE tbl_name = ? AND type IN ('index', 'trigger') AND sql IS NOT NULL"
+                        " ORDER BY type, name",
+                        (table,),
+                    ).fetchall()
+                ]
+                legacy = f"{table}_before_031"
+                cur.execute(f"ALTER TABLE {table} RENAME TO {legacy}")
+                cur.execute(ddl)
+                columns = ", ".join(row[1] for row in cur.execute(f"PRAGMA table_info({legacy})"))
+                cur.execute(f"INSERT INTO {table} ({columns}) SELECT {columns} FROM {legacy}")
+                cur.execute(f"DROP TABLE {legacy}")
+                for statement in dependents:
+                    cur.execute(statement)
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+        finally:
+            cur.execute("PRAGMA legacy_alter_table = OFF")
+            cur.execute("PRAGMA foreign_keys = ON")
+
+    @staticmethod
     def _ensure_evidence_grounded_triggers(conn: sqlite3.Connection) -> None:
         """Install cross-table evidence rules after every legacy table rebuild is complete."""
         conn.executescript(
@@ -1275,26 +1422,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 UNIQUE (platform, external_id)
             );
 
-            CREATE TABLE IF NOT EXISTS observations (
-                id TEXT PRIMARY KEY,
-                source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
-                cluster_id TEXT REFERENCES topic_clusters(id) ON DELETE SET NULL,
-                observed_at TEXT,
-                published_at TEXT,
-                time_provenance TEXT NOT NULL
-                    CHECK (time_provenance IN ('exact_ingestion', 'legacy_publish_only', 'unknown')),
-                identity_source TEXT NOT NULL
-                    CHECK (identity_source IN ('metadata_external_id', 'url_external_id',
-                                               'normalized_url_fallback')),
-                observed_title TEXT,
-                metric_value REAL DEFAULT 0.0,
-                growth_velocity REAL DEFAULT 0.0,
-                geo_code TEXT DEFAULT 'VN',
-                source_url TEXT,
-                metadata TEXT,
-                CHECK (time_provenance <> 'exact_ingestion' OR observed_at IS NOT NULL)
-            );
-            CREATE INDEX IF NOT EXISTS idx_observations_source ON observations (source_id, observed_at DESC);
+""" + _OBSERVATIONS_DDL + """            CREATE INDEX IF NOT EXISTS idx_observations_source ON observations (source_id, observed_at DESC);
             CREATE INDEX IF NOT EXISTS idx_observations_cluster ON observations (cluster_id, observed_at DESC);
 
             -- The ordering index from sql/019_observations_latest_per_source_index.sql. Its
@@ -1313,14 +1441,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 )
                 WHERE cluster_id IS NOT NULL AND time_provenance = 'exact_ingestion';
 
-            CREATE TABLE IF NOT EXISTS mission_evidence (
-                id TEXT PRIMARY KEY,
-                mission_id TEXT NOT NULL REFERENCES research_missions(id) ON DELETE CASCADE,
-                observation_id TEXT NOT NULL REFERENCES observations(id) ON DELETE CASCADE,
-                recorded_at TEXT NOT NULL,
-                UNIQUE (mission_id, observation_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_mission_evidence_observation ON mission_evidence (observation_id);
+""" + _MISSION_EVIDENCE_DDL + _AUTHOR_IDENTITY_TABLES_DDL + """            CREATE INDEX IF NOT EXISTS idx_mission_evidence_observation ON mission_evidence (observation_id);
 
             -- The alias ledger from sql/018_source_identity_aliases.sql. Restated here for the
             -- same reason as the three tables above: SQLite does not read the sql/ files, and a
@@ -1728,6 +1849,8 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
         """)
 
         self._upgrade_evidence_grounded_schema(conn)
+        self._upgrade_author_identity_schema(conn)
+        cur.executescript(_AUTHOR_IDENTITY_TRIGGERS_DDL)
         self._ensure_evidence_grounded_triggers(conn)
 
         # CREATE TABLE IF NOT EXISTS leaves an existing database untouched, so columns added

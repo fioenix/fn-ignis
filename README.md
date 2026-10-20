@@ -36,7 +36,9 @@ For a Codex-only installation with separate UAT storage, run
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
 The current source tree contains migrations through
-`sql/030_mission_follow_up_admission.sql`. Migration 030 adds current-input gaps, finite budget
+`sql/031_author_identity_at_rest.sql`. Migration 031 adds per-mission author keys, declared
+accounts and author columns on mission evidence, and lets an observation with no content reference
+be stored as unverifiable; it rewrites no stored evidence. Migration 030 adds current-input gaps, finite budget
 grants, narrowed source authority, command receipts and conservative resource allocations.
 Migration 029 adds immutable parent/child follow-up links and reservation storage. Neither
 migration backfills evidence or adopts old authority. Migration 028 (`sql/028_research_work.sql`) adds bounded host research-work storage

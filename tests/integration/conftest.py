@@ -63,6 +63,8 @@ SCHEMA_MIGRATIONS = (
     "027_mission_progress.sql",
     # Explicit owner-only host work, immutable input bindings and original receipts.
     "028_research_work.sql",
+    # Spec 015: author keys, declared accounts and the mission_evidence author columns.
+    "031_author_identity_at_rest.sql",
 )
 
 

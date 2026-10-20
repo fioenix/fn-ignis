@@ -12,7 +12,10 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/030_mission_follow_up_admission.sql`. Migration 030 bổ sung các khoảng trống
+Chuỗi migration trong mã nguồn kết thúc ở `sql/031_author_identity_at_rest.sql`. Migration 031 bổ sung khóa tác
+giả riêng cho từng nhiệm vụ, danh sách tài khoản được khai báo và các cột thông tin tác giả trên bằng chứng của nhiệm
+vụ. Migration này cũng cho phép lưu quan sát không có mã nội dung ở dạng không kiểm chứng được. Nó không sửa bằng
+chứng đã lưu. Migration 030 bổ sung các khoảng trống
 gắn với đầu vào hiện tại, hạn mức ngân sách và đơn vị đo rõ ràng, quyền truy cập nguồn đã thu hẹp, receipt của lệnh gốc
 và phân bổ tài nguyên theo nguyên tắc thận trọng. Khi nhận nhiệm vụ trên SQLite, hệ thống yêu cầu một bên xác minh
 quyền hạn hiện tại được cấu hình độc lập và từ chối nếu thiếu bên này. Bên cấp quyền hạn thực tế của host và việc

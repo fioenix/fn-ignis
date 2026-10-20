@@ -32,7 +32,10 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/030_mission_follow_up_admission.sql`. Migration 030 bổ sung các khoảng trống
+Cây mã nguồn hiện có migration tới `sql/031_author_identity_at_rest.sql`. Migration 031 bổ sung khóa tác giả
+riêng cho từng nhiệm vụ, danh sách tài khoản được khai báo và các cột thông tin tác giả trên bằng chứng của nhiệm vụ.
+Migration này cũng cho phép lưu quan sát không có mã nội dung ở dạng không kiểm chứng được. Nó không sửa bằng chứng
+đã lưu. Migration 030 bổ sung các khoảng trống
 gắn với đầu vào hiện tại, hạn mức ngân sách, quyền truy cập nguồn đã thu hẹp, receipt của lệnh và phân bổ tài nguyên
 theo nguyên tắc thận trọng. Migration 029 bổ sung liên kết bất biến giữa nhiệm vụ cha và nhiệm vụ con cùng dữ liệu
 dự trữ ngân sách. Hai migration này không bổ sung hồi tố bằng chứng hay kế thừa quyền hạn cũ.

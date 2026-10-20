@@ -12,7 +12,10 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/030_mission_follow_up_admission.sql`. Migration 030 adds
+The source migration chain ends at `sql/031_author_identity_at_rest.sql`. Migration 031 adds
+per-mission author keys, declared accounts and author columns on mission evidence, and lets an
+observation with no content reference be stored as unverifiable; it rewrites no stored evidence.
+Migration 030 adds
 private current-input gaps, explicit finite budget/unit grants, narrowed source authority, original
 command receipts and conservative resource allocations. SQLite admission requires an independently
 configured current capability provider and fails closed when it is absent; real host providers and
