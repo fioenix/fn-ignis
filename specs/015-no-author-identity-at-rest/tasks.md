@@ -27,7 +27,7 @@ test-first: each test task must be observed failing before its implementation ta
 
 **Purpose**: Settle the base revision and shared fixtures.
 
-- [ ] T001 Wait for PR #51 to merge (OG-2 approved 2026-10-20: Spec 015 lands after Spec 014), then rebase `codex/no-author-identity-at-rest` on `main`. Record in `specs/015-no-author-identity-at-rest/plan.md` the base commit, the latest migration (expected `030`) and the tool count (expected 47). If either differs, stop and report before T006.
+- [x] T001 Wait for PR #51 to merge (OG-2 approved 2026-10-20: Spec 015 lands after Spec 014), then rebase `codex/no-author-identity-at-rest` on `main`. Record in `specs/015-no-author-identity-at-rest/plan.md` the base commit, the latest migration (expected `030`) and the tool count (expected 47). If either differs, stop and report before T006. Done 20/10/2026: PR #51 merged as `474916f`; the branch is rebased on it; latest migration `030_mission_follow_up_admission.sql`; 47 tools in `server.py` and README.md.
 - [ ] T002 [P] Create sentinel identity fixtures in `tests/fixtures/author_identity_sentinels.py`. Cover one recognisable value per author field from research R2, per platform. Add handle-bearing URLs for TikTok and Threads, `@mention` text with Vietnamese diacritics, and one operator self-account.
 
 ---

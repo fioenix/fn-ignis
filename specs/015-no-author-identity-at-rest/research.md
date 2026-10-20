@@ -175,8 +175,8 @@ Adding a mutable list to it would change existing digests and forbid withdrawal.
 **MCP surface — owner gate (AGENTS.md Section 8)**:
 - Recommended: one new tool, `set_mission_declared_accounts(mission_id, accounts)`, which replaces
   the mission's declaration set and returns it.
-- The tool count rises by one: 47 → 48 once PR #51 merges (`main` has 44 today). Every governed
-  tool-count surface changes with it.
+- The tool count rises by one: 47 → 48 on `main` at `474916f`. Every governed tool-count surface
+  changes with it.
 - Alternative: an optional `declared_accounts` argument on `create_attention_mission`, plus a
   withdrawal path. Rejected: it changes an existing signature and still needs a second operation
   for withdrawal.

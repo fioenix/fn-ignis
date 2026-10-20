@@ -3,7 +3,7 @@
 ## Owner gate: new tool `set_mission_declared_accounts`
 
 Status: **approved by the owner on 2026-10-20 (OG-1, AGENTS.md Section 8)**. Adding
-one tool (47 → 48 once PR #51 merges; `main` has 44 today) changes every governed tool-count surface checked by
+one tool (47 → 48 on `main` at `474916f`) changes every governed tool-count surface checked by
 `tests/unit/test_public_distribution_contract.py`.
 
 Input:
