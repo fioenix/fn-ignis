@@ -3,6 +3,7 @@ import dataclasses
 import copy
 import json
 import logging
+import os
 import re
 import sqlite3
 from collections.abc import Mapping
@@ -92,7 +93,13 @@ from ignis.domain.mission_relay import (
     RelayProvenance,
     RelayEvidenceReference,
 )
-from ignis.infrastructure.auth.crypto import decrypt_credentials, encrypt_credentials
+from ignis.infrastructure.auth.crypto import (
+    decrypt_credentials,
+    decrypt_mission_author_key,
+    encrypt_credentials,
+    encrypt_secret_bytes,
+    has_persistent_key,
+)
 from ignis.infrastructure.persistence.migration_state import (
     UNBACKFILLED_CORPUS,
     is_unbackfilled,
@@ -3591,6 +3598,53 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     conn.close()
 
         await self._run_write(_sync_save)
+
+    async def get_or_create_mission_author_key(self, mission_id) -> Optional[bytes]:
+        """The mission's author key, for the identity policy only, or None when markers are unavailable.
+
+        None without a persistent IGNIS_ENCRYPTION_KEY, and None when the stored key no longer
+        decrypts (the encryption key was rotated): markers under a different key would not match
+        the ones already stored for the mission. The key is never logged or returned by a tool.
+        """
+        await self._ensure_schema()
+        if not has_persistent_key():
+            return None
+        token = encrypt_secret_bytes(os.urandom(32))
+
+        def _sync_get_or_create():
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO mission_author_keys (mission_id, encrypted_key, created_at)"
+                    " VALUES (?, ?, ?)",
+                    (str(mission_id), token, datetime.now(timezone.utc).isoformat()),
+                )
+                row = conn.execute(
+                    "SELECT encrypted_key FROM mission_author_keys WHERE mission_id = ?", (str(mission_id),)
+                ).fetchone()
+                conn.commit()
+                return row[0] if row else None
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        stored = await self._run_write(_sync_get_or_create)
+        return decrypt_mission_author_key(stored)
+
+    async def destroy_mission_author_key(self, mission_id) -> None:
+        """Delete the mission's author key, after which its markers can never be recomputed."""
+        await self._ensure_schema()
+
+        def _sync_destroy():
+            conn = self._get_connection()
+            try:
+                conn.execute("DELETE FROM mission_author_keys WHERE mission_id = ?", (str(mission_id),))
+                conn.commit()
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        await self._run_write(_sync_destroy)
 
     async def get_platform_credentials(self, platform: str) -> Optional[PlatformCredentialRecord]:
         await self._ensure_schema()

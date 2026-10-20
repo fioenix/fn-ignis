@@ -3,6 +3,7 @@ import dataclasses
 import copy
 import json
 import logging
+import os
 from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from enum import Enum
@@ -89,7 +90,13 @@ from ignis.domain.youtube_quota import (
     YouTubeQuotaUsage,
 )
 
-from ignis.infrastructure.auth.crypto import encrypt_credentials, decrypt_credentials
+from ignis.infrastructure.auth.crypto import (
+    decrypt_credentials,
+    decrypt_mission_author_key,
+    encrypt_credentials,
+    encrypt_secret_bytes,
+    has_persistent_key,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1727,6 +1734,42 @@ class PostgresTimescaleRepository(ITrendRepository):
         except Exception as e:
             logger.error(f"Error saving credentials for {platform}: {e}", exc_info=True)
             raise RepositoryException(f"Failed to save credentials for {platform}: {e}") from e
+
+    async def get_or_create_mission_author_key(self, mission_id) -> Optional[bytes]:
+        """The mission's author key, for the identity policy only, or None when markers are unavailable.
+
+        Same contract as the SQLite repository: None without a persistent IGNIS_ENCRYPTION_KEY or
+        when the stored key no longer decrypts. Concurrent first calls agree on one key.
+        """
+        if not has_persistent_key():
+            return None
+        pool = await self._get_pool()
+        token = encrypt_secret_bytes(os.urandom(32))
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    await cur.execute(
+                        "INSERT INTO mission_author_keys (mission_id, encrypted_key) VALUES (%s, %s)"
+                        " ON CONFLICT (mission_id) DO NOTHING;",
+                        (str(mission_id), token),
+                    )
+                    await cur.execute(
+                        "SELECT encrypted_key FROM mission_author_keys WHERE mission_id = %s;",
+                        (str(mission_id),),
+                    )
+                    row = await cur.fetchone()
+        except Exception as e:
+            raise RepositoryException(f"Failed to read the author key of mission {mission_id}: {type(e).__name__}") from e
+        return decrypt_mission_author_key(row[0] if row else None)
+
+    async def destroy_mission_author_key(self, mission_id) -> None:
+        """Delete the mission's author key, after which its markers can never be recomputed."""
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                await conn.execute("DELETE FROM mission_author_keys WHERE mission_id = %s;", (str(mission_id),))
+        except Exception as e:
+            raise RepositoryException(f"Failed to delete the author key of mission {mission_id}: {type(e).__name__}") from e
 
     async def get_platform_credentials(self, platform: str) -> Optional[PlatformCredentialRecord]:
         pool = await self._get_pool()
