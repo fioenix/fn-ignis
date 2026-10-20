@@ -4,12 +4,19 @@ Both halves matter. Two routes into one namespace have to converge, or the same 
 twice; two namespaces on one platform have to stay apart, or two objects are stored once.
 """
 
+from datetime import datetime, timezone
+
+import pytest
+
+from ignis.domain.author_identity import has_handle_segment
 from ignis.domain.source_identity import (
     ALIAS_FROM_CO_WITNESS,
     IDENTITY_FROM_METADATA,
     IDENTITY_FROM_NORMALIZED_URL,
     IDENTITY_FROM_URL,
+    IDENTITY_UNVERIFIABLE_CONTENT,
     alias_namespace_prefix,
+    identity_free_source_url,
     resolve_identity_alias,
     resolve_source_identity,
 )
@@ -269,3 +276,97 @@ def test_only_the_shortcode_namespace_is_aliasable_on_each_platform():
     assert alias_namespace_prefix("reels") == "reel_shortcode:"
     assert alias_namespace_prefix("youtube") is None
     assert alias_namespace_prefix("tiktok") is None
+
+
+# --- no author identity in the key or the link (Spec 015, research R5 and R6) -----------------
+
+
+def test_a_profile_url_is_never_the_fallback_identity():
+    """A handle in the key would store who posted; the fallback refuses it rather than file it."""
+    for platform, url in (
+        ("tiktok", "https://www.tiktok.com/@someone"),
+        ("threads", "https://www.threads.net/@someone"),
+        ("reels", "https://www.instagram.com/someone/"),
+        ("youtube", "https://www.youtube.com/channel/UC123"),
+    ):
+        assert resolve_source_identity(platform, url, {}) is None, url
+
+
+def test_a_handle_free_url_still_falls_back_to_the_normalized_url():
+    resolved = resolve_source_identity("google", "https://news.example.com/story?id=9", {})
+    assert resolved.identity_source == IDENTITY_FROM_NORMALIZED_URL
+
+
+def test_content_with_no_reference_is_kept_as_unverifiable_content():
+    published = datetime(2026, 10, 1, 8, 0, tzinfo=timezone.utc)
+    resolved = resolve_source_identity(
+        "tiktok", "https://www.tiktok.com/@someone", {},
+        content_text="Áo   thun  form rộng", published_at=published,
+    )
+    assert resolved.identity_source == IDENTITY_UNVERIFIABLE_CONTENT
+    assert resolved.external_id.startswith("content:")
+    assert len(resolved.external_id) == len("content:") + 64
+    assert "someone" not in resolved.external_id
+    # Whitespace and case do not make a second object; a different time or platform does.
+    same = resolve_source_identity(
+        "tiktok", None, {}, content_text="áo thun form rộng", published_at=published
+    )
+    assert same.external_id == resolved.external_id
+    later = resolve_source_identity(
+        "tiktok", None, {}, content_text="áo thun form rộng",
+        published_at=datetime(2026, 10, 2, tzinfo=timezone.utc),
+    )
+    elsewhere = resolve_source_identity(
+        "threads", None, {}, content_text="áo thun form rộng", published_at=published
+    )
+    assert later.external_id != resolved.external_id
+    assert elsewhere.external_id != resolved.external_id
+
+
+def test_a_content_reference_wins_over_unverifiable_content():
+    resolved = resolve_source_identity(
+        "tiktok", "https://www.tiktok.com/@a/video/12345", {}, content_text="x"
+    )
+    assert resolved.canonical_identity == "tiktok:video:12345"
+
+
+def test_blank_text_is_not_content():
+    assert resolve_source_identity("tiktok", None, {}, content_text="   ") is None
+
+
+@pytest.mark.parametrize(
+    ("platform", "url", "metadata", "link"),
+    [
+        ("tiktok", "https://www.tiktok.com/@someone/video/7694797676306615583", {},
+         "https://www.tiktok.com/share/video/7694797676306615583"),
+        ("tiktok", "https://www.tiktok.com/@someone", {"item_id": "42"},
+         "https://www.tiktok.com/share/video/42"),
+        # The shortcode is the content reference a Threads link needs, not the numeric post id.
+        ("threads", "https://www.threads.net/@someone/post/DeZtp-TkQHh", {"post_id": "1790"},
+         "https://www.threads.com/t/DeZtp-TkQHh"),
+        ("reels", "https://www.instagram.com/someone/reel/CzQwErTyUiO/", {},
+         "https://www.instagram.com/reel/CzQwErTyUiO/"),
+        ("youtube", "https://www.youtube.com/@someone", {"video_id": "abc123"},
+         "https://www.youtube.com/watch?v=abc123"),
+    ],
+)
+def test_a_handle_bearing_link_becomes_an_identity_free_link(platform, url, metadata, link):
+    assert identity_free_source_url(platform, url, metadata) == link
+    assert not has_handle_segment(link)
+    # The new link still resolves to the object the original one named.
+    original = resolve_source_identity(platform, url, metadata)
+    assert resolve_source_identity(platform, link, metadata).canonical_identity == (
+        original.canonical_identity
+    )
+
+
+def test_a_handle_free_link_is_kept_as_it_is():
+    url = "https://www.youtube.com/watch?v=abc123&utm_source=x"
+    assert identity_free_source_url("youtube", url, {}) == url
+
+
+def test_a_link_with_no_identity_free_form_is_unavailable():
+    """A numeric Threads id has no verified handle-free link, and a profile has no content."""
+    assert identity_free_source_url("threads", "https://www.threads.net/@someone", {"post_id": "1790"}) is None
+    assert identity_free_source_url("tiktok", "https://www.tiktok.com/@someone", {}) is None
+    assert identity_free_source_url("tiktok", None, {"item_id": "42"}) is None
