@@ -74,9 +74,10 @@ def _manifest():
     )
 
 
-async def _eligible_mission(tmp_path, *, contradiction=True):
-    repository = SqliteTrendRepository(db_path="sqlite:///:memory:")
-    await repository._ensure_schema()
+async def _eligible_mission(tmp_path, *, contradiction=True, repository=None):
+    if repository is None:
+        repository = SqliteTrendRepository(db_path="sqlite:///:memory:")
+        await repository._ensure_schema()
     store = WorkspaceRepository(repository=repository)
     workspace_use_case = CreateResearchWorkspaceUseCase(store=store)
     host = tmp_path / uuid4().hex

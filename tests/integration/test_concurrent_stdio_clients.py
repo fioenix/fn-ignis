@@ -21,6 +21,8 @@ import subprocess
 import sys
 import time
 
+from scripts.wheel_mcp_smoke import EXPECTED_TOOL_NAMES
+
 # Long enough for an import-heavy interpreter start on a loaded machine, short enough that a
 # hung server fails the run instead of stalling it. Enforced by selecting on the child's stdout
 # rather than by pytest-timeout, which this project does not depend on.
@@ -30,7 +32,7 @@ RESPONSE_TIMEOUT_SECONDS = 120.0
 SETTLE_SECONDS = 2.0
 
 PROTOCOL_VERSION = "2024-11-05"
-EXPECTED_TOOL_COUNT = 44
+EXPECTED_TOOL_COUNT = 47
 
 
 class StdioClient:
@@ -138,11 +140,15 @@ def test_second_client_does_not_terminate_the_first(tmp_path):
     """Starting a second server leaves the first one running and answering."""
     first = _isolated_client(tmp_path, "first")
     try:
-        assert len(first.list_tools()) == EXPECTED_TOOL_COUNT
+        first_tools = first.list_tools()
+        assert len(first_tools) == EXPECTED_TOOL_COUNT
+        assert {tool["name"] for tool in first_tools} == EXPECTED_TOOL_NAMES
 
         second = _isolated_client(tmp_path, "second")
         try:
-            assert len(second.list_tools()) == EXPECTED_TOOL_COUNT
+            second_tools = second.list_tools()
+            assert len(second_tools) == EXPECTED_TOOL_COUNT
+            assert {tool["name"] for tool in second_tools} == EXPECTED_TOOL_NAMES
 
             # The sweep signalled its peers during startup, so any corpse is already made.
             time.sleep(SETTLE_SECONDS)

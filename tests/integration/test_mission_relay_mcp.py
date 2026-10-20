@@ -1,0 +1,376 @@
+"""Actual MCP snapshot read chain over disposable canonical storage."""
+
+import json
+from contextlib import contextmanager
+from datetime import datetime, timezone
+
+import pytest
+import pytest_asyncio
+from fastmcp import Client
+from pathlib import Path
+from uuid import uuid4
+
+from ignis.application.ports.mission_relay_port import ProbeOutcomeCommitCommand
+from ignis.application.ports.research_workspace_port import RunJournal
+from ignis.domain.entities import ResearchMission, TrendSignal
+from ignis.domain.harness_models import ChannelHealthStatus
+from ignis.domain.research_workspace import MissionProbeOutcome
+from ignis.domain.value_objects import PlatformType
+from tests.caller_roots import bind_caller_root
+
+from test_mission_relay_read_boundary import (
+    _assert_postgres_reads,
+    _observe_postgres,
+    _observe_sqlite,
+    _setup_traps,
+    _state,
+    relay_case,  # noqa: F401 -- expose the actual disposable storage fixture
+)
+
+
+@pytest_asyncio.fixture
+async def attention_case(relay_case):  # noqa: F811 -- imported pytest fixture
+    case, missions, runs = relay_case
+    now = datetime.now(timezone.utc)
+    selected = ResearchMission(title='Selected Attention view', keywords=['synthetic'],
+        surface='ATTENTION', workspace_id=missions[0].workspace_id)
+    run = uuid4()
+    await case.repository.save_mission(selected)
+    await case.repository.record_run_journal(RunJournal(run_id=run, mission_id=selected.id,
+        workspace_id=selected.workspace_id, journal_path=Path('private/test-view-journal'),
+        sequence=1, status='COMPLETED', started_at=now, completed_at=now))
+    await case.repository.save_signals([TrendSignal(platform=PlatformType.YOUTUBE,
+        raw_title=f'Public synthetic observation {number}',
+        source_url=f'https://example.invalid/{selected.id}/{number}',
+        mission_id=selected.id, captured_at=now) for number in range(3)])
+    await case.repository.commit_probe_outcomes(ProbeOutcomeCommitCommand(
+        mission_id=selected.id, run_id=run, outcomes=(MissionProbeOutcome(run_id=run,
+            platform='youtube', connector_surface='youtube', status=ChannelHealthStatus.HEALTHY,
+            signals_collected=3, queried_keywords=('synthetic',), query_fingerprint='a' * 64,
+            completed_at=now),)))
+    return case, [selected, missions[1]], [run, runs[1]]
+
+
+@contextmanager
+def _observe_chain(case, monkeypatch):
+    if case.name != 'postgres':
+        with _observe_sqlite(monkeypatch, case.repository) as observed:
+            yield observed
+        return
+    from ignis.infrastructure.persistence.mission_relay_reader import PostgresMissionRelayReader
+    original = PostgresMissionRelayReader.load_snapshot
+    calls = []
+    async def physical_read(reader, request):
+        # Pin and verify each real read separately; the HTTP/MCP chain contains
+        # several deliberately independent transactions, not one global read.
+        with _observe_postgres(monkeypatch) as observation:
+            result = await original(reader, request)
+        _assert_postgres_reads(observation)
+        calls.append(observation)
+        return result
+    class ChainObservation:
+        def assert_no_writes(self):
+            assert calls, 'No physical PostgreSQL read was executed'
+    with monkeypatch.context() as patch:
+        patch.setattr(PostgresMissionRelayReader, 'load_snapshot', physical_read)
+        yield ChainObservation()
+
+
+@pytest.mark.asyncio
+async def test_actual_mcp_selected_snapshot_pages_preserve_physical_storage(attention_case, monkeypatch, tmp_path):
+    from ignis.interfaces.mcp import server
+    case, missions, runs = attention_case
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Read chain initialized writable components or credentials')
+    monkeypatch.setattr(server, 'get_components', forbidden)
+    monkeypatch.setattr(server, 'create_repository', forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
+    observer = _observe_chain(case, monkeypatch)
+    with observer as observed:
+        async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client:
+            snapshot = (await client.call_tool('get_mission_relay_snapshot', {
+                'mission_id': str(missions[0].id), 'run_id': str(runs[0]), 'page_size': 2,
+            })).structured_content
+            assert snapshot['status'] == 'OK'
+            assert snapshot['counts'] == {'observations': 3, 'sources': 3}
+            assert len(snapshot['evidence']) == 2 and snapshot['next_evidence_offset'] == 2
+            last = (await client.call_tool('get_mission_relay_snapshot', {
+                'mission_id': str(missions[0].id), 'run_id': str(runs[0]), 'page_size': 2, 'evidence_offset': 2,
+            })).structured_content
+            assert last['status'] == 'OK' and last['high_water'] == snapshot['high_water']
+            assert len(last['evidence']) == 1 and last['next_evidence_offset'] is None
+            assert last['counts'] == snapshot['counts']
+            first_page = {row['observation_id'] for row in snapshot['evidence']}
+            assert first_page.isdisjoint(row['observation_id'] for row in last['evidence'])
+            serialized = json.dumps([snapshot, last])
+            assert str(missions[1].id) not in serialized and str(runs[1]) not in serialized
+            # Fresh PostgreSQL includes migration 028; these SQLite fixtures
+            # intentionally initialize only canonical/progress storage.
+            expected_research = 'AVAILABLE' if case.name == 'postgres' else 'SCHEMA_UNAVAILABLE'
+            assert snapshot['research']['availability'] == expected_research
+        observed.assert_no_writes()
+    owned.assert_closed_unchanged(case, before)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('storage', ('missing', 'old', 'denied'))
+async def test_actual_mcp_missing_schema_or_access_refuses_before_bootstrap(storage, monkeypatch, tmp_path):
+    import sqlite3
+    from pydantic import SecretStr
+    from ignis.interfaces.mcp import server
+    path = tmp_path / 'unavailable.db'
+    if storage == 'old':
+        with sqlite3.connect(path) as connection:
+            connection.execute('CREATE TABLE research_missions (id TEXT PRIMARY KEY)')
+    before = path.read_bytes() if path.exists() else None
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    # A real, never-initialized owner repository: the dedicated reader must refuse it read-only.
+    repository = SqliteTrendRepository(str(path))
+    monkeypatch.setattr(server.settings, 'DATABASE_URL', SecretStr(f'sqlite:///{path}'))
+    monkeypatch.setattr(server, '_COMPONENTS', None)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Unavailable viewer invoked bootstrap or credential initialization')
+    monkeypatch.setattr(server, 'get_components', forbidden)
+    monkeypatch.setattr(server, 'create_repository', forbidden)
+    if storage == 'denied':
+        def denied(*args, **kwargs):
+            raise sqlite3.OperationalError('inert access denied')
+        monkeypatch.setattr(sqlite3, 'connect', denied)
+    async with _caller_client(monkeypatch, tmp_path, {'repository': repository}) as client:
+        result = (await client.call_tool('get_mission_relay_snapshot', {
+            'mission_id': str(uuid4()), 'page_size': 2})).structured_content
+        assert result == {'schema_version': 1, 'status': 'UNAVAILABLE', 'reason_code': 'READ_UNAVAILABLE'}
+    assert (path.read_bytes() if path.exists() else None) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('state', ('PENDING', 'RUNNING', 'LEGACY_UNRECOGNIZED'))
+async def test_actual_idle_is_canonical_not_inferred_from_unselected_run(attention_case, monkeypatch, state, tmp_path):
+    from ignis.interfaces.mcp import server
+    case, missions, _ = attention_case
+    mission = ResearchMission(title='Canonical collection state', keywords=['synthetic'],
+        surface='ATTENTION', status=state, workspace_id=missions[0].workspace_id)
+    await case.repository.save_mission(mission)
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Idle read started collection or component bootstrap')
+    monkeypatch.setattr(server, 'get_components', forbidden)
+    monkeypatch.setattr(server, 'create_repository', forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
+    with _observe_chain(case, monkeypatch) as observed:
+        async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client:
+            snapshot = (await client.call_tool('get_mission_relay_snapshot', {
+                'mission_id': str(mission.id), 'page_size': 100,
+            })).structured_content
+            assert snapshot['run_id'] is None
+            assert snapshot['collection_state'] == (state if state != 'LEGACY_UNRECOGNIZED' else None)
+            assert snapshot['counts']['observations'] == 0 and snapshot['event_page']['events'] == []
+        observed.assert_no_writes()
+    owned.assert_closed_unchanged(case, before)
+
+
+def _caller_client(monkeypatch, root, components):
+    """Initialized-owner readback through a validated caller root.
+
+    The real middleware resolves the bound startup folder as the caller root; the supported compose seam then binds
+    the owner-created repository to that caller scope. This covers readback of an already initialized
+    owner repository, not cold production composition of a caller store. The caller lifespan owns the
+    composed map and really closes its repository on exit.
+    """
+    from ignis.infrastructure.caller_storage import CallerStorageMiddleware
+    from ignis.interfaces.mcp import server
+    assert 'repository' in components, 'A caller composition map always owns a repository'
+    (root / '.fnignis').mkdir(exist_ok=True)
+
+    def compose(scope):
+        if scope.root.resolve() != root.resolve():
+            raise AssertionError('Compose received a foreign caller root')
+        return components
+    for middleware in server.mcp.middleware:
+        if isinstance(middleware, CallerStorageMiddleware):
+            monkeypatch.setattr(middleware, 'compose', compose)
+    bind_caller_root(monkeypatch, root)
+    return Client(server.mcp, mode='legacy')
+
+
+class _OwnedRepository:
+    """Spy on the caller lifespan's real close: physical state is captured right before it runs."""
+
+    def __init__(self, monkeypatch, case):
+        self.repository = case.repository
+        self.connection = getattr(case.repository, '_mem_conn', None)
+        self.closes = 0
+        self.state_at_close = None
+        original = case.repository.close
+
+        async def spying_close():
+            self.closes += 1
+            try:
+                if self.closes == 1:
+                    self.state_at_close = _state(case)
+            finally:
+                # A capture failure must never prevent the genuine shutdown close.
+                result = await original()
+            return result
+        monkeypatch.setattr(case.repository, 'close', spying_close)
+
+    def assert_closed_unchanged(self, case, before):
+        import sqlite3
+        assert self.closes == 1, 'The caller lifespan must close its composed repository exactly once'
+        assert self.state_at_close == before
+        if self.connection is not None:
+            # In-memory storage ends with its owner's close; the original connection is really closed.
+            assert self.repository._mem_conn is None
+            with pytest.raises(sqlite3.ProgrammingError):
+                self.connection.execute('SELECT 1')
+        else:
+            assert _state(case) == before
+
+
+@pytest.mark.asyncio
+async def test_owned_repository_spy_still_closes_when_state_capture_fails(monkeypatch):
+    import sqlite3
+    import sys
+    from types import SimpleNamespace
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    repository = SqliteTrendRepository(':memory:')
+    connection = repository._mem_conn
+    case = SimpleNamespace(name='memory', repository=repository)
+
+    def failing_state(_case):
+        raise RuntimeError('synthetic state capture failure')
+    monkeypatch.setattr(sys.modules[__name__], '_state', failing_state)
+    owned = _OwnedRepository(monkeypatch, case)
+    with pytest.raises(RuntimeError, match='synthetic state capture failure'):
+        await repository.close()
+    assert owned.closes == 1
+    assert repository._mem_conn is None, 'A state-capture failure prevented the genuine close'
+    with pytest.raises(sqlite3.ProgrammingError):
+        connection.execute('SELECT 1')
+
+
+@contextmanager
+def _view_only(case, monkeypatch):
+    before = _state(case)
+    with monkeypatch.context() as patch:
+        _setup_traps(patch, case.repository)
+        with _observe_chain(case, patch) as observed:
+            yield
+            observed.assert_no_writes()
+    assert _state(case) == before
+
+
+@pytest.mark.asyncio
+async def test_committed_changes_reach_snapshot_reads_once(attention_case, monkeypatch, tmp_path):
+    from ignis.interfaces.mcp import server
+    from ignis.domain.research_workspace import (
+        EvidenceDirection, EvidencePurpose, EvidenceQualification, QualificationReason,
+        QualificationRelation, compute_frame_fingerprint,
+    )
+    case, missions, runs = attention_case
+    mission, run = missions[0], runs[0]
+    def forbidden(*args, **kwargs):
+        raise AssertionError('A snapshot read started component bootstrap or credential initialization')
+    monkeypatch.setattr(server, 'get_components', forbidden)
+    monkeypatch.setattr(server, 'create_repository', forbidden)
+
+    async def read(client, after=None):
+        cursor = {'after_revision': after['revision'], 'after_ordinal': after['ordinal']} if after else {}
+        result = (await client.call_tool('get_mission_relay_snapshot', {
+            'mission_id': str(mission.id), 'run_id': str(run), 'page_size': 100, **cursor})).structured_content
+        assert result['status'] == 'OK', result
+        return result
+
+    def observations(event):
+        return {reference['observation_id'] for reference in event['evidence_references']}
+
+    async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client:
+        with _view_only(case, monkeypatch):
+            initial = await read(client)
+            assert initial['counts']['observations'] == 3
+            assert (await read(client, initial['high_water']))['event_page']['events'] == []
+        # Deliberate control-plane fixture writes occur outside the guarded read phases.
+        signals = [TrendSignal(platform=PlatformType.YOUTUBE,
+            raw_title=f'New committed observation {number}',
+            source_url=f'https://example.invalid/new/{mission.id}/{number}',
+            mission_id=mission.id, captured_at=datetime.now(timezone.utc)) for number in range(2)]
+        assert await case.repository.commit_collection_observations(mission.id, run, signals) == 2
+        committed = {str(signal.observation_id) for signal in signals}
+        with _view_only(case, monkeypatch):
+            arrived = await read(client, initial['high_water'])
+            assert arrived['counts'] == {'observations': 5, 'sources': 5}
+            arrivals = arrived['event_page']['events']
+            assert len(arrivals) == 1 and observations(arrivals[0]) == committed
+            assert arrivals[0]['provenance'] == 'HARNESS_OBSERVED'
+            assert {ref['evidence_role'] for ref in arrivals[0]['evidence_references']} == {'ATTENTION_CONTEXT'}
+            assert (await read(client, arrived['high_water']))['event_page']['events'] == []
+        directions = (EvidenceDirection.SUPPORT, EvidenceDirection.CONTRADICTION)
+        relations = (QualificationRelation.QUALIFIED_SUPPORT, QualificationRelation.QUALIFIED_CONTRADICTION)
+        qualifications = [EvidenceQualification(mission_id=mission.id,
+            observation_id=signal.observation_id, frame_fingerprint=compute_frame_fingerprint(mission, None),
+            relation=relation, purpose=EvidencePurpose.VOC, confidence=0.9,
+            reason_code=QualificationReason.DIRECT_TO_FRAME, judged_by='fixture',
+            evidence_role=direction, evidence_contract_version=2,
+            hypothesis_target='synthetic observation check', created_at=datetime.now(timezone.utc))
+            for signal, direction, relation in zip(signals, directions, relations)]
+        assert await case.repository.commit_evidence_qualifications(mission.id, qualifications) == 2
+        with _view_only(case, monkeypatch):
+            qualified = await read(client, arrived['high_water'])
+            events = qualified['event_page']['events']
+            assert len({event['event_id'] for event in events}) == 1 and events[0]['event_id'] != arrivals[0]['event_id']
+            assert {ref['direction'] for event in events for ref in event['evidence_references']} == {'SUPPORT', 'CONTRADICTION'}
+            rows = {row['observation_id']: row for row in qualified['evidence']}
+            for signal, relation in zip(signals, relations):
+                assert rows[str(signal.observation_id)]['qualification_relation'] == relation.value
+            assert (await read(client, qualified['high_water']))['event_page']['events'] == []
+            assert (await read(client))['counts'] == {'observations': 5, 'sources': 5}
+
+
+@pytest.mark.asyncio
+async def test_us3_actual_mcp_channels_and_foreign_scope_refuse_fallback(attention_case, monkeypatch, tmp_path):
+    from dataclasses import replace
+    from tests.unit.test_mission_claims import _manifest
+    from ignis.interfaces.mcp import server
+    case, missions, runs = attention_case
+    mission = missions[0]
+    run = uuid4()
+    await case.repository.record_run_journal(RunJournal(run_id=run, mission_id=mission.id,
+        workspace_id=mission.workspace_id, journal_path=Path(f'private/{run}'), sequence=2,
+        status='COMPLETED', started_at=datetime.now(timezone.utc), completed_at=datetime.now(timezone.utc)))
+    await case.repository.commit_probe_outcomes(ProbeOutcomeCommitCommand(mission_id=mission.id, run_id=run,
+        outcomes=tuple(MissionProbeOutcome(run_id=run, platform=platform, connector_surface=platform,
+            status=status, signals_collected=0, queried_keywords=('synthetic',), query_fingerprint='b' * 64,
+            completed_at=datetime.now(timezone.utc)) for platform, status in
+            (('youtube', ChannelHealthStatus.EMPTY_NO_DATA), ('google', ChannelHealthStatus.DEGRADED)))))
+    # Declare a later frame channel whose old selected-run outcomes never measured it.
+    await case.repository.save_mission_manifest(replace(_manifest(), mission_id=mission.id,
+        required_channels=('youtube', 'google', 'threads'), optional_channels=()))
+    foreign = (await case.repository.get_mission_signals(missions[1].id))[0]
+    before = _state(case)
+    _setup_traps(monkeypatch, case.repository)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Negative read started a connector, synthetic fallback or bootstrap')
+    monkeypatch.setattr(server, 'get_components', forbidden)
+    monkeypatch.setattr(server, 'create_repository', forbidden)
+    owned = _OwnedRepository(monkeypatch, case)
+    with _observe_chain(case, monkeypatch) as observed:
+        async with _caller_client(monkeypatch, tmp_path, {'repository': case.repository}) as client:
+            snapshot = (await client.call_tool('get_mission_relay_snapshot', {
+                'mission_id': str(mission.id), 'run_id': str(run), 'page_size': 2,
+            })).structured_content
+            channels = {row['platform']: row for row in snapshot['channels']}
+            assert channels['youtube']['status'] == 'EMPTY_NO_DATA' and channels['youtube']['signals_collected'] == 0
+            assert channels['google']['status'] == 'DEGRADED'
+            assert channels['threads']['status'] is None and channels['threads']['signals_collected'] is None
+            assert channels['threads']['completed_at'] is None
+            assert snapshot['claim_gate']['claims'] == [] and snapshot['claim_gate']['render_status'] == 'WITHHELD'
+            assert snapshot['counts'] == {'observations': 3, 'sources': 3}, 'Empty probe must not synthesize or erase committed corpus'
+            assert str(foreign.observation_id) not in json.dumps(snapshot), 'A foreign observation entered the selected read'
+            refused = (await client.call_tool('get_mission_relay_snapshot', {
+                'mission_id': str(mission.id), 'run_id': str(runs[1]), 'page_size': 2})).structured_content
+            assert refused == {'schema_version': 1, 'status': 'REFUSED', 'reason_code': 'SCOPE_MISMATCH'}
+        observed.assert_no_writes()
+    owned.assert_closed_unchanged(case, before)

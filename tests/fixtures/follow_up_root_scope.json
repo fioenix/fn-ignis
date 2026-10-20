@@ -1,0 +1,19 @@
+{
+  "reference": "synthetic-owner-scope",
+  "credential_reference": "synthetic-injected-key-reference",
+  "queries": [
+    "n8n Việt Nam",
+    "n8n tự động hóa"
+  ],
+  "geo": "GeoCode.VN",
+  "timeframe": "Timeframe.LAST_30D",
+  "source": "youtube",
+  "platform": "youtube",
+  "tier": "official_api",
+  "revision": "unversioned",
+  "video_limit": 5,
+  "search_calls": 2,
+  "other_calls": 4,
+  "run_minutes": 15,
+  "retention": "UNTIL_EXPLICIT_USER_DELETION"
+}

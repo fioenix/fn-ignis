@@ -1,3 +1,6 @@
+import asyncio
+from collections.abc import MutableMapping
+from contextlib import asynccontextmanager
 import json
 import logging
 import tempfile
@@ -14,7 +17,10 @@ import mcp.shared.exceptions
 if not hasattr(mcp.shared.exceptions, "McpError") and hasattr(mcp.shared.exceptions, "MCPError"):
     mcp.shared.exceptions.McpError = mcp.shared.exceptions.MCPError
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
+from fastmcp.exceptions import ToolError
+from fastmcp.server.middleware import Middleware
+from fastmcp.tools.base import ToolResult
 
 from ignis.application.use_cases.confirm_market_brief import ConfirmMarketBriefUseCase
 from ignis.application.use_cases.create_market_revision import CreateMarketRevisionUseCase
@@ -100,6 +106,7 @@ from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
 from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+from ignis.infrastructure.caller_storage import CallerStorageMiddleware, current_caller_storage
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
 
@@ -132,8 +139,533 @@ return the Gap Report and smallest next probe. An HTML report is optional and us
 The mission and Claim Ledger contracts, not this recipe, decide verdict eligibility.
 """
 
+class _MissionRelayRuntime:
+    """Borrowed storage and read resources owned by one FastMCP async lifespan."""
+
+    # Bound for joining, then cancelling, a pending source acquisition during shutdown.
+    _SOURCE_SETTLE_SECONDS = 5
+
+    def __init__(self, server: Optional[FastMCP] = None, *, caller_scope=None, source_activation_factory=None):
+        self.owner_loop = asyncio.get_running_loop()
+        self.caller_scope = caller_scope
+        # Private trusted-root injection only; the production lifespan supplies no factory.
+        self.source_activation_factory = source_activation_factory
+        self.source_activation = None
+        # Every returned activation not yet verified CLOSED stays owned here for close-only retry.
+        self.source_cleanup = []
+        self._source_acquisition = None
+        self._source_shutdown = None
+        # One owned shutdown task holds the whole hierarchy; observers never own cleanup.
+        self._shutdown = None
+        self._late = set()
+        self.source_state = "INACTIVE"
+        self.quiescent = asyncio.Event()
+        self.caller_scopes = {}
+        self.server = server
+        self.transport = Context(server).transport if server is not None else None
+        self._writes: set[asyncio.Task] = set()
+        self._executions: set[asyncio.Task] = set()
+        self.closed = False
+        self._projection = None
+        self._reads = None
+
+    async def record(self, mission_id: str, command: dict[str, Any]) -> dict[str, Any]:
+        from ignis.application.cancellation import await_settled
+        from ignis.application.use_cases.record_mission_research_work import RecordMissionResearchWorkUseCase
+        from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+        from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+        if self.closed or asyncio.get_running_loop() is not self.owner_loop:
+            return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
+        components = self.caller_scope.components if self.caller_scope is not None else _COMPONENTS
+        if self.caller_scope is not None:
+            self.caller_scope.check()
+        repository = components.get("repository") if components is not None else None
+        owner = (components, repository, self.owner_loop) if self.caller_scope is not None else _COMPONENTS_OWNER
+        if owner is None or owner[0] is not components or owner[1] is not repository or owner[2] is not self.owner_loop:
+            return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
+        if isinstance(repository, SqliteTrendRepository):
+            ready = repository._initialized and (repository._db_path != ":memory:" or repository._mem_conn is not None)
+        elif isinstance(repository, PostgresTimescaleRepository):
+            ready = repository._pool is not None and not repository._pool.closed
+        else:
+            ready = False
+        if not ready:
+            return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
+        # Borrow only: the owner initializes and closes storage; recording never adopts it.
+        worker = asyncio.create_task(RecordMissionResearchWorkUseCase(repository).execute(
+            mission_id, command, host_authorized=True))
+        self._writes.add(worker)
+        async def join():
+            return await asyncio.shield(worker)
+        try:
+            return await await_settled(join())
+        finally:
+            self._writes.discard(worker)
+
+    async def activate_source(self):
+        """Attach an injected caller-bound source host; absent injection leaves execution refused."""
+        from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+        if self.closed or asyncio.get_running_loop() is not self.owner_loop:
+            raise FollowUpExecutionBoundaryError()
+        if self.source_activation is not None or self.source_activation_factory is None or self.caller_scope is None:
+            return self.source_activation
+        # Single flight: one owned acquisition per runtime; a failed one is never replaced by a new run.
+        if self._source_acquisition is None:
+            self._source_acquisition = asyncio.create_task(self._acquire_source())
+        return await asyncio.shield(self._source_acquisition)
+
+    async def _acquire_source(self):
+        """Factory contract: it owns resources it allocated until it returns an activation.
+
+        A factory that is cancelled or fails before returning releases its own partial
+        allocation. Once returned, the activation belongs to this runtime until CLOSED.
+        """
+        from ignis.infrastructure.follow_up_caller_activation import CallerSourceActivation
+        from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+        activation = None
+        try:
+            self.caller_scope.check()
+            activation = await self.source_activation_factory(self.caller_scope)
+            if type(activation) is not CallerSourceActivation or self.closed:
+                raise FollowUpExecutionBoundaryError()
+            activation.attach(self.caller_scope, self.owner_loop)
+            self.source_activation = activation
+            return activation
+        except BaseException:
+            # Every returned but unpublished activation is retained, then disposed by this owner.
+            if type(activation) is CallerSourceActivation and self.source_activation is not activation:
+                self.source_cleanup.append(activation)
+                try:
+                    await activation.close()
+                except Exception:
+                    pass
+                if activation.disposition == 'CLOSED':
+                    self.source_cleanup.remove(activation)
+            raise
+
+    async def _settle_source(self, acquisition):
+        if acquisition is not None and not acquisition.done():
+            await asyncio.wait({acquisition}, timeout=self._SOURCE_SETTLE_SECONDS)
+            if not acquisition.done():
+                acquisition.cancel()
+                await asyncio.wait({acquisition}, timeout=self._SOURCE_SETTLE_SECONDS)
+        if acquisition is not None and not acquisition.done():
+            # Not quiescent: retain the original task and borrowed storage until it actually ends.
+            self.source_state = "PENDING"
+            def late(_task):
+                worker = asyncio.get_running_loop().create_task(self._late_source_cleanup())
+                self._late.add(worker)
+                worker.add_done_callback(self._late.discard)
+            acquisition.add_done_callback(late)
+            return self.source_state
+        await self._close_owned_sources()
+        self.source_state = "QUIESCENT"
+        self.quiescent.set()
+        return self.source_state
+
+    async def _close_owned_sources(self):
+        owned = ([self.source_activation] if self.source_activation is not None else []) + list(self.source_cleanup)
+        for activation in owned:
+            try:
+                await activation.close()
+            except Exception:
+                pass
+        self.source_cleanup = [item for item in self.source_cleanup if item.disposition != 'CLOSED']
+
+    async def _late_source_cleanup(self):
+        # The abandoned acquisition observed closure and disposed any late result into cleanup.
+        await self._close_owned_sources()
+        self.source_state = "QUIESCENT"
+        self.quiescent.set()
+
+    def retry_source_close(self):
+        """Close-only retry for retained activations; never a new run, lease or count reset."""
+        owned = ([self.source_activation] if self.source_activation is not None else []) + list(self.source_cleanup)
+        dispositions = [activation.retry_close() for activation in owned]
+        self.source_cleanup = [item for item in self.source_cleanup if item.disposition != 'CLOSED']
+        return dispositions
+
+    async def source_parent(self, mission_id):
+        """Private trusted-root parent run through the injected guarded source; refused by default."""
+        from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+        try:
+            selected = UUID(str(mission_id))
+            if self.source_activation_factory is None or self.caller_scope is None:
+                raise FollowUpExecutionBoundaryError()
+            activation = await self.activate_source()
+            activation.check(self.caller_scope, self.owner_loop)
+        except (FollowUpExecutionBoundaryError, ValueError):
+            return {"status": "REFUSED", "reason_code": "SESSION_AUTHORITY_REQUIRED"}
+        if self.closed:
+            return {"status": "REFUSED", "reason_code": "STORAGE_FAILURE"}
+        worker = asyncio.create_task(activation.run_parent(selected))
+        self._executions.add(worker)
+        # Ownership ends only when the worker itself settles, never when an observer leaves.
+        worker.add_done_callback(self._executions.discard)
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            if not worker.done():
+                worker.cancel()
+            raise
+
+    async def follow_up(self, request):
+        from ignis.application.cancellation import await_settled
+        from ignis.application.use_cases.execute_mission_follow_up import ExecuteMissionFollowUpUseCase
+        from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+        from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+        caller = asyncio.current_task()
+        if caller.cancelling():
+            raise asyncio.CancelledError
+        if self.closed or asyncio.get_running_loop() is not self.owner_loop:
+            return _follow_up_refused("STORAGE_FAILURE")
+        components = self.caller_scope.components if self.caller_scope is not None else _COMPONENTS
+        if self.caller_scope is not None:
+            self.caller_scope.check()
+        repository = components.get("repository") if components is not None else None
+        owner = (components, repository, self.owner_loop) if self.caller_scope is not None else _COMPONENTS_OWNER
+        if owner is None or owner[0] is not components or owner[1] is not repository or owner[2] is not self.owner_loop:
+            return _follow_up_refused("STORAGE_FAILURE")
+        if type(repository) is SqliteTrendRepository:
+            ready = repository._initialized and (repository._db_path != ":memory:" or repository._mem_conn is not None)
+        elif type(repository) is PostgresTimescaleRepository:
+            ready = repository._pool is not None and not repository._pool.closed
+        else:
+            ready = False
+        executor = components.get("execute_mission_use_case")
+        expected_registry = components.get("registry")
+        activated_executor = None
+        if self.source_activation_factory is not None and self.caller_scope is not None:
+            try:
+                activation = await self.activate_source()
+                activation.check(self.caller_scope, self.owner_loop)
+            except Exception:
+                return _follow_up_refused("SESSION_AUTHORITY_REQUIRED")
+            if request.mission_id != activation.selected_parent_id:
+                return _follow_up_refused("SCOPE_MISMATCH")
+            if self.closed:
+                return _follow_up_refused("STORAGE_FAILURE")
+            # The guarded executor borrows the same caller repository and workspace store.
+            executor, expected_registry = activation.executor, activation.executor._registry
+            activated_executor = executor
+        # The activated branch accepts only the activation's own bounded executor object.
+        exact_executor = type(executor) is ExecuteMissionUseCase or (
+            activated_executor is not None and executor is activated_executor)
+        if (not ready or not exact_executor or executor._repo is not repository
+                or executor._workspace_store is not components.get("workspace_store")
+                or type(executor._workspace_store) is not WorkspaceRepository
+                or executor._workspace_store._repo is not repository
+                or executor._registry is not expected_registry):
+            return _follow_up_refused("STORAGE_FAILURE")
+        # Selection is immutable per request. The repository's independent verifier still
+        # proves source/session capability; stdio eligibility cannot substitute for it.
+        service = ExecuteMissionFollowUpUseCase(repository, executor,
+            selected_parent_id=request.mission_id, host_authorized=True)
+        worker = asyncio.create_task(service.execute(**request.to_payload()))
+        self._executions.add(worker)
+        async def join():
+            return await asyncio.shield(worker)
+        try:
+            response = await asyncio.shield(worker)
+            payload = response.to_payload()
+            if response.relationship is not None:
+                payload["parent_mission_id"] = str(response.relationship.work.inputs.mission_id)
+            return payload
+        except asyncio.CancelledError:
+            if not worker.cancelling():
+                worker.cancel()
+            # Shield cleanup only after signalling cancellation to the owned execution.
+            try:
+                await await_settled(join())
+            except (asyncio.CancelledError, Exception):
+                pass
+            raise
+        finally:
+            self._executions.discard(worker)
+
+    def read_service(self):
+        if self.closed or asyncio.get_running_loop() is not self.owner_loop:
+            raise RuntimeError("Mission relay reads require an active owning lifespan.")
+        if self._reads is None:
+            from ignis.infrastructure.mission_relay import MissionRelayReadService
+            self._reads = MissionRelayReadService(provider=self, owner_loop=self.owner_loop)
+        return self._reads
+
+    def _use_case(self):
+        if self.caller_scope is not None:
+            self.caller_scope.check()
+        if self.closed or asyncio.get_running_loop() is not self.owner_loop:
+            raise RuntimeError("Mission relay reads require an active owning lifespan.")
+        if self._projection is None:
+            from ignis.application.use_cases.get_mission_relay_snapshot import GetMissionRelaySnapshotUseCase
+            from ignis.infrastructure.persistence.mission_relay_reader import (
+                PostgresMissionRelayReader, SqliteMissionRelayReader,
+            )
+            from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+            from ignis.infrastructure.persistence.postgres_repository import PostgresTimescaleRepository
+            # Borrow initialized in-memory storage only when the owner already created it.
+            components = self.caller_scope.components if self.caller_scope is not None else _COMPONENTS
+            if self.caller_scope is not None:
+                self.caller_scope.check()
+            if isinstance(components, _CallerComponents):
+                # Viewing never realizes the full provider composition; only an existing owner
+                # repository is borrowed.
+                repository = components.owner_repository()
+            else:
+                repository = components.get("repository") if components is not None else None
+            if isinstance(repository, SqliteTrendRepository):
+                reader = SqliteMissionRelayReader(repository)
+            elif isinstance(repository, PostgresTimescaleRepository):
+                reader = PostgresMissionRelayReader(repository)
+            elif self.caller_scope is not None:
+                # A cold caller read uses the caller's own configured storage through the dedicated
+                # read-only reader, never the global installation storage.
+                if self.caller_scope.database is not None:
+                    reader = SqliteMissionRelayReader(str(self.caller_scope.database))
+                else:
+                    reader = PostgresMissionRelayReader(
+                        self.caller_scope.configuration.DATABASE_URL.get_secret_value())
+            else:
+                dsn = reveal_secret(settings.DATABASE_URL)
+                if dsn.startswith("sqlite:///"):
+                    reader = SqliteMissionRelayReader(dsn.removeprefix("sqlite:///"))
+                elif dsn.startswith(("postgresql://", "postgres://")):
+                    reader = PostgresMissionRelayReader(dsn)
+                else:
+                    raise ValueError("Unsupported relay storage identity.")
+            self._projection = GetMissionRelaySnapshotUseCase(reader)
+        return self._projection
+
+    async def snapshot(self, request):
+        from ignis.domain.mission_relay import MissionRelayReadFailure, RelayReadReason, RelayReadStatus
+        try:
+            return await self._use_case().execute(request)
+        except (ValueError, RuntimeError):
+            return MissionRelayReadFailure(status=RelayReadStatus.UNAVAILABLE, reason_code=RelayReadReason.READ_UNAVAILABLE)
+
+    async def close(self):
+        from ignis.application.cancellation import await_settled
+        self.closed = True
+        if self._shutdown is None:
+            self._shutdown = asyncio.create_task(self._close_owned())
+        # A cancelled caller still waits for the one owned shutdown to settle, then is cancelled.
+        await await_settled(self._join_shutdown())
+
+    async def _join_shutdown(self):
+        return await asyncio.shield(self._shutdown)
+
+    async def _close_after(self, runtime, repository):
+        await runtime.quiescent.wait()
+        await repository.close()
+
+    async def _close_owned(self):
+        acquisition = self._source_acquisition
+        for worker in tuple(self._executions):
+            if not worker.cancelling():
+                worker.cancel()
+        resources = [self._reads] if self._reads is not None else []
+        for resource in resources:
+            resource.close()
+        from ignis.application.cancellation import await_settled
+        async def settle():
+            if self._executions:
+                await asyncio.gather(*tuple(self._executions), return_exceptions=True)
+            if self._writes:
+                await asyncio.gather(*tuple(self._writes), return_exceptions=True)
+            for resource in resources:
+                if not await resource.wait_closed(timeout=None):
+                    raise RuntimeError("Mission relay reads did not settle during shutdown.")
+        # Every later owned phase still runs; unsettled reads are reported once they have.
+        failure = None
+        try:
+            await await_settled(settle())
+        except BaseException as error:
+            failure = error
+        await self._settle_source(acquisition)
+        owner_reads_settled = failure is None
+        cancellation = None
+        for scope in self.caller_scopes.values():
+            runtime = scope.runtime
+            # Each caller's read settlement is known only when these reads and that caller's own
+            # runtime both settled; one failed or cancelled caller never retains a healthy sibling.
+            reads_settled = owner_reads_settled
+            if runtime is not None:
+                try:
+                    await runtime.close()
+                except asyncio.CancelledError as error:
+                    reads_settled = False
+                    cancellation = cancellation or error
+                except Exception as error:
+                    reads_settled = False
+                    failure = failure or error
+            if scope.components is not None and reads_settled:
+                # A borrowed repository closes only after its caller runtime is quiescent. With
+                # unknown read settlement it stays owned and open rather than closed under a read.
+                for repository in _caller_repositories(scope.components):
+                    if runtime is None or runtime.quiescent.is_set():
+                        await repository.close()
+                    else:
+                        closer = asyncio.create_task(self._close_after(runtime, repository))
+                        self._late.add(closer)
+                        closer.add_done_callback(self._late.discard)
+            if scope.log_handler is not None:
+                logging.getLogger().removeHandler(scope.log_handler)
+                scope.log_handler.close()
+        # Cancellation propagates only after every safe source, sibling and log cleanup ran.
+        if cancellation is not None:
+            raise cancellation
+        if failure is not None:
+            raise failure
+
+
+@asynccontextmanager
+async def _mission_relay_lifespan(server):
+    runtime = _MissionRelayRuntime(server)
+    try:
+        yield {"mission_relay": runtime}
+    finally:
+        await runtime.close()
+
+
 # Initialize FastMCP Server with Non-Prescriptive Harness Instructions
-mcp = FastMCP("fn-ignis-social-market-research", instructions=HARNESS_SYSTEM_INSTRUCTIONS)
+mcp = FastMCP("fn-ignis-social-market-research", instructions=HARNESS_SYSTEM_INSTRUCTIONS,
+              lifespan=_mission_relay_lifespan)
+
+class _ResearchRecordingArguments(Middleware):
+    """Stop private argument values before framework validation can echo them."""
+
+    async def on_call_tool(self, context, call_next):
+        if context.message.name == "record_mission_research_work":
+            arguments = context.message.arguments
+            if (type(arguments) is not dict or set(arguments) != {"mission_id", "command"}
+                    or type(arguments["mission_id"]) is not str or type(arguments["command"]) is not dict):
+                from ignis.application.use_cases.record_mission_research_work import RecordMissionResearchWorkUseCase
+                return ToolResult(structured_content=RecordMissionResearchWorkUseCase._refused("INVALID_COMMAND"))
+        elif context.message.name == "execute_mission_follow_up":
+            try:
+                _parse_follow_up_arguments(context.message.arguments)
+            except (ValueError, TypeError, AttributeError):
+                return ToolResult(structured_content=_follow_up_refused("INVALID_COMMAND"))
+        return await call_next(context)
+
+
+mcp.add_middleware(_ResearchRecordingArguments())
+
+
+@mcp.tool(name="record_mission_research_work", description="Record one explicit bounded research command through the local host session. Recording does not execute agents, invoke providers or collect sources; mission authority and exact revision, epoch and input bindings remain enforced.")
+async def record_mission_research_work(mission_id: str, command: dict[str, Any], ctx: Context) -> dict:
+    from ignis.application.use_cases.record_mission_research_work import RecordMissionResearchWorkUseCase
+    if type(ctx) is not Context:
+        return RecordMissionResearchWorkUseCase._refused("UNAUTHORIZED_HOST")
+    try:
+        from mcp.server.session import ServerSession
+        runtime = _request_runtime(ctx)
+        request = ctx.request_context
+        # Local client process/channel eligibility, never a claim of human identity or execution.
+        authorized = (
+            ctx.fastmcp is mcp and ctx.transport == "stdio"
+            and request is not None and isinstance(request.session, ServerSession)
+            and type(runtime) is _MissionRelayRuntime and runtime.server is mcp
+            and runtime.transport == "stdio"
+        )
+    except Exception:
+        authorized = False
+    if not authorized:
+        return RecordMissionResearchWorkUseCase._refused("UNAUTHORIZED_HOST")
+    try:
+        return await runtime.record(mission_id, command)
+    except Exception:
+        return RecordMissionResearchWorkUseCase._refused("STORAGE_FAILURE")
+
+
+def _follow_up_refused(reason):
+    from ignis.application.use_cases.execute_mission_follow_up import FollowUpExecutionResponse
+    return FollowUpExecutionResponse("REFUSED", reason).to_payload()
+
+
+def _parse_follow_up_arguments(arguments):
+    from ignis.domain.mission_follow_up import FollowUpExecutionRequest
+    if type(arguments) is not dict or set(arguments) != {
+            "mission_id", "follow_up_work_id", "expected_research_epoch", "idempotency_key"}:
+        raise ValueError("Invalid follow-up arguments.")
+    identities = {}
+    for name in ("mission_id", "follow_up_work_id"):
+        value = arguments[name]
+        if type(value) is not str or len(value) != 36:
+            raise ValueError("Invalid follow-up identity.")
+        identities[name] = UUID(value)
+        if str(identities[name]) != value:
+            raise ValueError("Invalid canonical follow-up identity.")
+    return FollowUpExecutionRequest(**{**arguments, **identities})
+
+
+@mcp.tool(name="execute_mission_follow_up", description="Execute one recorded, gap-linked bounded follow-up through the local host session. Requires a current research assignment and independently authorized source capability; creates one child and conservative reservation without reopening its parent. Viewing grants no execution authority; uncertain execution never starts a replacement child.")
+async def execute_mission_follow_up(mission_id: str, follow_up_work_id: str,
+                                    expected_research_epoch: int, idempotency_key: str, ctx: Context) -> dict:
+    try:
+        selected = _parse_follow_up_arguments({"mission_id": mission_id, "follow_up_work_id": follow_up_work_id,
+            "expected_research_epoch": expected_research_epoch, "idempotency_key": idempotency_key})
+    except (ValueError, TypeError, AttributeError):
+        return _follow_up_refused("INVALID_COMMAND")
+    if type(ctx) is not Context:
+        return _follow_up_refused("UNAUTHORIZED_HOST")
+    try:
+        from mcp.server.session import ServerSession
+        runtime = _request_runtime(ctx)
+        request = ctx.request_context
+        authorized = (ctx.fastmcp is mcp and ctx.transport == "stdio"
+            and request is not None and isinstance(request.session, ServerSession)
+            and type(runtime) is _MissionRelayRuntime and runtime.server is mcp and runtime.transport == "stdio")
+    except Exception:
+        authorized = False
+    if not authorized:
+        return _follow_up_refused("UNAUTHORIZED_HOST")
+    try:
+        return await runtime.follow_up(selected)
+    except Exception:
+        return _follow_up_refused("STORAGE_FAILURE")
+
+
+def _relay_failure(reason, unavailable=False):
+    from ignis.domain.mission_relay import MissionRelayReadFailure, RelayReadStatus
+    return MissionRelayReadFailure(status=RelayReadStatus.UNAVAILABLE if unavailable else RelayReadStatus.REFUSED,
+                                   reason_code=reason)
+
+
+async def handle_get_mission_relay_snapshot(mission_id: str, page_size: int, run_id: Optional[str] = None,
+        after_revision: Optional[int] = None, after_ordinal: Optional[int] = None, evidence_offset: int = 0,
+        *, runtime: Optional[_MissionRelayRuntime] = None):
+    """Independently read a bounded selected projection without opening a browser."""
+    from ignis.application.ports.mission_relay_port import MissionRelayReadRequest
+    from ignis.domain.mission_relay import MissionRelayCursor, RelayReadReason
+    try:
+        mission = UUID(mission_id)
+        run = UUID(run_id) if run_id is not None else None
+    except (ValueError, TypeError, AttributeError):
+        return _relay_failure(RelayReadReason.SCOPE_MISMATCH)
+    if type(page_size) is not int or not 1 <= page_size <= 200:
+        return _relay_failure(RelayReadReason.INVALID_PAGE_SIZE)
+    try:
+        cursor = None
+        if after_revision is not None or after_ordinal is not None:
+            cursor = MissionRelayCursor(mission_id=mission, revision=after_revision, ordinal=after_ordinal)
+        request = MissionRelayReadRequest(mission_id=mission, run_id=run, page_size=page_size,
+                                         after_cursor=cursor, evidence_offset=evidence_offset)
+    except ValueError:
+        return _relay_failure(RelayReadReason.INVALID_REQUEST)
+    if runtime is None or runtime.closed or runtime.owner_loop is not asyncio.get_running_loop():
+        return _relay_failure(RelayReadReason.READ_UNAVAILABLE, True)
+    return await runtime.read_service().read_snapshot(request)
+
+
+@mcp.tool(name="get_mission_relay_snapshot", description="Read an allowlisted bounded coherent snapshot for one selected mission and optional run. Page size is explicit; cursors and evidence offsets remain selected-scope reads. The ignis-track guide explains how to build a tracking artifact from it.")
+async def get_mission_relay_snapshot(mission_id: str, page_size: int, ctx: Context,
+        run_id: Optional[str] = None, after_revision: Optional[int] = None,
+        after_ordinal: Optional[int] = None, evidence_offset: int = 0) -> dict:
+    result = await handle_get_mission_relay_snapshot(mission_id, page_size, run_id, after_revision,
+        after_ordinal, evidence_offset, runtime=_request_runtime(ctx))
+    return result.to_payload()
+
 
 # This service opens no listener until an explicitly authorized finite request is prepared.
 _host_browser_search_service = HostBrowserSearchService()
@@ -221,8 +753,12 @@ async def cancel_host_browser_search(request_id: str, host_task_ref: str, sessio
 
 
 
-def _init_components():
-    repository = create_repository()
+def _init_components(*, caller_scope=None):
+    repository = create_repository(caller_scope.configuration.DATABASE_URL.get_secret_value(),
+        min_pool_size=caller_scope.configuration.DB_MIN_POOL_SIZE,
+        max_pool_size=caller_scope.configuration.DB_MAX_POOL_SIZE) if caller_scope is not None else create_repository()
+    if caller_scope is not None:
+        caller_scope.guard_repository(repository)
     runtime_config_manager = RuntimeConfigManager(repository=repository)
     tiktok_auth_manager = TikTokAuthManager(repository=repository)
     threads_auth_manager = ThreadsAuthManager(repository=repository)
@@ -251,15 +787,16 @@ def _init_components():
         )
     )
 
-    if reveal_secret(settings.YOUTUBE_API_KEY):
+    composition_settings = caller_scope.configuration if caller_scope is not None else settings
+    if reveal_secret(composition_settings.YOUTUBE_API_KEY):
         registry.register(
             YouTubeDataPlugin(
-                api_key=reveal_secret(settings.YOUTUBE_API_KEY),
+                api_key=reveal_secret(composition_settings.YOUTUBE_API_KEY),
                 quota_manager=YouTubeQuotaManager(
                     repository,
                     YouTubeQuotaPolicy(
-                        search_daily_limit=settings.YOUTUBE_SEARCH_DAILY_LIMIT,
-                        other_daily_unit_limit=settings.YOUTUBE_OTHER_DAILY_UNIT_LIMIT,
+                        search_daily_limit=composition_settings.YOUTUBE_SEARCH_DAILY_LIMIT,
+                        other_daily_unit_limit=composition_settings.YOUTUBE_OTHER_DAILY_UNIT_LIMIT,
                     ),
                 ),
             )
@@ -272,7 +809,8 @@ def _init_components():
     quality_evaluator = QualityEvaluator(detector=language_detector)
     strategic_reasoner = StrategicMarketReasoner(detector=language_detector)
 
-    workspace_store = WorkspaceRepository(repository=repository)
+    workspace_store = WorkspaceRepository(repository=repository,
+        path_guard=caller_scope.check_path if caller_scope is not None else None)
     # One synchronizer for every entry point, so the first mission after startup registers the
     # same persisted vocabulary a process warmed by an analysis call would already hold.
     vocabulary_synchronizer = VocabularySynchronizer(
@@ -293,7 +831,10 @@ def _init_components():
         workspace_store=workspace_store,
         vocabulary_sync=vocabulary_synchronizer,
     )
-    create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store)
+    create_research_workspace_use_case = CreateResearchWorkspaceUseCase(store=workspace_store,
+        research_directory=caller_scope.directory / "research" if caller_scope is not None else None,
+        path_guard=caller_scope.check_path if caller_scope is not None else None,
+        setup=caller_scope.prepare_layout if caller_scope is not None else None)
     create_attention_mission_use_case = CreateAttentionMissionUseCase(
         repository=repository,
         store=workspace_store,
@@ -361,11 +902,170 @@ def _init_components():
     }
 
 _COMPONENTS = None
+_COMPONENTS_OWNER = None
+
+def _request_runtime(ctx):
+    scope = current_caller_storage.get()
+    return scope.runtime if scope is not None else ctx.lifespan_context.get("mission_relay")
+
+
+class _CallerComponents(MutableMapping):
+    """One caller root's components: the full map is built on first item access only.
+
+    The Market qualification, claim and analysis tools take a separate provider-free composition
+    from analysis(). Relay viewing never builds anything: it borrows an existing owner repository
+    through owner_repository(), or reads the caller's configured storage through a dedicated
+    read-only reader. Every other tool, and a new or unprepared store, keeps the full composition and
+    its existing bootstrap contract unchanged.
+    """
+
+    def __init__(self, scope):
+        self._scope = scope
+        self._full = None
+        self._analysis = None
+        self._analysis_lock = asyncio.Lock()
+
+    def _realized(self):
+        if self._full is None:
+            self._full = _init_components(caller_scope=self._scope)
+        return self._full
+
+    def __getitem__(self, key):
+        return self._realized()[key]
+
+    def __setitem__(self, key, value):
+        self._realized()[key] = value
+
+    def __delitem__(self, key):
+        del self._realized()[key]
+
+    def __iter__(self):
+        return iter(self._realized())
+
+    def __len__(self):
+        return len(self._realized())
+
+    async def analysis(self):
+        # Only a validated prepared composition is cached: an unprepared store is re-evaluated, so
+        # preparation later in the same lifespan activates the narrow path, and refusals never stick.
+        if self._analysis is None:
+            async with self._analysis_lock:
+                if self._analysis is None:
+                    composed = await _compose_caller_analysis(self._scope)
+                    if composed is _UNPREPARED:
+                        return self
+                    self._analysis = composed
+        return self._analysis
+
+    def owner_repository(self):
+        """An already-created owner repository, full first; never builds the full composition."""
+        if self._full is not None:
+            return self._full["repository"]
+        if self._analysis is not None:
+            return self._analysis["repository"]
+        return None
+
+    def repositories(self):
+        owned = [] if self._full is None else [self._full["repository"]]
+        if self._analysis is not None:
+            owned.append(self._analysis["repository"])
+        return owned
+
+
+_UNPREPARED = object()
+
+
+async def _compose_caller_analysis(scope):
+    """Provider-free Market analysis components for a prepared caller store, or _UNPREPARED.
+
+    A store already holding parent progress objects is prepared: its exact supported core and progress
+    schema is validated before any read or write, and it is opened without bootstrap through the
+    narrow analysis grant. Partial or drifted schema refuses; it never falls back to bootstrap.
+    """
+    from ignis.domain.exceptions import RepositoryException
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+
+    database = scope.database
+    if database is None or not SqliteTrendRepository.has_progress_objects(str(database)):
+        return _UNPREPARED
+    try:
+        repository = await SqliteTrendRepository.open_existing_ready(
+            str(database),
+            expected_core_schema_digest=await SqliteTrendRepository.supported_core_schema_digest(),
+            analysis_writes=True,
+        )
+    except RepositoryException:
+        raise ToolError("CALLER_SCHEMA_UNSUPPORTED") from None
+    scope.guard_repository(repository)
+    workspace_store = WorkspaceRepository(repository=repository, path_guard=scope.check_path)
+    return {
+        "repository": repository,
+        "workspace_store": workspace_store,
+        "get_mission_analysis_use_case": GetMissionAnalysisUseCase(repository=repository, store=workspace_store),
+        "get_evidence_qualification_batch_use_case": GetEvidenceQualificationBatchUseCase(
+            repository=repository, store=workspace_store),
+        "submit_evidence_qualifications_use_case": SubmitEvidenceQualificationsUseCase(
+            repository=repository, store=workspace_store),
+        "submit_mission_claims_use_case": SubmitMissionClaimsUseCase(repository=repository, store=workspace_store),
+        "get_mission_claims_use_case": GetMissionClaimsUseCase(repository=repository, store=workspace_store),
+    }
+
+
+def _caller_repositories(components):
+    if isinstance(components, _CallerComponents):
+        return components.repositories()
+    return [components["repository"]]
+
+
+async def _analysis_components(mission_id):
+    """Components for the Market analysis tools: provider-free for a prepared caller store.
+
+    The mission's surface is read first through a read-only routing lookup: an existing non-Market
+    mission keeps the full composition before any Market readiness gate applies.
+    """
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+
+    scope = current_caller_storage.get()
+    if scope is None:
+        return get_components()
+    scope.check()
+    components = scope.components
+    if not isinstance(components, _CallerComponents):
+        return components
+    if scope.database is not None:
+        exists, surface = SqliteTrendRepository.mission_surface(str(scope.database), str(mission_id))
+        if exists and resolve_surface(surface) is not ResearchSurface.MARKET:
+            return components
+    return await components.analysis()
+
+
+def _compose_caller_scope(scope):
+    return _CallerComponents(scope)
+
+
+def _caller_runtime(scope, owner):
+    runtime = _MissionRelayRuntime(owner.server, caller_scope=scope,
+        source_activation_factory=owner.source_activation_factory)
+    runtime.transport = owner.transport
+    return runtime
+
+
+mcp.add_middleware(CallerStorageMiddleware(_compose_caller_scope, _caller_runtime))
+
 
 def get_components():
-    global _COMPONENTS
+    scope = current_caller_storage.get()
+    if scope is not None:
+        scope.check()
+        return scope.components
+    global _COMPONENTS, _COMPONENTS_OWNER
     if _COMPONENTS is None:
         _COMPONENTS = _init_components()
+        try:
+            owner_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            owner_loop = None
+        _COMPONENTS_OWNER = (_COMPONENTS, _COMPONENTS.get("repository"), owner_loop)
     return _COMPONENTS
 
 
@@ -1236,7 +1936,8 @@ def _host_workspace_of(proposed_path: Path) -> Path:
     confirmation carrying exactly the path the requester was shown.
     """
     parts = proposed_path.parts
-    tail = (*RESEARCH_ROOT_SEGMENTS, proposed_path.name)
+    scope = current_caller_storage.get()
+    tail = (*( (".fnignis", "research") if scope is not None else RESEARCH_ROOT_SEGMENTS), proposed_path.name)
     if len(parts) <= len(tail) or parts[-len(tail):] != tail:
         raise ValueError(
             f"'{proposed_path}' is not a research workspace path. Expected a path ending in "
@@ -1851,7 +2552,7 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
     external_refusal = _external_context_only_refusal(mission_id)
     if external_refusal is not None:
         return external_refusal
-    comp = get_components()
+    comp = await _analysis_components(mission_id)
     await _sync_lexicons_from_db(comp)
     mission = await comp["repository"].get_mission(mission_id)
     if not mission:
@@ -1948,6 +2649,12 @@ async def handle_get_mission_analysis(mission_id: str, limit: int = 25, platform
 
 
 def _get_secure_reports_dir() -> Path:
+    scope = current_caller_storage.get()
+    if scope is not None:
+        target = scope.check_path(scope.directory / "reports")
+        target.mkdir(parents=True, exist_ok=True)
+        scope.check_path(target / "scope-check")
+        return target
     # 1. Try project root reports/ directory
     try:
         source_module = Path(__file__).resolve()
@@ -2060,6 +2767,9 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
     report_filename = f"mission_{mission.shortcode.lower()}.html"
 
     report_path = reports_dir / report_filename
+    scope = current_caller_storage.get()
+    if scope is not None:
+        scope.check_path(report_path)
     report_path.write_text(html_content, encoding="utf-8")
     abs_path = str(report_path.resolve())
 
@@ -2144,7 +2854,7 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
 async def handle_get_mission_evidence_qualification_batch(
     mission_id: str, cursor: Optional[str] = None, limit: int = DEFAULT_BATCH_LIMIT
 ) -> str:
-    comp = get_components()
+    comp = await _analysis_components(mission_id)
     result = await comp["get_evidence_qualification_batch_use_case"].execute(
         mission_id=mission_id, cursor=cursor, limit=limit
     )
@@ -2154,7 +2864,7 @@ async def handle_get_mission_evidence_qualification_batch(
 async def handle_submit_mission_evidence_qualifications(
     mission_id: str, frame_fingerprint: str, assessments: List[Dict[str, Any]]
 ) -> str:
-    comp = get_components()
+    comp = await _analysis_components(mission_id)
     result = await comp["submit_evidence_qualifications_use_case"].execute(
         mission_id=mission_id, frame_fingerprint=frame_fingerprint, assessments=assessments
     )
@@ -2167,7 +2877,7 @@ async def handle_submit_mission_claims(
     candidates: List[Dict[str, Any]],
     created_by: str,
 ) -> str:
-    comp = get_components()
+    comp = await _analysis_components(mission_id)
     result = await comp["submit_mission_claims_use_case"].execute(
         mission_id=mission_id,
         frame_digest=frame_digest,
@@ -2180,7 +2890,7 @@ async def handle_submit_mission_claims(
 async def handle_get_mission_claims(
     mission_id: str, include_superseded: bool = False
 ) -> str:
-    comp = get_components()
+    comp = await _analysis_components(mission_id)
     result = await comp["get_mission_claims_use_case"].execute(
         mission_id=mission_id, include_superseded=include_superseded
     )
@@ -2242,7 +2952,7 @@ async def discover_market_opportunities(mission_id: str) -> str:
     return await handle_discover_market_opportunities(mission_id)
 
 
-@mcp.tool(name="propose_research_workspace", description="Propose where a new research would live: `<host-workspace>/.ignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.")
+@mcp.tool(name="propose_research_workspace", description="Propose caller-owned research storage under the uniquely authorized native repository `.fnignis/research/<research-slug>/`. Read-only -- it creates no directory, manifest, database record or journal. Show the proposed path to the requester and call confirm_research_workspace only after they agree.")
 async def propose_research_workspace(host_workspace: str, research_name: str, slug: Optional[str] = None) -> str:
     return await handle_propose_research_workspace(host_workspace, research_name, slug)
 
@@ -3358,6 +4068,31 @@ bounded Brief for confirmation before creating a mission or collecting. After au
 qualify the current evidence frame, seek contradiction, and submit claim candidates. Render
 only permitted claims; otherwise return the Gap Report. Export HTML only if requested.
 """
+
+
+def _ignis_track_guide() -> str:
+    # One packaged source, shipped in the wheel and mirrored by .agents/skills/ignis-track/SKILL.md.
+    from importlib import resources
+    return resources.files("ignis.interfaces.mcp").joinpath("guides/ignis_track.md").read_text(encoding="utf-8")
+
+
+@mcp.resource("fn-ignis://guide/ignis-track")
+def get_ignis_track_guide() -> str:
+    """How an agent reads the mission snapshot and generates a tracking artifact for a person."""
+    return _ignis_track_guide()
+
+
+@mcp.prompt(name="ignis_track")
+def prompt_ignis_track(mission_id: Optional[str] = None) -> str:
+    """Guide the agent to build a point-in-time tracking artifact; reads nothing by itself."""
+    guide = _ignis_track_guide()
+    if mission_id is None:
+        return guide
+    try:
+        selected = UUID(mission_id)
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("mission_id must be a mission UUID") from None
+    return f"Selected mission: `{selected}`\n\n{guide}"
 
 
 @mcp.prompt(name="voice_of_customer_audit")

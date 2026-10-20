@@ -48,6 +48,14 @@ class YouTubeDataPlugin(IConnectorPlugin):
         self._api_key = api_key
         self._quota_manager = quota_manager
 
+    def _client(self, **kwargs):
+        """Private transport injection; the default provider behavior is unchanged."""
+        return httpx.AsyncClient(**kwargs)
+
+    def _query_cache(self):
+        """Allow an explicitly scoped private adapter to isolate provider cache payloads."""
+        return _YOUTUBE_QUERY_CACHE
+
     async def _reserve(
         self,
         bucket: YouTubeQuotaBucket,
@@ -126,9 +134,13 @@ class YouTubeDataPlugin(IConnectorPlugin):
         }
         return lang_map.get(geo_str.upper(), None)
 
+    def _window_clock(self) -> datetime:
+        """Private clock seam; public collection windows retain their current clock."""
+        return datetime.now(timezone.utc)
+
     def _timeframe_to_published_after(self, timeframe_str: str) -> Tuple[str, datetime]:
         """Convert timeframe expression to RFC 3339 formatted UTC datetime string."""
-        now = datetime.now(timezone.utc)
+        now = self._window_clock()
         tf = str(timeframe_str).lower().strip()
 
         if tf in ["1d", "24h", "now 1-d", "last_24h"]:
@@ -174,7 +186,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
                 "maxResults": 1,
                 "key": self._api_key,
             }
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with self._client(timeout=5.0) as client:
                 resp = await client.get(self.BASE_API_URL, params=params)
                 reasons = self._error_reasons(resp)
                 if "quotaExceeded" in reasons or "dailyLimitExceeded" in reasons:
@@ -207,7 +219,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
 
         try:
             await self._reserve(YouTubeQuotaBucket.DEFAULT_UNITS)
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with self._client(timeout=15.0) as client:
                 response = await client.get(self.BASE_API_URL, params=params)
 
                 if response.status_code == 403:
@@ -266,6 +278,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
             source_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else None
 
             metadata = {
+                "source_access": "official_api",
                 "video_id": video_id,
                 "channel_id": snippet.get("channelId"),
                 "channel_title": snippet.get("channelTitle"),
@@ -276,6 +289,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
                 "comments": comment_count,
                 "published_at": published_at_str,
             }
+            if isinstance(snippet.get("description"), str):
+                metadata["description"] = sanitize_pii_text(snippet["description"])
 
             signal = TrendSignal(
                 platform=PlatformType.YOUTUBE,
@@ -327,7 +342,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
 
         for raw_kw in keywords:
             cache_key = f"{raw_kw.lower().strip()}|{region_code}|{tf_str}|{limit}"
-            cached_sigs = _YOUTUBE_QUERY_CACHE.get(cache_key)
+            cached_sigs = self._query_cache().get(cache_key)
             if cached_sigs is not None:
 
                 logger.info(f"Returning {len(cached_sigs)} cached YouTube signals for '{raw_kw}' (Quota preserved).")
@@ -372,7 +387,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
             video_ids = []
             try:
                 await self._reserve(YouTubeQuotaBucket.SEARCH_LIST, trigger)
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with self._client(timeout=15.0) as client:
                     resp = await client.get(self.SEARCH_API_URL, params=search_params)
                     if resp.status_code in [403, 429]:
                         reasons = self._error_reasons(resp)
@@ -467,6 +482,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                 velocity = round(view_count / hours_diff, 2)
 
                                 meta = {
+                                    "source_access": "official_api",
                                     "keyword": raw_kw,
                                     "video_id": v_id,
                                     "channel_title": sanitize_pii_text(v_snippet.get("channelTitle") or ""),
@@ -477,6 +493,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
                                     "published_at": pub_at_str,
                                     "timeframe_filter": tf_str,
                                 }
+                                if isinstance(v_snippet.get("description"), str):
+                                    meta["description"] = sanitize_pii_text(v_snippet["description"])
 
 
                                 sig = TrendSignal(
@@ -496,7 +514,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
 
                     if kw_signals:
                         signals.extend(kw_signals)
-                        _YOUTUBE_QUERY_CACHE[cache_key] = kw_signals
+                        self._query_cache()[cache_key] = kw_signals
             except ConnectorQuotaExceededException:
                 # Quota errors MUST bubble up to trip Circuit Breaker
                 raise

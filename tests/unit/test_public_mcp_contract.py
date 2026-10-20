@@ -23,11 +23,14 @@ EXPECTED_TOOLS = {
     "discover_market_opportunities",
     "evaluate_mission_quality",
     "execute_mission_ingress",
+    "execute_mission_follow_up",
     "extract_customer_pain_points",
     "generate_mission_artifact",
     "get_current_session_mission",
     "get_instagram_auth_status",
     "get_mission_analysis",
+    "get_mission_relay_snapshot",
+    "record_mission_research_work",
     "get_mission_claims",
     "get_mission_evidence_qualification_batch",
     "get_platform_auth_status",
@@ -62,6 +65,8 @@ REMOVED_TOOLS = {
     "trigger_ingress_refresh",
     "trigger_autonomous_discovery",
     "get_latest_daily_discovery",
+    # R2 retires the built-in viewer; agents build tracking artifacts with ignis-track instead.
+    "open_mission_relay",
 }
 
 
@@ -70,6 +75,7 @@ async def test_public_mcp_inventory_is_the_mission_bound_contract():
     """Removing any retained tool or keeping any unscoped tool breaks the cutover contract."""
     actual = {tool.name for tool in await mcp.list_tools()}
 
+    assert "execute_mission_follow_up" in actual
     assert actual == EXPECTED_TOOLS
     assert actual.isdisjoint(REMOVED_TOOLS)
 

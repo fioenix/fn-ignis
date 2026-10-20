@@ -179,7 +179,7 @@ def test_report_templates_have_one_committed_source_directory():
 
 
 # ---------------------------------------------------------------------------
-# Research workspace: one shared database, and no store for an unconfirmed framing
+# Research workspace: one canonical database per authorized caller root, no per-research DB
 # ---------------------------------------------------------------------------
 
 # Anything that names part of the `.ignis/research/<slug>/` layout knows where a research folder
@@ -223,6 +223,7 @@ def test_the_configured_database_is_never_rebuilt_beside_a_research_folder():
     database opened at a path this module could compute is a per-research one.
     """
     offenders = []
+    caller_compositions = []
     for path in _relative_python_files(SRC):
         rel = path.relative_to(SRC).as_posix()
         source = path.read_text(encoding="utf-8")
@@ -232,14 +233,31 @@ def test_the_configured_database_is_never_rebuilt_beside_a_research_folder():
         for node in ast.walk(ast.parse(source)):
             if isinstance(node, ast.Call) and _call_name(node) in DATABASE_CONSTRUCTORS:
                 if node.args or node.keywords:
-                    offenders.append(f"{rel}:{node.lineno}: {_call_name(node)}(...) takes a target")
+                    # The owner replaced installation-global storage with one caller-root
+                    # canonical store with validated literal caller configuration. This exact branch is the only target
+                    # exception; arbitrary and per-research databases remain prohibited.
+                    target = "create_repository(caller_scope.configuration.DATABASE_URL.get_secret_value(), min_pool_size=caller_scope.configuration.DB_MIN_POOL_SIZE, max_pool_size=caller_scope.configuration.DB_MAX_POOL_SIZE)"
+                    allowed = rel == "ignis/interfaces/mcp/server.py" and ast.unparse(node) == target
+                    if allowed:
+                        tree = ast.parse(source)
+                        compositions = [item for item in ast.walk(tree)
+                            if isinstance(item, ast.FunctionDef) and item.name == "_init_components"]
+                        assert len(compositions) == 1
+                        branch = compositions[0].body[0]
+                        assert isinstance(branch, ast.Assign) and isinstance(branch.value, ast.IfExp)
+                        assert ast.unparse(branch.value.test) == "caller_scope is not None"
+                        assert ast.unparse(branch.value.body) == target
+                        assert ast.unparse(branch.value.orelse) == "create_repository()"
+                        caller_compositions.append((rel, node.lineno))
+                    else:
+                        offenders.append(f"{rel}:{node.lineno}: {_call_name(node)}(...) takes a target")
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 if node.value.strip().lower().endswith(DATABASE_FILE_SUFFIXES):
                     offenders.append(f"{rel}:{node.lineno}: database filename {node.value!r}")
 
+    assert len(caller_compositions) == 1, "Caller-root canonical composition must have one explicit SQLite target."
     assert not offenders, (
-        "A module that knows the research folder layout opens a database of its own. One "
-        "configured database is canonical for every research:\n" + "\n".join(offenders)
+        "A research-layout consumer opens an arbitrary or per-research database:\n" + "\n".join(offenders)
     )
 
 

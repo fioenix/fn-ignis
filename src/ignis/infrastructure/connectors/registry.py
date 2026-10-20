@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ignis.application.ports.follow_up_execution_port import FollowUpExecutionBoundaryError
+
 import asyncio
 import logging
 from dataclasses import dataclass, field
@@ -227,21 +229,7 @@ class ConnectorPluginRegistry:
                 authority.append("paid_quota")
             if plugin.platform is PlatformType.YOUTUBE:
                 quota_costs["youtube_search_calls"] = max(1, len(keywords or []))
-            plugin_quota = (
-                {"youtube_search_calls": max(1, len(keywords or []))}
-                if plugin.platform is PlatformType.YOUTUBE
-                else {}
-            )
-            surface_requirements[plugin.plugin_id] = {
-                "authority_tier": required,
-                "requires_paid_quota": plugin.requires_paid_quota,
-                "quota_costs": plugin_quota,
-                "connector_path": (
-                    f"{plugin.__class__.__module__}.{plugin.__class__.__qualname__}.search_signals"
-                ),
-                "connector_revision": getattr(plugin, "connector_revision", "unversioned"),
-                "sampling": {"limit": 20, "ordering": "platform_default"},
-            }
+            surface_requirements[plugin.plugin_id] = self._search_requirement(plugin, required, keywords)
         return {
             "resources": tuple(plugin.plugin_id for plugin in selected),
             "authority": tuple(authority),
@@ -491,6 +479,53 @@ class ConnectorPluginRegistry:
                     )
         return signals
 
+    @staticmethod
+    def _search_requirement(plugin, tier, keywords):
+        return {
+            "authority_tier": tier,
+            "requires_paid_quota": plugin.requires_paid_quota,
+            "quota_costs": ({"youtube_search_calls": max(1, len(keywords or []))}
+                            if plugin.platform is PlatformType.YOUTUBE else {}),
+            "connector_path": f"{plugin.__class__.__module__}.{plugin.__class__.__qualname__}.search_signals",
+            "connector_revision": getattr(plugin, "connector_revision", "unversioned"),
+            "sampling": {"limit": 20, "ordering": "platform_default"},
+        }
+
+    def _describe_execution_requirements(self, *, target_platforms, sources, keywords):
+        """Describe recorded tiers and exact static metadata; this does not authorize runtime."""
+        selected, unavailable, requirements, quotas, tiers = [], [], {}, {}, []
+        for source in sources:
+            plugin = self.get_plugin_by_id(source.source)
+            if plugin is None or not plugin.supports_search or plugin.platform not in target_platforms:
+                unavailable.append(source.source)
+                continue
+            selected.append(plugin.plugin_id)
+            metadata = self._search_requirement(plugin, source.tier, keywords)
+            requirements[plugin.plugin_id] = metadata
+            quotas.update(metadata["quota_costs"])
+            tiers.append(source.tier)
+            if metadata["requires_paid_quota"]:
+                tiers.append("paid_quota")
+        return {"resources": tuple(selected), "authority": tuple(dict.fromkeys(tiers)),
+                "quota_costs": quotas, "unavailable_resources": tuple(unavailable),
+                "not_requested_resources": (), "surface_requirements": requirements}
+
+    @staticmethod
+    def _check_execution_metadata(plugin, tier, keywords, approved_plan):
+        if approved_plan is None:
+            return
+        metadata = ConnectorPluginRegistry._search_requirement(plugin, tier, keywords)
+        sampling = metadata["sampling"]
+        actual = (plugin.plugin_id, plugin.platform.value, tier, metadata["connector_revision"],
+                  metadata["connector_path"], sampling["limit"], sampling["ordering"],
+                  metadata["requires_paid_quota"])
+        expected = next((row for row in approved_plan.connectors if row[0] == plugin.plugin_id), None)
+        if (actual != expected or tuple(keywords) != approved_plan.queries
+                or len(keywords) > dict(approved_plan.resources).get("queries", -1)
+                or any(v > dict(approved_plan.resources).get(k, -1)
+                       for k, v in metadata["quota_costs"].items())):
+            raise FollowUpExecutionBoundaryError("SESSION_AUTHORITY_REQUIRED")
+
     async def search_across_all(
         self,
         keywords: List[str],
@@ -531,6 +566,26 @@ class ConnectorPluginRegistry:
         limit: int = 20,
         trigger: IngressTrigger = IngressTrigger.REQUESTED,
     ) -> SearchPassResult:
+        """Probe requested eligible sources using the existing connector policies."""
+        return await self._search_with_outcomes_guarded(
+            keywords=keywords, geo=geo, timeframe=timeframe, target_platforms=target_platforms,
+            target_surfaces=target_surfaces, custom_timeframe=custom_timeframe, scope=scope,
+            limit=limit, trigger=trigger,
+        )
+
+    async def _search_with_outcomes_guarded(
+        self,
+        keywords: List[str],
+        geo: GeoCode = GeoCode.VN,
+        timeframe: Timeframe = Timeframe.LAST_24H,
+        target_platforms: Optional[List[PlatformType]] = None,
+        target_surfaces: Optional[Tuple[str, ...]] = None,
+        custom_timeframe: Optional[str] = None,
+        scope: IngressScope = IngressScope.PUBLIC_MARKET,
+        limit: int = 20,
+        trigger: IngressTrigger = IngressTrigger.REQUESTED,
+        boundary_guard=None, approved_plan=None,
+    ) -> SearchPassResult:
         """Probe every keyword-capable connector, reporting what each eligible surface did.
 
         A keyword search reads a public surface, but it can still surface the operator's own post
@@ -564,10 +619,15 @@ class ConnectorPluginRegistry:
                 logger.debug(f"Skipping search on [{plugin.name}]: no keyword search probe.")
                 continue
 
+            if boundary_guard is not None:
+                boundary_guard()
             runtime = await plugin.resolve_ingest_runtime()
+            if boundary_guard is not None:
+                boundary_guard()
             authority_tier = (
                 "browser_session" if runtime is IngestRuntime.BROWSER else plugin.http_authority
             )
+            self._check_execution_metadata(plugin, authority_tier, keywords, approved_plan)
             provenance[plugin_id] = {
                 "authority_tier": authority_tier,
                 "connector_path": (
@@ -604,21 +664,41 @@ class ConnectorPluginRegistry:
                 )
                 continue
 
+            if boundary_guard is not None:
+                boundary_guard()
             blocked_reasons[plugin_id] = await self._keyword_search_blocked_reason(plugin)
+            if boundary_guard is not None:
+                boundary_guard()
             attestations[plugin_id] = self._attestation_for(plugin)
             enabled_plugins.append(plugin)
-            tasks.append(
-                self._safe_search(
-                    plugin, breaker, keywords, geo, timeframe, custom_timeframe, limit,
-                    attestation=attestations[plugin_id],
-                    trigger=trigger,
-                )
-            )
+            tasks.append((plugin, breaker, attestations[plugin_id]))
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        async def invoke(plugin, breaker, attestation):
+            if boundary_guard is not None:
+                boundary_guard()
+            if approved_plan is not None:
+                runtime = await plugin.resolve_ingest_runtime()
+                if boundary_guard is not None:
+                    boundary_guard()
+                tier = "browser_session" if runtime is IngestRuntime.BROWSER else plugin.http_authority
+                self._check_execution_metadata(plugin, tier, keywords, approved_plan)
+            result = await self._safe_search(
+                plugin, breaker, keywords, geo, timeframe, custom_timeframe, limit,
+                attestation=attestation, trigger=trigger,
+            )
+            if boundary_guard is not None:
+                boundary_guard()
+            return result
+
+        results = await asyncio.gather(*(invoke(*item) for item in tasks), return_exceptions=True)
         all_signals: List[TrendSignal] = []
 
         for plugin, result in zip(enabled_plugins, results):
+            if boundary_guard is not None and isinstance(result, BaseException) and not isinstance(result, Exception):
+                # A protected execution must preserve interruption rather than report empty success.
+                raise result
+            if isinstance(result, FollowUpExecutionBoundaryError):
+                raise result
             if isinstance(result, Exception):
                 safe_error = sanitize_pii_text(str(result))
                 outcomes[plugin.plugin_id] = SurfaceProbeResult(
@@ -742,6 +822,8 @@ class ConnectorPluginRegistry:
             return None
         try:
             return await check()
+        except FollowUpExecutionBoundaryError:
+            raise
         except Exception as exc:
             logger.debug(f"Could not ask [{plugin.name}] whether keyword search is blocked: {exc}")
             return None
@@ -863,6 +945,8 @@ class ConnectorPluginRegistry:
             signals = await plugin.search_signals(**kwargs)
             breaker.record_success()
             return self._stamp_connector_surface(plugin, signals)
+        except FollowUpExecutionBoundaryError:
+            raise
         except ConnectorCapabilityUnavailableException:
             # Unsupported measurement says nothing about the health of the plugin's feed.
             # Preserve earlier operational failures too; this is not a recovery probe.

@@ -48,13 +48,11 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     strategy:
-      # The whole range pyproject.toml claims. Testing one version while requires-python says
-      # >=3.11 means three different answers to "what does this support": the metadata, the
-      # matrix, and whatever the maintainer happens to run. All four pass, verified before this
-      # matrix was widened rather than after.
+      # Owner-approved representative CI runtime; compatibility checks for the
+      # wider supported range remain part of local development verification.
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12"]
 
     steps:
       - name: Checkout repository
@@ -75,6 +73,11 @@ jobs:
         run: |
           uv venv
           uv sync --locked --extra dev --extra browser
+
+      # Browser extras install the Python API, not its matching browser or Linux libraries.
+      - name: Install locked Playwright Chromium
+        run: |
+          .venv/bin/python -m playwright install --with-deps chromium
 
       - name: Run Ruff Linter
         run: |
@@ -107,7 +110,7 @@ jobs:
           uv build
 
       # The clean-user journey -- bootstrap from a clean checkout, registration, stdio handshake,
-      # 44-tool discovery, a real tool call -- runs inside the suite above as
+      # 47-tool discovery, a real tool call -- runs inside the suite above as
       # tests/integration/test_clean_user_journey.py, against the source tree.
       #
       # This step covers what that cannot: the wheel. It installs the built artifact into its own

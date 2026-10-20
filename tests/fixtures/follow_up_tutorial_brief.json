@@ -1,0 +1,20 @@
+{
+  "decision": "Describe what the bounded recent public Vietnamese-language YouTube title/description sample shows about n8n automation tutorial material, and what remains unsupported. No market size, adoption prevalence, demand, purchase intent or product recommendation.",
+  "target_user": "A Vietnamese small-team operator assessing available n8n learning material.",
+  "problem": "Relevant instructional material can be confused with general discussion or promotion; a small attributed sample must distinguish them and disclose coverage/language/missingness limitations.",
+  "geo": "VN",
+  "timeframe": "30d",
+  "hypothesis": "At least one eligible recent item explicitly describes relevant n8n automation instructional material in its public title/description. This supports only a description of available material, not proof of instructional quality, successful implementation or actual adoption.",
+  "alternative_hypotheses": [
+    "Eligible items contain general discussion, news or promotional claims without substantive instructional material in the available evidence.",
+    "Relevant instructional material is insufficiently described or covered by the parent query; the one conditional automation query may address a genuine recorded gap within the same question."
+  ],
+  "null_hypothesis": "Insufficient qualified recent, relevant observations to describe available n8n instructional material in this bounded sample.",
+  "falsifiers": [
+    "No eligible item describes substantive relevant instructional material; dates/language/source/context cannot be verified; qualified counterevidence contradicts the proposed description. Search emptiness or unavailable content does not prove market absence."
+  ],
+  "kill_criteria": [
+    "Stop on missing/revoked authority, unsafe retention, cancellation, the 15-minute deadline, aggregate call exhaustion or provider/auth/rate failure. Insufficiency yields a typed Gap Report. No child without a genuine canonical gap; no reopening a terminal parent."
+  ],
+  "revision_rule": "Qualify support, contradiction and context against the exact current frame; render only permitted bound claims or a Gap Report. Revise or withdraw the descriptive finding if genuinely admitted child evidence changes its bindings; preserve counterevidence and limitations. Never expand the approved bounds to obtain a favorable answer."
+}

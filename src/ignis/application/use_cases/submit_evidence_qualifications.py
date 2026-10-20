@@ -6,8 +6,9 @@ framed by -- and it refuses the whole batch when any of that fails, so a half-re
 changes what a report concludes.
 """
 
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Optional, Sequence, cast
 
+from ignis.application.ports.mission_relay_port import IAnalysisRelayWriter
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.domain.research_workspace import (
@@ -17,6 +18,7 @@ from ignis.domain.research_workspace import (
     QualificationProgress,
     QualificationRelation,
     ResearchSurface,
+    StaleEvidenceQualificationError,
     compute_frame_fingerprint,
     decide_qualification,
     resolve_surface,
@@ -146,7 +148,11 @@ class SubmitEvidenceQualificationsUseCase:
             )
 
         try:
-            recorded = await self._store.save_evidence_qualifications(mission.id, judgments)
+            recorded = await cast(IAnalysisRelayWriter, self._store).commit_evidence_qualifications(
+                mission.id, judgments
+            )
+        except StaleEvidenceQualificationError as exc:
+            return self._refused(base, "CONFLICT", "STALE_FRAME", str(exc))
         except EvidenceQualificationConflictError as exc:
             return self._refused(base, "CONFLICT", "CONFLICTING_REWRITE", str(exc))
         except InvalidEvidenceQualificationError as exc:

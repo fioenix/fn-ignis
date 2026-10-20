@@ -63,6 +63,38 @@ class RecordingQuotaManager:
         return {"quota_day": "2026-09-29", "buckets": {}}
 
 
+@pytest.mark.parametrize("mode", ["search", "feed"])
+@pytest.mark.parametrize("description", ["Public tutorial details", "", None,
+    "Contact synthetic@example.test; API_KEY=synthetic-private-value"])
+@pytest.mark.asyncio
+async def test_returned_description_is_retained_without_inventing_missing_content(mode, description):
+    plugin = YouTubeDataPlugin(api_key="synthetic-only", quota_manager=RecordingQuotaManager())
+    snippet = {"title": "Public tutorial", "publishedAt": datetime.now(timezone.utc).isoformat()}
+    if description is not None:
+        snippet["description"] = description
+    payload = {"items": [{"id": "description-video", "snippet": snippet,
+                          "statistics": {"viewCount": "10"}}]}
+    with patch("httpx.AsyncClient.get") as get:
+        if mode == "search":
+            get.side_effect = [_json_response(_search_list(["description-video"])), _json_response(payload)]
+            signals = await plugin.search_signals(["description regression"], geo=GeoCode.VN)
+        else:
+            get.return_value = _json_response(payload)
+            signals = await plugin.fetch_signals(geo=GeoCode.VN)
+    assert len(signals) == 1
+    assert signals[0].raw_title == "Public tutorial"
+    assert signals[0].source_url == "https://www.youtube.com/watch?v=description-video"
+    assert signals[0].metadata["video_id"] == "description-video"
+    assert signals[0].metadata["source_access"] == "official_api"
+    if description is None:
+        assert "description" not in signals[0].metadata
+    else:
+        expected = ("Contact [REDACTED_EMAIL]; API_KEY=[REDACTED_SECRET]"
+                    if description.startswith("Contact ") else description)
+        assert signals[0].metadata.get("description") == expected
+    assert get.call_count == (2 if mode == "search" else 1)
+
+
 @pytest.mark.asyncio
 async def test_youtube_plugin_parse_signals():
     plugin = YouTubeDataPlugin(api_key="mock_key_123", quota_manager=RecordingQuotaManager())

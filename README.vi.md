@@ -7,7 +7,7 @@ lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân t
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
 **Ranh giới phát hành:** Nhánh này đang triển khai Spec 011 và chưa được phát hành. Mã nguồn
-và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 44 tool theo
+và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 47 tool theo
 nhiệm vụ được mô tả ở đây. Không dùng image đã phát hành để kiểm chứng nhánh này.
 
 ## Hợp đồng sản phẩm
@@ -32,8 +32,17 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/026_partial_degraded_probe_outcomes.sql`. Migration
-026 chỉ sửa constraint số quan sát; kết quả DEGRADED vẫn không phải phép đo hoàn chỉnh. Khởi tạo
+Cây mã nguồn hiện có migration tới `sql/030_mission_follow_up_admission.sql`. Migration 030 bổ sung các khoảng trống
+gắn với đầu vào hiện tại, hạn mức ngân sách, quyền truy cập nguồn đã thu hẹp, receipt của lệnh và phân bổ tài nguyên
+theo nguyên tắc thận trọng. Migration 029 bổ sung liên kết bất biến giữa nhiệm vụ cha và nhiệm vụ con cùng dữ liệu
+dự trữ ngân sách. Hai migration này không bổ sung hồi tố bằng chứng hay kế thừa quyền hạn cũ.
+Migration 028 (`sql/028_research_work.sql`) bổ sung các bảng lưu hoạt động nghiên cứu
+của host trong phạm vi được duyệt và các loại sự kiện tiến độ, không chuyển đổi dữ liệu bằng chứng đã lưu.
+Migration 027 chỉ bổ sung các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
+chuẩn được giữ nguyên. SQLite và PostgreSQL hiện ghi dữ kiện thu thập, qualification và claim cùng sự kiện tiến độ
+tương ứng trong một giao dịch. Relay cung cấp giao diện chỉ đọc cục bộ có thời hạn và snapshot giới hạn từ dữ liệu nhiệm vụ đã khởi tạo.
+Migration 026 chỉ sửa constraint số quan sát; kết quả DEGRADED
+vẫn không phải phép đo hoàn chỉnh. Khởi tạo
 SQLite mới đã được kiểm tra cục bộ; rehearsal PostgreSQL tạm không xác minh database hiện hữu
 của người vận hành.
 Với cơ sở dữ liệu sẵn có, chạy lệnh inventory chỉ đọc
@@ -53,7 +62,7 @@ chỉ nằm tại `src/ignis/infrastructure/templates/html/`.
 
 ## Năng lực dành cho agent
 
-MCP server của nhánh hiện có **44 tools**. Mô tả tool do server đang chạy trả về là nguồn
+MCP server của nhánh hiện có **47 tools**. Mô tả tool do server đang chạy trả về là nguồn
 chuẩn cho tham số. Một số thao tác đại diện:
 
 - `create_attention_mission` và `confirm_market_brief` xác lập câu hỏi và phạm vi;
@@ -69,10 +78,22 @@ chuẩn cho tham số. Một số thao tác đại diện:
 - `submit_mission_claims`, `get_mission_claims` và `get_mission_analysis` kiểm soát
   nhận định còn hiệu lực và báo cáo khoảng trống. `generate_mission_artifact` xuất HTML khi
   người dùng yêu cầu.
+- `get_mission_relay_snapshot` đọc snapshot giới hạn của nhiệm vụ được chọn. Ignis không tự
+  dựng trang theo dõi: hướng dẫn `ignis-track` (prompt MCP `ignis_track`, resource
+  `fn-ignis://guide/ignis-track`) chỉ cho agent cách dùng snapshot đó để dựng artifact theo dõi,
+  phản ánh trạng thái tại lúc đọc. Mặc định artifact được lưu thành file cục bộ; agent chỉ công bố
+  ra nơi khác khi bạn đồng ý.
+- `record_mission_research_work` ghi lệnh có phạm vi của host, kiểm tra quyền của nhiệm vụ,
+  revision, epoch và dữ liệu đầu vào. Việc ghi lệnh không chạy agent, gọi provider hay thu thập nguồn.
+- `execute_mission_follow_up` thực hiện một công việc đã ghi nhận để bổ sung chứng cứ cho khoảng
+  trống cụ thể, trong phạm vi phân công còn hiệu lực và quyền truy cập nguồn được xác minh riêng.
+  Công cụ giữ lại nguồn gốc nhiệm vụ con và phần ngân sách đã giữ chỗ; quyền xem không cấp quyền
+  thực hiện, còn kết quả chưa rõ thì không dẫn tới lượt thu thập mới.
 
-Hướng dẫn agent nằm trong [AGENTS.md](AGENTS.md); hai skill
-[thu thập](.agents/skills/ignis-collect/SKILL.md) và
-[phân tích](.agents/skills/ignis-analyze/SKILL.md) tách biệt. [Hướng dẫn sử dụng](docs/USER_GUIDE.vi.md)
+Hướng dẫn agent nằm trong [AGENTS.md](AGENTS.md); ba skill
+[thu thập](.agents/skills/ignis-collect/SKILL.md),
+[phân tích](.agents/skills/ignis-analyze/SKILL.md) và
+[theo dõi](.agents/skills/ignis-track/SKILL.md) tách biệt. [Hướng dẫn sử dụng](docs/USER_GUIDE.vi.md)
 mô tả nhánh mã nguồn hiện tại. Các sơ đồ Dual-Track của v0.7.0 là tài liệu lịch sử, không
 biểu diễn nhánh này.
 

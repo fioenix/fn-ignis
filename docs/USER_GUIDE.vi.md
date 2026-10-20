@@ -12,7 +12,17 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/026_partial_degraded_probe_outcomes.sql`.
+Chuỗi migration trong mã nguồn kết thúc ở `sql/030_mission_follow_up_admission.sql`. Migration 030 bổ sung các khoảng trống
+gắn với đầu vào hiện tại, hạn mức ngân sách và đơn vị đo rõ ràng, quyền truy cập nguồn đã thu hẹp, receipt của lệnh gốc
+và phân bổ tài nguyên theo nguyên tắc thận trọng. Khi nhận nhiệm vụ trên SQLite, hệ thống yêu cầu một bên xác minh
+quyền hạn hiện tại được cấu hình độc lập và từ chối nếu thiếu bên này. Bên cấp quyền hạn thực tế của host và việc
+thực thi nhiệm vụ con chưa được xác minh. Migration 029 bổ sung liên kết bất biến giữa nhiệm vụ cha và nhiệm vụ con
+cùng dữ liệu dự trữ ngân sách. Hai migration này không bổ sung hồi tố bằng chứng hay kế thừa quyền hạn cũ.
+Migration 028 (`sql/028_research_work.sql`) bổ sung các bảng lưu hoạt động nghiên cứu
+của host trong phạm vi được duyệt và các loại sự kiện tiến độ, không chuyển đổi dữ liệu bằng chứng đã lưu.
+Migration 027 chỉ bổ sung các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
+chuẩn được giữ nguyên. SQLite và PostgreSQL hiện ghi dữ kiện thu thập, qualification và claim cùng sự kiện tiến độ
+tương ứng trong một giao dịch. Relay cung cấp snapshot giới hạn từ dữ liệu nhiệm vụ đã khởi tạo; Ignis không tự dựng trang theo dõi.
 Migration 026 chỉ sửa constraint số quan sát, giữ kết quả thu thập một phần ở trạng thái
 DEGRADED; không coi đó là phép đo hoàn chỉnh hay bằng chứng về sự vắng mặt.
 Khởi tạo SQLite mới đã được kiểm tra tại máy; rehearsal PostgreSQL tạm không xác minh database
@@ -32,6 +42,34 @@ Nếu chỉ hỏi một nguồn, hãy chỉ định từ khóa, địa lý, khun
 Agent gọi tool nguồn riêng lẻ và trả về nguồn, truy vấn, thời điểm thu thập, số quan sát và
 trạng thái kênh. Không cần mở nhiệm vụ Market hay cố đưa ra kết luận chiến lược.
 
+Dưới đây là một số tool nguồn riêng lẻ đã đăng ký (chữ ký chính xác nằm trong mô tả tool của server
+đang chạy). Đây là các lựa chọn đã đăng ký, chưa phải bằng chứng nguồn đang dùng được. Chỉ gọi tool
+cho đúng nhiệm vụ có phạm vi mà người dùng đã yêu cầu rõ, và chỉ khi đã có trước quyền cần thiết với
+owner, nguồn, trình duyệt hoặc phiên đăng nhập. Credential, phiên trình duyệt hay trạng thái xác
+thực đã lưu tự chúng không cấp quyền đó.
+
+- `get_tiktok_video_comments(video_url, limit=30)` đọc bình luận công khai dưới một video TikTok
+  bằng trình duyệt headless, dùng phiên TikTok đã lưu nếu có. Kết quả gồm `status`, `video_url`,
+  `total_comments` và danh sách bình luận. URL không có đoạn `/video/<id>` hoặc máy chưa cài
+  Playwright trả về `SUCCESS` với 0 bình luận. Trang bị chặn hoặc không phân tích được cũng có thể
+  cho 0 bình luận, hoặc trả về `ERROR`, tùy chỗ bị lỗi. Vì vậy con số 0 không chứng minh video
+  không có thảo luận.
+- `get_tiktok_search_suggestions(keywords, geo="VN")` và
+  `get_threads_search_suggestions(keyword, geo="VN", limit=10)` (tối đa 20) trả về gợi ý tìm kiếm
+  mở rộng. `get_threads_trending_topics(geo="VN", limit=15)` (tối đa 30) và
+  `get_tiktok_creative_center_trends(geo="VN", period=7, limit=20, industry=None)` (`limit` tối đa
+  50) trả về danh sách xu hướng vĩ mô. Tool Threads trả về `AUTH_REQUIRED` khi chưa có phiên đăng
+  nhập và `PARSE_EMPTY` khi trang không cho kết quả. Gợi ý và xu hướng chỉ mở rộng từ khóa hoặc chủ
+  đề, không phải lượng tìm kiếm, nhu cầu hay kết luận thị trường.
+- `execute_mission_ingress(mission_id)` là lựa chọn riêng cho nhiệm vụ đã xác nhận: tool này chỉ
+  chạy kế hoạch đã ghi của nhiệm vụ đó và ghi kết quả cho từng kênh được yêu cầu.
+
+Các tool này không ép theo quy trình thu thập rồi mới phân tích, không tự lên lịch thu thập tiếp
+và không cần gọi nối nhau. Mỗi tool vẫn có điều kiện riêng: quyền truy cập nguồn thực tế, phạm vi
+nguồn và nhiệm vụ, giới hạn tài nguyên. Riêng `execute_mission_ingress` còn cần nhiệm vụ đã xác
+nhận cùng kế hoạch đã ghi (với nhiệm vụ Market là Market Brief đã xác nhận). `verify_connectors_health` chỉ chạy chẩn đoán tổng hợp, còn tool xác thực có thể chạy
+probe truy cập, nên đừng gọi chúng chỉ để xem một nguồn có dùng được hay không.
+
 Nếu cần quyết định kinh doanh, hãy nêu quyết định cần đưa ra, đối tượng, địa lý, thời gian,
 giả thuyết, cách giải thích thay thế và điều gì khiến quyết định thay đổi. Agent tạo Attention mission
 hoặc xác nhận Market Brief với người dùng trước khi thu thập. Sau khi chốt phạm vi,
@@ -45,10 +83,21 @@ giả thuyết Market. Có thể yêu cầu một trong hai hoặc cả hai.
 ## 3. Đọc chứng cứ và kết quả phân tích
 
 Ignis ghi kết quả cho từng kênh được yêu cầu. `HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`,
-`RATE_LIMITED` và `DEGRADED` có ý nghĩa khác nhau: không truy cập được kênh là thiếu bao
-phủ, không phải chứng cứ rằng thị trường không có nhu cầu. Agent đánh giá từng quan sát là
+`RATE_LIMITED`, `DEGRADED`, `FAILED` và `NOT_REQUESTED` có ý nghĩa khác nhau: kênh không truy
+cập được hoặc đo thất bại là thiếu bao phủ, còn bề mặt nằm ngoài kế hoạch được yêu cầu thì chưa
+được đo; cả hai đều không phải chứng cứ rằng thị trường không có nhu cầu. Agent đánh giá từng quan sát là
 ủng hộ, phản bác hay chỉ cung cấp bối cảnh và kiểm tra khung chứng cứ đã đi đến trạng thái
 cuối trước khi lập nhận định Market.
+
+Truy cập Threads cần được kiểm tra riêng. Token Graph đã lưu có thể vẫn hợp lệ nhưng probe tìm
+kiếm từ khóa lại báo `SELF_ONLY` (endpoint chỉ trả về bài của chính tài khoản) hoặc `NOT_PERMITTED`.
+Cả hai đều nghĩa là token không trả lời được câu hỏi về thị trường công khai, và Ignis từ chối các
+kết quả đó thay vì coi dòng thời gian của chính tài khoản là chứng cứ thị trường.
+`get_threads_auth_status` chỉ báo credential đã lưu và tier, chưa chứng minh có quyền truy cập công
+khai; `authenticate_threads` khi gọi với `auth_code` trả kết quả probe trong `keyword_search_access`.
+Khi token bị chặn, Ignis ưu tiên phiên trình duyệt đã có, và chỉ được dùng phiên đó khi quyền với
+nguồn, phiên và nhiệm vụ cho phép. Nếu không, hãy ghi nhận thiếu bao phủ và giữ đúng phạm vi nguồn
+đã duyệt, không tự mở rộng phạm vi hay thu thập lại.
 
 Mỗi nhận định chiến lược phải nằm trong Claim Ledger được lưu. `submit_mission_claims` gắn
 nó với quan sát hoặc kết quả không thấy dữ liệu đã được đo hợp lệ;
@@ -60,18 +109,70 @@ nhỏ nhất nên làm tiếp. Điểm số hoặc tín hiệu thô không thay 
 File tải lên và dataset mua ngoài có thể giúp đặt câu hỏi hoặc nhận diện đối thủ. Nếu chưa
 có xuất xứ và đánh giá gắn với nhiệm vụ, chúng chỉ là bối cảnh, không phải chứng cứ Market
 chính. Phân tích cần nêu chứng cứ phản bác và điều kiện khiến kết luận thay đổi. Chỉ dùng
-`generate_mission_artifact` khi cần lưu báo cáo HTML. Bản chạy từ mã nguồn ghi vào `reports/`
-không được commit; bản cài bằng package ghi vào `~/.ignis/reports/`, hoặc thư mục tạm nếu
-cần. Mã template chỉ nằm ở `src/ignis/infrastructure/templates/html/`.
+`generate_mission_artifact` khi cần lưu báo cáo HTML. Giống mọi tool của nhiệm vụ, lệnh này chỉ
+được chấp nhận qua đúng một caller root hợp lệ và báo cáo được ghi vào `<root>/.fnignis/reports/`.
+Server vẫn giữ phương án dự phòng cho lệnh gọi không có caller root: bản chạy từ mã nguồn ghi vào
+`reports/` không được commit; bản cài bằng package ghi vào `~/.ignis/reports/`, hoặc thư mục tạm
+nếu cần. Lệnh gọi MCP đã được chấp nhận không dùng phương án này. Mã template chỉ nằm ở
+`src/ignis/infrastructure/templates/html/`.
+
+### Mission Relay trên nhánh phát triển
+
+Ignis không tự dựng trang theo dõi. Muốn theo dõi một nhiệm vụ, hãy yêu cầu agent đọc
+`get_mission_relay_snapshot` rồi dựng artifact theo dõi theo hướng dẫn `ignis-track`: prompt MCP
+`ignis_track`, resource `fn-ignis://guide/ignis-track` hoặc skill
+[`ignis-track`](../.agents/skills/ignis-track/SKILL.md) trong repo. Agent chỉ dựng lại artifact khi
+bạn yêu cầu hoặc tại một mốc trong chính lượt làm việc của nó, chứ không đọc lặp theo chu kỳ. Mỗi
+artifact là ảnh chụp tại một thời điểm, luôn hiển thị rõ những gì bị giữ lại, đã cũ hoặc chưa có
+dữ liệu. Artifact được lưu thành file cục bộ; muốn công bố ở nơi khác, agent phải xin phép bạn
+trước mỗi lần. Đọc snapshot không làm khởi động, tạm dừng hay huỷ việc thu thập.
+
+Dùng `get_mission_relay_snapshot` để đọc snapshot giới hạn của nhiệm vụ và run được chọn. Thao tác
+đọc kiểm tra storage đã khởi tạo, không khởi tạo database hay chạy collector. Giống mọi tool của
+nhiệm vụ, thao tác này chỉ được chấp nhận qua đúng một caller root: thư mục bạn mở agent, cũng là
+thư mục làm việc của MCP server lúc khởi động. Chỉ đặt `IGNIS_CALLER_ROOT` (thư mục tuyệt đối,
+không đổi kể từ lúc khởi động) khi host khởi động server ở nơi khác. Ignis không dùng danh sách
+root do client gửi. Ignis từ chối thư mục khởi động không thể là thư mục của một dự án, gồm: thư
+mục gốc của hệ thống; thư mục home hoặc thư mục cha của nó; thư mục ai cũng ghi được hoặc có sticky
+bit; thư mục thuộc người dùng khác. Thư mục bị thay thế sau khi khởi động cũng bị từ chối. Mọi trường hợp bị từ
+chối đều trả về `ROOT_REQUIRED`. Khi lệnh gọi được chấp
+nhận, dữ liệu chuẩn của nhiệm vụ mặc định nằm trong SQLite cục bộ của caller tại
+`<root>/.fnignis/canonical.sqlite3`. Có thể khai báo `DATABASE_URL` trong `<root>/.fnignis/.env` để dùng
+một file SQLite khác nằm trong root hoặc một database PostgreSQL. Cấu hình, log, báo cáo và file nghiên
+cứu của caller vẫn nằm trong `<root>/.fnignis/`.
+File này phải là file thường, không cấp quyền cho group hay người dùng khác (Ignis tạo với quyền
+0600), tối đa 32 KiB và chỉ chứa giá trị literal (không nội suy `${...}`) cho các khoá có trong file mẫu
+`<root>/.fnignis/.env.example` do Ignis tạo. Vi phạm về file, khoá, giá trị hoặc cú pháp trả về
+`CALLER_CONFIG_REFUSED`; đường dẫn SQLite tương đối hoặc nằm ngoài root trả về `ROOT_SCOPE_REQUIRED`. File `.env` riêng của server và `DATABASE_URL` do bootstrap ghi không quyết định
+storage nhiệm vụ của caller, và cấu hình không bao giờ cấp quyền chạy probe nguồn.
+`record_mission_research_work` ghi lệnh có phạm vi được chỉ định của host qua phiên stdio cục bộ,
+kiểm tra quyền của nhiệm vụ cùng revision, epoch và dữ liệu đầu vào chính xác. Việc ghi lệnh
+không chạy agent, gọi provider hay thu thập nguồn.
+
+`execute_mission_follow_up(mission_id, follow_up_work_id, expected_research_epoch, idempotency_key)`
+thực hiện công việc bổ sung chứng cứ đã ghi nhận qua phiên stdio cục bộ đang sở hữu tài nguyên.
+Ignis kiểm tra phân công còn hiệu lực, khung đầu vào chính xác, ngân sách còn lại và quyền truy cập
+nguồn được xác minh riêng trước khi tạo nhiệm vụ con hoặc thu thập. Công cụ không nhận truy vấn,
+thông tin xác thực hay cờ cấp quyền từ người gọi. Thiếu bộ cung cấp quyền thực hiện thì yêu cầu
+bị từ chối trước khi khởi tạo xác thực hoặc thu thập.
+Kết quả đã được tiếp nhận nêu đúng nhiệm vụ cha, công việc, khoảng trống, phân công, nhiệm vụ con,
+phần ngân sách giữ chỗ, lượt chạy và kết quả từng kênh. Yêu cầu lặp đọc lại cùng nhiệm vụ con;
+kết quả chưa rõ vẫn giữ chỗ ngân sách và không mở lượt thu thập mới. Khi người gọi hủy yêu cầu,
+Ignis dừng tác vụ đang sở hữu và chờ dọn dẹp. Vòng đời nhiệm vụ cha giữ nguyên; đọc snapshot không
+cấp quyền thực hiện.
 
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **44 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **47 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
 manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
-Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/unit/` và `uv lock --check`
-để kiểm tra cục bộ, rồi xem [danh sách việc](../specs/011-evidence-grounded-product-reset/tasks.md)
-cho các cổng PostgreSQL, pilot, tích hợp và phát hành cần chủ sở hữu quyết định.
+Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu
+`IGNIS_TEST_POSTGRES_DSN` không trỏ tới một database kiểm thử dùng một lần) và `uv lock --check`
+để kiểm tra cục bộ. Bộ kiểm thử tự thay credential bằng giá trị trơ; nếu muốn tách hẳn khỏi
+`.env` của checkout, dùng [cách cô lập cấu hình](../specs/014-evidence-factory/quickstart.md#isolated-settings). Xem [danh sách việc của Spec 011](../specs/011-evidence-grounded-product-reset/tasks.md)
+cho các cổng PostgreSQL, pilot, tích hợp và phát hành cần chủ sở hữu quyết định. Các cổng còn mở
+của Mission Relay, công việc nghiên cứu và bổ sung chứng cứ nằm trong
+[danh sách việc của Spec 014](../specs/014-evidence-factory/tasks.md).
 ### Tìm kiếm TikTok qua trình duyệt host trên nhánh phát triển
 
 Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và

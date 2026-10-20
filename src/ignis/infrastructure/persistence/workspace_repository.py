@@ -15,20 +15,22 @@ Which backend is configured is not this class's decision. It delegates to whiche
 import dataclasses
 import json
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple, cast
 from uuid import UUID, uuid4
 
 from ignis.application.cancellation import await_settled
+from ignis.application.ports.mission_relay_port import IAnalysisRelayWriter, ICollectionRelayWriter
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import (
     IResearchWorkspaceStore,
     MissionWriterClaim,
     RunJournal,
 )
-from ignis.domain.entities import ResearchMission
+from ignis.domain.entities import ResearchMission, TrendSignal
 from ignis.domain.research_workspace import (
     JOURNAL_DIRNAME,
     MANIFEST_FILENAME,
@@ -95,8 +97,9 @@ class RunJournalExhaustedError(Exception):
 class WorkspaceRepository(IResearchWorkspaceStore):
     """Canonical workspace storage, delegating to the configured shared database."""
 
-    def __init__(self, repository: Optional[ITrendRepository] = None):
+    def __init__(self, repository: Optional[ITrendRepository] = None, *, path_guard=None):
         self._repo = repository if repository is not None else create_repository()
+        self._path_guard = path_guard
 
     @property
     def repository(self) -> ITrendRepository:
@@ -108,18 +111,30 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     # ------------------------------------------------------------------
 
     async def save_research_workspace(self, workspace: ResearchWorkspace) -> ResearchWorkspace:
+        if self._path_guard is not None:
+            self._path_guard(workspace.manifest_path)
         return await self._repo.save_research_workspace(workspace)
 
     async def get_research_workspace(self, workspace_id: UUID) -> Optional[ResearchWorkspace]:
-        return await self._repo.get_research_workspace(workspace_id)
+        result = await self._repo.get_research_workspace(workspace_id)
+        if result is not None and self._path_guard is not None:
+            self._path_guard(result.manifest_path)
+        return result
 
     async def find_research_workspace_by_slug(
         self, slug: str, root_path: Optional[Path] = None
     ) -> Optional[ResearchWorkspace]:
-        return await self._repo.find_research_workspace_by_slug(slug, root_path)
+        result = await self._repo.find_research_workspace_by_slug(slug, root_path)
+        if result is not None and self._path_guard is not None:
+            self._path_guard(result.manifest_path)
+        return result
 
     async def list_research_workspaces(self, limit: int = 50) -> List[ResearchWorkspace]:
-        return await self._repo.list_research_workspaces(limit)
+        result = await self._repo.list_research_workspaces(limit)
+        if self._path_guard is not None:
+            for workspace in result:
+                self._path_guard(workspace.manifest_path)
+        return result
 
     async def save_brief_revision(self, revision: MarketBriefRevision) -> MarketBriefRevision:
         return await self._repo.save_brief_revision(revision)
@@ -221,6 +236,11 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         mission_id: UUID,
         run_id: Optional[UUID] = None,
     ) -> AsyncIterator[RunJournal]:
+        async with self._mission_run(workspace, mission_id, run_id=run_id) as journal:
+            yield journal
+
+    @asynccontextmanager
+    async def _mission_run(self, workspace, mission_id, *, run_id=None, before_journal=None):
         """Take the mission for one run: claim the writer, take a journal, give both back.
 
         The order is the contract. The claim comes first, so a second run is refused before it
@@ -232,33 +252,73 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         The claim is per mission. Two missions of one research take two different rows and
         never wait for each other.
         """
+        if self._path_guard is not None:
+            self._path_guard(workspace.manifest_path)
         run_id = run_id or uuid4()
-        try:
+        caller = asyncio.current_task()
+        ownership = {"acquired": False, "journal": None}
+
+        async def setup():
+            if caller.cancelling():
+                raise asyncio.CancelledError
             await self.require_mission_writer(mission_id, run_id)
-            # Preflight may have awaited while an earlier run completed. Recheck under the
-            # writer slot, before allocating a journal, so delayed admission cannot restart it.
+            ownership["acquired"] = True
+            if caller.cancelling():
+                raise asyncio.CancelledError
             mission = await self._repo.get_mission(mission_id)
             if mission is None:
                 raise WorkspaceScopeMismatchError(f"Mission {mission_id} no longer exists.")
             status = str(mission.status).upper()
             if status in {"COMPLETED", "FAILED", "BLOCKED", "CANCELLED", "INSUFFICIENT_EVIDENCE"}:
                 raise MissionTerminalStateError(mission_id, status)
-            journal = await self.allocate_run_journal(workspace, mission_id, run_id=run_id)
+            if before_journal is not None:
+                await before_journal(mission, run_id)
+            if caller.cancelling():
+                raise asyncio.CancelledError
+            ownership["journal"] = await self.allocate_run_journal(workspace, mission_id, run_id=run_id)
+
+        async def cleanup_setup():
+            try:
+                if ownership["journal"] is not None:
+                    await self._finish_interrupted_run_journal(ownership["journal"])
+            finally:
+                if ownership["acquired"]:
+                    await self.release_mission_writer(mission_id, run_id)
+
+        try:
+            await await_settled(setup())
+            journal = ownership["journal"]
         except BaseException:
-            # No journal, so there is no run to record -- and holding the slot for a run that
-            # never started is exactly the stale claim the release exists to prevent.
-            await await_settled(self.release_mission_writer(mission_id, run_id))
+            try:
+                await await_settled(cleanup_setup())
+            except Exception:
+                logger.error("Could not finalize interrupted setup for run %s", run_id)
             raise
 
         try:
             yield journal
         except BaseException:
-            await await_settled(self._finish_run_journal(journal, status="FAILED"))
+            await await_settled(self._finish_interrupted_run_journal(journal))
             raise
         else:
             await await_settled(self._finish_run_journal(journal, status="COMPLETED"))
         finally:
             await await_settled(self.release_mission_writer(mission_id, run_id))
+
+    async def _finish_interrupted_run_journal(self, journal: RunJournal) -> RunJournal:
+        """A lost completion acknowledgement cannot contradict its committed collection.
+
+        The caller still holds the mission writer. Check canonical state only after any
+        ownership-sensitive write settled; never infer completion from the filesystem.
+        """
+        status = "FAILED"
+        try:
+            mission = await self._repo.get_mission(journal.mission_id)
+            if mission is not None and str(mission.status).upper() == "COMPLETED":
+                status = "COMPLETED"
+        except Exception:
+            logger.error("Could not read collection settlement for run %s", journal.run_id)
+        return await self._finish_run_journal(journal, status=status)
 
     async def _finish_run_journal(self, journal: RunJournal, status: str) -> RunJournal:
         """Close a run's journal on disk and in the database, without raising over the run.
@@ -272,6 +332,8 @@ class WorkspaceRepository(IResearchWorkspaceStore):
             journal, status=status, completed_at=_utc_now()
         )
         try:
+            if self._path_guard is not None:
+                self._path_guard(journal.journal_path)
             existing = json.loads(journal.journal_path.read_text(encoding="utf-8"))
             journal.journal_path.write_text(
                 _journal_payload(finished, collection_plan=existing.get("collection_plan")),
@@ -345,11 +407,15 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         run_id = run_id or uuid4()
         started_at = _utc_now()
         journal_dir = workspace.root_path / JOURNAL_DIRNAME
+        if self._path_guard is not None:
+            self._path_guard(journal_dir)
         journal_dir.mkdir(parents=True, exist_ok=True)
         stamp = started_at.strftime("%Y%m%d-%H%M%S")
 
         for sequence in range(1, JOURNAL_SEQUENCE_LIMIT):
             candidate = journal_dir / f"{JOURNAL_PREFIX}{stamp}-{sequence:03d}.json"
+            if self._path_guard is not None:
+                self._path_guard(candidate)
             journal = RunJournal(
                 run_id=run_id,
                 mission_id=mission_id,
@@ -375,6 +441,8 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         )
 
     async def record_run_journal(self, journal: RunJournal) -> RunJournal:
+        if self._path_guard is not None:
+            self._path_guard(journal.journal_path)
         return await self._repo.record_run_journal(journal)
 
     async def record_collection_plan(
@@ -384,17 +452,28 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         digest = plan.get("plan_digest") if isinstance(plan, dict) else None
         if not isinstance(digest, str) or len(digest) != 64:
             raise ValueError("A run journal collection plan needs its canonical plan_digest.")
+        if self._path_guard is not None:
+            self._path_guard(journal.journal_path)
         current = json.loads(journal.journal_path.read_text(encoding="utf-8"))
         current["collection_plan"] = plan
         current["collection_plan_digest"] = digest
         temporary = journal.journal_path.with_suffix(journal.journal_path.suffix + ".tmp")
+        if self._path_guard is not None:
+            self._path_guard(temporary)
         temporary.write_text(
             json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+        if self._path_guard is not None:
+            self._path_guard(temporary)
+            self._path_guard(journal.journal_path)
         temporary.replace(journal.journal_path)
 
     async def list_run_journals(self, mission_id: UUID, limit: int = 20) -> List[RunJournal]:
-        return await self._repo.list_run_journals(mission_id, limit)
+        result = await self._repo.list_run_journals(mission_id, limit)
+        if self._path_guard is not None:
+            for journal in result:
+                self._path_guard(journal.journal_path)
+        return result
 
     async def latest_run_journal(self, mission_id: UUID) -> Optional[RunJournal]:
         """The most recent run of a mission, or None when it has never run."""
@@ -404,6 +483,30 @@ class WorkspaceRepository(IResearchWorkspaceStore):
     # ------------------------------------------------------------------
     # Probe outcomes and evidence qualifications (configured shared database)
     # ------------------------------------------------------------------
+
+    async def commit_collection_state(self, mission: ResearchMission, run_id: UUID) -> None:
+        await cast(ICollectionRelayWriter, self._repo).commit_collection_state(mission, run_id)
+
+    async def commit_collection_observations(
+        self, mission_id: UUID, run_id: UUID, signals: Sequence[TrendSignal]
+    ) -> int:
+        return await cast(ICollectionRelayWriter, self._repo).commit_collection_observations(
+            mission_id, run_id, signals
+        )
+
+    async def commit_collection_membership(
+        self, mission_id: UUID, run_id: UUID, signals: Sequence[TrendSignal]
+    ) -> int:
+        return await cast(ICollectionRelayWriter, self._repo).commit_collection_membership(
+            mission_id, run_id, signals
+        )
+
+    async def commit_collection_pruning(
+        self, mission_id: UUID, run_id: UUID, retained_observation_ids: Sequence[UUID]
+    ) -> int:
+        return await cast(ICollectionRelayWriter, self._repo).commit_collection_pruning(
+            mission_id, run_id, retained_observation_ids
+        )
 
     async def record_probe_outcomes(
         self, run_id: UUID, outcomes: Sequence[MissionProbeOutcome]
@@ -429,6 +532,20 @@ class WorkspaceRepository(IResearchWorkspaceStore):
         self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
     ) -> List[MissionClaim]:
         return await self._repo.save_mission_claims(mission_id, frame_digest, claims)
+
+    async def commit_evidence_qualifications(
+        self, mission_id: UUID, qualifications: Sequence[EvidenceQualification]
+    ) -> int:
+        return await cast(IAnalysisRelayWriter, self._repo).commit_evidence_qualifications(
+            mission_id, qualifications
+        )
+
+    async def commit_mission_claims(
+        self, mission_id: UUID, frame_digest: str, claims: Sequence[MissionClaim]
+    ) -> List[MissionClaim]:
+        return await cast(IAnalysisRelayWriter, self._repo).commit_mission_claims(
+            mission_id, frame_digest, claims
+        )
 
     async def list_mission_claims(
         self, mission_id: UUID, *, include_superseded: bool = False

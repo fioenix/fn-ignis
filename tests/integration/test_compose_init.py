@@ -54,6 +54,10 @@ READBACK = {
         "SELECT count(*) FROM pg_class"
         " WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p')"
     ),
+    "public_table_names": (
+        "SELECT string_agg(relname, ',' ORDER BY relname) FROM pg_class"
+        " WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p')"
+    ),
     "public_tables_without_rls": (
         "SELECT count(*) FROM pg_class WHERE relnamespace = 'public'::regnamespace"
         " AND relkind IN ('r', 'p') AND NOT relrowsecurity"
@@ -66,6 +70,14 @@ READBACK = {
         " WHERE c.relnamespace = 'public'::regnamespace"
         " AND pg_get_expr(d.adbin, d.adrelid) = 'gen_random_uuid()'"
     ),
+    "builtin_uuid_columns": (
+        "SELECT string_agg(c.relname || '.' || a.attname, ','"
+        " ORDER BY c.relname, a.attname) FROM pg_attrdef d"
+        " JOIN pg_class c ON c.oid = d.adrelid"
+        " JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum"
+        " WHERE c.relnamespace = 'public'::regnamespace"
+        " AND pg_get_expr(d.adbin, d.adrelid) = 'gen_random_uuid()'"
+    ),
     "uuid_ossp_defaults": (
         "SELECT count(*) FROM pg_attrdef d JOIN pg_class c ON c.oid = d.adrelid"
         " WHERE c.relnamespace = 'public'::regnamespace"
@@ -73,7 +85,99 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "025_evidence_grounded_claim_ledger.sql"
+NEWEST_MIGRATION = "030_mission_follow_up_admission.sql"
+
+# Exact full-chain identities: 027 adds three tables/one UUID default; 028 adds fifteen
+# tables, 029 three and 030 six, all with caller-bound identities and no UUID default.
+# Counts alone cannot detect a swapped table or default.
+EXPECTED_PUBLIC_TABLES = (
+    "industry_taxonomies",
+    "market_brief_revisions",
+    "market_lexicons",
+    "mission_claim_evidence",
+    "mission_claims",
+    "mission_evidence",
+    "mission_evidence_qualifications",
+    "mission_follow_up_assignment_budgets",
+    "mission_follow_up_authorities",
+    "mission_follow_up_commands",
+    "mission_follow_up_gaps",
+    "mission_follow_up_parent_budgets",
+    "mission_follow_up_reservation_resources",
+    "mission_follow_up_reservations",
+    "mission_follow_up_work",
+    "mission_follow_ups",
+    "mission_manifests",
+    "mission_probe_outcomes",
+    "mission_progress_commands",
+    "mission_progress_events",
+    "mission_progress_revisions",
+    "mission_run_journals",
+    "mission_writer_claims",
+    "observations",
+    "platform_credentials",
+    "research_activity_receipts",
+    "research_assignments",
+    "research_finding_observations",
+    "research_finding_revisions",
+    "research_handoff_acknowledgements",
+    "research_handoff_observations",
+    "research_handoff_references",
+    "research_handoffs",
+    "research_input_findings",
+    "research_input_observations",
+    "research_input_sets",
+    "research_missions",
+    "research_recorded_metadata",
+    "research_work_commands",
+    "research_work_dependencies",
+    "research_work_items",
+    "research_workspaces",
+    "runtime_configs",
+    "signal_metrics",
+    "source_identity_aliases",
+    "sources",
+    "system_audit_logs",
+    "topic_clusters",
+    "trend_signals",
+    "youtube_quota_buckets",
+)
+EXPECTED_UUID_COLUMNS = (
+    "industry_taxonomies.id",
+    "market_brief_revisions.id",
+    "market_lexicons.id",
+    "mission_claim_evidence.id",
+    "mission_claims.id",
+    "mission_evidence.id",
+    "mission_evidence_qualifications.id",
+    "mission_probe_outcomes.id",
+    "mission_progress_events.id",
+    "mission_run_journals.id",
+    "observations.id",
+    "research_missions.id",
+    "research_workspaces.id",
+    "source_identity_aliases.id",
+    "sources.id",
+    "topic_clusters.id",
+)
+
+
+def _assert_readback(readback):
+    assert readback == {
+        "later_objects": "13",
+        "ui_noise_terms": "10",
+        "retired_present": "0",
+        "rls_market_lexicons": "t",
+        "public_policies": "0",
+        "public_tables": "50",
+        "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
+        "public_tables_without_rls": "0",
+        "supabase_roles": "0",
+        "builtin_uuid_defaults": "16",
+        "builtin_uuid_columns": ",".join(EXPECTED_UUID_COLUMNS),
+        "uuid_ossp_defaults": "0",
+    }
+
 
 compose_only = pytest.mark.skipif(
     os.environ.get("IGNIS_TEST_COMPOSE_INIT") != "1" or shutil.which("docker") is None,
@@ -259,18 +363,7 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
         assert run["ran"] == list(all_postgres_migrations()), "init skipped or reordered a file"
         assert NEWEST_MIGRATION in run["ran"], f"init never reached {NEWEST_MIGRATION}"
         assert run["errors"] == []
-        assert run["readback"] == {
-            "later_objects": "13",
-            "ui_noise_terms": "10",
-            "retired_present": "0",
-            "rls_market_lexicons": "t",
-            "public_policies": "0",
-            "public_tables": "23",
-            "public_tables_without_rls": "0",
-            "supabase_roles": "0",
-            "builtin_uuid_defaults": "15",
-            "uuid_ossp_defaults": "0",
-        }
+        _assert_readback(run["readback"])
         assert run["cleanup"]["returncode"] == 0, run["cleanup"]
         assert run["leftovers"] == {"container": 0, "volume": 0, "network": 0}, (
             f"cleanup left {run['leftovers']}: {run['leftover_details']};"
@@ -278,3 +371,89 @@ def test_two_fresh_compose_inits_run_every_file_and_end_in_the_same_state(tmp_pa
         )
         assert run["credential_file_left"] is False
     assert first["readback"] == second["readback"]
+
+
+@pytest.mark.parametrize("control", ("table_identity", "uuid_identity", "rls", "policy"))
+def test_readback_oracle_rejects_identity_substitution_and_access_widening(control):
+    """Correct counts cannot hide the wrong schema or a widened access policy."""
+    readback = {
+        "later_objects": "13", "ui_noise_terms": "10", "retired_present": "0",
+        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "50",
+        "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
+        "public_tables_without_rls": "0", "supabase_roles": "0",
+        "builtin_uuid_defaults": "16", "builtin_uuid_columns": ",".join(EXPECTED_UUID_COLUMNS),
+        "uuid_ossp_defaults": "0",
+    }
+    _assert_readback(readback)
+    if control == "table_identity":
+        readback["public_table_names"] = readback["public_table_names"].replace(
+            "research_work_commands", "unexpected_table")
+    elif control == "uuid_identity":
+        readback["builtin_uuid_columns"] = readback["builtin_uuid_columns"].replace(
+            "mission_progress_events.id", "research_assignments.assignment_id")
+    elif control == "rls":
+        readback["public_tables_without_rls"] = "1"
+    else:
+        readback["public_policies"] = "1"
+    with pytest.raises(AssertionError):
+        _assert_readback(readback)
+
+
+def _migration_sources():
+    return [re.sub(r"--[^\n]*", "", (REPO / "sql" / name).read_text(encoding="utf-8"))
+            for name in all_postgres_migrations()]
+
+
+def _declared_public_tables():
+    """Tables the chain's own CREATE/DROP statements leave behind, independent of the oracle."""
+    created, dropped = set(), set()
+    for source in _migration_sources():
+        created.update(re.findall(
+            r"CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?([a-z_0-9]+)\s*\(",
+            source, re.I))
+        dropped.update(re.findall(
+            r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:public\.)?([a-z_0-9]+)", source, re.I))
+    return created - dropped
+
+
+def _declared_builtin_uuid_columns():
+    """UUID columns given a generator default, by CREATE TABLE body or by a later ALTER."""
+    generator = r"(?:gen_random_uuid|(?:public\.|extensions\.)?uuid_generate_v4)\(\)"
+    columns = set()
+    for source in _migration_sources():
+        for table in re.finditer(
+                r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?([a-z_0-9]+)\s*\(", source, re.I):
+            depth, end = 1, table.end()
+            while depth:
+                depth += {"(": 1, ")": -1}.get(source[end], 0)
+                end += 1
+            body = source[table.end():end - 1]
+            for column in re.finditer(
+                    r"(?:^|,)\s*([a-z_0-9]+)\s+UUID\b[^,]*?DEFAULT\s+" + generator, body, re.I | re.S):
+                columns.add(f"{table.group(1)}.{column.group(1)}")
+        for altered in re.finditer(
+                r"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?:public\.)?([a-z_0-9]+)"
+                r"\s+ALTER\s+COLUMN\s+([a-z_0-9]+)\s+SET\s+DEFAULT\s+" + generator, source, re.I):
+            columns.add(f"{altered.group(1)}.{altered.group(2)}")
+    return columns
+
+
+def test_full_chain_oracle_matches_every_declared_table_and_uuid_default():
+    """The readback oracle must name the whole current chain, not the chain as it once ended.
+
+    Read statically from sql/ without a database, so a stale endpoint, table list or count fails
+    here even where the Docker init cannot run. The fixed literals stay the oracle; this only
+    proves they are current.
+    """
+    assert NEWEST_MIGRATION == all_postgres_migrations()[-1]
+    tables = sorted(_declared_public_tables())
+    columns = sorted(_declared_builtin_uuid_columns())
+    assert list(EXPECTED_PUBLIC_TABLES) == tables
+    assert list(EXPECTED_UUID_COLUMNS) == columns
+    _assert_readback({
+        "later_objects": "13", "ui_noise_terms": "10", "retired_present": "0",
+        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": str(len(tables)),
+        "public_table_names": ",".join(tables), "public_tables_without_rls": "0",
+        "supabase_roles": "0", "builtin_uuid_defaults": str(len(columns)),
+        "builtin_uuid_columns": ",".join(columns), "uuid_ossp_defaults": "0",
+    })

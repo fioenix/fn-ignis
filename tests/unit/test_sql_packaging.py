@@ -5,6 +5,8 @@ repository root, which does not exist next to an installed package, so no lexico
 runtime config was ever seeded and the failure was silent.
 """
 
+import copy
+import tomllib
 from pathlib import Path
 
 import ignis.resources as resources
@@ -20,7 +22,33 @@ SEED_FILES = (
 )
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
-NEWEST_POSTGRES_MIGRATION = "026_partial_degraded_probe_outcomes.sql"
+NEWEST_POSTGRES_MIGRATION = "030_mission_follow_up_admission.sql"
+# The closed sdist member list: runtime package, the SQL chain, and the build metadata. Anything
+# else -- tests, docs, examples, reports, handoff notes, agent or local settings -- must not ship.
+SDIST_MEMBERS = {"src/ignis", "sql", "pyproject.toml", "README.md", "LICENSE"}
+
+
+def _packaging_offenders(project):
+    """Reason codes for each way a parsed pyproject leaves the approved declaration; empty if exact.
+
+    This checks the declared configuration, not Hatch's precedence rules: the approved sdist
+    declares only the closed member list, so exclude/include/force-include keys are refused as
+    outside that declaration rather than interpreted.
+    """
+    targets = project.get("tool", {}).get("hatch", {}).get("build", {}).get("targets", {})
+    wheel, sdist = targets.get("wheel", {}), targets.get("sdist", {})
+    offenders = []
+    if wheel.get("force-include", {}).get("sql") != "ignis/sql":
+        offenders.append("WHEEL_SQL_NOT_FORCE_INCLUDED")
+    members = sdist.get("only-include")
+    if not isinstance(members, list) or set(members) != SDIST_MEMBERS or len(members) != len(SDIST_MEMBERS):
+        offenders.append("SDIST_MEMBERS_NOT_EXACT")
+    # Any exclusion could remove a required member (README.md, LICENSE, sql, even "**").
+    for key, reason in (("exclude", "SDIST_EXCLUDE_UNSUPPORTED"), ("include", "SDIST_INCLUDE_UNSUPPORTED"),
+                        ("force-include", "SDIST_FORCE_INCLUDE_UNSUPPORTED")):
+        if key in sdist:
+            offenders.append(reason)
+    return offenders
 
 
 def test_seed_directory_is_found_in_this_layout():
@@ -81,9 +109,26 @@ def test_the_whole_postgres_migration_chain_ships_not_only_the_seeds():
     )
     assert NEWEST_POSTGRES_MIGRATION not in SEED_FILES, "a PostgreSQL-only migration is not a seed"
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
-    sdist = pyproject.read_text(encoding="utf-8").split("[tool.hatch.build.targets.sdist]", 1)[1]
-    excluded = sdist.split("]", 1)[0]
-    assert '"sql"' not in excluded and '"/sql"' not in excluded, "the sdist excludes sql/"
+    project = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    assert _packaging_offenders(project) == []
+
+    # Each wrong contract must be rejected, so the check above cannot pass vacuously.
+    def variant(change):
+        changed = copy.deepcopy(project)
+        change(changed["tool"]["hatch"]["build"]["targets"])
+        return _packaging_offenders(changed)
+
+    assert variant(lambda t: t["sdist"]["only-include"].remove("sql")) == ["SDIST_MEMBERS_NOT_EXACT"]
+    assert variant(lambda t: t["wheel"]["force-include"].update({"sql": "sql"})) == ["WHEEL_SQL_NOT_FORCE_INCLUDED"]
+    for private in (".handoff", ".env", "tests", "docs", "examples", "reports", ".codex"):
+        assert variant(lambda t, private=private: t["sdist"]["only-include"].append(private)) == [
+            "SDIST_MEMBERS_NOT_EXACT"], private
+    for required in (["/sql"], ["README.md"], ["LICENSE"], ["pyproject.toml"], ["src/ignis"], ["**"]):
+        assert variant(lambda t, required=required: t["sdist"].update({"exclude": required})) == [
+            "SDIST_EXCLUDE_UNSUPPORTED"], required
+    assert variant(lambda t: t["sdist"].update({"include": ["docs"]})) == ["SDIST_INCLUDE_UNSUPPORTED"]
+    assert variant(lambda t: t["sdist"].update({"force-include": {".handoff": ".handoff"}})) == [
+        "SDIST_FORCE_INCLUDE_UNSUPPORTED"]
 
 
 def test_the_migration_inventory_includes_partial_outcomes_and_both_backends_state_claim_tables():

@@ -96,18 +96,34 @@ def test_reveal_secret_passes_plain_strings_through():
     assert reveal_secret(None) == ""
 
 
+RAW_SECRET_READ = re.compile(
+    r"(?<!reveal_secret\()\b\w*settings\.(" + "|".join(SECRET_SETTINGS) + r")\b"
+)
+
+
+@pytest.mark.parametrize(
+    ("line", "flagged"),
+    [
+        ("key = settings.YOUTUBE_API_KEY", True),
+        ("key = reveal_secret(settings.YOUTUBE_API_KEY)", False),
+        ("key = composition_settings.YOUTUBE_API_KEY", True),
+        ("key = reveal_secret(composition_settings.YOUTUBE_API_KEY)", False),
+    ],
+)
+def test_the_raw_read_guard_judges_the_whole_settings_name(line, flagged):
+    # A name that merely ends in "settings" is still a settings object, wrapped or not.
+    assert bool(RAW_SECRET_READ.search(line)) is flagged, line
+
+
 def test_no_source_file_reads_a_secret_setting_without_unwrapping_it():
     """Guard the consumer chain: a new raw read would silently compare against a SecretStr."""
     from pathlib import Path
 
     source_root = Path(__file__).resolve().parents[2] / "src"
-    pattern = re.compile(
-        r"(?<!reveal_secret\()settings\.(" + "|".join(SECRET_SETTINGS) + r")\b"
-    )
     offenders = []
     for path in source_root.rglob("*.py"):
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if pattern.search(line):
+            if RAW_SECRET_READ.search(line):
                 offenders.append(f"{path.relative_to(source_root)}:{number}")
     assert not offenders, (
         "read these through reveal_secret(): " + ", ".join(offenders)
