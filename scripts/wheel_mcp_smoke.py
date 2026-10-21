@@ -31,7 +31,7 @@ import sys
 import threading
 from dataclasses import dataclass
 
-EXPECTED_TOOL_COUNT = 48
+EXPECTED_TOOL_COUNT = 51
 EXPECTED_TOOL_NAMES = {
     "authenticate_instagram",
     "authenticate_threads",
@@ -65,6 +65,7 @@ EXPECTED_TOOL_NAMES = {
     "get_tiktok_creative_center_trends",
     "get_tiktok_search_suggestions",
     "get_tiktok_video_comments",
+    "get_watchlist",
     "list_domain_lexicons",
     "list_research_missions",
     "list_research_workspaces",
@@ -75,7 +76,9 @@ EXPECTED_TOOL_NAMES = {
     "register_domain_lexicon",
     "register_noise_blacklist",
     "release_mission_writer",
+    "save_watchlist",
     "set_mission_declared_accounts",
+    "start_watchlist_run",
     "submit_host_browser_search",
     "submit_mission_claims",
     "submit_mission_evidence_qualifications",

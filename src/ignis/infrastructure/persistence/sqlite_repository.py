@@ -26,6 +26,14 @@ from ignis.application.ports.repository_port import (
 )
 from ignis.resources import sql_seed_file
 from ignis.domain.author_identity import DeclaredAccount
+from ignis.domain.watchlist import Watchlist, WatchlistConflict, watchlist_name_key
+from ignis.infrastructure.persistence.watchlist_rows import (
+    WATCHLIST_HEAD_SQL,
+    WATCHLIST_RUNS_SQL,
+    WATCHLIST_VERSIONS_SQL,
+    definition_json,
+    watchlist_from_rows,
+)
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.cross_platform_score import cluster_rank_key, cross_platform_score
 from ignis.domain.research_workspace import (
@@ -247,6 +255,42 @@ _AUTHOR_IDENTITY_TRIGGERS_DDL = """
                 WHERE id = NEW.declared_account_id AND mission_id = NEW.mission_id)
             BEGIN
                 SELECT RAISE(ABORT, 'declared account belongs to another mission');
+            END;
+"""
+
+# Tables sql/032 added (Spec 016). name_key is the case-folded name the repository computes, since
+# SQLite's lower() folds ASCII only; a version is immutable once written.
+_WATCHLIST_DDL = """
+            CREATE TABLE IF NOT EXISTS watchlists (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES research_workspaces(id) ON DELETE CASCADE,
+                name TEXT NOT NULL CHECK (trim(name) <> '' AND name = trim(name)),
+                name_key TEXT NOT NULL CHECK (name_key <> ''),
+                created_at TEXT NOT NULL,
+                UNIQUE (workspace_id, name_key)
+            );
+            CREATE TABLE IF NOT EXISTS watchlist_versions (
+                watchlist_id TEXT NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+                version INTEGER NOT NULL CHECK (version >= 1),
+                definition TEXT NOT NULL CHECK (json_valid(definition) AND json_type(definition) = 'object'),
+                definition_digest TEXT NOT NULL
+                    CHECK (length(definition_digest) = 64 AND definition_digest NOT GLOB '*[^0-9a-f]*'),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (watchlist_id, version)
+            );
+            CREATE TABLE IF NOT EXISTS watchlist_runs (
+                mission_id TEXT PRIMARY KEY REFERENCES research_missions(id) ON DELETE CASCADE,
+                watchlist_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                started_at TEXT NOT NULL,
+                FOREIGN KEY (watchlist_id, version)
+                    REFERENCES watchlist_versions (watchlist_id, version) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_watchlist_runs_watchlist ON watchlist_runs (watchlist_id, started_at);
+            CREATE TRIGGER IF NOT EXISTS refuse_watchlist_version_update
+            BEFORE UPDATE ON watchlist_versions
+            BEGIN
+                SELECT RAISE(ABORT, 'watchlist versions are immutable');
             END;
 """
 
@@ -1484,7 +1528,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 )
                 WHERE cluster_id IS NOT NULL AND time_provenance = 'exact_ingestion';
 
-""" + _MISSION_EVIDENCE_DDL + _AUTHOR_IDENTITY_TABLES_DDL + """            CREATE INDEX IF NOT EXISTS idx_mission_evidence_observation ON mission_evidence (observation_id);
+""" + _MISSION_EVIDENCE_DDL + _AUTHOR_IDENTITY_TABLES_DDL + _WATCHLIST_DDL + """            CREATE INDEX IF NOT EXISTS idx_mission_evidence_observation ON mission_evidence (observation_id);
 
             -- The alias ledger from sql/018_source_identity_aliases.sql. Restated here for the
             -- same reason as the three tables above: SQLite does not read the sql/ files, and a
@@ -3752,6 +3796,118 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
 
         withdrawn = await self._run_write(_sync_replace)
         return await self.list_mission_declared_accounts(mission_id), withdrawn
+
+    def _sync_watchlist(self, conn: sqlite3.Connection, watchlist_id: str) -> Optional[Watchlist]:
+        head = conn.execute(WATCHLIST_HEAD_SQL.format(p="?"), (watchlist_id,)).fetchone()
+        return watchlist_from_rows(
+            tuple(head) if head else None,
+            [tuple(r) for r in conn.execute(WATCHLIST_VERSIONS_SQL.format(p="?"), (watchlist_id,))],
+            [tuple(r) for r in conn.execute(WATCHLIST_RUNS_SQL.format(p="?"), (watchlist_id,))],
+        )
+
+    async def create_watchlist(self, workspace_id, name, definition) -> Watchlist:
+        """Create a watchlist with its first version. See the port."""
+        await self._ensure_schema()
+        watchlist_id = str(uuid4())
+
+        def _sync_create():
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                if conn.execute(
+                    "SELECT 1 FROM watchlists WHERE workspace_id = ? AND name_key = ?",
+                    (str(workspace_id), watchlist_name_key(name)),
+                ).fetchone():
+                    raise WatchlistConflict("DUPLICATE_NAME", "The workspace already has a watchlist with this name.")
+                now = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    "INSERT INTO watchlists (id, workspace_id, name, name_key, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (watchlist_id, str(workspace_id), name, watchlist_name_key(name), now),
+                )
+                conn.execute(
+                    "INSERT INTO watchlist_versions (watchlist_id, version, definition, definition_digest, created_at)"
+                    " VALUES (?, 1, ?, ?, ?)",
+                    (watchlist_id, definition_json(definition), definition.digest, now),
+                )
+                conn.commit()
+                return self._sync_watchlist(conn, watchlist_id)
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await self._run_write(_sync_create)
+
+    async def add_watchlist_version(self, watchlist_id, definition) -> Tuple[Watchlist, bool]:
+        """Append a version unless the definition equals the current one. See the port."""
+        await self._ensure_schema()
+
+        def _sync_add():
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                current = conn.execute(
+                    "SELECT version, definition_digest FROM watchlist_versions WHERE watchlist_id = ?"
+                    " ORDER BY version DESC LIMIT 1",
+                    (str(watchlist_id),),
+                ).fetchone()
+                if current is None:
+                    raise WatchlistConflict("NOT_FOUND", "No watchlist has this id.")
+                added = current[1] != definition.digest
+                if added:
+                    conn.execute(
+                        "INSERT INTO watchlist_versions (watchlist_id, version, definition, definition_digest, created_at)"
+                        " VALUES (?, ?, ?, ?, ?)",
+                        (str(watchlist_id), current[0] + 1, definition_json(definition), definition.digest,
+                         datetime.now(timezone.utc).isoformat()),
+                    )
+                conn.commit()
+                return self._sync_watchlist(conn, str(watchlist_id)), added
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await self._run_write(_sync_add)
+
+    async def get_watchlist(self, watchlist_id) -> Optional[Watchlist]:
+        """The watchlist with its versions and runs. See the port."""
+        await self._ensure_schema()
+
+        def _sync_get():
+            conn = self._get_connection()
+            try:
+                return self._sync_watchlist(conn, str(watchlist_id))
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_get)
+
+    async def record_watchlist_run(self, mission_id, watchlist_id, version) -> None:
+        """Bind a mission to the watchlist version it collects. See the port."""
+        await self._ensure_schema()
+
+        def _sync_record():
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    "INSERT INTO watchlist_runs (mission_id, watchlist_id, version, started_at) VALUES (?, ?, ?, ?)",
+                    (str(mission_id), str(watchlist_id), int(version), datetime.now(timezone.utc).isoformat()),
+                )
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        await self._run_write(_sync_record)
 
     async def destroy_mission_author_key(self, mission_id) -> None:
         """Delete the mission's author key, after which its markers can never be recomputed."""

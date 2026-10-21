@@ -12,7 +12,9 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/031_author_identity_at_rest.sql`. Migration 031 bổ sung khóa tác
+Chuỗi migration trong mã nguồn kết thúc ở `sql/032_watchlists.sql`. Migration 032 bổ sung watchlist, các phiên
+bản không sửa được của watchlist và các lần chạy gắn với từng phiên bản; nó không sửa bằng chứng đã lưu. Migration
+031 bổ sung khóa tác
 giả riêng cho từng nhiệm vụ, danh sách tài khoản được khai báo và các cột thông tin tác giả trên bằng chứng của nhiệm
 vụ. Migration này cũng cho phép lưu quan sát không có mã nội dung ở dạng không kiểm chứng được. Nó không sửa bằng
 chứng đã lưu. Migration 030 bổ sung các khoảng trống
@@ -82,6 +84,18 @@ thu thập hằng ngày.
 [Skill thu thập](../.agents/skills/ignis-collect/SKILL.md) tạo khung chứng cứ có thể kiểm
 tra. [Skill phân tích](../.agents/skills/ignis-analyze/SKILL.md) là năng lực riêng để thử
 giả thuyết Market. Có thể yêu cầu một trong hai hoặc cả hai.
+
+### Theo dõi một watchlist (nhánh phát triển)
+
+Muốn theo dõi cùng một chủ đề qua nhiều lần chạy, hãy nhờ agent lưu một watchlist trong research
+workspace đã xác nhận. Mỗi watchlist có tối đa 10 chủ đề; mỗi chủ đề gồm các ngành hàng, tối đa 20
+từ khóa và những tài khoản thương hiệu do bạn chỉ định. `save_watchlist` lưu mỗi lần thay đổi thành
+một phiên bản mới và phiên bản đã lưu thì không sửa được; `get_watchlist` liệt kê các phiên bản cùng
+các lần chạy. Mỗi lần gọi `start_watchlist_run` tạo một nhiệm vụ Attention trên phiên bản hiện tại
+và khai báo các thương hiệu đó làm tài khoản của nhiệm vụ. Đây là những tài khoản duy nhất Ignis gọi
+tên. Lần chạy nào bạn cũng phải nêu rõ nguồn được phép và quyền hạn; sau đó việc thu thập đi qua
+`execute_mission_ingress` như mọi nhiệm vụ khác. Ignis không bao giờ tự chạy watchlist, còn phần so
+sánh giữa các kỳ sẽ có ở phần sau của Spec 016.
 
 ## 3. Đọc chứng cứ và kết quả phân tích
 
@@ -192,7 +206,7 @@ cấp quyền thực hiện.
 
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **48 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **51 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
 manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu

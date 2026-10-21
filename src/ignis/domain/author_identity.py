@@ -249,6 +249,24 @@ def normalise_account_key(value: Any) -> Optional[str]:
     return _normalise_handle(value)
 
 
+# Bounds on what a requester may declare (research R8). Watchlists hold the same brand accounts, so
+# they share these bounds and a saved brand is always one a run can declare.
+MAX_DECLARED_ACCOUNTS = 50
+MAX_ACCOUNT_LENGTH = 100
+MAX_DECLARED_NAME_LENGTH = 120
+
+
+def declarable_account_key(value: Any) -> Optional[str]:
+    """A handle or account id as declared, a profile link reduced to its handle; None when the value
+    names no account, is longer than MAX_ACCOUNT_LENGTH or contains a space."""
+    if not isinstance(value, str):
+        return None
+    key = account_in_link(value) if ("/" in value or "://" in value) else normalise_account_key(value)
+    if not key or len(key) > MAX_ACCOUNT_LENGTH or any(character.isspace() for character in key):
+        return None
+    return key
+
+
 @dataclass(frozen=True)
 class DeclaredAccount:
     """An account the requester declared for one mission: the only identity Ignis keeps (R8)."""
@@ -382,6 +400,7 @@ __all__: List[str] = [
     "author_concentration_by_channel",
     "author_identity_violation",
     "author_marker",
+    "declarable_account_key",
     "declared_accounts_at",
     "has_handle_segment",
     "scrub_handle_links",

@@ -65,6 +65,8 @@ SCHEMA_MIGRATIONS = (
     "028_research_work.sql",
     # Spec 015: author keys, declared accounts and the mission_evidence author columns.
     "031_author_identity_at_rest.sql",
+    # Spec 016: watchlists, their immutable versions and the runs bound to them.
+    "032_watchlists.sql",
 )
 
 

@@ -1610,5 +1610,131 @@
         "type": "object"
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_watchlist",
+      "description": "Read one watchlist: every version's definition and digest, and every run with its mission and the version it collected. Returns no observations.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "watchlist_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "watchlist_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "save_watchlist",
+      "description": "Create a watchlist in a confirmed research workspace, or save a new version of one by passing its watchlist_id. The definition is {topics: [{name, categories, keywords, brands: [{platform, account, declared_name}], discovery_share}]} with at most 10 topics, 20 keywords per topic and a discovery_share of at most 0.2. Versions are immutable; saving the current definition again creates nothing.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "definition": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "watchlist_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "workspace_id",
+          "name",
+          "definition"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "start_watchlist_run",
+      "description": "Create one ATTENTION mission that collects the watchlist's current version: its keywords and brand names, with its brands declared as the mission's accounts. The caller states allowed_resources and authority_boundary for every run, as for create_attention_mission. Collection then runs through execute_mission_ingress; this call collects nothing.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "watchlist_id": {
+            "type": "string"
+          },
+          "allowed_resources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "authority_boundary": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "quota_budget": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "geo": {
+            "default": "VN",
+            "type": "string"
+          },
+          "timeframe": {
+            "default": "7d",
+            "type": "string"
+          },
+          "agent": {
+            "default": "claude",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "watchlist_id",
+          "allowed_resources",
+          "authority_boundary"
+        ],
+        "type": "object"
+      }
+    }
   }
 ]

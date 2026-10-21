@@ -12,15 +12,18 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
-from ignis.domain.author_identity import DeclaredAccount, account_in_link, normalise_account_key
+from ignis.domain.author_identity import (
+    MAX_ACCOUNT_LENGTH,
+    MAX_DECLARED_ACCOUNTS,
+    MAX_DECLARED_NAME_LENGTH,
+    DeclaredAccount,
+    declarable_account_key,
+)
 from ignis.domain.value_objects import PlatformType
 
 APPLIES_FROM = "Content collected after declared_at; earlier observations are not re-attributed."
 # The platforms whose content has an account behind it; a Google Trends keyword has none.
 ACCOUNT_PLATFORMS = frozenset(platform.value for platform in PlatformType if platform is not PlatformType.GOOGLE_TRENDS)
-MAX_DECLARED_ACCOUNTS = 50
-MAX_ACCOUNT_LENGTH = 100
-MAX_DECLARED_NAME_LENGTH = 120
 
 
 class SetMissionDeclaredAccountsUseCase:
@@ -65,11 +68,12 @@ class SetMissionDeclaredAccountsUseCase:
         """A handle or account id as stored; a profile link becomes the handle it names."""
         if not isinstance(value, str):
             raise ValueError("Every account must be a handle, an account id or a profile link.")
-        key = account_in_link(value) if ("/" in value or "://" in value) else normalise_account_key(value)
-        if not key:
-            raise ValueError("A link that names no account cannot be declared.")
-        if len(key) > MAX_ACCOUNT_LENGTH or any(character.isspace() for character in key):
-            raise ValueError("An account is a handle or an account id, without spaces.")
+        key = declarable_account_key(value)
+        if key is None:
+            raise ValueError(
+                f"An account is a handle, an account id or a profile link that names one, without spaces"
+                f" and at most {MAX_ACCOUNT_LENGTH} characters."
+            )
         return key
 
     @classmethod

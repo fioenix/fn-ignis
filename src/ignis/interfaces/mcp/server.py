@@ -3115,6 +3115,96 @@ async def set_mission_declared_accounts(mission_id: str, accounts: List[Dict[str
     return await handle_set_mission_declared_accounts(mission_id, accounts)
 
 
+async def handle_save_watchlist(
+    workspace_id: str, name: str, definition: Dict[str, Any], watchlist_id: Optional[str] = None
+) -> str:
+    from ignis.application.use_cases.watchlists import SaveWatchlistUseCase
+
+    comp = get_components()
+    result = await SaveWatchlistUseCase(comp["repository"], comp["workspace_store"]).execute(
+        workspace_id, name, definition, watchlist_id
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def handle_get_watchlist(watchlist_id: str) -> str:
+    from ignis.application.use_cases.watchlists import GetWatchlistUseCase
+
+    result = await GetWatchlistUseCase(get_components()["repository"]).execute(watchlist_id)
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+async def handle_start_watchlist_run(
+    watchlist_id: str,
+    allowed_resources: List[str],
+    authority_boundary: Dict[str, bool],
+    quota_budget: Optional[Dict[str, int]] = None,
+    geo: str = "VN",
+    timeframe: str = "7d",
+    agent: str = "claude",
+    session_id: Optional[str] = None,
+) -> str:
+    from ignis.application.use_cases.watchlists import StartWatchlistRunUseCase
+
+    comp = get_components()
+    use_case = StartWatchlistRunUseCase(
+        comp["repository"], comp["workspace_store"], comp["create_attention_mission_use_case"]
+    )
+    try:
+        geo_code = resolve_geo(geo)
+    except ValueError:
+        return json.dumps({"status": "INVALID", "reason_code": "INVALID_REQUEST", "error": f"Unknown geo: {geo!r}."})
+    result = await use_case.execute(
+        watchlist_id,
+        {
+            "allowed_resources": allowed_resources,
+            "authority_boundary": authority_boundary,
+            "quota_budget": quota_budget or {},
+        },
+        lambda payload: _mission_manifest_from_payload(payload, created_by=agent),
+        agent=agent,
+        session_id=session_id,
+        geo=geo_code,
+        timeframe=timeframe,
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+@mcp.tool(name="save_watchlist", description="Create a watchlist in a confirmed research workspace, or save a new version of one by passing its watchlist_id. The definition is {topics: [{name, categories, keywords, brands: [{platform, account, declared_name}], discovery_share}]} with at most 10 topics, 20 keywords per topic and a discovery_share of at most 0.2. Versions are immutable; saving the current definition again creates nothing.")
+async def save_watchlist(
+    workspace_id: str, name: str, definition: dict, watchlist_id: Optional[str] = None
+) -> str:
+    return await handle_save_watchlist(workspace_id, name, definition, watchlist_id)
+
+
+@mcp.tool(name="get_watchlist", description="Read one watchlist: every version's definition and digest, and every run with its mission and the version it collected. Returns no observations.")
+async def get_watchlist(watchlist_id: str) -> str:
+    return await handle_get_watchlist(watchlist_id)
+
+
+@mcp.tool(name="start_watchlist_run", description="Create one ATTENTION mission that collects the watchlist's current version: its keywords and brand names, with its brands declared as the mission's accounts. The caller states allowed_resources and authority_boundary for every run, as for create_attention_mission. Collection then runs through execute_mission_ingress; this call collects nothing.")
+async def start_watchlist_run(
+    watchlist_id: str,
+    allowed_resources: list[str],
+    authority_boundary: dict,
+    quota_budget: Optional[dict[str, int]] = None,
+    geo: str = "VN",
+    timeframe: str = "7d",
+    agent: str = "claude",
+    session_id: Optional[str] = None,
+) -> str:
+    return await handle_start_watchlist_run(
+        watchlist_id=watchlist_id,
+        allowed_resources=allowed_resources,
+        authority_boundary=authority_boundary,
+        quota_budget=quota_budget,
+        geo=geo,
+        timeframe=timeframe,
+        agent=agent,
+        session_id=session_id,
+    )
+
+
 @mcp.tool(name="get_mission_analysis", description="Retrieve full strategic analysis payload (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) for in-chat Native Artifact rendering.")
 async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
     return await handle_get_mission_analysis(mission_id=mission_id, limit=limit, platform=platform)

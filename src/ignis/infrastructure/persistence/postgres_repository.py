@@ -34,6 +34,14 @@ from ignis.application.ports.repository_port import (
     PlatformCredentialRecord,
     PlatformCredentialSummary,
 )
+from ignis.domain.watchlist import Watchlist, WatchlistConflict, watchlist_name_key
+from ignis.infrastructure.persistence.watchlist_rows import (
+    WATCHLIST_HEAD_SQL,
+    WATCHLIST_RUNS_SQL,
+    WATCHLIST_VERSIONS_SQL,
+    definition_json,
+    watchlist_from_rows,
+)
 from ignis.domain.author_identity import DeclaredAccount
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
@@ -1860,6 +1868,115 @@ class PostgresTimescaleRepository(ITrendRepository):
                 f"Failed to replace the declared accounts of mission {mission_id}: {type(e).__name__}"
             ) from e
         return await self.list_mission_declared_accounts(mission_id), withdrawn
+
+    @staticmethod
+    async def _watchlist(cur, watchlist_id: str) -> Optional[Watchlist]:
+        await cur.execute(WATCHLIST_HEAD_SQL.format(p="%s") + ";", (watchlist_id,))
+        head = await cur.fetchone()
+        if head is None:
+            return None
+        await cur.execute(WATCHLIST_VERSIONS_SQL.format(p="%s") + ";", (watchlist_id,))
+        versions = await cur.fetchall()
+        await cur.execute(WATCHLIST_RUNS_SQL.format(p="%s") + ";", (watchlist_id,))
+        return watchlist_from_rows(head, versions, await cur.fetchall())
+
+    async def create_watchlist(self, workspace_id, name, definition) -> Watchlist:
+        """Create a watchlist with its first version. See the port."""
+        watchlist_id = str(uuid4())
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.transaction():
+                    async with conn.cursor(row_factory=tuple_row) as cur:
+                        # Serialises creators of one workspace's watchlists, so a taken name is
+                        # reported as such rather than as a unique-constraint failure.
+                        await cur.execute(
+                            "SELECT pg_advisory_xact_lock(hashtextextended('watchlists:' || %s, 0));",
+                            (str(workspace_id),),
+                        )
+                        await cur.execute(
+                            "SELECT 1 FROM watchlists WHERE workspace_id = %s AND name_key = %s;",
+                            (str(workspace_id), watchlist_name_key(name)),
+                        )
+                        if await cur.fetchone():
+                            raise WatchlistConflict(
+                                "DUPLICATE_NAME", "The workspace already has a watchlist with this name."
+                            )
+                        # Stamped by this process, like the declared accounts and collection times.
+                        now = datetime.now(timezone.utc)
+                        await cur.execute(
+                            "INSERT INTO watchlists (id, workspace_id, name, name_key, created_at)"
+                            " VALUES (%s, %s, %s, %s, %s);",
+                            (watchlist_id, str(workspace_id), name, watchlist_name_key(name), now),
+                        )
+                        await cur.execute(
+                            "INSERT INTO watchlist_versions (watchlist_id, version, definition, definition_digest,"
+                            " created_at) VALUES (%s, 1, %s::jsonb, %s, %s);",
+                            (watchlist_id, definition_json(definition), definition.digest, now),
+                        )
+                        return await self._watchlist(cur, watchlist_id)
+        except WatchlistConflict:
+            raise
+        except Exception as e:
+            raise RepositoryException(f"Failed to create a watchlist: {type(e).__name__}") from e
+
+    async def add_watchlist_version(self, watchlist_id, definition) -> Tuple[Watchlist, bool]:
+        """Append a version unless the definition equals the current one. See the port."""
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.transaction():
+                    async with conn.cursor(row_factory=tuple_row) as cur:
+                        await cur.execute("SELECT 1 FROM watchlists WHERE id = %s FOR UPDATE;", (str(watchlist_id),))
+                        if await cur.fetchone() is None:
+                            raise WatchlistConflict("NOT_FOUND", "No watchlist has this id.")
+                        await cur.execute(
+                            "SELECT version, definition_digest FROM watchlist_versions WHERE watchlist_id = %s"
+                            " ORDER BY version DESC LIMIT 1;",
+                            (str(watchlist_id),),
+                        )
+                        version, digest = await cur.fetchone()
+                        added = digest != definition.digest
+                        if added:
+                            await cur.execute(
+                                "INSERT INTO watchlist_versions (watchlist_id, version, definition,"
+                                " definition_digest, created_at) VALUES (%s, %s, %s::jsonb, %s, %s);",
+                                (str(watchlist_id), version + 1, definition_json(definition), definition.digest,
+                                 datetime.now(timezone.utc)),
+                            )
+                        return await self._watchlist(cur, str(watchlist_id)), added
+        except WatchlistConflict:
+            raise
+        except Exception as e:
+            raise RepositoryException(
+                f"Failed to add a version to watchlist {watchlist_id}: {type(e).__name__}"
+            ) from e
+
+    async def get_watchlist(self, watchlist_id) -> Optional[Watchlist]:
+        """The watchlist with its versions and runs. See the port."""
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.transaction():
+                    async with conn.cursor(row_factory=tuple_row) as cur:
+                        return await self._watchlist(cur, str(watchlist_id))
+        except Exception as e:
+            raise RepositoryException(f"Failed to read watchlist {watchlist_id}: {type(e).__name__}") from e
+
+    async def record_watchlist_run(self, mission_id, watchlist_id, version) -> None:
+        """Bind a mission to the watchlist version it collects. See the port."""
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                await conn.execute(
+                    "INSERT INTO watchlist_runs (mission_id, watchlist_id, version, started_at)"
+                    " VALUES (%s, %s, %s, %s);",
+                    (str(mission_id), str(watchlist_id), int(version), datetime.now(timezone.utc)),
+                )
+        except Exception as e:
+            raise RepositoryException(
+                f"Failed to bind mission {mission_id} to watchlist {watchlist_id}: {type(e).__name__}"
+            ) from e
 
     async def destroy_mission_author_key(self, mission_id) -> None:
         """Delete the mission's author key, after which its markers can never be recomputed."""
