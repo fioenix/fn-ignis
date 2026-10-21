@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from ignis.domain.host_browser_search import HostSearchQuery, HostSearchRequest
 from ignis.domain.source_identity import identity_free_source_url
+from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text
 from ignis.infrastructure.connectors.host_browser.relay import LoopbackRelay
 from ignis.infrastructure.connectors.host_browser.validator import validate_answer
 
@@ -26,6 +27,7 @@ def _outward(receipt):
     outward = copy.deepcopy(receipt)
     for record in outward.get("observations", ()):
         record["source_url"] = identity_free_source_url("tiktok", record.get("source_url"), {})
+        record["excerpt"] = mask_author_identity_text(record.get("excerpt"))
     return outward
 
 

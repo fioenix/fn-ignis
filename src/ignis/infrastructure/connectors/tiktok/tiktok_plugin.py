@@ -19,7 +19,11 @@ from ignis.infrastructure.connectors.browser_support import (
 )
 from ignis.infrastructure.connectors.meta_browser_ingress import build_cookie_header
 from ignis.config import reveal_secret, settings
-from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
+from ignis.infrastructure.security.pii_sanitizer import (
+    mask_author_identity_text,
+    sanitize_pii_text,
+    tokenise_mentions,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -553,7 +557,7 @@ class TikTokPlugin(IConnectorPlugin):
                         cmt_text = c.get("text", "").strip()
                         if cmt_text:
                             # Redact phone numbers, emails, and credentials
-                            redacted_text = sanitize_pii_text(cmt_text)
+                            redacted_text = tokenise_mentions(sanitize_pii_text(cmt_text), {})
 
                             comment = {
                                 "comment_id": str(c.get("cid") or "") or None,
@@ -580,9 +584,12 @@ class TikTokPlugin(IConnectorPlugin):
         except Exception as e:
             logger.error(
                 "Error scraping comments for video %s: %s",
-                identity_free_source_url("tiktok", video_url, {}) or "with no identity-free link", e,
+                identity_free_source_url("tiktok", video_url, {}) or "with no identity-free link",
+                mask_author_identity_text(str(e)),
             )
-            raise ConnectorExecutionException(f"Failed to fetch TikTok comments: {e}") from e
+            raise ConnectorExecutionException(
+                f"Failed to fetch TikTok comments: {mask_author_identity_text(str(e))}"
+            ) from e
 
         return comments
 
@@ -618,7 +625,8 @@ class TikTokPlugin(IConnectorPlugin):
             except Exception as e:
                 logger.warning(
                     "Skipping comments scraping for video %s: %s",
-                    identity_free_source_url("tiktok", s.source_url, s.metadata) or "with no identity-free link", e,
+                    identity_free_source_url("tiktok", s.source_url, s.metadata) or "with no identity-free link",
+                    mask_author_identity_text(str(e)),
                 )
 
         return all_results
@@ -792,8 +800,9 @@ class TikTokPlugin(IConnectorPlugin):
                 await browser.close()
 
         except Exception as e:
-            logger.error(f"Error executing TikTok Ingress ({url}): {e}")
-            raise ConnectorExecutionException(f"Failed to fetch TikTok signals: {e}") from e
+            message = mask_author_identity_text(str(e))
+            logger.error("Error executing TikTok Ingress (%s): %s", mask_author_identity_text(url), message)
+            raise ConnectorExecutionException(f"Failed to fetch TikTok signals: {message}") from e
 
         if attestation is not None and keyword:
             if answered or signals:

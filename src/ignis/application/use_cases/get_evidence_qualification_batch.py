@@ -203,6 +203,7 @@ class GetEvidenceQualificationBatchUseCase:
             if len(remaining) > page_size
             else None
         )
+        declared_names = await self._declared_names(mission.id)
         return {
             **payload,
             "frame": (
@@ -211,7 +212,7 @@ class GetEvidenceQualificationBatchUseCase:
                 else attention_frame_payload(mission)
             ),
             "pending_batches": -(-len(pending) // page_size),
-            "evidence": [self._evidence(s, await self._declared_names(mission.id)) for s in page],
+            "evidence": [self._evidence(s, declared_names) for s in page],
             "next_cursor": next_cursor,
             "recommended_judgment": {
                 "relation": [r.value for r in QualificationRelation],

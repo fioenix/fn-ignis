@@ -221,3 +221,117 @@ async def test_the_plugin_marks_commenters_only_under_the_key_it_is_given():
     assert markers[0] == markers[1] != markers[2]
     assert all("author_assignment" not in c for c in unmarked)
     assert "sentinel" not in str([{k: v for k, v in c.items() if k != "author_assignment"} for c in marked])
+
+
+# --- T038 review findings 5, 7, 15 and 16 -----------------------------------------------------------
+
+MENTIONED = "sentinel.mention.linh"
+
+
+@pytest.mark.asyncio
+async def test_comment_answers_carry_no_raw_mention():
+    comments = [{"comment_id": "1", "text": f"@{MENTIONED} giá bao nhiêu?", "likes": 0}]
+    pain_points = [{"video_url": SHARE_LINK, "video_title": f"Hỏi @{MENTIONED}", "views": 1,
+                    "total_comments_fetched": 1, "comments": [dict(comments[0])]}]
+    with patch("ignis.interfaces.mcp.server.get_components", return_value=_comment_components()):
+        with patch.object(TikTokPlugin, "fetch_video_comments", new_callable=AsyncMock) as fetch:
+            fetch.return_value = [dict(comments[0])]
+            video = await handle_get_tiktok_video_comments(video_url=SHARE_LINK, limit=5)
+        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new_callable=AsyncMock) as fetch:
+            fetch.return_value = pain_points
+            pains = await handle_extract_customer_pain_points(keywords=["áo"], geo="VN", max_videos=1)
+
+    assert MENTIONED not in video and MENTIONED not in pains
+    assert "@[user] giá bao nhiêu?" in video
+
+
+@pytest.mark.asyncio
+async def test_the_plugin_stores_no_raw_mention_in_comment_text():
+    plugin = TikTokPlugin(auth_manager=None)
+    with patch("playwright.async_api.async_playwright") as playwright:
+        page = AsyncMock()
+        page.evaluate.return_value = {"comments": [{"cid": "1", "text": f"@{MENTIONED} đẹp", "user": {}}]}
+        p = AsyncMock()
+        playwright.return_value.__aenter__.return_value = p
+        p.chromium.launch.return_value.new_context.return_value.new_page.return_value = page
+        comments = await plugin.fetch_video_comments(video_url=SHARE_LINK, limit=5)
+
+    assert comments[0]["text"] == "@[user] đẹp"
+
+
+def test_a_host_receipt_masks_mentions_in_the_excerpt():
+    from ignis.application.use_cases.host_browser_search import _outward
+
+    receipt = _outward({"observations": [{"source_url": TIKTOK_HANDLE_URL, "excerpt": f"@{MENTIONED} mua ở đâu"}]})
+
+    assert receipt["observations"][0]["excerpt"] == "@[user] mua ở đâu"
+
+
+@pytest.mark.asyncio
+async def test_exception_text_never_carries_a_handle(caplog):
+    caplog.set_level("DEBUG")
+    failing = RuntimeError(f"Page.goto: net::ERR_ABORTED at {TIKTOK_HANDLE_URL}")
+    plugin = TikTokPlugin(auth_manager=None)
+
+    with patch("playwright.async_api.async_playwright", side_effect=failing):
+        with pytest.raises(Exception) as raised:
+            await plugin.fetch_video_comments(video_url=SHARE_LINK, limit=5)
+    with patch("ignis.interfaces.mcp.server.get_components", return_value=_comment_components()):
+        with patch.object(TikTokPlugin, "fetch_video_comments", new=AsyncMock(side_effect=failing)):
+            video = await handle_get_tiktok_video_comments(video_url=SHARE_LINK, limit=5)
+        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new=AsyncMock(side_effect=failing)):
+            pains = await handle_extract_customer_pain_points(keywords=["áo"], geo="VN", max_videos=1)
+    signal = TrendSignal(platform=PlatformType.TIKTOK, raw_title="x", source_url=TIKTOK_HANDLE_URL, metadata={})
+    with patch.object(TikTokPlugin, "search_signals", new=AsyncMock(return_value=[signal])), \
+            patch.object(TikTokPlugin, "fetch_video_comments", new=AsyncMock(side_effect=failing)):
+        await plugin.fetch_top_comments_for_keywords(["áo"], max_videos=1)
+
+    for text in (str(raised.value), video, pains, caplog.text):
+        assert SENTINEL_TIKTOK_HANDLE not in text
+
+
+def test_a_serialized_citation_renders_declared_tokens():
+    from ignis.domain.harness_models import CitationEvidence
+    from ignis.interfaces.mcp.server import _citation_declared_names, _serialize_citation
+
+    declared = "6f1c2c47-8a43-4c1e-9b1e-3d7a2b9c0001"
+    citation = CitationEvidence(
+        citation_id="CIT-01", platform=PlatformType.TIKTOK, title_or_query=f"Áo của @[declared:{declared}]",
+        metric_highlight="1 views", excerpt=f"@[declared:{declared}] đẹp",
+    )
+
+    with _citation_declared_names({declared: "Brand X"}):
+        named = _serialize_citation(citation)
+    anonymous = _serialize_citation(citation)
+
+    assert (named["title_or_query"], named["excerpt"]) == ("Áo của @Brand X", "@Brand X đẹp")
+    assert declared not in json.dumps(anonymous)
+
+
+@pytest.mark.asyncio
+async def test_an_evidence_batch_reads_the_declarations_once(tmp_path):
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
+    from ignis.application.use_cases.create_research_workspace import CreateResearchWorkspaceUseCase
+    from tests.unit.test_evidence_qualification import _market
+
+    repository = SqliteTrendRepository(str(tmp_path / "batch.sqlite"))
+    store = WorkspaceRepository(repository=repository)
+    workspaces = CreateResearchWorkspaceUseCase(store=store)
+    host = tmp_path / "host"
+    host.mkdir()
+    workspace = await workspaces.confirm(await workspaces.propose(host, "Batch"), confirmation=True)
+    mission, _, _ = await _market(repository, store, workspace, ("a", "b", "c"))
+    calls = []
+    original = repository.list_mission_declared_accounts
+
+    async def counted(mission_id):
+        calls.append(mission_id)
+        return await original(mission_id)
+
+    repository.list_mission_declared_accounts = counted
+    batch = await GetEvidenceQualificationBatchUseCase(repository=repository, store=store).execute(str(mission.id))
+    await repository.close()
+
+    assert len(batch["evidence"]) == 3
+    assert len(calls) == 1
