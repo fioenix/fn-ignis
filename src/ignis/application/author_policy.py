@@ -12,6 +12,7 @@ from ignis.domain.author_identity import (
     DeclaredAccount,
     assign_author,
     declared_accounts_at,
+    scrub_handle_links,
     strip_author_identity,
 )
 from ignis.domain.entities import TrendSignal
@@ -59,5 +60,5 @@ def apply_author_policy(
         # Handles written inside the content become tokens: a declared account's handle names
         # its declaration, every other handle becomes @[user] (research R7).
         mentions = {key: account_id for (account_platform, key), account_id in declared.items() if account_platform == platform}
-        signal.raw_title = tokenise_mentions(signal.raw_title, mentions)
+        signal.raw_title = tokenise_mentions(scrub_handle_links(signal.raw_title), mentions)
         signal.metadata = _tokenise(strip_author_identity(signal.metadata), mentions)

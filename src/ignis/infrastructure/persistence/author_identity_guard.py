@@ -31,7 +31,7 @@ def refuse_author_identity(signals: Iterable[TrendSignal]) -> None:
     Checked before the first row is written, so a refusal never leaves part of a batch behind.
     """
     for signal in signals:
-        violation = author_identity_violation(signal.metadata, signal.source_url)
+        violation = author_identity_violation(signal.metadata, signal.source_url, signal.raw_title)
         if violation is not None:
             raise RepositoryException(f"Refused to store author identity: {violation}.")
 

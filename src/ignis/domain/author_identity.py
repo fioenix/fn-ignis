@@ -65,6 +65,15 @@ _SCHEMELESS_PLATFORM_LINK = re.compile(
     r"^(?:[a-z0-9-]+\.)*(?:tiktok\.com|threads\.com|threads\.net|instagram\.com|youtube\.com)(?:[/?#]|$)",
     re.IGNORECASE,
 )
+# A link written inside prose, with or without its scheme. Trailing sentence punctuation is not
+# part of the link.
+_LINK_IN_TEXT = re.compile(
+    r"(?:https?://|www\.)[^\s<>\"']+"
+    r"|(?<![\w.@/])(?:[a-z0-9-]+\.)*(?:tiktok\.com|threads\.com|threads\.net|instagram\.com|youtube\.com)/[^\s<>\"']*",
+    re.IGNORECASE,
+)
+_LINK_TRAILING_PUNCTUATION = ".,;:!?)]}"
+LINK_PLACEHOLDER = "[link]"
 # Instagram paths whose first segment is a content or service namespace, not an account.
 _INSTAGRAM_CONTENT_SEGMENTS = frozenset(
     {"p", "reel", "reels", "tv", "explore", "accounts", "s", "direct", "about", "legal", "developer", "web"}
@@ -126,6 +135,19 @@ def has_handle_segment(url: Optional[str]) -> bool:
     return _url_account(url) is not None
 
 
+def scrub_handle_links(text: Any) -> Any:
+    """Replace each link inside prose that names an account with [link]; content links stay."""
+    if not isinstance(text, str) or not text:
+        return text
+
+    def replace(match: "re.Match[str]") -> str:
+        link = match.group(0).rstrip(_LINK_TRAILING_PUNCTUATION)
+        tail = match.group(0)[len(link):]
+        return f"{LINK_PLACEHOLDER}{tail}" if has_handle_segment(link) else match.group(0)
+
+    return _LINK_IN_TEXT.sub(replace, text)
+
+
 def _strip(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {
@@ -135,6 +157,8 @@ def _strip(value: Any) -> Any:
         }
     if isinstance(value, (list, tuple)):
         return [_strip(item) for item in value if not (isinstance(item, str) and has_handle_segment(item))]
+    if isinstance(value, str):
+        return scrub_handle_links(value)
     return copy.deepcopy(value)
 
 
@@ -149,7 +173,9 @@ def strip_author_identity(metadata: Optional[Mapping[str, Any]]) -> Dict[str, An
     return _strip(metadata)
 
 
-def author_identity_violation(metadata: Optional[Mapping[str, Any]], source_url: Optional[str]) -> Optional[str]:
+def author_identity_violation(
+    metadata: Optional[Mapping[str, Any]], source_url: Optional[str], title: Optional[str] = None
+) -> Optional[str]:
     """What kind of author identity a sighting still carries, or None when it carries none.
 
     The answer names the kind only, never the value, so a refusal built from it cannot itself
@@ -157,6 +183,8 @@ def author_identity_violation(metadata: Optional[Mapping[str, Any]], source_url:
     """
     if has_handle_segment(source_url):
         return "a source_url that names an account"
+    if scrub_handle_links(title) != title:
+        return "a title holding a link that names an account"
     if isinstance(metadata, Mapping) and strip_author_identity(metadata) != dict(metadata):
         return "metadata holding an author field or a link that names an account"
     return None
@@ -350,6 +378,7 @@ __all__: List[str] = [
     "author_marker",
     "declared_accounts_at",
     "has_handle_segment",
+    "scrub_handle_links",
     "normalise_account_key",
     "strip_author_identity",
 ]

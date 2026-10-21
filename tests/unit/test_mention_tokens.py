@@ -132,3 +132,84 @@ async def test_mcp_answers_render_declared_tokens_by_name():
 
     assert analysis["top_signals"][0]["title"] == f"Áo của @{DECLARED_BRAND_NAME} và @[user]"
     assert (row["title"], row["excerpt"]) == (f"Áo của @{DECLARED_BRAND_NAME} và @[user]", f"@{DECLARED_BRAND_NAME} đẹp")
+
+
+# --- T038 review findings 2, 3, 6 and 13 -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "stored"),
+    [
+        ("＠Đạt quá đẹp", "@[user] quá đẹp"),
+        ("hỏi @nguyen-van nhé", "hỏi @[user] nhé"),
+        ("cảm ơn＠abc", "cảm ơn@[user]"),
+        ("cảm ơn@abc nha", "cảm ơn@[user] nha"),
+        ("fullwidth ＠bob", "fullwidth @[user]"),
+        ("@Ngọc.Ánh_99.", "@[user]."),
+        ("liên hệ seller@example.test", "liên hệ seller@example.test"),
+    ],
+)
+def test_every_mention_shape_becomes_a_token_and_emails_do_not(text, stored):
+    assert tokenise_mentions(text, {}) == stored
+
+
+def test_a_collected_literal_token_cannot_pose_as_a_declaration():
+    forged = f"mua ở @[declared:{DECLARED_ID}] đi"
+
+    assert tokenise_mentions(forged, {DECLARED_BRAND_HANDLE: DECLARED_ID}) == "mua ở @[user] đi"
+
+
+def test_a_profile_link_written_inside_text_is_removed():
+    signal = TrendSignal(
+        platform=PlatformType.TIKTOK,
+        raw_title="follow https://www.instagram.com/nguyenvana nhé",
+        source_url="https://www.tiktok.com/share/video/1",
+        captured_at=datetime.now(timezone.utc),
+        metadata={"item_id": "1", "excerpt": "kênh www.youtube.com/@Đạt, video https://www.youtube.com/watch?v=abc123"},
+    )
+
+    apply_author_policy([signal], None)
+
+    assert signal.raw_title == "follow [link] nhé"
+    assert signal.metadata["excerpt"] == "kênh [link], video https://www.youtube.com/watch?v=abc123"
+
+
+def test_the_guard_refuses_a_link_that_names_an_account_inside_text():
+    from ignis.domain.author_identity import author_identity_violation
+
+    assert author_identity_violation({}, None, title="follow https://www.instagram.com/nguyenvana") is not None
+    assert author_identity_violation({"excerpt": "xem tiktok.com/@abc/video/1"}, None) is not None
+    assert author_identity_violation({"excerpt": "xem https://www.tiktok.com/share/video/1"}, None, title="ok") is None
+
+
+def test_rows_stored_before_the_policy_are_masked_on_read():
+    legacy_title = "@legacy.user hỏi giá, xem https://www.tiktok.com/@legacy.user"
+
+    assert render_mention_tokens(legacy_title, {}) == "@[user] hỏi giá, xem [link]"
+    # A token the policy wrote still renders by name.
+    assert render_mention_tokens(f"@[declared:{DECLARED_ID}] và @legacy", {DECLARED_ID: "Brand"}) == "@Brand và @[user]"
+
+
+def test_a_citation_over_a_legacy_row_shows_no_raw_mention():
+    from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+
+    legacy = TrendSignal(
+        platform=PlatformType.TIKTOK, raw_title=f"{MENTION_TEXT}", source_url="https://www.tiktok.com/share/video/1",
+        metadata={"excerpt": MENTION_TEXT},
+    )
+
+    citation = StrategicMarketReasoner()._build_citation(legacy, 1)
+
+    assert SENTINEL_MENTIONED_HANDLE not in f"{citation.title_or_query} {citation.excerpt}"
+
+
+def test_a_report_over_a_legacy_row_shows_no_raw_mention():
+    legacy = TrendSignal(
+        platform=PlatformType.TIKTOK, raw_title=MENTION_TEXT, source_url="https://www.tiktok.com/share/video/1",
+        geo_code=GeoCode.VN, metadata={"item_id": "1"},
+    )
+    mission = ResearchMission(title="Áo khoác", keywords=["áo khoác"], shortcode="IGN-L", geo_code=GeoCode.VN)
+
+    html = HtmlArtifactBuilder().build_mission_report_artifact(mission=mission, signals=[legacy], platform_breakdown={"tiktok": 1})
+
+    assert SENTINEL_MENTIONED_HANDLE not in html

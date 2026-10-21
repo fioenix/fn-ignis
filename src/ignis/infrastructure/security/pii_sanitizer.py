@@ -1,5 +1,8 @@
 import re
+import unicodedata
 from typing import Any, Dict, List, Mapping, Union
+
+from ignis.domain.author_identity import scrub_handle_links
 
 # Regex patterns for high-risk PII identification
 EMAIL_PATTERN = re.compile(
@@ -58,37 +61,65 @@ UUID_PATTERN = re.compile(
 
 
 # Character-class patterns: the characters are the algorithm (the CLAUDE.md exception). A mention
-# is "@" plus the handle characters the platforms allow, not preceded by a word character, "@" or
-# ".", so the local part of an e-mail address is never read as a handle. A trailing "." ends the
-# sentence, not the handle.
-MENTION_PATTERN = re.compile(r"(?<![\w@.])@([A-Za-z0-9_][A-Za-z0-9_.]*[A-Za-z0-9_]|[A-Za-z0-9_])")
+# is an ASCII or full-width at sign followed by Unicode handle characters (letters, digits, "_",
+# "." and "-"); a trailing "." or "-" ends the sentence, not the handle. An at sign inside an
+# e-mail address is not a mention.
+MENTION_PATTERN = re.compile(r"[@\uff20](\w[\w.\-]*)")
 DECLARED_TOKEN_PATTERN = re.compile(r"@\[declared:([0-9a-fA-F-]{36})\]")
 USER_TOKEN = "@[user]"
 
 
-def tokenise_mentions(text: str, declared: Mapping[str, str]) -> str:
-    """Replace each @mention with a token before the text is stored (Spec 015, research R7).
+def tokenise_mentions(text: str, declared: Mapping[str, str], *, keep_declared_tokens: bool = False) -> str:
+    """Replace each @mention with a token (Spec 015, research R7).
 
     `declared` maps a normalised handle to its declared account id; that mention becomes
-    `@[declared:<id>]`, every other one `@[user]`. The handle itself is never kept.
+    `@[declared:<id>]`, every other one `@[user]`. The handle itself is never kept. Collected text
+    can carry a literal declared token, which would then render as a declared name, so at ingest
+    every pre-existing token is neutralised to @[user]; `keep_declared_tokens` keeps tokens the
+    policy wrote, for masking text that is read back.
     """
     if not text or not isinstance(text, str):
         return text
+    if not keep_declared_tokens:
+        text = DECLARED_TOKEN_PATTERN.sub(USER_TOKEN, text)
+    emails = [match.span() for match in EMAIL_PATTERN.finditer(text)]
+    pieces, position = [], 0
+    for match in MENTION_PATTERN.finditer(text):
+        if any(start <= match.start() < end for start, end in emails):
+            continue
+        handle = match.group(1).rstrip(".-")
+        if not handle or match.start() < position:
+            continue
+        declared_id = declared.get(unicodedata.normalize("NFC", handle).lower())
+        pieces.append(text[position:match.start()])
+        pieces.append(f"@[declared:{declared_id}]" if declared_id else USER_TOKEN)
+        position = match.start(1) + len(handle)
+    pieces.append(text[position:])
+    return "".join(pieces)
 
-    def replace(match: "re.Match[str]") -> str:
-        declared_id = declared.get(match.group(1).lower())
-        return f"@[declared:{declared_id}]" if declared_id else USER_TOKEN
 
-    return MENTION_PATTERN.sub(replace, text)
+def mask_author_identity_text(text: Any) -> Any:
+    """Text as it may be shown: no link naming an account and no raw @mention.
+
+    For text read back from rows stored before the policy and for exception messages. Declared
+    tokens the policy wrote are kept for rendering.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    return tokenise_mentions(scrub_handle_links(text), {}, keep_declared_tokens=True)
 
 
 def render_mention_tokens(text: str, declared_names: Mapping[str, str]) -> str:
-    """Show a declared token as "@<declared name>", and as @[user] once it is withdrawn."""
+    """Show a declared token as "@<declared name>", and as @[user] once it is withdrawn.
+
+    Raw mentions and account links in text stored before the policy are masked first; stored
+    rows are never rewritten (FR-015).
+    """
     if not text or not isinstance(text, str):
         return text
     return DECLARED_TOKEN_PATTERN.sub(
         lambda match: f"@{declared_names[match.group(1)]}" if match.group(1) in declared_names else USER_TOKEN,
-        text,
+        mask_author_identity_text(text),
     )
 
 
