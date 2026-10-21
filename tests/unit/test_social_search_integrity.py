@@ -83,7 +83,8 @@ def test_threads_qualification_preserves_full_text_and_publication_date():
     evidence = GetEvidenceQualificationBatchUseCase._evidence(signal)
     assert evidence["excerpt"] == text
     assert evidence["published_at"] == "2025-10-01T00:00:00+00:00"
-    assert evidence["source_url"] == "https://www.threads.net/@reviewer/post/post123"
+    # The evidence batch links to the post without the poster's handle (Spec 015).
+    assert evidence["source_url"] == "https://www.threads.com/t/post123"
 
 
 @pytest.mark.asyncio

@@ -590,9 +590,9 @@ class TikTokPlugin(IConnectorPlugin):
             try:
                 cmts = await self.fetch_video_comments(video_url=s.source_url, limit=limit_per_video)
                 all_results.append({
-                    "video_url": s.source_url,
+                    # Identity-free: no creator, and no handle in the link (Spec 015).
+                    "video_url": identity_free_source_url("tiktok", s.source_url, s.metadata),
                     "video_title": s.raw_title,
-                    "author": s.metadata.get("channel", "Unknown"),
                     "views": s.metric_value,
                     "total_comments_fetched": len(cmts),
                     "comments": cmts,

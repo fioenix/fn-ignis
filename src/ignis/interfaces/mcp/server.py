@@ -47,6 +47,7 @@ from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.youtube_quota import YouTubeQuotaManager
+from ignis.domain.author_identity import strip_author_identity
 from ignis.domain.entities import TopicCluster
 from ignis.domain.harness_models import QualificationSummary
 from ignis.domain.exceptions import IgnisDomainException, VocabularySynchronizationError
@@ -71,6 +72,7 @@ from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepos
 
 from ignis.config import reveal_secret, settings
 
+from ignis.domain.source_identity import identity_free_source_url
 from ignis.domain.token_rotation import (
     STATUS_EXPIRED,
     STATUS_EXPIRING_SOON,
@@ -3423,20 +3425,22 @@ async def handle_get_tiktok_video_comments(video_url: str, limit: int = 30) -> s
     if not tiktok_plugin:
         tiktok_plugin = TikTokPlugin(auth_manager=comp.get("tiktok_auth_manager"))
 
+    # The caller's link may name the creator; the response and the log name the video only.
+    video_link = identity_free_source_url("tiktok", video_url, {})
     try:
         comments = await tiktok_plugin.fetch_video_comments(video_url=video_url, limit=limit)
         return json.dumps(
             {
                 "status": "SUCCESS",
-                "video_url": video_url,
+                "video_url": video_link,
                 "total_comments": len(comments),
-                "comments": comments,
+                "comments": [strip_author_identity(comment) for comment in comments],
             },
             ensure_ascii=False,
             indent=2,
         )
     except Exception as e:
-        logger.error(f"Error fetching TikTok video comments {video_url}: {e}")
+        logger.error("Error fetching TikTok video comments %s: %s", video_link or "with no identity-free link", e)
         return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
 
 
@@ -3495,7 +3499,6 @@ async def handle_extract_customer_pain_points(
                 if any(q in txt.lower() for q in active_triggers):
                     inquiries.append({
                         "video_title": v.get("video_title"),
-                        "author": c.get("author"),
                         "inquiry": txt,
                         "likes": c.get("likes", 0),
                     })
@@ -3508,7 +3511,14 @@ async def handle_extract_customer_pain_points(
                 "total_videos_analyzed": len(data),
                 "total_comments_extracted": len(all_comments),
                 "top_inquiries_and_pain_points": inquiries[:20],
-                "videos_breakdown": data,
+                # No creator or commenter, and no handle in a link (Spec 015).
+                "videos_breakdown": [
+                    {
+                        **strip_author_identity(video),
+                        "video_url": identity_free_source_url("tiktok", video.get("video_url"), {}),
+                    }
+                    for video in data
+                ],
             },
             ensure_ascii=False,
             indent=2,

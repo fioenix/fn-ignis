@@ -6,6 +6,7 @@ from collections import defaultdict
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
+from ignis.domain.author_identity import strip_author_identity
 from ignis.domain.research_workspace import (
     ClaimStatus,
     EvidenceRole,
@@ -18,6 +19,7 @@ from ignis.domain.research_workspace import (
     assess_strategic_sufficiency,
     resolve_surface,
 )
+from ignis.domain.source_identity import identity_free_source_url
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_data
 
 logger = logging.getLogger(__name__)
@@ -87,18 +89,14 @@ class GetMissionAnalysisUseCase:
                 if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)).lower() == platform_filter.lower()
             ]
 
-        # Calculate platform distribution and channel breakdown
+        # Calculate platform distribution. No per-creator breakdown: who posted is not kept, and
+        # rows stored before Spec 015 are not read for it either.
         platform_breakdown = defaultdict(int)
-        channel_counts = defaultdict(int)
         total_views = 0.0
 
         for s in signals:
             p_val = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
             platform_breakdown[p_val] += 1
-            
-            ch = s.metadata.get("channel_title")
-            if ch:
-                channel_counts[ch] += 1
             if p_val == "youtube":
                 total_views += s.metric_value
 
@@ -110,20 +108,20 @@ class GetMissionAnalysisUseCase:
         compact_signals = []
         for s in top_signals:
             p_str = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
-            
+            # Identity-free whatever the row holds: rows stored before Spec 015 keep author fields.
+            metadata = strip_author_identity(s.metadata)
+
             clean_meta = {}
-            if s.metadata.get("metric_known") is False:
+            if metadata.get("metric_known") is False:
                 clean_meta.update(metric_known=False, metric_kind=None)
-            if "channel_title" in s.metadata:
-                clean_meta["channel"] = s.metadata["channel_title"]
-            if "likes" in s.metadata:
-                clean_meta["likes"] = s.metadata["likes"]
-            if "comments" in s.metadata:
-                clean_meta["comments"] = s.metadata["comments"]
-            if "related_queries" in s.metadata:
-                clean_meta["related_queries"] = s.metadata["related_queries"][:5]
-            if "keyword" in s.metadata:
-                clean_meta["keyword"] = s.metadata["keyword"]
+            if "likes" in metadata:
+                clean_meta["likes"] = metadata["likes"]
+            if "comments" in metadata:
+                clean_meta["comments"] = metadata["comments"]
+            if "related_queries" in metadata:
+                clean_meta["related_queries"] = metadata["related_queries"][:5]
+            if "keyword" in metadata:
+                clean_meta["keyword"] = metadata["keyword"]
 
             compact_signals.append({
                 # The canonical evidence identity, so a reader can address the observation
@@ -134,12 +132,9 @@ class GetMissionAnalysisUseCase:
                 "title": s.raw_title,
                 "metric_value": None if s.metadata.get("metric_known") is False else s.metric_value,
                 "velocity_per_hour": None if s.metadata.get("metric_known") is False else s.growth_velocity,
-                "url": s.source_url,
+                "url": identity_free_source_url(p_str, s.source_url, s.metadata),
                 "metadata": clean_meta,
             })
-
-        # Top 5 most active creators
-        top_channels = sorted(channel_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
         result = {
             "mission": {
@@ -158,7 +153,6 @@ class GetMissionAnalysisUseCase:
                 "total_signals_collected": len(signals),
                 "platform_breakdown": dict(platform_breakdown),
                 "total_youtube_views": int(total_views),
-                "top_creators": [{"channel": ch, "video_count": cnt} for ch, cnt in top_channels],
                 "signals_returned": len(compact_signals),
                 "note": f"Displaying top {len(compact_signals)} highest engagement signals. Use generate_mission_artifact to view the complete HTML dossier."
             },

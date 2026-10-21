@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.application.use_cases.recorded_content import recorded_excerpt
+from ignis.domain.source_identity import IDENTITY_UNVERIFIABLE_CONTENT, identity_free_source_url
 from ignis.domain.entities import TrendSignal
 from ignis.domain.probe_provenance import PROBE_KEY_ALIASES
 from ignis.domain.research_workspace import (
@@ -253,7 +254,10 @@ class GetEvidenceQualificationBatchUseCase:
             "platform": _platform(signal),
             "connector_surface": metadata.get("connector_surface") or _platform(signal),
             "title": signal.raw_title,
-            "source_url": signal.source_url,
+            # Identity-free whatever the row holds (Spec 015); None reads as "link unavailable".
+            "source_url": identity_free_source_url(_platform(signal), signal.source_url, metadata),
+            # Content with no reference anyone could open qualifies only as context.
+            "source_verifiable": signal.identity_source != IDENTITY_UNVERIFIABLE_CONTENT,
             "published_at": signal.published_at.isoformat() if signal.published_at else None,
             "captured_at": signal.captured_at.isoformat() if signal.captured_at else None,
             # Comments are written by the public, so a phone number or an e-mail in one is
