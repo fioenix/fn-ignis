@@ -470,7 +470,8 @@ async def test_postgres_admission_clock_after_observed_physical_wait(
                     "UPDATE research_assignments SET deadline=%s WHERE assignment_id=%s",
                     (boundary_at, assigned.assignment_id),
                 )
-        occurrence = boundary_at if boundary == "later_occurrence" else actual_clock
+        # The receipt allowance lets an occurrence lead admission; keep it ahead of BEGIN even so.
+        occurrence = boundary_at + domain.RECEIPT_CLOCK_SKEW_ALLOWANCE if boundary == "later_occurrence" else actual_clock
         freshness = boundary_at if boundary == "freshness" else actual_clock + timedelta(minutes=1)
         activity = domain.ResearchActivityReceipt(
             work_id=assigned.work_id,
@@ -515,7 +516,8 @@ async def test_postgres_admission_clock_after_observed_physical_wait(
         result = await asyncio.wait_for(task, 5)
         if boundary == "later_occurrence":
             assert result.disposition == "APPLIED", "A valid occurrence after BEGIN must use fresh admission time"
-            assert captured["transaction"] < occurrence < released_clock
+            lead = occurrence - domain.RECEIPT_CLOCK_SKEW_ALLOWANCE
+            assert captured["transaction"] < lead < released_clock
             after = await contender.load_research_work(mission.id)
             actual = next(w for w in after.work_items if w.work_id == assigned.work_id)
             assert actual.state == "RUNNING" and actual.version == 2

@@ -129,7 +129,7 @@ async def test_native_finite_lifecycle_stop_after_end_and_nonretained_refusal(re
         assigned = await record(client, mission, assigned_body)
         assert assigned['disposition'] == 'APPLIED' and assigned['work_version'] == 1
         activity = {'work_id': identity, 'expected_version': 1, 'ownership_fence': 'new-fence',
-            'execution_ref': 'synthetic-new-execution', 'occurred_at': (now - CLOCK_SKEW_MARGIN).isoformat(),
+            'execution_ref': 'synthetic-new-execution', 'occurred_at': now.isoformat(),
             'fresh_until': (now + timedelta(minutes=3)).isoformat()}
         last = await record(client, mission, command('START_WORK', activity, assigned['revision']))
         assert last['disposition'] == 'APPLIED' and last['work_version'] == 2

@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 import pytest
-from ignis.domain.research_work import parse_research_work_command, transition_research_work
+from ignis.domain.research_work import RECEIPT_CLOCK_SKEW_ALLOWANCE, parse_research_work_command, transition_research_work
 from ignis.domain.research_work import ResearchAuthority, ResearchAssignment, ResearchInputBindings, ResearchWorkItem
 
 NOW = datetime(2026, 10, 6, tzinfo=timezone.utc)
@@ -54,6 +54,23 @@ def test_record_activity_requires_current_receipt():
     assert result.reason_code == 'EXECUTION_RECEIPT_NOT_CURRENT'
     assert result.work == work
 
+
+
+@pytest.mark.parametrize('operation,state', [('START_WORK', 'ASSIGNED'), ('RECORD_ACTIVITY', 'RUNNING')])
+@pytest.mark.parametrize('lead,disposition', [
+    (RECEIPT_CLOCK_SKEW_ALLOWANCE, 'APPLIED'),
+    (RECEIPT_CLOCK_SKEW_ALLOWANCE + timedelta(microseconds=1), 'REFUSED'),
+])
+def test_receipt_may_lead_admission_clock_only_by_the_skew_allowance(operation, state, lead, disposition):
+    assignment, work = bound_records(state=state)
+    payload = dict(work_id=str(work.work_id), expected_version=1, ownership_fence='fence', execution_ref='host/execution',
+        occurred_at=(NOW+lead).isoformat(), fresh_until=(NOW+timedelta(minutes=1)).isoformat())
+    parsed = parse_research_work_command(envelope(operation, payload))
+    result = transition_research_work(work=work, assignment=assignment, command=parsed.command, now=NOW)
+    assert result.disposition == disposition
+    if disposition == 'REFUSED':
+        assert result.reason_code == 'EXECUTION_RECEIPT_NOT_CURRENT'
+        assert result.work == work
 
 def bound_records(state='RUNNING', assignment_state='ACTIVE'):
     authority = ResearchAuthority(actions=frozenset({'ANALYZE'}), sources=frozenset({'youtube'}),

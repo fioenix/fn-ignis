@@ -41,7 +41,7 @@ def activity(work, version=None):
     return {
         **payload,
         "execution_ref": "synthetic-execution",
-        "occurred_at": (now - CLOCK_SKEW_MARGIN).isoformat(),
+        "occurred_at": now.isoformat(),
         "fresh_until": (now + timedelta(minutes=5)).isoformat(),
     }
 
