@@ -101,3 +101,27 @@ def test_counted_value_is_the_latest_within_the_window():
     assert counted_value(published, observations, window_days=7) == 300.0
     assert counted_value(published, observations[2:], window_days=7) is None
     assert counted_value(None, observations, window_days=7) is None
+
+
+def test_counted_value_ignores_observations_before_publication():
+    published = utc(2026, 10, 5)
+    observations = [(utc(2026, 10, 4), 500.0), (utc(2026, 10, 6), 40.0)]
+    assert counted_value(published, observations, window_days=7) == 40.0
+    assert counted_value(published, observations[:1], window_days=7) is None
+
+
+def test_naive_timestamps_are_refused():
+    naive = datetime(2026, 10, 21, 23, 30)
+    aware = utc(2026, 10, 21, 12)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        local_date(naive)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        place_observation(naive, aware)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        place_observation(aware, naive)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        counted_value(naive, [(aware, 1.0)], window_days=7)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        counted_value(aware, [(naive, 1.0)], window_days=7)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        period_of(PeriodKind.DAY, date(2026, 10, 21)).is_complete(naive)

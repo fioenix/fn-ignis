@@ -27,8 +27,15 @@ class PeriodKind(str, Enum):
     MONTH = "month"
 
 
+def _aware(moment: datetime) -> datetime:
+    """A naive timestamp would take the host's own zone and land on a host-dependent day."""
+    if moment.tzinfo is None or moment.tzinfo.utcoffset(moment) is None:
+        raise ValueError("Listening periods need timezone-aware timestamps.")
+    return moment
+
+
 def local_date(moment: datetime) -> date:
-    return moment.astimezone(LISTENING_TZ).date()
+    return _aware(moment).astimezone(LISTENING_TZ).date()
 
 
 @dataclass(frozen=True)
@@ -53,7 +60,7 @@ class Period:
         return datetime.combine(self.last_day + timedelta(days=1), time(0), tzinfo=LISTENING_TZ)
 
     def is_complete(self, now: datetime) -> bool:
-        return now >= self.completes_at
+        return _aware(now) >= self.completes_at
 
     def contains(self, day: date) -> bool:
         return self.start <= day <= self.last_day
@@ -89,9 +96,10 @@ def place_observation(
     """(local date, basis) for an observation, or None when it has no collection time."""
     if observed_at is None:
         return None
+    _aware(observed_at)
     if (
         published_at is not None
-        and published_at <= observed_at
+        and _aware(published_at) <= observed_at
         and local_date(published_at) >= EARLIEST_PLAUSIBLE_PUBLICATION
     ):
         return local_date(published_at), "published"
@@ -113,13 +121,16 @@ def counted_value(
     *,
     window_days: int,
 ) -> Optional[float]:
-    """The value of the latest observation collected within window_days of publication.
+    """The value of the latest observation collected from publication to window_days after it.
 
     Fixing each item's exposure window keeps an earlier period's figure from growing when the item
     is collected again later. None when the item has no publication time or no such observation.
     """
     if published_at is None:
         return None
-    limit = published_at + timedelta(days=window_days)
-    eligible = [(at, value) for at, value in observations if at is not None and at <= limit]
+    limit = _aware(published_at) + timedelta(days=window_days)
+    # An observation dated before its publication contradicts it and measures no exposure window.
+    eligible = [
+        (at, value) for at, value in observations if at is not None and published_at <= _aware(at) <= limit
+    ]
     return max(eligible, key=lambda pair: pair[0])[1] if eligible else None
