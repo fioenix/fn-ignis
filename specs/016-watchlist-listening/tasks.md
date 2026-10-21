@@ -44,7 +44,7 @@ this branch on it before T004.
 - [ ] T007 [US1] Failing tests, then `save_watchlist`, `get_watchlist` and `start_watchlist_run`
   per the contract, in `tests/integration/test_watchlist_mcp.py` and `server.py`; brands become the
   run's declared accounts.
-- [ ] T008 [US1] Raise every governed tool-count surface from 48 to 52 and regenerate manifests
+- [ ] T008 [US1] Raise every governed tool-count surface from 48 to 51 (Part A; Part B raises it to 52) and regenerate manifests
   with `scripts/sync_tool_manifests.py --write`.
 
 ## Phase 4: US2 — Compare two complete periods (P1)
@@ -80,6 +80,13 @@ this branch on it before T004.
   `.handoff/spec016/regressions.handoff.md`.
 - [ ] T018 Code and security review of the full diff; dispose of findings with evidence before the
   PR.
+
+## Landing in two pull requests
+
+- **Part A** (merges on green CI and review): T001–T008, T013, T014, T016 for US1 and US4, T017, T018.
+  Tool count 48 → 51 (`save_watchlist`, `get_watchlist`, `start_watchlist_run`).
+- **Part B** (opens after Part A merges; merges only after the owner ratifies the amendment): T009–T012,
+  T015, T016 for US2 and US3, T017, T018. Tool count 51 → 52 (`get_watchlist_period_snapshot`).
 
 ## Dependencies
 

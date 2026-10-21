@@ -79,6 +79,15 @@ confirm (listed again under "Owner review"):
 - Q: How much collection variance is tolerated when a connector change is compared live against
   `main`? → A: None is assumed: such a comparison is reported with both scores and is not an
   automatic pass; the golden-set procedure owns the decision.
+- Q: How does this feature land while the constitution amendment (FR-015) awaits the owner? → A: In
+  two pull requests. The first carries watchlists, versions, runs, the per-channel daily ceilings and
+  the retention action (US1, US4), which current Principles I and III already allow. The second
+  carries the period comparison, the period snapshot, the `ignis-listen` guide and the Proposed
+  amendment (US2, US3); it merges only after the owner ratifies the amendment, because placing
+  observations in periods by publication time conflicts with Principle III as ratified (agent
+  decided; basis: Constitution Governance requires an explicit owner decision for an amendment and
+  AGENTS.md section 8 leaves additive tools and migrations to the agent; cost if wrong: one merged
+  pull request instead of two).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -260,3 +269,4 @@ Agent decisions under the owner's delegation of 21/10/2026, to confirm or change
 3. Discovery slice: at most 20 percent of a topic's requests (FR-002).
 4. Live connector comparisons are reported with both scores and are never an automatic pass.
 5. The constitution amendment text (FR-015) stays Proposed until ratified.
+6. The two-part landing: US1 and US4 merge first; US2 and US3 wait for the amendment.
