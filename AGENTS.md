@@ -339,7 +339,7 @@ These boundaries hold for every contributor. Where the `noulmes` skill is instal
 
 **The agent decides these alone and records the decision:** vocabulary seeded in `sql/`, test fixtures, internal refactors that keep every contract, `.handoff/` notes, and thresholds in a local SQLite `runtime_configs`.
 
-**An agent checks a choice before acting** when it falls within the constitution (`.specify/memory/constitution.md`, Principles I–VI) or an ADR in `docs/decisions/`, such as adding a dependency or a migration.
+**An agent checks a choice before acting** when it falls within the constitution (`.specify/memory/constitution.md`, Principles I–VII) or an ADR in `docs/decisions/`, such as adding a dependency or a migration.
 
 **Where a decision is recorded:**
 - A decision that belongs to a spec is recorded in that spec's `## Clarifications`, under `### Session YYYY-MM-DD`, as `- Q: … → A: … (agent decided; basis: …)`.

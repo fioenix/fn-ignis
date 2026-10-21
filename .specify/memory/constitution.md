@@ -8,7 +8,10 @@ Sync Impact Report
   - III. Evidence-First Research and Falsification: the ingestion-clock rule now names collection
     windows and evidence frames, and a listening period places observations by publication time with
     the basis stated (Spec 016 amendment, Change 2).
-- Added principles: VII. No Author Identity at Rest (Spec 015, T036)
+- Added principles: VII. No Author Identity at Rest (Spec 015, T036). Review of the ratification
+  PR added three clarifications that match the shipped Spec 015 contract: declared accounts may be
+  shown (FR-002, FR-016), atomic probes count voices with a response-scoped key never stored
+  (research R9), and identity stored before Spec 015 is held unchanged pending OG-3 (FR-015).
 - Removed sections: the "Proposed Amendment (not ratified)" appendix, now folded into VII
 - Bump rationale: MINOR. One new principle and two narrowed or clarified rules for a new use; no
   principle is removed or made incompatible. Owner ratified all three on 2026-10-21.
@@ -22,7 +25,7 @@ Sync Impact Report
   identity removal; tests/unit/test_ignis_skills.py keeps "daily" and "scheduler" out of the
   collection and analysis skills, and routine guidance stays in the Spec 017 guide.
 - Follow-up TODOs: OG-3, the disposition of identity stored before Spec 015, remains an open owner
-  decision (Spec 015 T034); VII governs what is stored from now on.
+  decision (Spec 015 T034); VII records that data as an exception until then.
 -->
 # fn-ignis Constitution
 
@@ -133,16 +136,20 @@ not from a template.
 - Ignis studies markets in aggregate and MUST NOT keep who said something. Usernames, account and
   channel identifiers, display names, profile links, avatars, and handles in links or in content
   text MUST be removed before an observation is stored, and MUST NOT appear in a tool response,
-  report or log.
+  report or log, except an account the requester declared for that mission.
 - Distinct voices MAY be counted only through per-mission markers under a key that belongs to one
-  mission, is encrypted at rest, and is destroyed with the mission's evidence. Markers MUST NOT be
-  linkable across missions.
+  mission, is encrypted at rest, and is destroyed with the mission's evidence. An atomic probe
+  outside a mission MAY count them only with a key scoped to one response and never stored.
+  Markers MUST NOT be linkable across missions or responses.
 - The only identities Ignis MAY keep are accounts a requester declares for one mission; a
   declaration applies only to content collected after it and MUST be withdrawable without
   rewriting evidence.
 - Content with no content reference MAY be kept as context, never as support for a claim.
 - Every new connector MUST be covered by the author identity conformance check before it ships.
   Free-text personal names are outside this principle and MUST be documented as such.
+- Author identity stored before this principle took effect is a recorded exception: it stays
+  unchanged until the owner decides its disposition (Spec 015, OG-3), MUST NOT grow, and MUST NOT
+  appear in a tool response, report or log.
 
 ---
 
