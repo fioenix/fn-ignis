@@ -8,6 +8,7 @@ from collections import defaultdict
 
 from ignis.config import settings
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
+from ignis.domain.source_identity import identity_free_source_url
 from ignis.domain.harness_models import (
     ChannelDataSummary,
     ChannelHealthStatus,
@@ -515,19 +516,17 @@ class StrategicMarketReasoner:
         return " · ".join(parts)
 
     def _build_citation(self, signal: TrendSignal, sequence: int, geo: GeoCode = GeoCode.VN) -> CitationEvidence:
-        author = (
-            signal.metadata.get("channel_title")
-            or signal.metadata.get("author")
-            or signal.metadata.get("username")
-        )
+        # A citation shows content, not who posted it (Spec 015, FR-016). Rows stored before the
+        # policy still carry author fields and handle links, so neither is read from them here;
+        # only a declared account may be named, and the link is rebuilt without the handle.
         excerpt = signal.metadata.get("top_comment") or signal.metadata.get("excerpt")
         return CitationEvidence(
             citation_id=f"CIT-{sequence:02d}",
             platform=signal.platform,
             title_or_query=signal.metadata.get("keyword") or signal.raw_title,
             metric_highlight=self._format_metric_highlight(signal, geo=geo),
-            author_or_channel=author,
-            url=signal.source_url,
+            author_or_channel=None,
+            url=identity_free_source_url(self._platform_value(signal.platform), signal.source_url, signal.metadata),
             excerpt=excerpt,
             observation_id=str(signal.observation_id) if signal.observation_id else None,
             source_id=str(signal.source_id) if signal.source_id else None,

@@ -131,7 +131,8 @@ def test_channel_summary_generation_covers_all_five_platforms():
     # The top citation is the highest-engagement signal, not an arbitrary one.
     assert by_platform["youtube"].top_citation.title_or_query == "Hướng dẫn n8n cơ bản cho người mới bắt đầu"
     assert "120.0K views" in by_platform["youtube"].top_citation.metric_highlight
-    assert by_platform["youtube"].top_citation.author_or_channel == "Vincent AI"
+    # An undeclared channel is never named in a citation (Spec 015, FR-016).
+    assert by_platform["youtube"].top_citation.author_or_channel is None
     assert by_platform["youtube"].timeframe_used == "30d (VN)"
 
     assert by_platform["google"].top_citation.metric_highlight.startswith("search index 95/100")
@@ -387,7 +388,7 @@ def test_html_renders_ingress_audit_table_and_citation_pills():
         assert label in html
     assert "AUTH_REQUIRED" in html
     assert "DEGRADED" in html
-    assert "Vincent AI" in html
+    assert "Vincent AI" not in html
     # Citation pill badges under the insights.
     assert "◆ [CIT-" in html
     assert "bg-blue-100 text-blue-800" in html

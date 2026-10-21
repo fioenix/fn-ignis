@@ -1,3 +1,4 @@
+import dataclasses
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -5,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ignis.application.ports.artifact_port import IArtifactBuilder
+from ignis.domain.author_identity import strip_author_identity
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.harness_models import (
     ChannelDataSummary,
@@ -13,6 +15,7 @@ from ignis.domain.harness_models import (
     StrategicInsight,
     TrendMaturityStage,
 )
+from ignis.domain.source_identity import identity_free_source_url
 from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_data, sanitize_pii_text
 
@@ -35,6 +38,19 @@ def _normalize_insights(raw_insights: List[Any]) -> List[Dict[str, Any]]:
         else:
             normalized.append({"statement": str(item), "citations": []})
     return normalized
+
+
+def _identity_free_signal(signal: TrendSignal) -> TrendSignal:
+    """The signal as a report shows it: no author field and no link that names an account.
+
+    Rows stored before Spec 015 still hold both, so the report does not rely on ingress alone.
+    """
+    platform = signal.platform.value if hasattr(signal.platform, "value") else str(signal.platform)
+    return dataclasses.replace(
+        signal,
+        source_url=identity_free_source_url(platform, signal.source_url, signal.metadata),
+        metadata=strip_author_identity(signal.metadata),
+    )
 
 
 class HtmlArtifactBuilder(IArtifactBuilder):
@@ -290,7 +306,7 @@ class HtmlArtifactBuilder(IArtifactBuilder):
         )
         return template.render(
             mission=mission,
-            signals=signals,
+            signals=[_identity_free_signal(signal) for signal in signals],
             platform_breakdown=platform_breakdown,
             scorecard=scorecard,
             # Rendered from the persisted qualification the application layer supplied; the

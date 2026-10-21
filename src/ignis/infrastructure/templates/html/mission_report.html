@@ -5,7 +5,7 @@
 {% macro citation_pill(cit) -%}
 {%- set pv = cit.platform.value if cit.platform.value is defined else cit.platform -%}
 {% if cit.url %}<a href="{{ cit.url }}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 transition max-w-full">◆ [{{ cit.citation_id }} · {{ pv|upper }}] <span class="truncate ml-1">{{ cit.title_or_query|sanitize_pii }}</span> <span class="ml-1 font-bold whitespace-nowrap">({{ cit.metric_highlight }})</span></a>
-{% else %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 max-w-full">◆ [{{ cit.citation_id }} · {{ pv|upper }}] <span class="truncate ml-1">{{ cit.title_or_query|sanitize_pii }}</span> <span class="ml-1 font-bold whitespace-nowrap">({{ cit.metric_highlight }})</span></span>{% endif %}
+{% else %}<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 max-w-full">◆ [{{ cit.citation_id }} · {{ pv|upper }}] <span class="truncate ml-1">{{ cit.title_or_query|sanitize_pii }}</span> <span class="ml-1 font-bold whitespace-nowrap">({{ cit.metric_highlight }})</span> <span class="ml-1 text-[10px] text-slate-500 whitespace-nowrap">link unavailable</span></span>{% endif %}
 {%- endmacro %}
 <!DOCTYPE html>
 <html lang="en" class="light">
@@ -590,12 +590,8 @@
           {% for inq in customer_inquiries %}
           <div class="bg-slate-50 border border-slate-200/90 rounded-2xl p-4 space-y-2 hover:border-rose-300 transition">
             <div class="flex justify-between items-start">
-              <div class="flex items-center space-x-2">
-                <div class="w-6 h-6 rounded-full bg-rose-100 text-rose-700 font-black text-[10px] flex items-center justify-center">
-                  {{ inq.author[:1]|upper if inq.author else '?' }}
-                </div>
-                <span class="text-xs font-bold text-slate-800">{{ inq.author|sanitize_pii }}</span>
-              </div>
+              {# Who asked is never shown (Spec 015); the question is what the report is about. #}
+              <div class="w-6 h-6 rounded-full bg-rose-100 text-rose-700 font-black text-[10px] flex items-center justify-center">?</div>
               {% if inq.likes and inq.likes > 0 %}
               <span class="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100">
                 {{ inq.likes }} likes
@@ -698,9 +694,6 @@
             </div>
 
             <div class="flex items-center space-x-3 text-[11px] text-slate-500 font-medium">
-              {% if s.metadata.get('channel_title') %}
-              <span>Channel: <strong class="text-slate-700">{{ s.metadata.get('channel_title')|sanitize_pii }}</strong></span>
-              {% endif %}
               {% if s.metadata.get('published_at') %}
               <span class="text-emerald-700 font-mono text-[10px]">{{ s.metadata.get('published_at')[:10] }}</span>
               {% endif %}
@@ -718,6 +711,8 @@
             {% endif %}
             {% if s.source_url %}
             <a href="{{ s.source_url }}" target="_blank" class="text-sky-600 hover:underline text-[10px] font-bold block mt-0.5">Source ↗</a>
+            {% else %}
+            <span class="text-slate-400 text-[10px] font-bold block mt-0.5">link unavailable</span>
             {% endif %}
           </div>
         </div>
