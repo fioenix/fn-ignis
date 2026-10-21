@@ -42,7 +42,8 @@ For a Codex-only installation with separate UAT storage, run
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
 The current source tree contains migrations through
-`sql/031_author_identity_at_rest.sql`. Migration 031 adds per-mission author keys, declared
+`sql/032_watchlists.sql`. Migration 032 adds watchlists, their immutable versions and the runs
+bound to them; it rewrites no stored evidence. Migration 031 adds per-mission author keys, declared
 accounts and author columns on mission evidence, and lets an observation with no content reference
 be stored as unverifiable; it rewrites no stored evidence. Migration 030 adds current-input gaps, finite budget
 grants, narrowed source authority, command receipts and conservative resource allocations.

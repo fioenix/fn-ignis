@@ -116,6 +116,13 @@ AUTHOR_IDENTITY_OWNER_ONLY = {
     "mission_declared_accounts": "declared account",
 }
 OWNER_ONLY.update(AUTHOR_IDENTITY_OWNER_ONLY)
+# SQL032 watchlists are owner-only (Spec 016).
+WATCHLIST_OWNER_ONLY = {
+    "watchlists": "followed subject",
+    "watchlist_versions": "immutable watchlist definition",
+    "watchlist_runs": "mission bound to a watchlist version",
+}
+OWNER_ONLY.update(WATCHLIST_OWNER_ONLY)
 POSTURE = {
     **{table: "client read-only" for table in CLIENT_READ_ONLY},
     **{table: "owner only" for table in OWNER_ONLY},
@@ -320,6 +327,7 @@ CLIENT_ROWS.update(RESEARCH_ROWS)
 CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in FOLLOW_UP_OWNER_ONLY})
 CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in ADMISSION_OWNER_ONLY})
 CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in AUTHOR_IDENTITY_OWNER_ONLY})
+CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in WATCHLIST_OWNER_ONLY})
 
 
 def test_research_posture_inventory_matches_exact_sql028_tables():
@@ -377,6 +385,14 @@ def test_author_identity_posture_inventory_matches_exact_sql031_tables():
         )
     )
     assert created == set(AUTHOR_IDENTITY_OWNER_ONLY)
+    assert created <= set(CLIENT_ROWS)
+
+
+def test_watchlist_posture_inventory_matches_exact_sql032_tables():
+    created = set(
+        re.findall(r"CREATE TABLE IF NOT EXISTS public\.(\w+)", (REPO_SQL / "032_watchlists.sql").read_text())
+    )
+    assert created == set(WATCHLIST_OWNER_ONLY)
     assert created <= set(CLIENT_ROWS)
 
 

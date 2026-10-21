@@ -250,6 +250,42 @@ _AUTHOR_IDENTITY_TRIGGERS_DDL = """
             END;
 """
 
+# Tables sql/032 added (Spec 016). name_key is the case-folded name the repository computes, since
+# SQLite's lower() folds ASCII only; a version is immutable once written.
+_WATCHLIST_DDL = """
+            CREATE TABLE IF NOT EXISTS watchlists (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL REFERENCES research_workspaces(id) ON DELETE CASCADE,
+                name TEXT NOT NULL CHECK (trim(name) <> '' AND name = trim(name)),
+                name_key TEXT NOT NULL CHECK (name_key <> ''),
+                created_at TEXT NOT NULL,
+                UNIQUE (workspace_id, name_key)
+            );
+            CREATE TABLE IF NOT EXISTS watchlist_versions (
+                watchlist_id TEXT NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+                version INTEGER NOT NULL CHECK (version >= 1),
+                definition TEXT NOT NULL CHECK (json_valid(definition) AND json_type(definition) = 'object'),
+                definition_digest TEXT NOT NULL
+                    CHECK (length(definition_digest) = 64 AND definition_digest NOT GLOB '*[^0-9a-f]*'),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (watchlist_id, version)
+            );
+            CREATE TABLE IF NOT EXISTS watchlist_runs (
+                mission_id TEXT PRIMARY KEY REFERENCES research_missions(id) ON DELETE CASCADE,
+                watchlist_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                started_at TEXT NOT NULL,
+                FOREIGN KEY (watchlist_id, version)
+                    REFERENCES watchlist_versions (watchlist_id, version) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_watchlist_runs_watchlist ON watchlist_runs (watchlist_id, started_at);
+            CREATE TRIGGER IF NOT EXISTS refuse_watchlist_version_update
+            BEFORE UPDATE ON watchlist_versions
+            BEGIN
+                SELECT RAISE(ABORT, 'watchlist versions are immutable');
+            END;
+"""
+
 # Tables an existing-ready connection may change: the finite parent's mission, journal, progress,
 # source, observation, quota and cluster records. Vocabulary, taxonomy, runtime configuration,
 # credentials and workspace registrations are never written through this path.
@@ -1484,7 +1520,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 )
                 WHERE cluster_id IS NOT NULL AND time_provenance = 'exact_ingestion';
 
-""" + _MISSION_EVIDENCE_DDL + _AUTHOR_IDENTITY_TABLES_DDL + """            CREATE INDEX IF NOT EXISTS idx_mission_evidence_observation ON mission_evidence (observation_id);
+""" + _MISSION_EVIDENCE_DDL + _AUTHOR_IDENTITY_TABLES_DDL + _WATCHLIST_DDL + """            CREATE INDEX IF NOT EXISTS idx_mission_evidence_observation ON mission_evidence (observation_id);
 
             -- The alias ledger from sql/018_source_identity_aliases.sql. Restated here for the
             -- same reason as the three tables above: SQLite does not read the sql/ files, and a

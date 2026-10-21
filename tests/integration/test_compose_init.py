@@ -85,10 +85,11 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "031_author_identity_at_rest.sql"
+NEWEST_MIGRATION = "032_watchlists.sql"
 
 # Exact full-chain identities: 027 adds three tables/one UUID default; 028 adds fifteen
-# tables, 029 three, 030 six and 031 two, all with caller-bound identities and no UUID default.
+# tables, 029 three, 030 six, 031 two and 032 three, all with caller-bound identities and no UUID
+# default.
 # Counts alone cannot detect a swapped table or default.
 EXPECTED_PUBLIC_TABLES = (
     "industry_taxonomies",
@@ -142,6 +143,9 @@ EXPECTED_PUBLIC_TABLES = (
     "system_audit_logs",
     "topic_clusters",
     "trend_signals",
+    "watchlist_runs",
+    "watchlist_versions",
+    "watchlists",
     "youtube_quota_buckets",
 )
 EXPECTED_UUID_COLUMNS = (

@@ -12,7 +12,8 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/031_author_identity_at_rest.sql`. Migration 031 adds
+The source migration chain ends at `sql/032_watchlists.sql`. Migration 032 adds watchlists, their
+immutable versions and the runs bound to them; it rewrites no stored evidence. Migration 031 adds
 per-mission author keys, declared accounts and author columns on mission evidence, and lets an
 observation with no content reference be stored as unverifiable; it rewrites no stored evidence.
 Migration 030 adds

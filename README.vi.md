@@ -38,7 +38,8 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/031_author_identity_at_rest.sql`. Migration 031 bổ sung khóa tác giả
+Cây mã nguồn hiện có migration tới `sql/032_watchlists.sql`. Migration 032 bổ sung watchlist, các phiên bản
+không sửa được của watchlist và các lần chạy gắn với từng phiên bản; nó không sửa bằng chứng đã lưu. Migration 031 bổ sung khóa tác giả
 riêng cho từng nhiệm vụ, danh sách tài khoản được khai báo và các cột thông tin tác giả trên bằng chứng của nhiệm vụ.
 Migration này cũng cho phép lưu quan sát không có mã nội dung ở dạng không kiểm chứng được. Nó không sửa bằng chứng
 đã lưu. Migration 030 bổ sung các khoảng trống

@@ -12,7 +12,9 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/031_author_identity_at_rest.sql`. Migration 031 bổ sung khóa tác
+Chuỗi migration trong mã nguồn kết thúc ở `sql/032_watchlists.sql`. Migration 032 bổ sung watchlist, các phiên
+bản không sửa được của watchlist và các lần chạy gắn với từng phiên bản; nó không sửa bằng chứng đã lưu. Migration
+031 bổ sung khóa tác
 giả riêng cho từng nhiệm vụ, danh sách tài khoản được khai báo và các cột thông tin tác giả trên bằng chứng của nhiệm
 vụ. Migration này cũng cho phép lưu quan sát không có mã nội dung ở dạng không kiểm chứng được. Nó không sửa bằng
 chứng đã lưu. Migration 030 bổ sung các khoảng trống
