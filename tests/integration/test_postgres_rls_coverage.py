@@ -782,7 +782,7 @@ async def test_the_runtime_owner_reads_and_writes_every_table_class_after_021(
         platform=PlatformType.THREADS,
         raw_title="T018 owner",
         metric_value=1.0,
-        source_url="https://www.threads.net/@t018/post/C2xT018Ownr",
+        source_url="https://www.threads.com/t/C2xT018Ownr",
         geo_code=GeoCode.VN,
         captured_at=datetime(2026, 9, 24, 1, 0, tzinfo=timezone.utc),
         metadata={"post_id": "3141592653589793"},
