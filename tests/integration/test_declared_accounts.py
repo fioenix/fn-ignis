@@ -225,3 +225,25 @@ async def test_the_tool_answers_in_the_contract_shape(repository_case, monkeypat
     assert set(answer["accounts"][0]) == {"id", "platform", "account", "declared_name", "declared_at"}
     declared_at = datetime.fromisoformat(answer["accounts"][0]["declared_at"])
     assert abs(datetime.now(timezone.utc) - declared_at) < timedelta(minutes=5)
+
+
+async def test_declared_at_is_stamped_by_the_clock_that_stamps_collection(repository_case, monkeypatch):
+    """A database clock running ahead of the host would leave fresh content unattributed."""
+    import ignis.infrastructure.persistence.postgres_repository as postgres_module
+    import ignis.infrastructure.persistence.sqlite_repository as sqlite_module
+
+    host_now = datetime(2026, 10, 21, 1, 0, tzinfo=timezone.utc)
+
+    class _HostClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return host_now
+
+    monkeypatch.setattr(sqlite_module, "datetime", _HostClock)
+    monkeypatch.setattr(postgres_module, "datetime", _HostClock)
+    repository = repository_case.repository
+    mission = await _mission(repository)
+
+    stored, _ = await repository.replace_mission_declared_accounts(mission.id, [("tiktok", "brandx", "Brand X")])
+
+    assert stored[0].declared_at == host_now, repository_case.name

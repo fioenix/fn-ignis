@@ -1834,12 +1834,16 @@ class PostgresTimescaleRepository(ITrendRepository):
                                     "DELETE FROM mission_declared_accounts WHERE id = %s;", (account_id,)
                                 )
                                 withdrawn += 1
+                        # Stamped by this process, not by the database: collection times come
+                        # from this clock too, and a declaration applies only to content
+                        # collected after it, so two clocks would misattribute fresh content.
+                        now = datetime.now(timezone.utc)
                         for (platform, key), name in wanted.items():
                             await cur.execute(
                                 "INSERT INTO mission_declared_accounts"
-                                " (id, mission_id, platform, account_key, declared_name)"
-                                " VALUES (%s, %s, %s, %s, %s);",
-                                (str(uuid4()), str(mission_id), platform, key, name),
+                                " (id, mission_id, platform, account_key, declared_name, declared_at)"
+                                " VALUES (%s, %s, %s, %s, %s, %s);",
+                                (str(uuid4()), str(mission_id), platform, key, name, now),
                             )
         except Exception as e:
             raise RepositoryException(
