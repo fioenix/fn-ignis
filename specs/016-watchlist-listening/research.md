@@ -84,3 +84,18 @@ research binding references. It is a script, not a tool, so the MCP surface is u
 the user's explicit request and keeps Ignis free of schedulers and workers; Principle III keeps the
 ingestion clock for collection windows and evidence frames and allows publication time for
 listening-period membership.
+
+## R11. Open: one indicator per channel needs one meaning of `metric_value`
+
+**Finding (21/10/2026, read from the connectors on the Spec 015 branch)**: `metric_value` does not
+mean the same thing across channels. TikTok and YouTube store plays or views; Threads search stores
+likes; Reels stores plays, or likes when a reel reports no plays; Threads trending topics store a
+post count, or a placeholder of 1000 when the count is missing; the host-browser path stores none
+(`metric_known = False`). R4's "views and interactions" therefore cannot be read from
+`metric_value` alone without mixing units inside one channel.
+
+**Proposal for the owner**: Part B reads each channel's indicator from the field that means it
+(plays or views, likes, comments) where the connector records it in metadata, labels the unit, and
+counts an item with no such field as listed but not counted, like an item without a counted
+observation (FR-008). Placeholder values (the Threads 1000) never count. Snapshot assembly waits for
+this decision; the pure period functions (`src/ignis/domain/listening_period.py`) do not depend on it.
