@@ -85,6 +85,17 @@ The [collection skill](../.agents/skills/ignis-collect/SKILL.md) is the method f
 an inspectable frame. The [analysis skill](../.agents/skills/ignis-analyze/SKILL.md) is a
 separate method for testing the Market hypothesis. Ask for either or both.
 
+### Follow a watchlist (development branch)
+
+To follow the same subject across runs, ask the agent to save a watchlist in a confirmed research
+workspace: up to 10 topics, each with categories, up to 20 keywords and the brand accounts you
+name. `save_watchlist` stores every change as a new immutable version, and `get_watchlist` lists
+the versions and the runs. Each `start_watchlist_run` creates one Attention mission on the current
+version and declares its brands as that mission's accounts, the only accounts Ignis ever names.
+You state the allowed sources and authority for every run; collection then goes through
+`execute_mission_ingress` as for any mission. Ignis never runs a watchlist on its own, and the
+comparison between periods arrives in a later part of Spec 016.
+
 ## 3. Understand evidence and analysis
 
 Ignis records a channel outcome for every requested source. `HEALTHY`, `EMPTY_NO_DATA`,

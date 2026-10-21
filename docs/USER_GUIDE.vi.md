@@ -85,6 +85,18 @@ thu thập hằng ngày.
 tra. [Skill phân tích](../.agents/skills/ignis-analyze/SKILL.md) là năng lực riêng để thử
 giả thuyết Market. Có thể yêu cầu một trong hai hoặc cả hai.
 
+### Theo dõi một watchlist (nhánh phát triển)
+
+Muốn theo dõi cùng một chủ đề qua nhiều lần chạy, hãy nhờ agent lưu một watchlist trong research
+workspace đã xác nhận. Mỗi watchlist có tối đa 10 chủ đề; mỗi chủ đề gồm các ngành hàng, tối đa 20
+từ khóa và những tài khoản thương hiệu do bạn chỉ định. `save_watchlist` lưu mỗi lần thay đổi thành
+một phiên bản mới và phiên bản đã lưu thì không sửa được; `get_watchlist` liệt kê các phiên bản cùng
+các lần chạy. Mỗi lần gọi `start_watchlist_run` tạo một nhiệm vụ Attention trên phiên bản hiện tại
+và khai báo các thương hiệu đó làm tài khoản của nhiệm vụ. Đây là những tài khoản duy nhất Ignis gọi
+tên. Lần chạy nào bạn cũng phải nêu rõ nguồn được phép và quyền hạn; sau đó việc thu thập đi qua
+`execute_mission_ingress` như mọi nhiệm vụ khác. Ignis không bao giờ tự chạy watchlist, còn phần so
+sánh giữa các kỳ sẽ có ở phần sau của Spec 016.
+
 ## 3. Đọc chứng cứ và kết quả phân tích
 
 Ignis ghi kết quả cho từng kênh được yêu cầu. `HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`,
