@@ -50,8 +50,6 @@ from tests.fixtures.author_identity_sentinels import (
 )
 from test_host_browser_mission import assignment, staged_answer
 
-pytestmark = pytest.mark.asyncio
-
 NOW = datetime(2026, 10, 21, 1, 0, tzinfo=timezone.utc)
 CONNECTORS_DIR = Path(__file__).resolve().parents[2] / "src" / "ignis" / "infrastructure" / "connectors"
 
@@ -266,6 +264,7 @@ def test_every_fixture_that_can_name_a_person_plants_a_sentinel():
 # --- the mission ---------------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_a_sentinel_mission_leaves_no_author_identity_anywhere(
     repository_case, tmp_path, monkeypatch, caplog, persistent_key
 ):
@@ -278,6 +277,7 @@ async def test_a_sentinel_mission_leaves_no_author_identity_anywhere(
     assert repository_case.counts()["observations"] == len(CONNECTOR_FIXTURES), repository_case.name
 
 
+@pytest.mark.asyncio
 async def test_a_host_browser_submission_leaves_no_author_identity_anywhere(
     repository_case, tmp_path, monkeypatch, caplog, persistent_key
 ):
@@ -307,6 +307,7 @@ async def test_a_host_browser_submission_leaves_no_author_identity_anywhere(
 # --- the negative control (SC-007) ----------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_the_scan_catches_a_connector_that_leaks(
     repository_case, tmp_path, monkeypatch, caplog, persistent_key
 ):
