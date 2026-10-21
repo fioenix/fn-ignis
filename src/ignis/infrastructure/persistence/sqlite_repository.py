@@ -1332,6 +1332,21 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 SELECT RAISE(ABORT, 'claim observation lacks a compatible mission qualification');
             END;
 
+            -- Spec 015 (research R6): content with no reference anyone could open is context,
+            -- never support, even if a support qualification was written around the domain.
+            DROP TRIGGER IF EXISTS refuse_unverifiable_claim_support;
+            CREATE TRIGGER IF NOT EXISTS refuse_unverifiable_claim_support
+            BEFORE INSERT ON mission_claim_evidence
+            WHEN NEW.role = 'SUPPORT'
+                 AND EXISTS (
+                     SELECT 1 FROM observations o
+                     WHERE o.id = NEW.observation_id
+                       AND o.identity_source = 'unverifiable_content'
+                 )
+            BEGIN
+                SELECT RAISE(ABORT, 'claim support must be content a reader can open');
+            END;
+
             DROP TRIGGER IF EXISTS validate_claim_measured_absence_binding;
             CREATE TRIGGER IF NOT EXISTS validate_claim_measured_absence_binding
             BEFORE INSERT ON mission_claim_evidence

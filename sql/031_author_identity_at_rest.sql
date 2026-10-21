@@ -84,6 +84,31 @@ ALTER TABLE public.observations ADD CONSTRAINT observations_identity_source_chec
     )
 );
 
+-- Content with no reference anyone could open is context, never support (research R6). The
+-- domain refuses a support qualification for it; this refuses the binding even when a support row
+-- was written around the domain.
+CREATE OR REPLACE FUNCTION refuse_unverifiable_claim_support()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+    IF NEW.role = 'SUPPORT' AND EXISTS (
+        SELECT 1 FROM observations o
+        WHERE o.id = NEW.observation_id AND o.identity_source = 'unverifiable_content'
+    ) THEN
+        RAISE EXCEPTION 'claim support must be content a reader can open'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS refuse_unverifiable_claim_support ON public.mission_claim_evidence;
+CREATE TRIGGER refuse_unverifiable_claim_support
+BEFORE INSERT ON public.mission_claim_evidence
+FOR EACH ROW EXECUTE FUNCTION refuse_unverifiable_claim_support();
+
 -- Owner-only, as every other non-vocabulary table since 021.
 DO $$
 DECLARE

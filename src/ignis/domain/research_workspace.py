@@ -26,6 +26,7 @@ from uuid import UUID, uuid4
 
 from ignis.domain.exceptions import IgnisDomainException
 from ignis.domain.harness_models import ChannelHealthStatus
+from ignis.domain.source_identity import IDENTITY_UNVERIFIABLE_CONTENT
 
 # Bumped when a workspace on disk can no longer be read by this build. A workspace whose manifest
 # names a higher version is reported INCOMPATIBLE rather than opened and partially understood.
@@ -2008,6 +2009,27 @@ def compute_query_fingerprint(keywords: Sequence[str], geo: Any, timeframe: Any)
             "timeframe": _plain(timeframe) if timeframe is not None else None,
         }
     )
+
+
+# The relations that let an observation count for or against a hypothesis (Spec 015, research R6).
+_COUNTING_RELATIONS = frozenset(
+    {QualificationRelation.QUALIFIED_SUPPORT, QualificationRelation.QUALIFIED_CONTRADICTION}
+)
+
+
+def require_verifiable_relation(relation: Any, identity_source: Optional[str]) -> None:
+    """Refuse a counting judgment on content that names no object a reader could open.
+
+    Such an observation is kept, counted and shown, but only as context: CONTEXT_ONLY, an
+    exclusion or UNASSESSED. A claim cannot rest on evidence nobody outside Ignis can check.
+    """
+    if identity_source != IDENTITY_UNVERIFIABLE_CONTENT:
+        return
+    if _coerce_enum(QualificationRelation, relation, "relation") in _COUNTING_RELATIONS:
+        raise InvalidEvidenceQualificationError(
+            "This observation has no content reference anyone could open, so it can only be "
+            "qualified as context (CONTEXT_ONLY), excluded or left UNASSESSED."
+        )
 
 
 def compute_frame_fingerprint(mission: Any, brief: Optional[MarketBriefRevision]) -> str:
