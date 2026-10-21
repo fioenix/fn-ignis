@@ -60,3 +60,42 @@ def test_a_parallel_run_without_postgres_is_left_alone(select):
     environment = {"PYTEST_XDIST_WORKER": "gw1", "PYTEST_XDIST_WORKER_COUNT": "2"}
     select(environment)
     assert "IGNIS_TEST_POSTGRES_DSN" not in environment
+
+
+class _Item:
+    def __init__(self, nodeid):
+        self.nodeid = nodeid
+        self.marks = []
+
+    def add_marker(self, mark):
+        self.marks.append(mark)
+
+
+@pytest.fixture(scope="module")
+def root_conftest():
+    return runpy.run_path(str(REPO_ROOT / "tests" / "conftest.py"))
+
+
+def _config(dist):
+    from types import SimpleNamespace
+    return SimpleNamespace(option=SimpleNamespace(dist=dist))
+
+
+def test_loadgroup_keeps_files_together_except_the_spread_ones(root_conftest):
+    spread = sorted(root_conftest["SPREAD_ACROSS_WORKERS"])[0]
+    kept, split = _Item("tests/unit/test_x.py::test_a"), _Item(f"{spread}::test_b")
+    root_conftest["pytest_collection_modifyitems"](_config("loadgroup"), [kept, split])
+    assert [(m.name, m.args) for m in kept.marks] == [("xdist_group", ("tests/unit/test_x.py",))]
+    assert split.marks == []
+
+
+@pytest.mark.parametrize("dist", ["no", "loadfile", "load"])
+def test_other_modes_add_no_group(root_conftest, dist):
+    item = _Item("tests/unit/test_x.py::test_a")
+    root_conftest["pytest_collection_modifyitems"](_config(dist), [item])
+    assert item.marks == []
+
+
+def test_every_spread_file_exists(root_conftest):
+    missing = [path for path in root_conftest["SPREAD_ACROSS_WORKERS"] if not (REPO_ROOT / path).is_file()]
+    assert not missing, f"SPREAD_ACROSS_WORKERS names files that are gone: {missing}"

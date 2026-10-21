@@ -70,6 +70,29 @@ def select_worker_postgres(environment: MutableMapping[str, str]) -> None:
 
 select_worker_postgres(os.environ)
 
+
+# Test files whose tests share no module or session fixture and run long enough that holding the
+# whole file on one worker leaves the others idle: on main's CI of 21/10/2026 the RLS file alone
+# kept one worker busy 100 s after the other three had finished.
+SPREAD_ACROSS_WORKERS = frozenset({
+    "tests/integration/test_postgres_rls_coverage.py",
+    "tests/unit/test_caller_youtube_pilot_cli.py",
+})
+
+
+def pytest_collection_modifyitems(config, items):
+    """Under --dist loadgroup, keep each file on one worker except SPREAD_ACROSS_WORKERS.
+
+    A test with no xdist_group mark is scheduled on its own, so marking every other test with its
+    file reproduces --dist loadfile for them and spreads only the listed files' tests.
+    """
+    if getattr(config.option, "dist", "no") != "loadgroup":
+        return
+    for item in items:
+        path = item.nodeid.split("::", 1)[0]
+        if path not in SPREAD_ACROSS_WORKERS:
+            item.add_marker(pytest.mark.xdist_group(path))
+
 from ignis.domain.entities import TrendSignal, TopicCluster  # noqa: E402
 from ignis.domain.value_objects import PlatformType, GeoCode  # noqa: E402
 
