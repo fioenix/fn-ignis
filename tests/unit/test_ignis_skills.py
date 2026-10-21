@@ -54,3 +54,14 @@ def test_capability_examples_keep_external_data_as_context():
     assert "CONTRADICTION" in analyze_example
     assert "CONTEXT_ONLY" in analyze_example
     assert "frame_digest" in analyze_example
+
+
+def test_analysis_reads_concentration_as_a_signal_without_identifying_authors():
+    """Spec 015 T028: voices are counted, never named."""
+    analysis = ANALYZE.read_text(encoding="utf-8")
+
+    assert "author_concentration" in analysis
+    assert "top_share" in analysis
+    assert "seeding" in analysis
+    assert "declared account" in analysis
+    assert "unavailable" in analysis
