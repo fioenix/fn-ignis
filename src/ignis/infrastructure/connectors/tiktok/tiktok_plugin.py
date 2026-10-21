@@ -1,6 +1,5 @@
 import logging
 import re
-import hashlib
 import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
@@ -10,6 +9,7 @@ import httpx
 from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
+from ignis.domain.source_identity import identity_free_source_url
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.connectors.browser_support import (
@@ -481,7 +481,8 @@ class TikTokPlugin(IConnectorPlugin):
         """
         match = re.search(r"/video/(\d+)", video_url)
         if not match:
-            logger.warning(f"Could not extract video ID from URL: {video_url}")
+            # The URL is not logged: a profile link names an account (Spec 015).
+            logger.warning("Could not extract a video ID from the comment URL.")
             return []
         aweme_id = match.group(1)
 
@@ -538,32 +539,18 @@ class TikTokPlugin(IConnectorPlugin):
                 api_data = await page.evaluate(js_fetch)
                 raw_comments = api_data.get("comments", []) if isinstance(api_data, dict) else []
 
-                salt = "ignis_salt_2026"
+                # No commenter identity leaves this loop, not even a pseudonym: a fixed-salt hash
+                # links one commenter across every mission and leaks a prefix of the name
+                # (Spec 015, research R3). The comment id is the comment's own content reference.
                 for c in raw_comments:
                     if isinstance(c, dict):
-                        user_obj = c.get("user", {}) or {}
-                        raw_name = user_obj.get("nickname") or user_obj.get("unique_id") or "user"
-                        raw_id = user_obj.get("unique_id") or "anon"
-                        raw_cid = str(c.get("cid", ""))
-                        
-                        # Salted Pseudonymization (GDPR Art. 4(5) / Law 91/2025/QH15)
-                        h_name = hashlib.sha256(f"{salt}:{raw_name}".encode()).hexdigest()[:4]
-                        h_id = hashlib.sha256(f"{salt}:{raw_id}".encode()).hexdigest()[:6]
-                        h_cid = hashlib.sha256(f"{salt}:{raw_cid}".encode()).hexdigest()[:8]
-
-                        pseudo_author = f"{raw_name[:2]}***_{h_name}" if len(raw_name) >= 2 else "user_anon"
-                        pseudo_id = f"id_{h_id}"
-                        pseudo_cid = f"cmt_{h_cid}"
-
                         cmt_text = c.get("text", "").strip()
                         if cmt_text:
                             # Redact phone numbers, emails, and credentials
                             redacted_text = sanitize_pii_text(cmt_text)
 
                             comments.append({
-                                "comment_id": pseudo_cid,
-                                "author": pseudo_author,
-                                "author_id": pseudo_id,
+                                "comment_id": str(c.get("cid") or "") or None,
                                 "text": redacted_text,
                                 "likes": c.get("digg_count", 0),
                                 "reply_count": c.get("reply_comment_total", 0),
@@ -576,7 +563,10 @@ class TikTokPlugin(IConnectorPlugin):
                 await browser.close()
 
         except Exception as e:
-            logger.error(f"Error scraping comments for video {video_url}: {e}")
+            logger.error(
+                "Error scraping comments for video %s: %s",
+                identity_free_source_url("tiktok", video_url, {}) or "with no identity-free link", e,
+            )
             raise ConnectorExecutionException(f"Failed to fetch TikTok comments: {e}") from e
 
         return comments
@@ -608,7 +598,10 @@ class TikTokPlugin(IConnectorPlugin):
                     "comments": cmts,
                 })
             except Exception as e:
-                logger.warning(f"Skipping comments scraping for video {s.source_url}: {e}")
+                logger.warning(
+                    "Skipping comments scraping for video %s: %s",
+                    identity_free_source_url("tiktok", s.source_url, s.metadata) or "with no identity-free link", e,
+                )
 
         return all_results
 

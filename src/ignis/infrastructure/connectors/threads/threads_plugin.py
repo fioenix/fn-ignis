@@ -431,7 +431,6 @@ class ThreadsPlugin(IConnectorPlugin):
             own = {}
             logger.warning(f"Could not read the authenticated Threads account: {e}")
 
-        own_id = str(own.get("id") or "")
         own_username = str(own.get("username") or "").lstrip("@").lower()
 
         try:
@@ -484,10 +483,9 @@ class ThreadsPlugin(IConnectorPlugin):
         return {
             "status": self.KEYWORD_SEARCH_SELF_ONLY,
             "detail": (
+                # No account name or id: the verdict is about the token (Spec 015).
                 f"Every one of the {len(items)} results belongs to the authenticated account"
-                + (f" (@{own_username})" if own_username else "")
-                + (f" [id {own_id}]" if own_id and not own_username else "")
-                + ". Meta grants threads_keyword_search only after App Review, so this token "
+                ". Meta grants threads_keyword_search only after App Review, so this token "
                 "searches its own posts. Use the Tier-1 browser session for Threads listening "
                 "instead: authenticate_threads(browser_login=True)."
             ),
