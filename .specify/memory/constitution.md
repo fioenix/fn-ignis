@@ -163,3 +163,43 @@ labels, and remembered command output are not evidence by themselves: run the co
 surface that owns the claim, read the output, and record what was not checked.
 
 **Version**: 2.1.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-10-19
+
+---
+
+## Proposed Amendment (not ratified): VII. No Author Identity at Rest
+
+**Status**: Proposed by Spec 015 (T036), 21/10/2026. It has no effect until the owner ratifies it;
+until then the version above stays 2.1.0.
+
+<!--
+Proposed Sync Impact Report
+- Version change on ratification: 2.1.0 -> 2.2.0
+- Added principle: VII. No Author Identity at Rest
+- Modified principles: none; III keeps its evidence rules, and VII constrains what evidence may hold
+- Bump rationale: MINOR. A new principle that adds guidance without removing or making any
+  existing principle incompatible. Spec 015 already implements it.
+- Templates to check on ratification: .specify/templates/plan-template.md (Constitution Check
+  gains a VII line), spec-template.md and tasks-template.md (no wording change expected).
+- Dependent documents to check: AGENTS.md (data-handling section), README.md and docs/USER_GUIDE.md
+  (already describe the behaviour), the ignis-analyze skill (already reads concentration only).
+- Open owner decision outside this principle: OG-3, the disposition of identity stored before
+  Spec 015 (see .handoff/spec015/inventory.handoff.md).
+-->
+
+Proposed text:
+
+### VII. No Author Identity at Rest
+
+- Ignis studies markets in aggregate and MUST NOT keep who said something. Usernames, account and
+  channel identifiers, display names, profile links, avatars, and handles in links or in content
+  text MUST be removed before an observation is stored, and MUST NOT appear in a tool response,
+  report or log.
+- Distinct voices MAY be counted only through per-mission markers under a key that belongs to one
+  mission, is encrypted at rest, and is destroyed with the mission's evidence. Markers MUST NOT be
+  linkable across missions.
+- The only identities Ignis MAY keep are accounts a requester declares for one mission; a
+  declaration applies only to content collected after it and MUST be withdrawable without
+  rewriting evidence.
+- Content with no content reference MAY be kept as context, never as support for a claim.
+- Every new connector MUST be covered by the author identity conformance check before it ships.
+  Free-text personal names are outside this principle and MUST be documented as such.
