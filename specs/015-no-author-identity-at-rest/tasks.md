@@ -125,15 +125,20 @@ test-first: each test task must be observed failing before its implementation ta
 
 **Independent Test**: Quickstart step 2, plus a two-mission integration fixture with a known author distribution.
 
-- [ ] T024 [P] [US2] Write failing integration tests in `tests/integration/test_author_concentration.py`. Cover:
+- [x] T024 [P] [US2] Write failing integration tests in `tests/integration/test_author_concentration.py`. Cover:
   - 10 observations from 2 authors counted as 2;
   - the same authors in two missions sharing no marker;
   - unknown authors never merged;
   - `UNAVAILABLE` with its visible limitation when the encryption key is absent.
-- [ ] T025 [US2] Add `author_concentration` (`distinct_authors`, `unknown`, `unavailable`, `top_share`) per channel to `src/ignis/application/use_cases/get_mission_analysis.py` and its serializer in `src/ignis/interfaces/mcp/server.py`.
-- [ ] T026 [US2] Add a per-response `author_concentration` with an ephemeral, never-stored key to `get_tiktok_video_comments` and `extract_customer_pain_points` in `src/ignis/interfaces/mcp/server.py`.
-- [ ] T027 [US2] Call `destroy_mission_author_key` from `delete_mission_signals` in both repositories, but not from `prune_mission_evidence`. Test that markers of a deleted mission can no longer be recomputed in `tests/unit/test_mission_author_keys.py`.
-- [ ] T028 [US2] Extend the `ignis-analyze` skill text in `.agents/skills/ignis-analyze/SKILL.md` and its distributed copies. Explain how to read concentration as a seeding signal without implying who the authors are.
+  - Done 21/10/2026 with T025 (`5ca096d`). RED observed for three of four (no `author_concentration` key; diversity stuck at its no-data default of 70); markers across missions were already disjoint from T015. Also covers the quality scorecard reading markers.
+- [x] T025 [US2] Add `author_concentration` (`distinct_authors`, `unknown`, `unavailable`, `top_share`) per channel to `src/ignis/application/use_cases/get_mission_analysis.py` and its serializer in `src/ignis/interfaces/mcp/server.py`.
+  - Done 21/10/2026 (`5ca096d`). Concentration is computed from every mission signal, grouped by platform; rows stored before 031 count as unknown. A visible `author_concentration_limitation` appears when any sighting is UNAVAILABLE. The MCP serializer passes the use-case result through unchanged. Addition beyond the task text: `creator_diversity_score` now reads markers, which closes the consumer gap T015 opened.
+- [x] T026 [US2] Add a per-response `author_concentration` with an ephemeral, never-stored key to `get_tiktok_video_comments` and `extract_customer_pain_points` in `src/ignis/interfaces/mcp/server.py`.
+  - Done 21/10/2026 (`175fe21`). RED observed (no `author_key` argument). The server makes a 32-byte key per call; the plugin marks commenters under it only when given one; the server aggregates and removes the markers before the response. No repository call stores the key.
+- [x] T027 [US2] Call `destroy_mission_author_key` from `delete_mission_signals` in both repositories, but not from `prune_mission_evidence`. Test that markers of a deleted mission can no longer be recomputed in `tests/unit/test_mission_author_keys.py`.
+  - Done 21/10/2026 (`8051148`). RED observed on SQLite. The key is deleted inside the same transaction as the evidence on both backends (rather than through a second call to `destroy_mission_author_key`), so a failure cannot leave one without the other. Parity on a disposable PostgreSQL: 8 passed.
+- [x] T028 [US2] Extend the `ignis-analyze` skill text in `.agents/skills/ignis-analyze/SKILL.md` and its distributed copies. Explain how to read concentration as a seeding signal without implying who the authors are.
+  - Done 21/10/2026 (`f450d1c`). RED observed in `tests/unit/test_ignis_skills.py`. The skill has no other distributed copy in the repository.
 
 **Checkpoint**: US1 and US2 work independently.
 
@@ -145,12 +150,14 @@ test-first: each test task must be observed failing before its implementation ta
 
 **Independent Test**: Quickstart step 3 mention cases with Vietnamese fixtures.
 
-- [ ] T029 [P] [US3] Write failing tests in `tests/unit/test_mention_tokens.py`. Cover:
+- [x] T029 [P] [US3] Write failing tests in `tests/unit/test_mention_tokens.py`. Cover:
   - "@linh.nguyen mua ở đâu vậy" stored as "@[user] mua ở đâu vậy";
   - the declared `@brandx` kept as a token and rendered "@Brand X";
   - after withdrawal, the token rendered as "@[user]";
   - email and phone redaction unchanged.
-- [ ] T030 [US3] Apply tokenisation to titles, captions, excerpts and comments at the policy. Add declared-token rendering to the report builder in `src/ignis/infrastructure/templates/html/` and to the MCP serializers in `src/ignis/interfaces/mcp/server.py`. Add the helper to `src/ignis/infrastructure/security/pii_sanitizer.py`. Extend the T010 conformance scan to the `@mention` sentinels from T002.
+  - Done 21/10/2026 with T030 (`743ea23`). RED: `ImportError` for `render_mention_tokens`.
+- [x] T030 [US3] Apply tokenisation to titles, captions, excerpts and comments at the policy. Add declared-token rendering to the report builder in `src/ignis/infrastructure/templates/html/` and to the MCP serializers in `src/ignis/interfaces/mcp/server.py`. Add the helper to `src/ignis/infrastructure/security/pii_sanitizer.py`. Extend the T010 conformance scan to the `@mention` sentinels from T002.
+  - Done 21/10/2026 (`743ea23`). Tokenisation covers the title and every metadata string except the requester's query keys (`PROBE_KEY_ALIASES`, `matched_keywords`, `query`), which also key Google sources. Rendering covers the report (through the `sanitize_pii` filter), `get_mission_analysis` titles and evidence batch titles and excerpts; citation JSON in `discover_market_opportunities` keeps the token, which names no person. The extended conformance scan failed on the pre-T030 source with three `@mention` leaks and passes now.
 
 **Checkpoint**: US1–US3 work independently.
 
@@ -162,18 +169,24 @@ test-first: each test task must be observed failing before its implementation ta
 
 **Independent Test**: Quickstart step 6 against a seeded fixture database.
 
-- [ ] T031 [P] [US4] Write failing tests in `tests/unit/test_inventory_author_identity.py`. Use a seeded SQLite fixture and check counts per table and field, that no identity value appears in the output, and that the file is unchanged after the run.
-- [ ] T032 [US4] Implement `scripts/inventory_author_identity.py`. SQLite opens with `mode=ro`. PostgreSQL uses `SET TRANSACTION READ ONLY` with the DSN read from the environment variable named by `--database-url-env`, and the value is never printed. Output is JSON counts only.
-- [ ] T033 [US4] Run the inventory on the local caller SQLite. If the DSN is present, also run it on the dev Supabase project under the owner's 02/10/2026 dev preauthorisation. Record the counts and anything not run in `.handoff/spec015/inventory.handoff.md`.
+- [x] T031 [P] [US4] Write failing tests in `tests/unit/test_inventory_author_identity.py`. Use a seeded SQLite fixture and check counts per table and field, that no identity value appears in the output, and that the file is unchanged after the run.
+  - Done 21/10/2026 with T032 (`757845c`). RED observed for three of five tests (no script yet); the PostgreSQL case is `tests/integration/test_inventory_author_identity_postgres.py`.
+- [x] T032 [US4] Implement `scripts/inventory_author_identity.py`. SQLite opens with `mode=ro`. PostgreSQL uses `SET TRANSACTION READ ONLY` with the DSN read from the environment variable named by `--database-url-env`, and the value is never printed. Output is JSON counts only.
+  - Done 21/10/2026 (`757845c`). Counts per table and field: metadata rows holding author fields with the keys found, handle links, handle-derived source keys and `@mentions` in `observations`, `sources`, `trend_signals` and `topic_clusters`. A connection failure prints the error type only.
+- [x] T033 [US4] Run the inventory on the local caller SQLite. If the DSN is present, also run it on the dev Supabase project under the owner's 02/10/2026 dev preauthorisation. Record the counts and anything not run in `.handoff/spec015/inventory.handoff.md`.
+  - Done 21/10/2026 for the local stores; the dev Supabase run is not done. The caller store `.fnignis/canonical.sqlite3` holds 5 observations whose metadata carries `channel_id` and `channel_title`, and nothing else; the default `ignis.db` is empty. Both files hashed identically before and after. No DSN variable was set in the session environment, so Supabase was not inventoried. Details and the OG-3 options are in `.handoff/spec015/inventory.handoff.md`.
 - [ ] T034 [US4] OWNER GATE OG-3: present the inventory and the disposition options (keep, anonymise, delete), together with their effect on stored frame digests (research R10). Record the owner's decision in `specs/015-no-author-identity-at-rest/spec.md` Clarifications. Apply nothing in this feature without that decision and a pre-action manifest (FR-015).
 
 ---
 
 ## Phase 7: Polish & Cross-Cutting
 
-- [ ] T035 [P] Document what is and is not removed, including that free-text names are not removed (FR-012), and how to declare accounts. Update README.md, README.vi.md, docs/USER_GUIDE.md and docs/USER_GUIDE.vi.md. The Vietnamese files go through the vietnamizer workflow.
-- [ ] T036 [P] Draft a constitution amendment that adds a privacy principle ("no author identity at rest"), with its impact report and MINOR version bump, as `Proposed` for the owner in `.specify/memory/constitution.md`. Do not ratify it.
-- [ ] T037 Run the quickstart steps, `.venv/bin/pytest tests/`, ruff, `git diff --check`, `uv lock --check`, the package build and `scripts/wheel_mcp_smoke.py`. Record the exact commands, revision, results and skips in `.handoff/spec015/regressions.handoff.md`.
+- [x] T035 [P] Document what is and is not removed, including that free-text names are not removed (FR-012), and how to declare accounts. Update README.md, README.vi.md, docs/USER_GUIDE.md and docs/USER_GUIDE.vi.md. The Vietnamese files go through the vietnamizer workflow.
+  - Done 21/10/2026 (`de83d02`). The Vietnamese text went through the vietnamizer workflow: Jev ran with partial coverage (19 patterns hit the request limit), and the core workflow decided four edits (V17 twice, V14, V18).
+- [x] T036 [P] Draft a constitution amendment that adds a privacy principle ("no author identity at rest"), with its impact report and MINOR version bump, as `Proposed` for the owner in `.specify/memory/constitution.md`. Do not ratify it.
+  - Done 21/10/2026 (`1b17ace`) as a Proposed section at the end of the constitution, with its impact report; the effective version stays 2.1.0.
+- [x] T037 Run the quickstart steps, `.venv/bin/pytest tests/`, ruff, `git diff --check`, `uv lock --check`, the package build and `scripts/wheel_mcp_smoke.py`. Record the exact commands, revision, results and skips in `.handoff/spec015/regressions.handoff.md`.
+  - Done 21/10/2026 at `1b17ace`. Full suite on SQLite: 4126 passed, 1008 skipped, 1 deselected. `tests/integration -k postgres` on a disposable TimescaleDB pg16 against an export of the same commit: 890 passed, 23 skipped, no database left behind. ruff on `src tests scripts` clean; `git diff --check` clean; `uv lock --check` exit 0; `uv build` produced the wheel and sdist; `scripts/wheel_mcp_smoke.py` against the installed wheel: 48 tools, a real tool call, the tracking guide and a clean exit. Quickstart steps 1-5 run inside the suite; step 6 ran as T033. Recorded in `.handoff/spec015/regressions.handoff.md`.
 - [ ] T038 Run a code and security review of the full diff, covering the auth, private-data and untrusted-input boundaries. Dispose of the findings with evidence before any PR. Opening, merging or pushing a PR needs the owner's explicit authority.
 
 ---
