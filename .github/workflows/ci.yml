@@ -37,6 +37,10 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       IGNIS_TEST_POSTGRES_DSN: postgresql://postgres:ignis_test@localhost:5432/postgres
+      # One server per pytest-xdist worker (tests/conftest.py, select_worker_postgres): roles are
+      # per server, and the RLS contracts create, drop and assert the absence of them.
+      IGNIS_TEST_POSTGRES_DSN_POOL: >-
+        postgresql://postgres:ignis_test@localhost:5432/postgres,postgresql://postgres:ignis_test@localhost:5433/postgres,postgresql://postgres:ignis_test@localhost:5434/postgres,postgresql://postgres:ignis_test@localhost:5435/postgres
     services:
       postgres:
         image: timescale/timescaledb-ha:pg16
@@ -44,6 +48,39 @@ jobs:
           POSTGRES_PASSWORD: ignis_test
         ports:
           - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      postgres2:
+        image: timescale/timescaledb-ha:pg16
+        env:
+          POSTGRES_PASSWORD: ignis_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      postgres3:
+        image: timescale/timescaledb-ha:pg16
+        env:
+          POSTGRES_PASSWORD: ignis_test
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      postgres4:
+        image: timescale/timescaledb-ha:pg16
+        env:
+          POSTGRES_PASSWORD: ignis_test
+        ports:
+          - 5435:5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
@@ -108,14 +145,38 @@ jobs:
             echo "marker=not migration_chain" >> "$GITHUB_OUTPUT"
           fi
 
+      # The services are throwaway: durability buys nothing and every test copies a template
+      # database, which fsyncs it. These three settings take effect on reload, without a restart.
+      - name: Let the Throwaway PostgreSQL Services Skip Durability
+        run: |
+          uv run python - <<'PY'
+          import os
+          import psycopg
+          for dsn in os.environ["IGNIS_TEST_POSTGRES_DSN_POOL"].split(","):
+              with psycopg.connect(dsn, autocommit=True) as conn:
+                  for setting in ("fsync", "synchronous_commit", "full_page_writes"):
+                      conn.execute(f"ALTER SYSTEM SET {setting} = off")
+                  conn.execute("SELECT pg_reload_conf()")
+          PY
+
+      # About 5,200 tests with no single slow file took 15-20 minutes in one process. pytest-xdist
+      # spreads them over the runner's four cores, one test file per worker at a time (--dist
+      # loadfile), so a module's fixtures and ordering stay as they were. Each worker runs against
+      # its own PostgreSQL service from IGNIS_TEST_POSTGRES_DSN_POOL, so it sees a server exactly
+      # as the serial run did; -n must not exceed the pool. pytest-cov combines the workers' data
+      # into the same .coverage file the SC-004 gate below reads.
+      #
+      # COVERAGE_CORE=sysmon measures through Python 3.12's sys.monitoring instead of a trace
+      # function, which costs far less per line; the measured lines and the report are the same.
       - name: Run Test Suite with Coverage
         env:
           MARKER: ${{ steps.scope.outputs.marker }}
+          COVERAGE_CORE: sysmon
         run: |
           if [ -n "$MARKER" ]; then
-            uv run pytest tests/ -v --cov=ignis --cov-report=term-missing -m "$MARKER"
+            uv run pytest tests/ -v -n 4 --dist loadfile --cov=ignis --cov-report=term-missing -m "$MARKER"
           else
-            uv run pytest tests/ -v --cov=ignis --cov-report=term-missing
+            uv run pytest tests/ -v -n 4 --dist loadfile --cov=ignis --cov-report=term-missing
           fi
 
       # SC-004 promises at least 85% coverage for the Repository, the RSS Plugin, the YouTube
