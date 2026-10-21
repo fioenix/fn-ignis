@@ -130,6 +130,11 @@ def _url_account(url: Optional[str]) -> Optional[str]:
     return None
 
 
+def account_in_link(url: Optional[str]) -> Optional[str]:
+    """The normalised account a profile or post link names, or None when it names none."""
+    return _url_account(url)
+
+
 def has_handle_segment(url: Optional[str]) -> bool:
     """True when a link names an account, so storing it would store who posted."""
     return _url_account(url) is not None
@@ -372,6 +377,7 @@ __all__: List[str] = [
     "AuthorConcentration",
     "AuthorState",
     "DeclaredAccount",
+    "account_in_link",
     "assign_author",
     "author_concentration_by_channel",
     "author_identity_violation",

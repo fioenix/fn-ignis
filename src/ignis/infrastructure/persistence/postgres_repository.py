@@ -1821,6 +1821,11 @@ class PostgresTimescaleRepository(ITrendRepository):
             async with pool.connection() as conn:
                 async with conn.transaction():
                     async with conn.cursor(row_factory=tuple_row) as cur:
+                        # Lock the mission first: with no declaration yet, FOR UPDATE on the
+                        # declarations locks nothing, and two replacements would merge.
+                        await cur.execute(
+                            "SELECT id FROM research_missions WHERE id = %s FOR UPDATE;", (str(mission_id),)
+                        )
                         await cur.execute(
                             "SELECT id, platform, account_key FROM mission_declared_accounts"
                             " WHERE mission_id = %s FOR UPDATE;",

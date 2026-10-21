@@ -247,3 +247,59 @@ async def test_declared_at_is_stamped_by_the_clock_that_stamps_collection(reposi
     stored, _ = await repository.replace_mission_declared_accounts(mission.id, [("tiktok", "brandx", "Brand X")])
 
     assert stored[0].declared_at == host_now, repository_case.name
+
+
+# --- T038 review findings 10 and 11 ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "account",
+    [
+        {"platform": "made-up", "account": "a", "declared_name": "A"},
+        {"platform": None, "account": "a", "declared_name": "A"},
+        {"platform": "google", "account": "a", "declared_name": "A"},
+        {"platform": "tiktok", "account": 5, "declared_name": "A"},
+        {"platform": "tiktok", "account": "Brand X", "declared_name": "A"},
+        {"platform": "tiktok", "account": "https://www.tiktok.com/share/video/1", "declared_name": "A"},
+        {"platform": "tiktok", "account": "a" * 101, "declared_name": "A"},
+        {"platform": "tiktok", "account": "a", "declared_name": "N" * 121},
+    ],
+)
+async def test_an_account_that_could_never_match_is_refused(repository_case, account):
+    repository = repository_case.repository
+    mission = await _mission(repository)
+
+    refused = await _declare(repository, mission, [account])
+
+    assert (refused["status"], refused["reason_code"]) == ("INVALID", "INVALID_REQUEST"), repository_case.name
+    assert await repository.list_mission_declared_accounts(mission.id) == []
+
+
+async def test_a_profile_link_is_declared_as_its_handle_and_the_list_is_bounded(repository_case):
+    repository = repository_case.repository
+    mission = await _mission(repository)
+
+    linked = await _declare(repository, mission, [{"platform": "tiktok", "account": "https://www.tiktok.com/@BrandX", "declared_name": "Brand X"}])
+    too_many = await _declare(
+        repository, mission, [{"platform": "tiktok", "account": f"a{i}", "declared_name": "A"} for i in range(51)]
+    )
+
+    assert [a["account"] for a in linked["accounts"]] == ["brandx"], repository_case.name
+    assert too_many["reason_code"] == "INVALID_REQUEST", repository_case.name
+
+
+async def test_concurrent_replacements_leave_exactly_one_set(repository_case):
+    import asyncio
+
+    repository = repository_case.repository
+    mission = await _mission(repository)
+    first = [("tiktok", f"first{i}", "First") for i in range(5)]
+    second = [("threads", f"second{i}", "Second") for i in range(5)]
+
+    await asyncio.gather(
+        repository.replace_mission_declared_accounts(mission.id, first),
+        repository.replace_mission_declared_accounts(mission.id, second),
+    )
+
+    stored = {(a.platform, a.account_key, a.declared_name) for a in await repository.list_mission_declared_accounts(mission.id)}
+    assert stored in ({*first}, {*second}), repository_case.name

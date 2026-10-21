@@ -12,10 +12,15 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
-from ignis.domain.author_identity import DeclaredAccount, normalise_account_key
-from ignis.domain.value_objects import resolve_platform
+from ignis.domain.author_identity import DeclaredAccount, account_in_link, normalise_account_key
+from ignis.domain.value_objects import PlatformType
 
 APPLIES_FROM = "Content collected after declared_at; earlier observations are not re-attributed."
+# The platforms whose content has an account behind it; a Google Trends keyword has none.
+ACCOUNT_PLATFORMS = frozenset(platform.value for platform in PlatformType if platform is not PlatformType.GOOGLE_TRENDS)
+MAX_DECLARED_ACCOUNTS = 50
+MAX_ACCOUNT_LENGTH = 100
+MAX_DECLARED_NAME_LENGTH = 120
 
 
 class SetMissionDeclaredAccountsUseCase:
@@ -56,21 +61,34 @@ class SetMissionDeclaredAccountsUseCase:
         }
 
     @staticmethod
-    def _entries(accounts: Sequence[Mapping[str, Any]]) -> List[tuple]:
+    def _account_key(value: Any) -> str:
+        """A handle or account id as stored; a profile link becomes the handle it names."""
+        if not isinstance(value, str):
+            raise ValueError("Every account must be a handle, an account id or a profile link.")
+        key = account_in_link(value) if ("/" in value or "://" in value) else normalise_account_key(value)
+        if not key:
+            raise ValueError("A link that names no account cannot be declared.")
+        if len(key) > MAX_ACCOUNT_LENGTH or any(character.isspace() for character in key):
+            raise ValueError("An account is a handle or an account id, without spaces.")
+        return key
+
+    @classmethod
+    def _entries(cls, accounts: Sequence[Mapping[str, Any]]) -> List[tuple]:
         if not isinstance(accounts, (list, tuple)):
             raise ValueError("accounts must be a list; an empty list withdraws every declaration.")
+        if len(accounts) > MAX_DECLARED_ACCOUNTS:
+            raise ValueError(f"A mission declares at most {MAX_DECLARED_ACCOUNTS} accounts.")
         entries, seen = [], set()
         for item in accounts:
             if not isinstance(item, Mapping):
                 raise ValueError("Every declared account must be an object.")
-            try:
-                platform = resolve_platform(item.get("platform")).value
-            except ValueError as exc:
-                raise ValueError(f"Unknown platform: {item.get('platform')!r}.") from exc
-            key = normalise_account_key(item.get("account"))
+            platform = str(item.get("platform") or "").strip().lower()
+            if platform not in ACCOUNT_PLATFORMS:
+                raise ValueError(f"Accounts can be declared only on: {', '.join(sorted(ACCOUNT_PLATFORMS))}.")
+            key = cls._account_key(item.get("account"))
             name = str(item.get("declared_name") or "").strip()
-            if key is None or not name:
-                raise ValueError("Every declared account needs an account and a declared_name.")
+            if not name or len(name) > MAX_DECLARED_NAME_LENGTH:
+                raise ValueError(f"Every declared account needs a declared_name of at most {MAX_DECLARED_NAME_LENGTH} characters.")
             if (platform, key) in seen:
                 raise ValueError(f"{platform} account '{key}' is declared more than once.")
             seen.add((platform, key))
