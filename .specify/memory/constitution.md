@@ -11,7 +11,8 @@ Sync Impact Report
 - Added principles: VII. No Author Identity at Rest (Spec 015, T036). Review of the ratification
   PR added three clarifications that match the shipped Spec 015 contract: declared accounts may be
   shown (FR-002, FR-016), atomic probes count voices with a response-scoped key never stored
-  (research R9), and identity stored before Spec 015 is held unchanged pending OG-3 (FR-015).
+  (research R9), and identity stored before Spec 015 is held unchanged pending OG-3 (FR-015). The owner
+  approved the clarified text on 2026-10-21.
 - Removed sections: the "Proposed Amendment (not ratified)" appendix, now folded into VII
 - Bump rationale: MINOR. One new principle and two narrowed or clarified rules for a new use; no
   principle is removed or made incompatible. Owner ratified all three on 2026-10-21.
