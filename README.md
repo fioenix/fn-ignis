@@ -6,7 +6,7 @@ acting on it. Its two capabilities are independent: source collection can end wi
 frame, while Market analysis can end with a Gap Report rather than a forced verdict.
 
 **Release boundary:** This branch implements the unreleased Spec 011 product reset. The published
-v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 48-tool
+v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 51-tool
 mission-bound surface described here. Do not use a published image to validate this branch.
 
 ## Product contract
@@ -42,7 +42,8 @@ For a Codex-only installation with separate UAT storage, run
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
 The current source tree contains migrations through
-`sql/031_author_identity_at_rest.sql`. Migration 031 adds per-mission author keys, declared
+`sql/032_watchlists.sql`. Migration 032 adds watchlists, their immutable versions and the runs
+bound to them; it rewrites no stored evidence. Migration 031 adds per-mission author keys, declared
 accounts and author columns on mission evidence, and lets an observation with no content reference
 be stored as unverifiable; it rewrites no stored evidence. Migration 030 adds current-input gaps, finite budget
 grants, narrowed source authority, command receipts and conservative resource allocations.
@@ -72,11 +73,14 @@ committed report templates live only in `src/ignis/infrastructure/templates/html
 
 ## Agent capabilities
 
-The current MCP server exposes **48 tools**. Use the server's live tool descriptions as the
+The current MCP server exposes **51 tools**. Use the server's live tool descriptions as the
 signature authority. Representative operations:
 
 - `create_attention_mission` and `confirm_market_brief` establish a bounded question and
   confirmed scope; `execute_mission_ingress` collects the requested frame.
+- `save_watchlist`, `get_watchlist` and `start_watchlist_run` keep a versioned watchlist of
+  topics and brands and start one Attention mission per run on its current version. Ignis never
+  runs a watchlist on its own.
 - Atomic source tools such as `get_tiktok_search_suggestions` and
   `get_tiktok_video_comments` can answer source-specific questions without a Market verdict.
 - Opt-in `prepare_host_browser_search`, `submit_host_browser_search` and

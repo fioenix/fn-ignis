@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import Dict, Any, List, Optional, Sequence, Tuple, TypedDict
 from uuid import UUID
 from ignis.domain.author_identity import DeclaredAccount
+from ignis.domain.watchlist import Watchlist, WatchlistDefinition
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
 from ignis.domain.value_objects import GeoCode, Timeframe
 from ignis.domain.value_objects import IngressTrigger
@@ -158,6 +159,30 @@ class ITrendRepository(ABC):
         stays attributed; its name may change. Returns the stored set and how many were withdrawn.
         """
         raise NotImplementedError("This repository keeps no declared accounts.")
+
+    async def create_watchlist(self, workspace_id: UUID, name: str, definition: WatchlistDefinition) -> Watchlist:
+        """Create a watchlist with its first version (Spec 016).
+
+        Raises WatchlistConflict("DUPLICATE_NAME") when the workspace already has the name.
+        """
+        raise NotImplementedError("This repository keeps no watchlists.")
+
+    async def add_watchlist_version(
+        self, watchlist_id: UUID, definition: WatchlistDefinition
+    ) -> Tuple[Watchlist, bool]:
+        """Append a version unless the definition equals the current one; True when one was added.
+
+        Raises WatchlistConflict("NOT_FOUND") for an unknown watchlist.
+        """
+        raise NotImplementedError("This repository keeps no watchlists.")
+
+    async def get_watchlist(self, watchlist_id: UUID) -> Optional[Watchlist]:
+        """The watchlist with every version, oldest first, and its runs in start order."""
+        return None
+
+    async def record_watchlist_run(self, mission_id: UUID, watchlist_id: UUID, version: int) -> None:
+        """Bind a mission to the watchlist version it collects."""
+        raise NotImplementedError("This repository keeps no watchlists.")
 
     async def get_or_create_mission_author_key(self, mission_id: UUID) -> Optional[bytes]:
         """The mission's key for author markers, created on first use (Spec 015).

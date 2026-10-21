@@ -12,7 +12,8 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/031_author_identity_at_rest.sql`. Migration 031 adds
+The source migration chain ends at `sql/032_watchlists.sql`. Migration 032 adds watchlists, their
+immutable versions and the runs bound to them; it rewrites no stored evidence. Migration 031 adds
 per-mission author keys, declared accounts and author columns on mission evidence, and lets an
 observation with no content reference be stored as unverifiable; it rewrites no stored evidence.
 Migration 030 adds
@@ -83,6 +84,17 @@ worker or unattended collection.
 The [collection skill](../.agents/skills/ignis-collect/SKILL.md) is the method for gathering
 an inspectable frame. The [analysis skill](../.agents/skills/ignis-analyze/SKILL.md) is a
 separate method for testing the Market hypothesis. Ask for either or both.
+
+### Follow a watchlist (development branch)
+
+To follow the same subject across runs, ask the agent to save a watchlist in a confirmed research
+workspace: up to 10 topics, each with categories, up to 20 keywords and the brand accounts you
+name. `save_watchlist` stores every change as a new immutable version, and `get_watchlist` lists
+the versions and the runs. Each `start_watchlist_run` creates one Attention mission on the current
+version and declares its brands as that mission's accounts, the only accounts Ignis ever names.
+You state the allowed sources and authority for every run; collection then goes through
+`execute_mission_ingress` as for any mission. Ignis never runs a watchlist on its own, and the
+comparison between periods arrives in a later part of Spec 016.
 
 ## 3. Understand evidence and analysis
 
@@ -207,7 +219,7 @@ unchanged, and reading a snapshot confers no execution authority.
 
 ## 4. Tool and deployment boundaries
 
-The local MCP server exposes **48 tools**. Discover the running server's descriptions for exact
+The local MCP server exposes **51 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
 The published OCI manifest is still v0.7.0, so neither it nor a public-image smoke test
 establishes that Spec 011 shipped. PyPI installation is not advertised. Run the branch's

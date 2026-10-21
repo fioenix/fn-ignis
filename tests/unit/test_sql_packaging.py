@@ -22,7 +22,7 @@ SEED_FILES = (
 )
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
-NEWEST_POSTGRES_MIGRATION = "031_author_identity_at_rest.sql"
+NEWEST_POSTGRES_MIGRATION = "032_watchlists.sql"
 # The closed sdist member list: runtime package, the SQL chain, and the build metadata. Anything
 # else -- tests, docs, examples, reports, handoff notes, agent or local settings -- must not ship.
 SDIST_MEMBERS = {"src/ignis", "sql", "pyproject.toml", "README.md", "LICENSE"}
