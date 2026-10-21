@@ -6,7 +6,8 @@ Four new tools; no existing signature changes. Tool count 48 → 52 (OG-1, owner
 
 Creates a watchlist (no `watchlist_id`) or a new version of one. Returns `{watchlist_id, version,
 definition_digest}`. Refuses: more than 10 topics or 20 keywords per topic, a discovery share
-above 0.2, an unnormalised brand key, a duplicate name in the workspace, an unknown watchlist.
+above 0.2, a brand on a platform without accounts, a duplicate name in the workspace, an unknown
+watchlist. Brand accounts are normalised as in Spec 015 (lower case, no leading `@`).
 Saving an identical definition returns the current version without creating one.
 
 ## `get_watchlist(watchlist_id)`
