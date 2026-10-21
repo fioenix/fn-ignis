@@ -1,14 +1,14 @@
-# Proposed Constitution Amendment: Host Routines and Listening Periods
+# Constitution Amendment: Host Routines and Listening Periods
 
-**Status**: Proposed, 2026-10-21. Not in force. The owner ratifies or rejects it; until then
-`.specify/memory/constitution.md` (2.1.0) governs, and this file changes nothing.
+**Status**: Ratified by the owner on 2026-10-21, together with Spec 015's Principle VII, as
+constitution 2.2.0. `.specify/memory/constitution.md` now carries both changes; this file keeps the
+before-and-after text and the impact report.
 
 **Source**: the accepted decision record
 [`docs/decisions/2026-10-21-listening-first-product-direction.md`](../../docs/decisions/2026-10-21-listening-first-product-direction.md),
 section "Relation to earlier decisions", which names both changes and leaves them to an amendment.
 
-**Version**: MINOR (2.1.0 → 2.2.0, or the next MINOR if Spec 015's privacy amendment is ratified
-first). Both changes narrow or clarify existing guidance for a new use; no principle is removed.
+**Version**: MINOR (2.1.0 → 2.2.0, ratified in the same version as Spec 015's privacy principle). Both changes narrow or clarify existing guidance for a new use; no principle is removed.
 
 ## Change 1: Principle I, recurring runs belong to the host
 

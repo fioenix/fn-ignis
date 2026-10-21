@@ -1,6 +1,8 @@
 # Decision: Mission-Bound Evidence-Grounded Ignis
 
-**Status:** Accepted
+**Status:** Accepted; amended by the
+[2026-10-21 listening-first product direction](2026-10-21-listening-first-product-direction.md)
+(host routines and listening periods, constitution 2.2.0)
 **Date:** 2026-09-29
 **Scope:** Product category, autonomy boundary, research method, and breaking runtime direction
 

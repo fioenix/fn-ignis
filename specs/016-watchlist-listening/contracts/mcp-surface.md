@@ -43,8 +43,11 @@ Compares that period with the one before it. Returns:
 - `periods`: both periods with bounds in Asia/Ho_Chi_Minh and the watchlist versions active in each;
 - `topics[]`: per topic, `channels[]` with `status` (`comparable` or `not_comparable`),
   `indicator` (kind and unit), `current`, `previous`, `change`, `measured_on_sample`,
-  `missing_days`, `reasons`; plus `rising_terms`, `new_terms` and up to three `items` (content
-  excerpt, identity-free link or "link unavailable", channel, publication date, basis flag);
+  `missing_days`, `reasons`, and `basis`: for each period, how many counted observations were
+  placed by publication date and how many by collection date (constitution III); plus
+  `rising_terms` and `new_terms`, each with the same `basis` counts, and up to three `items`
+  (content excerpt, identity-free link or "link unavailable", channel, publication date, basis
+  flag);
 - `refusal` when the requested period is not complete, with the time it completes.
 
 Never contains author identity, summed cross-channel values, or values for a `not_comparable`
