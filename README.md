@@ -23,6 +23,12 @@ datasets are context unless they acquire mission-scoped provenance and qualifica
 [Spec 011](specs/011-evidence-grounded-product-reset/spec.md) and its
 [public contract](specs/011-evidence-grounded-product-reset/contracts/mission-bound-public-surface.md).
 
+Ignis keeps no author identity at rest. Usernames, account and channel ids, profile links, avatars,
+and handles in links or `@mentions` are removed before anything is stored; a per-mission marker
+counts distinct voices instead. Only accounts a requester declares for one mission with
+`set_mission_declared_accounts` are named. Personal names written in free text are not removed.
+See [Spec 015](specs/015-no-author-identity-at-rest/spec.md).
+
 ## Local source setup
 
 Requirements: Python 3.11 or newer. Run `./scripts/bootstrap.sh` from a source checkout. It

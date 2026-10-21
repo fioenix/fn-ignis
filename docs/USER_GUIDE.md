@@ -128,6 +128,32 @@ root: gitignored `reports/` in a source checkout, `~/.ignis/reports/` for an ins
 temporary directory if needed; admitted MCP calls do not use it. Templates live in
 `src/ignis/infrastructure/templates/html/`.
 
+### Author identity
+
+Ignis studies a market in aggregate and keeps no author identity at rest. Before a sighting is
+stored, it removes the author fields connectors report (usernames, user and channel ids, display
+names, profile links, avatars), replaces a link that names an account with a handle-free link to
+the content (`tiktok.com/share/video/<id>`, `threads.com/t/<shortcode>`) or drops it when none
+exists, and turns `@mentions` in titles, captions and comments into `@[user]`. It keeps a
+per-mission author marker instead: a keyed hash that tells many voices from one voice within one
+mission and links nothing across missions. `get_mission_analysis` reports `author_concentration`
+per channel; without a persistent `IGNIS_ENCRYPTION_KEY` Ignis cannot count authors and the
+analysis says so. Content with no content reference is kept as context only and never supports a
+claim.
+
+Ignis keeps identity only for accounts a requester declares for one mission with
+`set_mission_declared_accounts`, such as the brand's own account or a named competitor, as
+`{platform, account, declared_name}`. Each call replaces the mission's set; an empty list
+withdraws every declaration. Content from a declared account collected after `declared_at` is
+attributed by the declared name, and mentions of it render as `@<declared name>`. Earlier
+observations are never re-attributed; after a withdrawal the name disappears from reports without
+rewriting evidence.
+
+Ignis does not remove personal names written in free text, such as a commenter signing a post.
+Rows stored before Spec 015 keep their identity at rest until the owner decides what to do with
+them; every report and tool response strips it on output, and
+`scripts/inventory_author_identity.py` counts it without showing any value.
+
 ### Mission Relay on the development branch
 
 Ignis serves no tracking page. To follow a mission, ask your agent to read

@@ -25,6 +25,12 @@ người dùng tải lên hoặc mua từ bên ngoài chỉ là bối cảnh n�
 với nhiệm vụ. Xem [Spec 011](specs/011-evidence-grounded-product-reset/spec.md) và
 [hợp đồng công khai](specs/011-evidence-grounded-product-reset/contracts/mission-bound-public-surface.md).
 
+Ignis không lưu danh tính tác giả: username, ID tài khoản, link hồ sơ, ảnh đại diện, handle trong
+link và trong @mention đều bị loại bỏ trước khi lưu; thay vào đó, một marker theo từng nhiệm vụ cho
+biết có bao nhiêu người nói khác nhau. Ignis chỉ nêu tên những tài khoản mà người yêu cầu khai báo
+cho nhiệm vụ bằng `set_mission_declared_accounts`. Tên người viết trong nội dung tự do không bị loại
+bỏ. Xem [Spec 015](specs/015-no-author-identity-at-rest/spec.md).
+
 ## Cài đặt từ mã nguồn
 
 Cần Python 3.11 trở lên. Chạy `./scripts/bootstrap.sh` trong checkout mã nguồn. Script tạo

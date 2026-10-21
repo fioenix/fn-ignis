@@ -119,6 +119,32 @@ Server vẫn giữ phương án dự phòng cho lệnh gọi không có caller r
 nếu cần. Lệnh gọi MCP đã được chấp nhận không dùng phương án này. Mã template chỉ nằm ở
 `src/ignis/infrastructure/templates/html/`.
 
+### Danh tính tác giả
+
+Ignis nghiên cứu thị trường ở mức tổng hợp và không lưu danh tính tác giả. Trước khi lưu một quan
+sát, Ignis loại bỏ các trường tác giả mà connector trả về (username, ID người dùng và kênh, tên hiển
+thị, link hồ sơ, ảnh đại diện), thay link có tên tài khoản bằng link tới nội dung không chứa handle
+(`tiktok.com/share/video/<id>`, `threads.com/t/<shortcode>`) hoặc bỏ link nếu không dựng được, và
+đổi các @mention trong tiêu đề, chú thích, bình luận thành `@[user]`. Ignis chỉ giữ lại marker tác
+giả theo từng nhiệm vụ: một mã băm có khóa, đủ để phân biệt nhiều người nói với một người nói trong
+cùng nhiệm vụ, nhưng không nối được các nhiệm vụ với nhau. `get_mission_analysis` trả
+`author_concentration` cho từng kênh; nếu chưa cấu hình `IGNIS_ENCRYPTION_KEY` cố định thì Ignis
+không đếm được số tác giả và kết quả phân tích nói rõ điều đó. Nội dung không có mã tham chiếu chỉ
+được giữ làm bối cảnh, không bao giờ dùng để ủng hộ một nhận định.
+
+Ignis chỉ giữ danh tính của các tài khoản mà người yêu cầu khai báo cho một nhiệm vụ bằng
+`set_mission_declared_accounts`, chẳng hạn tài khoản của chính thương hiệu hoặc một đối thủ được nêu
+tên, theo dạng `{platform, account, declared_name}`. Mỗi lần gọi thay toàn bộ danh sách của nhiệm
+vụ; gửi danh sách rỗng nghĩa là rút mọi khai báo. Nội dung của tài khoản đã khai báo, nếu thu thập
+sau `declared_at`, được ghi theo tên đã khai báo, và lời nhắc tới tài khoản đó hiển thị thành
+`@<tên đã khai báo>`. Quan sát thu trước đó không bị gán lại; sau khi rút khai báo, tên biến mất khỏi
+báo cáo mà chứng cứ không bị viết lại.
+
+Ignis không loại bỏ tên người viết trong nội dung tự do, chẳng hạn khi người bình luận tự ký tên. Dữ
+liệu lưu trước Spec 015 vẫn còn danh tính cho đến khi chủ sở hữu quyết định cách xử lý; mọi báo cáo
+và phản hồi của tool đều loại bỏ danh tính khi xuất ra, còn `scripts/inventory_author_identity.py`
+chỉ đếm mà không hiển thị giá trị.
+
 ### Mission Relay trên nhánh phát triển
 
 Ignis không tự dựng trang theo dõi. Muốn theo dõi một nhiệm vụ, hãy yêu cầu agent đọc
