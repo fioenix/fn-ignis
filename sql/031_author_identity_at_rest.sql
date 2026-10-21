@@ -53,8 +53,9 @@ BEGIN
         SELECT 1 FROM pg_constraint WHERE conrelid = 'public.mission_evidence'::regclass AND conname = 'mission_evidence_author_marker_check'
     ) THEN
         -- A marker exists exactly when the author is KNOWN, and is 16 lower-case hex characters.
+        -- IS NOT DISTINCT FROM keeps a NULL state from passing with a marker, as SQLite's IS does.
         ALTER TABLE public.mission_evidence ADD CONSTRAINT mission_evidence_author_marker_check CHECK (
-            (author_state = 'KNOWN') = (author_marker IS NOT NULL)
+            (author_state IS NOT DISTINCT FROM 'KNOWN') = (author_marker IS NOT NULL)
             AND (author_marker IS NULL OR author_marker ~ '^[0-9a-f]{16}$')
         );
     END IF;
@@ -85,8 +86,8 @@ ALTER TABLE public.observations ADD CONSTRAINT observations_identity_source_chec
 );
 
 -- Content with no reference anyone could open is context, never support (research R6). The
--- domain refuses a support qualification for it; this refuses the binding even when a support row
--- was written around the domain.
+-- domain refuses a support qualification for it; this refuses the binding, inserted or moved onto
+-- such an observation, even when a support row was written around the domain.
 CREATE OR REPLACE FUNCTION refuse_unverifiable_claim_support()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -106,7 +107,7 @@ $$;
 
 DROP TRIGGER IF EXISTS refuse_unverifiable_claim_support ON public.mission_claim_evidence;
 CREATE TRIGGER refuse_unverifiable_claim_support
-BEFORE INSERT ON public.mission_claim_evidence
+BEFORE INSERT OR UPDATE OF role, observation_id ON public.mission_claim_evidence
 FOR EACH ROW EXECUTE FUNCTION refuse_unverifiable_claim_support();
 
 -- Owner-only, as every other non-vocabulary table since 021.
