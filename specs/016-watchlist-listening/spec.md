@@ -282,3 +282,6 @@ Agent decisions under the owner's delegation of 21/10/2026, to confirm or change
 10. Brand accounts a user names stay in every immutable version that named them, also after a
     later version drops them; a run declares only the current version's brands (Spec 015 keeps
     withdrawal per mission). Deleting a watchlist is not offered yet.
+11. Part B indicators: `metric_value` means views, plays or likes depending on the connector, and
+    Threads trending stores a placeholder of 1000 (research R11). Proposed: read each unit from
+    its own field, label it, and never count a placeholder. Snapshot assembly waits for this.
