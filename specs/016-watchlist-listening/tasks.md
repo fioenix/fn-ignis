@@ -17,35 +17,41 @@ this branch on it before T004.
 
 ## Phase 1: Setup
 
-- [ ] T001 Rebase on `main` after Spec 015 merges; record the base commit, latest migration
+- [x] T001 Rebase on `main` after Spec 015 merges; record the base commit, latest migration
   (expected `031`) and tool count (expected 48) in `plan.md`. Stop and report if either differs.
+  Done 21/10/2026: rebased on `main` at `1f4971e` (PR #57, Spec 015); latest migration `031_author_identity_at_rest.sql`; 48 tools.
 - [ ] T002 [P] Create fixtures in `tests/fixtures/watchlist_fixtures.py`: a two-topic watchlist and
   observations spanning two complete weeks across all five channels, with one channel missing three
   days in one week, items observed twice, and one item without a publication date.
 
 ## Phase 2: Foundational
 
-- [ ] T003 [P] Write failing unit tests in `tests/unit/test_watchlist_domain.py`: definition limits
+- [~] T003 [P] Write failing unit tests in `tests/unit/test_watchlist_domain.py`: definition limits
   and digest, period boundaries in Asia/Ho_Chi_Minh (day, Monday-to-Sunday week, month, across
   midnight and month ends), placement by publication date with the plausibility guard, coverage from
   probe outcomes, the 20 percent rule per topic and channel, and the 7-day counted observation.
-- [ ] T004 Implement `src/ignis/domain/watchlist.py` until T003 passes.
-- [ ] T005 Write `sql/032_watchlists.sql` (three owner-only tables, immutable versions, seeded
+- [x] T004 Implement `src/ignis/domain/watchlist.py` until T003 passes.
+  Part A done 21/10/2026: `src/ignis/domain/watchlist.py` (definition, limits, digest). Period functions are on the Part B branch.
+- [x] T005 Write `sql/032_watchlists.sql` (three owner-only tables, immutable versions, seeded
   `runtime_configs`) and the SQLite mirror in `_ensure_schema`; move the pinned newest-migration
   surfaces (`test_sql_packaging.py`, `tests/integration/conftest.py`, `test_compose_init.py`,
   `test_postgres_rls_coverage.py`, `test_public_distribution_contract.py`, README and USER_GUIDE
   migration paragraphs) to 032, with a SQLite upgrade rehearsal test.
-- [ ] T006 Add repository methods for watchlists, versions and runs, and a period read of a
+  Done 21/10/2026: `sql/032_watchlists.sql`, SQLite mirror, pins moved to 032; `tests/unit/test_watchlist_schema.py`.
+- [x] T006 Add repository methods for watchlists, versions and runs, and a period read of a
   watchlist's observations with their selected values and probe outcomes, on both backends;
   dual-backend tests in `tests/integration/test_watchlist_repository.py`.
+  Done 21/10/2026: both repositories; `tests/integration/test_watchlist_repository.py` 12/12 on SQLite and PostgreSQL.
 
 ## Phase 3: US1 — Follow a watchlist across runs (P1)
 
-- [ ] T007 [US1] Failing tests, then `save_watchlist`, `get_watchlist` and `start_watchlist_run`
+- [x] T007 [US1] Failing tests, then `save_watchlist`, `get_watchlist` and `start_watchlist_run`
   per the contract, in `tests/integration/test_watchlist_mcp.py` and `server.py`; brands become the
   run's declared accounts.
-- [ ] T008 [US1] Raise every governed tool-count surface from 48 to 51 (Part A; Part B raises it to 52) and regenerate manifests
+  Done 21/10/2026: three tools; `tests/integration/test_watchlist_mcp.py` 16/16 on SQLite and PostgreSQL. Brands are declared through Spec 015.
+- [x] T008 [US1] Raise every governed tool-count surface from 48 to 51 (Part A; Part B raises it to 52) and regenerate manifests
   with `scripts/sync_tool_manifests.py --write`.
+  Done 21/10/2026: 48 → 51 on every governed surface; Hermes manifests regenerated.
 
 ## Phase 4: US2 — Compare two complete periods (P1)
 
@@ -76,15 +82,19 @@ this branch on it before T004.
   rather than in `.specify/memory/constitution.md`, so no agent reads a Proposed text as in force.
 - [ ] T016 [P] Document watchlists and the period view in README.md, README.vi.md,
   docs/USER_GUIDE.md and docs/USER_GUIDE.vi.md; Vietnamese through the vietnamizer core workflow.
+  Part A done 21/10/2026: watchlists in README.md, README.vi.md and both user guides; Vietnamese through the vietnamizer core workflow.
 - [ ] T017 Run the quickstart, the full suite on SQLite and PostgreSQL, ruff, `git diff --check`,
   `uv lock --check`, the package build and `scripts/wheel_mcp_smoke.py`; record results in
   `.handoff/spec016/regressions.handoff.md`.
+  Part A, 21/10/2026: full suite on SQLite 4231 passed, 1034 skipped, 3 failed; the same 3 fail on a `main`-based worktree locally (clean-checkout bootstrap and the missing worktree `.venv`) and pass in CI. Watchlist, RLS and Compose files on PostgreSQL 46/46 after rebasing on Spec 015.
 - [ ] T018 Code and security review of the full diff; dispose of findings with evidence before the
   PR.
+  Part A, 21/10/2026: self-review found unbounded definition text and an unreported declaration status, both fixed (`T018 finding` commit).
 
 ## Landing in two pull requests
 
-- **Part A** (merges on green CI and review): T001–T008, T016 for US1, T017, T018. Tool count
+- **Part A** (merges on green CI and review): T001–T008, T016 for US1, T017, T018. T003 and T004
+  are split: definition tests and code here, period tests and code in Part B (`[~]`). Tool count
   48 → 51 (`save_watchlist`, `get_watchlist`, `start_watchlist_run`).
 - **Part A2** (US4, T013–T014): the per-channel daily ceiling needs a persistent per-day request
   count that survives separate routine sessions, which `data-model.md` does not yet define
