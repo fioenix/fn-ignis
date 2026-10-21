@@ -83,8 +83,11 @@ this branch on it before T004.
 
 ## Landing in two pull requests
 
-- **Part A** (merges on green CI and review): T001–T008, T013, T014, T016 for US1 and US4, T017, T018.
-  Tool count 48 → 51 (`save_watchlist`, `get_watchlist`, `start_watchlist_run`).
+- **Part A** (merges on green CI and review): T001–T008, T016 for US1, T017, T018. Tool count
+  48 → 51 (`save_watchlist`, `get_watchlist`, `start_watchlist_run`).
+- **Part A2** (US4, T013–T014): the per-channel daily ceiling needs a persistent per-day request
+  count that survives separate routine sessions, which `data-model.md` does not yet define
+  (`youtube_quota_buckets` already does this for YouTube alone). Re-planned before implementation.
 - **Part B** (opens after Part A merges; merges only after the owner ratifies the amendment): T009–T012,
   T015, T016 for US2 and US3, T017, T018. Tool count 51 → 52 (`get_watchlist_period_snapshot`).
 

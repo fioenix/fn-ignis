@@ -88,6 +88,10 @@ confirm (listed again under "Owner review"):
   decided; basis: Constitution Governance requires an explicit owner decision for an amendment and
   AGENTS.md section 8 leaves additive tools and migrations to the agent; cost if wrong: one merged
   pull request instead of two).
+- Q: Does a run inherit the authority of an earlier run? → A: No. `start_watchlist_run` takes
+  `allowed_resources` and `authority_boundary` on every call, as `create_attention_mission` does, so
+  each mission's manifest states its own consent (agent decided; basis: Constitution I and the
+  Spec 011 manifest contract; cost if wrong: a routine prompt restates two fields).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -269,4 +273,9 @@ Agent decisions under the owner's delegation of 21/10/2026, to confirm or change
 3. Discovery slice: at most 20 percent of a topic's requests (FR-002).
 4. Live connector comparisons are reported with both scores and are never an automatic pass.
 5. The constitution amendment text (FR-015) stays Proposed until ratified.
-6. The two-part landing: US1 and US4 merge first; US2 and US3 wait for the amendment.
+6. The landing: US1 merges first; US2 and US3 wait for the amendment; US4 is re-planned because the
+   daily ceiling needs a persistent per-day request count.
+7. A run restates `allowed_resources` and `authority_boundary` every time; nothing is inherited
+   from an earlier run.
+8. The discovery share is stored with each version but not spent by collection until a later part.
+9. A revision keeps the watchlist's name; renaming is refused.

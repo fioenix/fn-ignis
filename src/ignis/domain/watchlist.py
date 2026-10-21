@@ -13,6 +13,7 @@ import json
 import math
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Mapping, Optional, Tuple
 
 from ignis.domain.author_identity import normalise_account_key
@@ -174,5 +175,49 @@ def parse_watchlist_definition(value: Any) -> WatchlistDefinition:
 
 
 def watchlist_name(value: Any) -> Optional[str]:
-    """A watchlist's display name, stripped, or None when blank."""
-    return value.strip() if isinstance(value, str) and value.strip() else None
+    """A watchlist's display name, stripped and composed, or None when blank."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return unicodedata.normalize("NFC", value.strip())
+
+
+def watchlist_name_key(name: str) -> str:
+    """What makes two names the same inside a workspace: case-folded, as stored in name_key."""
+    return name.casefold()
+
+
+@dataclass(frozen=True)
+class WatchlistVersion:
+    version: int
+    definition: WatchlistDefinition
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class WatchlistRun:
+    mission_id: str
+    version: int
+    started_at: datetime
+    mission_status: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class Watchlist:
+    id: str
+    workspace_id: str
+    name: str
+    created_at: datetime
+    versions: Tuple[WatchlistVersion, ...]
+    runs: Tuple[WatchlistRun, ...] = ()
+
+    @property
+    def current(self) -> WatchlistVersion:
+        return self.versions[-1]
+
+
+class WatchlistConflict(Exception):
+    """A save the store refuses: the name is taken in the workspace, or the watchlist is unknown."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code

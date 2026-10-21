@@ -175,7 +175,7 @@ def _assert_readback(readback):
         "retired_present": "0",
         "rls_market_lexicons": "t",
         "public_policies": "0",
-        "public_tables": "52",
+        "public_tables": "55",
         "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
         "public_tables_without_rls": "0",
         "supabase_roles": "0",
@@ -384,7 +384,7 @@ def test_readback_oracle_rejects_identity_substitution_and_access_widening(contr
     """Correct counts cannot hide the wrong schema or a widened access policy."""
     readback = {
         "later_objects": "13", "ui_noise_terms": "10", "retired_present": "0",
-        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "52",
+        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "55",
         "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
         "public_tables_without_rls": "0", "supabase_roles": "0",
         "builtin_uuid_defaults": "16", "builtin_uuid_columns": ",".join(EXPECTED_UUID_COLUMNS),

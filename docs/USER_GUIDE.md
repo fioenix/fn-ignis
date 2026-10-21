@@ -208,7 +208,7 @@ unchanged, and reading a snapshot confers no execution authority.
 
 ## 4. Tool and deployment boundaries
 
-The local MCP server exposes **48 tools**. Discover the running server's descriptions for exact
+The local MCP server exposes **51 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
 The published OCI manifest is still v0.7.0, so neither it nor a public-image smoke test
 establishes that Spec 011 shipped. PyPI installation is not advertised. Run the branch's
