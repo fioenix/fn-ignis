@@ -1611,6 +1611,11 @@ class PostgresTimescaleRepository(ITrendRepository):
                 async with conn.cursor() as cur:
                     await cur.execute(query, (str(mission_id),))
                     deleted_count = cur.rowcount
+                    # The evidence is gone, so its markers must never be recomputable (Spec 015).
+                    # Same transaction as the delete; prune_mission_evidence keeps the key.
+                    await cur.execute(
+                        "DELETE FROM mission_author_keys WHERE mission_id = %s;", (str(mission_id),)
+                    )
                     await conn.commit()
             logger.info(f"Withdrew {deleted_count} evidence rows for mission {mission_id}.")
             return deleted_count

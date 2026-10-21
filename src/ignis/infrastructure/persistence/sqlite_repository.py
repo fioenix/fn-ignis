@@ -3498,6 +3498,9 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 # those observations.
                 cur.execute("DELETE FROM mission_evidence WHERE mission_id = ?", (str(mission_id),))
                 deleted = cur.rowcount
+                # The evidence is gone, so its markers must never be recomputable (Spec 015).
+                # Same transaction as the delete; prune_mission_evidence keeps the key.
+                cur.execute("DELETE FROM mission_author_keys WHERE mission_id = ?", (str(mission_id),))
                 conn.commit()
                 return deleted
             finally:

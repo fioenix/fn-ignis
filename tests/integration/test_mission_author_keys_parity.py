@@ -63,3 +63,16 @@ async def test_a_rotated_encryption_key_makes_the_mission_key_unavailable(reposi
     monkeypatch.setattr(settings, "IGNIS_ENCRYPTION_KEY", "a-rotated-key")
 
     assert await repository.get_or_create_mission_author_key(mission) is None, repository_case.name
+
+
+@pytest.mark.asyncio
+async def test_deleting_mission_evidence_destroys_the_key_and_pruning_does_not(repository_case, persistent_key):
+    repository = repository_case.repository
+    mission = await _mission(repository)
+    key = await repository.get_or_create_mission_author_key(mission)
+
+    await repository.prune_mission_evidence(mission, [])
+    assert await repository.get_or_create_mission_author_key(mission) == key, repository_case.name
+
+    await repository.delete_mission_signals(mission)
+    assert _stored(repository_case, mission) is None, repository_case.name

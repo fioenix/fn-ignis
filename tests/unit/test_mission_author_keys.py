@@ -126,3 +126,30 @@ async def test_the_key_never_reaches_the_logs(store, persistent_key, caplog):
 
     assert key.hex() not in caplog.text
     assert base64.urlsafe_b64encode(key).decode() not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_missions_evidence_destroys_its_markers_for_good(store, persistent_key):
+    """T027: once the evidence is gone, no marker of that mission can be recomputed."""
+    from ignis.domain.author_identity import author_marker
+
+    repository, path = store
+    mission = _mission(path)
+    before = await repository.get_or_create_mission_author_key(mission)
+
+    await repository.delete_mission_signals(mission)
+
+    assert _stored(path, mission) is None
+    after = await repository.get_or_create_mission_author_key(mission)
+    assert author_marker(after, "tiktok:someone") != author_marker(before, "tiktok:someone")
+
+
+@pytest.mark.asyncio
+async def test_pruning_evidence_keeps_the_key(store, persistent_key):
+    repository, path = store
+    mission = _mission(path)
+    before = await repository.get_or_create_mission_author_key(mission)
+
+    await repository.prune_mission_evidence(mission, [])
+
+    assert await repository.get_or_create_mission_author_key(mission) == before
