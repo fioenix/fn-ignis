@@ -28,10 +28,16 @@ This document defines the operational protocol, architectural guidelines, and to
 
 ## 🏛️ 1. Architecture: Mission-Bound Evidence Grounding
 
-Ignis starts only after a person or host agent assigns an explicit bounded task. There is no
-worker, scheduler, daily discovery, or idle collection. Inside a confirmed Mission Manifest,
-the agent may autonomously select in-scope probes; it stops at a terminal state or an authority
-boundary.
+Ignis starts only after a person or host agent assigns an explicit bounded task. Ignis holds no
+worker, scheduler, daily discovery, or idle collection. A user may ask their own agent to run one
+watchlist on the host's native scheduler; each firing is a separate explicit run (constitution
+Principle I). Inside a confirmed Mission Manifest, the agent may autonomously select in-scope
+probes; it stops at a terminal state or an authority boundary.
+
+Ignis keeps no author identity at rest: handles, account ids, display names and profile links are
+removed before an observation is stored, distinct voices are counted only through per-mission
+markers, and the only identities kept are accounts a requester declares for one mission
+(constitution Principle VII, Spec 015).
 
 The product has two independent capability families:
 
@@ -333,7 +339,7 @@ These boundaries hold for every contributor. Where the `noulmes` skill is instal
 
 **The agent decides these alone and records the decision:** vocabulary seeded in `sql/`, test fixtures, internal refactors that keep every contract, `.handoff/` notes, and thresholds in a local SQLite `runtime_configs`.
 
-**An agent checks a choice before acting** when it falls within the constitution (`.specify/memory/constitution.md`, Principles I–VI) or an ADR in `docs/decisions/`, such as adding a dependency or a migration.
+**An agent checks a choice before acting** when it falls within the constitution (`.specify/memory/constitution.md`, Principles I–VII) or an ADR in `docs/decisions/`, such as adding a dependency or a migration.
 
 **Where a decision is recorded:**
 - A decision that belongs to a spec is recorded in that spec's `## Clarifications`, under `### Session YYYY-MM-DD`, as `- Q: … → A: … (agent decided; basis: …)`.

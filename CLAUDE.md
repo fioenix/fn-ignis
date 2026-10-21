@@ -54,8 +54,9 @@ Owner-approved exception (2026-10-04): use `./scripts/bootstrap.sh --client code
 
 ## Architecture: Mission-Bound Research
 
-Ignis starts collection only for a user-requested mission or explicit atomic probe. There is no
-always-on worker, daily discovery, or background baseline. Its two capability families are source
+Ignis starts collection only for a user-requested mission or explicit atomic probe. Ignis holds no
+always-on worker, scheduler, daily discovery, or background baseline; a user may ask their own
+agent to run a watchlist on a host routine, one explicit run per firing. Its two capability families are source
 connectors for collecting inspectable social evidence and an analysis skill for testing a market
 hypothesis against that evidence. A raw signal or score is not a market verdict. Persist claims,
 counterevidence, evidence gaps, and provenance before returning a strategic conclusion. See
@@ -68,7 +69,7 @@ counterevidence, evidence gaps, and provenance before returning a strategic conc
 Atomic connector tools remain independently callable. A strategic market verdict requires a
 mission, qualified evidence, a persisted claim ledger, explicit contrary evidence and unresolved
 gaps. The agent may autonomously pursue the specified mission, but cannot silently broaden the
-research question or launch recurring collection. See the `ignis-collect` and `ignis-analyze`
+research question or launch recurring collection, except a host routine the user asked for. See the `ignis-collect` and `ignis-analyze`
 skills for the separate workflows.
 
 ---
