@@ -44,6 +44,7 @@ marker for schema tests.
   signatures are unchanged. Taken under the overnight delegation; owner to confirm.
 - **OG-2 (migration)**: additive `sql/032_watchlists.sql`. Taken under the overnight delegation.
 - **OG-3 (constitution)**: the amendment text stays Proposed until the owner ratifies it.
+  Ratified 2026-10-21 as constitution 2.2.0.
 
 The feature lands in two pull requests (spec Clarifications; tasks "Landing in two pull requests"):
 Part A (US1, US4; three tools, 48 → 51) needs no amendment; Part B (US2, US3; the snapshot tool,

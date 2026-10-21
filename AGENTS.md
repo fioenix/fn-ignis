@@ -28,10 +28,16 @@ This document defines the operational protocol, architectural guidelines, and to
 
 ## 🏛️ 1. Architecture: Mission-Bound Evidence Grounding
 
-Ignis starts only after a person or host agent assigns an explicit bounded task. There is no
-worker, scheduler, daily discovery, or idle collection. Inside a confirmed Mission Manifest,
-the agent may autonomously select in-scope probes; it stops at a terminal state or an authority
-boundary.
+Ignis starts only after a person or host agent assigns an explicit bounded task. Ignis holds no
+worker, scheduler, daily discovery, or idle collection. A user may ask their own agent to run one
+watchlist on the host's native scheduler; each firing is a separate explicit run (constitution
+Principle I). Inside a confirmed Mission Manifest, the agent may autonomously select in-scope
+probes; it stops at a terminal state or an authority boundary.
+
+Ignis keeps no author identity at rest: handles, account ids, display names and profile links are
+removed before an observation is stored, distinct voices are counted only through per-mission
+markers, and the only identities kept are accounts a requester declares for one mission
+(constitution Principle VII, Spec 015).
 
 The product has two independent capability families:
 

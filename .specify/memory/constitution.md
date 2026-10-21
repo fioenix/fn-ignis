@@ -1,19 +1,28 @@
 <!--
 Sync Impact Report
-- Version change: 2.0.0 -> 2.1.0
+- Version change: 2.1.0 -> 2.2.0
 - Modified principles:
-  - IV. Deterministic Artifact Builders -> IV. Deterministic Report Builders (scope limited to Ignis
-    research reports; new guidance for host-rendered tracking artifacts)
-- Added sections: none
-- Removed sections: none
-- Technology Constraints: "Artifacts" line narrowed to research reports
-- Bump rationale: MINOR. No principle is removed or made incompatible; IV gains explicit guidance
-  for a new artifact class (owner decision 2026-10-19, Spec 014 R2 research R2-4).
-- Templates checked: .specify/templates/plan-template.md, spec-template.md, tasks-template.md and
-  checklist-template.md carry no Principle IV wording; no template change needed.
-- Dependent documents checked: AGENTS.md section 7 ("only report source committed as code") stays
-  accurate. Historical plans (specs/007, 009, 011) keep their dated checks unchanged.
-- Follow-up TODOs: none
+  - I. Mission-Bound Autonomy and Zero-Token Collection: Ignis still holds no scheduler, worker or
+    background loop; a user MAY now ask their own agent to run one watchlist on a recurring host
+    schedule, each firing a separate explicit task (Spec 016 amendment, Change 1).
+  - III. Evidence-First Research and Falsification: the ingestion-clock rule now names collection
+    windows and evidence frames, and a listening period places observations by publication time with
+    the basis stated (Spec 016 amendment, Change 2).
+- Added principles: VII. No Author Identity at Rest (Spec 015, T036)
+- Removed sections: the "Proposed Amendment (not ratified)" appendix, now folded into VII
+- Bump rationale: MINOR. One new principle and two narrowed or clarified rules for a new use; no
+  principle is removed or made incompatible. Owner ratified all three on 2026-10-21.
+- Templates checked: .specify/templates/plan-template.md derives its Constitution Check gates from
+  this file at plan time ("[Gates determined based on constitution file]"), so it needs no edit;
+  spec-template.md, tasks-template.md and checklist-template.md carry no wording on I, III or VII.
+- Dependent documents updated: CLAUDE.md (Architecture, Operational Boundary), AGENTS.md section 1,
+  docs/decisions/2026-09-29-mission-bound-evidence-grounded-ignis.md (pointer to the 2026-10-21
+  decision), specs/016-watchlist-listening/constitution-amendment.md (status Ratified).
+- Dependent documents checked, unchanged: README.md and docs/USER_GUIDE.md already describe author
+  identity removal; tests/unit/test_ignis_skills.py keeps "daily" and "scheduler" out of the
+  collection and analysis skills, and routine guidance stays in the Spec 017 guide.
+- Follow-up TODOs: OG-3, the disposition of identity stored before Spec 015, remains an open owner
+  decision (Spec 015 T034); VII governs what is stored from now on.
 -->
 # fn-ignis Constitution
 
@@ -27,8 +36,13 @@ principles for `fn-ignis`.
 ### I. Mission-Bound Autonomy and Zero-Token Collection (NON-NEGOTIABLE)
 
 - Ignis MUST start collection or analysis only after a user or host agent explicitly assigns a
-  task. It MUST NOT run an always-on radar, unattended scheduled sweep, autonomous daily discovery,
-  or background collection loop.
+  task. Ignis itself MUST NOT contain a scheduler, worker, always-on radar or background
+  collection loop, and MUST NOT discover topics on its own.
+- A user MAY ask their own agent to run one watchlist on a recurring schedule through the host's
+  native scheduler. Each firing is a separate explicit task: one watchlist run, bounded by the
+  watchlist version, the run's own stated authority and the per-channel daily request ceilings.
+  An agent MUST NOT set up, widen or resume such a routine without the user's explicit request,
+  and the user MUST be able to see, pause and remove it in the host.
 - Once assigned a task, Ignis MAY autonomously select and execute the bounded collection and
   analysis steps needed to satisfy that task, subject to connector authorization and evidence
   gates.
@@ -64,9 +78,13 @@ principles for `fn-ignis`.
 - Evidence qualification and verdict generation MUST fail closed: when required evidence is absent
   or insufficient, Ignis MUST return the gap and the next validation action instead of manufacturing
   certainty.
-- Time-window queries MUST use an ingestion clock whose provenance is exact. Publication time is a
-  separate fact and MUST NOT silently substitute for ingestion time. Legacy observations whose
-  ingestion time was never recorded keep `observed_at = NULL` with explicit provenance.
+- Collection windows, evidence frames and every other time-window query MUST use an ingestion
+  clock whose provenance is exact. Legacy observations whose ingestion time was never recorded keep
+  `observed_at = NULL` with explicit provenance.
+- A listening period (a calendar day, week or month of a watchlist) places each observation by its
+  publication time when a plausible one exists, and otherwise by its ingestion date, flagged as
+  such. The basis MUST be stated with every figure; publication time MUST NOT silently substitute
+  for ingestion time anywhere else.
 
 ### IV. Deterministic Report Builders
 
@@ -109,6 +127,22 @@ not from a template.
   sequence.
 - Work is not shipped until it is merged, deployed, migrated where required, verified from the
   production or public surface, and activated.
+
+### VII. No Author Identity at Rest
+
+- Ignis studies markets in aggregate and MUST NOT keep who said something. Usernames, account and
+  channel identifiers, display names, profile links, avatars, and handles in links or in content
+  text MUST be removed before an observation is stored, and MUST NOT appear in a tool response,
+  report or log.
+- Distinct voices MAY be counted only through per-mission markers under a key that belongs to one
+  mission, is encrypted at rest, and is destroyed with the mission's evidence. Markers MUST NOT be
+  linkable across missions.
+- The only identities Ignis MAY keep are accounts a requester declares for one mission; a
+  declaration applies only to content collected after it and MUST be withdrawable without
+  rewriting evidence.
+- Content with no content reference MAY be kept as context, never as support for a claim.
+- Every new connector MUST be covered by the author identity conformance check before it ships.
+  Free-text personal names are outside this principle and MUST be documented as such.
 
 ---
 
@@ -162,44 +196,5 @@ pays the cost, its expiry condition, and the owner approval that permits it. Tes
 labels, and remembered command output are not evidence by themselves: run the command against the
 surface that owns the claim, read the output, and record what was not checked.
 
-**Version**: 2.1.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-10-19
+**Version**: 2.2.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-10-21
 
----
-
-## Proposed Amendment (not ratified): VII. No Author Identity at Rest
-
-**Status**: Proposed by Spec 015 (T036), 21/10/2026. It has no effect until the owner ratifies it;
-until then the version above stays 2.1.0.
-
-<!--
-Proposed Sync Impact Report
-- Version change on ratification: 2.1.0 -> 2.2.0
-- Added principle: VII. No Author Identity at Rest
-- Modified principles: none; III keeps its evidence rules, and VII constrains what evidence may hold
-- Bump rationale: MINOR. A new principle that adds guidance without removing or making any
-  existing principle incompatible. Spec 015 already implements it.
-- Templates to check on ratification: .specify/templates/plan-template.md (Constitution Check
-  gains a VII line), spec-template.md and tasks-template.md (no wording change expected).
-- Dependent documents to check: AGENTS.md (data-handling section), README.md and docs/USER_GUIDE.md
-  (already describe the behaviour), the ignis-analyze skill (already reads concentration only).
-- Open owner decision outside this principle: OG-3, the disposition of identity stored before
-  Spec 015 (see .handoff/spec015/inventory.handoff.md).
--->
-
-Proposed text:
-
-### VII. No Author Identity at Rest
-
-- Ignis studies markets in aggregate and MUST NOT keep who said something. Usernames, account and
-  channel identifiers, display names, profile links, avatars, and handles in links or in content
-  text MUST be removed before an observation is stored, and MUST NOT appear in a tool response,
-  report or log.
-- Distinct voices MAY be counted only through per-mission markers under a key that belongs to one
-  mission, is encrypted at rest, and is destroyed with the mission's evidence. Markers MUST NOT be
-  linkable across missions.
-- The only identities Ignis MAY keep are accounts a requester declares for one mission; a
-  declaration applies only to content collected after it and MUST be withdrawable without
-  rewriting evidence.
-- Content with no content reference MAY be kept as context, never as support for a claim.
-- Every new connector MUST be covered by the author identity conformance check before it ships.
-  Free-text personal names are outside this principle and MUST be documented as such.
