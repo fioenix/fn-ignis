@@ -23,6 +23,8 @@ from ignis.domain.value_objects import PlatformType
 MAX_TOPICS = 10
 MAX_KEYWORDS_PER_TOPIC = 20
 MAX_DISCOVERY_SHARE = 0.2
+# Longest name, category, keyword or declared name; a search term or label, never a document.
+MAX_TEXT_LENGTH = 200
 
 # Platforms whose content has an account a brand can own; Google Trends has none.
 BRAND_PLATFORMS = frozenset(p.value for p in PlatformType if p is not PlatformType.GOOGLE_TRENDS)
@@ -94,6 +96,8 @@ def _object(value: Any, allowed: frozenset, what: str) -> Mapping[str, Any]:
 def _text(value: Any, what: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise _invalid(f"{what} must be non-blank text.")
+    if len(value.strip()) > MAX_TEXT_LENGTH:
+        raise WatchlistDefinitionError("TEXT_TOO_LONG", f"{what} is longer than {MAX_TEXT_LENGTH} characters.")
     # Vietnamese arrives composed or decomposed depending on the keyboard; one form keeps one digest.
     return unicodedata.normalize("NFC", value.strip())
 
@@ -123,6 +127,8 @@ def _brand(value: Any) -> WatchlistBrand:
     platform = str(item.get("platform") or "").strip().lower()
     account = normalise_account_key(item.get("account"))
     name = item.get("declared_name")
+    if isinstance(name, str) and len(name.strip()) > MAX_TEXT_LENGTH:
+        raise WatchlistDefinitionError("TEXT_TOO_LONG", f"A declared_name is longer than {MAX_TEXT_LENGTH} characters.")
     if platform not in BRAND_PLATFORMS or account is None or not isinstance(name, str) or not name.strip():
         raise WatchlistDefinitionError(
             "INVALID_BRAND",
@@ -175,8 +181,8 @@ def parse_watchlist_definition(value: Any) -> WatchlistDefinition:
 
 
 def watchlist_name(value: Any) -> Optional[str]:
-    """A watchlist's display name, stripped and composed, or None when blank."""
-    if not isinstance(value, str) or not value.strip():
+    """A watchlist's display name, stripped and composed, or None when blank or too long."""
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > MAX_TEXT_LENGTH:
         return None
     return unicodedata.normalize("NFC", value.strip())
 

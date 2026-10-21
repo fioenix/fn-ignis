@@ -112,6 +112,7 @@ async def test_run_is_an_attention_mission_on_the_current_version_with_brands_de
     assert mission.keywords == ["matcha latte", "cát vệ sinh mèo", "Brand X"]
     declared = await repository.list_mission_declared_accounts(mission.id)
     assert [(a.platform, a.account_key, a.declared_name) for a in declared] == [("tiktok", "brandx", "Brand X")]
+    assert run["declared_accounts_status"] == "RECORDED"
     read = await call("handle_get_watchlist", watchlist_id=saved["watchlist_id"])
     assert [(r["mission_id"], r["version"]) for r in read["runs"]] == [(run["mission_id"], 2)]
     assert run["next_step"].startswith("Call execute_mission_ingress")

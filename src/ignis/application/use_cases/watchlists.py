@@ -178,6 +178,8 @@ class StartWatchlistRunUseCase:
             "mission_id": str(mission.id),
             "shortcode": mission.shortcode,
             "keywords": mission.keywords,
+            # A refused declaration leaves every author anonymous, which fails safe but is reported.
+            "declared_accounts_status": declared.get("status"),
             "declared_accounts": declared.get("accounts", []),
             "next_step": f"Call execute_mission_ingress(mission_id='{mission.shortcode}').",
         }

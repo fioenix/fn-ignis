@@ -5,6 +5,7 @@ import pytest
 from ignis.domain.watchlist import (
     MAX_DISCOVERY_SHARE,
     MAX_KEYWORDS_PER_TOPIC,
+    MAX_TEXT_LENGTH,
     MAX_TOPICS,
     WatchlistDefinitionError,
     parse_watchlist_definition,
@@ -91,6 +92,10 @@ def test_payload_round_trips():
     ({"topics": [topic(brands=[{"platform": "tiktok", "account": "@x", "declared_name": "X"},
                                {"platform": "TikTok", "account": "X", "declared_name": "X2"}])]}, "DUPLICATE_BRAND"),
     ({"topics": [topic(name=" ")]}, "INVALID_DEFINITION"),
+    ({"topics": [topic(keywords=["k" * (MAX_TEXT_LENGTH + 1)])]}, "TEXT_TOO_LONG"),
+    ({"topics": [topic(name="n" * (MAX_TEXT_LENGTH + 1))]}, "TEXT_TOO_LONG"),
+    ({"topics": [topic(brands=[{"platform": "tiktok", "account": "x", "declared_name": "d" * (MAX_TEXT_LENGTH + 1)}])]},
+     "TEXT_TOO_LONG"),
     ({"topics": [topic(keywords=["ok", 3])]}, "INVALID_DEFINITION"),
     ({"topics": [topic(extra="x")]}, "INVALID_DEFINITION"),
     ({"topics": [topic()], "extra": 1}, "INVALID_DEFINITION"),

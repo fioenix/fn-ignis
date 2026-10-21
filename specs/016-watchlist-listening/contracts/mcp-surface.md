@@ -7,7 +7,8 @@ confirm). Refusals carry `status` and a stable `reason_code`.
 
 Creates a watchlist (no `watchlist_id`) or a new version of one. Returns `{watchlist_id, version,
 definition_digest}`. Refuses: more than 10 topics or 20 keywords per topic, a discovery share
-above 0.2, a brand on a platform without accounts, a duplicate name in the workspace, an unknown
+above 0.2, a name, category, keyword or declared name over 200 characters, a brand on a
+platform without accounts, a duplicate name in the workspace, an unknown
 watchlist. Brand accounts are normalised as in Spec 015 (lower case, no leading `@`).
 Saving an identical definition returns the current version without creating one. `status` is
 `CREATED`, `VERSION_ADDED` or `UNCHANGED`. A revision keeps the watchlist's workspace and name;
@@ -27,6 +28,8 @@ become the mission's declared accounts (Spec 015). The caller states `allowed_re
 inherits authority from an earlier one; the outcome, output type (`COLLECTION_FRAME`), stop
 condition and retention policy follow from the watchlist. Collection then runs through
 `execute_mission_ingress` as for any mission. Refuses an unknown watchlist and an invalid manifest.
+The response reports `declared_accounts_status`; a refused declaration leaves every author
+anonymous.
 The discovery share is stored with the version but not yet spent by collection (Part A).
 
 ## `get_watchlist_period_snapshot(watchlist_id, period_kind, period_start=None)`
