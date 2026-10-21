@@ -99,6 +99,9 @@ CONNECTOR_FIXTURES: Dict[str, Callable[[], TrendSignal]] = {
     ),
 }
 
+# Modules outside the connector folders that define a connector subclass.
+EXTRA_CONNECTOR_MODULES = ("ignis.infrastructure.follow_up_provider_bridge",)
+
 # Connectors whose payload names no person at all: a trend keyword and a hashtag chart.
 AUTHOR_FREE_CONNECTORS = frozenset({"GoogleTrendsRssPlugin", "TikTokCreativeCenterPlugin"})
 
@@ -112,6 +115,10 @@ def _registered_connector_classes() -> List[str]:
     for path in sorted(CONNECTORS_DIR.rglob("*_plugin.py")):
         module = ".".join(("ignis",) + path.relative_to(CONNECTORS_DIR.parents[1]).with_suffix("").parts)
         importlib.import_module(module)
+    # Connector subclasses defined outside the connector folders, so the scan does not depend on
+    # which other tests happened to import them first.
+    for module in EXTRA_CONNECTOR_MODULES:
+        importlib.import_module(module)
 
     def subclasses(cls):
         for sub in cls.__subclasses__():
@@ -123,6 +130,9 @@ def _registered_connector_classes() -> List[str]:
             cls.__name__
             for cls in subclasses(IConnectorPlugin)
             if not inspect.isabstract(cls) and cls.__module__.startswith("ignis.")
+            # A subclass emits its parent's payload unless it overrides it; the parent's fixture
+            # covers it. One that changes the payload must get a fixture of its own.
+            and not any(base.__name__ in CONNECTOR_FIXTURES for base in cls.__mro__[1:])
         }
     )
 
