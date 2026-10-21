@@ -20,7 +20,7 @@ from ignis.domain.research_workspace import (
     resolve_surface,
 )
 from ignis.domain.source_identity import identity_free_source_url
-from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_data
+from ignis.infrastructure.security.pii_sanitizer import render_mention_tokens, sanitize_pii_data
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,10 @@ class GetMissionAnalysisUseCase:
             raise ValueError(f"Research Mission {mission_id} does not exist.")
 
         signals = await self._repo.get_mission_signals(mission_id)
+        declared_names = {
+            account.id: account.declared_name
+            for account in await self._repo.list_mission_declared_accounts(mission.id)
+        }
 
         # Which question these observations were collected to answer. A Market mission's own
         # evidence is what its Brief is judged against; an Attention mission's is context for a
@@ -129,7 +133,7 @@ class GetMissionAnalysisUseCase:
                 "observation_id": str(s.observation_id) if s.observation_id else None,
                 "evidence_role": evidence_role,
                 "platform": p_str,
-                "title": s.raw_title,
+                "title": render_mention_tokens(s.raw_title, declared_names),
                 "metric_value": None if s.metadata.get("metric_known") is False else s.metric_value,
                 "velocity_per_hour": None if s.metadata.get("metric_known") is False else s.growth_velocity,
                 "url": identity_free_source_url(p_str, s.source_url, s.metadata),

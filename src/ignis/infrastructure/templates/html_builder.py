@@ -3,7 +3,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from jinja2 import Environment, FileSystemLoader, pass_context, select_autoescape
 
 from ignis.application.ports.artifact_port import IArtifactBuilder
 from ignis.domain.author_identity import strip_author_identity
@@ -17,7 +17,11 @@ from ignis.domain.harness_models import (
 )
 from ignis.domain.source_identity import identity_free_source_url
 from ignis.domain.value_objects import GeoCode
-from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_data, sanitize_pii_text
+from ignis.infrastructure.security.pii_sanitizer import (
+    render_mention_tokens,
+    sanitize_pii_data,
+    sanitize_pii_text,
+)
 
 
 def _normalize_insights(raw_insights: List[Any]) -> List[Dict[str, Any]]:
@@ -38,6 +42,12 @@ def _normalize_insights(raw_insights: List[Any]) -> List[Dict[str, Any]]:
         else:
             normalized.append({"statement": str(item), "citations": []})
     return normalized
+
+
+@pass_context
+def _sanitize_and_render_mentions(context, text):
+    """Every text the report shows: declared mention tokens by name (Spec 015), then PII redaction."""
+    return sanitize_pii_text(render_mention_tokens(text, context.get("declared_names") or {}))
 
 
 def _identity_free_signal(signal: TrendSignal) -> TrendSignal:
@@ -96,7 +106,7 @@ class HtmlArtifactBuilder(IArtifactBuilder):
 
         self._env.filters["format_currency"] = format_currency_filter
         self._env.filters["format_number"] = format_number_filter
-        self._env.filters["sanitize_pii"] = sanitize_pii_text
+        self._env.filters["sanitize_pii"] = _sanitize_and_render_mentions
 
 
 
@@ -268,6 +278,7 @@ class HtmlArtifactBuilder(IArtifactBuilder):
         analysis_contract: Optional[Dict[str, Any]] = None,
         scorecard_override: Optional[QualityScorecard] = None,
         market_brief_override: Optional[Dict[str, Any]] = None,
+        declared_names: Optional[Dict[str, str]] = None,
     ) -> str:
         template = self._env.get_template("mission_report.html")
         if analysis_contract is not None:
@@ -335,4 +346,6 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             analysis_contract=analysis_contract,
             channel_outcomes=(analysis_contract or {}).get("channel_outcomes", []),
             generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            # Declared account id -> declared name, for mention tokens; withdrawn ids are absent.
+            declared_names=declared_names or {},
         )

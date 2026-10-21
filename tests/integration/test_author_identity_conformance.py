@@ -7,7 +7,8 @@ report, the MCP responses and the captured logs. No undeclared sentinel may appe
 
 Two controls keep the scan honest: a registry-coverage test fails when a connector is added
 without a fixture, and a leaking connector -- one that hides a handle under a key the policy does
-not know -- must be caught by the same scan. `@mention` sentinels in text join the scan in T030.
+not know -- must be caught by the same scan. Since T030 the scan also covers `@mention` sentinels
+written inside the content.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ from tests.fixtures.author_identity_sentinels import (
     TIKTOK_HANDLE_URL,
     YOUTUBE_VIDEO_ID,
     google_trends_metadata,
+    mention_sentinels,
     reels_metadata,
     threads_metadata,
     tiktok_metadata,
@@ -272,7 +274,7 @@ async def test_a_sentinel_mission_leaves_no_author_identity_anywhere(
         repository_case, CONNECTOR_FIXTURES.values(), tmp_path, monkeypatch, caplog
     )
 
-    assert _leaks(surfaces, undeclared_sentinels()) == [], repository_case.name
+    assert _leaks(surfaces, undeclared_sentinels() + mention_sentinels()) == [], repository_case.name
     # The content survives: the mission still holds an observation per fixture.
     assert repository_case.counts()["observations"] == len(CONNECTOR_FIXTURES), repository_case.name
 
@@ -300,7 +302,7 @@ async def test_a_host_browser_submission_leaves_no_author_identity_anywhere(
     surfaces["mcp submit_host_browser_search"] = json.dumps(receipt, ensure_ascii=False, default=str)
     surfaces["captured logs"] = caplog.text
 
-    assert _leaks(surfaces, undeclared_sentinels()) == [], repository_case.name
+    assert _leaks(surfaces, undeclared_sentinels() + mention_sentinels()) == [], repository_case.name
     assert repository_case.counts()["observations"] >= 1, repository_case.name
 
 

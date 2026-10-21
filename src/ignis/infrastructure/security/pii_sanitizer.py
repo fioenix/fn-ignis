@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Mapping, Union
 
 # Regex patterns for high-risk PII identification
 EMAIL_PATTERN = re.compile(
@@ -55,6 +55,41 @@ UUID_PATTERN = re.compile(
     r"(\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b)",
     re.IGNORECASE,
 )
+
+
+# Character-class patterns: the characters are the algorithm (the CLAUDE.md exception). A mention
+# is "@" plus the handle characters the platforms allow, not preceded by a word character, "@" or
+# ".", so the local part of an e-mail address is never read as a handle. A trailing "." ends the
+# sentence, not the handle.
+MENTION_PATTERN = re.compile(r"(?<![\w@.])@([A-Za-z0-9_][A-Za-z0-9_.]*[A-Za-z0-9_]|[A-Za-z0-9_])")
+DECLARED_TOKEN_PATTERN = re.compile(r"@\[declared:([0-9a-fA-F-]{36})\]")
+USER_TOKEN = "@[user]"
+
+
+def tokenise_mentions(text: str, declared: Mapping[str, str]) -> str:
+    """Replace each @mention with a token before the text is stored (Spec 015, research R7).
+
+    `declared` maps a normalised handle to its declared account id; that mention becomes
+    `@[declared:<id>]`, every other one `@[user]`. The handle itself is never kept.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    def replace(match: "re.Match[str]") -> str:
+        declared_id = declared.get(match.group(1).lower())
+        return f"@[declared:{declared_id}]" if declared_id else USER_TOKEN
+
+    return MENTION_PATTERN.sub(replace, text)
+
+
+def render_mention_tokens(text: str, declared_names: Mapping[str, str]) -> str:
+    """Show a declared token as "@<declared name>", and as @[user] once it is withdrawn."""
+    if not text or not isinstance(text, str):
+        return text
+    return DECLARED_TOKEN_PATTERN.sub(
+        lambda match: f"@{declared_names[match.group(1)]}" if match.group(1) in declared_names else USER_TOKEN,
+        text,
+    )
 
 
 def sanitize_pii_text(text: str) -> str:

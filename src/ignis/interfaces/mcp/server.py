@@ -2768,6 +2768,10 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         analysis_contract=analysis_contract,
         scorecard_override=scorecard,
         market_brief_override=brief,
+        declared_names={
+            account.id: account.declared_name
+            for account in await comp["repository"].list_mission_declared_accounts(m_id)
+        },
     )
 
     # Securely save HTML report artifact to disk
