@@ -268,10 +268,6 @@ async def test_a_sentinel_mission_leaves_no_author_identity_anywhere(
     assert repository_case.counts()["observations"] == len(CONNECTOR_FIXTURES), repository_case.name
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="T016: the host browser receipt still echoes the submitted record with its handle link.",
-)
 async def test_a_host_browser_submission_leaves_no_author_identity_anywhere(
     repository_case, tmp_path, monkeypatch, caplog, persistent_key
 ):

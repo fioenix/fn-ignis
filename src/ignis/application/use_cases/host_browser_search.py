@@ -9,8 +9,24 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from ignis.domain.host_browser_search import HostSearchQuery, HostSearchRequest
+from ignis.domain.source_identity import identity_free_source_url
 from ignis.infrastructure.connectors.host_browser.relay import LoopbackRelay
 from ignis.infrastructure.connectors.host_browser.validator import validate_answer
+
+
+def _outward(receipt):
+    """The receipt as a caller sees it: no link that names an account (Spec 015).
+
+    The ticket keeps the submitted links in memory until ingestion, where the identity policy
+    still needs the handle to tell authors apart; nothing returned carries it. The host surface
+    is the TikTok public grid, whose links the validator admits only in /@handle/video/<id> form.
+    """
+    if receipt is None:
+        return None
+    outward = copy.deepcopy(receipt)
+    for record in outward.get("observations", ()):
+        record["source_url"] = identity_free_source_url("tiktok", record.get("source_url"), {})
+    return outward
 
 
 class HostBrowserSearchService:
@@ -108,14 +124,14 @@ class HostBrowserSearchService:
             if ticket["request"].mode != "TACTICAL":
                 raise ValueError("Mission answer requires canonical mission ingestion")
             if ticket["state"] == "ACCEPTED":
-                return copy.deepcopy(ticket["receipt"])
+                return _outward(ticket["receipt"])
             if ticket["state"] != "STAGED":
                 raise ValueError("Task has no accepted staged answer")
             if datetime.now(timezone.utc) >= ticket["request"].expires_at:
                 self._finish(ticket, "EXPIRED", payload=None, receipt=None)
                 raise ValueError("Task expired")
             self._finish(ticket, "ACCEPTED", payload=None)
-            return copy.deepcopy(ticket["receipt"])
+            return _outward(ticket["receipt"])
 
     async def prepare_mission(self, executor, mission_id, host_task_ref, session_ref, lifetime_seconds, authorized):
         from ignis.application.use_cases.host_browser_mission import prepare_scope
@@ -139,7 +155,7 @@ class HostBrowserSearchService:
             if ticket["request"].mode != "MISSION":
                 raise ValueError("Not a mission request")
             if ticket["state"] == "ACCEPTED":
-                return copy.deepcopy(ticket["receipt"])
+                return _outward(ticket["receipt"])
             if ticket["state"] != "STAGED" or datetime.now(timezone.utc) >= ticket["request"].expires_at:
                 raise ValueError("Mission answer is unavailable or expired")
             ticket["state"] = "SUBMITTING"
@@ -160,7 +176,7 @@ class HostBrowserSearchService:
             raise
         with self._lock:
             self._finish(ticket, "ACCEPTED", payload=None, receipt=receipt)
-        return copy.deepcopy(receipt)
+        return _outward(receipt)
 
     def mode(self, request_id, host_task_ref, session_ref):
         with self._lock:

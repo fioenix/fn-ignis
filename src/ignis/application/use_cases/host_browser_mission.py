@@ -10,6 +10,7 @@ from ignis.application.use_cases.execute_mission import TERMINAL_MISSION_STATES
 from ignis.domain.entities import TrendSignal
 from ignis.domain.harness_models import ChannelHealthStatus
 from ignis.domain.research_workspace import ResearchSurface, resolve_surface
+from ignis.domain.self_content import partition_self_authored
 from ignis.domain.value_objects import PlatformType
 from ignis.infrastructure.connectors.registry import SearchPassResult, SurfaceProbeResult
 
@@ -103,6 +104,9 @@ async def ingest_scope(executor, binding, receipt):
             metadata={**record, "connector_surface": "tiktok_video", "keyword": record["query"],
                       "metric_known": False, "metric_kind": None},
         ) for record in receipt["observations"]]
+        # Host answers never pass the registry's scope guard, so the operator's own posts are
+        # dropped here, while the handle that identifies them is still on the link (Spec 015).
+        signals, _own = partition_self_authored(signals, getattr(executor._registry, "self_identities", ()))
         statuses = {item["status"] for item in receipt["outcomes"]}
         status = ("DEGRADED" if "DEGRADED" in statuses else
                   "HEALTHY" if signals else "EMPTY_NO_DATA")

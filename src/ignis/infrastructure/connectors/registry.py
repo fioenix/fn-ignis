@@ -134,6 +134,11 @@ class ConnectorPluginRegistry:
         self._self_identities: List[SelfIdentity] = []
         self.last_pass_report: Dict[str, Any] = {}
 
+    @property
+    def self_identities(self) -> Tuple[SelfIdentity, ...]:
+        """The operator's own usable accounts, for paths that bypass the registry's scope guard."""
+        return tuple(self._self_identities)
+
     def register_self_identities(self, identities: List[SelfIdentity]) -> None:
         """Bind the operator's own accounts so their content can be kept out of market passes."""
         self._self_identities = [i for i in identities if i.is_usable]
