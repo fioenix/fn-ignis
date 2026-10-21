@@ -3,6 +3,7 @@ from collections.abc import MutableMapping
 from contextlib import asynccontextmanager
 import json
 import logging
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,7 +48,12 @@ from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.youtube_quota import YouTubeQuotaManager
-from ignis.domain.author_identity import strip_author_identity
+from ignis.domain.author_identity import (
+    AuthorAssignment,
+    AuthorConcentration,
+    AuthorState,
+    strip_author_identity,
+)
 from ignis.domain.entities import TopicCluster
 from ignis.domain.harness_models import QualificationSummary
 from ignis.domain.exceptions import IgnisDomainException, VocabularySynchronizationError
@@ -3429,6 +3435,20 @@ async def get_tiktok_creative_center_trends(geo: str = "VN", period: int = 7, li
     return await handle_get_tiktok_creative_center_trends(geo=geo, period=period, limit=limit, industry=industry)
 
 
+def _ephemeral_author_key() -> bytes:
+    """A key for one response's commenter markers. It lives only in this call (Spec 015, R9)."""
+    return os.urandom(32)
+
+
+def _response_concentration(comments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Distinct commenters in one response, taking the markers out of the comments as it goes."""
+    assignments = [comment.pop("author_assignment", None) for comment in comments]
+    return AuthorConcentration.from_assignments(
+        assignment if assignment is not None else AuthorAssignment(AuthorState.UNKNOWN)
+        for assignment in assignments
+    ).to_payload()
+
+
 async def handle_get_tiktok_video_comments(video_url: str, limit: int = 30) -> str:
     comp = get_components()
     tiktok_plugin = None
@@ -3443,13 +3463,17 @@ async def handle_get_tiktok_video_comments(video_url: str, limit: int = 30) -> s
     # The caller's link may name the creator; the response and the log name the video only.
     video_link = identity_free_source_url("tiktok", video_url, {})
     try:
-        comments = await tiktok_plugin.fetch_video_comments(video_url=video_url, limit=limit)
+        comments = await tiktok_plugin.fetch_video_comments(
+            video_url=video_url, limit=limit, author_key=_ephemeral_author_key()
+        )
+        concentration = _response_concentration(comments)
         return json.dumps(
             {
                 "status": "SUCCESS",
                 "video_url": video_link,
                 "total_comments": len(comments),
                 "comments": [strip_author_identity(comment) for comment in comments],
+                "author_concentration": concentration,
             },
             ensure_ascii=False,
             indent=2,
@@ -3487,6 +3511,10 @@ async def handle_extract_customer_pain_points(
             geo=geo_code,
             max_videos=max_videos,
             limit_per_video=20,
+            author_key=_ephemeral_author_key(),
+        )
+        concentration = _response_concentration(
+            [comment for video in data for comment in video.get("comments", [])]
         )
         
         # The caller may pass its own triggers; otherwise the persisted baseline is used. The
@@ -3526,6 +3554,7 @@ async def handle_extract_customer_pain_points(
                 "total_videos_analyzed": len(data),
                 "total_comments_extracted": len(all_comments),
                 "top_inquiries_and_pain_points": inquiries[:20],
+                "author_concentration": concentration,
                 # No creator or commenter, and no handle in a link (Spec 015).
                 "videos_breakdown": [
                     {

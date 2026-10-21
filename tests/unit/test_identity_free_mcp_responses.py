@@ -146,3 +146,78 @@ async def test_top_comments_for_keywords_carry_no_creator():
 
     assert videos[0]["video_url"] == SHARE_LINK
     assert "author" not in videos[0]
+
+
+# --- per-response concentration with a key that is never stored (T026) -------------------------
+
+
+def _assigned(marker):
+    from ignis.domain.author_identity import AuthorAssignment, AuthorState
+
+    if marker is None:
+        return AuthorAssignment(AuthorState.UNKNOWN)
+    return AuthorAssignment(AuthorState.KNOWN, marker=marker)
+
+
+@pytest.mark.asyncio
+async def test_video_comments_report_concentration_without_any_author():
+    components = _comment_components()
+    comments = [
+        {"comment_id": str(i), "text": "Giá bao nhiêu?", "likes": 0, "author_assignment": _assigned(marker)}
+        for i, marker in enumerate(["a" * 16, "a" * 16, "b" * 16, None])
+    ]
+    with patch("ignis.interfaces.mcp.server.get_components", return_value=components):
+        with patch.object(TikTokPlugin, "fetch_video_comments", new_callable=AsyncMock) as fetch:
+            fetch.return_value = comments
+            response = json.loads(await handle_get_tiktok_video_comments(video_url=TIKTOK_HANDLE_URL, limit=5))
+
+    key = fetch.await_args.kwargs["author_key"]
+    assert isinstance(key, bytes) and len(key) == 32
+    assert response["author_concentration"] == {"distinct_authors": 2, "unknown": 1, "unavailable": 0, "top_share": 2 / 3}
+    assert all("author_assignment" not in comment for comment in response["comments"])
+    assert key.hex() not in json.dumps(response)
+    components["repository"].get_or_create_mission_author_key.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pain_points_report_concentration_across_videos():
+    payload = [
+        {"video_url": SHARE_LINK, "video_title": "Áo khoác", "views": 1, "total_comments_fetched": 2,
+         "comments": [
+             {"comment_id": "1", "text": "Giá bao nhiêu?", "likes": 1, "author_assignment": _assigned("c" * 16)},
+             {"comment_id": "2", "text": "Đẹp", "likes": 1, "author_assignment": _assigned("c" * 16)},
+         ]},
+        {"video_url": SHARE_LINK, "video_title": "Áo khoác 2", "views": 1, "total_comments_fetched": 1,
+         "comments": [{"comment_id": "3", "text": "Có size không?", "likes": 1, "author_assignment": _assigned("d" * 16)}]},
+    ]
+    with patch("ignis.interfaces.mcp.server.get_components", return_value=_comment_components()):
+        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new_callable=AsyncMock) as fetch:
+            fetch.return_value = payload
+            response = json.loads(await handle_extract_customer_pain_points(keywords=["áo khoác"], geo="VN", max_videos=2))
+
+    assert isinstance(fetch.await_args.kwargs["author_key"], bytes)
+    assert response["author_concentration"]["distinct_authors"] == 2
+    assert "author_assignment" not in json.dumps(response)
+
+
+@pytest.mark.asyncio
+async def test_the_plugin_marks_commenters_only_under_the_key_it_is_given():
+    plugin = TikTokPlugin(auth_manager=None)
+    raw = {"comments": [
+        {"cid": "1", "user": {"unique_id": "sentinel.one", "uid": "11"}, "text": "Giá?", "digg_count": 0},
+        {"cid": "2", "user": {"unique_id": "sentinel.one", "uid": "11"}, "text": "Size?", "digg_count": 0},
+        {"cid": "3", "user": {"unique_id": "sentinel.two", "uid": "22"}, "text": "Đẹp", "digg_count": 0},
+    ]}
+    with patch("playwright.async_api.async_playwright") as playwright:
+        page = AsyncMock()
+        page.evaluate.return_value = raw
+        p = AsyncMock()
+        playwright.return_value.__aenter__.return_value = p
+        p.chromium.launch.return_value.new_context.return_value.new_page.return_value = page
+        marked = await plugin.fetch_video_comments(video_url=SHARE_LINK, limit=10, author_key=bytes(32))
+        unmarked = await plugin.fetch_video_comments(video_url=SHARE_LINK, limit=10)
+
+    markers = [c["author_assignment"].marker for c in marked]
+    assert markers[0] == markers[1] != markers[2]
+    assert all("author_assignment" not in c for c in unmarked)
+    assert "sentinel" not in str([{k: v for k, v in c.items() if k != "author_assignment"} for c in marked])

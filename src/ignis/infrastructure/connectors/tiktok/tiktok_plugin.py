@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
+from ignis.domain.author_identity import assign_author
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
 from ignis.domain.source_identity import identity_free_source_url
@@ -475,9 +476,14 @@ class TikTokPlugin(IConnectorPlugin):
         self,
         video_url: str,
         limit: int = 30,
+        author_key: Optional[bytes] = None,
     ) -> List[Dict[str, Any]]:
         """
         Fetch public comments under a specific TikTok video using in-page API with Playwright session context.
+
+        With `author_key`, each comment carries an `author_assignment`: a marker under that key,
+        so a caller can count distinct commenters in one response. The key is the caller's and
+        is never stored; without it no author fact is produced at all (Spec 015).
         """
         match = re.search(r"/video/(\d+)", video_url)
         if not match:
@@ -549,13 +555,22 @@ class TikTokPlugin(IConnectorPlugin):
                             # Redact phone numbers, emails, and credentials
                             redacted_text = sanitize_pii_text(cmt_text)
 
-                            comments.append({
+                            comment = {
                                 "comment_id": str(c.get("cid") or "") or None,
                                 "text": redacted_text,
                                 "likes": c.get("digg_count", 0),
                                 "reply_count": c.get("reply_comment_total", 0),
                                 "created_at": c.get("create_time"),
-                            })
+                            }
+                            if author_key is not None:
+                                user = c.get("user") or {}
+                                comment["author_assignment"] = assign_author(
+                                    PlatformType.TIKTOK,
+                                    {"user_id": user.get("uid"), "unique_id": user.get("unique_id")},
+                                    None,
+                                    author_key,
+                                )
+                            comments.append(comment)
 
 
 
@@ -577,6 +592,7 @@ class TikTokPlugin(IConnectorPlugin):
         geo: GeoCode = GeoCode.VN,
         max_videos: int = 3,
         limit_per_video: int = 20,
+        author_key: Optional[bytes] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search top videos for keywords and extract comments for Voice of Customer analysis.
@@ -588,7 +604,9 @@ class TikTokPlugin(IConnectorPlugin):
 
         for s in valid_vids:
             try:
-                cmts = await self.fetch_video_comments(video_url=s.source_url, limit=limit_per_video)
+                cmts = await self.fetch_video_comments(
+                    video_url=s.source_url, limit=limit_per_video, author_key=author_key
+                )
                 all_results.append({
                     # Identity-free: no creator, and no handle in the link (Spec 015).
                     "video_url": identity_free_source_url("tiktok", s.source_url, s.metadata),
