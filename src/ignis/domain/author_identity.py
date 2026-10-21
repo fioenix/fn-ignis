@@ -19,6 +19,7 @@ import hmac
 import re
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 from urllib.parse import urlsplit
@@ -165,11 +166,50 @@ def author_marker(mission_key: bytes, reference: str) -> str:
 
 @dataclass(frozen=True)
 class AuthorAssignment:
-    """The identity-free fact about one observation's author within one mission."""
+    """The identity-free fact about one observation's author within one mission.
+
+    `declared_name` is filled only when the fact is read back for a declared account; it is the
+    name the requester gave, never something taken from the platform.
+    """
 
     state: AuthorState
     marker: Optional[str] = None
     declared_account_id: Optional[str] = None
+    declared_name: Optional[str] = None
+
+
+def normalise_account_key(value: Any) -> Optional[str]:
+    """A declared account as stored and matched: lower case, no leading @."""
+    return _normalise_handle(value)
+
+
+@dataclass(frozen=True)
+class DeclaredAccount:
+    """An account the requester declared for one mission: the only identity Ignis keeps (R8)."""
+
+    id: str
+    mission_id: str
+    platform: str
+    account_key: str
+    declared_name: str
+    declared_at: datetime
+
+
+def declared_accounts_at(
+    accounts: Iterable[DeclaredAccount], moment: Optional[datetime]
+) -> Dict[Tuple[str, str], str]:
+    """(platform, account key) -> declared account id, for content collected at `moment`.
+
+    A declaration applies only to content collected after it was made, so an observation is never
+    attributed after the fact. Content with no collection time gets no declaration.
+    """
+    if moment is None:
+        return {}
+    return {
+        (account.platform, account.account_key): account.id
+        for account in accounts
+        if account.declared_at <= moment
+    }
 
 
 def _platform_name(platform: Any) -> str:
@@ -254,9 +294,12 @@ __all__: List[str] = [
     "AuthorAssignment",
     "AuthorConcentration",
     "AuthorState",
+    "DeclaredAccount",
     "assign_author",
     "author_identity_violation",
     "author_marker",
+    "declared_accounts_at",
     "has_handle_segment",
+    "normalise_account_key",
     "strip_author_identity",
 ]

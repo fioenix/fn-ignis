@@ -591,7 +591,11 @@ class ExecuteMissionUseCase:
         """
         if not signals:
             return
-        apply_author_policy(signals, await self._repo.get_or_create_mission_author_key(mission_id))
+        apply_author_policy(
+            signals,
+            await self._repo.get_or_create_mission_author_key(mission_id),
+            declared_accounts=await self._repo.list_mission_declared_accounts(mission_id),
+        )
 
     async def _execute_pass(
         self, mission, journal=None, manifest=None, execution_requirements=None, search_provider=None, expiry_guard=None

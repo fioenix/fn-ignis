@@ -26,9 +26,12 @@ hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đ�
 kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
 các cổng pilot và release vẫn giữ nguyên.
 
-`main` có **47 tools** từ ngày 20/10/2026, khi PR #51 (Spec 014) được merge tại `474916f`: Spec 014 R2 đã bỏ
-`open_mission_relay` nhưng vẫn giữ `get_mission_relay_snapshot` và `execute_mission_follow_up`;
-migration mới nhất là `sql/030_mission_follow_up_admission.sql`; các con số 47 tools, worker, quota
+Nhánh `codex/no-author-identity-at-rest` (Spec 015, chưa merge) có **48 tools**: Spec 015 thêm
+`set_mission_declared_accounts`, được chủ sở hữu duyệt ngày 20/10/2026 (OG-1), vào bộ tool mà `main`
+có từ ngày 20/10/2026, khi PR #51 (Spec 014) được merge tại `474916f`. Spec 014 R2 đã bỏ
+`open_mission_relay` nhưng vẫn giữ `get_mission_relay_snapshot` và `execute_mission_follow_up`.
+Migration mới nhất của nhánh là `sql/031_author_identity_at_rest.sql`, còn trên `main` là
+`sql/030_mission_follow_up_admission.sql`; các con số 47 tools, worker, quota
 scheduled và migration `024` trong phần lịch sử dưới đây là của bản v0.7.0 đã phát hành, khác bộ tool
 hiện tại. Tại mốc Spec 011 ngày 02/10/2026, nhánh `codex/evidence-grounded-product-reset`
 có 44 tool theo nhiệm vụ và migration mới nhất là `sql/025_evidence_grounded_claim_ledger.sql`.

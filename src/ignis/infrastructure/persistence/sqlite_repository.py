@@ -25,6 +25,7 @@ from ignis.application.ports.repository_port import (
     PlatformCredentialSummary,
 )
 from ignis.resources import sql_seed_file
+from ignis.domain.author_identity import DeclaredAccount
 from ignis.domain.entities import ResearchMission, TopicCluster, TrendSignal
 from ignis.domain.cross_platform_score import cluster_rank_key, cross_platform_score
 from ignis.domain.research_workspace import (
@@ -57,6 +58,8 @@ from ignis.application.ports.research_workspace_port import (
 )
 from ignis.infrastructure.persistence.author_identity_guard import (
     author_evidence_values,
+    declared_account,
+    read_author_assignment,
     refuse_author_identity,
     refuse_identity_bearing_key,
 )
@@ -3352,10 +3355,12 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     "SELECT s.platform, o.observed_title, o.metric_value, o.growth_velocity,"
                     " o.source_url, o.geo_code, e.mission_id, o.metadata, o.observed_at,"
                     " o.published_at, o.cluster_id, o.id AS observation_id, o.source_id,"
-                    " o.identity_source, o.time_provenance"
+                    " o.identity_source, o.time_provenance,"
+                    " e.author_state, e.author_marker, e.declared_account_id, d.declared_name"
                     " FROM mission_evidence e"
                     " JOIN observations o ON o.id = e.observation_id"
                     " JOIN sources s ON s.id = o.source_id"
+                    " LEFT JOIN mission_declared_accounts d ON d.id = e.declared_account_id"
                     " WHERE e.mission_id = ? ORDER BY o.observed_at DESC",
                     (str(mission_id),)
                 )
@@ -3387,6 +3392,10 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                             metadata=meta,
                             captured_at=cap_at,
                             published_at=pub_at,
+                            author_assignment=read_author_assignment(
+                                r["author_state"], r["author_marker"],
+                                r["declared_account_id"], r["declared_name"],
+                            ),
                         )
                     )
 
@@ -3663,6 +3672,70 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
 
         stored = await self._run_write(_sync_get_or_create)
         return decrypt_mission_author_key(stored)
+
+    async def list_mission_declared_accounts(self, mission_id) -> List[DeclaredAccount]:
+        """The accounts declared for this mission, oldest first. See the port."""
+        await self._ensure_schema()
+
+        def _sync_list():
+            conn = self._get_connection()
+            try:
+                rows = conn.execute(
+                    "SELECT id, mission_id, platform, account_key, declared_name, declared_at"
+                    " FROM mission_declared_accounts WHERE mission_id = ?"
+                    " ORDER BY declared_at, platform, account_key",
+                    (str(mission_id),),
+                ).fetchall()
+                return [declared_account(tuple(row)) for row in rows]
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_list)
+
+    async def replace_mission_declared_accounts(self, mission_id, accounts) -> Tuple[List[DeclaredAccount], int]:
+        """Make the given (platform, account key, declared name) the whole set. See the port."""
+        await self._ensure_schema()
+        wanted = {(platform, key): name for platform, key, name in accounts}
+
+        def _sync_replace():
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                current = conn.execute(
+                    "SELECT id, platform, account_key FROM mission_declared_accounts WHERE mission_id = ?",
+                    (str(mission_id),),
+                ).fetchall()
+                withdrawn = 0
+                for account_id, platform, key in current:
+                    if (platform, key) in wanted:
+                        conn.execute(
+                            "UPDATE mission_declared_accounts SET declared_name = ? WHERE id = ?",
+                            (wanted.pop((platform, key)), account_id),
+                        )
+                    else:
+                        # ON DELETE SET NULL clears the evidence references; nothing is rewritten.
+                        conn.execute("DELETE FROM mission_declared_accounts WHERE id = ?", (account_id,))
+                        withdrawn += 1
+                now = datetime.now(timezone.utc).isoformat()
+                for (platform, key), name in wanted.items():
+                    conn.execute(
+                        "INSERT INTO mission_declared_accounts"
+                        " (id, mission_id, platform, account_key, declared_name, declared_at)"
+                        " VALUES (?, ?, ?, ?, ?, ?)",
+                        (str(uuid4()), str(mission_id), platform, key, name, now),
+                    )
+                conn.commit()
+                return withdrawn
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        withdrawn = await self._run_write(_sync_replace)
+        return await self.list_mission_declared_accounts(mission_id), withdrawn
 
     async def destroy_mission_author_key(self, mission_id) -> None:
         """Delete the mission's author key, after which its markers can never be recomputed."""

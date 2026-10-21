@@ -8,11 +8,13 @@ shared here because the two backends must refuse exactly the same things.
 
 from __future__ import annotations
 
-from typing import Iterable, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, Iterable, Optional, Tuple
 
 from ignis.domain.author_identity import (
     AuthorAssignment,
     AuthorState,
+    DeclaredAccount,
     author_identity_violation,
     has_handle_segment,
 )
@@ -52,3 +54,40 @@ def author_evidence_values(signal: TrendSignal) -> Tuple[str, Optional[str], Opt
     assignment = signal.author_assignment or AuthorAssignment(AuthorState.UNKNOWN)
     declared = str(assignment.declared_account_id) if assignment.declared_account_id else None
     return assignment.state.value, assignment.marker, declared
+
+
+def read_author_assignment(
+    state: Optional[str], marker: Optional[str], declared_id: Any, declared_name: Optional[str]
+) -> Optional[AuthorAssignment]:
+    """The author fact a mission_evidence row holds, or None for a row written before 031.
+
+    A withdrawn declaration leaves DECLARED with no account; the row then reads as UNKNOWN, and
+    no marker appears after the fact because the identity was never kept.
+    """
+    if state is None:
+        return None
+    if state == AuthorState.DECLARED.value and declared_id is None:
+        return AuthorAssignment(AuthorState.UNKNOWN)
+    return AuthorAssignment(
+        AuthorState(state),
+        marker=marker,
+        declared_account_id=str(declared_id) if declared_id is not None else None,
+        declared_name=declared_name if declared_id is not None else None,
+    )
+
+
+def declared_account(row: Tuple[Any, Any, Any, Any, Any, Any]) -> DeclaredAccount:
+    """(id, mission_id, platform, account_key, declared_name, declared_at) as a DeclaredAccount."""
+    account_id, mission_id, platform, account_key, declared_name, declared_at = row
+    if isinstance(declared_at, str):
+        declared_at = datetime.fromisoformat(declared_at)
+    if declared_at.tzinfo is None:
+        declared_at = declared_at.replace(tzinfo=timezone.utc)
+    return DeclaredAccount(
+        id=str(account_id),
+        mission_id=str(mission_id),
+        platform=platform,
+        account_key=account_key,
+        declared_name=declared_name,
+        declared_at=declared_at,
+    )

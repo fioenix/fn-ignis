@@ -1581,5 +1581,34 @@
         "type": "object"
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "set_mission_declared_accounts",
+      "description": "Declare the brand or competitor accounts one mission may name, as {platform, account, declared_name}. Ignis keeps no author identity except these: content from a declared account collected after its declared_at is attributed to it by the declared name, and every other author stays anonymous. The list replaces the mission's whole declaration set; an empty list withdraws all, and earlier observations are never re-attributed.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "accounts": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "mission_id",
+          "accounts"
+        ],
+        "type": "object"
+      }
+    }
   }
 ]

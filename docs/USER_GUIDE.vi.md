@@ -166,7 +166,7 @@ cấp quyền thực hiện.
 
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **47 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **48 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
 manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu

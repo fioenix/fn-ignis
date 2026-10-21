@@ -3071,6 +3071,21 @@ async def release_mission_writer(mission_id: str, run_id: str) -> str:
     return await handle_release_mission_writer(mission_id, run_id)
 
 
+async def handle_set_mission_declared_accounts(mission_id: str, accounts: List[Dict[str, Any]]) -> str:
+    from ignis.application.use_cases.set_mission_declared_accounts import SetMissionDeclaredAccountsUseCase
+
+    comp = get_components()
+    result = await SetMissionDeclaredAccountsUseCase(comp["repository"], comp.get("workspace_store")).execute(
+        mission_id, accounts
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+@mcp.tool(name="set_mission_declared_accounts", description="Declare the brand or competitor accounts one mission may name, as {platform, account, declared_name}. Ignis keeps no author identity except these: content from a declared account collected after its declared_at is attributed to it by the declared name, and every other author stays anonymous. The list replaces the mission's whole declaration set; an empty list withdraws all, and earlier observations are never re-attributed.")
+async def set_mission_declared_accounts(mission_id: str, accounts: List[Dict[str, str]]) -> str:
+    return await handle_set_mission_declared_accounts(mission_id, accounts)
+
+
 @mcp.tool(name="get_mission_analysis", description="Retrieve full strategic analysis payload (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) for in-chat Native Artifact rendering.")
 async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
     return await handle_get_mission_analysis(mission_id=mission_id, limit=limit, platform=platform)

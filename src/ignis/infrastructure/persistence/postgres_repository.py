@@ -34,6 +34,7 @@ from ignis.application.ports.repository_port import (
     PlatformCredentialRecord,
     PlatformCredentialSummary,
 )
+from ignis.domain.author_identity import DeclaredAccount
 from ignis.domain.entities import TopicCluster, TrendSignal, ResearchMission
 from ignis.domain.exceptions import RepositoryException
 from ignis.domain.research_workspace import (
@@ -66,6 +67,8 @@ from ignis.application.ports.research_workspace_port import (
 )
 from ignis.infrastructure.persistence.author_identity_guard import (
     author_evidence_values,
+    declared_account,
+    read_author_assignment,
     refuse_author_identity,
     refuse_identity_bearing_key,
 )
@@ -1457,10 +1460,15 @@ class PostgresTimescaleRepository(ITrendRepository):
                 o.id,
                 o.source_id,
                 o.identity_source,
-                o.time_provenance
+                o.time_provenance,
+                e.author_state,
+                e.author_marker,
+                e.declared_account_id,
+                d.declared_name
             FROM mission_evidence e
             JOIN observations o ON o.id = e.observation_id
             JOIN sources s ON s.id = o.source_id
+            LEFT JOIN mission_declared_accounts d ON d.id = e.declared_account_id
             WHERE e.mission_id = %s
             ORDER BY o.metric_value DESC, o.observed_at DESC;
         """
@@ -1475,6 +1483,7 @@ class PostgresTimescaleRepository(ITrendRepository):
                 (
                     platform_str, title, metric, velocity, url, geo_str, meta_json, observed,
                     published, c_id, m_id, o_id, src_id, route, provenance,
+                    author_state, author_marker, declared_id, declared_name,
                 ) = row
                 meta = meta_json if isinstance(meta_json, dict) else json.loads(meta_json or "{}")
                 sig = TrendSignal(
@@ -1495,6 +1504,9 @@ class PostgresTimescaleRepository(ITrendRepository):
                     # recorded, and substituting one here would turn that into "collected now".
                     captured_at=observed,
                     published_at=published,
+                    author_assignment=read_author_assignment(
+                        author_state, author_marker, declared_id, declared_name
+                    ),
                 )
                 signals.append(sig)
             return signals
@@ -1777,6 +1789,63 @@ class PostgresTimescaleRepository(ITrendRepository):
         except Exception as e:
             raise RepositoryException(f"Failed to read the author key of mission {mission_id}: {type(e).__name__}") from e
         return decrypt_mission_author_key(row[0] if row else None)
+
+    async def list_mission_declared_accounts(self, mission_id) -> List[DeclaredAccount]:
+        """The accounts declared for this mission, oldest first. See the port."""
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    await cur.execute(
+                        "SELECT id, mission_id, platform, account_key, declared_name, declared_at"
+                        " FROM mission_declared_accounts WHERE mission_id = %s"
+                        " ORDER BY declared_at, platform, account_key;",
+                        (str(mission_id),),
+                    )
+                    return [declared_account(row) for row in await cur.fetchall()]
+        except Exception as e:
+            raise RepositoryException(
+                f"Failed to read the declared accounts of mission {mission_id}: {type(e).__name__}"
+            ) from e
+
+    async def replace_mission_declared_accounts(self, mission_id, accounts) -> Tuple[List[DeclaredAccount], int]:
+        """Make the given (platform, account key, declared name) the whole set. See the port."""
+        wanted = {(platform, key): name for platform, key, name in accounts}
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.transaction():
+                    async with conn.cursor(row_factory=tuple_row) as cur:
+                        await cur.execute(
+                            "SELECT id, platform, account_key FROM mission_declared_accounts"
+                            " WHERE mission_id = %s FOR UPDATE;",
+                            (str(mission_id),),
+                        )
+                        withdrawn = 0
+                        for account_id, platform, key in await cur.fetchall():
+                            if (platform, key) in wanted:
+                                await cur.execute(
+                                    "UPDATE mission_declared_accounts SET declared_name = %s WHERE id = %s;",
+                                    (wanted.pop((platform, key)), account_id),
+                                )
+                            else:
+                                # ON DELETE SET NULL clears the evidence references; nothing is rewritten.
+                                await cur.execute(
+                                    "DELETE FROM mission_declared_accounts WHERE id = %s;", (account_id,)
+                                )
+                                withdrawn += 1
+                        for (platform, key), name in wanted.items():
+                            await cur.execute(
+                                "INSERT INTO mission_declared_accounts"
+                                " (id, mission_id, platform, account_key, declared_name)"
+                                " VALUES (%s, %s, %s, %s, %s);",
+                                (str(uuid4()), str(mission_id), platform, key, name),
+                            )
+        except Exception as e:
+            raise RepositoryException(
+                f"Failed to replace the declared accounts of mission {mission_id}: {type(e).__name__}"
+            ) from e
+        return await self.list_mission_declared_accounts(mission_id), withdrawn
 
     async def destroy_mission_author_key(self, mission_id) -> None:
         """Delete the mission's author key, after which its markers can never be recomputed."""

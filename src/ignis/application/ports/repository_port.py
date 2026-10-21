@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from datetime import date, datetime
-from typing import Dict, Any, List, Optional, TypedDict
+from typing import Dict, Any, List, Optional, Sequence, Tuple, TypedDict
 from uuid import UUID
+from ignis.domain.author_identity import DeclaredAccount
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
 from ignis.domain.value_objects import GeoCode, Timeframe
 from ignis.domain.value_objects import IngressTrigger
@@ -143,6 +144,20 @@ class ITrendRepository(ABC):
         nothing, without the harness claiming to have polled a platform it could not reach.
         """
         pass
+
+    async def list_mission_declared_accounts(self, mission_id: UUID) -> List[DeclaredAccount]:
+        """The accounts declared for this mission, oldest first (Spec 015). None for a store without them."""
+        return []
+
+    async def replace_mission_declared_accounts(
+        self, mission_id: UUID, accounts: Sequence[Tuple[str, str, str]]
+    ) -> Tuple[List[DeclaredAccount], int]:
+        """Make (platform, account key, declared name) the mission's whole declaration set.
+
+        An account already declared keeps its id and declared_at, so content attributed to it
+        stays attributed; its name may change. Returns the stored set and how many were withdrawn.
+        """
+        raise NotImplementedError("This repository keeps no declared accounts.")
 
     async def get_or_create_mission_author_key(self, mission_id: UUID) -> Optional[bytes]:
         """The mission's key for author markers, created on first use (Spec 015).
