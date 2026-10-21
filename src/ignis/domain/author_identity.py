@@ -17,12 +17,13 @@ import copy
 import hashlib
 import hmac
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from ignis.domain.self_content import ACCOUNT_ID_METADATA_KEYS, AUTHOR_METADATA_KEYS
 
@@ -46,15 +47,28 @@ AUTHOR_FIELD_KEYS: Tuple[str, ...] = tuple(
 # Of those, the keys whose value is a stable reference to the account rather than a display name.
 # A display name is neither unique nor stable, so it never feeds a marker.
 _ACCOUNT_ID_KEYS = ACCOUNT_ID_METADATA_KEYS + ("channel_id",)
-_HANDLE_KEYS = AUTHOR_METADATA_KEYS + ("unique_id", "uniqueId", "channel")
+# Keys that hold the platform handle itself, preferred over anything else that may be a handle.
+_STABLE_HANDLE_KEYS = ("unique_id", "uniqueId", "username", "author_username", "handle")
+# Keys that hold a handle on some connectors and a display name on others. Read last, and only
+# when the value looks like a handle (no whitespace), so two creators sharing a display name are
+# never merged and a declared handle in the link wins over a name.
+_LOOSE_HANDLE_KEYS = ("author", "creator", "owner", "channel")
 
 # Character-class patterns: the characters are the algorithm (the CLAUDE.md exception). They read
-# the account segment of the link shapes the platforms use: /@handle on TikTok, Threads and
-# YouTube; the first path segment on Instagram; /channel/, /user/ and /c/ on YouTube.
-_AT_HANDLE = re.compile(r"/@([A-Za-z0-9._-]+)")
+# the account segment of the link shapes the platforms use: /@handle (ASCII or full-width at sign,
+# any Unicode handle, percent-decoded first) on TikTok, Threads and YouTube; the first path segment
+# on Instagram, or the second under /stories/; /channel/, /user/ and /c/ on YouTube.
+_AT_HANDLE = re.compile(r"/[@\uff20]([^/?#\s]+)")
 _YOUTUBE_ACCOUNT = re.compile(r"^/(?:channel|user|c)/([^/?#]+)")
-# Instagram paths whose first segment is a content namespace, not an account.
-_INSTAGRAM_CONTENT_SEGMENTS = frozenset({"p", "reel", "reels", "tv", "explore"})
+# A link written without its scheme still names an account on these hosts.
+_SCHEMELESS_PLATFORM_LINK = re.compile(
+    r"^(?:[a-z0-9-]+\.)*(?:tiktok\.com|threads\.com|threads\.net|instagram\.com|youtube\.com)(?:[/?#]|$)",
+    re.IGNORECASE,
+)
+# Instagram paths whose first segment is a content or service namespace, not an account.
+_INSTAGRAM_CONTENT_SEGMENTS = frozenset(
+    {"p", "reel", "reels", "tv", "explore", "accounts", "s", "direct", "about", "legal", "developer", "web"}
+)
 
 
 class AuthorState(str, Enum):
@@ -67,7 +81,7 @@ class AuthorState(str, Enum):
 
 
 def _normalise_handle(value: Any) -> Optional[str]:
-    text = str(value or "").strip().lstrip("@").lower()
+    text = unicodedata.normalize("NFC", str(value or "")).strip().lstrip("@\uff20").lower()
     return text or None
 
 
@@ -75,21 +89,30 @@ def _url_account(url: Optional[str]) -> Optional[str]:
     """The account segment a link exposes, normalised, or None for a content-only link."""
     if not url or not isinstance(url, str):
         return None
+    text = url.strip()
+    if "://" not in text:
+        if not _SCHEMELESS_PLATFORM_LINK.match(text):
+            return None
+        text = f"https://{text}"
     try:
-        parts = urlsplit(url.strip())
+        parts = urlsplit(text)
     except ValueError:
         return None
-    if parts.scheme not in ("http", "https"):
+    if parts.scheme.lower() not in ("http", "https"):
         return None
     host = (parts.hostname or "").lower()
-    path = parts.path or ""
+    path = unicodedata.normalize("NFC", unquote(parts.path or ""))
     at_handle = _AT_HANDLE.search(path)
     if at_handle:
         return _normalise_handle(at_handle.group(1))
     if host.endswith("instagram.com"):
-        first = next((segment for segment in path.split("/") if segment), "")
-        if first and first.lower() not in _INSTAGRAM_CONTENT_SEGMENTS:
-            return _normalise_handle(first)
+        segments = [segment for segment in path.split("/") if segment]
+        if not segments:
+            return None
+        if segments[0].lower() == "stories":
+            return _normalise_handle(segments[1]) if len(segments) > 1 else None
+        if segments[0].lower() not in _INSTAGRAM_CONTENT_SEGMENTS:
+            return _normalise_handle(segments[0])
         return None
     if host.endswith("youtube.com"):
         account = _YOUTUBE_ACCOUNT.match(path)
@@ -110,7 +133,7 @@ def _strip(value: Any) -> Any:
             for key, item in value.items()
             if key not in AUTHOR_FIELD_KEYS and not (isinstance(item, str) and has_handle_segment(item))
         }
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_strip(item) for item in value if not (isinstance(item, str) and has_handle_segment(item))]
     return copy.deepcopy(value)
 
@@ -147,16 +170,26 @@ def _first_present(metadata: Mapping[str, Any], keys: Iterable[str]) -> Optional
     return None
 
 
-def _references(metadata: Mapping[str, Any], source_url: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    """(account id, normalised handle) as far as the payload reveals them."""
+def _handle_like(value: Optional[str]) -> Optional[str]:
+    handle = _normalise_handle(value)
+    return handle if handle and not any(character.isspace() for character in handle) else None
+
+
+def _references(metadata: Mapping[str, Any], source_url: Optional[str]) -> Tuple[Optional[str], List[str]]:
+    """(account id, candidate handles in order of trust) as far as the payload reveals them.
+
+    Stable handle keys first, then the link, then keys that some connectors fill with a display
+    name -- and those only when the value looks like a handle.
+    """
     nested_user = metadata.get("user") if isinstance(metadata.get("user"), Mapping) else {}
     account_id = _first_present(metadata, _ACCOUNT_ID_KEYS) or _first_present(nested_user, ("pk", "id"))
-    handle = (
-        _normalise_handle(_first_present(metadata, _HANDLE_KEYS))
-        or _normalise_handle(_first_present(nested_user, ("username",)))
-        or _url_account(source_url)
-    )
-    return account_id, handle
+    candidates = [
+        _handle_like(_first_present(metadata, _STABLE_HANDLE_KEYS)),
+        _handle_like(_first_present(nested_user, ("username",))),
+        _url_account(source_url),
+        *(_handle_like(_first_present(metadata, (key,))) for key in _LOOSE_HANDLE_KEYS),
+    ]
+    return account_id, list(dict.fromkeys(handle for handle in candidates if handle))
 
 
 def author_marker(mission_key: bytes, reference: str) -> str:
@@ -227,26 +260,28 @@ def assign_author(
 ) -> AuthorAssignment:
     """Classify an observation's author before the identity is stripped.
 
-    The reference is the platform plus the account id, or the normalised handle when no id is
-    present. One author seen once by id and once only by handle therefore counts twice; that
-    overcounts voices, which is the safe direction for a seeding check.
+    The reference is the platform plus the account id, or the most trusted handle when no id is
+    present; a display name never is. One author seen once by id and once only by handle
+    therefore counts as two voices. That overcounts voices and so understates concentration -- the
+    unsafe direction for a seeding check -- which is why the account id is preferred whenever the
+    payload carries one.
 
     `declared` maps (platform, normalised account key) to a declared account id. A declared
     author keeps that id and gets no marker. A missing mission key (no encryption key configured)
     makes every undeclared known author UNAVAILABLE.
     """
     name = _platform_name(platform)
-    account_id, handle = _references(metadata if isinstance(metadata, Mapping) else {}, source_url)
-    if account_id is None and handle is None:
+    account_id, handles = _references(metadata if isinstance(metadata, Mapping) else {}, source_url)
+    if account_id is None and not handles:
         return AuthorAssignment(AuthorState.UNKNOWN)
-    for candidate in (account_id, handle):
-        if candidate is not None and declared:
+    for candidate in ([account_id] if account_id is not None else []) + handles:
+        if declared:
             declared_id = declared.get((name, candidate.lower()))
             if declared_id is not None:
                 return AuthorAssignment(AuthorState.DECLARED, declared_account_id=declared_id)
     if mission_key is None:
         return AuthorAssignment(AuthorState.UNAVAILABLE)
-    reference = f"{name}:{account_id if account_id is not None else handle}"
+    reference = f"{name}:{account_id if account_id is not None else handles[0]}"
     return AuthorAssignment(AuthorState.KNOWN, marker=author_marker(mission_key, reference))
 
 
