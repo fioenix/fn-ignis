@@ -35,12 +35,21 @@ Read from the code and from the host's documented tool contract, not from produc
   daily request ceilings and the period snapshot. This feature assumes them.
 - Ignis already serves packaged guides as MCP prompts and resources (`ignis_track`,
   `fn-ignis://guide/ignis-track`) with an identical `.agents/skills/` copy.
-- Claude Desktop local scheduled tasks: a task is a self-contained prompt stored as
+- Claude Code Desktop (the Code tab) local scheduled tasks, as their tool contract read in this
+  repository's Claude Code Desktop session on 21/10/2026: a task is a self-contained prompt stored as
   `{taskId}/SKILL.md` under the user's `~/.claude/scheduled-tasks/`; it fires on a 5-field cron in
   local time with a small dispatch delay, runs as a fresh session with no memory of the
   conversation that created it, runs only while the app is open (a task due while the app is closed
-  runs on next launch), and may be saved with the creating session's permission mode. It reaches
+  runs on next launch), may be saved with the creating session's permission mode, and starts in a
+  working folder of its own. It reaches
   local MCP servers.
+- Not verified: whether scheduled tasks created in the Claude app (Cowork) or other Claude surfaces
+  still run locally for new tasks. A PR review on 21/10/2026 cited a vendor note that new tasks there
+  run in the cloud; this spec does not rely on any surface other than the one above until a probe
+  (T001) confirms it on current versions.
+- Ignis mission tools resolve their authorized root from the MCP server's startup folder or an
+  operator's `IGNIS_CALLER_ROOT`, and refuse a home or root folder with `ROOT_REQUIRED`
+  (`docs/caller-storage.md`); only a Claude Code session opened in a repository folder is verified.
 - Codex and Antigravity scheduled tasks have no documented access to local MCP servers; cloud
   routines cannot reach a local server or the user's browser sessions (ADR).
 
@@ -56,7 +65,7 @@ Decided by the owner in the accepted decision record:
   run).
 - Q: Missed days? → A: Ignis does not backfill on its own; a re-run the user or the harness starts
   collects what platforms still return, and a missed day otherwise stays a visible gap.
-- Q: Which host first? → A: Claude Desktop local scheduled tasks; Codex after a probe; cloud
+- Q: Which host first? → A: Claude Code Desktop local scheduled tasks; Codex after a probe; cloud
   routines later and only for API channels with a remote database.
 
 Decided by the agent under the owner's delegation of 21/10/2026, conservative defaults, owner to
@@ -72,9 +81,14 @@ confirm (listed again under "Owner review"):
 - Q: What does a firing do after collection? → A: Nothing by default: it stops when the mission
   reaches a terminal state. Rendering a period view on a firing happens only if the user asked for
   it at setup, and the artifact stays local.
-- Q: Which permission mode does the routine use? → A: The guide tells the user that the host may save
-  the routine with the current session's permission mode and recommends creating it from a session
-  in the host's default mode, so the first firing asks for each tool approval.
+- Q: Which permission mode does the routine use? → A: Never an auto or bypass mode. Setup ends with an
+  attended "Run now" in which the user approves exactly the two Ignis tools a firing needs
+  (`start_watchlist_run`, `execute_mission_ingress`) for that routine; later firings reuse those
+  approvals and anything else still asks. Without those approvals the routine is attended, and the
+  guide says so (revised after PR review, 21/10/2026).
+- Q: Where does a firing start? → A: In the research workspace's repository folder, set as the task's
+  working folder at setup, or under an operator-set `IGNIS_CALLER_ROOT`; setup refuses a home or root
+  folder, and acceptance runs a fresh firing in exactly that configuration (added after PR review).
 - Q: What if the host has no scheduling capability? → A: The guide says so and stops. It never falls
   back to OS schedulers (cron, launchd, Task Scheduler) or to a loop inside Ignis.
 
@@ -82,14 +96,14 @@ confirm (listed again under "Owner review"):
 
 ### User Story 1 - Set up a daily routine on request (Priority: P1)
 
-The user asks their Claude Desktop agent to run their matcha watchlist every morning. The agent
+The user asks their Claude Code Desktop agent to run their matcha watchlist every morning. The agent
 reads the Ignis routine guide, shows what will run (watchlist name and version, channels, daily
 time, what happens after collection, how to pause it) and creates the routine only after the user
 confirms.
 
 **Why this priority**: Without it, history depends on the user remembering to run the watchlist.
 
-**Independent Test**: In Claude Desktop with a fixture watchlist, follow the guide: the routine is
+**Independent Test**: In Claude Code Desktop with a fixture watchlist, follow the guide: the routine is
 created once, appears in the host's task list, and its stored prompt names exactly that watchlist
 and contains the safeguards.
 
@@ -181,11 +195,16 @@ no OS scheduler entry, no Ignis-side loop; the agent tells the user to run the w
   create or revise watchlists, or publish anything.
 - **FR-006**: Rendering a period view on a firing MUST happen only if the user asked for it at setup;
   the artifact MUST stay local.
-- **FR-007**: The guide MUST warn that the host may save the routine with the current permission mode
-  and recommend the host's default mode.
+- **FR-007**: The guide MUST refuse to create a routine from an auto or bypass permission mode, and MUST
+  end setup with an attended "Run now" that grants approvals for only `start_watchlist_run` and
+  `execute_mission_ingress`; a routine without them MUST be described to the user as attended.
 - **FR-008**: Removing a routine MUST require the user's confirmation and MUST leave watchlist history
   untouched.
-- **FR-009**: Claude Desktop local scheduled tasks MUST be the supported host; any other host MUST be
+- **FR-020**: Each routine MUST start in a validated working folder that resolves the research
+  workspace's caller root (the repository folder, or an operator-set `IGNIS_CALLER_ROOT`); setup MUST
+  refuse a home or root folder.
+- **FR-009**: Claude Code Desktop local scheduled tasks, as confirmed by the T001 probe on current
+  versions, MUST be the supported host; any other host MUST be
   reported as unsupported until a recorded probe shows it reaches the local Ignis server.
 - **FR-010**: Serving the guide MUST start no read, collection or write.
 - **FR-011**: Ignis MUST NOT gain a scheduler, worker, background loop or routine table; no MCP tool or
@@ -202,10 +221,12 @@ no OS scheduler entry, no Ignis-side loop; the agent tells the user to run the w
 
 ### Measurable Outcomes
 
-- **SC-001**: In a Claude Desktop acceptance run, following the guide from a single explicit request
+- **SC-001**: In a Claude Code Desktop acceptance run, following the guide from a single explicit request
   creates exactly one routine, and following it without a request creates none.
 - **SC-002**: Each manual "run now" of the routine produces exactly one watchlist run bound to the
-  current version, and zero other writes.
+  current version. Its only writes are those that run owns (the mission, its run journal, observations,
+  mission evidence, channel outcomes and terminal state); it creates no other mission, watchlist,
+  watchlist version or routine record.
 - **SC-003**: The stored routine prompt contains the watchlist identifier and every FR-005
   prohibition, and no credential or author identity.
 - **SC-004**: The repository still contains no scheduler, worker or background loop (existing
@@ -216,6 +237,8 @@ no OS scheduler entry, no Ignis-side loop; the agent tells the user to run the w
 ## Assumptions
 
 - Spec 016 is merged first (watchlists, `start_watchlist_run`, ceilings, period snapshot).
+- The golden-set baseline run, ordered before Spec 017 in the decision record, is complete and
+  recorded before implementation starts.
 - The owner ratifies the Spec 016 constitution amendment before this feature merges.
 - The host's scheduled-task behaviour is as documented on 21/10/2026; if a firing missed while the
   app was closed runs once or several times on launch is not documented, and the guide does not
@@ -229,5 +252,6 @@ Agent decisions under the owner's delegation of 21/10/2026, to confirm or change
 1. No Ignis-side record of routines; no new tool or table (FR-011).
 2. One routine per watchlist; at most daily; proposed default time 07:00 local (FR-004).
 3. No period view on a firing unless asked at setup (FR-006).
-4. Permission-mode warning and default-mode recommendation (FR-007).
+4. Attended setup "Run now" granting only the two Ignis tools; never auto or bypass (FR-007).
+6. A routine's working folder is the workspace repository or an operator-set root (FR-020).
 5. Merge waits for the constitution amendment (FR-012).

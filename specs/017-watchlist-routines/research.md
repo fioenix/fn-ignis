@@ -2,7 +2,7 @@
 
 ## R1. Which host capability creates the routine?
 
-**Decision**: Claude Desktop's local scheduled tasks (the `scheduled-tasks` tools:
+**Decision**: Claude Code Desktop's local scheduled tasks (the `scheduled-tasks` tools:
 create, list, update, run now), with a daily 5-field cron in local time.
 
 **Rationale**: Documented on 21/10/2026: tasks are stored as self-contained prompts under
@@ -53,14 +53,26 @@ is testable (SC-003).
 requests without adding coverage. Morning collection gives a complete previous day for date-bounded
 channels.
 
-## R6. Permission mode
+## R6. Permission mode and approvals
 
-**Decision**: Warn and recommend the host's default mode.
+**Decision**: Refuse auto and bypass modes; end setup with an attended "Run now" that approves only
+`start_watchlist_run` and `execute_mission_ingress` for the routine.
 
 **Rationale**: The host may save the routine with the creating session's mode; an auto or bypass
-routine would approve tool calls unattended, including real-session connectors.
+routine would approve every tool unattended, including real-session connectors. In the default mode
+the first unattended firing would instead stop at its first approval prompt and add no history
+(PR review, 21/10/2026). Narrow approvals granted once while the user watches keep both properties.
 
 ## R7. Missed firings
 
 **Decision**: The guide does not rely on how many missed firings the host replays on launch; each
 firing is one run of "now", and Spec 016 places observations by their own dates.
+
+## R8. Working folder
+
+**Decision**: The task's working folder is the research workspace's repository folder, or the
+operator sets `IGNIS_CALLER_ROOT`; acceptance runs a fresh firing in that configuration.
+
+**Rationale**: Ignis resolves its caller root from the server's startup folder and refuses a home or
+root folder (`docs/caller-storage.md`); a firing started in the host's default folder would fail with
+`ROOT_REQUIRED` before creating a run.

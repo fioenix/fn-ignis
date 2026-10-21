@@ -10,7 +10,7 @@ branch carries the design only.
 
 Add one packaged guide, `ignis-routine`, served as the MCP prompt `ignis_routine` and the resource
 `fn-ignis://guide/ignis-routine` and mirrored as `.agents/skills/ignis-routine/SKILL.md`. It tells
-the host agent how to turn an explicit user request into one Claude Desktop scheduled task that
+the host agent how to turn an explicit user request into one Claude Code Desktop scheduled task that
 runs one watchlist daily, and how to list, change, pause and remove it. The guide carries the
 routine prompt template. Ignis gains no tool, table, dependency, scheduler or worker.
 
@@ -20,8 +20,8 @@ routine prompt template. Ignis gains no tool, table, dependency, scheduler or wo
 **Primary Dependencies**: FastMCP prompt and resource registration as used by `ignis_track`.
 **Storage**: None. The routine lives in the host (`~/.claude/scheduled-tasks/{taskId}/SKILL.md`).
 **Testing**: pytest unit tests in the style of `tests/unit/test_ignis_track_guidance.py`; one
-manual Claude Desktop acceptance run recorded in `.handoff/spec017/`.
-**Target Platform**: Claude Desktop local scheduled tasks reaching the local Ignis MCP server.
+manual Claude Code Desktop acceptance run recorded in `.handoff/spec017/`.
+**Target Platform**: Claude Code Desktop local scheduled tasks reaching the local Ignis MCP server.
 **Constraints**: Constitution I as amended by Spec 016 (routines only on explicit request, none
 inside Ignis); `test_ignis_skills.py` keeps "daily" and "scheduler" out of `ignis-collect` and
 `ignis-analyze`, so routine guidance lives only in the new guide.

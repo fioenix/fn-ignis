@@ -11,14 +11,20 @@ description: "Task list for Spec 017 — Host-Scheduled Watchlist Routines"
 **Tests**: Included and written first; each test task must be observed failing before its
 implementation task.
 
-**Prerequisites**: Spec 016 merged to `main` (watchlists, `start_watchlist_run`, ceilings), and the
-owner has ratified the Spec 016 constitution amendment (OG-1). Stop before T002 if either is
-missing.
+**Prerequisites**: Spec 016 merged to `main` (watchlists, `start_watchlist_run`, ceilings); the owner
+has ratified the Spec 016 constitution amendment (OG-1); and the golden-set baseline, ordered before
+this spec in the decision record, has run and its recorded result is linked from `plan.md`. Stop
+before T002 if any is missing.
 
 ## Phase 1: Setup
 
-- [ ] T001 Rebase on `main` after Spec 016 merges; record the base commit, the tool count and the
-  constitution version in `plan.md`. Stop and report if the amendment is not ratified.
+- [ ] T001 Rebase on `main` after Spec 016 merges; record the base commit, the tool count, the
+  constitution version and the golden-set baseline artifact in `plan.md`. Probe the current Claude
+  Code Desktop scheduled-task tools: where a new task runs (local or cloud), its working folder, how
+  it stores tool approvals, and whether a fresh firing reaches the local Ignis server with the
+  workspace's caller root. Record the probe in `.handoff/spec017/host-probe.handoff.md`. Stop and
+  report if the amendment is not ratified, the baseline is missing, or the probe contradicts the
+  spec's Context.
 
 ## Phase 2: US1 and US2 — Set up a routine; each firing is one run (P1)
 
@@ -41,13 +47,17 @@ missing.
 
 - [ ] T005 [P] Document routines in README.md, README.vi.md, docs/USER_GUIDE.md and
   docs/USER_GUIDE.vi.md; Vietnamese through the vietnamizer core workflow.
-- [ ] T006 Run the Claude Desktop acceptance in [quickstart.md](quickstart.md) and record it in
+- [ ] T006 Run the Claude Code Desktop acceptance in [quickstart.md](quickstart.md) and record it in
   `.handoff/spec017/acceptance.handoff.md` (SC-001, SC-002, SC-003).
 - [ ] T007 Run the full suite, ruff, `git diff --check`, the package build and
   `scripts/wheel_mcp_smoke.py`; code and security review of the diff; dispose of findings with
   evidence before the PR.
+- [ ] T008 After activation, keep one real routine running on one golden-set watchlist for 14
+  consecutive days and record the share of days with a completed run (SC-005) in
+  `.handoff/spec017/routine-14-days.handoff.md`. The feature may merge before this finishes; the
+  measurement is reported separately and sets no target.
 
 ## Dependencies
 
 T001 gates everything. T002→T003→T004. T005 after T004. T006 needs T003 and Spec 016 merged. T007
-last.
+last before the PR; T008 runs after activation and does not gate the merge.
