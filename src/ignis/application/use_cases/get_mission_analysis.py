@@ -6,7 +6,7 @@ from collections import defaultdict
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
-from ignis.domain.author_identity import strip_author_identity
+from ignis.domain.author_identity import author_concentration_by_channel, strip_author_identity
 from ignis.domain.research_workspace import (
     ClaimStatus,
     EvidenceRole,
@@ -157,7 +157,19 @@ class GetMissionAnalysisUseCase:
                 "note": f"Displaying top {len(compact_signals)} highest engagement signals. Use generate_mission_artifact to view the complete HTML dossier."
             },
             "top_signals": compact_signals,
+            # How many voices per channel, never whose (Spec 015, US2). Rows stored before the
+            # policy carry no author fact and count as unknown.
+            "author_concentration": {
+                channel: concentration.to_payload()
+                for channel, concentration in sorted(author_concentration_by_channel(signals).items())
+            },
         }
+        if any(c["unavailable"] for c in result["author_concentration"].values()):
+            result["author_concentration_limitation"] = (
+                "Distinct-author counts are unavailable for some observations: no persistent "
+                "encryption key was configured when they were collected, so no per-mission "
+                "author marker could be computed."
+            )
         if surface is ResearchSurface.MARKET:
             if self._store is None:
                 result.update(

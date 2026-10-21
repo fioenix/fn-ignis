@@ -289,6 +289,20 @@ class AuthorConcentration:
         }
 
 
+def author_concentration_by_channel(signals: Iterable[Any]) -> Dict[str, "AuthorConcentration"]:
+    """Concentration per platform for signals read back with their author facts.
+
+    A signal with no fact -- a row stored before migration 031 -- counts as unknown, so legacy
+    identity is never used to merge voices.
+    """
+    grouped: Dict[str, List[AuthorAssignment]] = {}
+    for signal in signals:
+        channel = _platform_name(getattr(signal, "platform", None))
+        assignment = getattr(signal, "author_assignment", None) or AuthorAssignment(AuthorState.UNKNOWN)
+        grouped.setdefault(channel, []).append(assignment)
+    return {channel: AuthorConcentration.from_assignments(items) for channel, items in grouped.items()}
+
+
 __all__: List[str] = [
     "AUTHOR_FIELD_KEYS",
     "AuthorAssignment",
@@ -296,6 +310,7 @@ __all__: List[str] = [
     "AuthorState",
     "DeclaredAccount",
     "assign_author",
+    "author_concentration_by_channel",
     "author_identity_violation",
     "author_marker",
     "declared_accounts_at",
