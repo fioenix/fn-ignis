@@ -71,8 +71,9 @@ this branch on it before T004.
 
 ## Phase 7: Polish
 
-- [ ] T015 [P] Draft the constitution amendment (Principles I and III) as Proposed with its impact
-  report in `.specify/memory/constitution.md`; do not ratify.
+- [x] T015 [P] Draft the constitution amendment (Principles I and III) as Proposed with its impact
+  report; do not ratify. Drafted 21/10/2026 in [constitution-amendment.md](constitution-amendment.md)
+  rather than in `.specify/memory/constitution.md`, so no agent reads a Proposed text as in force.
 - [ ] T016 [P] Document watchlists and the period view in README.md, README.vi.md,
   docs/USER_GUIDE.md and docs/USER_GUIDE.vi.md; Vietnamese through the vietnamizer core workflow.
 - [ ] T017 Run the quickstart, the full suite on SQLite and PostgreSQL, ruff, `git diff --check`,
