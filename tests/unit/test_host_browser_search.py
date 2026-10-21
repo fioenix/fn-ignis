@@ -117,7 +117,8 @@ def test_host_excerpt_is_masked_before_receipt_and_not_retained_raw(service):
     assert record["excerpt"] == (
         "Túi đi làm 200000 VND; contact [REDACTED_EMAIL], [REDACTED_PHONE]; api_key=[REDACTED_SECRET]"
     )
-    assert record["source_url"] == "https://www.tiktok.com/@fixture/video/7417820067028536584"
+    # The caller gets the content link without the poster's handle (Spec 015).
+    assert record["source_url"] == "https://www.tiktok.com/share/video/7417820067028536584"
     assert record["query"] == "túi đi làm"
 
 

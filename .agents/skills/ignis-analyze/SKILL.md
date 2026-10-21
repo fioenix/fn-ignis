@@ -28,6 +28,13 @@ method, not a second set of thresholds or a report template.
    show failed gates, attempted probes, safe partial observations, and the smallest next probe.
    Call `generate_mission_artifact` only when a persistent report was requested.
 
+`get_mission_analysis` also reports `author_concentration` per channel: distinct voices, unknown
+and unavailable sightings, and `top_share`, the share held by the single most frequent voice. Many
+sightings from few voices, or a high `top_share`, can mean seeding or one loud account; state it as
+a limitation on the claims it touches. The counts never say who the authors are, and the analysis
+must not try to find out: name an account only when it is a declared account in the evidence. When
+counts are unavailable, no marker key existed at collection; report that instead of guessing.
+
 An uploaded, purchased, or otherwise external dataset without mission-scoped provenance and
 qualification has `CONTEXT_ONLY` status. It can shape a falsifiable question; it cannot supply a
 Market verdict. Check unknown assumptions and contradictory evidence before recommending action.

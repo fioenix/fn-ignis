@@ -1,8 +1,10 @@
 import asyncio
-from collections.abc import MutableMapping
-from contextlib import asynccontextmanager
+from collections.abc import Mapping, MutableMapping
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 import json
 import logging
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +49,12 @@ from ignis.application.use_cases.get_top_clusters import GetTopClustersUseCase
 from ignis.application.use_cases.ingest_trends import IngestTrendsUseCase
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.youtube_quota import YouTubeQuotaManager
+from ignis.domain.author_identity import (
+    AuthorAssignment,
+    AuthorConcentration,
+    AuthorState,
+    strip_author_identity,
+)
 from ignis.domain.entities import TopicCluster
 from ignis.domain.harness_models import QualificationSummary
 from ignis.domain.exceptions import IgnisDomainException, VocabularySynchronizationError
@@ -71,6 +79,8 @@ from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepos
 
 from ignis.config import reveal_secret, settings
 
+from ignis.domain.source_identity import identity_free_source_url
+from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, render_mention_tokens
 from ignis.domain.token_rotation import (
     STATUS_EXPIRED,
     STATUS_EXPIRING_SOON,
@@ -1132,6 +1142,24 @@ def _describe_proxy(proxy_uri: str) -> str:
     return f"{scheme}{host}" if not parsed.username else f"{scheme}<redacted>@{host}"
 
 
+# Declared account id -> name for the mission whose citations are being serialized. Citation
+# serializers sit several calls deep, so the handler sets it once instead of threading it through.
+_CITATION_DECLARED_NAMES: ContextVar[Mapping[str, str]] = ContextVar("citation_declared_names", default={})
+
+
+@contextmanager
+def _citation_declared_names(names: Mapping[str, str]):
+    token = _CITATION_DECLARED_NAMES.set(dict(names))
+    try:
+        yield
+    finally:
+        _CITATION_DECLARED_NAMES.reset(token)
+
+
+async def _declared_names(repository, mission_id) -> Dict[str, str]:
+    return {account.id: account.declared_name for account in await repository.list_mission_declared_accounts(mission_id)}
+
+
 def _serialize_citation(cit: Any) -> Dict[str, Any]:
     """`observation_id` first, because that is the citation's identity.
 
@@ -1149,11 +1177,12 @@ def _serialize_citation(cit: Any) -> Dict[str, Any]:
         # Whether the reader is looking at evidence collected for this Brief or at the Attention
         # context the question came from. Without it the two read identically.
         "evidence_role": getattr(cit, "evidence_role", None),
-        "title_or_query": getattr(cit, "title_or_query", None),
+        # Declared mention tokens by name, everything else as @[user] (Spec 015).
+        "title_or_query": render_mention_tokens(getattr(cit, "title_or_query", None), _CITATION_DECLARED_NAMES.get()),
         "metric_highlight": getattr(cit, "metric_highlight", None),
         "author_or_channel": getattr(cit, "author_or_channel", None),
         "url": getattr(cit, "url", None),
-        "excerpt": getattr(cit, "excerpt", None),
+        "excerpt": render_mention_tokens(getattr(cit, "excerpt", None), _CITATION_DECLARED_NAMES.get()),
     }
 
 
@@ -1608,8 +1637,8 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
             indent=2,
         )
 
-    return json.dumps(
-        {
+    with _citation_declared_names(await _declared_names(comp["repository"], mission.id)):
+        payload = {
             "mission_id": str(mission.id),
             "maturity_stage": _maturity_value(report),
             **_surface_payload(report, mission),
@@ -1619,10 +1648,8 @@ async def handle_discover_market_opportunities(mission_id: str) -> str:
             "channel_summaries": _serialize_channel_summaries(report.channel_summaries),
             "strategic_insights": _serialize_insights(report.strategic_insights),
             "actionables": _serialize_insights(report.actionable_takeaways),
-        },
-        ensure_ascii=False,
-        indent=2
-    )
+        }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 # --- Handlers for System Diagnostics & Logs ---
@@ -2760,6 +2787,10 @@ async def handle_generate_mission_artifact(mission_id: str) -> str:
         analysis_contract=analysis_contract,
         scorecard_override=scorecard,
         market_brief_override=brief,
+        declared_names={
+            account.id: account.declared_name
+            for account in await comp["repository"].list_mission_declared_accounts(m_id)
+        },
     )
 
     # Securely save HTML report artifact to disk
@@ -3067,6 +3098,21 @@ async def execute_mission_ingress(mission_id: str) -> str:
 @mcp.tool(name="release_mission_writer", description="Recover a mission whose run died while holding its single writer slot. Pass the mission and exactly the active_run_id that the CONFLICT result reported: the claim is released only when both match, a wrong run_id refuses and changes nothing, and there is no expiry and no force release -- a claim taken from a run that is still writing is the failure the slot exists to prevent. Use it only when that run is known to have died; otherwise wait for it to finish.")
 async def release_mission_writer(mission_id: str, run_id: str) -> str:
     return await handle_release_mission_writer(mission_id, run_id)
+
+
+async def handle_set_mission_declared_accounts(mission_id: str, accounts: List[Dict[str, Any]]) -> str:
+    from ignis.application.use_cases.set_mission_declared_accounts import SetMissionDeclaredAccountsUseCase
+
+    comp = get_components()
+    result = await SetMissionDeclaredAccountsUseCase(comp["repository"], comp.get("workspace_store")).execute(
+        mission_id, accounts
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+@mcp.tool(name="set_mission_declared_accounts", description="Declare the brand or competitor accounts one mission may name, as {platform, account, declared_name}. Ignis keeps no author identity except these: content from a declared account collected after its declared_at is attributed to it by the declared name, and every other author stays anonymous. The list replaces the mission's whole declaration set; an empty list withdraws all, and earlier observations are never re-attributed.")
+async def set_mission_declared_accounts(mission_id: str, accounts: List[Dict[str, str]]) -> str:
+    return await handle_set_mission_declared_accounts(mission_id, accounts)
 
 
 @mcp.tool(name="get_mission_analysis", description="Retrieve full strategic analysis payload (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) for in-chat Native Artifact rendering.")
@@ -3412,6 +3458,31 @@ async def get_tiktok_creative_center_trends(geo: str = "VN", period: int = 7, li
     return await handle_get_tiktok_creative_center_trends(geo=geo, period=period, limit=limit, industry=industry)
 
 
+def _identity_free_text(value: Any) -> Any:
+    """Every string in a probe answer with account links and @mentions masked (Spec 015)."""
+    if isinstance(value, str):
+        return mask_author_identity_text(value)
+    if isinstance(value, Mapping):
+        return {key: _identity_free_text(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_identity_free_text(item) for item in value]
+    return value
+
+
+def _ephemeral_author_key() -> bytes:
+    """A key for one response's commenter markers. It lives only in this call (Spec 015, R9)."""
+    return os.urandom(32)
+
+
+def _response_concentration(comments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Distinct commenters in one response, taking the markers out of the comments as it goes."""
+    assignments = [comment.pop("author_assignment", None) for comment in comments]
+    return AuthorConcentration.from_assignments(
+        assignment if assignment is not None else AuthorAssignment(AuthorState.UNKNOWN)
+        for assignment in assignments
+    ).to_payload()
+
+
 async def handle_get_tiktok_video_comments(video_url: str, limit: int = 30) -> str:
     comp = get_components()
     tiktok_plugin = None
@@ -3423,21 +3494,28 @@ async def handle_get_tiktok_video_comments(video_url: str, limit: int = 30) -> s
     if not tiktok_plugin:
         tiktok_plugin = TikTokPlugin(auth_manager=comp.get("tiktok_auth_manager"))
 
+    # The caller's link may name the creator; the response and the log name the video only.
+    video_link = identity_free_source_url("tiktok", video_url, {})
     try:
-        comments = await tiktok_plugin.fetch_video_comments(video_url=video_url, limit=limit)
+        comments = await tiktok_plugin.fetch_video_comments(
+            video_url=video_url, limit=limit, author_key=_ephemeral_author_key()
+        )
+        concentration = _response_concentration(comments)
         return json.dumps(
             {
                 "status": "SUCCESS",
-                "video_url": video_url,
+                "video_url": video_link,
                 "total_comments": len(comments),
-                "comments": comments,
+                "comments": [_identity_free_text(strip_author_identity(comment)) for comment in comments],
+                "author_concentration": concentration,
             },
             ensure_ascii=False,
             indent=2,
         )
     except Exception as e:
-        logger.error(f"Error fetching TikTok video comments {video_url}: {e}")
-        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+        message = mask_author_identity_text(str(e))
+        logger.error("Error fetching TikTok video comments %s: %s", video_link or "with no identity-free link", message)
+        return json.dumps({"status": "ERROR", "message": message}, ensure_ascii=False)
 
 
 @mcp.tool(name="get_tiktok_video_comments", description="Fetch real-time public comments, inquiries, and discussions under a specific TikTok video URL.")
@@ -3468,6 +3546,10 @@ async def handle_extract_customer_pain_points(
             geo=geo_code,
             max_videos=max_videos,
             limit_per_video=20,
+            author_key=_ephemeral_author_key(),
+        )
+        concentration = _response_concentration(
+            [comment for video in data for comment in video.get("comments", [])]
         )
         
         # The caller may pass its own triggers; otherwise the persisted baseline is used. The
@@ -3494,9 +3576,8 @@ async def handle_extract_customer_pain_points(
                 all_comments.append(txt)
                 if any(q in txt.lower() for q in active_triggers):
                     inquiries.append({
-                        "video_title": v.get("video_title"),
-                        "author": c.get("author"),
-                        "inquiry": txt,
+                        "video_title": mask_author_identity_text(v.get("video_title")),
+                        "inquiry": mask_author_identity_text(txt),
                         "likes": c.get("likes", 0),
                     })
 
@@ -3508,14 +3589,23 @@ async def handle_extract_customer_pain_points(
                 "total_videos_analyzed": len(data),
                 "total_comments_extracted": len(all_comments),
                 "top_inquiries_and_pain_points": inquiries[:20],
-                "videos_breakdown": data,
+                "author_concentration": concentration,
+                # No creator or commenter, and no handle in a link (Spec 015).
+                "videos_breakdown": [
+                    {
+                        **_identity_free_text(strip_author_identity(video)),
+                        "video_url": identity_free_source_url("tiktok", video.get("video_url"), {}),
+                    }
+                    for video in data
+                ],
             },
             ensure_ascii=False,
             indent=2,
         )
     except Exception as e:
-        logger.error(f"Error extracting customer pain points from TikTok: {e}")
-        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+        message = mask_author_identity_text(str(e))
+        logger.error("Error extracting customer pain points from TikTok: %s", message)
+        return json.dumps({"status": "ERROR", "message": message}, ensure_ascii=False)
 
 
 @mcp.tool(name="extract_customer_pain_points", description="Extract voice of customer, frequent inquiries, and unmet needs across top TikTok videos for specific market keywords and target geography.")

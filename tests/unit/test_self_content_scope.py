@@ -211,3 +211,51 @@ async def test_guard_is_inert_when_no_identity_is_known():
     assert len(signals) == 2
     assert registry.last_pass_report["self_identities_known"] == 0
     assert registry.last_pass_report["filtered_out"] == 0
+
+
+# --- The host browser path (Spec 015, research R15) ---------------------------------------------
+
+
+async def _host_submission(tmp_path, records):
+    """Submit one host answer whose records are the given TikTok links, through the real writer."""
+    from ignis.application.use_cases.host_browser_search import HostBrowserSearchService
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    from tests.integration.test_host_browser_mission import assignment, staged_answer
+
+    repository = SqliteTrendRepository(str(tmp_path / "host.sqlite"))
+    await repository._ensure_schema()
+    _store, _workspace, mission, executor = await assignment(repository, tmp_path)
+    executor._registry.register_self_identities([SelfIdentity(platform="tiktok", username="sentinel.operator.self")])
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
+        payload = staged_answer(request)
+        template = payload["answers"][0]["records"][0]
+        payload["answers"][0]["records"] = [{**template, "source_url": url} for url in records]
+        service.stage(request["request_id"], payload)
+        receipt = await service.submit_mission(executor, request["request_id"], "task", "chrome")
+    finally:
+        service.close()
+    held = await repository.get_mission_signals(mission.id)
+    await repository.close()
+    return receipt, held
+
+
+@pytest.mark.asyncio
+async def test_a_host_answer_drops_the_operators_own_posts(tmp_path):
+    own = "https://www.tiktok.com/@sentinel.operator.self/video/7400000000000000001"
+    public = "https://www.tiktok.com/@someone.else/video/7400000000000000002"
+
+    _receipt, held = await _host_submission(tmp_path, [own, public])
+
+    assert [s.source_url for s in held] == ["https://www.tiktok.com/share/video/7400000000000000002"]
+
+
+@pytest.mark.asyncio
+async def test_a_host_receipt_returns_identity_free_links(tmp_path):
+    receipt, _held = await _host_submission(tmp_path, ["https://www.tiktok.com/@someone.else/video/7400000000000000002"])
+
+    assert [o["source_url"] for o in receipt["observations"]] == [
+        "https://www.tiktok.com/share/video/7400000000000000002"
+    ]
+    assert "someone.else" not in json.dumps(receipt, default=str)

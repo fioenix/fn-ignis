@@ -7,7 +7,7 @@ lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân t
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
 **Ranh giới phát hành:** Nhánh này đang triển khai Spec 011 và chưa được phát hành. Mã nguồn
-và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 47 tool theo
+và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 48 tool theo
 nhiệm vụ được mô tả ở đây. Không dùng image đã phát hành để kiểm chứng nhánh này.
 
 ## Hợp đồng sản phẩm
@@ -25,6 +25,12 @@ người dùng tải lên hoặc mua từ bên ngoài chỉ là bối cảnh n�
 với nhiệm vụ. Xem [Spec 011](specs/011-evidence-grounded-product-reset/spec.md) và
 [hợp đồng công khai](specs/011-evidence-grounded-product-reset/contracts/mission-bound-public-surface.md).
 
+Ignis không lưu danh tính tác giả: username, ID tài khoản, link hồ sơ, ảnh đại diện, handle trong
+link và trong @mention đều bị loại bỏ trước khi lưu; thay vào đó, một marker theo từng nhiệm vụ cho
+biết có bao nhiêu người nói khác nhau. Ignis chỉ nêu tên những tài khoản mà người yêu cầu khai báo
+cho nhiệm vụ bằng `set_mission_declared_accounts`. Tên người viết trong nội dung tự do không bị loại
+bỏ. Xem [Spec 015](specs/015-no-author-identity-at-rest/spec.md).
+
 ## Cài đặt từ mã nguồn
 
 Cần Python 3.11 trở lên. Chạy `./scripts/bootstrap.sh` trong checkout mã nguồn. Script tạo
@@ -32,7 +38,10 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/030_mission_follow_up_admission.sql`. Migration 030 bổ sung các khoảng trống
+Cây mã nguồn hiện có migration tới `sql/031_author_identity_at_rest.sql`. Migration 031 bổ sung khóa tác giả
+riêng cho từng nhiệm vụ, danh sách tài khoản được khai báo và các cột thông tin tác giả trên bằng chứng của nhiệm vụ.
+Migration này cũng cho phép lưu quan sát không có mã nội dung ở dạng không kiểm chứng được. Nó không sửa bằng chứng
+đã lưu. Migration 030 bổ sung các khoảng trống
 gắn với đầu vào hiện tại, hạn mức ngân sách, quyền truy cập nguồn đã thu hẹp, receipt của lệnh và phân bổ tài nguyên
 theo nguyên tắc thận trọng. Migration 029 bổ sung liên kết bất biến giữa nhiệm vụ cha và nhiệm vụ con cùng dữ liệu
 dự trữ ngân sách. Hai migration này không bổ sung hồi tố bằng chứng hay kế thừa quyền hạn cũ.
@@ -62,7 +71,7 @@ chỉ nằm tại `src/ignis/infrastructure/templates/html/`.
 
 ## Năng lực dành cho agent
 
-MCP server của nhánh hiện có **47 tools**. Mô tả tool do server đang chạy trả về là nguồn
+MCP server của nhánh hiện có **48 tools**. Mô tả tool do server đang chạy trả về là nguồn
 chuẩn cho tham số. Một số thao tác đại diện:
 
 - `create_attention_mission` và `confirm_market_brief` xác lập câu hỏi và phạm vi;

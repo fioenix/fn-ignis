@@ -6,6 +6,7 @@ from collections import defaultdict
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.application.use_cases.current_evidence_frame import frame_from_snapshot
+from ignis.domain.author_identity import author_concentration_by_channel, strip_author_identity
 from ignis.domain.research_workspace import (
     ClaimStatus,
     EvidenceRole,
@@ -18,7 +19,8 @@ from ignis.domain.research_workspace import (
     assess_strategic_sufficiency,
     resolve_surface,
 )
-from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_data
+from ignis.domain.source_identity import identity_free_source_url
+from ignis.infrastructure.security.pii_sanitizer import render_mention_tokens, sanitize_pii_data
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,10 @@ class GetMissionAnalysisUseCase:
             raise ValueError(f"Research Mission {mission_id} does not exist.")
 
         signals = await self._repo.get_mission_signals(mission_id)
+        declared_names = {
+            account.id: account.declared_name
+            for account in await self._repo.list_mission_declared_accounts(mission.id)
+        }
 
         # Which question these observations were collected to answer. A Market mission's own
         # evidence is what its Brief is judged against; an Attention mission's is context for a
@@ -87,18 +93,14 @@ class GetMissionAnalysisUseCase:
                 if (s.platform.value if hasattr(s.platform, "value") else str(s.platform)).lower() == platform_filter.lower()
             ]
 
-        # Calculate platform distribution and channel breakdown
+        # Calculate platform distribution. No per-creator breakdown: who posted is not kept, and
+        # rows stored before Spec 015 are not read for it either.
         platform_breakdown = defaultdict(int)
-        channel_counts = defaultdict(int)
         total_views = 0.0
 
         for s in signals:
             p_val = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
             platform_breakdown[p_val] += 1
-            
-            ch = s.metadata.get("channel_title")
-            if ch:
-                channel_counts[ch] += 1
             if p_val == "youtube":
                 total_views += s.metric_value
 
@@ -110,20 +112,20 @@ class GetMissionAnalysisUseCase:
         compact_signals = []
         for s in top_signals:
             p_str = s.platform.value if hasattr(s.platform, "value") else str(s.platform)
-            
+            # Identity-free whatever the row holds: rows stored before Spec 015 keep author fields.
+            metadata = strip_author_identity(s.metadata)
+
             clean_meta = {}
-            if s.metadata.get("metric_known") is False:
+            if metadata.get("metric_known") is False:
                 clean_meta.update(metric_known=False, metric_kind=None)
-            if "channel_title" in s.metadata:
-                clean_meta["channel"] = s.metadata["channel_title"]
-            if "likes" in s.metadata:
-                clean_meta["likes"] = s.metadata["likes"]
-            if "comments" in s.metadata:
-                clean_meta["comments"] = s.metadata["comments"]
-            if "related_queries" in s.metadata:
-                clean_meta["related_queries"] = s.metadata["related_queries"][:5]
-            if "keyword" in s.metadata:
-                clean_meta["keyword"] = s.metadata["keyword"]
+            if "likes" in metadata:
+                clean_meta["likes"] = metadata["likes"]
+            if "comments" in metadata:
+                clean_meta["comments"] = metadata["comments"]
+            if "related_queries" in metadata:
+                clean_meta["related_queries"] = metadata["related_queries"][:5]
+            if "keyword" in metadata:
+                clean_meta["keyword"] = metadata["keyword"]
 
             compact_signals.append({
                 # The canonical evidence identity, so a reader can address the observation
@@ -131,15 +133,12 @@ class GetMissionAnalysisUseCase:
                 "observation_id": str(s.observation_id) if s.observation_id else None,
                 "evidence_role": evidence_role,
                 "platform": p_str,
-                "title": s.raw_title,
+                "title": render_mention_tokens(s.raw_title, declared_names),
                 "metric_value": None if s.metadata.get("metric_known") is False else s.metric_value,
                 "velocity_per_hour": None if s.metadata.get("metric_known") is False else s.growth_velocity,
-                "url": s.source_url,
+                "url": identity_free_source_url(p_str, s.source_url, s.metadata),
                 "metadata": clean_meta,
             })
-
-        # Top 5 most active creators
-        top_channels = sorted(channel_counts.items(), key=lambda x: x[1], reverse=True)[:5]
 
         result = {
             "mission": {
@@ -158,12 +157,23 @@ class GetMissionAnalysisUseCase:
                 "total_signals_collected": len(signals),
                 "platform_breakdown": dict(platform_breakdown),
                 "total_youtube_views": int(total_views),
-                "top_creators": [{"channel": ch, "video_count": cnt} for ch, cnt in top_channels],
                 "signals_returned": len(compact_signals),
                 "note": f"Displaying top {len(compact_signals)} highest engagement signals. Use generate_mission_artifact to view the complete HTML dossier."
             },
             "top_signals": compact_signals,
+            # How many voices per channel, never whose (Spec 015, US2). Rows stored before the
+            # policy carry no author fact and count as unknown.
+            "author_concentration": {
+                channel: concentration.to_payload()
+                for channel, concentration in sorted(author_concentration_by_channel(signals).items())
+            },
         }
+        if any(c["unavailable"] for c in result["author_concentration"].values()):
+            result["author_concentration_limitation"] = (
+                "Distinct-author counts are unavailable for some observations: no persistent "
+                "encryption key was configured when they were collected, so no per-mission "
+                "author marker could be computed."
+            )
         if surface is ResearchSurface.MARKET:
             if self._store is None:
                 result.update(

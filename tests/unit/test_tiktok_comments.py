@@ -42,9 +42,27 @@ async def test_tiktok_plugin_fetch_video_comments_mocked():
             limit=10,
         )
         assert len(comments) == 1
-        assert comments[0]["author"].startswith("Ng***_")
+        # No author field, not even a pseudonym: a fixed-salt hash links one commenter across
+        # every mission and leaks a prefix of the name (Spec 015, research R3).
+        assert "author" not in comments[0] and "author_id" not in comments[0]
+        assert "nguyenvana" not in json.dumps(comments) and "Ng" not in json.dumps(comments)
         assert "Giá bao nhiêu" in comments[0]["text"]
         assert comments[0]["likes"] == 5
+
+
+@pytest.mark.asyncio
+async def test_comment_scraping_logs_carry_no_handle(caplog):
+    caplog.set_level("DEBUG")
+    plugin = TikTokPlugin(auth_manager=None)
+
+    with patch("playwright.async_api.async_playwright", side_effect=RuntimeError("browser unavailable")):
+        with pytest.raises(Exception):
+            await plugin.fetch_video_comments(
+                video_url="https://www.tiktok.com/@sentinel.tiktok.author/video/7666063173253991687", limit=10
+            )
+    assert await plugin.fetch_video_comments(video_url="https://www.tiktok.com/@sentinel.tiktok.profile") == []
+
+    assert "sentinel.tiktok" not in caplog.text
 
 
 

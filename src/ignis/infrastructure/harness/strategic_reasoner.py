@@ -7,7 +7,10 @@ from typing import List, Dict, Any, Tuple, Optional, Set
 from collections import defaultdict
 
 from ignis.config import settings
+from ignis.domain.author_identity import AuthorState
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
+from ignis.domain.source_identity import identity_free_source_url
+from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text
 from ignis.domain.harness_models import (
     ChannelDataSummary,
     ChannelHealthStatus,
@@ -515,19 +518,24 @@ class StrategicMarketReasoner:
         return " · ".join(parts)
 
     def _build_citation(self, signal: TrendSignal, sequence: int, geo: GeoCode = GeoCode.VN) -> CitationEvidence:
-        author = (
-            signal.metadata.get("channel_title")
-            or signal.metadata.get("author")
-            or signal.metadata.get("username")
+        # A citation shows content, not who posted it (Spec 015, FR-016). Rows stored before the
+        # policy still carry author fields and handle links, so neither is read from them here;
+        # only a declared account may be named, and the link is rebuilt without the handle.
+        # Rows stored before the policy can still hold raw mentions and account links.
+        excerpt = mask_author_identity_text(signal.metadata.get("top_comment") or signal.metadata.get("excerpt"))
+        assignment = signal.author_assignment
+        declared_name = (
+            assignment.declared_name
+            if assignment is not None and assignment.state is AuthorState.DECLARED
+            else None
         )
-        excerpt = signal.metadata.get("top_comment") or signal.metadata.get("excerpt")
         return CitationEvidence(
             citation_id=f"CIT-{sequence:02d}",
             platform=signal.platform,
-            title_or_query=signal.metadata.get("keyword") or signal.raw_title,
+            title_or_query=mask_author_identity_text(signal.metadata.get("keyword") or signal.raw_title),
             metric_highlight=self._format_metric_highlight(signal, geo=geo),
-            author_or_channel=author,
-            url=signal.source_url,
+            author_or_channel=declared_name,
+            url=identity_free_source_url(self._platform_value(signal.platform), signal.source_url, signal.metadata),
             excerpt=excerpt,
             observation_id=str(signal.observation_id) if signal.observation_id else None,
             source_id=str(signal.source_id) if signal.source_id else None,

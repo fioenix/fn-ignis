@@ -1,6 +1,5 @@
 import logging
 import re
-import hashlib
 import math
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
@@ -8,8 +7,10 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 from ignis.application.ports.connector_port import IConnectorPlugin, SearchAttestation
+from ignis.domain.author_identity import assign_author
 from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import ConnectorExecutionException
+from ignis.domain.source_identity import identity_free_source_url
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe
 from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.connectors.browser_support import (
@@ -18,7 +19,11 @@ from ignis.infrastructure.connectors.browser_support import (
 )
 from ignis.infrastructure.connectors.meta_browser_ingress import build_cookie_header
 from ignis.config import reveal_secret, settings
-from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
+from ignis.infrastructure.security.pii_sanitizer import (
+    mask_author_identity_text,
+    sanitize_pii_text,
+    tokenise_mentions,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -475,13 +480,19 @@ class TikTokPlugin(IConnectorPlugin):
         self,
         video_url: str,
         limit: int = 30,
+        author_key: Optional[bytes] = None,
     ) -> List[Dict[str, Any]]:
         """
         Fetch public comments under a specific TikTok video using in-page API with Playwright session context.
+
+        With `author_key`, each comment carries an `author_assignment`: a marker under that key,
+        so a caller can count distinct commenters in one response. The key is the caller's and
+        is never stored; without it no author fact is produced at all (Spec 015).
         """
         match = re.search(r"/video/(\d+)", video_url)
         if not match:
-            logger.warning(f"Could not extract video ID from URL: {video_url}")
+            # The URL is not logged: a profile link names an account (Spec 015).
+            logger.warning("Could not extract a video ID from the comment URL.")
             return []
         aweme_id = match.group(1)
 
@@ -538,37 +549,32 @@ class TikTokPlugin(IConnectorPlugin):
                 api_data = await page.evaluate(js_fetch)
                 raw_comments = api_data.get("comments", []) if isinstance(api_data, dict) else []
 
-                salt = "ignis_salt_2026"
+                # No commenter identity leaves this loop, not even a pseudonym: a fixed-salt hash
+                # links one commenter across every mission and leaks a prefix of the name
+                # (Spec 015, research R3). The comment id is the comment's own content reference.
                 for c in raw_comments:
                     if isinstance(c, dict):
-                        user_obj = c.get("user", {}) or {}
-                        raw_name = user_obj.get("nickname") or user_obj.get("unique_id") or "user"
-                        raw_id = user_obj.get("unique_id") or "anon"
-                        raw_cid = str(c.get("cid", ""))
-                        
-                        # Salted Pseudonymization (GDPR Art. 4(5) / Law 91/2025/QH15)
-                        h_name = hashlib.sha256(f"{salt}:{raw_name}".encode()).hexdigest()[:4]
-                        h_id = hashlib.sha256(f"{salt}:{raw_id}".encode()).hexdigest()[:6]
-                        h_cid = hashlib.sha256(f"{salt}:{raw_cid}".encode()).hexdigest()[:8]
-
-                        pseudo_author = f"{raw_name[:2]}***_{h_name}" if len(raw_name) >= 2 else "user_anon"
-                        pseudo_id = f"id_{h_id}"
-                        pseudo_cid = f"cmt_{h_cid}"
-
                         cmt_text = c.get("text", "").strip()
                         if cmt_text:
                             # Redact phone numbers, emails, and credentials
-                            redacted_text = sanitize_pii_text(cmt_text)
+                            redacted_text = tokenise_mentions(sanitize_pii_text(cmt_text), {})
 
-                            comments.append({
-                                "comment_id": pseudo_cid,
-                                "author": pseudo_author,
-                                "author_id": pseudo_id,
+                            comment = {
+                                "comment_id": str(c.get("cid") or "") or None,
                                 "text": redacted_text,
                                 "likes": c.get("digg_count", 0),
                                 "reply_count": c.get("reply_comment_total", 0),
                                 "created_at": c.get("create_time"),
-                            })
+                            }
+                            if author_key is not None:
+                                user = c.get("user") or {}
+                                comment["author_assignment"] = assign_author(
+                                    PlatformType.TIKTOK,
+                                    {"user_id": user.get("uid"), "unique_id": user.get("unique_id")},
+                                    None,
+                                    author_key,
+                                )
+                            comments.append(comment)
 
 
 
@@ -576,8 +582,14 @@ class TikTokPlugin(IConnectorPlugin):
                 await browser.close()
 
         except Exception as e:
-            logger.error(f"Error scraping comments for video {video_url}: {e}")
-            raise ConnectorExecutionException(f"Failed to fetch TikTok comments: {e}") from e
+            logger.error(
+                "Error scraping comments for video %s: %s",
+                identity_free_source_url("tiktok", video_url, {}) or "with no identity-free link",
+                mask_author_identity_text(str(e)),
+            )
+            raise ConnectorExecutionException(
+                f"Failed to fetch TikTok comments: {mask_author_identity_text(str(e))}"
+            ) from e
 
         return comments
 
@@ -587,6 +599,7 @@ class TikTokPlugin(IConnectorPlugin):
         geo: GeoCode = GeoCode.VN,
         max_videos: int = 3,
         limit_per_video: int = 20,
+        author_key: Optional[bytes] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search top videos for keywords and extract comments for Voice of Customer analysis.
@@ -598,17 +611,23 @@ class TikTokPlugin(IConnectorPlugin):
 
         for s in valid_vids:
             try:
-                cmts = await self.fetch_video_comments(video_url=s.source_url, limit=limit_per_video)
+                cmts = await self.fetch_video_comments(
+                    video_url=s.source_url, limit=limit_per_video, author_key=author_key
+                )
                 all_results.append({
-                    "video_url": s.source_url,
+                    # Identity-free: no creator, and no handle in the link (Spec 015).
+                    "video_url": identity_free_source_url("tiktok", s.source_url, s.metadata),
                     "video_title": s.raw_title,
-                    "author": s.metadata.get("channel", "Unknown"),
                     "views": s.metric_value,
                     "total_comments_fetched": len(cmts),
                     "comments": cmts,
                 })
             except Exception as e:
-                logger.warning(f"Skipping comments scraping for video {s.source_url}: {e}")
+                logger.warning(
+                    "Skipping comments scraping for video %s: %s",
+                    identity_free_source_url("tiktok", s.source_url, s.metadata) or "with no identity-free link",
+                    mask_author_identity_text(str(e)),
+                )
 
         return all_results
 
@@ -781,8 +800,9 @@ class TikTokPlugin(IConnectorPlugin):
                 await browser.close()
 
         except Exception as e:
-            logger.error(f"Error executing TikTok Ingress ({url}): {e}")
-            raise ConnectorExecutionException(f"Failed to fetch TikTok signals: {e}") from e
+            message = mask_author_identity_text(str(e))
+            logger.error("Error executing TikTok Ingress (%s): %s", mask_author_identity_text(url), message)
+            raise ConnectorExecutionException(f"Failed to fetch TikTok signals: {message}") from e
 
         if attestation is not None and keyword:
             if answered or signals:

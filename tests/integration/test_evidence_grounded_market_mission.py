@@ -87,7 +87,7 @@ async def test_overlapping_queries_reach_qualification_on_both_backends(reposito
         TrendSignal(
             platform=PlatformType.THREADS,
             raw_title="Public overlap fixture",
-            source_url="https://www.threads.net/@fixture/post/overlap",
+            source_url="https://www.threads.com/t/overlap",
             geo_code=GeoCode.VN,
             captured_at=NOW,
             mission_id=mission.id,

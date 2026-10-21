@@ -143,7 +143,7 @@ STRUCTURED_SENTINELS = {
     "access_token": "SENTINELACCESSTOKENQ7RELAY",
     "private_messages": "SENTINELPRIVATEMESSAGEQ7RELAY",
     "hidden_reasoning": "SENTINELHIDDENREASONINGQ7RELAY",
-    "raw_source_owner_address": "SENTINELOWNERADDRESSQ7RELAY",
+    "raw_source_contact_address": "SENTINELCONTACTADDRESSQ7RELAY",
     "unknown_nested": "SENTINELUNKNOWNNESTEDQ7RELAY",
 }
 STRUCTURED_METADATA = {
@@ -151,7 +151,8 @@ STRUCTURED_METADATA = {
     "auth": {"session": {"access_token": STRUCTURED_SENTINELS["access_token"]}},
     "private_messages": [{"direction": "inbound", "text": STRUCTURED_SENTINELS["private_messages"]}],
     "hidden_reasoning": {"summary": STRUCTURED_SENTINELS["hidden_reasoning"]},
-    "raw_source": {"owner": {"address": STRUCTURED_SENTINELS["raw_source_owner_address"]}},
+    # Not "owner": an author key is refused at storage since Spec 015, and this row must be stored.
+    "raw_source": {"contact": {"address": STRUCTURED_SENTINELS["raw_source_contact_address"]}},
     "vendor_extension": {"layer": {"opaque": STRUCTURED_SENTINELS["unknown_nested"]}},
 }
 

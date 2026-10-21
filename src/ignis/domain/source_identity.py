@@ -16,10 +16,15 @@ which makes a title something observed about a source rather than part of what i
 
 from __future__ import annotations
 
+import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from datetime import datetime
+from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import parse_qsl, unquote_plus, urlsplit, urlunsplit
+
+from ignis.domain.author_identity import has_handle_segment
 
 # The object namespace each connector's identifier points into. Two routes into one namespace
 # describe one object, so both carry the same kind here. These kind names are ours; the field
@@ -30,6 +35,8 @@ KIND_POST = "post"
 KIND_REEL = "reel"
 KIND_KEYWORD = "keyword"
 KIND_URL = "url"
+# Content that carries no platform reference at all, keyed by a digest of what it says (R6).
+KIND_CONTENT = "content"
 
 # Threads and Instagram address one object by two values that are not translations of each other:
 # the Graph API reports a numeric primary key, a permalink carries a shortcode, and there is no
@@ -115,6 +122,7 @@ def _canonical_value(kind: str, raw: str) -> str:
 IDENTITY_FROM_METADATA = "metadata_external_id"
 IDENTITY_FROM_URL = "url_external_id"
 IDENTITY_FROM_NORMALIZED_URL = "normalized_url_fallback"
+IDENTITY_UNVERIFIABLE_CONTENT = "unverifiable_content"
 IDENTITY_UNRESOLVED = "unresolved"
 
 
@@ -184,10 +192,40 @@ def _from_url(platform: str, source_url: Optional[str]) -> Optional[SourceIdenti
     return None
 
 
-def resolve_source_identity(
-    platform: str, source_url: Optional[str], metadata: Any
+def _from_content(
+    platform: str, content_text: Optional[str], published_at: Optional[datetime]
 ) -> Optional[SourceIdentity]:
-    """The canonical source a sighting belongs to, or None when nothing identifies it."""
+    """An identity for content that names no object: a digest of what it says and when.
+
+    Nobody outside Ignis can open it, so evidence resting on it is context, never support
+    (research R6). Case, Unicode form and spacing do not make a second object.
+    """
+    text = " ".join(unicodedata.normalize("NFC", content_text or "").casefold().split())
+    if not text:
+        return None
+    when = published_at.isoformat() if published_at else ""
+    digest = hashlib.sha256(f"{platform}\n{text}\n{when}".encode("utf-8")).hexdigest()
+    return SourceIdentity(
+        platform=platform,
+        external_id=f"{KIND_CONTENT}:{digest}",
+        identity_source=IDENTITY_UNVERIFIABLE_CONTENT,
+    )
+
+
+def resolve_source_identity(
+    platform: str,
+    source_url: Optional[str],
+    metadata: Any,
+    *,
+    content_text: Optional[str] = None,
+    published_at: Optional[datetime] = None,
+) -> Optional[SourceIdentity]:
+    """The canonical source a sighting belongs to, or None when nothing identifies it.
+
+    A URL that names an account is never the fallback key: that would key evidence on who
+    posted it (Spec 015). Without a content reference, the text the sighting carries -- when the
+    caller passes it -- gives an unverifiable content identity instead.
+    """
     from_metadata = _from_metadata(platform, metadata)
     if from_metadata is not None:
         return from_metadata
@@ -197,14 +235,49 @@ def resolve_source_identity(
         return from_url
 
     normalized = normalize_url(source_url)
-    if normalized:
+    if normalized and not has_handle_segment(source_url):
         return SourceIdentity(
             platform=platform,
             external_id=f"{KIND_URL}:{normalized}",
             identity_source=IDENTITY_FROM_NORMALIZED_URL,
         )
 
-    return None
+    return _from_content(platform, content_text, published_at)
+
+
+# Handle-free links per content namespace (research R5). The TikTok and Threads forms were
+# verified on public pages on 20/10/2026; each redirects to the canonical page only once a reader
+# opens it. A namespace missing here has no verified form, so its link is unavailable.
+_IDENTITY_FREE_LINKS: Dict[Tuple[str, str], Callable[[str], str]] = {
+    ("youtube", KIND_VIDEO): lambda value: f"https://www.youtube.com/watch?v={value}",
+    ("reels", KIND_REEL_SHORTCODE): lambda value: f"https://www.instagram.com/reel/{value}/",
+    ("tiktok", KIND_VIDEO): lambda value: f"https://www.tiktok.com/share/video/{value}",
+    ("threads", KIND_POST_SHORTCODE): lambda value: f"https://www.threads.com/t/{value}",
+}
+
+
+def _identity_free_link(identity: Optional[SourceIdentity]) -> Optional[str]:
+    if identity is None:
+        return None
+    kind, _, value = identity.external_id.partition(":")
+    build = _IDENTITY_FREE_LINKS.get((identity.platform, kind))
+    return build(value) if build is not None and value else None
+
+
+def identity_free_source_url(
+    platform: str, source_url: Optional[str], metadata: Any
+) -> Optional[str]:
+    """The link to store for a sighting: the original when it names no account, else a rebuilt one.
+
+    The rebuilt link comes from the content reference, the URL's own first, because a Threads
+    link needs the shortcode in the permalink rather than the numeric post id in metadata. None
+    means no identity-free link exists, which a report shows as "link unavailable".
+    """
+    if not source_url or not has_handle_segment(source_url):
+        return source_url or None
+    return _identity_free_link(_from_url(platform, source_url)) or _identity_free_link(
+        _from_metadata(platform, metadata)
+    )
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,7 @@ import logging
 import base64
 import hashlib
 from typing import Any, Dict, Optional
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from ignis.config import reveal_secret, settings
 from ignis.domain.exceptions import EncryptionKeyMissingException
 
@@ -106,6 +106,39 @@ def decrypt_credentials(data: Dict[str, Any], secret_key: Optional[str] = None) 
     except Exception as e:
         logger.error(f"Error decrypting credentials (wrong key or corrupted data): {e}")
         raise ValueError(f"Failed to decrypt credentials: {e}") from e
+
+
+def encrypt_secret_bytes(raw: bytes, secret_key: Optional[str] = None) -> str:
+    """Fernet ciphertext of raw secret bytes, such as a mission author key (Spec 015).
+
+    Refuses an ephemeral key: ciphertext under it would be undecryptable after a restart, and a
+    mission's markers would silently stop matching.
+    """
+    assert_persistent_key("Storing a mission author key", secret_key=secret_key)
+    return _get_fernet_instance(secret_key).encrypt(raw).decode("ascii")
+
+
+def decrypt_secret_bytes(token: str, secret_key: Optional[str] = None) -> bytes:
+    """Raw bytes back from `encrypt_secret_bytes`; raises cryptography's InvalidToken on a wrong key."""
+    return _get_fernet_instance(secret_key).decrypt(token.encode("ascii"))
+
+
+def decrypt_mission_author_key(stored: Optional[str]) -> Optional[bytes]:
+    """A stored mission author key, or None when there is none or it no longer decrypts.
+
+    A rotated IGNIS_ENCRYPTION_KEY makes an old key unreadable; markers under a new key would not
+    match the ones already stored, so the mission's author markers become unavailable instead.
+    """
+    if not stored:
+        return None
+    try:
+        return decrypt_secret_bytes(stored)
+    except InvalidToken:
+        logger.warning(
+            "A mission author key does not decrypt under the configured IGNIS_ENCRYPTION_KEY; "
+            "author markers are unavailable for that mission."
+        )
+        return None
 
 
 class CryptoService:

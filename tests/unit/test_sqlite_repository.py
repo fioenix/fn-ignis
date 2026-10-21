@@ -114,7 +114,7 @@ async def test_sqlite_signals_crud(sqlite_repo):
         growth_velocity=150.0,
         source_url="https://youtube.com/watch?v=sample123",
         geo_code=GeoCode.VN,
-        metadata={"channel_title": "AI Master", "likes": 500},
+        metadata={"video_id": "sample123", "likes": 500},
         captured_at=datetime.now(timezone.utc),
     )
 

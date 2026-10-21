@@ -12,7 +12,10 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/030_mission_follow_up_admission.sql`. Migration 030 bổ sung các khoảng trống
+Chuỗi migration trong mã nguồn kết thúc ở `sql/031_author_identity_at_rest.sql`. Migration 031 bổ sung khóa tác
+giả riêng cho từng nhiệm vụ, danh sách tài khoản được khai báo và các cột thông tin tác giả trên bằng chứng của nhiệm
+vụ. Migration này cũng cho phép lưu quan sát không có mã nội dung ở dạng không kiểm chứng được. Nó không sửa bằng
+chứng đã lưu. Migration 030 bổ sung các khoảng trống
 gắn với đầu vào hiện tại, hạn mức ngân sách và đơn vị đo rõ ràng, quyền truy cập nguồn đã thu hẹp, receipt của lệnh gốc
 và phân bổ tài nguyên theo nguyên tắc thận trọng. Khi nhận nhiệm vụ trên SQLite, hệ thống yêu cầu một bên xác minh
 quyền hạn hiện tại được cấu hình độc lập và từ chối nếu thiếu bên này. Bên cấp quyền hạn thực tế của host và việc
@@ -116,6 +119,32 @@ Server vẫn giữ phương án dự phòng cho lệnh gọi không có caller r
 nếu cần. Lệnh gọi MCP đã được chấp nhận không dùng phương án này. Mã template chỉ nằm ở
 `src/ignis/infrastructure/templates/html/`.
 
+### Danh tính tác giả
+
+Ignis nghiên cứu thị trường ở mức tổng hợp và không lưu danh tính tác giả. Trước khi lưu một quan
+sát, Ignis loại bỏ các trường tác giả mà connector trả về (username, ID người dùng và kênh, tên hiển
+thị, link hồ sơ, ảnh đại diện), thay link có tên tài khoản bằng link tới nội dung không chứa handle
+(`tiktok.com/share/video/<id>`, `threads.com/t/<shortcode>`) hoặc bỏ link nếu không dựng được, và
+đổi các @mention trong tiêu đề, chú thích, bình luận thành `@[user]`. Ignis chỉ giữ lại marker tác
+giả theo từng nhiệm vụ: một mã băm có khóa, đủ để phân biệt nhiều người nói với một người nói trong
+cùng nhiệm vụ, nhưng không nối được các nhiệm vụ với nhau. `get_mission_analysis` trả
+`author_concentration` cho từng kênh; nếu chưa cấu hình `IGNIS_ENCRYPTION_KEY` cố định thì Ignis
+không đếm được số tác giả và kết quả phân tích nói rõ điều đó. Nội dung không có mã tham chiếu chỉ
+được giữ làm bối cảnh, không bao giờ dùng để ủng hộ một nhận định.
+
+Ignis chỉ giữ danh tính của các tài khoản mà người yêu cầu khai báo cho một nhiệm vụ bằng
+`set_mission_declared_accounts`, chẳng hạn tài khoản của chính thương hiệu hoặc một đối thủ được nêu
+tên, theo dạng `{platform, account, declared_name}`. Mỗi lần gọi thay toàn bộ danh sách của nhiệm
+vụ; gửi danh sách rỗng nghĩa là rút mọi khai báo. Nội dung của tài khoản đã khai báo, nếu thu thập
+sau `declared_at`, được ghi theo tên đã khai báo, và lời nhắc tới tài khoản đó hiển thị thành
+`@<tên đã khai báo>`. Quan sát thu trước đó không bị gán lại; sau khi rút khai báo, tên biến mất khỏi
+báo cáo mà chứng cứ không bị viết lại.
+
+Ignis không loại bỏ tên người viết trong nội dung tự do, chẳng hạn khi người bình luận tự ký tên. Dữ
+liệu lưu trước Spec 015 vẫn còn danh tính cho đến khi chủ sở hữu quyết định cách xử lý; mọi báo cáo
+và phản hồi của tool đều loại bỏ danh tính khi xuất ra, còn `scripts/inventory_author_identity.py`
+chỉ đếm mà không hiển thị giá trị.
+
 ### Mission Relay trên nhánh phát triển
 
 Ignis không tự dựng trang theo dõi. Muốn theo dõi một nhiệm vụ, hãy yêu cầu agent đọc
@@ -163,7 +192,7 @@ cấp quyền thực hiện.
 
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **47 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **48 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
 manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu

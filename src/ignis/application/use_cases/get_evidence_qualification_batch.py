@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
 from ignis.application.use_cases.recorded_content import recorded_excerpt
+from ignis.domain.source_identity import IDENTITY_UNVERIFIABLE_CONTENT, identity_free_source_url
 from ignis.domain.entities import TrendSignal
 from ignis.domain.probe_provenance import PROBE_KEY_ALIASES
 from ignis.domain.research_workspace import (
@@ -25,7 +26,7 @@ from ignis.domain.research_workspace import (
     decide_qualification,
     resolve_surface,
 )
-from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
+from ignis.infrastructure.security.pii_sanitizer import render_mention_tokens, sanitize_pii_text
 
 DEFAULT_BATCH_LIMIT = 25
 MAX_BATCH_LIMIT = 50
@@ -202,6 +203,7 @@ class GetEvidenceQualificationBatchUseCase:
             if len(remaining) > page_size
             else None
         )
+        declared_names = await self._declared_names(mission.id)
         return {
             **payload,
             "frame": (
@@ -210,7 +212,7 @@ class GetEvidenceQualificationBatchUseCase:
                 else attention_frame_payload(mission)
             ),
             "pending_batches": -(-len(pending) // page_size),
-            "evidence": [self._evidence(s) for s in page],
+            "evidence": [self._evidence(s, declared_names) for s in page],
             "next_cursor": next_cursor,
             "recommended_judgment": {
                 "relation": [r.value for r in QualificationRelation],
@@ -231,9 +233,15 @@ class GetEvidenceQualificationBatchUseCase:
             },
         }
 
+    async def _declared_names(self, mission_id) -> Dict[str, str]:
+        """Declared account id -> declared name, to render mention tokens (Spec 015)."""
+        accounts = await self._repo.list_mission_declared_accounts(mission_id)
+        return {account.id: account.declared_name for account in accounts}
+
     @staticmethod
-    def _evidence(signal: TrendSignal) -> Dict[str, Any]:
+    def _evidence(signal: TrendSignal, declared_names: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         metadata = signal.metadata or {}
+        names = declared_names or {}
         excerpt = metadata.get("top_comment") or recorded_excerpt(metadata)
         probe_keyword = next(
             (metadata[key].strip() for key in PROBE_KEY_ALIASES
@@ -252,13 +260,16 @@ class GetEvidenceQualificationBatchUseCase:
             "source_id": str(signal.source_id) if signal.source_id else None,
             "platform": _platform(signal),
             "connector_surface": metadata.get("connector_surface") or _platform(signal),
-            "title": signal.raw_title,
-            "source_url": signal.source_url,
+            "title": render_mention_tokens(signal.raw_title, names),
+            # Identity-free whatever the row holds (Spec 015); None reads as "link unavailable".
+            "source_url": identity_free_source_url(_platform(signal), signal.source_url, metadata),
+            # Content with no reference anyone could open qualifies only as context.
+            "source_verifiable": signal.identity_source != IDENTITY_UNVERIFIABLE_CONTENT,
             "published_at": signal.published_at.isoformat() if signal.published_at else None,
             "captured_at": signal.captured_at.isoformat() if signal.captured_at else None,
             # Comments are written by the public, so a phone number or an e-mail in one is
             # masked before it leaves the server.
-            "excerpt": sanitize_pii_text(str(excerpt)) if excerpt else None,
+            "excerpt": sanitize_pii_text(render_mention_tokens(str(excerpt), names)) if excerpt else None,
             # As the connector recorded it, not casefolded: it is shown to the Agent as the query.
             "probe_keyword": probe_keyword,
             "probe_keywords": probe_keywords,

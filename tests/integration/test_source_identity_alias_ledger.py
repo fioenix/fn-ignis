@@ -21,7 +21,7 @@ from ignis.domain.value_objects import GeoCode, PlatformType
 
 THREADS_PK = "17912345678901234"
 THREADS_SHORTCODE = "C2xYzAbCdEf"
-THREADS_PERMALINK = f"https://www.threads.net/@author/post/{THREADS_SHORTCODE}"
+THREADS_PERMALINK = f"https://www.threads.com/t/{THREADS_SHORTCODE}"
 
 REEL_PK = "17998877665544332"
 REEL_SHORTCODE = "CzQwErTyUiO"
@@ -216,7 +216,7 @@ async def test_an_alias_does_not_cross_platforms(repository_case):
         [
             signal(
                 PlatformType.THREADS,
-                f"https://www.threads.net/@a/post/{REEL_SHORTCODE}",
+                f"https://www.threads.com/t/{REEL_SHORTCODE}",
                 {"post_id": THREADS_PK},
             )
         ]

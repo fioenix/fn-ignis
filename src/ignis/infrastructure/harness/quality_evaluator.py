@@ -3,6 +3,7 @@ from typing import List, Optional, Set
 
 from ignis.application.ports.language_detector_port import ILanguageDetector
 from ignis.config import settings
+from ignis.domain.author_identity import AuthorState
 from ignis.domain.entities import TrendSignal
 from ignis.domain.harness_models import ConfidenceLevel, QualificationSummary, QualityScorecard
 from ignis.domain.value_objects import GeoCode
@@ -156,8 +157,22 @@ class QualityEvaluator:
                     f"Severe view distribution skew: Single viral video ('{max_signal.raw_title[:45]}...') accounts for {round(view_ratio * 100, 1)}% of all video views ({int(max_views):,} / {int(total_views):,})."
                 )
 
-        # 4. Creator Diversity Score
-        if channels:
+        # 4. Creator Diversity Score. Per-mission author markers measure it (Spec 015): distinct
+        # voices over attributed sightings. channel_title is read only for rows stored before
+        # the policy, which still carry it.
+        attributed = [
+            s.author_assignment for s in signals
+            if s.author_assignment is not None
+            and s.author_assignment.state in (AuthorState.KNOWN, AuthorState.DECLARED)
+        ]
+        if attributed:
+            voices = len({a.marker or f"declared:{a.declared_account_id}" for a in attributed})
+            creator_diversity = round(min(100.0, (voices / float(len(attributed))) * 100.0), 1)
+            if creator_diversity >= 60.0:
+                strengths.append(f"Diverse creator distribution ({voices} independent voices).")
+            else:
+                flaws.append("Signals concentrated among very few creators (viewpoint bias risk).")
+        elif channels:
             unique_channels = len(set(channels))
             creator_diversity = round(min(100.0, (unique_channels / float(len(channels))) * 100.0), 1)
             if creator_diversity >= 60.0:

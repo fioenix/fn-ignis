@@ -62,6 +62,8 @@ async def test_the_probe_records_its_verdict():
 
     report = await plugin.check_keyword_search_access("cà phê")
     assert report["status"] == ThreadsPlugin.KEYWORD_SEARCH_SELF_ONLY
+    # The verdict is about the token, not the account: no username or id in it (Spec 015).
+    assert "self_account" not in report["detail"] and "99" not in report["detail"]
     manager.record_keyword_search_verdict.assert_awaited_once()
     assert (
         manager.record_keyword_search_verdict.await_args.args[0]

@@ -130,7 +130,7 @@ def _signal(title, platform=PlatformType.YOUTUBE, external=None, metric=1000.0, 
     urls = {
         PlatformType.YOUTUBE: f"https://www.youtube.com/watch?v={external:0<11}"[:43],
         PlatformType.GOOGLE_TRENDS: f"https://trends.google.com/trends/explore?q={external}",
-        PlatformType.TIKTOK: f"https://www.tiktok.com/@shop/video/{abs(hash(external)) % 10**19:019d}",
+        PlatformType.TIKTOK: f"https://www.tiktok.com/share/video/{abs(hash(external)) % 10**19:019d}",
     }
     return TrendSignal(
         platform=platform,
@@ -768,8 +768,8 @@ def _corpus_signal(item, captured_at=T0):
     urls = {
         "google": f"https://trends.google.com/trends/explore?q={key}",
         "youtube": f"https://www.youtube.com/watch?v={(key * 2)[:11]}",
-        "tiktok": f"https://www.tiktok.com/@handle/video/{number % 10**19:019d}",
-        "threads": f"https://www.threads.net/@handle/post/{key[:11]}",
+        "tiktok": f"https://www.tiktok.com/share/video/{number % 10**19:019d}",
+        "threads": f"https://www.threads.com/t/{key[:11]}",
         "reels": f"https://www.instagram.com/reel/{key[:11]}/",
     }
     metadata = {"connector_surface": SURFACE_OF[item["platform"]]}

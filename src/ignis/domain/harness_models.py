@@ -44,8 +44,9 @@ class CitationEvidence:
     platform: PlatformType
     title_or_query: str                  # Article / video title or search keyword
     metric_highlight: str                # '120K views', '+180% velocity', '45 comments'
+    # A declared account's name only; never an undeclared author (Spec 015, FR-016).
     author_or_channel: Optional[str] = None
-    url: Optional[str] = None
+    url: Optional[str] = None            # An identity-free link, or None: "link unavailable"
     excerpt: Optional[str] = None        # Representative comment / argument snippet
     observation_id: Optional[str] = None  # Canonical evidence identity
     source_id: Optional[str] = None       # The external object, for display

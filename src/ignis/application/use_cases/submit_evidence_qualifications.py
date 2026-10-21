@@ -21,6 +21,7 @@ from ignis.domain.research_workspace import (
     StaleEvidenceQualificationError,
     compute_frame_fingerprint,
     decide_qualification,
+    require_verifiable_relation,
     resolve_surface,
 )
 
@@ -146,6 +147,14 @@ class SubmitEvidenceQualificationsUseCase:
                 f"{len(foreign)} observation(s) are not part of this mission's current evidence: "
                 f"{', '.join(foreign[:5])}.",
             )
+        identity_sources = {str(s.observation_id): s.identity_source for s in signals if s.observation_id}
+        try:
+            for judgment in judgments:
+                require_verifiable_relation(
+                    judgment.relation, identity_sources.get(str(judgment.observation_id))
+                )
+        except InvalidEvidenceQualificationError as exc:
+            return self._refused(base, "INVALID", "UNVERIFIABLE_SOURCE", str(exc))
 
         try:
             recorded = await cast(IAnalysisRelayWriter, self._store).commit_evidence_qualifications(
