@@ -14,6 +14,11 @@ from ignis.application.use_cases.record_mission_research_work import RecordMissi
 
 relay_case = _relay_case
 
+# Receipts keep the host's current time, as a real caller stamps them; the domain's receipt allowance
+# absorbs the database running behind the host (70 ms on Docker for macOS). Deliberately expired
+# deadlines have no allowance, so tests backdate them far past that skew.
+CLOCK_SKEW_MARGIN = timedelta(seconds=30)
+
 
 def command(operation, payload, revision, key=None):
     return {

@@ -19,6 +19,16 @@
 
 ---
 
+## Hướng sản phẩm — 21/10/2026
+
+Chủ sở hữu chốt hướng mới qua buổi grilling ngày 20–21/10/2026 và duyệt bản ghi quyết định ngày
+21/10/2026: [listening-first product direction](docs/decisions/2026-10-21-listening-first-product-direction.md).
+Mặc định Ignis nghe mạng xã hội theo watchlist có phiên bản và so sánh theo ngày, tuần, tháng.
+Chế độ phán quyết vẫn giữ nhưng đóng băng. Lịch thu thập định kỳ chạy bằng cơ chế có sẵn của host
+khi người dùng yêu cầu; server Ignis không có lịch hay worker riêng. Thứ tự làm: Spec 015, Spec 016
+(watchlist và so sánh theo kỳ), lượt mốc golden set, Spec 017 (skill dựng routine), rồi spike kênh
+thương mại.
+
 ## Spec 011 — trạng thái nhánh phát triển, chưa phát hành
 
 **Mục tiêu phiên bản đã duyệt: `v0.8.0`** (02/10/2026). MINOR dành cho thay đổi chức năng
@@ -184,6 +194,11 @@ của PR.
 
 Tại mốc này, ledger có 110/116 task đã nghiệm thu. Còn mở T079, T082, T084, T087, T112 và T113.
 Chưa có UAT với nhiệm vụ thật; chưa bump version, tag hay phát hành.
+
+Cũng trong ngày 20/10/2026, [PR #52](https://github.com/fioenix/fn-ignis/pull/52) (đối chiếu ledger)
+và [PR #53](https://github.com/fioenix/fn-ignis/pull/53) (tăng tốc CI PostgreSQL bằng template
+database và marker `migration_chain`) được merge tại `6d6cd90` và `af88e15`. Cả bốn workflow chạy
+trên `main` tại `af88e15` đều đạt.
 
 
 ## Nghiên cứu riêng — benchmark đối thủ
