@@ -279,3 +279,6 @@ Agent decisions under the owner's delegation of 21/10/2026, to confirm or change
    from an earlier run.
 8. The discovery share is stored with each version but not spent by collection until a later part.
 9. A revision keeps the watchlist's name; renaming is refused.
+10. Brand accounts a user names stay in every immutable version that named them, also after a
+    later version drops them; a run declares only the current version's brands (Spec 015 keeps
+    withdrawal per mission). Deleting a watchlist is not offered yet.
