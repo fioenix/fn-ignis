@@ -2,10 +2,14 @@
 
 import pytest
 
+from ignis.domain.author_identity import MAX_ACCOUNT_LENGTH, MAX_DECLARED_NAME_LENGTH
+
 from ignis.domain.watchlist import (
     MAX_DISCOVERY_SHARE,
     MAX_KEYWORDS_PER_TOPIC,
     MAX_TEXT_LENGTH,
+    MAX_CATEGORIES_PER_TOPIC,
+    definition_from_payload,
     MAX_TOPICS,
     WatchlistDefinitionError,
     parse_watchlist_definition,
@@ -94,8 +98,6 @@ def test_payload_round_trips():
     ({"topics": [topic(name=" ")]}, "INVALID_DEFINITION"),
     ({"topics": [topic(keywords=["k" * (MAX_TEXT_LENGTH + 1)])]}, "TEXT_TOO_LONG"),
     ({"topics": [topic(name="n" * (MAX_TEXT_LENGTH + 1))]}, "TEXT_TOO_LONG"),
-    ({"topics": [topic(brands=[{"platform": "tiktok", "account": "x", "declared_name": "d" * (MAX_TEXT_LENGTH + 1)}])]},
-     "TEXT_TOO_LONG"),
     ({"topics": [topic(keywords=["ok", 3])]}, "INVALID_DEFINITION"),
     ({"topics": [topic(extra="x")]}, "INVALID_DEFINITION"),
     ({"topics": [topic()], "extra": 1}, "INVALID_DEFINITION"),
@@ -112,3 +114,44 @@ def test_refusal_message_names_no_brand_account():
             {"platform": "tiktok", "account": "SecretHandle", "declared_name": "S"},
         ])]})
     assert "secrethandle" not in str(caught.value).casefold()
+
+
+
+def brand(account="brandx", name="Brand X", platform="tiktok"):
+    return {"platform": platform, "account": account, "declared_name": name}
+
+
+@pytest.mark.parametrize("definition,code", [
+    # Every brand a watchlist saves must be one a run can declare (Spec 015 bounds).
+    ({"topics": [topic(brands=[brand(name="n" * (MAX_DECLARED_NAME_LENGTH + 1))])]}, "INVALID_BRAND"),
+    ({"topics": [topic(brands=[brand(account="brand x")])]}, "INVALID_BRAND"),
+    ({"topics": [topic(brands=[brand(account="a" * (MAX_ACCOUNT_LENGTH + 1))])]}, "INVALID_BRAND"),
+    ({"topics": [topic(f"t{t}", brands=[brand(f"b{t}x{i}") for i in range(6)]) for t in range(9)]}, "TOO_MANY_BRANDS"),
+    ({"topics": [topic(categories=[f"c{i}" for i in range(MAX_CATEGORIES_PER_TOPIC + 1)])]}, "TOO_MANY_CATEGORIES"),
+    ({"topics": [topic(keywords=["matcha\x00"])]}, "INVALID_DEFINITION"),
+    ({"topics": [topic(name="bad\ud800")]}, "INVALID_DEFINITION"),
+])
+def test_bounds_shared_with_declarations(definition, code):
+    assert refusal(definition) == code
+
+
+def test_a_profile_link_brand_becomes_its_handle():
+    parsed = parse_watchlist_definition({"topics": [topic(brands=[brand(account="https://www.tiktok.com/@BrandX")])]})
+    assert parsed.topics[0].brands[0].account == "brandx"
+
+
+def test_length_is_measured_after_composition():
+    import unicodedata
+    composed = "ằ" * MAX_TEXT_LENGTH
+    decomposed = unicodedata.normalize("NFD", composed)
+    assert len(decomposed) > MAX_TEXT_LENGTH
+    parsed = parse_watchlist_definition({"topics": [topic(keywords=[decomposed])]})
+    assert parsed.topics[0].keywords == (composed,)
+
+
+def test_stored_definitions_load_without_today_s_limits():
+    payload = {"topics": [topic(f"t{i}") for i in range(MAX_TOPICS + 3)]}
+    for item in payload["topics"]:
+        item["brands"][0]["account"] = "brandx"
+    loaded = definition_from_payload(payload)
+    assert len(loaded.topics) == MAX_TOPICS + 3

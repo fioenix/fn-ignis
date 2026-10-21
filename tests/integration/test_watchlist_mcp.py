@@ -129,3 +129,28 @@ async def test_run_refuses_unknown_watchlist_and_missing_authority(tools):
     assert missing["status"] == "INVALID"
     read = await call("handle_get_watchlist", watchlist_id=saved["watchlist_id"])
     assert read["runs"] == []
+
+
+
+async def test_run_keywords_are_unique_ignoring_case_across_topics(tools):
+    workspace, repository = tools
+    body = definition("Matcha latte", "trà xanh")
+    body["topics"][1]["keywords"] = ["matcha LATTE", "cát vệ sinh mèo"]
+    saved = await call("handle_save_watchlist", workspace_id=workspace, name="Matcha", definition=body)
+    run = await call("handle_start_watchlist_run", watchlist_id=saved["watchlist_id"],
+                     allowed_resources=["youtube"], authority_boundary=AUTHORITY)
+    assert run["keywords"] == ["Matcha latte", "trà xanh", "cát vệ sinh mèo", "Brand X"]
+
+
+async def test_a_run_that_cannot_be_bound_says_so(tools, monkeypatch):
+    workspace, repository = tools
+    saved = await call("handle_save_watchlist", workspace_id=workspace, name="Matcha", definition=definition())
+
+    async def refuse(*_args, **_kwargs):
+        raise RuntimeError("binding failed")
+
+    monkeypatch.setattr(repository, "record_watchlist_run", refuse)
+    run = await call("handle_start_watchlist_run", watchlist_id=saved["watchlist_id"],
+                     allowed_resources=["youtube"], authority_boundary=AUTHORITY)
+    assert run["status"] == "FAILED" and run["reason_code"] == "RUN_NOT_BOUND"
+    assert run["mission_id"] and "execute_mission_ingress" not in run.get("next_step", "")

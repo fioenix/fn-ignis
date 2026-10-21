@@ -11,7 +11,7 @@ from ignis.domain.watchlist import (
     WatchlistDefinition,
     WatchlistRun,
     WatchlistVersion,
-    parse_watchlist_definition,
+    definition_from_payload,
 )
 
 
@@ -34,7 +34,7 @@ def watchlist_from_rows(
     parsed = tuple(
         WatchlistVersion(
             int(version),
-            parse_watchlist_definition(definition if isinstance(definition, dict) else json.loads(definition)),
+            definition_from_payload(definition if isinstance(definition, dict) else json.loads(definition)),
             _time(created_at),
         )
         for version, definition, created_at in versions

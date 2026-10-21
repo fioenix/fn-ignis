@@ -43,7 +43,7 @@ CREATE INDEX IF NOT EXISTS idx_watchlist_runs_watchlist ON public.watchlist_runs
 
 -- A version is what earlier runs collected; changing it would rewrite their history. Deletion stays
 -- possible so that removing a workspace or watchlist cascades.
-CREATE OR REPLACE FUNCTION refuse_watchlist_version_update()
+CREATE OR REPLACE FUNCTION public.refuse_watchlist_version_update()
 RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = public, pg_temp
@@ -57,7 +57,9 @@ $$;
 DROP TRIGGER IF EXISTS refuse_watchlist_version_update ON public.watchlist_versions;
 CREATE TRIGGER refuse_watchlist_version_update
 BEFORE UPDATE ON public.watchlist_versions
-FOR EACH ROW EXECUTE FUNCTION refuse_watchlist_version_update();
+FOR EACH ROW EXECUTE FUNCTION public.refuse_watchlist_version_update();
+
+REVOKE ALL ON FUNCTION public.refuse_watchlist_version_update() FROM PUBLIC;
 
 -- Owner-only, as every other non-vocabulary table since 021.
 DO $$
@@ -73,5 +75,10 @@ BEGIN
         LOOP
             EXECUTE format('REVOKE ALL ON public.%I FROM %I', t, client_role);
         END LOOP;
+    END LOOP;
+    FOR client_role IN
+        SELECT rolname FROM pg_roles WHERE rolname IN ('anon', 'authenticated') ORDER BY rolname
+    LOOP
+        EXECUTE format('REVOKE ALL ON FUNCTION public.refuse_watchlist_version_update() FROM %I', client_role);
     END LOOP;
 END $$;

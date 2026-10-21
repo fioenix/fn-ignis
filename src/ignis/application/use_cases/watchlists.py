@@ -167,10 +167,20 @@ class StartWatchlistRunUseCase:
             )
         except (IgnisDomainException, ValueError) as exc:
             return _refused("INVALID", "INVALID_REQUEST", str(exc), watchlist_id=watchlist.id)
-        await self._repo.record_watchlist_run(mission.id, UUID(watchlist.id), version.version)
-        declared = await SetMissionDeclaredAccountsUseCase(self._repo, self._store).execute(
-            str(mission.id), run_brands(version.definition)
-        )
+        try:
+            await self._repo.record_watchlist_run(mission.id, UUID(watchlist.id), version.version)
+            declared = await SetMissionDeclaredAccountsUseCase(self._repo, self._store).execute(
+                str(mission.id), run_brands(version.definition)
+            )
+        except Exception as exc:
+            # The mission exists but belongs to no watchlist, or declares no brand; report it rather
+            # than hand back a run that would collect brand content without attribution.
+            return _refused(
+                "FAILED", "RUN_NOT_BOUND",
+                f"Mission {mission.shortcode} was created but could not be bound to the watchlist"
+                f" ({type(exc).__name__}); do not run ingress for it.",
+                watchlist_id=watchlist.id, mission_id=str(mission.id),
+            )
         return {
             "status": "CREATED",
             "watchlist_id": watchlist.id,
@@ -186,15 +196,15 @@ class StartWatchlistRunUseCase:
 
 
 def run_keywords(definition) -> List[str]:
-    """Every topic's keywords, then every brand's declared name, each once in first-seen order."""
-    terms: Dict[str, None] = {}
+    """Every topic's keywords, then every brand's declared name, each once ignoring case, in first-seen order."""
+    terms: Dict[str, str] = {}
     for topic in definition.topics:
         for keyword in topic.keywords:
-            terms.setdefault(keyword, None)
+            terms.setdefault(keyword.casefold(), keyword)
     for topic in definition.topics:
         for brand in topic.brands:
-            terms.setdefault(brand.declared_name, None)
-    return list(terms)
+            terms.setdefault(brand.declared_name.casefold(), brand.declared_name)
+    return list(terms.values())
 
 
 def run_brands(definition) -> List[Mapping[str, str]]:

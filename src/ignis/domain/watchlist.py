@@ -16,13 +16,18 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Mapping, Optional, Tuple
 
-from ignis.domain.author_identity import normalise_account_key
+from ignis.domain.author_identity import (
+    MAX_DECLARED_ACCOUNTS,
+    MAX_DECLARED_NAME_LENGTH,
+    declarable_account_key,
+)
 from ignis.domain.value_objects import PlatformType
 
 # Bounds that keep one run inside the per-channel daily request ceilings (spec FR-001, FR-002).
 MAX_TOPICS = 10
 MAX_KEYWORDS_PER_TOPIC = 20
 MAX_DISCOVERY_SHARE = 0.2
+MAX_CATEGORIES_PER_TOPIC = 20
 # Longest name, category, keyword or declared name; a search term or label, never a document.
 MAX_TEXT_LENGTH = 200
 
@@ -93,13 +98,26 @@ def _object(value: Any, allowed: frozenset, what: str) -> Mapping[str, Any]:
     return value
 
 
-def _text(value: Any, what: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise _invalid(f"{what} must be non-blank text.")
-    if len(value.strip()) > MAX_TEXT_LENGTH:
-        raise WatchlistDefinitionError("TEXT_TOO_LONG", f"{what} is longer than {MAX_TEXT_LENGTH} characters.")
-    # Vietnamese arrives composed or decomposed depending on the keyboard; one form keeps one digest.
-    return unicodedata.normalize("NFC", value.strip())
+def _clean(value: Any) -> Optional[str]:
+    """Stripped, composed text, or None when blank or holding a control character or lone surrogate,
+    which PostgreSQL cannot store and a digest cannot encode."""
+    if not isinstance(value, str):
+        return None
+    # Vietnamese arrives composed or decomposed depending on the keyboard; one form keeps one digest
+    # and one length.
+    text = unicodedata.normalize("NFC", value.strip())
+    if not text or any(unicodedata.category(character) in ("Cc", "Cs") for character in text):
+        return None
+    return text
+
+
+def _text(value: Any, what: str, limit: int = MAX_TEXT_LENGTH) -> str:
+    text = _clean(value)
+    if text is None:
+        raise _invalid(f"{what} must be non-blank text without control characters.")
+    if len(text) > limit:
+        raise WatchlistDefinitionError("TEXT_TOO_LONG", f"{what} is longer than {limit} characters.")
+    return text
 
 
 def _texts(value: Any, what: str) -> Tuple[str, ...]:
@@ -125,22 +143,26 @@ def _share(value: Any) -> float:
 def _brand(value: Any) -> WatchlistBrand:
     item = _object(value, _BRAND_KEYS, "A brand")
     platform = str(item.get("platform") or "").strip().lower()
-    account = normalise_account_key(item.get("account"))
-    name = item.get("declared_name")
-    if isinstance(name, str) and len(name.strip()) > MAX_TEXT_LENGTH:
-        raise WatchlistDefinitionError("TEXT_TOO_LONG", f"A declared_name is longer than {MAX_TEXT_LENGTH} characters.")
-    if platform not in BRAND_PLATFORMS or account is None or not isinstance(name, str) or not name.strip():
+    account = declarable_account_key(item.get("account"))
+    name = _clean(item.get("declared_name"))
+    # The same rules as set_mission_declared_accounts, so every saved brand can be declared on a run.
+    if platform not in BRAND_PLATFORMS or account is None or name is None or len(name) > MAX_DECLARED_NAME_LENGTH:
         raise WatchlistDefinitionError(
             "INVALID_BRAND",
-            f"A brand needs a platform among {', '.join(sorted(BRAND_PLATFORMS))}, an account and a declared_name.",
+            f"A brand needs a platform among {', '.join(sorted(BRAND_PLATFORMS))}, an account or profile"
+            f" link without spaces, and a declared_name of at most {MAX_DECLARED_NAME_LENGTH} characters.",
         )
-    return WatchlistBrand(platform, account, unicodedata.normalize("NFC", name.strip()))
+    return WatchlistBrand(platform, account, name)
 
 
 def _topic(value: Any) -> WatchlistTopic:
     item = _object(value, _TOPIC_KEYS, "A topic")
     name = _text(item.get("name"), "A topic name")
     categories = _texts(item.get("categories"), f"Categories of topic '{name}'")
+    if len(categories) > MAX_CATEGORIES_PER_TOPIC:
+        raise WatchlistDefinitionError(
+            "TOO_MANY_CATEGORIES", f"Topic '{name}' has more than {MAX_CATEGORIES_PER_TOPIC} categories."
+        )
     keywords = _texts(item.get("keywords"), f"Keywords of topic '{name}'")
     if not keywords:
         raise WatchlistDefinitionError("NO_KEYWORDS", f"Topic '{name}' needs at least one keyword.")
@@ -177,14 +199,37 @@ def parse_watchlist_definition(value: Any) -> WatchlistDefinition:
     topics = tuple(_topic(t) for t in raw_topics)
     if len({t.name.casefold() for t in topics}) != len(topics):
         raise WatchlistDefinitionError("DUPLICATE_TOPIC", "Two topics share a name.")
+    if len({(b.platform, b.account) for t in topics for b in t.brands}) > MAX_DECLARED_ACCOUNTS:
+        raise WatchlistDefinitionError(
+            "TOO_MANY_BRANDS", f"A watchlist names at most {MAX_DECLARED_ACCOUNTS} brand accounts, as a run declares them."
+        )
     return WatchlistDefinition(topics)
 
 
+def definition_from_payload(payload: Mapping[str, Any]) -> WatchlistDefinition:
+    """A stored, already validated definition, read without re-applying today's limits.
+
+    Versions are immutable, so a rule tightened later must not make an earlier version unreadable.
+    """
+    return WatchlistDefinition(tuple(
+        WatchlistTopic(
+            name=topic["name"],
+            categories=tuple(topic.get("categories") or ()),
+            keywords=tuple(topic.get("keywords") or ()),
+            brands=tuple(
+                WatchlistBrand(b["platform"], b["account"], b["declared_name"]) for b in topic.get("brands") or ()
+            ),
+            discovery_share=float(topic.get("discovery_share") or 0.0),
+        )
+        for topic in payload.get("topics") or ()
+    ))
+
+
 def watchlist_name(value: Any) -> Optional[str]:
-    """A watchlist's display name, stripped and composed, or None when blank or too long."""
-    if not isinstance(value, str) or not value.strip() or len(value.strip()) > MAX_TEXT_LENGTH:
-        return None
-    return unicodedata.normalize("NFC", value.strip())
+    """A watchlist's display name, stripped and composed, or None when blank, too long or holding a
+    control character."""
+    text = _clean(value)
+    return text if text is not None and len(text) <= MAX_TEXT_LENGTH else None
 
 
 def watchlist_name_key(name: str) -> str:
