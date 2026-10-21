@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 
@@ -10,6 +10,10 @@ TERMINAL = frozenset({'COMPLETED', 'CANCELLED', 'FAILED', 'INSUFFICIENT_EVIDENCE
 WORK_STATES = TERMINAL | {'ASSIGNED', 'RUNNING', 'WAITING', 'CANCEL_PENDING', 'HANDOFF_READY'}
 ASSIGNMENT_STATES = TERMINAL | {'ASSIGNED', 'ACTIVE', 'CANCEL_PENDING'}
 ACTIONS = frozenset({'ANALYZE', 'FOLLOW_UP'})
+# Hosts stamp occurred_at with their own clock while admission reads the store's clock (PostgreSQL
+# clock_timestamp() may run behind the host). A just-taken receipt may lead admission by this much;
+# it grants no freshness, which fresh_until alone bounds.
+RECEIPT_CLOCK_SKEW_ALLOWANCE = timedelta(seconds=5)
 
 
 def _literal(value, values):
@@ -266,6 +270,10 @@ def _work_reason(assignment, work, now, expected_epoch, expected_version, owners
             or _admission_reason(assignment, work, now))
 
 
+def _receipt_current(receipt, now):
+    return receipt.occurred_at <= now + RECEIPT_CLOCK_SKEW_ALLOWANCE and now < receipt.fresh_until
+
+
 def admit_work_start(*, assignment, work, receipt, now, expected_epoch, expected_version, ownership_fence, host_authorized):
     if host_authorized is not True:
         return ResearchAdmission(False, 'UNAUTHORIZED_HOST')
@@ -280,7 +288,7 @@ def admit_work_start(*, assignment, work, receipt, now, expected_epoch, expected
         return ResearchAdmission(False, 'STALE_EPOCH')
     if receipt.ownership_fence != work.ownership_fence:
         return ResearchAdmission(False, 'STALE_FENCE')
-    if not receipt.occurred_at <= now < receipt.fresh_until:
+    if not _receipt_current(receipt, now):
         return ResearchAdmission(False, 'EXECUTION_RECEIPT_NOT_CURRENT')
     if work.state != 'ASSIGNED':
         return ResearchAdmission(False, 'INVALID_TRANSITION')
@@ -577,7 +585,7 @@ def transition_research_work(*, work, command, assignment, now):
         if operation == 'RECORD_ACTIVITY':
             if work.state != 'RUNNING':
                 return ResearchTransition('REFUSED', work, 'INVALID_TRANSITION')
-            if not receipt.occurred_at <= now < receipt.fresh_until:
+            if not _receipt_current(receipt, now):
                 return ResearchTransition('REFUSED', work, 'EXECUTION_RECEIPT_NOT_CURRENT')
             return ResearchTransition('APPLIED', replace(work, version=work.version + 1))
         admission = admit_work_start(assignment=assignment, work=work, receipt=receipt, now=now,
