@@ -38,6 +38,38 @@ def quarantine_ambient_credentials(environment: MutableMapping[str, str]) -> Non
 
 quarantine_ambient_credentials(os.environ)
 
+
+def select_worker_postgres(environment: MutableMapping[str, str]) -> None:
+    """Point each pytest-xdist worker at its own PostgreSQL server.
+
+    Databases are per test, but roles are per server: the RLS and runtime-owner contracts create
+    and drop `anon`, `authenticated` and `ignis_test_runtime_owner`, and some assert a server has
+    none of them. Two workers on one server would break each other, so a parallel run that reaches
+    PostgreSQL needs one server per worker, listed comma-separated in
+    IGNIS_TEST_POSTGRES_DSN_POOL. A serial run is unaffected.
+    """
+    worker = environment.get("PYTEST_XDIST_WORKER", "")
+    if not worker.startswith("gw"):
+        return
+    pool = [dsn.strip() for dsn in environment.get("IGNIS_TEST_POSTGRES_DSN_POOL", "").split(",") if dsn.strip()]
+    if not pool:
+        if environment.get("IGNIS_TEST_POSTGRES_DSN", "").strip():
+            raise pytest.UsageError(
+                "A parallel run cannot share one PostgreSQL server between workers; set"
+                " IGNIS_TEST_POSTGRES_DSN_POOL to one server per worker, or run serially."
+            )
+        return
+    workers = int(environment.get("PYTEST_XDIST_WORKER_COUNT", "1"))
+    if workers > len(pool):
+        raise pytest.UsageError(
+            f"{workers} workers but {len(pool)} PostgreSQL servers in IGNIS_TEST_POSTGRES_DSN_POOL;"
+            " each worker needs its own."
+        )
+    environment["IGNIS_TEST_POSTGRES_DSN"] = pool[int(worker[2:])]
+
+
+select_worker_postgres(os.environ)
+
 from ignis.domain.entities import TrendSignal, TopicCluster  # noqa: E402
 from ignis.domain.value_objects import PlatformType, GeoCode  # noqa: E402
 
