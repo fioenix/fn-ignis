@@ -76,6 +76,9 @@ class PeriodItem:
     # The keywords whose query returned it, where the connector recorded them.
     query_keywords: Tuple[str, ...]
     observations: Tuple[Tuple[Optional[datetime], float, Mapping[str, Any]], ...]
+    # The source's first sighting in any run of the watchlist, read beyond the compared periods,
+    # so an item without a publication time keeps one period whichever comparison is asked.
+    first_seen: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +153,7 @@ class _Merged:
     relevant: bool
     query_keywords: set
     observations: List[Tuple[datetime, float, Mapping[str, Any]]]
+    first_seen: Optional[datetime] = None
 
 
 def _merge(items: Iterable[PeriodItem]) -> List[_Merged]:
@@ -167,6 +171,11 @@ def _merge(items: Iterable[PeriodItem]) -> List[_Merged]:
         entry.link = entry.link or item.link
         entry.relevant = entry.relevant or item.relevant
         entry.query_keywords.update(keyword.casefold() for keyword in item.query_keywords)
+        # A Google Trends source is a search term measured per dated appearance (above), so a
+        # source-wide first sighting would misplace a later appearance; it applies to posts only.
+        if item.channel != "google" and item.first_seen is not None and (
+                entry.first_seen is None or item.first_seen < entry.first_seen):
+            entry.first_seen = item.first_seen
         # Only an observation judged relevant can be counted; another run's judgment of the same
         # source does not qualify it (FR-010).
         if item.relevant:
@@ -192,7 +201,8 @@ def _belongs(entry: _Merged, queries: frozenset, single_topic: bool) -> bool:
 def _placed(entry: _Merged) -> Tuple[date, str, datetime]:
     """(local day, basis, counting anchor). Without a plausible publication time the first
     collection anchors the counting window as well as the day."""
-    first = min(observed for observed, _, _ in entry.observations)
+    first = min([observed for observed, _, _ in entry.observations]
+                + ([entry.first_seen] if entry.first_seen is not None else []))
     day, basis = place_observation(entry.published_at, first)
     return day, basis, entry.published_at if basis == "published" else first
 

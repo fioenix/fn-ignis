@@ -113,7 +113,9 @@ the count is shared by every session on the same store for the calendar day in A
 The defaults are 200 for YouTube and 50 for every other channel; raise one with
 `update_runtime_config` on `connector.<platform>.daily_request_ceiling`. A search that would pass
 the ceiling sends nothing to that channel and records it as `RATE_LIMITED` with a `daily_ceiling`
-note, while the other channels run. History is finite but never pruned on its own:
+note, while the other channels run. A pass counts every keyword it searches (Reels reads at most
+10), so a watchlist with more keywords than a channel's ceiling skips that channel until
+you raise it. History is finite but never pruned on its own:
 `scripts/prune_expired_observations.py` lists observations collected more than 13 months ago, and
 removes them with `--apply`, keeping any that a stored claim or recorded research work still cites.
 

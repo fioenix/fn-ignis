@@ -76,6 +76,8 @@ async def test_handle_extract_customer_pain_points():
         {"domain": "customer_inquiry", "term": term, "category": "question"}
         for term in ("?", "how", "price", "như thế nào", "giá")
     ]
+    # A mock keeps no request count, so it sets no daily ceiling.
+    repository.reserve_connector_requests = AsyncMock(side_effect=NotImplementedError)
     mock_comp = {
         "registry": MagicMock(),
         "repository": repository,

@@ -192,3 +192,27 @@ async def test_a_publication_time_without_an_offset_is_read_as_utc(listening):
     snapshot = await two_weeks(listening, extra=later)
     assert snapshot["status"] == "OK"
     assert indicator(channel(snapshot, "tiktok"), "views")["current"] == 600 + 50
+
+
+async def test_an_undated_item_first_seen_before_the_periods_stays_out_of_both(listening):
+    """T018: placement by first sighting reads runs before the compared periods too."""
+    early = PREVIOUS[0] - timedelta(days=3)
+    undated = {
+        early: [signal(PlatformType.TIKTOK, "7009", "matcha latte quán mới", None, at(early, 21), 50,
+                       metric_kind="views", likes=1, comments=0, shares=0)],
+        CURRENT[3]: [signal(PlatformType.TIKTOK, "7009", "matcha latte quán mới", None, at(CURRENT[3], 21), 80,
+                            metric_kind="views", likes=2, comments=0, shares=0)],
+    }
+    snapshot = await two_weeks(listening, extra=undated)
+    tiktok = channel(snapshot, "tiktok")
+    assert tiktok["basis"]["current"]["collection_date"] == 0
+    assert tiktok["basis"]["previous"]["collection_date"] == 0
+    assert indicator(tiktok, "views")["current"] == 600
+
+
+async def test_year_one_has_no_earlier_period_and_is_refused(listening):
+    """T018: comparing the first week of year 1 would need a week before it."""
+    _, _, _, watchlist_id = listening
+    refused = await call("handle_get_watchlist_period_snapshot", watchlist_id=watchlist_id,
+                         period_kind="week", period_start="0001-01-01")
+    assert refused["reason_code"] == "INVALID_PERIOD_START"

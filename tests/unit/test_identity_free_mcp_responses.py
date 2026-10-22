@@ -89,6 +89,8 @@ def _comment_components():
     repository.get_domain_lexicons.return_value = [
         {"domain": "customer_inquiry", "term": term, "category": "question"} for term in ("?", "giá")
     ]
+    # A mock keeps no request count, so it sets no daily ceiling.
+    repository.reserve_connector_requests = AsyncMock(side_effect=NotImplementedError)
     components = {"registry": MagicMock(), "repository": repository, "tiktok_auth_manager": AsyncMock()}
     components["registry"]._plugins = {}
     return components
