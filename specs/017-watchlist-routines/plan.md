@@ -2,9 +2,16 @@
 
 **Branch**: `codex/spec017-routine-setup` | **Date**: 2026-10-21 | **Spec**: [spec.md](spec.md)
 
-**Status**: Drafted under the owner's overnight delegation of 21/10/2026. Implementation depends on
-Spec 016 being merged and on the owner ratifying its constitution amendment; until then this
-branch carries the design only.
+**Status**: Drafted under the owner's overnight delegation of 21/10/2026; implemented 22/10/2026
+after Spec 016 merged and the amendment was ratified.
+
+**T001 record (22/10/2026)**: base `main` at `2f08c47`; 52 tools; constitution 2.2.1 (the Spec 016
+amendment ratified in 2.2.0); golden-set baseline of 22/10/2026 in the owner's local
+`.handoff/product/golden-set-runs/2026-10-22/` (scores also in Spec 016 T019). Host probe in
+`.handoff/spec017/host-probe.handoff.md`: a manual task created from this session fired locally in
+the repository folder, reached the local Ignis server, resolved the caller root (1 workspace, no
+`ROOT_REQUIRED`), and was saved in the session's Auto mode. The probe refines FR-007 and FR-020
+(spec clarifications of 22/10/2026) and contradicts nothing else in the Context.
 
 ## Summary
 
