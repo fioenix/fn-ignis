@@ -82,6 +82,9 @@ PostgreSQL corpus was not inspected because no connection was available in that 
   (research R10). Source keys derived from an account link are reported, not rewritten, because
   a key change re-identifies the source; there were none in the local stores. Delete was rejected
   because it loses the evidence; keep was rejected because identity would stay at rest.
+- Q: Is the dev Supabase store anonymised too? → A: No (owner decided 22/10/2026). It is a
+  development store, the script is tested on SQLite and PostgreSQL, and the anonymise run applies
+  to the caller store only. Legacy identity there, if any, stays at rest and was not inventoried.
 
 ## User Scenarios & Testing *(mandatory)*
 
