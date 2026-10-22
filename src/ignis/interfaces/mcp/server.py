@@ -3650,9 +3650,7 @@ async def handle_extract_customer_pain_points(
         tiktok_plugin = TikTokPlugin(auth_manager=comp.get("tiktok_auth_manager"))
 
     # This search goes to TikTok directly, not through the registry, so it reserves itself.
-    refusal = await daily_ceiling_refusal(
-        comp["repository"], tiktok_plugin, min(len(keywords), TikTokPlugin.max_search_keywords)
-    )
+    refusal = await daily_ceiling_refusal(comp["repository"], tiktok_plugin, len(keywords))
     if refusal is not None:
         return json.dumps({"status": "RATE_LIMITED", "reason": "daily_ceiling", "message": refusal},
                           ensure_ascii=False)

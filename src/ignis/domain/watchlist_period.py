@@ -171,7 +171,10 @@ def _merge(items: Iterable[PeriodItem]) -> List[_Merged]:
         entry.link = entry.link or item.link
         entry.relevant = entry.relevant or item.relevant
         entry.query_keywords.update(keyword.casefold() for keyword in item.query_keywords)
-        if item.first_seen is not None and (entry.first_seen is None or item.first_seen < entry.first_seen):
+        # A Google Trends source is a search term measured per dated appearance (above), so a
+        # source-wide first sighting would misplace a later appearance; it applies to posts only.
+        if item.channel != "google" and item.first_seen is not None and (
+                entry.first_seen is None or item.first_seen < entry.first_seen):
             entry.first_seen = item.first_seen
         # Only an observation judged relevant can be counted; another run's judgment of the same
         # source does not qualify it (FR-010).

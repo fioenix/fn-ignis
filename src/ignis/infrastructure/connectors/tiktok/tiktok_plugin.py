@@ -39,9 +39,6 @@ class TikTokPlugin(IConnectorPlugin):
     Extracts only public videos with valid canonical URLs from explore and search grids.
     """
 
-    # A keyword search reads at most this many keywords; the daily ceiling counts what is sent.
-    max_search_keywords = 10
-
     EXPLORE_URL = "https://www.tiktok.com/explore"
     SEARCH_BASE_URL = "https://www.tiktok.com/search?q="
 
@@ -316,7 +313,7 @@ class TikTokPlugin(IConnectorPlugin):
                 context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
 
-                for kw in keywords[: self.max_search_keywords]:
+                for kw in keywords[:10]:
                     kw_clean = kw.strip()
                     url = f"{self.SEARCH_BASE_URL}{urllib.parse.quote(kw_clean)}"
                     

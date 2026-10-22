@@ -232,3 +232,26 @@ async def test_the_count_is_what_a_capped_connector_sends(store):
 
     assert _outcome(result, "reels").status != ChannelHealthStatus.RATE_LIMITED
     assert _counts(store) == {"reels": 10}
+
+
+@pytest.mark.asyncio
+async def test_pain_points_count_every_tiktok_keyword_searched(store):
+    """TikTok search reads every keyword it is given, so fifteen keywords need fifteen requests."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import json
+
+    from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
+    from ignis.interfaces.mcp import server
+
+    repository = SqliteTrendRepository(str(store))
+    await repository.set_runtime_config("connector.tiktok.daily_request_ceiling", "10")
+    components = {"registry": MagicMock(), "repository": repository, "tiktok_auth_manager": AsyncMock()}
+    components["registry"]._plugins = {}
+
+    with patch("ignis.interfaces.mcp.server.get_components", return_value=components):
+        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new_callable=AsyncMock) as fetch:
+            refused = json.loads(await server.handle_extract_customer_pain_points(
+                keywords=[f"từ khoá {index}" for index in range(15)]))
+
+    assert refused["status"] == "RATE_LIMITED" and fetch.await_count == 0

@@ -114,7 +114,7 @@ mọi phiên dùng chung một store đều dùng chung bộ đếm của ngày 
 được 200 request, các kênh khác 50; muốn nâng trần thì đặt `connector.<platform>.daily_request_ceiling`
 bằng `update_runtime_config`. Lượt tìm nào vượt trần sẽ không gửi gì tới kênh đó và được ghi
 `RATE_LIMITED` kèm ghi chú `daily_ceiling`, còn các kênh khác vẫn chạy. Mỗi lượt tìm tính mọi từ
-khóa nó tìm (TikTok và Reels chỉ đọc tối đa 10 từ khóa), nên watchlist có nhiều từ khóa hơn trần của
+khóa nó tìm (Reels chỉ đọc tối đa 10 từ khóa), nên watchlist có nhiều từ khóa hơn trần của
 một kênh sẽ bỏ qua kênh đó cho tới khi bạn nâng trần. Ignis không tự xóa
 lịch sử: `scripts/prune_expired_observations.py` liệt kê các quan sát
 thu thập cách đây hơn 13 tháng và xóa chúng khi có `--apply`, trừ những quan sát mà một

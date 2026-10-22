@@ -198,6 +198,21 @@ def test_an_undated_item_first_seen_before_both_periods_is_in_neither():
     assert with_first["basis"]["previous"]["collection_date"] == 0
 
 
+def test_a_google_appearance_keeps_its_own_date_whatever_the_first_sighting():
+    """A Google Trends term is measured per dated appearance; an older sighting never moves it."""
+    import dataclasses
+
+    day = CURRENT.start + timedelta(days=1)
+    appearance = item("g:term", "google", at(day, 8), [(at(day, 20), 70, {})], keywords=("matcha latte",))
+    google_coverage = coverage("google", ALL_DAYS)
+    plain = cell(compare([appearance], outcomes=google_coverage), "google")
+    seen_earlier = dataclasses.replace(appearance, first_seen=at(CURRENT.previous().start - timedelta(days=9)))
+    with_first = cell(compare([seen_earlier], outcomes=google_coverage), "google")
+
+    assert with_first["basis"] == plain["basis"]
+    assert with_first["basis"]["current"]["published"] == 1
+
+
 def test_new_and_rising_terms_exclude_the_query_and_noise():
     tiktok = cell(compare(), "tiktok")
     terms = {t["term"] for t in tiktok["new_terms"]}

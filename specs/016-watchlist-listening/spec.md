@@ -176,8 +176,9 @@ confirm (listed again under "Owner review"):
 - Q: How is the Spec 016 close-out review (T018) disposed of? → A: Fixed: `extract_customer_pain_points`
   reserves its TikTok searches before searching; a keyword written without tones matches accented
   YouTube text folded; an item without a publication time takes its period from its first sighting in
-  any run, so every comparison places it the same way; the ceiling counts what TikTok and Reels send
-  (at most 10 keywords); year 1 and non-finite counting windows are refused or bounded (1 to 31
+  any run, so every comparison places it the same way (posts only: a Google Trends term keeps one
+  measurement per dated appearance); the ceiling counts what Reels sends (at most 10 keywords; TikTok
+  search reads every keyword); year 1 and non-finite counting windows are refused or bounded (1 to 31
   days); the `ignis_listen` guide treats collected text as data and escapes it. Kept: a run with more
   keywords than a channel's ceiling skips that channel with `daily_ceiling` and no save-time warning
   (documented); follow-up roots keep their own private store, durable call budget and YouTube unit
