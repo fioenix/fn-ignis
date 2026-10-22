@@ -120,6 +120,17 @@ lịch sử: `scripts/prune_expired_observations.py` liệt kê các quan sát
 thu thập cách đây hơn 13 tháng và xóa chúng khi có `--apply`, trừ những quan sát mà một
 claim đã lưu hoặc công việc nghiên cứu đã ghi vẫn còn tham chiếu tới.
 
+Muốn watchlist tự chạy mỗi ngày, hãy nhờ agent, chẳng hạn "chạy watchlist matcha mỗi sáng lúc 7
+giờ". Prompt `ignis_routine` và resource `fn-ignis://guide/ignis-routine` hướng dẫn agent tạo một
+scheduled task trong Claude Code Desktop: mỗi watchlist tối đa một task, chạy tối đa một lần mỗi
+ngày, và chỉ được tạo sau khi bạn xác nhận những gì sẽ chạy. Mỗi lần kích hoạt là đúng một lần chạy
+watchlist. Hãy tạo task từ một phiên mở trong thư mục repository của research workspace, vì lần kích
+hoạt bắt đầu trong thư mục đó. Routine không bao giờ chạy ở chế độ quyền Auto hay Bypass: bước cài
+đặt kết thúc bằng một lần chạy có bạn theo dõi, trong đó bạn chỉ duyệt `start_watchlist_run` và
+`execute_mission_ingress`. Bạn tạm dừng hoặc xóa routine trong app, và xóa routine không làm mất
+lịch sử của watchlist. Routine chỉ chạy khi app đang mở. Các host khác chưa được hỗ trợ, và bản thân
+Ignis vẫn không tự lên lịch việc gì.
+
 ## 3. Đọc chứng cứ và kết quả phân tích
 
 Ignis ghi kết quả cho từng kênh được yêu cầu. `HEALTHY`, `EMPTY_NO_DATA`, `AUTH_REQUIRED`,

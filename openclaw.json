@@ -33,13 +33,15 @@
       "market_research_pipeline",
       "voice_of_customer_audit",
       "ignis_track",
-      "ignis_listen"
+      "ignis_listen",
+      "ignis_routine"
     ],
     "resources": [
       "fn-ignis://sop/market-research",
       "fn-ignis://methodology/opportunity-index",
       "fn-ignis://guide/ignis-track",
-      "fn-ignis://guide/ignis-listen"
+      "fn-ignis://guide/ignis-listen",
+      "fn-ignis://guide/ignis-routine"
     ]
   }
 }

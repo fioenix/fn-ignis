@@ -20,10 +20,11 @@ Returns the guide, preceded by the watchlist identifier when one is given. Refus
    first run will ask for and how to pause;
    wait for confirmation.
 3. **Create**: the host scheduling call with task identifier `ignis-watchlist-<first 8 characters of
-   the watchlist id>`, daily cron, the routine prompt template filled in, and the task's working
-   folder set to the research workspace's repository (refusing a home or root folder). Setup ends
-   with an attended "Run now" that approves only `start_watchlist_run` and
-   `execute_mission_ingress`; never from an auto or bypass permission mode.
+   the watchlist id>`, daily cron and the routine prompt template filled in, from a session whose
+   folder is the research workspace's repository (the host starts firings there; a home or root
+   folder is refused). A task saved in an auto or bypass permission mode is paused until the
+   person changes it. Setup ends with an attended "Run now" that approves only
+   `start_watchlist_run` and `execute_mission_ingress`.
 4. **Routine prompt template**: self-contained; one `start_watchlist_run`, collection via
    `execute_mission_ingress`, ceilings respected, stop at terminal state, report mission id and
    per-channel status; prohibitions: no backfill, no broadening, no watchlist edits, no publishing,

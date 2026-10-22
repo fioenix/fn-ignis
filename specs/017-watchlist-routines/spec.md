@@ -92,6 +92,22 @@ confirm (listed again under "Owner review"):
 - Q: What if the host has no scheduling capability? → A: The guide says so and stops. It never falls
   back to OS schedulers (cron, launchd, Task Scheduler) or to a loop inside Ignis.
 
+### Session 2026-10-22
+
+- Q: Are the agent decisions of 21/10 confirmed? → A: Yes, all five listed under "Owner review"
+  (owner, 22/10/2026). The constitution amendment they waited on is ratified (2.2.0, 21/10/2026).
+- Q: Where does a firing start, given the T001 probe? → A: In the folder of the session that
+  created the task: `create_scheduled_task` takes no working folder. Setup therefore checks that
+  its own folder is the research workspace's repository, or that `IGNIS_CALLER_ROOT` is set, before
+  creating; a first run that reports `ROOT_REQUIRED` means the task is deleted and set up again
+  from the right folder (agent decided; basis: `.handoff/spec017/host-probe.handoff.md`).
+- Q: The probe showed a task saved in the creating session's Auto mode. How does FR-007 hold? →
+  A: Setup reads the creation result; a task saved in an Auto or Bypass mode is paused at once
+  and stays paused until the person changes its mode in the app (agent decided; basis: the probe
+  and the owner's confirmation of FR-007).
+- Q: Is the new prompt and resource (OG-2) accepted? → A: Yes, under the owner's go-ahead of
+  22/10/2026 to implement Spec 017; no tool or signature changes.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Set up a daily routine on request (Priority: P1)
@@ -195,14 +211,15 @@ no OS scheduler entry, no Ignis-side loop; the agent tells the user to run the w
   create or revise watchlists, or publish anything.
 - **FR-006**: Rendering a period view on a firing MUST happen only if the user asked for it at setup;
   the artifact MUST stay local.
-- **FR-007**: The guide MUST refuse to create a routine from an auto or bypass permission mode, and MUST
-  end setup with an attended "Run now" that grants approvals for only `start_watchlist_run` and
+- **FR-007**: The guide MUST refuse to let a routine run in an auto or bypass permission mode (a task
+  the host saved in such a mode is paused until the person changes it), and MUST end setup with an attended "Run now" that grants approvals for only `start_watchlist_run` and
   `execute_mission_ingress`; a routine without them MUST be described to the user as attended.
 - **FR-008**: Removing a routine MUST require the user's confirmation and MUST leave watchlist history
   untouched.
 - **FR-020**: Each routine MUST start in a validated working folder that resolves the research
-  workspace's caller root (the repository folder, or an operator-set `IGNIS_CALLER_ROOT`); setup MUST
-  refuse a home or root folder.
+  workspace's caller root (the repository folder, or an operator-set `IGNIS_CALLER_ROOT`); since the
+  host starts a firing in the creating session's folder, setup MUST check that folder and refuse a
+  home or root folder.
 - **FR-009**: Claude Code Desktop local scheduled tasks, as confirmed by the T001 probe on current
   versions, MUST be the supported host; any other host MUST be
   reported as unsupported until a recorded probe shows it reaches the local Ignis server.
@@ -247,7 +264,7 @@ no OS scheduler entry, no Ignis-side loop; the agent tells the user to run the w
 
 ## Owner review
 
-Agent decisions under the owner's delegation of 21/10/2026, to confirm or change:
+Agent decisions under the owner's delegation of 21/10/2026, confirmed by the owner on 22/10/2026:
 
 1. No Ignis-side record of routines; no new tool or table (FR-011).
 2. One routine per watchlist; at most daily; proposed default time 07:00 local (FR-004).
