@@ -277,3 +277,40 @@ def test_threads_values_read_the_field_that_means_them(metadata, expected):
 ])
 def test_channel_values_never_mix_units(channel, metric, metadata, expected):
     assert channel_values(channel, metric, metadata) == expected
+
+
+def test_only_a_relevant_observation_is_counted():
+    day = CURRENT.start
+    judged = item("tt:5", "tiktok", at(day), [(at(day, 20), 10, {"likes": 1})], metadata=TIKTOK)
+    unjudged = item("tt:5", "tiktok", at(day), [(at(day + timedelta(days=2)), 9000, {"likes": 90})],
+                    metadata=TIKTOK, relevant=False)
+    only = [i for i in items() if i.channel != "tiktok"] + [judged, unjudged]
+    assert indicator(cell(compare(only), "tiktok"), "views")["current"] == 10
+
+
+def test_each_google_appearance_is_measured_in_its_own_period():
+    trends = [PeriodCoverage("google", "HEALTHY", ("matcha latte",), at(day, 22)) for day in ALL_DAYS]
+    previous_day, current_day = CURRENT.previous().start, CURRENT.start
+    google = [item("g:matcha latte", "google", at(day), [(at(day, 20), value, {})])
+              for day, value in ((previous_day, 100), (current_day, 300))]
+    interest = indicator(cell(compare(google, outcomes=trends), "google"), "interest")
+    assert (interest["previous"], interest["current"]) == (100, 300)
+
+
+def test_a_recorded_query_from_a_removed_topic_keeps_the_item_out():
+    day = CURRENT.start
+    jacket = item("j:1", "youtube", at(day), [(at(day, 20), 1, {})], title="áo khoác", keywords=("áo khoác",))
+    assert indicator(cell(compare(items() + [jacket]), "youtube"), "new_uploads")["current"] == 2
+
+
+def test_terms_never_span_the_title_and_the_excerpt():
+    day = CURRENT.start
+    post = PeriodItem(source_id="th:1", channel="tiktok", published_at=at(day), title="matcha latte trà",
+                      excerpt="sữa ngon", link=None, relevant=True, query_keywords=("matcha latte",),
+                      observations=((at(day, 20), 5, {**TIKTOK, "likes": 1}),))
+    terms = {t["term"] for t in cell(compare(items() + [post]), "tiktok")["new_terms"]}
+    assert "trà sữa" in terms  # from tt:2's title, where it really occurs
+    assert not any(term.startswith("trà ") and term.endswith("sữa") for term in terms if term != "trà sữa")
+    assert "latte trà" in terms and "sữa ngon" in terms
+    boundary = {t["term"]: t["current_items"] for t in cell(compare(items() + [post]), "tiktok")["new_terms"]}
+    assert boundary["trà sữa"] == 1  # th:1 must not add a second "trà sữa" across its fields

@@ -154,9 +154,10 @@ class _Merged:
 
 def _merge(items: Iterable[PeriodItem]) -> List[_Merged]:
     """One entry per source, so two runs that saw the same post count it once (SC-001)."""
-    merged: Dict[Tuple[str, str], _Merged] = {}
+    merged: Dict[Tuple[str, str, Optional[datetime]], _Merged] = {}
     for item in items:
-        key = (item.channel, item.source_id)
+        # A Google Trends source is a search term; each appearance is its own dated measurement.
+        key = (item.channel, item.source_id, item.published_at if item.channel == "google" else None)
         entry = merged.get(key)
         if entry is None:
             entry = merged[key] = _Merged(item.source_id, item.channel, item.published_at, item.title,
@@ -166,7 +167,10 @@ def _merge(items: Iterable[PeriodItem]) -> List[_Merged]:
         entry.link = entry.link or item.link
         entry.relevant = entry.relevant or item.relevant
         entry.query_keywords.update(keyword.casefold() for keyword in item.query_keywords)
-        entry.observations.extend(obs for obs in item.observations if obs[0] is not None)
+        # Only an observation judged relevant can be counted; another run's judgment of the same
+        # source does not qualify it (FR-010).
+        if item.relevant:
+            entry.observations.extend(obs for obs in item.observations if obs[0] is not None)
     return [entry for entry in merged.values() if entry.observations]
 
 
@@ -175,12 +179,12 @@ def _mentions(text: str, keyword: str) -> bool:
 
 
 def _belongs(entry: _Merged, queries: frozenset, single_topic: bool) -> bool:
-    """A one-topic watchlist collected every item for that topic. Otherwise the query that found
-    the item decides; the item's text, word by word, decides only when no query was recorded."""
-    if single_topic:
-        return True
+    """The query that found the item decides, even after its topic left the watchlist. Without a
+    recorded query, a one-topic watchlist holds the item; otherwise its text decides, word by word."""
     if entry.query_keywords:
         return bool(entry.query_keywords & queries)
+    if single_topic:
+        return True
     text = f"{entry.title} {entry.excerpt}".casefold()
     return any(_mentions(text, keyword) for keyword in queries)
 
@@ -207,9 +211,12 @@ _NOT_WORDS = re.compile(r"https?://\S+|@\[[^\]]*\]|@\S+|\[link\]", re.IGNORECASE
 
 def _terms(entry: _Merged, keywords: frozenset, noise: frozenset) -> set:
     """Two-word terms: one Vietnamese syllable rarely carries the meaning a term needs."""
-    text = _NOT_WORDS.sub(" ", f"{entry.title} {entry.excerpt}").casefold()
-    tokens = [t for t in _TOKEN.findall(text) if len(t) > 1 and not t.isdigit() and t not in noise]
-    pairs = {f"{a} {b}" for a, b in zip(tokens, tokens[1:])}
+    pairs = set()
+    # Title and excerpt are paired apart, so no term spans the boundary between them.
+    for field_text in (entry.title, entry.excerpt):
+        text = _NOT_WORDS.sub(" ", field_text or "").casefold()
+        tokens = [t for t in _TOKEN.findall(text) if len(t) > 1 and not t.isdigit() and t not in noise]
+        pairs.update(f"{a} {b}" for a, b in zip(tokens, tokens[1:]))
     return {pair for pair in pairs if not any(pair in keyword for keyword in keywords)}
 
 
