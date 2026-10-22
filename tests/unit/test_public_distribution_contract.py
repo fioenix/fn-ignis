@@ -875,7 +875,7 @@ SMOKE_SCRIPT = REPO / "scripts" / "wheel_mcp_smoke.py"
 FAKE_SERVER = r'''
 import json, sys, time
 mode = sys.argv[1]
-tools = int(sys.argv[2]) if len(sys.argv) > 2 else 51
+tools = int(sys.argv[2]) if len(sys.argv) > 2 else 52
 if mode == "banner":
     print("starting worker loop", flush=True)
 for raw in sys.stdin:
@@ -939,6 +939,7 @@ for raw in sys.stdin:
             "save_watchlist",
             "set_mission_declared_accounts",
             "start_watchlist_run",
+            "get_watchlist_period_snapshot",
             "submit_host_browser_search",
             "submit_mission_claims",
             "submit_mission_evidence_qualifications",
@@ -985,7 +986,7 @@ def _smoke():
     return wheel_mcp_smoke
 
 
-def _fake(tmp_path, mode, tools=51) -> list[str]:
+def _fake(tmp_path, mode, tools=52) -> list[str]:
     import sys
 
     server = tmp_path / "fake_server.py"
@@ -1011,7 +1012,7 @@ def test_a_wrong_tool_count_fails_the_smoke(tmp_path):
     module = _smoke()
     import pytest
 
-    with pytest.raises(module.SmokeFailure, match="expected 51 tools, discovered 39"):
+    with pytest.raises(module.SmokeFailure, match="expected 52 tools, discovered 39"):
         module.run_smoke(_fake(tmp_path, "ok", tools=39), response_timeout=10, exit_timeout=10)
 
 
@@ -1115,7 +1116,7 @@ cd "$(dirname "$0")/.."
 env > bootstrap-env.txt
 [ "${FAKE_BOOTSTRAP_FAIL:-}" = "1" ] && { echo "boom" >&2; exit 3; }
 mkdir -p .venv/bin
-printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-51}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
+printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-52}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
 chmod +x .venv/bin/python
 printf 'DATABASE_URL=sqlite:///ignis.db\n' > .env
 "$FAKE_PYTHON" - <<'PY'
@@ -1467,7 +1468,7 @@ if args[0] == "pull":
     print("Digest: " + os.environ["FAKE_DOCKER_REPO_DIGEST"].split("@", 1)[1])
     sys.exit(0)
 if args[0] == "run":
-    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "51"])
+    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "52"])
 if args[:2] == ["image", "rm"]:
     sys.exit(0)
 print("unexpected docker call: " + " ".join(args), file=sys.stderr)
@@ -1852,15 +1853,15 @@ def _mutate(root: Path, relative: str, pattern: str, replacement: str) -> None:
 
 # (control name, file, regex, replacement, contract test it must turn red)
 NEGATIVE_CONTROLS = (
-    ("AGENTS tool count", "AGENTS.md", r"all 51 FastMCP tools", "all 39 FastMCP tools",
+    ("AGENTS tool count", "AGENTS.md", r"all 52 FastMCP tools", "all 39 FastMCP tools",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("CLAUDE tool count", "CLAUDE.md", r"All 51 tools", "All 39 tools",
+    ("CLAUDE tool count", "CLAUDE.md", r"All 52 tools", "All 39 tools",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("BACKLOG branch tool count", "BACKLOG.md", r"\*\*51 tools\*\*", "**39 tools**",
+    ("BACKLOG branch tool count", "BACKLOG.md", r"\*\*52 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("README tool count", "README.md", r"\*\*51 tools\*\*", "**39 tools**",
+    ("README tool count", "README.md", r"\*\*52 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("user guide tool count", "docs/USER_GUIDE.md", r"\*\*51 tools\*\*", "**39 tools**",
+    ("user guide tool count", "docs/USER_GUIDE.md", r"\*\*52 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
     ("README migration endpoint", "README.md", r"`sql/032_watchlists\.sql`", "`sql/024_youtube_quota_ledger.sql`",
      "test_install_and_upgrade_guidance_reaches_the_newest_migration"),

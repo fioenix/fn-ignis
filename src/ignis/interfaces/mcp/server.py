@@ -3205,6 +3205,25 @@ async def start_watchlist_run(
     )
 
 
+async def handle_get_watchlist_period_snapshot(
+    watchlist_id: str, period_kind: str, period_start: Optional[str] = None
+) -> str:
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+
+    comp = get_components()
+    result = await GetWatchlistPeriodSnapshotUseCase(comp["repository"], comp["workspace_store"]).execute(
+        watchlist_id, period_kind, period_start
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+@mcp.tool(name="get_watchlist_period_snapshot", description="Read one complete listening period of a watchlist (day, Monday-to-Sunday week or calendar month, in Asia/Ho_Chi_Minh) against the period before it: per topic and channel, that channel's own indicators in their own units, or not_comparable with the missing days; rising and new terms; and up to three items with content only. Refuses a period that has not ended yet. Collects nothing; render it with the ignis_listen guide.")
+async def get_watchlist_period_snapshot(
+    watchlist_id: str, period_kind: str, period_start: Optional[str] = None
+) -> str:
+    return await handle_get_watchlist_period_snapshot(watchlist_id, period_kind, period_start)
+
+
 @mcp.tool(name="get_mission_analysis", description="Retrieve full strategic analysis payload (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) for in-chat Native Artifact rendering.")
 async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
     return await handle_get_mission_analysis(mission_id=mission_id, limit=limit, platform=platform)

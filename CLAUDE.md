@@ -117,7 +117,7 @@ Before completing changes or cutting a release, verify these three checklist gat
 
 ### Checklist B: Harness Autonomy & Decoupling
 - [ ] FastMCP server instructions and tool definitions do NOT dictate mandatory agent workflows.
-- [ ] All 51 tools remain callable according to their independent contracts.
+- [ ] All 52 tools remain callable according to their independent contracts.
 - [ ] Output formatting is adapted to conversational context, not forced into rigid report templates.
 
 ### Checklist C: Pre-Release & Version Bump Gate

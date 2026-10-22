@@ -7,7 +7,7 @@ lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân t
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
 **Ranh giới phát hành:** Nhánh này đang triển khai Spec 011 và chưa được phát hành. Mã nguồn
-và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 51 tool theo
+và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 52 tool theo
 nhiệm vụ được mô tả ở đây. Không dùng image đã phát hành để kiểm chứng nhánh này.
 
 ## Hợp đồng sản phẩm
@@ -72,7 +72,7 @@ chỉ nằm tại `src/ignis/infrastructure/templates/html/`.
 
 ## Năng lực dành cho agent
 
-MCP server của nhánh hiện có **51 tools**. Mô tả tool do server đang chạy trả về là nguồn
+MCP server của nhánh hiện có **52 tools**. Mô tả tool do server đang chạy trả về là nguồn
 chuẩn cho tham số. Một số thao tác đại diện:
 
 - `create_attention_mission` và `confirm_market_brief` xác lập câu hỏi và phạm vi;
