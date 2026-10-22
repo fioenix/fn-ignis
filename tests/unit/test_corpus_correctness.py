@@ -111,6 +111,8 @@ def _repository(lexicon_terms: Optional[List[str]] = None) -> AsyncMock:
     )
     repo.save_signals = AsyncMock(side_effect=lambda signals: len(signals))
     repo.get_self_accounts = AsyncMock(return_value=[])
+    # A mock keeps no request count, so it sets no daily ceiling.
+    repo.reserve_connector_requests = AsyncMock(side_effect=NotImplementedError)
     return repo
 
 
