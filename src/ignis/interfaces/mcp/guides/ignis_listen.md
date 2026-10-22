@@ -57,8 +57,10 @@ Also:
 - `uncounted_items` are items Ignis listed but could not count for that indicator, because the
   platform did not report the value or no observation fell within seven days of publication. Show
   the count; do not estimate their values.
-- A `relative` change is a ratio: 0.5 is 50 percent more, -0.2 is 20 percent less. Show both
-  `absolute` and `relative`; a change on a small base is still a small number of items.
+- `relative` is the change as a ratio of the previous value: 0.5 means half as much again, -0.2
+  means a fifth less. Show it exactly as the snapshot gives it, next to `absolute`; do not convert
+  it into a percentage or round it, because the view must contain no number the snapshot lacks. A
+  change on a small base is still a small number of items.
 - `rising_terms` and `new_terms` are two-word terms with item counts, not topics or themes. Show
   the term, `current_items`, `previous_items` and its `basis`; do not group or rename them.
 - Items carry content only. Never add an author, an account, a handle or a profile link, and
