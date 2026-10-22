@@ -6,7 +6,13 @@ expired when it was collected (`observed_at`, the ingestion clock) before the cu
 calendar day, --older-than-months earlier, at midnight in Asia/Ho_Chi_Minh. An expired observation
 is kept while a stored claim cites it or recorded research work binds it; every other expired
 observation is removed, and its mission evidence and qualification rows go with it through the
-schema's cascades (owner decision, 22/10/2026). Sources are kept.
+schema's cascades (owner decision, 22/10/2026). Sources are kept. A store that still holds legacy
+trend_signals rows keeps its most recently collected observation, because a store with those rows
+and no observation fails the readiness check on its next open.
+
+With --apply, nothing can write a new reference while the run decides and deletes: SQLite holds
+its write lock from the first read, and PostgreSQL locks the referencing tables in SHARE mode, so a
+claim cannot be bound to an observation in the middle of a run and then lose it to the cascade.
 
 A dry run is the default and lists what would be removed; --apply removes it in one transaction
 and reads back. A PostgreSQL DSN is read from the environment variable named by
@@ -63,11 +69,8 @@ def _instant(value: Any) -> Optional[datetime]:
 
 
 def _plan(read: Callable[[str], Iterable[tuple]], tables: set, limit: datetime) -> Dict[str, Any]:
-    expired = {
-        str(row_id)
-        for row_id, observed in read("SELECT id, observed_at FROM observations")
-        if (instant := _instant(observed)) is not None and instant < limit
-    }
+    collected = {str(row_id): _instant(observed) for row_id, observed in read("SELECT id, observed_at FROM observations")}
+    expired = {row_id for row_id, instant in collected.items() if instant is not None and instant < limit}
     kept: Counter = Counter()
     keep = set()
     for table, reason in KEEPING_REFERENCES:
@@ -77,14 +80,20 @@ def _plan(read: Callable[[str], Iterable[tuple]], tables: set, limit: datetime) 
         held = (expired & cited) - keep
         kept[reason] += len(held)
         keep |= held
-    removed = sorted(expired - keep)
+    removable = expired - keep
+    legacy = "trend_signals" in tables and bool(read("SELECT EXISTS (SELECT 1 FROM trend_signals)")[0][0])
+    if legacy and removable and len(removable) == len(collected):
+        newest = max(removable, key=lambda row_id: (collected[row_id], row_id))
+        kept["readiness"] += 1
+        removable = removable - {newest}
+    removed = sorted(removable)
     missions: Counter = Counter()
     if "mission_evidence" in tables:
         doomed = set(removed)
         missions.update(str(m) for m, o in read("SELECT mission_id, observation_id FROM mission_evidence") if str(o) in doomed)
     return {
         "expired": len(expired),
-        "kept": {reason: kept[reason] for reason in ("claim", "research_work")},
+        "kept": {reason: kept[reason] for reason in ("claim", "research_work", "readiness")},
         "to_remove": len(removed),
         "ids": removed,
         "mission_evidence_by_mission": dict(sorted(missions.items())),
@@ -121,6 +130,8 @@ def _sqlite(path: Path, months: int, now: datetime, apply: bool) -> Dict[str, An
             conn.execute(f"DELETE FROM observations WHERE id IN ({', '.join('?' for _ in ids)})", tuple(ids))
 
         with conn:
+            if apply:
+                conn.execute("BEGIN IMMEDIATE")
             return _run("sqlite", tables, lambda q: conn.execute(q).fetchall(), delete, months, now, apply)
     finally:
         conn.close()
@@ -132,6 +143,7 @@ def _postgres(variable: str, months: int, now: datetime, apply: bool) -> Dict[st
         raise SystemExit(f"The environment variable {variable} is not set.")
     try:
         import psycopg
+        from psycopg import sql
 
         with psycopg.connect(dsn) as conn:
             if not apply:
@@ -146,6 +158,15 @@ def _postgres(variable: str, months: int, now: datetime, apply: bool) -> Dict[st
 
             def delete(ids: Sequence[str]) -> None:
                 conn.execute("DELETE FROM public.observations WHERE id = ANY(%s::uuid[])", (list(ids),))
+
+            if apply:
+                referencing = [table for table, _ in KEEPING_REFERENCES if table in tables]
+                if referencing:
+                    conn.execute(
+                        sql.SQL("LOCK TABLE {} IN SHARE MODE").format(
+                            sql.SQL(", ").join(sql.Identifier("public", table) for table in referencing)
+                        )
+                    )
 
             report = _run("postgres", tables, lambda q: conn.execute(q).fetchall(), delete, months, now, apply)
             conn.commit() if apply else conn.rollback()

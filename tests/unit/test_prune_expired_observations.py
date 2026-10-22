@@ -21,6 +21,7 @@ from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendReposi
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "prune_expired_observations.py"
 sys.path.insert(0, str(ROOT / "scripts"))
+import prune_expired_observations  # noqa: E402
 from prune_expired_observations import cutoff  # noqa: E402
 
 NOW = datetime.now(timezone.utc)
@@ -92,7 +93,7 @@ def test_a_dry_run_lists_only_unreferenced_expired_observations(seeded):
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     assert report["mode"] == "dry-run" and report["older_than_months"] == 13
-    assert report["expired"] == 3 and report["kept"] == {"claim": 1, "research_work": 0}
+    assert report["expired"] == 3 and report["kept"] == {"claim": 1, "research_work": 0, "readiness": 0}
     assert sorted(report["ids"]) == sorted([ids["old_free"], ids["old_evidence"]])
     assert report["mission_evidence_by_mission"] == {ids["mission"]: 1}
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before, "A dry run must not write"
@@ -130,3 +131,52 @@ def test_refuses_a_missing_store_and_a_zero_retention(tmp_path):
     missing = tmp_path / "absent.sqlite3"
     assert _run("--sqlite", str(missing), "--apply").returncode != 0 and not missing.exists()
     assert _run("--sqlite", str(missing), "--older-than-months", "0").returncode != 0
+
+
+def test_a_store_with_legacy_signals_keeps_one_observation_and_still_opens(tmp_path):
+    path = tmp_path / "legacy.sqlite3"
+    ids = _seed(path)
+    conn = sqlite3.connect(path)
+    conn.execute("DELETE FROM mission_claim_evidence")
+    conn.execute("DELETE FROM observations WHERE id = ?", (ids["recent"],))
+    conn.execute(
+        "INSERT INTO trend_signals (id, platform, raw_title, metric_value, captured_at)"
+        " VALUES (?, 'youtube', 'áo khoác', 0, ?)",
+        (str(uuid.uuid4()), OLD),
+    )
+    conn.commit()
+    conn.close()
+
+    report = json.loads(_run("--sqlite", str(path), "--apply").stdout)
+
+    assert report["kept"]["readiness"] == 1 and report["readback"]["removed"] == 2
+    assert len(_ids(path, "observations")) == 1
+    repository = SqliteTrendRepository(str(path))
+    asyncio.run(repository._ensure_schema())  # The readiness check refuses a store with no observation.
+    asyncio.run(repository.close())
+
+
+def test_apply_holds_the_write_lock_while_it_decides(seeded, monkeypatch):
+    path, ids = seeded
+    original = prune_expired_observations._plan
+    attempts = []
+
+    def plan_with_a_concurrent_claim(read, tables, limit):
+        other = sqlite3.connect(path, timeout=0)
+        try:
+            other.execute(
+                "INSERT INTO mission_claim_evidence (id, claim_id, observation_id, role) VALUES (?, ?, ?, 'CONTEXT')",
+                (str(uuid.uuid4()), str(uuid.uuid4()), ids["old_free"]),
+            )
+            other.commit()
+            attempts.append("written")
+        except sqlite3.OperationalError as error:
+            attempts.append(str(error))
+        finally:
+            other.close()
+        return original(read, tables, limit)
+
+    monkeypatch.setattr(prune_expired_observations, "_plan", plan_with_a_concurrent_claim)
+    prune_expired_observations._sqlite(path, 13, NOW, apply=True)
+
+    assert attempts and all("locked" in attempt for attempt in attempts), attempts

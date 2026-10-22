@@ -681,21 +681,6 @@ class ConnectorPluginRegistry:
             blocked_reasons[plugin_id] = await self._keyword_search_blocked_reason(plugin)
             if boundary_guard is not None:
                 boundary_guard()
-            ceiling_note = None
-            if blocked_reasons[plugin_id] is None:
-                ceiling_note = await self._daily_ceiling_note(plugin, len(keywords))
-            if ceiling_note is not None:
-                outcomes[plugin_id] = SurfaceProbeResult(
-                    platform=plugin.platform.value,
-                    connector_surface=plugin_id,
-                    status=ChannelHealthStatus.RATE_LIMITED,
-                    signals_collected=0,
-                    note=ceiling_note,
-                    authority_tier=provenance[plugin_id]["authority_tier"],
-                    connector_path=provenance[plugin_id]["connector_path"],
-                    connector_revision=provenance[plugin_id]["connector_revision"],
-                )
-                continue
             attestations[plugin_id] = self._attestation_for(plugin)
             enabled_plugins.append(plugin)
             tasks.append((plugin, breaker, attestations[plugin_id]))
@@ -712,6 +697,8 @@ class ConnectorPluginRegistry:
             result = await self._safe_search(
                 plugin, breaker, keywords, geo, timeframe, custom_timeframe, limit,
                 attestation=attestation, trigger=trigger,
+                # A surface that already knows it cannot search sends nothing, so it spends nothing.
+                count_requests=blocked_reasons.get(plugin.plugin_id) is None,
             )
             if boundary_guard is not None:
                 boundary_guard()
@@ -989,7 +976,14 @@ class ConnectorPluginRegistry:
         limit: Optional[int] = None,
         attestation: Optional[SearchAttestation] = None,
         trigger: IngressTrigger = IngressTrigger.REQUESTED,
+        count_requests: bool = True,
     ) -> List[TrendSignal]:
+        # Every keyword search passes here, so the daily ceiling holds on every path. A refusal is
+        # not a connector failure and leaves the circuit breaker alone.
+        if count_requests:
+            ceiling_note = await self._daily_ceiling_note(plugin, len(keywords))
+            if ceiling_note is not None:
+                raise ConnectorQuotaExceededException(ceiling_note)
         try:
             import inspect
             sig = inspect.signature(plugin.search_signals)

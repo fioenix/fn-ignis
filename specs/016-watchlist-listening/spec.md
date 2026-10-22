@@ -166,6 +166,13 @@ confirm (listed again under "Owner review"):
   observation, and they are removed with it through the schema's cascades (owner decided
   22/10/2026). Expiry uses the collection time, 13 calendar months back to midnight in
   Asia/Ho_Chi_Minh; sources are kept.
+- Q: What does review of PR #68 change? → A: The ceiling check sits where every keyword search is
+  dispatched, so the ingress keyword probe is bounded too; SQLite reservations go through the
+  repository's write lock; the retention run holds the write lock (SQLite) or SHARE locks on the
+  referencing tables (PostgreSQL) from its first read to its commit, so a claim bound mid-run is
+  not stripped; and a store that still holds legacy `trend_signals` rows keeps its most recently
+  collected observation, since the readiness check refuses such a store with no observation
+  (agent decided; basis: Codex review of 22/10/2026).
 
 ## User Scenarios & Testing *(mandatory)*
 

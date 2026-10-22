@@ -462,7 +462,7 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 if self._mem_conn is None:
                     conn.close()
 
-        return await asyncio.to_thread(_sync_reserve)
+        return await self._run_write(_sync_reserve)
 
     async def reserve_youtube_quota(
         self,

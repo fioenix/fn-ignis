@@ -5,6 +5,7 @@ in the store, so separate sessions share the count. A pass that does not fit sto
 with RATE_LIMITED and a `daily_ceiling` note before any request is sent; the other channels run.
 """
 
+import asyncio
 import sqlite3
 from datetime import datetime, timezone
 from typing import List
@@ -151,3 +152,37 @@ async def test_a_store_without_a_ledger_sets_no_ceiling():
 
     assert _outcome(result, "tiktok").status != ChannelHealthStatus.RATE_LIMITED
     assert tiktok.search_calls == [["áo khoác"]]
+
+
+class _ProbeOnlyPlugin(_SearchPlugin):
+    """A popularity-chart feed: an ingress pass routes it to the keyword probe (stage 2)."""
+
+    feed_yields_candidate_topics = False
+
+
+@pytest.mark.asyncio
+async def test_the_ingress_keyword_probe_respects_the_ceiling(store):
+    repository = SqliteTrendRepository(str(store))
+    registry = ConnectorPluginRegistry(repository=repository)
+    youtube = _ProbeOnlyPlugin(PlatformType.YOUTUBE)
+    registry.register(youtube)
+    await repository.set_runtime_config("connector.youtube.daily_request_ceiling", "0")
+
+    signals = await registry.fetch_from_all(seed_keywords=["áo khoác"])
+
+    assert youtube.search_calls == [] and signals == []
+    assert _counts(store).get("youtube", 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_in_memory_reservations_are_serialised():
+    # The shared in-memory connection lost or failed some of 60 concurrent reservations in about
+    # one run in ten before reservations went through the write lock; twenty runs catch that.
+    day = datetime(2026, 10, 22, tzinfo=timezone.utc)
+    for _ in range(20):
+        repository = SqliteTrendRepository(":memory:")
+        results = await asyncio.gather(
+            *(repository.reserve_connector_requests(day.date(), "tiktok", 1, 25, day) for _ in range(60))
+        )
+        assert sum(admitted for admitted, _ in results) == 25
+        assert await repository.reserve_connector_requests(day.date(), "tiktok", 0, 25, day) == (True, 25)

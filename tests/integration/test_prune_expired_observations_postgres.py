@@ -62,3 +62,40 @@ def test_prune_on_postgres_keeps_claimed_and_recent_observations(schema_postgres
         left = {str(row[0]) for row in conn.execute("SELECT id FROM observations")}
         evidence = {str(row[0]) for row in conn.execute("SELECT observation_id FROM mission_evidence")}
     assert left == evidence == {ids["old_claimed"], ids["recent"]}
+
+
+def test_apply_locks_out_new_claim_bindings_while_it_decides(schema_postgres_dsn, monkeypatch):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import prune_expired_observations
+
+    source, observation = str(uuid.uuid4()), str(uuid.uuid4())
+    with psycopg.connect(schema_postgres_dsn, autocommit=True) as conn:
+        conn.execute("INSERT INTO sources (id, platform, external_id) VALUES (%s, 'youtube', 'video:b2')", (source,))
+        conn.execute(
+            "INSERT INTO observations (id, source_id, observed_at, time_provenance, identity_source,"
+            " observed_title, metric_value, growth_velocity, geo_code, metadata)"
+            " VALUES (%s, %s, %s, 'exact_ingestion', 'metadata_external_id', 'áo len', 0, 0, 'VN', '{}')",
+            (observation, source, NOW - timedelta(days=430)),
+        )
+    original = prune_expired_observations._plan
+    attempts = []
+
+    def plan_with_a_concurrent_claim(read, tables, limit):
+        with psycopg.connect(schema_postgres_dsn, autocommit=True) as other:
+            other.execute("SET session_replication_role = replica")
+            other.execute("SET lock_timeout = '300ms'")
+            try:
+                other.execute(
+                    "INSERT INTO mission_claim_evidence (claim_id, observation_id, role) VALUES (%s, %s, 'CONTEXT')",
+                    (str(uuid.uuid4()), observation),
+                )
+                attempts.append("written")
+            except psycopg.errors.LockNotAvailable:
+                attempts.append("locked")
+        return original(read, tables, limit)
+
+    monkeypatch.setenv("IGNIS_PRUNE_DSN", str(schema_postgres_dsn))
+    monkeypatch.setattr(prune_expired_observations, "_plan", plan_with_a_concurrent_claim)
+    prune_expired_observations._postgres("IGNIS_PRUNE_DSN", 13, NOW, apply=True)
+
+    assert attempts and set(attempts) == {"locked"}, attempts
