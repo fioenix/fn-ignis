@@ -1,32 +1,20 @@
 <!--
 Sync Impact Report
-- Version change: 2.1.0 -> 2.2.0
+- Version change: 2.2.0 -> 2.2.1
 - Modified principles:
-  - I. Mission-Bound Autonomy and Zero-Token Collection: Ignis still holds no scheduler, worker or
-    background loop; a user MAY now ask their own agent to run one watchlist on a recurring host
-    schedule, each firing a separate explicit task (Spec 016 amendment, Change 1).
-  - III. Evidence-First Research and Falsification: the ingestion-clock rule now names collection
-    windows and evidence frames, and a listening period places observations by publication time with
-    the basis stated (Spec 016 amendment, Change 2).
-- Added principles: VII. No Author Identity at Rest (Spec 015, T036). Review of the ratification
-  PR added three clarifications that match the shipped Spec 015 contract: declared accounts may be
-  shown (FR-002, FR-016), atomic probes count voices with a response-scoped key never stored
-  (research R9), and identity stored before Spec 015 is held unchanged pending OG-3 (FR-015). The owner
-  approved the clarified text on 2026-10-21.
-- Removed sections: the "Proposed Amendment (not ratified)" appendix, now folded into VII
-- Bump rationale: MINOR. One new principle and two narrowed or clarified rules for a new use; no
-  principle is removed or made incompatible. Owner ratified all three on 2026-10-21.
-- Templates checked: .specify/templates/plan-template.md derives its Constitution Check gates from
-  this file at plan time ("[Gates determined based on constitution file]"), so it needs no edit;
-  spec-template.md, tasks-template.md and checklist-template.md carry no wording on I, III or VII.
-- Dependent documents updated: CLAUDE.md (Architecture, Operational Boundary), AGENTS.md section 1,
-  docs/decisions/2026-09-29-mission-bound-evidence-grounded-ignis.md (pointer to the 2026-10-21
-  decision), specs/016-watchlist-listening/constitution-amendment.md (status Ratified).
-- Dependent documents checked, unchanged: README.md and docs/USER_GUIDE.md already describe author
-  identity removal; tests/unit/test_ignis_skills.py keeps "daily" and "scheduler" out of the
-  collection and analysis skills, and routine guidance stays in the Spec 017 guide.
-- Follow-up TODOs: OG-3, the disposition of identity stored before Spec 015, remains an open owner
-  decision (Spec 015 T034); VII records that data as an exception until then.
+  - VII. No Author Identity at Rest: the exception for identity stored before Spec 015 now records
+    the owner's OG-3 decision of 2026-10-22 (anonymise with scripts/anonymise_author_identity.py,
+    applied to the caller store; the dev Supabase store left out) instead of "until the owner
+    decides". What remains in a store the script has not run on keeps the same limits.
+- Added principles: none. Removed sections: none.
+- Bump rationale: PATCH. The exception's wording records a decision; no obligation is added,
+  removed or changed. Owner approved on 2026-10-22.
+- Templates checked: plan-template.md derives its gates from this file at plan time;
+  spec-template.md, tasks-template.md and checklist-template.md carry no wording on VII.
+- Dependent documents checked, unchanged: specs/015-no-author-identity-at-rest/spec.md already
+  records the decision (Clarifications, session 2026-10-22).
+- Follow-up TODOs: none. The 2.2.0 report (Principles I and III for Spec 016, Principle VII for
+  Spec 015, ratified 2026-10-21) is in git history.
 -->
 # fn-ignis Constitution
 
@@ -148,9 +136,11 @@ not from a template.
 - Content with no content reference MAY be kept as context, never as support for a claim.
 - Every new connector MUST be covered by the author identity conformance check before it ships.
   Free-text personal names are outside this principle and MUST be documented as such.
-- Author identity stored before this principle took effect is a recorded exception: it stays
-  unchanged until the owner decides its disposition (Spec 015, OG-3), MUST NOT grow, and MUST NOT
-  appear in a tool response, report or log.
+- Author identity stored before this principle took effect is anonymised by
+  `scripts/anonymise_author_identity.py` (owner decision of 2026-10-22, Spec 015 OG-3), which has
+  been applied to the caller store. Any that remains in a store the script has not run on, such as
+  the dev Supabase store, is a recorded exception: it MUST NOT grow and MUST NOT appear in a tool
+  response, report or log.
 
 ---
 
@@ -204,5 +194,5 @@ pays the cost, its expiry condition, and the owner approval that permits it. Tes
 labels, and remembered command output are not evidence by themselves: run the command against the
 surface that owns the claim, read the output, and record what was not checked.
 
-**Version**: 2.2.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-10-21
+**Version**: 2.2.1 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-10-22
 
