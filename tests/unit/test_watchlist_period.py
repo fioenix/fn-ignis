@@ -204,13 +204,64 @@ def test_a_link_naming_an_account_is_withheld():
     risky = item("tt:7", "tiktok", at(CURRENT.start), [(at(CURRENT.start, 20), 10**9, {"likes": 1})],
                  metadata=TIKTOK, link=None)
     (topic,) = compare(items() + [risky])["topics"]
-    assert topic["items"][0]["link"] is None
+    tiktok = [shown for shown in topic["items"] if shown["channel"] == "tiktok"]
+    assert tiktok[0]["link"] is None
+
+
+def test_items_take_channels_in_turn():
+    (topic,) = compare()["topics"]
+    assert [shown["channel"] for shown in topic["items"]] == ["youtube", "tiktok", "reels"]
+
+
+def test_a_measured_period_with_no_items_is_zero_not_unknown():
+    only_current = [i for i in items() if i.channel != "tiktok" or i.source_id != "tt:1"]
+    views = indicator(cell(compare(only_current), "tiktok"), "views")
+    assert views["previous"] == 0 and views["change"] == {"absolute": 670, "relative": None}
+
+
+def test_mentions_links_and_tokens_never_become_terms():
+    noisy = item("tt:8", "tiktok", at(CURRENT.start), [(at(CURRENT.start, 20), 5, {"likes": 1})], metadata=TIKTOK,
+                 title="@[user] matcha @[declared:3f2a1b4c] @someone ghé https://shopee.vn/x [link] matcha latte")
+    terms = {t["term"] for t in cell(compare(items() + [noisy]), "tiktok")["new_terms"]}
+    assert not any(word in term for term in terms for word in ("user", "declared", "3f2a1b4c", "someone", "shopee", "https", "link"))
+
+
+SECOND = {"name": "Jackets", "keywords": ["áo khoác"], "brands": [{"platform": "tiktok", "account": "bx", "declared_name": "Brand X"}]}
+
+
+def multi(observations, outcomes=COVERAGE):
+    jackets = [PeriodCoverage(c.channel, c.status, ("áo khoác",), c.completed_at) for c in outcomes]
+    return compare_periods(topics=[TOPIC, SECOND], items=observations, coverage=list(outcomes) + jackets,
+                           period=CURRENT, now=NOW, policy=POLICY, versions={})
+
+
+def test_with_several_topics_the_query_decides_and_text_matches_whole_words():
+    day = CURRENT.start
+    found = [
+        item("m:1", "youtube", at(day), [(at(day, 20), 1, {})], title="áo khoác đi mưa", keywords=("matcha latte",)),
+        item("b:1", "youtube", at(day), [(at(day, 20), 1, {})], title="review mới", keywords=("Brand X",)),
+        item("t:1", "youtube", at(day), [(at(day, 20), 1, {})], title="báo áo khoác", keywords=()),
+        item("t:2", "youtube", at(day), [(at(day, 20), 1, {})], title="báo khoác ngoài", keywords=()),
+    ]
+    matcha, jackets = multi(found)["topics"]
+    count = lambda topic: indicator(next(c for c in topic["channels"] if c["channel"] == "youtube"), "new_uploads")["current"]  # noqa: E731
+    assert count(matcha) == 1   # m:1 only: its query was a matcha keyword
+    assert count(jackets) == 2  # b:1 by its brand query, t:1 by the whole words "áo khoác"
+
+
+def test_a_month_compares_with_the_month_before():
+    october = period_of(PeriodKind.MONTH, date(2026, 10, 5))
+    snapshot = compare(period=october, now=datetime(2026, 11, 1, 0, 1, tzinfo=LISTENING_TZ))
+    assert snapshot["periods"]["current"]["start"] == "2026-10-01"
+    assert snapshot["periods"]["previous"] == {"kind": "month", "start": "2026-09-01", "end": "2026-09-30",
+                                               "timezone": "Asia/Ho_Chi_Minh", "versions": []}
 
 
 @pytest.mark.parametrize("metadata,expected", [
     ({"source": "threads_trending_topics"}, {}),
     ({"views": 120, "like_count": 4, "reply_count": 1, "reposts": 0, "quotes": 0}, {"views": 120, "interactions": 5}),
     ({"like_count": 4, "reply_count": 1}, {"interactions": 5}),
+    ({"views": 0, "like_count": 0, "reply_count": 0, "reposts": 0, "quotes": 0}, {}),
 ])
 def test_threads_values_read_the_field_that_means_them(metadata, expected):
     assert channel_values("threads", 1000.0, metadata) == expected

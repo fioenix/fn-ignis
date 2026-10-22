@@ -60,7 +60,7 @@ this branch on it before T004.
   Done 22/10/2026: `tests/unit/test_watchlist_period.py`, 23 tests, RED observed (module absent); negative controls: an unbounded counting window fails 2, a DEGRADED day counted as complete fails 1.
 - [x] T010 [US2] Implement `src/ignis/application/use_cases/watchlist_period.py` and
   `get_watchlist_period_snapshot`; dual-backend integration test for SC-001–SC-004 and SC-006.
-  Done 22/10/2026: `src/ignis/domain/watchlist_period.py`, `src/ignis/application/use_cases/watchlist_period.py`, tool `get_watchlist_period_snapshot` (51 → 52 tools); `tests/integration/test_watchlist_period.py` 5/5 on SQLite and PostgreSQL. Reads existing repository methods; no migration.
+  Done 22/10/2026: `src/ignis/domain/watchlist_period.py`, `src/ignis/application/use_cases/watchlist_period.py`, tool `get_watchlist_period_snapshot` (51 → 52 tools); `tests/integration/test_watchlist_period_storage.py` 5/5 on SQLite and PostgreSQL. Reads existing repository methods; no migration.
 
 ## Phase 5: US3 — Read the period view (P2)
 

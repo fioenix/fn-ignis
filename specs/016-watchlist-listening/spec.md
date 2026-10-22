@@ -128,6 +128,13 @@ confirm (listed again under "Owner review"):
   the documented defaults (2, 0.5, 7), so no migration is needed (agent decided; basis: AGENTS.md
   section 8; cost if wrong: a user changes a threshold through `update_runtime_config` instead of
   a seeded row).
+- Q: Which collections cover a day, and which runs does a snapshot read? → A: Each run's latest
+  completed collection; a run's day is the day that collection completed. A snapshot reads only
+  runs whose day falls between the start of the earlier period and the end of the later one plus
+  the counting window. A run that is collected again keeps only its latest day; daily routine runs
+  collect once (agent decided; basis: the repository exposes the latest completed outcomes per
+  mission, and reading every run for months of history does not scale; cost if wrong: a re-run
+  mission's earlier day reads as missing).
 
 ## User Scenarios & Testing *(mandatory)*
 

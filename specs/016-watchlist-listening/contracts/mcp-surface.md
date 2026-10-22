@@ -51,7 +51,11 @@ Compares that period with the one before it. Returns:
   `rising_terms` and `new_terms`, each `{term, current_items, previous_items, basis}`. Per topic,
   up to three `items` `{excerpt, link, channel, published_on, basis}`: content only, an
   identity-free link or null for "link unavailable";
-- `refusal` when the requested period is not complete, with the time it completes.
+- when the requested period is not complete, `status` `REFUSED`, `reason_code` `PERIOD_INCOMPLETE`
+  and `completes_at` instead of the comparison.
+
+Topics come from the watchlist's current version; a run's period is the day its collection
+completed.
 
 Never contains author identity, summed cross-channel values, or values for a `not_comparable`
 channel.

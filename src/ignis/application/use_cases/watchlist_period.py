@@ -8,22 +8,23 @@ nothing.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.application.ports.research_workspace_port import IResearchWorkspaceStore
+from ignis.application.use_cases.recorded_content import recorded_excerpt
 from ignis.application.use_cases.watchlists import _refused, _uuid
 from ignis.domain.listening_period import PeriodKind, latest_complete_period, local_date, period_of
 from ignis.domain.research_workspace import QualificationRelation, compute_frame_fingerprint
 from ignis.domain.source_identity import identity_free_source_url
 from ignis.domain.watchlist_period import PeriodCoverage, PeriodItem, TermsPolicy, compare_periods
+from ignis.infrastructure.security.pii_sanitizer import render_mention_tokens, sanitize_pii_text
 
 # R4: what counts toward a volume indicator. Unassessed and irrelevant observations do not.
 RELEVANT_RELATIONS = frozenset({QualificationRelation.QUALIFIED_SUPPORT, QualificationRelation.CONTEXT_ONLY})
 # Where connectors record the keyword whose query returned an item.
 QUERY_KEYWORD_FIELDS = ("keyword", "matched_keyword")
-EXCERPT_FIELDS = ("excerpt", "caption", "description", "news_snippet")
 # runtime_configs keys (data-model.md), with the defaults the spec chose when a key is absent.
 RISING_MIN_COUNT = ("listening.terms.rising_min_count", 2)
 RISING_MIN_GROWTH = ("listening.terms.rising_min_growth", 0.5)
@@ -39,8 +40,11 @@ def _query_keywords(metadata: Dict[str, Any]) -> tuple:
     return tuple(k for k in found if isinstance(k, str) and k.strip())
 
 
-def _excerpt(metadata: Dict[str, Any]) -> str:
-    return next((metadata[name] for name in EXCERPT_FIELDS if isinstance(metadata.get(name), str)), "")
+def _utc(moment: Optional[datetime]) -> Optional[datetime]:
+    """A stored time without an offset is UTC: SQLite keeps one that PostgreSQL would convert."""
+    if moment is None or moment.tzinfo is not None:
+        return moment
+    return moment.replace(tzinfo=timezone.utc)
 
 
 def _platform(value: Any) -> str:
@@ -74,13 +78,32 @@ class GetWatchlistPeriodSnapshotUseCase:
         if watchlist is None:
             return _refused("NOT_FOUND", "NOT_FOUND", "No watchlist has this id.", watchlist_id=str(target))
         base = {"watchlist_id": str(watchlist.id), "name": watchlist.name, "period_kind": kind.value}
+        window_days = max(1, int(await self._config(*COUNTER_DAYS)))
+        topics = [topic.to_payload() for topic in watchlist.current.definition.topics]
+        policy = TermsPolicy()
+        if not period.is_complete(now):
+            # Refuse before reading a single run.
+            return {**base, **compare_periods(topics=topics, items=(), coverage=(), period=period, now=now,
+                                              policy=policy, versions={})}
+        # A collection before the earlier period cannot hold its posts; one after the counting
+        # window of the later period cannot change a counted value or a covered day.
+        first_day = period.previous().start
+        last_day = period.last_day + timedelta(days=window_days)
 
         items: List[PeriodItem] = []
         coverage: List[PeriodCoverage] = []
         versions: Dict[date, set] = {period.start: set(), period.previous().start: set()}
         for run in watchlist.runs:
+            # A run's day is the day its collection completed; a run that never completed one
+            # covers no day and holds no counted evidence.
+            outcomes = await self._store.get_latest_completed_probe_outcomes(run.mission_id)
+            if not outcomes:
+                continue
+            collected = local_date(max(_utc(o.completed_at) for o in outcomes))
+            if not first_day <= collected <= last_day:
+                continue
             for span in (period, period.previous()):
-                if run.started_at is not None and span.contains(local_date(run.started_at)):
+                if span.contains(collected):
                     versions[span.start].add(run.version)
             mission = await self._repo.get_mission(run.mission_id)
             if mission is None:
@@ -90,44 +113,50 @@ class GetWatchlistPeriodSnapshotUseCase:
                 q.observation_id for q in await self._store.list_evidence_qualifications(mission.id)
                 if q.frame_fingerprint == frame and q.relation in RELEVANT_RELATIONS
             }
+            names = {a.id: a.declared_name for a in await self._repo.list_mission_declared_accounts(mission.id)}
             coverage.extend(
                 PeriodCoverage(channel=o.platform, status=_platform(o.status),
-                               queried_keywords=tuple(o.queried_keywords), completed_at=o.completed_at)
-                for o in await self._store.get_latest_completed_probe_outcomes(mission.id)
+                               queried_keywords=tuple(o.queried_keywords), completed_at=_utc(o.completed_at))
+                for o in outcomes
             )
             for signal in await self._repo.get_mission_signals(mission.id):
                 if signal.source_id is None:
                     continue
                 metadata = dict(signal.metadata or {})
                 channel = _platform(signal.platform)
+                excerpt = recorded_excerpt(metadata)
                 items.append(PeriodItem(
                     source_id=str(signal.source_id),
                     channel=channel,
-                    published_at=signal.published_at,
-                    title=signal.raw_title or "",
-                    excerpt=_excerpt(metadata),
+                    published_at=_utc(signal.published_at),
+                    # Mentions render as Spec 015 renders them everywhere else.
+                    title=render_mention_tokens(signal.raw_title or "", names),
+                    excerpt=sanitize_pii_text(render_mention_tokens(str(excerpt), names)) if excerpt else "",
                     link=identity_free_source_url(channel, signal.source_url, metadata),
                     relevant=signal.observation_id in relevant,
                     query_keywords=_query_keywords(metadata),
-                    observations=((signal.captured_at, signal.metric_value, metadata),),
+                    observations=((_utc(signal.captured_at), signal.metric_value, metadata),),
                 ))
 
         snapshot = compare_periods(
-            topics=[topic.to_payload() for topic in watchlist.current.definition.topics],
+            topics=topics,
             items=items,
             coverage=coverage,
             period=period,
             now=now,
             policy=await self._policy(),
             versions={start: sorted(found) for start, found in versions.items()},
-            window_days=int(await self._config(*COUNTER_DAYS)),
+            window_days=window_days,
         )
         return {**base, **snapshot}
 
     async def _config(self, key: str, default: float) -> float:
         try:
             raw = await self._repo.get_runtime_config(key)
-            return type(default)(raw) if raw not in (None, "") else default
+            if raw in (None, ""):
+                return default
+            value = float(raw)
+            return type(default)(value) if value >= 0 else default
         except (ValueError, TypeError, NotImplementedError):
             return default
 

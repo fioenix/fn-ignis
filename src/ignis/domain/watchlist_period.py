@@ -132,7 +132,9 @@ def channel_values(channel: str, metric_value: Any, metadata: Mapping[str, Any])
         for names in INTERACTION_FIELDS[channel]
     ]
     present = [counter for counter in counters if counter is not None]
-    if present:
+    # The Threads Graph API writes 0 for every counter when insights are missing (R11).
+    unreported = channel == "threads" and not values and not any(present)
+    if present and not unreported:
         values["interactions"] = sum(present)
     return values
 
@@ -168,14 +170,19 @@ def _merge(items: Iterable[PeriodItem]) -> List[_Merged]:
     return [entry for entry in merged.values() if entry.observations]
 
 
-def _belongs(entry: _Merged, keywords: frozenset, single_topic: bool) -> bool:
-    if entry.query_keywords & keywords:
+def _mentions(text: str, keyword: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text) is not None
+
+
+def _belongs(entry: _Merged, queries: frozenset, single_topic: bool) -> bool:
+    """A one-topic watchlist collected every item for that topic. Otherwise the query that found
+    the item decides; the item's text, word by word, decides only when no query was recorded."""
+    if single_topic:
         return True
+    if entry.query_keywords:
+        return bool(entry.query_keywords & queries)
     text = f"{entry.title} {entry.excerpt}".casefold()
-    if any(keyword in text for keyword in keywords):
-        return True
-    # A one-topic watchlist collected every item for that topic.
-    return single_topic and not entry.query_keywords
+    return any(_mentions(text, keyword) for keyword in queries)
 
 
 def _placed(entry: _Merged) -> Tuple[date, str, datetime]:
@@ -194,11 +201,13 @@ def _change(current: Optional[float], previous: Optional[float]) -> Optional[Dic
 
 
 _TOKEN = re.compile(r"\w+", re.UNICODE)
+# Links, @mentions and the stored mention tokens (@[user], @[declared:<id>]) are never terms.
+_NOT_WORDS = re.compile(r"https?://\S+|@\[[^\]]*\]|@\S+|\[link\]", re.IGNORECASE)
 
 
 def _terms(entry: _Merged, keywords: frozenset, noise: frozenset) -> set:
     """Two-word terms: one Vietnamese syllable rarely carries the meaning a term needs."""
-    text = scrub_handle_links(f"{entry.title} {entry.excerpt}").casefold()
+    text = _NOT_WORDS.sub(" ", f"{entry.title} {entry.excerpt}").casefold()
     tokens = [t for t in _TOKEN.findall(text) if len(t) > 1 and not t.isdigit() and t not in noise]
     pairs = {f"{a} {b}" for a, b in zip(tokens, tokens[1:])}
     return {pair for pair in pairs if not any(pair in keyword for keyword in keywords)}
@@ -241,6 +250,9 @@ def _indicator(channel: str, kind: str, unit: str, current: List[Tuple[_Merged, 
             if value is not None:
                 counted.append(value)
         uncounted = len(rows) - len(counted)
+        if not rows and kind != "interest":
+            # A comparable channel measured every day and found nothing: a measured zero.
+            return 0.0, 0
         if not counted:
             return None, uncounted
         return (sum(counted) / len(counted) if kind == "interest" else sum(counted)), uncounted
@@ -263,9 +275,20 @@ def _representative(rows: List[Tuple[_Merged, str, datetime]], window_days: int)
                 return value
         return 0.0
 
-    ranked = sorted(rows, key=lambda row: (-weight(row), -row[2].timestamp(), row[0].source_id))
+    # Units differ between channels, so rank within a channel and take channels in turn.
+    by_channel: Dict[str, List[Tuple[_Merged, str, datetime]]] = defaultdict(list)
+    for row in rows:
+        by_channel[row[0].channel].append(row)
+    queues = [sorted(found, key=lambda row: (-weight(row), -row[2].timestamp(), row[0].source_id))
+              for _, found in sorted(by_channel.items(), key=lambda pair: (
+                  CHANNEL_ORDER.index(pair[0]) if pair[0] in CHANNEL_ORDER else len(CHANNEL_ORDER), pair[0]))]
+    picked: List[Tuple[_Merged, str, datetime]] = []
+    while len(picked) < MAX_ITEMS and any(queues):
+        for queue in queues:
+            if queue and len(picked) < MAX_ITEMS:
+                picked.append(queue.pop(0))
     shown = []
-    for entry, basis, _ in ranked[:MAX_ITEMS]:
+    for entry, basis, _ in picked:
         excerpt = scrub_handle_links((entry.title or entry.excerpt or "").strip())
         shown.append({
             "excerpt": excerpt[:EXCERPT_LENGTH],
@@ -302,14 +325,16 @@ def compare_periods(
     topic_rows = []
     for topic in topics:
         keywords = frozenset(k.casefold() for k in topic.get("keywords", ()))
-        mine = [e for e in merged if e.relevant and _belongs(e, keywords, single_topic)]
+        # A run also queries each brand by its declared name (research R1).
+        queries = keywords | {str(b.get("declared_name", "")).casefold() for b in topic.get("brands", ()) or ()} - {""}
+        mine = [e for e in merged if e.relevant and _belongs(e, queries, single_topic)]
         placed = [(e, *_placed(e)) for e in mine]
         topic_items: List[Tuple[_Merged, str, datetime]] = []
         cells = []
         for channel in channels:
             days = {local_date(c.completed_at) for c in coverage
                     if c.channel == channel and c.status in COMPLETING_STATUSES
-                    and (not c.queried_keywords or {k.casefold() for k in c.queried_keywords} & keywords)}
+                    and (not c.queried_keywords or {k.casefold() for k in c.queried_keywords} & queries)}
             gaps = {"current": missing_days(period, days), "previous": missing_days(previous, days)}
             in_period = {
                 which: [(e, basis, anchor) for e, day, basis, anchor in placed

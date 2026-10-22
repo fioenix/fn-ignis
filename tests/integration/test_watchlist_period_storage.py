@@ -182,3 +182,13 @@ async def test_refusals(listening):
                        period_kind="year"))["reason_code"] == "INVALID_PERIOD_KIND"
     assert (await call("handle_get_watchlist_period_snapshot", watchlist_id=str(uuid4()),
                        period_kind="week"))["status"] == "NOT_FOUND"
+
+
+async def test_a_publication_time_without_an_offset_is_read_as_utc(listening):
+    # The RSS connector can return a naive time; SQLite keeps it naive, PostgreSQL converts it.
+    naive = datetime(CURRENT[3].year, CURRENT[3].month, CURRENT[3].day, 2)
+    later = {CURRENT[3]: [signal(PlatformType.TIKTOK, "7003", "matcha latte mới", naive, at(CURRENT[3], 21), 50,
+                                 metric_kind="views", likes=1, comments=0, shares=0)]}
+    snapshot = await two_weeks(listening, extra=later)
+    assert snapshot["status"] == "OK"
+    assert indicator(channel(snapshot, "tiktok"), "views")["current"] == 600 + 50

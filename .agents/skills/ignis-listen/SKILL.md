@@ -40,8 +40,9 @@ Take every value from the snapshot. Show:
   - a `not_comparable` channel: its `reasons` and the dates in `missing_days`, and nothing else;
 - per topic, the `items`: `excerpt`, `channel`, `published_on` and `link`.
 
-Every view states that it compares two closed periods as read at the time you called the tool,
-in Asia/Ho_Chi_Minh.
+Every view names the two closed periods it compares, in Asia/Ho_Chi_Minh. Topics are those of the
+watchlist's current version; after a keyword change, an earlier period can lack collections for the
+new keywords and show as not comparable.
 
 ## Display rules
 
@@ -60,8 +61,8 @@ Also:
 - A missing day is no data, not a quiet day. Keep `missing_days` visible even for a comparable
   channel when any are listed.
 - `uncounted_items` are items Ignis listed but could not count for that indicator, because the
-  platform did not report the value or no observation fell within seven days of publication. Show
-  the count; do not estimate their values.
+  platform did not report the value or no observation fell within the counting window after
+  publication. Show the count; do not estimate their values.
 - `relative` is the change as a ratio of the previous value: 0.5 means half as much again, -0.2
   means a fifth less. Show it exactly as the snapshot gives it, next to `absolute`; do not convert
   it into a percentage or round it, because the view must contain no number the snapshot lacks. A
