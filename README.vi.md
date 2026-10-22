@@ -83,9 +83,10 @@ chuẩn cho tham số. Một số thao tác đại diện:
   thương hiệu theo từng phiên bản và tạo một nhiệm vụ Attention trên phiên bản hiện tại cho mỗi
   lần chạy. Ignis không bao giờ tự chạy watchlist. `get_watchlist_period_snapshot` so một ngày,
   tuần hoặc tháng đã trọn vẹn với kỳ liền trước, theo từng kênh và theo đơn vị riêng của kênh đó;
-  guide `ignis_listen` dựng kết quả thành bản xem trên máy. Với guide `ignis_routine`, agent có thể
-  tạo một scheduled task hằng ngày trong Claude Code Desktop để chạy một watchlist; bản thân Ignis
-  vẫn không tự lên lịch việc gì.
+  guide `ignis_listen` dựng kết quả thành bản xem trên máy. Mỗi kênh dừng khi chạm trần request
+  theo ngày (bạn có thể nâng trần), và `scripts/prune_expired_observations.py` xóa lịch sử cũ hơn
+  13 tháng khi bạn chạy nó. Với guide `ignis_routine`, agent có thể tạo một scheduled task hằng ngày
+  trong Claude Code Desktop để chạy một watchlist; bản thân Ignis vẫn không tự lên lịch việc gì.
 - Các tool nguồn riêng lẻ như `get_tiktok_search_suggestions` và
   `get_tiktok_video_comments` có thể trả lời câu hỏi cụ thể mà không cần kết luận thị trường.
 - Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và

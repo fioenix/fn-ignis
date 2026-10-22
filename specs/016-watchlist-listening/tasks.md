@@ -20,16 +20,18 @@ this branch on it before T004.
 - [x] T001 Rebase on `main` after Spec 015 merges; record the base commit, latest migration
   (expected `031`) and tool count (expected 48) in `plan.md`. Stop and report if either differs.
   Done 21/10/2026: rebased on `main` at `1f4971e` (PR #57, Spec 015); latest migration `031_author_identity_at_rest.sql`; 48 tools.
-- [ ] T002 [P] Create fixtures in `tests/fixtures/watchlist_fixtures.py`: a two-topic watchlist and
+- [x] T002 [P] Create fixtures in `tests/fixtures/watchlist_fixtures.py`: a two-topic watchlist and
   observations spanning two complete weeks across all five channels, with one channel missing three
   days in one week, items observed twice, and one item without a publication date.
+  Closed 22/10/2026 without a shared module: each test builds the scenario it needs inline. Two topics: `test_with_several_topics_the_query_decides_and_text_matches_whole_words`; two complete weeks on all channels: `tests/integration/test_watchlist_period_storage.py`; a channel missing days: `test_a_channel_missing_more_than_a_fifth_of_its_days_is_not_comparable`; an item observed twice: `test_a_counter_counts_the_latest_observation_within_seven_days`; no publication date: `test_basis_counts_publication_and_collection_dates`.
 
 ## Phase 2: Foundational
 
-- [~] T003 [P] Write failing unit tests in `tests/unit/test_watchlist_domain.py`: definition limits
+- [x] T003 [P] Write failing unit tests in `tests/unit/test_watchlist_domain.py`: definition limits
   and digest, period boundaries in Asia/Ho_Chi_Minh (day, Monday-to-Sunday week, month, across
   midnight and month ends), placement by publication date with the plausibility guard, coverage from
   probe outcomes, the 20 percent rule per topic and channel, and the 7-day counted observation.
+  Closed 22/10/2026: split across `tests/unit/test_watchlist_definition.py` (limits and digest), `tests/unit/test_listening_period.py` (boundaries, placement, the 20 percent rule, the counted value) and `tests/unit/test_watchlist_period.py` (coverage from probe outcomes).
 - [x] T004 Implement `src/ignis/domain/watchlist.py` until T003 passes.
   Part A done 21/10/2026: `src/ignis/domain/watchlist.py` (definition, limits, digest). Period functions are on the Part B branch.
 - [x] T005 Write `sql/032_watchlists.sql` (three owner-only tables, immutable versions, seeded
@@ -86,16 +88,19 @@ this branch on it before T004.
 - [x] T015 [P] Draft the constitution amendment (Principles I and III) as Proposed with its impact
   report; do not ratify. Drafted 21/10/2026 in [constitution-amendment.md](constitution-amendment.md)
   rather than in `.specify/memory/constitution.md`, so no agent reads a Proposed text as in force.
-- [ ] T016 [P] Document watchlists and the period view in README.md, README.vi.md,
+- [x] T016 [P] Document watchlists and the period view in README.md, README.vi.md,
   docs/USER_GUIDE.md and docs/USER_GUIDE.vi.md; Vietnamese through the vietnamizer core workflow.
   Part A done 21/10/2026: watchlists in README.md, README.vi.md and both user guides; Vietnamese through the vietnamizer core workflow.
-- [ ] T017 Run the quickstart, the full suite on SQLite and PostgreSQL, ruff, `git diff --check`,
+  Done 22/10/2026: the period view (Part B), the daily ceilings and retention (US4) are in all four files; the README sentences on US4 were added in the close-out PR.
+- [x] T017 Run the quickstart, the full suite on SQLite and PostgreSQL, ruff, `git diff --check`,
   `uv lock --check`, the package build and `scripts/wheel_mcp_smoke.py`; record results in
   `.handoff/spec016/regressions.handoff.md`.
   Part A, 21/10/2026: full suite on SQLite 4231 passed, 1034 skipped, 3 failed; the same 3 fail on a `main`-based worktree locally (clean-checkout bootstrap and the missing worktree `.venv`) and pass in CI. Watchlist, RLS and Compose files on PostgreSQL 46/46 after rebasing on Spec 015.
-- [ ] T018 Code and security review of the full diff; dispose of findings with evidence before the
+  Done 22/10/2026. Full suite on SQLite and PostgreSQL in CI on `main` at `d19d028` (same code as `2f08c47`): 5382 passed, 31 skipped, SC-004 90.44%. Quickstart steps run as tests in that suite: 1 `test_watchlist_mcp.py`, 2 and 4 `test_watchlist_period_storage.py`, 3 its `test_refusals`, 5 `test_ignis_listen_guidance.py` plus the SC-005 view, 6 `test_connector_daily_ceiling.py` and `test_prune_expired_observations*.py`. Locally at `2f08c47`: ruff clean, `git diff --check` clean, `uv lock --check` (uv 0.12.17) resolves 161 packages, `uv build` produced the wheel and sdist, and `scripts/wheel_mcp_smoke.py` against the installed wheel: 52 tools, a real tool call, the guide read and a clean exit.
+- [x] T018 Code and security review of the full diff; dispose of findings with evidence before the
   PR.
   Part A, 21/10/2026: self-review found unbounded definition text and an unreported declaration status, both fixed (`T018 finding` commit).
+  Close-out, 22/10/2026: an independent read-only review of `1f4971e..2f08c47` found no P0, one P1 (pain-point extraction bypassed the daily ceiling) and five P2s plus a guide note. Every fix has a test; the YouTube tone and undated-placement tests were observed failing first, the others were written with their fix. Dispositions are in the spec's clarification of that day.
 
 ## Phase 8: Collection precision (from the golden-set baseline, 22/10/2026)
 

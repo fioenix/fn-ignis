@@ -643,6 +643,24 @@ async def test_a_text_written_without_tone_marks_is_matched_folded_and_an_accent
 
 
 @pytest.mark.asyncio
+async def test_a_keyword_written_without_tone_marks_matches_an_accented_title():
+    """A keyword typed without tones names no tones to compare, so it is compared folded (T018)."""
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["accented", "unrelated"])),
+            _json_response(_videos_with_descriptions([
+                ("accented", "Trà sữa trân châu đường đen", ""),
+                ("unrelated", "Phim ngắn cổ trang", ""),
+            ])),
+        ]
+        signals = await plugin.search_signals(["tra sua"], geo=GeoCode.VN)
+
+    assert [s.metadata["video_id"] for s in signals] == ["accented"]
+
+
+@pytest.mark.asyncio
 async def test_each_query_counts_its_own_drops_whatever_the_query_order_or_cache():
     """A video dropped under two queries is counted under both, fresh or cached."""
     plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
