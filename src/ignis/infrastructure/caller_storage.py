@@ -372,8 +372,11 @@ class CallerStorageMiddleware(Middleware):
     async def on_call_tool(self, context, call_next):
         name = context.message.name
         arguments = context.message.arguments or {}
-        if not ('mission' in name or 'research_workspace' in name or name == 'confirm_market_brief'
-                or 'mission_id' in arguments or 'workspace_id' in arguments):
+        # Watchlists live in the caller's store like the missions their runs create; a tool that
+        # carries only a watchlist_id must not fall through to the global store.
+        if not ('mission' in name or 'research_workspace' in name or 'watchlist' in name
+                or name == 'confirm_market_brief' or 'mission_id' in arguments
+                or 'workspace_id' in arguments or 'watchlist_id' in arguments):
             return await call_next(context)
         ctx = context.fastmcp_context
         if ctx is None or getattr(ctx, 'request_context', None) is None:
