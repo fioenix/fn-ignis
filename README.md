@@ -83,7 +83,8 @@ signature authority. Representative operations:
   topics and brands and start one Attention mission per run on its current version. Ignis never
   runs a watchlist on its own. `get_watchlist_period_snapshot` compares a complete day, week or
   month with the one before, per channel and in each channel's own unit; the `ignis_listen` guide
-  renders it as a local view.
+  renders it as a local view. Each channel stops at a daily request ceiling you can raise, and
+  `scripts/prune_expired_observations.py` removes history older than 13 months when you run it.
 - Atomic source tools such as `get_tiktok_search_suggestions` and
   `get_tiktok_video_comments` can answer source-specific questions without a Market verdict.
 - Opt-in `prepare_host_browser_search`, `submit_host_browser_search` and

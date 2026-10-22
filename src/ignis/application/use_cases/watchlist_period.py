@@ -8,6 +8,8 @@ nothing.
 
 from __future__ import annotations
 
+import dataclasses
+import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -29,6 +31,7 @@ QUERY_KEYWORD_FIELDS = ("keyword", "matched_keyword")
 RISING_MIN_COUNT = ("listening.terms.rising_min_count", 2)
 RISING_MIN_GROWTH = ("listening.terms.rising_min_growth", 0.5)
 COUNTER_DAYS = ("listening.counter_observation_days", 7)
+MAX_COUNTER_DAYS = 31
 NOISE_DOMAINS = ("noise_blacklist", "foreign_stopwords")
 
 
@@ -72,13 +75,15 @@ class GetWatchlistPeriodSnapshotUseCase:
         else:
             try:
                 period = period_of(kind, date.fromisoformat(str(period_start)))
-            except ValueError:
+                period.previous()  # Year 1 has no period before it.
+            except (ValueError, OverflowError):
                 return _refused("INVALID", "INVALID_PERIOD_START", "period_start is a date, YYYY-MM-DD.")
         watchlist = await self._repo.get_watchlist(target)
         if watchlist is None:
             return _refused("NOT_FOUND", "NOT_FOUND", "No watchlist has this id.", watchlist_id=str(target))
         base = {"watchlist_id": str(watchlist.id), "name": watchlist.name, "period_kind": kind.value}
-        window_days = max(1, int(await self._config(*COUNTER_DAYS)))
+        # Bounded so a misconfigured value cannot overflow the date arithmetic.
+        window_days = min(MAX_COUNTER_DAYS, max(1, int(await self._config(*COUNTER_DAYS))))
         topics = [topic.to_payload() for topic in watchlist.current.definition.topics]
         policy = TermsPolicy()
         if not period.is_complete(now):
@@ -93,6 +98,9 @@ class GetWatchlistPeriodSnapshotUseCase:
         items: List[PeriodItem] = []
         coverage: List[PeriodCoverage] = []
         versions: Dict[date, set] = {period.start: set(), period.previous().start: set()}
+        # The first sighting of each source in any run up to the later period's counting window:
+        # an item without a publication time takes its period from it.
+        first_seen: Dict[str, datetime] = {}
         for run in watchlist.runs:
             # A run's day is the day its collection completed; a run that never completed one
             # covers no day and holds no counted evidence.
@@ -100,7 +108,11 @@ class GetWatchlistPeriodSnapshotUseCase:
             if not outcomes:
                 continue
             collected = local_date(max(_utc(o.completed_at) for o in outcomes))
-            if not first_day <= collected <= last_day:
+            if collected > last_day:
+                continue
+            if collected < first_day:
+                for signal in await self._repo.get_mission_signals(run.mission_id):
+                    _note_sighting(first_seen, signal)
                 continue
             for span in (period, period.previous()):
                 if span.contains(collected):
@@ -122,6 +134,7 @@ class GetWatchlistPeriodSnapshotUseCase:
             for signal in await self._repo.get_mission_signals(mission.id):
                 if signal.source_id is None:
                     continue
+                _note_sighting(first_seen, signal)
                 metadata = dict(signal.metadata or {})
                 channel = _platform(signal.platform)
                 excerpt = recorded_excerpt(metadata)
@@ -138,6 +151,7 @@ class GetWatchlistPeriodSnapshotUseCase:
                     observations=((_utc(signal.captured_at), signal.metric_value, metadata),),
                 ))
 
+        items = [dataclasses.replace(item, first_seen=first_seen.get(item.source_id)) for item in items]
         snapshot = compare_periods(
             topics=topics,
             items=items,
@@ -156,8 +170,8 @@ class GetWatchlistPeriodSnapshotUseCase:
             if raw in (None, ""):
                 return default
             value = float(raw)
-            return type(default)(value) if value >= 0 else default
-        except (ValueError, TypeError, NotImplementedError):
+            return type(default)(value) if math.isfinite(value) and value >= 0 else default
+        except (ValueError, TypeError, OverflowError, NotImplementedError):
             return default
 
     async def _policy(self) -> TermsPolicy:
@@ -173,3 +187,11 @@ class GetWatchlistPeriodSnapshotUseCase:
         return TermsPolicy(rising_min_count=int(await self._config(*RISING_MIN_COUNT)),
                            rising_min_growth=float(await self._config(*RISING_MIN_GROWTH)),
                            noise=frozenset(noise))
+
+
+def _note_sighting(first_seen: Dict[str, datetime], signal: Any) -> None:
+    if signal.source_id is None or signal.captured_at is None:
+        return
+    key, seen = str(signal.source_id), _utc(signal.captured_at)
+    if key not in first_seen or seen < first_seen[key]:
+        first_seen[key] = seen

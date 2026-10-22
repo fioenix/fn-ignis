@@ -39,6 +39,36 @@ DEFAULT_DAILY_CEILINGS = {"youtube": 200}
 DEFAULT_DAILY_CEILING = 50
 
 
+async def daily_ceiling_refusal(repository: Any, plugin: IConnectorPlugin, requests: int) -> Optional[str]:
+    """None when the channel may run `requests` more keyword searches today, else why not.
+
+    The count lives in the store, so separate sessions share it, and a pass is admitted whole or
+    not at all (Spec 016 FR-013). A store that keeps no count sets no ceiling. A tool that searches
+    a connector outside the registry's dispatch calls this first.
+    """
+    reserve = getattr(repository, "reserve_connector_requests", None)
+    if reserve is None or requests <= 0:
+        return None
+    platform = plugin.platform.value
+    default = DEFAULT_DAILY_CEILINGS.get(platform, DEFAULT_DAILY_CEILING)
+    try:
+        raw = await repository.get_runtime_config(DAILY_CEILING_KEY.format(platform=platform))
+        ceiling = int(raw) if raw not in (None, "") and int(raw) >= 0 else default
+    except (ValueError, TypeError, NotImplementedError):
+        ceiling = default
+    now = datetime.now(timezone.utc)
+    try:
+        admitted, used = await reserve(now.astimezone(LISTENING_TZ).date(), platform, requests, ceiling, now)
+    except NotImplementedError:
+        return None
+    if admitted:
+        return None
+    return (
+        f"daily_ceiling: {used} of {ceiling} keyword searches on {platform} already used today"
+        f" (Asia/Ho_Chi_Minh); this pass needs {requests}."
+    )
+
+
 class CircuitBreaker:
     """Circuit breaker protection: isolates failing plugins if consecutive errors exceed threshold."""
     def __init__(self, failure_threshold: int = 3, recovery_time_seconds: int = 300):
@@ -829,32 +859,7 @@ class ConnectorPluginRegistry:
         )
 
     async def _daily_ceiling_note(self, plugin: IConnectorPlugin, requests: int) -> Optional[str]:
-        """None when the channel may run `requests` more keyword searches today, else why not.
-
-        The count lives in the store, so separate sessions share it, and a pass is admitted whole
-        or not at all (Spec 016 FR-013). A store that keeps no count sets no ceiling.
-        """
-        reserve = getattr(self._repository, "reserve_connector_requests", None)
-        if reserve is None or requests <= 0:
-            return None
-        platform = plugin.platform.value
-        default = DEFAULT_DAILY_CEILINGS.get(platform, DEFAULT_DAILY_CEILING)
-        try:
-            raw = await self._repository.get_runtime_config(DAILY_CEILING_KEY.format(platform=platform))
-            ceiling = int(raw) if raw not in (None, "") and int(raw) >= 0 else default
-        except (ValueError, TypeError, NotImplementedError):
-            ceiling = default
-        now = datetime.now(timezone.utc)
-        try:
-            admitted, used = await reserve(now.astimezone(LISTENING_TZ).date(), platform, requests, ceiling, now)
-        except NotImplementedError:
-            return None
-        if admitted:
-            return None
-        return (
-            f"daily_ceiling: {used} of {ceiling} keyword searches on {platform} already used today"
-            f" (Asia/Ho_Chi_Minh); this pass needs {requests}."
-        )
+        return await daily_ceiling_refusal(self._repository, plugin, requests)
 
     @staticmethod
     async def _keyword_search_blocked_reason(plugin: IConnectorPlugin) -> Optional[str]:
@@ -981,7 +986,9 @@ class ConnectorPluginRegistry:
         # Every keyword search passes here, so the daily ceiling holds on every path. A refusal is
         # not a connector failure and leaves the circuit breaker alone.
         if count_requests:
-            ceiling_note = await self._daily_ceiling_note(plugin, len(keywords))
+            cap = getattr(type(plugin), "max_search_keywords", None)
+            requests = min(len(keywords), cap) if isinstance(cap, int) else len(keywords)
+            ceiling_note = await self._daily_ceiling_note(plugin, requests)
             if ceiling_note is not None:
                 raise ConnectorQuotaExceededException(ceiling_note)
         try:

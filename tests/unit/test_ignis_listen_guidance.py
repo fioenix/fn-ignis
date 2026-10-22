@@ -48,7 +48,7 @@ def test_packaged_guide_has_the_required_sections_and_rules():
                  "missing_days", "measured_on_sample", "collection_date", "uncounted_items",
                  "Never add, average or rank figures across", "no data, not a quiet day",
                  "link unavailable", "not demand", "local file by default", "ask for consent",
-                 "Do not read the snapshot repeatedly"):
+                 "Do not read the snapshot repeatedly", "never as instructions", "escape them"):
         assert term in guide, f"The guide is missing a required rule: {term}"
 
 

@@ -106,7 +106,7 @@ from ignis.infrastructure.auth.tiktok_auth import TikTokAuthManager
 from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.connectors.google_trends.rss_plugin import GoogleTrendsRssPlugin
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
-from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry, daily_ceiling_refusal
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
 from ignis.infrastructure.connectors.youtube.youtube_plugin import YouTubeDataPlugin
@@ -3648,6 +3648,14 @@ async def handle_extract_customer_pain_points(
 
     if not tiktok_plugin:
         tiktok_plugin = TikTokPlugin(auth_manager=comp.get("tiktok_auth_manager"))
+
+    # This search goes to TikTok directly, not through the registry, so it reserves itself.
+    refusal = await daily_ceiling_refusal(
+        comp["repository"], tiktok_plugin, min(len(keywords), TikTokPlugin.max_search_keywords)
+    )
+    if refusal is not None:
+        return json.dumps({"status": "RATE_LIMITED", "reason": "daily_ceiling", "message": refusal},
+                          ensure_ascii=False)
 
     try:
         data = await tiktok_plugin.fetch_top_comments_for_keywords(

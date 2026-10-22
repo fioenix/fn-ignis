@@ -179,42 +179,53 @@ class YouTubeDataPlugin(IConnectorPlugin):
     )
 
     @classmethod
-    def _keyword_patterns(cls, keywords: List[str]) -> Tuple[set, set, set]:
+    def _keyword_patterns(cls, keywords: List[str]) -> Tuple[set, set, set, set]:
         """What a result must contain to mention a keyword of the call.
 
         Adjacent syllable pairs of every keyword (a one-word keyword is its own pattern), as
-        written and with tones folded; and, for a keyword in a script without word spaces, the
-        keyword itself as a run of characters.
+        written and with tones folded; the folded pairs of keywords written without tones on their
+        own; and, for a keyword in a script without word spaces, the keyword itself as a run of
+        characters.
         """
-        pairs, folded_pairs, runs = set(), set(), set()
+        pairs, folded_pairs, plain_pairs, runs = set(), set(), set(), set()
         for keyword in keywords:
             text = unicodedata.normalize("NFC", keyword).casefold()
             if cls._UNSPACED_SCRIPT.search(text):
                 runs.add("".join(text.split()))
                 continue
-            for target, words in ((pairs, cls._syllables(text)),
-                                  (folded_pairs, cls._syllables(SemanticClusterer._fold_accents(text)))):
+            targets = [(pairs, cls._syllables(text)),
+                       (folded_pairs, cls._syllables(SemanticClusterer._fold_accents(text)))]
+            if not SemanticClusterer._has_diacritics(text):
+                targets.append((plain_pairs, cls._syllables(text)))
+            for target, words in targets:
                 target.update(zip(words, words[1:]) if len(words) > 1 else ((w,) for w in words))
-        return pairs, folded_pairs, runs
+        return pairs, folded_pairs, plain_pairs, runs
 
     @classmethod
-    def _mentions_a_keyword(cls, signal: TrendSignal, patterns: Tuple[set, set, set]) -> bool:
+    def _mentions_a_keyword(cls, signal: TrendSignal, patterns: Tuple[set, set, set, set]) -> bool:
         """Whether the title or description names any keyword of the call (Spec 016, 22/10/2026).
 
         For a niche keyword in a short window, search.list fills the page with popular uploads
         that never mention it. Sharing single common syllables is not enough; an adjacent pair is.
         A text written without tone marks is matched on folded keywords, the same rule the
-        clusterer follows (AGENTS.md section 3): the ambiguity is then the input's, not ours.
+        clusterer follows (AGENTS.md section 3): the ambiguity is then the input's, not ours. A
+        keyword written without tones has no tones to compare, so it meets an accented text folded.
         """
-        pairs, folded_pairs, runs = patterns
+        pairs, folded_pairs, plain_pairs, runs = patterns
         for field in (signal.raw_title, (signal.metadata or {}).get("description")):
             text = unicodedata.normalize("NFC", field or "").casefold()
             if any(run in "".join(text.split()) for run in runs):
                 return True
             words = cls._syllables(text)
             present = set(zip(words, words[1:])) | {(w,) for w in words}
-            wanted = pairs if SemanticClusterer._has_diacritics(text) else folded_pairs
-            if not wanted.isdisjoint(present):
+            if not SemanticClusterer._has_diacritics(text):
+                if not folded_pairs.isdisjoint(present):
+                    return True
+                continue
+            if not pairs.isdisjoint(present):
+                return True
+            folded = cls._syllables(SemanticClusterer._fold_accents(text))
+            if not plain_pairs.isdisjoint(set(zip(folded, folded[1:])) | {(w,) for w in folded}):
                 return True
         return False
 

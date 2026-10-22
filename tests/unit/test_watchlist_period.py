@@ -183,6 +183,21 @@ def test_an_implausible_publication_date_falls_back_to_collection():
     assert tiktok["basis"]["current"]["collection_date"] == 2
 
 
+def test_an_undated_item_first_seen_before_both_periods_is_in_neither():
+    """Its period is fixed by its first sighting, not by which runs a comparison reads (T018)."""
+    import dataclasses
+
+    seen_again = at(CURRENT.start + timedelta(days=2), 20)
+    first_seen = at(CURRENT.previous().start - timedelta(days=5), 20)
+    undated = item("tt:old", "tiktok", None, [(seen_again, 300, {"likes": 3})], metadata=TIKTOK)
+    without = cell(compare(items() + [undated]), "tiktok")
+    with_first = cell(compare(items() + [dataclasses.replace(undated, first_seen=first_seen)]), "tiktok")
+
+    assert without["basis"]["current"]["collection_date"] == 2
+    assert with_first["basis"]["current"]["collection_date"] == 1
+    assert with_first["basis"]["previous"]["collection_date"] == 0
+
+
 def test_new_and_rising_terms_exclude_the_query_and_noise():
     tiktok = cell(compare(), "tiktok")
     terms = {t["term"] for t in tiktok["new_terms"]}
@@ -314,3 +329,18 @@ def test_terms_never_span_the_title_and_the_excerpt():
     assert "latte trà" in terms and "sữa ngon" in terms
     boundary = {t["term"]: t["current_items"] for t in cell(compare(items() + [post]), "tiktok")["new_terms"]}
     assert boundary["trà sữa"] == 1  # th:1 must not add a second "trà sữa" across its fields
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", ["inf", "-3", "nan", "many"])
+async def test_a_non_finite_or_invalid_counting_window_falls_back_to_the_default(raw):
+    """T018: the configured window cannot overflow the date arithmetic."""
+    from ignis.application.use_cases.watchlist_period import MAX_COUNTER_DAYS, GetWatchlistPeriodSnapshotUseCase
+
+    class _Config:
+        async def get_runtime_config(self, key):
+            return raw
+
+    use_case = GetWatchlistPeriodSnapshotUseCase(_Config(), None, lambda: NOW)
+    assert await use_case._config("listening.counter_observation_days", 7) == 7
+    assert MAX_COUNTER_DAYS == 31

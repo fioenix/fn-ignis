@@ -186,3 +186,49 @@ async def test_in_memory_reservations_are_serialised():
         )
         assert sum(admitted for admitted, _ in results) == 25
         assert await repository.reserve_connector_requests(day.date(), "tiktok", 0, 25, day) == (True, 25)
+
+
+@pytest.mark.asyncio
+async def test_pain_point_extraction_reserves_its_tiktok_searches(store):
+    """extract_customer_pain_points searches TikTok outside the registry, so it reserves itself."""
+    import json
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from ignis.infrastructure.connectors.tiktok.tiktok_plugin import TikTokPlugin
+    from ignis.interfaces.mcp import server
+
+    repository = SqliteTrendRepository(str(store))
+    await repository.set_runtime_config("connector.tiktok.daily_request_ceiling", "1")
+    components = {"registry": MagicMock(), "repository": repository, "tiktok_auth_manager": AsyncMock()}
+    components["registry"]._plugins = {}
+
+    with patch("ignis.interfaces.mcp.server.get_components", return_value=components):
+        with patch.object(TikTokPlugin, "fetch_top_comments_for_keywords", new_callable=AsyncMock) as fetch:
+            fetch.return_value = []
+            refused = json.loads(await server.handle_extract_customer_pain_points(keywords=["áo khoác", "áo len"]))
+            admitted = json.loads(await server.handle_extract_customer_pain_points(keywords=["áo khoác"]))
+
+    assert refused["status"] == "RATE_LIMITED" and refused["reason"] == "daily_ceiling"
+    assert admitted["status"] == "SUCCESS"
+    assert fetch.await_count == 1
+    assert _counts(store) == {"tiktok": 1}
+
+
+class _CappedPlugin(_SearchPlugin):
+    """Reads at most ten keywords per search, as TikTok and Reels do."""
+
+    max_search_keywords = 10
+
+
+@pytest.mark.asyncio
+async def test_the_count_is_what_a_capped_connector_sends(store):
+    repository = SqliteTrendRepository(str(store))
+    registry = ConnectorPluginRegistry(repository=repository)
+    reels = _CappedPlugin(PlatformType.REELS)
+    registry.register(reels)
+    await repository.set_runtime_config("connector.reels.daily_request_ceiling", "10")
+
+    result = await registry.search_with_outcomes(keywords=[f"từ khoá {index}" for index in range(15)])
+
+    assert _outcome(result, "reels").status != ChannelHealthStatus.RATE_LIMITED
+    assert _counts(store) == {"reels": 10}

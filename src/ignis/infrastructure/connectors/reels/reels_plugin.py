@@ -46,6 +46,9 @@ class ReelsPlugin(IConnectorPlugin):
       3. Legacy unauthenticated public clips endpoint when nothing is bound.
     """
 
+    # A keyword search reads at most this many keywords; the daily ceiling counts what is sent.
+    max_search_keywords = 10
+
     GRAPH_BASE_URL = "https://graph.instagram.com"
     LEGACY_DISCOVER_URL = "https://www.instagram.com/api/v1/clips/discover/"
     BASE_URL = LEGACY_DISCOVER_URL  # retained for backward compatibility
@@ -257,7 +260,7 @@ class ReelsPlugin(IConnectorPlugin):
         all_signals: List[TrendSignal] = []
         seen_ids: set[str] = set()
 
-        for keyword in [k.strip() for k in keywords[:10] if k and k.strip()]:
+        for keyword in [k.strip() for k in keywords[: self.max_search_keywords] if k and k.strip()]:
             hashtag = self._to_hashtag(keyword)
             hashtag_id = await self._resolve_hashtag_id(hashtag, token)
             if not hashtag_id:
@@ -508,7 +511,7 @@ class ReelsPlugin(IConnectorPlugin):
         all_signals: List[TrendSignal] = []
         seen_ids: set[str] = set()
 
-        for keyword in [k.strip() for k in keywords[:10] if k and k.strip()]:
+        for keyword in [k.strip() for k in keywords[: self.max_search_keywords] if k and k.strip()]:
             hashtag = self._to_hashtag(keyword)
             if not hashtag:
                 continue
