@@ -4294,6 +4294,31 @@ def prompt_ignis_track(mission_id: Optional[str] = None) -> str:
     return f"Selected mission: `{selected}`\n\n{guide}"
 
 
+def _ignis_listen_guide() -> str:
+    # One packaged source, shipped in the wheel and mirrored by .agents/skills/ignis-listen/SKILL.md.
+    from importlib import resources
+    return resources.files("ignis.interfaces.mcp").joinpath("guides/ignis_listen.md").read_text(encoding="utf-8")
+
+
+@mcp.resource("fn-ignis://guide/ignis-listen")
+def get_ignis_listen_guide() -> str:
+    """How an agent reads a watchlist-period snapshot and renders the period view for a person."""
+    return _ignis_listen_guide()
+
+
+@mcp.prompt(name="ignis_listen")
+def prompt_ignis_listen(watchlist_id: Optional[str] = None) -> str:
+    """Guide the agent to render a watchlist's period view; reads nothing by itself."""
+    guide = _ignis_listen_guide()
+    if watchlist_id is None:
+        return guide
+    try:
+        selected = UUID(watchlist_id)
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("watchlist_id must be a watchlist UUID") from None
+    return f"Selected watchlist: `{selected}`\n\n{guide}"
+
+
 @mcp.prompt(name="voice_of_customer_audit")
 def prompt_voice_of_customer_audit(keywords: str = "Chatbot AI") -> str:
     """Frame a bounded source-specific customer-voice probe."""
