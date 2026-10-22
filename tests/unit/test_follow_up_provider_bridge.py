@@ -125,7 +125,7 @@ def setup_bridge(*, duration=timedelta(minutes=15)):
                 {"id": {"videoId": f"video-{i}"}} for i in range(5)]})
         if request.url.params.get('id'):
             return httpx.Response(200, json={"items": [{"id": f"video-{i}",
-                "snippet": {"title": f"Synthetic video {i}", "publishedAt": now.isoformat()},
+                "snippet": {"title": f"Synthetic n8n tự động hóa ở Việt Nam video {i}", "publishedAt": now.isoformat()},
                 "statistics": {"viewCount": "10", "likeCount": "1", "commentCount": "0"}}
                 for i in range(5)]})
         return httpx.Response(200, json={"items": []})

@@ -805,6 +805,11 @@ class ConnectorPluginRegistry:
                     "geo": geo.value,
                     "timeframe": (attestation.window if attestation else requested_window),
                     "keywords": list(queried),
+                    **(
+                        {"dropped_off_keyword": dict(attestation.dropped_off_keyword)}
+                        if attestation and attestation.dropped_off_keyword
+                        else {}
+                    ),
                 }
                 if measured
                 else None

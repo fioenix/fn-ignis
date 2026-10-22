@@ -150,7 +150,7 @@ def _synthetic_tutorial_transport(calls):
         if request.url.path.endswith('/search'):
             return httpx.Response(200,json={'items':[{'id':{'videoId':'synthetic-retained'}}]})
         return httpx.Response(200,json={'items':[{'id':'synthetic-retained','snippet':{
-            'title':'Hướng dẫn n8n: workflow được lưu giữ','description':'Synthetic retained description.',
+            'title':'Hướng dẫn n8n tự động hóa ở Việt Nam: workflow được lưu giữ','description':'Synthetic retained description.',
             'publishedAt':now.isoformat()},'statistics':{'viewCount':'10'}}]})
     return httpx.MockTransport(response)
 
@@ -286,7 +286,7 @@ async def tutorial_parent_control(tmp_path, *, brief, receipt, instruction, desc
         calls.append((request.url.path,dict(request.url.params)))
         if request.url.path.endswith('/search'):
             return httpx.Response(200,json={'items':[{'id':{'videoId':'synthetic-tutorial'}}]})
-        snippet={'title':'Hướng dẫn n8n: tạo workflow thử nghiệm','publishedAt':now.isoformat(),
+        snippet={'title':'Hướng dẫn n8n tự động hóa ở Việt Nam: tạo workflow thử nghiệm','publishedAt':now.isoformat(),
             'channelTitle':'Synthetic tutorial channel'}
         if description_present is not False:
             snippet['description']=(description_present if isinstance(description_present,str)
@@ -321,7 +321,7 @@ async def tutorial_parent_control(tmp_path, *, brief, receipt, instruction, desc
         assert bounds.retention_until is None
         assert (bounds.search_calls,bounds.other_calls)==(2,4)
         assert result['bridge'].budget._used=={'search':1,'other':1}
-        assert snapshot.signals[0].raw_title=='Hướng dẫn n8n: tạo workflow thử nghiệm'
+        assert snapshot.signals[0].raw_title=='Hướng dẫn n8n tự động hóa ở Việt Nam: tạo workflow thử nghiệm'
         assert snapshot.signals[0].source_url=='https://www.youtube.com/watch?v=synthetic-tutorial'
         signal=snapshot.signals[0]
         expected_description=(description_present if isinstance(description_present,str)

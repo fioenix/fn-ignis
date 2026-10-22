@@ -26,7 +26,7 @@ async def handler(request):
     if request.url.path.endswith('/search'):
         return httpx.Response(200, json={'items': [{'id': {'videoId': 'cli-video'}}]})
     return httpx.Response(200, json={'items': [{'id': 'cli-video', 'snippet': {
-        'title': 'Hướng dẫn n8n qua CLI', 'description': 'Synthetic CLI description.',
+        'title': 'Hướng dẫn n8n tự động hóa ở Việt Nam qua CLI', 'description': 'Synthetic CLI description.',
         'publishedAt': datetime.now(timezone.utc).isoformat()}, 'statistics': {'viewCount': '3'}}]})
 code = cli.main(sys.argv[2:], transport=httpx.MockTransport(handler), resolve_credential=lambda: sys.argv[1])
 print(json.dumps({'calls': calls}), file=sys.stderr)
@@ -285,7 +285,7 @@ events = Path(sys.argv[2])
 async def handler(request):
     if request.url.path.endswith('/search'):
         return httpx.Response(200, json={'items': [{'id': {'videoId': 'default-video'}}]})
-    return httpx.Response(200, json={'items': [{'id': 'default-video', 'snippet': {'title': 'Hướng dẫn n8n mặc định',
+    return httpx.Response(200, json={'items': [{'id': 'default-video', 'snippet': {'title': 'Hướng dẫn n8n tự động hóa ở Việt Nam mặc định',
         'description': 'Default transport', 'publishedAt': datetime.now(timezone.utc).isoformat()}, 'statistics': {'viewCount': '1'}}]})
 class RecordedOfficialTransport(httpx.MockTransport):
     def __init__(self, *args, **kwargs):
@@ -397,7 +397,7 @@ async def handler(request):
     lock = sqlite3.connect(ledger, timeout=0)
     lock.execute('BEGIN IMMEDIATE')
     locks.append(lock)
-    return httpx.Response(200, json={'items': [{'id': 'locked-video', 'snippet': {'title': 'Hướng dẫn n8n khóa',
+    return httpx.Response(200, json={'items': [{'id': 'locked-video', 'snippet': {'title': 'Hướng dẫn n8n tự động hóa ở Việt Nam khóa',
         'description': 'Locked ledger', 'publishedAt': datetime.now(timezone.utc).isoformat()}, 'statistics': {'viewCount': '1'}}]})
 raise SystemExit(cli.main(sys.argv[3:], transport=httpx.MockTransport(handler), resolve_credential=lambda: sys.argv[1]))
 '''
@@ -505,7 +505,7 @@ from ignis.interfaces.cli import caller_youtube_pilot as cli
 async def handler(request):
     if request.url.path.endswith('/search'):
         return httpx.Response(200, json={'items': [{'id': {'videoId': 'cleanup-video'}}]})
-    return httpx.Response(200, json={'items': [{'id': 'cleanup-video', 'snippet': {'title': 'Hướng dẫn n8n dọn dẹp',
+    return httpx.Response(200, json={'items': [{'id': 'cleanup-video', 'snippet': {'title': 'Hướng dẫn n8n tự động hóa ở Việt Nam dọn dẹp',
         'description': 'Cleanup', 'publishedAt': datetime.now(timezone.utc).isoformat()}, 'statistics': {'viewCount': '1'}}]})
 raise SystemExit(cli.main(sys.argv[3:], transport=httpx.MockTransport(handler), resolve_credential=lambda: sys.argv[1]))
 '''
@@ -705,7 +705,7 @@ import httpx
 async def handler(request):
     if request.url.path.endswith('/search'):
         return httpx.Response(200, json={'items': [{'id': {'videoId': 'close-video'}}]})
-    return httpx.Response(200, json={'items': [{'id': 'close-video', 'snippet': {'title': 'Hướng dẫn n8n đóng',
+    return httpx.Response(200, json={'items': [{'id': 'close-video', 'snippet': {'title': 'Hướng dẫn n8n tự động hóa ở Việt Nam đóng',
         'description': 'Close failure', 'publishedAt': datetime.now(timezone.utc).isoformat()}, 'statistics': {'viewCount': '1'}}]})
 class FailingClose(httpx.MockTransport):
     def __init__(self, *args, **kwargs):
@@ -857,7 +857,7 @@ async def handler(request):
     if request.url.path.endswith('/search'):
         return httpx.Response(200, json={'items': [{'id': {'videoId': 'ready-video'}}]})
     return httpx.Response(200, json={'items': [{'id': 'ready-video', 'snippet': {
-        'title': 'Hướng dẫn n8n ready', 'description': 'Synthetic ready description.',
+        'title': 'Hướng dẫn n8n tự động hóa ở Việt Nam ready', 'description': 'Synthetic ready description.',
         'publishedAt': datetime.now(timezone.utc).isoformat()}, 'statistics': {'viewCount': '2'}}]})
 code = cli.main(sys.argv[2:], transport=httpx.MockTransport(handler), resolve_credential=lambda: sys.argv[1])
 print(json.dumps({'calls': calls, 'entered': entered}), file=sys.stderr)

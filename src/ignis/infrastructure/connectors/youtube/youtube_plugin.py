@@ -1,4 +1,6 @@
 import logging
+import re
+import unicodedata
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Tuple
 import httpx
@@ -162,6 +164,31 @@ class YouTubeDataPlugin(IConnectorPlugin):
         if not title or len(title.strip()) < 3:
             return True
         return False
+
+    @staticmethod
+    def _syllables(text: str) -> List[str]:
+        # `\w+` is a character class, not vocabulary: it splits Vietnamese into its syllables.
+        return re.findall(r"\w+", unicodedata.normalize("NFC", text).casefold())
+
+    @classmethod
+    def _keyword_patterns(cls, keywords: List[str]) -> set:
+        """Adjacent syllable pairs of every keyword; a one-word keyword is its own pattern."""
+        patterns = set()
+        for keyword in keywords:
+            words = cls._syllables(keyword)
+            patterns.update(zip(words, words[1:]) if len(words) > 1 else ((w,) for w in words))
+        return patterns
+
+    @classmethod
+    def _mentions_a_keyword(cls, signal: TrendSignal, patterns: set) -> bool:
+        """Whether the title or description names any keyword of the call (Spec 016, 22/10/2026).
+
+        For a niche keyword in a short window, search.list fills the page with popular uploads
+        that never mention it. Sharing single common syllables is not enough; an adjacent pair is.
+        """
+        words = cls._syllables(f"{signal.raw_title} {(signal.metadata or {}).get('description') or ''}")
+        present = set(zip(words, words[1:])) | {(w,) for w in words}
+        return not patterns.isdisjoint(present)
 
     @property
     def feed_yields_candidate_topics(self) -> bool:
@@ -334,6 +361,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
         region_code = self._geo_to_region_code(geo)
         relevance_lang = self._geo_to_relevance_language(geo)
         
+        keyword_patterns = self._keyword_patterns(keywords)
         tf_str = custom_timeframe or (timeframe.value if hasattr(timeframe, "value") else str(timeframe))
         published_after_str, published_after_dt = self._timeframe_to_published_after(tf_str)
         if attestation is not None:
@@ -352,6 +380,10 @@ class YouTubeDataPlugin(IConnectorPlugin):
                     v_id = cs.metadata.get("video_id")
                     if v_id and v_id not in seen_video_ids:
                         seen_video_ids.add(v_id)
+                        if not self._mentions_a_keyword(cs, keyword_patterns):
+                            if attestation is not None:
+                                attestation.dropped(raw_kw)
+                            continue
                         cloned_sig = TrendSignal(
                             platform=cs.platform,
                             raw_title=cs.raw_title,
@@ -513,8 +545,13 @@ class YouTubeDataPlugin(IConnectorPlugin):
                             videos_resp.raise_for_status()
 
                     if kw_signals:
-                        signals.extend(kw_signals)
+                        # The cache keeps every result: the check depends on the call's keywords.
                         self._query_cache()[cache_key] = kw_signals
+                        for sig in kw_signals:
+                            if self._mentions_a_keyword(sig, keyword_patterns):
+                                signals.append(sig)
+                            elif attestation is not None:
+                                attestation.dropped(raw_kw)
             except ConnectorQuotaExceededException:
                 # Quota errors MUST bubble up to trip Circuit Breaker
                 raise
