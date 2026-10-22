@@ -3205,6 +3205,25 @@ async def start_watchlist_run(
     )
 
 
+async def handle_get_watchlist_period_snapshot(
+    watchlist_id: str, period_kind: str, period_start: Optional[str] = None
+) -> str:
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+
+    comp = get_components()
+    result = await GetWatchlistPeriodSnapshotUseCase(comp["repository"], comp["workspace_store"]).execute(
+        watchlist_id, period_kind, period_start
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+@mcp.tool(name="get_watchlist_period_snapshot", description="Read one complete listening period of a watchlist (day, Monday-to-Sunday week or calendar month, in Asia/Ho_Chi_Minh) against the period before it: per topic and channel, that channel's own indicators in their own units, or not_comparable with the missing days; rising and new terms; and up to three items with content only. Refuses a period that has not ended yet. Collects nothing; render it with the ignis_listen guide.")
+async def get_watchlist_period_snapshot(
+    watchlist_id: str, period_kind: str, period_start: Optional[str] = None
+) -> str:
+    return await handle_get_watchlist_period_snapshot(watchlist_id, period_kind, period_start)
+
+
 @mcp.tool(name="get_mission_analysis", description="Retrieve full strategic analysis payload (Scorecard, 10 White Spaces, Insights, Action Plan, Top Signals) for in-chat Native Artifact rendering.")
 async def get_mission_analysis(mission_id: str, limit: int = 25, platform: Optional[str] = None) -> str:
     return await handle_get_mission_analysis(mission_id=mission_id, limit=limit, platform=platform)
@@ -4273,6 +4292,31 @@ def prompt_ignis_track(mission_id: Optional[str] = None) -> str:
     except (ValueError, TypeError, AttributeError):
         raise ValueError("mission_id must be a mission UUID") from None
     return f"Selected mission: `{selected}`\n\n{guide}"
+
+
+def _ignis_listen_guide() -> str:
+    # One packaged source, shipped in the wheel and mirrored by .agents/skills/ignis-listen/SKILL.md.
+    from importlib import resources
+    return resources.files("ignis.interfaces.mcp").joinpath("guides/ignis_listen.md").read_text(encoding="utf-8")
+
+
+@mcp.resource("fn-ignis://guide/ignis-listen")
+def get_ignis_listen_guide() -> str:
+    """How an agent reads a watchlist-period snapshot and renders the period view for a person."""
+    return _ignis_listen_guide()
+
+
+@mcp.prompt(name="ignis_listen")
+def prompt_ignis_listen(watchlist_id: Optional[str] = None) -> str:
+    """Guide the agent to render a watchlist's period view; reads nothing by itself."""
+    guide = _ignis_listen_guide()
+    if watchlist_id is None:
+        return guide
+    try:
+        selected = UUID(watchlist_id)
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("watchlist_id must be a watchlist UUID") from None
+    return f"Selected watchlist: `{selected}`\n\n{guide}"
 
 
 @mcp.prompt(name="voice_of_customer_audit")

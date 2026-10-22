@@ -55,18 +55,22 @@ this branch on it before T004.
 
 ## Phase 4: US2 — Compare two complete periods (P1)
 
-- [ ] T009 [US2] Failing tests in `tests/unit/test_watchlist_period.py` for the comparison cells,
+- [x] T009 [US2] Failing tests in `tests/unit/test_watchlist_period.py` for the comparison cells,
   refusal of an incomplete period, no cross-channel sums, counter stability, and terms.
-- [ ] T010 [US2] Implement `src/ignis/application/use_cases/watchlist_period.py` and
+  Done 22/10/2026: `tests/unit/test_watchlist_period.py`, 23 tests, RED observed (module absent); negative controls: an unbounded counting window fails 2, a DEGRADED day counted as complete fails 1.
+- [x] T010 [US2] Implement `src/ignis/application/use_cases/watchlist_period.py` and
   `get_watchlist_period_snapshot`; dual-backend integration test for SC-001–SC-004 and SC-006.
+  Done 22/10/2026: `src/ignis/domain/watchlist_period.py`, `src/ignis/application/use_cases/watchlist_period.py`, tool `get_watchlist_period_snapshot` (51 → 52 tools); `tests/integration/test_watchlist_period_storage.py` 5/5 on SQLite and PostgreSQL. Reads existing repository methods; no migration.
 
 ## Phase 5: US3 — Read the period view (P2)
 
-- [ ] T011 [US3] Failing tests in `tests/unit/test_ignis_listen_guidance.py`: prompt and resource
+- [x] T011 [US3] Failing tests in `tests/unit/test_ignis_listen_guidance.py`: prompt and resource
   listed, guide packaged, SKILL body equal to the packaged guide, serving starts no read.
-- [ ] T012 [US3] Write `src/ignis/interfaces/mcp/guides/ignis_listen.md` and
+  Done 22/10/2026: `tests/unit/test_ignis_listen_guidance.py`, RED observed (prompt, resource and skill absent).
+- [x] T012 [US3] Write `src/ignis/interfaces/mcp/guides/ignis_listen.md` and
   `.agents/skills/ignis-listen/SKILL.md`; register the prompt and resource; verify SC-005 on a
   fixture snapshot.
+  Done 22/10/2026: guide, skill mirror, prompt, resource and `openclaw.json`. SC-005 on the unit fixture snapshot: a view rendered by the guide holds 70 numbers, none absent from the snapshot (`.handoff/spec016/sc005-view.md`).
 
 ## Phase 6: US4 — Bounded collection and finite history (P3)
 
@@ -93,12 +97,15 @@ this branch on it before T004.
 
 ## Phase 8: Collection precision (from the golden-set baseline, 22/10/2026)
 
-- [ ] T019 Failing tests in `tests/unit/test_youtube_plugin.py` and
+- [x] T019 Failing tests in `tests/unit/test_youtube_plugin.py` and
   `tests/unit/test_connector_registry*.py`, then the YouTube keyword check and its per-keyword
   dropped count on `SearchAttestation`, carried into the probe outcome's `scope_attestation`
   (clarification of 22/10/2026). Accept only after a same-day live golden-set rerun of `main` and
   this branch, both scored with `jev-1.14.0` at 0.60 over the first 50 signals, shows this branch
   no lower on any of the four watchlists; record both scores in the pull request.
+  Done 22/10/2026 in PR #66: share G2 0.132→0.385, G3 0.167→0.250, G4 0.408→0.667, G5
+  0.667→0.815 (main 10:32, branch 12:02 ICT); relevant items fall on G3, G4 and G5 (6→5, 20→16,
+  30→22).
 
 ## Landing in two pull requests
 
