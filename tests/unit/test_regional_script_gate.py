@@ -51,6 +51,7 @@ async def test_an_agent_probe_fetches_foreign_language_content_freely():
     repo = AsyncMock()
     repo.log_event = AsyncMock()
     repo.get_self_accounts = AsyncMock(return_value=[])
+    repo.reserve_connector_requests = AsyncMock(side_effect=NotImplementedError)
     registry = ConnectorPluginRegistry(repository=repo)
     registry.register(MultilingualPlugin())
 
@@ -100,6 +101,7 @@ async def test_a_requested_pass_preserves_the_languages_it_found():
         repo = AsyncMock()
         repo.log_event = AsyncMock()
         repo.get_self_accounts = AsyncMock(return_value=[])
+        repo.reserve_connector_requests = AsyncMock(side_effect=NotImplementedError)
         registry = ConnectorPluginRegistry(repository=repo)
         registry.register(MixedLanguageFeed())
         return registry

@@ -85,13 +85,14 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "032_watchlists.sql"
+NEWEST_MIGRATION = "033_connector_request_days.sql"
 
 # Exact full-chain identities: 027 adds three tables/one UUID default; 028 adds fifteen
-# tables, 029 three, 030 six, 031 two and 032 three, all with caller-bound identities and no UUID
-# default.
+# tables, 029 three, 030 six, 031 two, 032 three and 033 one, all with caller-bound identities and
+# no UUID default.
 # Counts alone cannot detect a swapped table or default.
 EXPECTED_PUBLIC_TABLES = (
+    "connector_request_days",
     "industry_taxonomies",
     "market_brief_revisions",
     "market_lexicons",
@@ -175,7 +176,7 @@ def _assert_readback(readback):
         "retired_present": "0",
         "rls_market_lexicons": "t",
         "public_policies": "0",
-        "public_tables": "55",
+        "public_tables": "56",
         "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
         "public_tables_without_rls": "0",
         "supabase_roles": "0",
@@ -384,7 +385,7 @@ def test_readback_oracle_rejects_identity_substitution_and_access_widening(contr
     """Correct counts cannot hide the wrong schema or a widened access policy."""
     readback = {
         "later_objects": "13", "ui_noise_terms": "10", "retired_present": "0",
-        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "55",
+        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "56",
         "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
         "public_tables_without_rls": "0", "supabase_roles": "0",
         "builtin_uuid_defaults": "16", "builtin_uuid_columns": ",".join(EXPECTED_UUID_COLUMNS),

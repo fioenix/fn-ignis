@@ -16,6 +16,7 @@ from ignis.domain.exceptions import (
     ConnectorQuotaExceededException,
 )
 from ignis.domain.harness_models import ChannelHealthStatus
+from ignis.domain.listening_period import LISTENING_TZ
 from ignis.domain.self_content import SelfIdentity, partition_self_authored
 from ignis.domain.entities import TrendSignal
 from ignis.domain.value_objects import (
@@ -30,6 +31,12 @@ from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReaso
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 
 logger = logging.getLogger(__name__)
+
+# Per-channel daily request ceilings when runtime_configs sets none (Spec 016 research R8):
+# thresholds, not vocabulary. One request is one keyword searched on one channel.
+DAILY_CEILING_KEY = "connector.{platform}.daily_request_ceiling"
+DEFAULT_DAILY_CEILINGS = {"youtube": 200}
+DEFAULT_DAILY_CEILING = 50
 
 
 class CircuitBreaker:
@@ -690,6 +697,8 @@ class ConnectorPluginRegistry:
             result = await self._safe_search(
                 plugin, breaker, keywords, geo, timeframe, custom_timeframe, limit,
                 attestation=attestation, trigger=trigger,
+                # A surface that already knows it cannot search sends nothing, so it spends nothing.
+                count_requests=blocked_reasons.get(plugin.plugin_id) is None,
             )
             if boundary_guard is not None:
                 boundary_guard()
@@ -819,6 +828,34 @@ class ConnectorPluginRegistry:
             connector_revision=provenance["connector_revision"],
         )
 
+    async def _daily_ceiling_note(self, plugin: IConnectorPlugin, requests: int) -> Optional[str]:
+        """None when the channel may run `requests` more keyword searches today, else why not.
+
+        The count lives in the store, so separate sessions share it, and a pass is admitted whole
+        or not at all (Spec 016 FR-013). A store that keeps no count sets no ceiling.
+        """
+        reserve = getattr(self._repository, "reserve_connector_requests", None)
+        if reserve is None or requests <= 0:
+            return None
+        platform = plugin.platform.value
+        default = DEFAULT_DAILY_CEILINGS.get(platform, DEFAULT_DAILY_CEILING)
+        try:
+            raw = await self._repository.get_runtime_config(DAILY_CEILING_KEY.format(platform=platform))
+            ceiling = int(raw) if raw not in (None, "") and int(raw) >= 0 else default
+        except (ValueError, TypeError, NotImplementedError):
+            ceiling = default
+        now = datetime.now(timezone.utc)
+        try:
+            admitted, used = await reserve(now.astimezone(LISTENING_TZ).date(), platform, requests, ceiling, now)
+        except NotImplementedError:
+            return None
+        if admitted:
+            return None
+        return (
+            f"daily_ceiling: {used} of {ceiling} keyword searches on {platform} already used today"
+            f" (Asia/Ho_Chi_Minh); this pass needs {requests}."
+        )
+
     @staticmethod
     async def _keyword_search_blocked_reason(plugin: IConnectorPlugin) -> Optional[str]:
         """Why a surface's keyword search would come back empty, when it knows in advance.
@@ -939,7 +976,14 @@ class ConnectorPluginRegistry:
         limit: Optional[int] = None,
         attestation: Optional[SearchAttestation] = None,
         trigger: IngressTrigger = IngressTrigger.REQUESTED,
+        count_requests: bool = True,
     ) -> List[TrendSignal]:
+        # Every keyword search passes here, so the daily ceiling holds on every path. A refusal is
+        # not a connector failure and leaves the circuit breaker alone.
+        if count_requests:
+            ceiling_note = await self._daily_ceiling_note(plugin, len(keywords))
+            if ceiling_note is not None:
+                raise ConnectorQuotaExceededException(ceiling_note)
         try:
             import inspect
             sig = inspect.signature(plugin.search_signals)

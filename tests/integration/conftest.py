@@ -67,6 +67,8 @@ SCHEMA_MIGRATIONS = (
     "031_author_identity_at_rest.sql",
     # Spec 016: watchlists, their immutable versions and the runs bound to them.
     "032_watchlists.sql",
+    # Spec 016 US4: keyword searches per channel per day, for the daily request ceilings.
+    "033_connector_request_days.sql",
 )
 
 

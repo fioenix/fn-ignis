@@ -12,7 +12,9 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/032_watchlists.sql`. Migration 032 adds watchlists, their
+The source migration chain ends at `sql/033_connector_request_days.sql`. Migration 033 adds a
+per-channel, per-day count of keyword searches for the daily request ceilings; it rewrites no
+stored evidence. Migration 032 adds watchlists, their
 immutable versions and the runs bound to them; it rewrites no stored evidence. Migration 031 adds
 per-mission author keys, declared accounts and author columns on mission evidence, and lets an
 observation with no content reference be stored as unverifiable; it rewrites no stored evidence.
@@ -105,6 +107,15 @@ numbers. Only observations the agent qualified as relevant count, and each post 
 seen within seven days of publication, so an earlier period does not change after later runs. The
 `ignis_listen` prompt and `fn-ignis://guide/ignis-listen` resource tell the agent how to render the
 view as a local file.
+
+Each channel has a daily request ceiling: one request is one keyword searched on that channel, and
+the count is shared by every session on the same store for the calendar day in Asia/Ho_Chi_Minh.
+The defaults are 200 for YouTube and 50 for every other channel; raise one with
+`update_runtime_config` on `connector.<platform>.daily_request_ceiling`. A search that would pass
+the ceiling sends nothing to that channel and records it as `RATE_LIMITED` with a `daily_ceiling`
+note, while the other channels run. History is finite but never pruned on its own:
+`scripts/prune_expired_observations.py` lists observations collected more than 13 months ago, and
+removes them with `--apply`, keeping any that a stored claim or recorded research work still cites.
 
 ## 3. Understand evidence and analysis
 

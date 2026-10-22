@@ -150,6 +150,29 @@ confirm (listed again under "Owner review"):
   and which lowered matcha from 0.667 to 0.575 in a same-day live run; a smaller `maxResults`,
   because relevant cat and matcha items reach rank 10. (Owner decision, 22/10/2026: "Đồng ý, ghi
   số bị bỏ". Accepted only if a same-day live golden-set rerun scores no lower than `main`.)
+- Q: What is one request against a channel's daily ceiling, and which searches count? → A: One
+  keyword searched on one channel, counted for every keyword search the connector registry
+  dispatches (missions, watchlist runs and atomic probes), per calendar day in Asia/Ho_Chi_Minh, in
+  the store so separate sessions share it (owner decided 22/10/2026). A pass is admitted whole or
+  stopped for that channel before any request is sent; YouTube's API-unit quota keeps its own
+  ledger.
+- Q: Where is the per-day count kept? → A: In a new table `connector_request_days` (migration
+  033, both backends), one row per day and platform holding a counter only. Ceilings stay in
+  `runtime_configs` as `connector.<platform>.daily_request_ceiling`, read with defaults (YouTube
+  200, others 50) rather than seeded, as `listening.*` are; an invalid value falls back to the
+  default (agent decided; basis: research R8 and the `youtube_quota_buckets` precedent).
+- Q: Which expired observations does the retention action keep? → A: Only those a stored claim
+  cites or recorded research work binds; mission evidence and qualifications alone do not keep an
+  observation, and they are removed with it through the schema's cascades (owner decided
+  22/10/2026). Expiry uses the collection time, 13 calendar months back to midnight in
+  Asia/Ho_Chi_Minh; sources are kept.
+- Q: What does review of PR #68 change? → A: The ceiling check sits where every keyword search is
+  dispatched, so the ingress keyword probe is bounded too; SQLite reservations go through the
+  repository's write lock; the retention run holds the write lock (SQLite) or SHARE locks on the
+  referencing tables (PostgreSQL) from its first read to its commit, so a claim bound mid-run is
+  not stripped; and a store that still holds legacy `trend_signals` rows keeps its most recently
+  collected observation, since the readiness check refuses such a store with no observation
+  (agent decided; basis: Codex review of 22/10/2026).
 
 ## User Scenarios & Testing *(mandatory)*
 

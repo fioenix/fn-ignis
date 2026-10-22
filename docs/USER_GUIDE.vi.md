@@ -12,7 +12,9 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/032_watchlists.sql`. Migration 032 bổ sung watchlist, các phiên
+Chuỗi migration trong mã nguồn kết thúc ở `sql/033_connector_request_days.sql`. Migration 033 thêm
+bộ đếm số lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không
+sửa bằng chứng đã lưu. Migration 032 bổ sung watchlist, các phiên
 bản không sửa được của watchlist và các lần chạy gắn với từng phiên bản; nó không sửa bằng chứng đã lưu. Migration
 031 bổ sung khóa tác
 giả riêng cho từng nhiệm vụ, danh sách tài khoản được khai báo và các cột thông tin tác giả trên bằng chứng của nhiệm
@@ -106,6 +108,15 @@ Reels là lượt xem và lượt tương tác, đo trên những bài Ignis đ�
 là liên quan mới được tính, và mỗi bài chỉ tính giá trị ghi nhận trong vòng bảy ngày kể từ khi
 đăng, nên số liệu của kỳ trước không đổi sau các lần chạy tiếp theo. Prompt `ignis_listen` và resource
 `fn-ignis://guide/ignis-listen` hướng dẫn agent dựng bản xem này thành một file trên máy.
+
+Mỗi kênh có một trần request theo ngày. Một request là một lần tìm một từ khóa trên kênh đó và
+mọi phiên dùng chung một store đều dùng chung bộ đếm của ngày đó theo giờ Việt Nam. Mặc định YouTube
+được 200 request, các kênh khác 50; muốn nâng trần thì đặt `connector.<platform>.daily_request_ceiling`
+bằng `update_runtime_config`. Lượt tìm nào vượt trần sẽ không gửi gì tới kênh đó và được ghi
+`RATE_LIMITED` kèm ghi chú `daily_ceiling`, còn các kênh khác vẫn chạy. Ignis không tự xóa
+lịch sử: `scripts/prune_expired_observations.py` liệt kê các quan sát
+thu thập cách đây hơn 13 tháng và xóa chúng khi có `--apply`, trừ những quan sát mà một
+claim đã lưu hoặc công việc nghiên cứu đã ghi vẫn còn tham chiếu tới.
 
 ## 3. Đọc chứng cứ và kết quả phân tích
 

@@ -308,6 +308,15 @@ class ITrendRepository(ABC):
         """Atomically admit and record one YouTube request, or return the current refusal state."""
         pass
 
+    async def reserve_connector_requests(
+        self, request_day: date, platform: str, requests: int, ceiling: int, now: datetime
+    ) -> Tuple[bool, int]:
+        """Count `requests` keyword searches on a channel for the day, only if they fit the ceiling.
+
+        All or nothing, atomically: (admitted, the day's count afterwards). Spec 016 FR-013.
+        """
+        raise NotImplementedError("This repository keeps no request counts.")
+
     @abstractmethod
     async def mark_youtube_quota_exhausted(
         self,
