@@ -80,7 +80,9 @@ signature authority. Representative operations:
   confirmed scope; `execute_mission_ingress` collects the requested frame.
 - `save_watchlist`, `get_watchlist` and `start_watchlist_run` keep a versioned watchlist of
   topics and brands and start one Attention mission per run on its current version. Ignis never
-  runs a watchlist on its own.
+  runs a watchlist on its own. `get_watchlist_period_snapshot` compares a complete day, week or
+  month with the one before, per channel and in each channel's own unit; the `ignis_listen` guide
+  renders it as a local view.
 - Atomic source tools such as `get_tiktok_search_suggestions` and
   `get_tiktok_video_comments` can answer source-specific questions without a Market verdict.
 - Opt-in `prepare_host_browser_search`, `submit_host_browser_search` and

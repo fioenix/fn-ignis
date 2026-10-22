@@ -104,6 +104,30 @@ confirm (listed again under "Owner review"):
   dedicated SQLite store for the golden set, running current `main`, on public channels only
   (Google Trends, and YouTube where its API key is configured). TikTok, Threads and Reels wait for
   the per-channel daily ceilings (US4), so the first run uses no personal account.
+- Q: How does a channel carry more than one unit? → A: Each channel cell holds a list of
+  `indicators`, one per unit (TikTok, Threads and Reels report `views` and `interactions`
+  separately), so no unit is summed into another (agent decided; basis: FR-007 and R11; cost if
+  wrong: a contract field renamed before release).
+- Q: Which time anchors the 7-day counting window of an item with no plausible publication date?
+  → A: Its first collection, the same time that places it in a period (agent decided; basis: FR-004
+  places it by collection date, and FR-008 needs a fixed window so earlier periods never grow; cost
+  if wrong: such items counted instead of only listed).
+- Q: Which topic does an item belong to in a watchlist with several topics? → A: A topic whose
+  keyword the connector recorded as the query that found it, else one whose keyword appears in its
+  text; in a one-topic watchlist every item belongs to that topic (agent decided; basis: R3 keys
+  coverage by topic keyword; cost if wrong: an item shown under the wrong topic).
+- Q: Does a collection that recorded no queried keywords cover a topic's day? → A: It covers every
+  topic of its run (agent decided; basis: older connectors record no keywords for a measured run;
+  cost if wrong: a day counted as covered for a topic it did not query).
+- Q: What is a term? → A: Two adjacent words of an item's title and excerpt, minus noise vocabulary
+  from `market_lexicons` and anything inside a topic keyword; new when absent from the earlier
+  period, rising by the R6 thresholds (agent decided; basis: one Vietnamese syllable rarely
+  carries a meaning; cost if wrong: terms that read as fragments).
+- Q: Where do the R6 thresholds and the 7-day window come from, given that `032_watchlists.sql`
+  seeded no `runtime_configs` rows? → A: From `runtime_configs` when a row exists, otherwise from
+  the documented defaults (2, 0.5, 7), so no migration is needed (agent decided; basis: AGENTS.md
+  section 8; cost if wrong: a user changes a threshold through `update_runtime_config` instead of
+  a seeded row).
 
 ## User Scenarios & Testing *(mandatory)*
 

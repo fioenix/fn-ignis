@@ -93,8 +93,18 @@ name. `save_watchlist` stores every change as a new immutable version, and `get_
 the versions and the runs. Each `start_watchlist_run` creates one Attention mission on the current
 version and declares its brands as that mission's accounts, the only accounts Ignis ever names.
 You state the allowed sources and authority for every run; collection then goes through
-`execute_mission_ingress` as for any mission. Ignis never runs a watchlist on its own, and the
-comparison between periods arrives in a later part of Spec 016.
+`execute_mission_ingress` as for any mission. Ignis never runs a watchlist on its own.
+
+To see how a watchlist moved, ask for its period view. `get_watchlist_period_snapshot` compares a
+complete day, Monday-to-Sunday week or calendar month in Asia/Ho_Chi_Minh with the one before, and
+refuses a period that has not ended. Each channel keeps its own figures in its own unit -- Google
+Trends interest, YouTube new uploads, and TikTok, Threads and Reels views and interactions measured
+on the posts Ignis collected -- and channels are never added together. A channel that missed more
+than a fifth of its days in either period shows "not comparable" and its missing days instead of
+numbers. Only observations the agent qualified as relevant count, and each post counts the value
+seen within seven days of publication, so an earlier period does not change after later runs. The
+`ignis_listen` prompt and `fn-ignis://guide/ignis-listen` resource tell the agent how to render the
+view as a local file.
 
 ## 3. Understand evidence and analysis
 
