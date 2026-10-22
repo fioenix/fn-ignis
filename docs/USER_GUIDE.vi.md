@@ -94,8 +94,18 @@ một phiên bản mới và phiên bản đã lưu thì không sửa được; 
 các lần chạy. Mỗi lần gọi `start_watchlist_run` tạo một nhiệm vụ Attention trên phiên bản hiện tại
 và khai báo các thương hiệu đó làm tài khoản của nhiệm vụ. Đây là những tài khoản duy nhất Ignis gọi
 tên. Lần chạy nào bạn cũng phải nêu rõ nguồn được phép và quyền hạn; sau đó việc thu thập đi qua
-`execute_mission_ingress` như mọi nhiệm vụ khác. Ignis không bao giờ tự chạy watchlist, còn phần so
-sánh giữa các kỳ sẽ có ở phần sau của Spec 016.
+`execute_mission_ingress` như mọi nhiệm vụ khác. Ignis không bao giờ tự chạy watchlist.
+
+Muốn xem một watchlist thay đổi ra sao, hãy nhờ agent mở bản xem theo kỳ.
+`get_watchlist_period_snapshot` so một ngày, một tuần (từ thứ Hai đến Chủ nhật) hoặc một tháng đã
+trọn vẹn theo giờ Việt Nam với kỳ liền trước, và từ chối kỳ chưa kết thúc. Mỗi kênh giữ số liệu và
+đơn vị riêng: Google Trends là mức quan tâm, YouTube là số video mới đăng, còn TikTok, Threads và
+Reels là lượt xem và lượt tương tác, đo trên những bài Ignis đã thu thập. Các kênh không bao giờ
+được cộng dồn với nhau. Kênh nào thiếu quá một phần năm số ngày ở một trong hai kỳ thì chỉ hiện
+"không so được" kèm danh sách ngày thiếu, không hiện con số. Chỉ những quan sát agent đã đánh giá
+là liên quan mới được tính, và mỗi bài chỉ tính giá trị ghi nhận trong vòng bảy ngày kể từ khi
+đăng, nên số liệu của kỳ trước không đổi sau các lần chạy tiếp theo. Prompt `ignis_listen` và resource
+`fn-ignis://guide/ignis-listen` hướng dẫn agent dựng bản xem này thành một file trên máy.
 
 ## 3. Đọc chứng cứ và kết quả phân tích
 
@@ -206,7 +216,7 @@ cấp quyền thực hiện.
 
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **51 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **52 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
 manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu

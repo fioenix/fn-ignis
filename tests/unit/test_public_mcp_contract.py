@@ -54,6 +54,7 @@ EXPECTED_TOOLS = {
     "save_watchlist",
     "set_mission_declared_accounts",
     "start_watchlist_run",
+    "get_watchlist_period_snapshot",
     "submit_mission_claims",
     "submit_mission_evidence_qualifications",
     "update_runtime_config",

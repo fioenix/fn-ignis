@@ -41,14 +41,21 @@ The discovery share is stored with the version but not yet spent by collection (
 Compares that period with the one before it. Returns:
 
 - `periods`: both periods with bounds in Asia/Ho_Chi_Minh and the watchlist versions active in each;
-- `topics[]`: per topic, `channels[]` with `status` (`comparable` or `not_comparable`),
-  `indicator` (kind and unit), `current`, `previous`, `change`, `measured_on_sample`,
-  `missing_days`, `reasons`, and `basis`: for each period, how many counted observations were
-  placed by publication date and how many by collection date (constitution III); plus
-  `rising_terms` and `new_terms`, each with the same `basis` counts, and up to three `items`
-  (content excerpt, identity-free link or "link unavailable", channel, publication date, basis
-  flag);
-- `refusal` when the requested period is not complete, with the time it completes.
+- `topics[]`: per topic, `channels[]` with `channel`, `status` (`comparable` or
+  `not_comparable`), `measured_on_sample` and `missing_days` for each period. A `not_comparable`
+  channel adds only `reasons`. A `comparable` channel adds `indicators[]` -- each `{kind, unit,
+  current, previous, change: {absolute, relative}, uncounted_items: {current, previous}}`, one per
+  unit the channel reports (Google Trends `interest`; YouTube `new_uploads`; TikTok, Threads and
+  Reels `views` and `interactions`, R11) -- and `basis`: for each period, how many listed items
+  were placed by publication date and how many by collection date (constitution III); plus
+  `rising_terms` and `new_terms`, each `{term, current_items, previous_items, basis}`. Per topic,
+  up to three `items` `{excerpt, link, channel, published_on, basis}`: content only, an
+  identity-free link or null for "link unavailable";
+- when the requested period is not complete, `status` `REFUSED`, `reason_code` `PERIOD_INCOMPLETE`
+  and `completes_at` instead of the comparison.
+
+Topics come from the watchlist's current version; a run's period is the day its collection
+completed.
 
 Never contains author identity, summed cross-channel values, or values for a `not_comparable`
 channel.

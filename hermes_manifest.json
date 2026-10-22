@@ -1736,5 +1736,39 @@
         "type": "object"
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_watchlist_period_snapshot",
+      "description": "Read one complete listening period of a watchlist (day, Monday-to-Sunday week or calendar month, in Asia/Ho_Chi_Minh) against the period before it: per topic and channel, that channel's own indicators in their own units, or not_comparable with the missing days; rising and new terms; and up to three items with content only. Refuses a period that has not ended yet. Collects nothing; render it with the ignis_listen guide.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "watchlist_id": {
+            "type": "string"
+          },
+          "period_kind": {
+            "type": "string"
+          },
+          "period_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "watchlist_id",
+          "period_kind"
+        ],
+        "type": "object"
+      }
+    }
   }
 ]
