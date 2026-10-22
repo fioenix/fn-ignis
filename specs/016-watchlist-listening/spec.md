@@ -93,6 +93,18 @@ confirm (listed again under "Owner review"):
   each mission's manifest states its own consent (agent decided; basis: Constitution I and the
   Spec 011 manifest contract; cost if wrong: a routine prompt restates two fields).
 
+### Session 2026-10-22
+
+- Q: Which value is a channel's indicator, given that `metric_value` means views, plays, likes or a
+  post count depending on the connector (research R11)? → A: The owner accepted the R11 proposal on
+  22/10/2026: each channel's indicator is read from the field that means it (plays or views, likes,
+  comments) where the connector records it, its unit is labelled, an item without that field is
+  listed and not counted, and placeholder values such as the Threads trending 1000 never count.
+- Q: Where does the first golden-set relevance run collect? → A: The owner chose on 22/10/2026 a
+  dedicated SQLite store for the golden set, running current `main`, on public channels only
+  (Google Trends, and YouTube where its API key is configured). TikTok, Threads and Reels wait for
+  the per-channel daily ceilings (US4), so the first run uses no personal account.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Follow a watchlist across runs (Priority: P1)
