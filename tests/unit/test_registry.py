@@ -561,6 +561,29 @@ async def test_platform_filtering_decides_which_surfaces_are_eligible():
 
 
 @pytest.mark.asyncio
+async def test_results_dropped_for_never_mentioning_the_keyword_are_recorded_with_the_outcome():
+    """Spec 016, 22/10/2026: a dropped count stays first-class evidence, not a log line."""
+
+    class FilteringYouTube(_BasePlugin):
+        _platform = PlatformType.YOUTUBE
+        _name = "YouTube Filtering"
+
+        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H,
+                                 limit=20, attestation=None):
+            attestation.executed(keywords[0])
+            for _ in range(3):
+                attestation.dropped(keywords[0])
+            return []
+
+    filtered = await _registry(FilteringYouTube()).search_with_outcomes(keywords=["ai agent"])
+    plain = await _registry(EmptyYouTubePlugin()).search_with_outcomes(keywords=["ai agent"])
+
+    assert _by_surface(filtered) == {"youtube": (ChannelHealthStatus.EMPTY_NO_DATA, 0)}
+    assert filtered.outcomes[0].scope_attestation["dropped_off_keyword"] == {"ai agent": 3}
+    assert "dropped_off_keyword" not in plain.outcomes[0].scope_attestation
+
+
+@pytest.mark.asyncio
 async def test_two_concurrent_searches_each_keep_their_own_outcomes():
     import asyncio
 

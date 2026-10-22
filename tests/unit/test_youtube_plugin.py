@@ -1,3 +1,5 @@
+import unicodedata
+
 import pytest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -5,6 +7,7 @@ from unittest.mock import patch, MagicMock
 
 import httpx
 
+from ignis.application.ports.connector_port import SearchAttestation
 from ignis.domain.value_objects import PlatformType, GeoCode, IngressTrigger, Timeframe
 from ignis.domain.youtube_quota import YouTubeQuotaBucket
 from ignis.domain.exceptions import (
@@ -77,7 +80,7 @@ async def test_returned_description_is_retained_without_inventing_missing_conten
     with patch("httpx.AsyncClient.get") as get:
         if mode == "search":
             get.side_effect = [_json_response(_search_list(["description-video"])), _json_response(payload)]
-            signals = await plugin.search_signals(["description regression"], geo=GeoCode.VN)
+            signals = await plugin.search_signals(["public tutorial"], geo=GeoCode.VN)
         else:
             get.return_value = _json_response(payload)
             signals = await plugin.fetch_signals(geo=GeoCode.VN)
@@ -263,13 +266,13 @@ async def test_youtube_search_ttl_caching():
         mock_get.side_effect = [resp1, resp2]
 
         # Call 1: Fetches from API (2 HTTP requests: search.list + videos.list)
-        signals_1 = await plugin.search_signals(keywords=["n8n test cache"], geo=GeoCode.VN)
+        signals_1 = await plugin.search_signals(keywords=["n8n automation"], geo=GeoCode.VN)
         assert len(signals_1) == 1
         assert signals_1[0].raw_title == "Tutorial AI Agent n8n Automation"
         assert mock_get.call_count == 2
 
         # Call 2: Must be retrieved from TTLCache without any HTTP request
-        signals_2 = await plugin.search_signals(keywords=["n8n test cache"], geo=GeoCode.VN)
+        signals_2 = await plugin.search_signals(keywords=["n8n automation"], geo=GeoCode.VN)
         assert len(signals_2) == 1
         assert signals_2[0].raw_title == "Tutorial AI Agent n8n Automation"
         # call_count remains 2 (0 new network calls, quota preserved!)
@@ -465,8 +468,8 @@ async def test_a_video_older_than_the_requested_window_is_dropped():
             _json_response(
                 _videos_list(
                     [
-                        ("fresh", "Fresh upload", 10_000, _recent(hours_ago=3)),
-                        ("stale", "Two years old", 9_000_000, "2024-01-01T00:00:00Z"),
+                        ("fresh", "Fresh đánh giá upload", 10_000, _recent(hours_ago=3)),
+                        ("stale", "Two years old đánh giá", 9_000_000, "2024-01-01T00:00:00Z"),
                     ]
                 )
             ),
@@ -489,7 +492,7 @@ async def test_a_title_too_short_to_be_a_topic_is_dropped():
             _json_response(
                 _videos_list(
                     [
-                        ("ok", "A usable title", 500, _recent()),
+                        ("ok", "A usable x title", 500, _recent()),
                         ("junk", " x ", 900_000, _recent()),
                     ]
                 )
@@ -516,9 +519,195 @@ async def test_the_same_video_returned_for_two_keywords_is_emitted_once():
             _json_response(_search_list(["shared"])),
         ]
 
-        signals = await plugin.search_signals(["first", "second"], geo=GeoCode.VN)
+        signals = await plugin.search_signals(["shared", "video"], geo=GeoCode.VN)
 
     assert [s.metadata["video_id"] for s in signals] == ["shared"]
+
+
+# --- keyword check (Spec 016 clarification of 22/10/2026) ----------------------------------------
+#
+# For a niche keyword in a short window, search.list pads the page with popular uploads that never
+# mention it; the golden-set baseline drew the same short dramas for drinks, jackets and cat litter.
+
+
+def _videos_with_descriptions(entries):
+    """entries: (video_id, title, description)."""
+    payload = _videos_list([(v, t, 10, _recent()) for v, t, _ in entries])
+    for item, (_, _, description) in zip(payload["items"], entries):
+        item["snippet"]["description"] = description
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_a_result_that_never_mentions_the_keyword_is_dropped_and_counted():
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
+    attestation = SearchAttestation()
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["review", "drama", "desc"])),
+            _json_response(_videos_with_descriptions([
+                ("review", "Review Trà Không Đường mới", ""),
+                ("drama", "Xuyên không thành thiếu gia, trà xanh từ hôn", "Phim ngắn lồng tiếng"),
+                ("desc", "Đồ uống cho dân văn phòng", "Hôm nay thử trà không đường đóng chai"),
+            ])),
+        ]
+        signals = await plugin.search_signals(
+            ["trà không đường"], geo=GeoCode.VN, attestation=attestation
+        )
+
+    # The drama shares two single syllables with the keyword but no adjacent pair of it.
+    assert [s.metadata["video_id"] for s in signals] == ["review", "desc"]
+    assert attestation.dropped_off_keyword == {"trà không đường": 1}
+    assert attestation.queried == ["trà không đường"], "a filtered answer is still a measurement"
+
+
+@pytest.mark.asyncio
+async def test_a_result_matching_another_keyword_of_the_same_call_is_kept():
+    """An English upload returned for one keyword is kept when it names another keyword."""
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
+    attestation = SearchAttestation()
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["latte"])),
+            _json_response(_videos_with_descriptions([("latte", "Classic Matcha Latte", "")])),
+            _json_response(_search_list([])),
+        ]
+        signals = await plugin.search_signals(
+            ["matcha muối", "matcha latte"], geo=GeoCode.VN, attestation=attestation
+        )
+
+    assert [s.metadata["keyword"] for s in signals] == ["matcha muối"]
+    assert attestation.dropped_off_keyword == {}
+
+
+@pytest.mark.asyncio
+async def test_a_one_word_keyword_needs_only_that_word_in_any_case_or_unicode_form():
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
+    decomposed = unicodedata.normalize("NFD", "MÈO con đáng yêu")
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["cat", "other"])),
+            _json_response(_videos_with_descriptions([
+                ("cat", decomposed, ""),
+                ("other", "Chó con đáng yêu", ""),
+            ])),
+        ]
+        signals = await plugin.search_signals(["mèo"], geo=GeoCode.VN)
+
+    assert [s.metadata["video_id"] for s in signals] == ["cat"]
+
+
+@pytest.mark.asyncio
+async def test_a_cached_answer_is_checked_against_the_current_call_and_counted_again():
+    """The check depends on every keyword of the call, so the cache holds unchecked results."""
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
+    first, second = SearchAttestation(), SearchAttestation()
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["latte", "drama"])),
+            _json_response(_videos_with_descriptions([
+                ("latte", "Classic Matcha Latte", ""),
+                ("drama", "Phim ngắn cổ trang", ""),
+            ])),
+            _json_response(_search_list([])),
+        ]
+        await plugin.search_signals(["matcha muối", "matcha latte"], geo=GeoCode.VN, attestation=first)
+        cached = await plugin.search_signals(["matcha muối"], geo=GeoCode.VN, attestation=second)
+
+    assert mock_get.call_count == 3, "the second call reads its only keyword from the cache"
+    assert cached == [], "without `matcha latte` in this call, the cached latte no longer matches"
+    assert second.dropped_off_keyword == {"matcha muối": 2}
+
+
+@pytest.mark.asyncio
+async def test_a_text_written_without_tone_marks_is_matched_folded_and_an_accented_one_is_not():
+    """AGENTS.md section 3: fold only when the input carries no tones, never both sides."""
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["plain", "other_word"])),
+            _json_response(_videos_with_descriptions([
+                ("plain", "Tra khong duong dong chai", ""),
+                # Folds to the same letters, but its tones name other words.
+                ("other_word", "Trả không đương thời", ""),
+            ])),
+        ]
+        signals = await plugin.search_signals(["trà không đường"], geo=GeoCode.VN)
+
+    assert [s.metadata["video_id"] for s in signals] == ["plain"]
+
+
+@pytest.mark.asyncio
+async def test_each_query_counts_its_own_drops_whatever_the_query_order_or_cache():
+    """A video dropped under two queries is counted under both, fresh or cached."""
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
+    fresh, cached = SearchAttestation(), SearchAttestation()
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["drama", "first_hit"])),
+            _json_response(_videos_with_descriptions([
+                ("drama", "Phim ngắn cổ trang", ""),
+                ("first_hit", "Review trà không đường", ""),
+            ])),
+            _json_response(_search_list(["drama", "second_hit"])),
+            _json_response(_videos_with_descriptions([("second_hit", "Nước ngọt không đường", "")])),
+        ]
+        keywords = ["trà không đường", "nước ngọt không đường"]
+        signals = await plugin.search_signals(keywords, geo=GeoCode.VN, attestation=fresh)
+        replayed = await plugin.search_signals(keywords[::-1], geo=GeoCode.VN, attestation=cached)
+
+    assert mock_get.call_count == 4, "the replay is served from the cache"
+    assert [s.metadata["video_id"] for s in signals] == ["first_hit", "second_hit"]
+    assert fresh.dropped_off_keyword == {"trà không đường": 1, "nước ngọt không đường": 1}
+    assert cached.dropped_off_keyword == fresh.dropped_off_keyword
+    assert sorted(s.metadata["video_id"] for s in replayed) == ["first_hit", "second_hit"]
+
+
+@pytest.mark.asyncio
+async def test_a_shared_video_cached_under_a_later_query_carries_that_query_as_its_keyword():
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["shared"])),
+            _json_response(_videos_with_descriptions([("shared", "Matcha latte và matcha muối", "")])),
+            _json_response(_search_list(["shared"])),
+        ]
+        await plugin.search_signals(["matcha latte", "matcha muối"], geo=GeoCode.VN)
+        later = await plugin.search_signals(["matcha muối"], geo=GeoCode.VN)
+
+    assert mock_get.call_count == 3
+    assert [s.metadata["keyword"] for s in later] == ["matcha muối"]
+
+
+@pytest.mark.parametrize(
+    "keyword,title,kept",
+    [
+        ("抹茶", "抹茶ラテの作り方", True),
+        ("抹茶 ラテ", "抹茶ラテの作り方", True),
+        ("抹茶", "ほうじ茶ラテの作り方", False),
+        ("ชาเขียว", "วิธีทำชาเขียวนม", True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_keyword_in_a_script_without_word_spaces_is_matched_as_a_run(keyword, title, kept):
+    """`\\w+` returns a whole Japanese or Thai phrase as one token, so pairs cannot form there."""
+    plugin = YouTubeDataPlugin(api_key="test_key", quota_manager=RecordingQuotaManager())
+
+    with patch("httpx.AsyncClient.get") as mock_get:
+        mock_get.side_effect = [
+            _json_response(_search_list(["vid"])),
+            _json_response(_videos_with_descriptions([("vid", title, "")])),
+        ]
+        signals = await plugin.search_signals([keyword], geo=GeoCode.JP)
+
+    assert bool(signals) is kept
 
 
 @pytest.mark.asyncio
@@ -579,7 +768,7 @@ async def test_a_transport_failure_on_one_keyword_does_not_lose_the_others():
         mock_get.side_effect = [
             httpx.ConnectError("Network down"),
             _json_response(_search_list(["vid_ok"])),
-            _json_response(_videos_list([("vid_ok", "Survived", 42, _recent())])),
+            _json_response(_videos_list([("vid_ok", "Working and survived", 42, _recent())])),
         ]
 
         signals = await plugin.search_signals(["broken", "working"], geo=GeoCode.VN)

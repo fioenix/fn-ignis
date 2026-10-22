@@ -135,6 +135,21 @@ confirm (listed again under "Owner review"):
   collect once (agent decided; basis: the repository exposes the latest completed outcomes per
   mission, and reading every run for months of history does not scale; cost if wrong: a re-run
   mission's earlier day reads as missing).
+- Q: The golden-set baseline of 22/10/2026 rated 3 of 40 YouTube signals relevant for low-sugar
+  drinks and 4 of 37 for sun- and rain-proof jackets. Why, and what changes? → A: YouTube keyword
+  search for a niche Vietnamese keyword in a 7-day `publishedAfter` window fills the page with
+  recent popular uploads that do not mention the keyword (the same short dramas appeared under the
+  drinks, jackets and cat-litter watchlists). The YouTube connector now drops a search result
+  whose title and description share no adjacent syllable pair with any keyword of the call (for a
+  one-word keyword, the word itself), and records the dropped count per keyword in the probe
+  outcome's `scope_attestation`. This is a documented exception to "the host agent filters
+  relevance" above: the check is lexical and deterministic (Constitution I) and only removes items
+  that do not mention what was asked; relevance among the remaining items is still the host
+  agent's. Rejected: exact-phrase quoting of `q`, which `search.list` does not document and the API
+  did not enforce (a quoted query returned 0 results, then 10 including dramas, 45 minutes later),
+  and which lowered matcha from 0.667 to 0.575 in a same-day live run; a smaller `maxResults`,
+  because relevant cat and matcha items reach rank 10. (Owner decision, 22/10/2026: "Đồng ý, ghi
+  số bị bỏ". Accepted only if a same-day live golden-set rerun scores no lower than `main`.)
 
 ## User Scenarios & Testing *(mandatory)*
 

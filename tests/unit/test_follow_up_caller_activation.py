@@ -535,7 +535,7 @@ def _video_transport(calls):
         if request.url.path.endswith('/search'):
             return httpx.Response(200, json={'items': [{'id': {'videoId': 'caller-parent'}}]})
         return httpx.Response(200, json={'items': [{'id': 'caller-parent', 'snippet': {
-            'title': 'Hướng dẫn n8n cho người mới', 'description': 'Synthetic caller description.',
+            'title': 'Hướng dẫn n8n tự động hóa ở Việt Nam cho người mới', 'description': 'Synthetic caller description.',
             'publishedAt': now.isoformat()}, 'statistics': {'viewCount': '10'}}]})
     return httpx.MockTransport(handler)
 

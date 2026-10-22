@@ -53,7 +53,7 @@ async def verify(packet_path, confirmation_path):
         if request.url.path.endswith('/search'):
             return httpx.Response(200, json={'items': [{'id': {'videoId': 'offline-tutorial'}}]})
         return httpx.Response(200, json={'items': [{'id': 'offline-tutorial', 'snippet': {
-            'title': 'Synthetic tutorial material', 'description': 'Synthetic public workflow explanation.',
+            'title': 'Synthetic n8n Việt Nam tutorial material', 'description': 'Synthetic public workflow explanation.',
             'publishedAt': now.isoformat()}, 'statistics': {'viewCount': '10'}}]})
 
     def resolve():
@@ -80,7 +80,7 @@ async def verify(packet_path, confirmation_path):
         snapshot = await store.load_mission_evidence_snapshot(host.confirmation.selected_parent_id)
         assert len(snapshot.signals) == 1 and not snapshot.qualifications and not snapshot.claims
         signal = snapshot.signals[0]
-        assert signal.raw_title == 'Synthetic tutorial material'
+        assert signal.raw_title == 'Synthetic n8n Việt Nam tutorial material'
         assert signal.metadata['description'] == 'Synthetic public workflow explanation.'
         assert signal.source_url == 'https://www.youtube.com/watch?v=offline-tutorial'
         assert signal.observation_id and signal.source_id

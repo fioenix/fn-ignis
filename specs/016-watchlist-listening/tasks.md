@@ -95,6 +95,18 @@ this branch on it before T004.
   PR.
   Part A, 21/10/2026: self-review found unbounded definition text and an unreported declaration status, both fixed (`T018 finding` commit).
 
+## Phase 8: Collection precision (from the golden-set baseline, 22/10/2026)
+
+- [x] T019 Failing tests in `tests/unit/test_youtube_plugin.py` and
+  `tests/unit/test_connector_registry*.py`, then the YouTube keyword check and its per-keyword
+  dropped count on `SearchAttestation`, carried into the probe outcome's `scope_attestation`
+  (clarification of 22/10/2026). Accept only after a same-day live golden-set rerun of `main` and
+  this branch, both scored with `jev-1.14.0` at 0.60 over the first 50 signals, shows this branch
+  no lower on any of the four watchlists; record both scores in the pull request.
+  Done 22/10/2026 in PR #66: share G2 0.132→0.385, G3 0.167→0.250, G4 0.408→0.667, G5
+  0.667→0.815 (main 10:32, branch 12:02 ICT); relevant items fall on G3, G4 and G5 (6→5, 20→16,
+  30→22).
+
 ## Landing in two pull requests
 
 - **Part A** (merges on green CI and review): T001–T008, T016 for US1, T017, T018. T003 and T004

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 from ignis.domain.entities import TrendSignal
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe
 
@@ -22,6 +22,9 @@ class SearchAttestation:
     # The time window the platform was actually asked to filter by, e.g. "7d". None when the
     # surface cannot restrict its search to a window, which is then no measure of any window.
     window: Optional[str] = None
+    # Results the platform returned but the surface discarded for never mentioning any keyword
+    # of the call, counted per keyword. A dropped item is still part of what was measured.
+    dropped_off_keyword: Dict[str, int] = field(default_factory=dict)
 
     def executed(self, keyword: str) -> None:
         """The query for `keyword` reached the platform and its answer was read."""
@@ -35,6 +38,10 @@ class SearchAttestation:
         """The platform itself filtered this call's results to `window`."""
         # A str-based Timeframe renders as "Timeframe.LAST_7D" under str(); keep its value.
         self.window = str(getattr(window, "value", window))
+
+    def dropped(self, keyword: str) -> None:
+        """One result returned for `keyword` was discarded for never mentioning any keyword."""
+        self.dropped_off_keyword[keyword] = self.dropped_off_keyword.get(keyword, 0) + 1
 
     def blocked(self, reason: str) -> None:
         """The surface could not search at all without a credential or session it lacks."""
