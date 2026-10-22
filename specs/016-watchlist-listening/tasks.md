@@ -74,10 +74,12 @@ this branch on it before T004.
 
 ## Phase 6: US4 — Bounded collection and finite history (P3)
 
-- [ ] T013 [US4] Failing tests, then the per-channel daily request ceiling read from
+- [x] T013 [US4] Failing tests, then the per-channel daily request ceiling read from
   `runtime_configs` in the connector registry, with status `RATE_LIMITED`/`daily_ceiling`.
-- [ ] T014 [US4] Failing tests, then `scripts/prune_expired_observations.py` with `--dry-run` and
+  Done 22/10/2026: RED observed (3 of 6 tests: no ceiling, status HEALTHY), then `sql/033_connector_request_days.sql` and the SQLite table, `reserve_connector_requests` on both repositories, and the registry check before each keyword search. `tests/unit/test_connector_daily_ceiling.py` 6 passed; `tests/integration/test_connector_request_days_storage.py` passed on SQLite and a disposable TimescaleDB pg16, concurrency included. Migration pins, RLS posture and table counts moved to 033.
+- [x] T014 [US4] Failing tests, then `scripts/prune_expired_observations.py` with `--dry-run` and
   `--apply`, keeping referenced observations.
+  Done 22/10/2026, script written before its tests: `tests/unit/test_prune_expired_observations.py` 5 passed and `tests/integration/test_prune_expired_observations_postgres.py` passed on pg16; a mutation dropping the claim keep and the foreign-key cascade failed 3 of the 5 unit tests, so the tests do detect both. Documented in both user guides; the Vietnamese paragraph went through the vietnamizer core workflow.
 
 ## Phase 7: Polish
 
@@ -115,6 +117,8 @@ this branch on it before T004.
 - **Part A2** (US4, T013–T014): the per-channel daily ceiling needs a persistent per-day request
   count that survives separate routine sessions, which `data-model.md` does not yet define
   (`youtube_quota_buckets` already does this for YouTube alone). Re-planned before implementation.
+  Re-planned 22/10/2026: table `connector_request_days` (migration 033); see the spec's
+  clarifications of that day.
 - **Part B** (opens after Part A merges; merges only after the owner ratifies the amendment): T009–T012,
   T015, T016 for US2 and US3, T017, T018. Tool count 51 → 52 (`get_watchlist_period_snapshot`).
 

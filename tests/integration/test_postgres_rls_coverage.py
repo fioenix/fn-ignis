@@ -123,6 +123,9 @@ WATCHLIST_OWNER_ONLY = {
     "watchlist_runs": "mission bound to a watchlist version",
 }
 OWNER_ONLY.update(WATCHLIST_OWNER_ONLY)
+# SQL033 per-channel daily request counts are owner-only (Spec 016 US4).
+REQUEST_DAY_OWNER_ONLY = {"connector_request_days": "daily keyword-search count"}
+OWNER_ONLY.update(REQUEST_DAY_OWNER_ONLY)
 POSTURE = {
     **{table: "client read-only" for table in CLIENT_READ_ONLY},
     **{table: "owner only" for table in OWNER_ONLY},
@@ -328,6 +331,7 @@ CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in FOLLOW_UP_OWNER_ONLY})
 CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in ADMISSION_OWNER_ONLY})
 CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in AUTHOR_IDENTITY_OWNER_ONLY})
 CLIENT_ROWS.update({table: "DEFAULT VALUES" for table in WATCHLIST_OWNER_ONLY})
+CLIENT_ROWS["connector_request_days"] = "(request_day, platform, used) VALUES ('2026-10-22', 'tiktok', 1)"
 
 
 def test_research_posture_inventory_matches_exact_sql028_tables():
@@ -393,6 +397,16 @@ def test_watchlist_posture_inventory_matches_exact_sql032_tables():
         re.findall(r"CREATE TABLE IF NOT EXISTS public\.(\w+)", (REPO_SQL / "032_watchlists.sql").read_text())
     )
     assert created == set(WATCHLIST_OWNER_ONLY)
+    assert created <= set(CLIENT_ROWS)
+
+
+def test_request_day_posture_inventory_matches_exact_sql033_tables():
+    created = set(
+        re.findall(
+            r"CREATE TABLE IF NOT EXISTS public\.(\w+)", (REPO_SQL / "033_connector_request_days.sql").read_text()
+        )
+    )
+    assert created == set(REQUEST_DAY_OWNER_ONLY)
     assert created <= set(CLIENT_ROWS)
 
 

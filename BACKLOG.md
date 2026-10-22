@@ -43,7 +43,7 @@ tại `5d6794c`. Trước đó, PR #57 (Spec 015) được merge tại `1f4971e`
 `set_mission_declared_accounts`, được chủ sở hữu duyệt ngày 20/10/2026 (OG-1); PR #51 (Spec 014)
 được merge tại `474916f`; Spec 014 R2 đã bỏ `open_mission_relay` nhưng vẫn giữ
 `get_mission_relay_snapshot` và `execute_mission_follow_up`. Migration mới nhất trên cả nhánh lẫn
-`main` là `sql/032_watchlists.sql`; các con số 47 tools, worker, quota
+`main` là `sql/033_connector_request_days.sql`; các con số 47 tools, worker, quota
 scheduled và migration `024` trong phần lịch sử dưới đây là của bản v0.7.0 đã phát hành, khác bộ tool
 hiện tại. Tại mốc Spec 011 ngày 02/10/2026, nhánh `codex/evidence-grounded-product-reset`
 có 44 tool theo nhiệm vụ và migration mới nhất là `sql/025_evidence_grounded_claim_ledger.sql`.

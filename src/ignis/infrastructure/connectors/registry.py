@@ -16,6 +16,7 @@ from ignis.domain.exceptions import (
     ConnectorQuotaExceededException,
 )
 from ignis.domain.harness_models import ChannelHealthStatus
+from ignis.domain.listening_period import LISTENING_TZ
 from ignis.domain.self_content import SelfIdentity, partition_self_authored
 from ignis.domain.entities import TrendSignal
 from ignis.domain.value_objects import (
@@ -30,6 +31,12 @@ from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReaso
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 
 logger = logging.getLogger(__name__)
+
+# Per-channel daily request ceilings when runtime_configs sets none (Spec 016 research R8):
+# thresholds, not vocabulary. One request is one keyword searched on one channel.
+DAILY_CEILING_KEY = "connector.{platform}.daily_request_ceiling"
+DEFAULT_DAILY_CEILINGS = {"youtube": 200}
+DEFAULT_DAILY_CEILING = 50
 
 
 class CircuitBreaker:
@@ -674,6 +681,21 @@ class ConnectorPluginRegistry:
             blocked_reasons[plugin_id] = await self._keyword_search_blocked_reason(plugin)
             if boundary_guard is not None:
                 boundary_guard()
+            ceiling_note = None
+            if blocked_reasons[plugin_id] is None:
+                ceiling_note = await self._daily_ceiling_note(plugin, len(keywords))
+            if ceiling_note is not None:
+                outcomes[plugin_id] = SurfaceProbeResult(
+                    platform=plugin.platform.value,
+                    connector_surface=plugin_id,
+                    status=ChannelHealthStatus.RATE_LIMITED,
+                    signals_collected=0,
+                    note=ceiling_note,
+                    authority_tier=provenance[plugin_id]["authority_tier"],
+                    connector_path=provenance[plugin_id]["connector_path"],
+                    connector_revision=provenance[plugin_id]["connector_revision"],
+                )
+                continue
             attestations[plugin_id] = self._attestation_for(plugin)
             enabled_plugins.append(plugin)
             tasks.append((plugin, breaker, attestations[plugin_id]))
@@ -817,6 +839,34 @@ class ConnectorPluginRegistry:
             authority_tier=provenance["authority_tier"],
             connector_path=provenance["connector_path"],
             connector_revision=provenance["connector_revision"],
+        )
+
+    async def _daily_ceiling_note(self, plugin: IConnectorPlugin, requests: int) -> Optional[str]:
+        """None when the channel may run `requests` more keyword searches today, else why not.
+
+        The count lives in the store, so separate sessions share it, and a pass is admitted whole
+        or not at all (Spec 016 FR-013). A store that keeps no count sets no ceiling.
+        """
+        reserve = getattr(self._repository, "reserve_connector_requests", None)
+        if reserve is None or requests <= 0:
+            return None
+        platform = plugin.platform.value
+        default = DEFAULT_DAILY_CEILINGS.get(platform, DEFAULT_DAILY_CEILING)
+        try:
+            raw = await self._repository.get_runtime_config(DAILY_CEILING_KEY.format(platform=platform))
+            ceiling = int(raw) if raw not in (None, "") and int(raw) >= 0 else default
+        except (ValueError, TypeError, NotImplementedError):
+            ceiling = default
+        now = datetime.now(timezone.utc)
+        try:
+            admitted, used = await reserve(now.astimezone(LISTENING_TZ).date(), platform, requests, ceiling, now)
+        except NotImplementedError:
+            return None
+        if admitted:
+            return None
+        return (
+            f"daily_ceiling: {used} of {ceiling} keyword searches on {platform} already used today"
+            f" (Asia/Ho_Chi_Minh); this pass needs {requests}."
         )
 
     @staticmethod

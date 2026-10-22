@@ -314,6 +314,7 @@ _EXISTING_READY_WRITABLE = frozenset(
         "observations",
         "topic_clusters",
         "youtube_quota_buckets",
+        "connector_request_days",
     }
 )
 # Consequences of the parent's own mission-scoped evidence prune, never direct writes: the
@@ -428,6 +429,40 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
             exhausted=bool(row["exhausted"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
+
+    async def reserve_connector_requests(
+        self, request_day: date, platform: str, requests: int, ceiling: int, now: datetime
+    ) -> Tuple[bool, int]:
+        await self._ensure_schema()
+
+        def _sync_reserve() -> Tuple[bool, int]:
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    "SELECT used FROM connector_request_days WHERE request_day = ? AND platform = ?",
+                    (request_day.isoformat(), platform),
+                ).fetchone()
+                used = int(row["used"]) if row else 0
+                admitted = used + requests <= ceiling
+                if admitted:
+                    used += requests
+                    conn.execute(
+                        "INSERT INTO connector_request_days (request_day, platform, used, updated_at)"
+                        " VALUES (?, ?, ?, ?) ON CONFLICT (request_day, platform) DO UPDATE SET"
+                        " used = excluded.used, updated_at = excluded.updated_at",
+                        (request_day.isoformat(), platform, used, now.astimezone(timezone.utc).isoformat()),
+                    )
+                conn.commit()
+                return admitted, used
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+
+        return await asyncio.to_thread(_sync_reserve)
 
     async def reserve_youtube_quota(
         self,
@@ -1662,6 +1697,16 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (quota_day, bucket),
                 CHECK (used >= 0 AND scheduled_used >= 0 AND scheduled_used <= used)
+            );
+
+            -- sql/033_connector_request_days.sql: keyword searches per channel per day in
+            -- Asia/Ho_Chi_Minh, against each channel's daily request ceiling.
+            CREATE TABLE IF NOT EXISTS connector_request_days (
+                request_day TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0 CHECK (used >= 0),
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (request_day, platform)
             );
 
             -- The five entities sql/017_research_workspace.sql creates on Postgres. SQLite does

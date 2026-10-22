@@ -189,6 +189,31 @@ class PostgresTimescaleRepository(ITrendRepository):
             updated_at=row[5],
         )
 
+    async def reserve_connector_requests(
+        self, request_day: date, platform: str, requests: int, ceiling: int, now: datetime
+    ) -> Tuple[bool, int]:
+        pool = await self._get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor(row_factory=tuple_row) as cur:
+                await cur.execute(
+                    "INSERT INTO connector_request_days (request_day, platform, used, updated_at)"
+                    " SELECT %s, %s, %s, %s WHERE %s <= %s"
+                    " ON CONFLICT (request_day, platform) DO UPDATE SET"
+                    " used = connector_request_days.used + EXCLUDED.used, updated_at = EXCLUDED.updated_at"
+                    " WHERE connector_request_days.used + EXCLUDED.used <= %s"
+                    " RETURNING used;",
+                    (request_day, platform, requests, now, requests, ceiling, ceiling),
+                )
+                row = await cur.fetchone()
+                if row is not None:
+                    return True, int(row[0])
+                await cur.execute(
+                    "SELECT used FROM connector_request_days WHERE request_day = %s AND platform = %s;",
+                    (request_day, platform),
+                )
+                row = await cur.fetchone()
+        return False, int(row[0]) if row else 0
+
     async def reserve_youtube_quota(
         self,
         quota_day: date,
