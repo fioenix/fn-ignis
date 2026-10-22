@@ -18,6 +18,7 @@ from ignis.domain.youtube_quota import YouTubeQuotaBucket, YouTubeQuotaSnapshot
 import cachetools
 
 from ignis.config import settings
+from ignis.infrastructure.clustering.semantic_clusterer import SemanticClusterer
 from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
 
 logger = logging.getLogger(__name__)
@@ -170,25 +171,68 @@ class YouTubeDataPlugin(IConnectorPlugin):
         # `\w+` is a character class, not vocabulary: it splits Vietnamese into its syllables.
         return re.findall(r"\w+", unicodedata.normalize("NFC", text).casefold())
 
-    @classmethod
-    def _keyword_patterns(cls, keywords: List[str]) -> set:
-        """Adjacent syllable pairs of every keyword; a one-word keyword is its own pattern."""
-        patterns = set()
-        for keyword in keywords:
-            words = cls._syllables(keyword)
-            patterns.update(zip(words, words[1:]) if len(words) > 1 else ((w,) for w in words))
-        return patterns
+    # Scripts written without spaces between words (Thai, Lao, Myanmar, Khmer, kana, CJK
+    # ideographs), where `\w+` returns a whole phrase as one token. The ranges are the algorithm,
+    # not vocabulary.
+    _UNSPACED_SCRIPT = re.compile(
+        r"[\u0e00-\u0eff\u1000-\u109f\u1780-\u17ff\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]"
+    )
 
     @classmethod
-    def _mentions_a_keyword(cls, signal: TrendSignal, patterns: set) -> bool:
+    def _keyword_patterns(cls, keywords: List[str]) -> Tuple[set, set, set]:
+        """What a result must contain to mention a keyword of the call.
+
+        Adjacent syllable pairs of every keyword (a one-word keyword is its own pattern), as
+        written and with tones folded; and, for a keyword in a script without word spaces, the
+        keyword itself as a run of characters.
+        """
+        pairs, folded_pairs, runs = set(), set(), set()
+        for keyword in keywords:
+            text = unicodedata.normalize("NFC", keyword).casefold()
+            if cls._UNSPACED_SCRIPT.search(text):
+                runs.add("".join(text.split()))
+                continue
+            for target, words in ((pairs, cls._syllables(text)),
+                                  (folded_pairs, cls._syllables(SemanticClusterer._fold_accents(text)))):
+                target.update(zip(words, words[1:]) if len(words) > 1 else ((w,) for w in words))
+        return pairs, folded_pairs, runs
+
+    @classmethod
+    def _mentions_a_keyword(cls, signal: TrendSignal, patterns: Tuple[set, set, set]) -> bool:
         """Whether the title or description names any keyword of the call (Spec 016, 22/10/2026).
 
         For a niche keyword in a short window, search.list fills the page with popular uploads
         that never mention it. Sharing single common syllables is not enough; an adjacent pair is.
+        A text written without tone marks is matched on folded keywords, the same rule the
+        clusterer follows (AGENTS.md section 3): the ambiguity is then the input's, not ours.
         """
-        words = cls._syllables(f"{signal.raw_title} {(signal.metadata or {}).get('description') or ''}")
-        present = set(zip(words, words[1:])) | {(w,) for w in words}
-        return not patterns.isdisjoint(present)
+        pairs, folded_pairs, runs = patterns
+        for field in (signal.raw_title, (signal.metadata or {}).get("description")):
+            text = unicodedata.normalize("NFC", field or "").casefold()
+            if any(run in "".join(text.split()) for run in runs):
+                return True
+            words = cls._syllables(text)
+            present = set(zip(words, words[1:])) | {(w,) for w in words}
+            wanted = pairs if SemanticClusterer._has_diacritics(text) else folded_pairs
+            if not wanted.isdisjoint(present):
+                return True
+        return False
+
+    @staticmethod
+    def _copy_for_keyword(signal: TrendSignal, keyword: str) -> TrendSignal:
+        """A fresh signal for one query's answer, as the cache returns it."""
+        return TrendSignal(
+            platform=signal.platform,
+            raw_title=signal.raw_title,
+            metric_value=signal.metric_value,
+            growth_velocity=signal.growth_velocity,
+            source_url=signal.source_url,
+            geo_code=signal.geo_code,
+            cluster_id=signal.cluster_id,
+            mission_id=signal.mission_id,
+            metadata={**(signal.metadata or {}), "keyword": keyword},
+            captured_at=signal.captured_at,
+        )
 
     @property
     def feed_yields_candidate_topics(self) -> bool:
@@ -362,6 +406,19 @@ class YouTubeDataPlugin(IConnectorPlugin):
         relevance_lang = self._geo_to_relevance_language(geo)
         
         keyword_patterns = self._keyword_patterns(keywords)
+        # Every query's answer is checked whole, so its drop count does not depend on which
+        # earlier query returned the same video; only emitting is deduplicated.
+        built: dict = {}
+        emitted = set()
+
+        def emit(raw_kw: str, query_signals: List[TrendSignal]) -> None:
+            for sig in query_signals:
+                if not self._mentions_a_keyword(sig, keyword_patterns):
+                    if attestation is not None:
+                        attestation.dropped(raw_kw)
+                elif sig.metadata.get("video_id") not in emitted:
+                    emitted.add(sig.metadata.get("video_id"))
+                    signals.append(sig)
         tf_str = custom_timeframe or (timeframe.value if hasattr(timeframe, "value") else str(timeframe))
         published_after_str, published_after_dt = self._timeframe_to_published_after(tf_str)
         if attestation is not None:
@@ -376,27 +433,12 @@ class YouTubeDataPlugin(IConnectorPlugin):
                 logger.info(f"Returning {len(cached_sigs)} cached YouTube signals for '{raw_kw}' (Quota preserved).")
                 if attestation is not None:
                     attestation.executed(raw_kw)
-                for cs in cached_sigs:
-                    v_id = cs.metadata.get("video_id")
-                    if v_id and v_id not in seen_video_ids:
-                        seen_video_ids.add(v_id)
-                        if not self._mentions_a_keyword(cs, keyword_patterns):
-                            if attestation is not None:
-                                attestation.dropped(raw_kw)
-                            continue
-                        cloned_sig = TrendSignal(
-                            platform=cs.platform,
-                            raw_title=cs.raw_title,
-                            metric_value=cs.metric_value,
-                            growth_velocity=cs.growth_velocity,
-                            source_url=cs.source_url,
-                            geo_code=cs.geo_code,
-                            cluster_id=cs.cluster_id,
-                            mission_id=cs.mission_id,
-                            metadata=dict(cs.metadata or {}),
-                            captured_at=cs.captured_at,
-                        )
-                        signals.append(cloned_sig)
+                query_signals = [self._copy_for_keyword(cs, raw_kw) for cs in cached_sigs]
+                for qs in query_signals:
+                    v_id = qs.metadata.get("video_id")
+                    seen_video_ids.add(v_id)
+                    built.setdefault(v_id, qs)
+                emit(raw_kw, query_signals)
                 continue
 
 
@@ -417,6 +459,7 @@ class YouTubeDataPlugin(IConnectorPlugin):
 
 
             video_ids = []
+            query_ids = []
             try:
                 await self._reserve(YouTubeQuotaBucket.SEARCH_LIST, trigger)
                 async with self._client(timeout=15.0) as client:
@@ -447,6 +490,8 @@ class YouTubeDataPlugin(IConnectorPlugin):
                             attestation.executed(raw_kw)
                         for item in search_data.get("items", []):
                             v_id = item.get("id", {}).get("videoId")
+                            if v_id and v_id not in query_ids:
+                                query_ids.append(v_id)
                             if v_id and v_id not in seen_video_ids:
                                 video_ids.append(v_id)
                                 seen_video_ids.add(v_id)
@@ -544,14 +589,18 @@ class YouTubeDataPlugin(IConnectorPlugin):
                         else:
                             videos_resp.raise_for_status()
 
-                    if kw_signals:
+                    for sig in kw_signals:
+                        built.setdefault(sig.metadata["video_id"], sig)
+                    new_ids = {sig.metadata["video_id"] for sig in kw_signals}
+                    query_signals = [
+                        built[v_id] if v_id in new_ids else self._copy_for_keyword(built[v_id], raw_kw)
+                        for v_id in query_ids
+                        if v_id in built
+                    ]
+                    if query_signals:
                         # The cache keeps every result: the check depends on the call's keywords.
-                        self._query_cache()[cache_key] = kw_signals
-                        for sig in kw_signals:
-                            if self._mentions_a_keyword(sig, keyword_patterns):
-                                signals.append(sig)
-                            elif attestation is not None:
-                                attestation.dropped(raw_kw)
+                        self._query_cache()[cache_key] = query_signals
+                        emit(raw_kw, query_signals)
             except ConnectorQuotaExceededException:
                 # Quota errors MUST bubble up to trip Circuit Breaker
                 raise
