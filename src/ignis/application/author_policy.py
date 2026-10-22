@@ -6,7 +6,7 @@ them -- strip identity the same way.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 from ignis.domain.author_identity import (
     DeclaredAccount,
@@ -18,22 +18,22 @@ from ignis.domain.author_identity import (
 from ignis.domain.entities import TrendSignal
 from ignis.domain.probe_provenance import PROBE_KEY_ALIASES
 from ignis.domain.source_identity import identity_free_source_url
-from ignis.infrastructure.security.pii_sanitizer import tokenise_mentions
+from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, tokenise_mentions
 
 # The requester's own query words, which also key a Google Trends source: never tokenised.
 _QUERY_KEYS = frozenset(PROBE_KEY_ALIASES) | {"matched_keywords", "query"}
 
 
-def _tokenise(value: Any, declared: Mapping[str, str]) -> Any:
+def _tokenise(value: Any, declared: Mapping[str, str], keep_declared_tokens: bool = False) -> Any:
     if isinstance(value, str):
-        return tokenise_mentions(value, declared)
+        return tokenise_mentions(value, declared, keep_declared_tokens=keep_declared_tokens)
     if isinstance(value, Mapping):
         return {
-            key: item if key in _QUERY_KEYS else _tokenise(item, declared)
+            key: item if key in _QUERY_KEYS else _tokenise(item, declared, keep_declared_tokens)
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [_tokenise(item, declared) for item in value]
+        return [_tokenise(item, declared, keep_declared_tokens) for item in value]
     return value
 
 
@@ -62,3 +62,18 @@ def apply_author_policy(
         mentions = {key: account_id for (account_platform, key), account_id in declared.items() if account_platform == platform}
         signal.raw_title = tokenise_mentions(scrub_handle_links(signal.raw_title), mentions)
         signal.metadata = _tokenise(strip_author_identity(signal.metadata), mentions)
+
+
+def strip_stored_identity(
+    platform: str, source_url: Optional[str], title: Optional[str], metadata: Mapping[str, Any]
+) -> Tuple[Optional[str], Optional[str], Dict[str, Any]]:
+    """The policy above, applied to a row already stored (Spec 015, OG-3 anonymise).
+
+    Legacy rows predate declarations, so every @mention becomes @[user]; tokens the policy wrote
+    are kept, so a row that already complies comes back unchanged. No marker is assigned.
+    """
+    return (
+        identity_free_source_url(platform, source_url, metadata),
+        mask_author_identity_text(title),
+        _tokenise(strip_author_identity(metadata), {}, keep_declared_tokens=True),
+    )

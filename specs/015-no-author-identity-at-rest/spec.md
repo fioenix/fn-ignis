@@ -69,6 +69,20 @@ PostgreSQL corpus was not inspected because no connection was available in that 
 - Q: Does this feature land before or after Spec 014 (PR #51)? → A: After; implementation starts once
   PR #51 merges, rebased on `main`, with migration `031` (owner approved OG-2 on 2026-10-20).
 
+### Session 2026-10-22
+
+- Q: What happens to author identity stored before this feature (OG-3, FR-015)? → A: Anonymise
+  (owner decided 22/10/2026). A script rewrites legacy rows through the same policy the collection
+  pass applies: author fields and account-naming links leave metadata, a stored link that names an
+  account becomes an identity-free link or none, and @mentions become `@[user]`. Rows that already
+  comply, including declared tokens the policy wrote, come back unchanged. The script prints a
+  manifest of target rows, affected missions and bound claims before acting, applies only with
+  `--apply`, and prints a readback after. Evidence frames that include a rewritten row get a new
+  digest, so claims bound to the old digest read as stale until the mission is requalified
+  (research R10). Source keys derived from an account link are reported, not rewritten, because
+  a key change re-identifies the source; there were none in the local stores. Delete was rejected
+  because it loses the evidence; keep was rejected because identity would stay at rest.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Research without keeping who said it (Priority: P1)
