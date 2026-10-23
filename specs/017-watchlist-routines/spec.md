@@ -108,6 +108,16 @@ confirm (listed again under "Owner review"):
 - Q: Is the new prompt and resource (OG-2) accepted? → A: Yes, under the owner's go-ahead of
   22/10/2026 to implement Spec 017; no tool or signature changes.
 
+### Session 2026-10-23
+
+- Q: The T006 acceptance found Threads and Reels `AUTH_REQUIRED` inside the caller root while
+  `verify_connectors_health` reported them healthy. Which store holds platform sessions? → A: The
+  installation store. `authenticate_*` saves there, so a caller root's missions now read sessions
+  there too, as does the self-content guard; the caller store keeps the caller's evidence and its
+  own `YOUTUBE_API_KEY`. A caller root never creates an absent SQLite installation store; it then
+  reads its own store as before (owner decided 23/10/2026: "Sửa code để caller scope thấy phiên
+  đăng nhập").
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Set up a daily routine on request (Priority: P1)
