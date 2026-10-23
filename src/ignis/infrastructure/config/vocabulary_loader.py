@@ -119,8 +119,11 @@ class VocabularySynchronizer:
         language_detector: Optional[Any] = None,
         tiktok_plugin: Optional[Any] = None,
         registry: Optional[Any] = None,
+        credential_repository: Optional[ITrendRepository] = None,
     ):
         self._repository = repository
+        # The store holding the connected accounts' sessions, when it is not the evidence store.
+        self._credential_repository = credential_repository or repository
         self._quality_evaluator = quality_evaluator
         self._strategic_reasoner = strategic_reasoner
         self._clusterer = clusterer
@@ -204,7 +207,7 @@ class VocabularySynchronizer:
         from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
 
         try:
-            identities = await SelfIdentityRegistry(self._repository).load()
+            identities = await SelfIdentityRegistry(self._credential_repository).load()
         except Exception as exc:
             raise VocabularySynchronizationError(
                 f"Could not load the operator's own account identities: {exc}"

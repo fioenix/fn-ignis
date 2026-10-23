@@ -763,18 +763,40 @@ async def cancel_host_browser_search(request_id: str, host_task_ref: str, sessio
 
 
 
+def _operator_repository():
+    """(repository, owned): the installation store the global tools use, or (None, False).
+
+    A caller root must never create the installation's SQLite file, so an absent or in-memory one
+    leaves the caller on its own store. `owned` is True only for a repository created here, which
+    the caller scope closes; one borrowed from the global components stays with its owner.
+    """
+    if _COMPONENTS is not None:
+        return _COMPONENTS["repository"], False
+    dsn = reveal_secret(settings.DATABASE_URL)
+    if dsn.startswith("sqlite"):
+        path = dsn.replace("sqlite:///", "").replace("sqlite://", "")
+        if path == ":memory:" or not Path(path).is_file():
+            return None, False
+    return create_repository(), True
+
+
 def _init_components(*, caller_scope=None):
     repository = create_repository(caller_scope.configuration.DATABASE_URL.get_secret_value(),
         min_pool_size=caller_scope.configuration.DB_MIN_POOL_SIZE,
         max_pool_size=caller_scope.configuration.DB_MAX_POOL_SIZE) if caller_scope is not None else create_repository()
     if caller_scope is not None:
         caller_scope.guard_repository(repository)
+    # Platform sessions belong to the installation: authenticate_* saves them in its store, so a
+    # caller root's missions read them there while their own evidence stays in the caller store.
+    credentials, credentials_owned = _operator_repository() if caller_scope is not None else (None, False)
+    if credentials is None:
+        credentials = repository
     runtime_config_manager = RuntimeConfigManager(repository=repository)
-    tiktok_auth_manager = TikTokAuthManager(repository=repository)
-    threads_auth_manager = ThreadsAuthManager(repository=repository)
-    instagram_auth_manager = InstagramAuthManager(repository=repository)
-    threads_browser_auth_manager = ThreadsBrowserAuthManager(repository=repository)
-    instagram_browser_auth_manager = InstagramBrowserAuthManager(repository=repository)
+    tiktok_auth_manager = TikTokAuthManager(repository=credentials)
+    threads_auth_manager = ThreadsAuthManager(repository=credentials)
+    instagram_auth_manager = InstagramAuthManager(repository=credentials)
+    threads_browser_auth_manager = ThreadsBrowserAuthManager(repository=credentials)
+    instagram_browser_auth_manager = InstagramBrowserAuthManager(repository=credentials)
     creative_center_plugin = TikTokCreativeCenterPlugin(auth_manager=tiktok_auth_manager)
 
     google_trends_plugin = GoogleTrendsRssPlugin()
@@ -832,6 +854,7 @@ def _init_components(*, caller_scope=None):
         language_detector=language_detector,
         tiktok_plugin=tiktok_plugin,
         registry=registry,
+        credential_repository=credentials,
     )
 
     execute_mission_use_case = ExecuteMissionUseCase(
@@ -881,6 +904,8 @@ def _init_components(*, caller_scope=None):
 
     return {
         "repository": repository,
+        "credential_repository": credentials,
+        "owned_credential_repository": credentials if credentials_owned else None,
         "registry": registry,
         "google_trends_plugin": google_trends_plugin,
         "tiktok_plugin": tiktok_plugin,
@@ -976,9 +1001,12 @@ class _CallerComponents(MutableMapping):
         return None
 
     def repositories(self):
-        owned = [] if self._full is None else [self._full["repository"]]
-        if self._analysis is not None:
-            owned.append(self._analysis["repository"])
+        owned = []
+        for composed in (self._full, self._analysis):
+            if composed is not None:
+                owned.append(composed["repository"])
+                if composed.get("owned_credential_repository") is not None:
+                    owned.append(composed["owned_credential_repository"])
         return owned
 
 
@@ -1008,8 +1036,11 @@ async def _compose_caller_analysis(scope):
         raise ToolError("CALLER_SCHEMA_UNSUPPORTED") from None
     scope.guard_repository(repository)
     workspace_store = WorkspaceRepository(repository=repository, path_guard=scope.check_path)
+    credentials, credentials_owned = _operator_repository()
     return {
         "repository": repository,
+        "credential_repository": repository if credentials is None else credentials,
+        "owned_credential_repository": credentials if credentials_owned else None,
         "workspace_store": workspace_store,
         "get_mission_analysis_use_case": GetMissionAnalysisUseCase(repository=repository, store=workspace_store),
         "get_evidence_qualification_batch_use_case": GetEvidenceQualificationBatchUseCase(
@@ -1101,7 +1132,8 @@ async def _collect_channel_context(comp: Dict[str, Any]):
     connector_health = None
 
     try:
-        creds = await comp["repository"].list_platform_credentials()
+        # The store the connectors' sessions are read from, which a caller root keeps apart.
+        creds = await comp.get("credential_repository", comp["repository"]).list_platform_credentials()
         active = {
             str(c.get("platform", "")).lower()
             for c in creds
