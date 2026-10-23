@@ -315,7 +315,9 @@ def test_lifecycle_owns_only_realized_repositories_and_roots_never_share(tmp_pat
         assert components_a.repositories() == []
         analysis_a, analysis_b = await components_a.analysis(), await components_b.analysis()
         owned = components_a.repositories()
-        assert owned == [analysis_a['repository']] and components_a._full is None
+        # An installation store that exists is also opened for platform sessions, and owned.
+        credentials = [analysis_a['owned_credential_repository']] if analysis_a['owned_credential_repository'] else []
+        assert owned == [analysis_a['repository'], *credentials] and components_a._full is None
         assert analysis_a['repository'] is not analysis_b['repository']
         assert str(root_a) in analysis_a['repository']._db_path and str(root_b) in analysis_b['repository']._db_path
         assert await analysis_a['repository'].get_mission(mission_b) is None

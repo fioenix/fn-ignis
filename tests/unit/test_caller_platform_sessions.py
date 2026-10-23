@@ -4,6 +4,7 @@ The sessions live in the installation store; the caller store keeps only the cal
 Found in the Spec 017 T006 acceptance: Threads and Reels reported AUTH_REQUIRED inside a caller root
 while verify_connectors_health, which reads the installation store, reported them HEALTHY.
 """
+import asyncio
 import json
 
 import pytest
@@ -74,3 +75,55 @@ def test_caller_reuses_the_composed_installation_repository(tmp_path, monkeypatc
     (root / ".fnignis").mkdir(parents=True)
     components = server._init_components(caller_scope=CallerStorageScope(root))
     assert all(components[name]._repository is shared for name in AUTH_MANAGERS)
+
+
+@pytest.mark.asyncio
+async def test_channel_audit_reads_the_sessions_the_connectors_use(caller_root):
+    _, scope = caller_root
+    await create_repository().save_platform_credentials(
+        "threads_browser", "session_cookies", {"cookies": [{"name": "synthetic", "value": "1"}]})
+    components = server._init_components(caller_scope=scope)
+
+    auth_status, _ = await server._collect_channel_context(components)
+
+    assert auth_status["threads"] is True and auth_status["reels"] is False
+
+
+def test_caller_closes_only_the_installation_repository_it_created(caller_root, tmp_path, monkeypatch):
+    installation, scope = caller_root
+    installation.touch()
+    components = server._compose_caller_scope(scope)
+    components["registry"]
+    created = components["owned_credential_repository"]
+    assert created is components["credential_repository"] and created in components.repositories()
+
+    shared = create_repository("sqlite:///" + str(installation))
+    monkeypatch.setattr(server, "_COMPONENTS", {"repository": shared})
+    borrowed = server._compose_caller_scope(CallerStorageScope(scope.root))
+    borrowed["registry"]
+    assert borrowed["credential_repository"] is shared
+    assert shared not in borrowed.repositories()
+
+
+def test_market_analysis_audit_reads_the_installation_sessions(tmp_path, monkeypatch):
+    from test_caller_analysis_composition import _prepared_completed_parent
+
+    root, _, _ = _prepared_completed_parent(tmp_path)
+    installation = tmp_path / "installation.sqlite3"
+    monkeypatch.setattr(config.settings, "DATABASE_URL", "sqlite:///" + str(installation))
+    monkeypatch.setattr(server, "_COMPONENTS", None)
+
+    async def exercise():
+        await create_repository().save_platform_credentials(
+            "instagram_browser", "session_cookies", {"cookies": [{"name": "synthetic", "value": "1"}]})
+        components = server._compose_caller_scope(CallerStorageScope(root))
+        analysis = await components.analysis()
+        auth_status, _ = await server._collect_channel_context(analysis)
+        owned = components.repositories()
+        for repository in owned:
+            await repository.close()
+        return components, analysis, auth_status, owned
+
+    components, analysis, auth_status, owned = asyncio.run(exercise())
+    assert analysis is not components and auth_status["reels"] is True
+    assert analysis["owned_credential_repository"] in owned
