@@ -223,3 +223,9 @@ def test_preparation_returns_the_relay_tab_script(service):
     assert request["tab_script"]
     assert html.unescape(shown) == request["tab_script"]
     assert request["relay_url"].rstrip("/").rsplit("/", 1)[0] in request["tab_script"]
+
+
+def test_a_batch_cannot_repeat_a_query(service):
+    """The tab script binds a tab to its query by text, so a repeated query could never stage."""
+    with pytest.raises(ValueError, match="once"):
+        prepare(service, queries=["túi đi làm", "túi đi làm"])

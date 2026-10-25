@@ -13,7 +13,7 @@ from ignis.domain.source_identity import identity_free_source_url
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text
 from ignis.infrastructure.connectors.host_browser.relay import LoopbackRelay
 from ignis.infrastructure.connectors.host_browser.validator import validate_answer
-from ignis.infrastructure.config.vocabulary_loader import seeded_lexicon_terms
+from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary, seeded_lexicon_terms
 
 
 def _outward(receipt):
@@ -71,6 +71,9 @@ class HostBrowserSearchService:
         )
         if any(not query.query.strip() for query in request.queries):
             raise ValueError("Search queries cannot be blank")
+        # The tab script finds its query by text, so each query may appear once (PR #79 review).
+        if len({query.query for query in request.queries}) != len(request.queries):
+            raise ValueError("Each search query may appear once in a batch")
         extractor = files("ignis.infrastructure.connectors.host_browser").joinpath("tiktok_search.js").read_text()
         with self._lock:
             expired = [key for key, item in self._tickets.items()
@@ -160,6 +163,11 @@ class HostBrowserSearchService:
         from ignis.application.use_cases.host_browser_mission import prepare_scope
         if authorized is not True:
             raise ValueError("Explicit browser authorization is required")
+        # The ticket freezes its templates, so a locale added in the database must be read first;
+        # ingestion does not clean the validated receipt again (PR #79 review).
+        vocabulary = await load_market_vocabulary(executor._repo)
+        if vocabulary.tiktok_attribution:
+            self.register_attribution_templates(vocabulary.tiktok_attribution)
         binding = await prepare_scope(executor, mission_id)
         request = self.prepare(host_task_ref, session_ref, binding["queries"], 20,
                                lifetime_seconds, authorized, mode="MISSION")

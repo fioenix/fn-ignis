@@ -180,6 +180,13 @@ mission use requires its confirmed source, query budget, authority, and evidence
   string data") (owner decision of 2026-10-26, same quote;
   basis: FR-011, FR-013 and the 2026-10-26 trial, where reading the answer back through browser
   tooling was blocked and a host-improvised transport was needed).
+- Q: When does a MISSION ticket read attribution wording added in the database? → A: Before the
+  ticket is created, from the mission's repository, because the ticket freezes its templates and
+  ingestion does not clean the validated receipt again. TACTICAL keeps the database-free path
+  (agent decided; basis: PR #79 code review P1, FR-012).
+- Q: May one batch repeat a query? → A: No. The tab script binds a tab to its query by text, so a
+  repeated query could never stage; preparation rejects it. Mission query unions are already
+  deduplicated (agent decided; basis: PR #79 code review P2, FR-013).
 - Q: Does this amendment skip `speckit-tasks`? → A: No. It touches the author-identity privacy
   boundary and the relay's script and origin checks, so the depth gate requires tasks; Phase 7 in
   tasks.md lists them (agent decided; basis: owner depth-gate rule).

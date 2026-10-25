@@ -692,3 +692,22 @@ async def test_host_mission_stores_no_poster_attribution(repository_case, tmp_pa
         assert "Fixture Poster" not in repr([signal.metadata for signal in held])
     finally:
         service.close()
+
+
+@pytest.mark.asyncio
+async def test_host_mission_applies_attribution_wording_added_in_the_database(repository_case, tmp_path):
+    """A locale an operator registered must clean the ticket before it is frozen (PR #79 review)."""
+    repo = repository_case.repository
+    await repo.register_lexicon_terms("tiktok_attribution", ["created by {author} with"], "ui_attribution")
+    store, workspace, mission, executor = await assignment(repo, tmp_path)
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
+        payload = staged_answer(request)
+        payload["answers"][0]["records"][0]["excerpt"] = "Work bag review created by Fixture Poster with original sound"
+        service.stage(request["request_id"], payload)
+        await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        held = await repo.get_mission_signals(mission.id)
+        assert [signal.raw_title for signal in held] == ["Work bag review"]
+    finally:
+        service.close()
