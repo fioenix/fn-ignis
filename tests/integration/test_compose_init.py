@@ -85,7 +85,7 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "033_connector_request_days.sql"
+NEWEST_MIGRATION = "034_tiktok_attribution.sql"
 
 # Exact full-chain identities: 027 adds three tables/one UUID default; 028 adds fifteen
 # tables, 029 three, 030 six, 031 two, 032 three and 033 one, all with caller-bound identities and

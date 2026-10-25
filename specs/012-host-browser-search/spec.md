@@ -108,6 +108,18 @@ mission use requires its confirmed source, query budget, authority, and evidence
 - **FR-011**: The approved localhost relay MUST bind only to `127.0.0.1`, use an unpredictable
   task-specific path, enforce exact Host/Origin and finite payload bounds, exclude third-party CORS,
   and stop on completion, cancellation or expiry. It MUST NOT expose cookies or persistent access.
+- **FR-012**: No excerpt MAY carry the platform's author attribution. TikTok's image label ends
+  with a sentence naming the poster ("do <author> tạo với bản nhạc …"); Ignis MUST remove it before
+  a receipt is returned or an observation is stored, using attribution templates held as seeded
+  vocabulary per locale. Without that vocabulary, preparation MUST fail closed. A record left with
+  no content is dropped, and an answer left with no record is degraded, not healthy.
+- **FR-013**: The relay page MUST offer one control per approved query that opens its exact search
+  URL from a real click, and MUST accept a search answer only by `postMessage` from
+  `https://www.tiktok.com` sent by a window that control opened, for that window's query, within
+  the approved record limit. Once every query has an answer it stages them through the same
+  same-origin form. The script the host runs in the search tab returns only status and counts, so
+  records never pass through the agent. Preparation also returns that script as `tab_script`, because
+  browser tooling may refuse to read it back from the page.
 
 ### Key Entities
 
@@ -140,10 +152,37 @@ mission use requires its confirmed source, query budget, authority, and evidence
 - Hosts without the required capability remain explicitly unsupported; support for every agent
   environment is not part of this feature's first implementation.
 - No new cookie/profile persistence, database migration, release, or account interaction is included.
+  Amended 2026-10-26: migration 034 seeds vocabulary rows only; it transforms no evidence.
 - The separate bounded Google correction retains RSS macro observations and moves Autocomplete
   to keyword expansion. Genuine keyword Trends time-series ingestion is outside this feature.
 
 ## Clarifications
+
+### Session 2026-10-26
+
+- Q: Does the image label keep TikTok's attribution sentence? → A: No. The owner approved the fix
+  on 2026-10-26 ("Cho session TikTok sửa lỗi lọt tên tác giả trong excerpt và thêm nút mở tìm kiếm
+  cùng listener postMessage cho relay, mở PR riêng, chưa đổi routine"). This supersedes the
+  2026-10-03 answer that retained the label "including attribution", which predates Constitution
+  VII and Spec 015. A live tactical trial on 2026-10-26 returned twelve excerpts, each ending in
+  the poster's display name. Templates such as `do {author} tạo với` are seeded in
+  `market_lexicons` domain `tiktok_attribution` (migration 034), one row per locale; the server
+  strips the rightmost matching attribution and everything after it. Only the Vietnamese wording
+  observed live is seeded; another locale needs its own observed row (owner decision; basis:
+  Constitution V and VII, FR-012, repository vocabulary rule).
+- Q: How does the extractor answer reach the relay without the host improvising a transport or the
+  agent transcribing records? → A: The relay page opens each search tab itself from a real click
+  and listens for `postMessage`. It accepts a message only from `https://www.tiktok.com`, only
+  from a window it opened, and only for that window's query. The packaged tab script posts the
+  extractor result to `window.opener` and returns counts only. The relay page script is bound by a
+  per-page CSP nonce; the manual paste path remains. Preparation returns the same script as
+  `tab_script`: in the live check, Claude in Chrome refused to return it from the page ("Cookie/query
+  string data") (owner decision of 2026-10-26, same quote;
+  basis: FR-011, FR-013 and the 2026-10-26 trial, where reading the answer back through browser
+  tooling was blocked and a host-improvised transport was needed).
+- Q: Does this amendment skip `speckit-tasks`? → A: No. It touches the author-identity privacy
+  boundary and the relay's script and origin checks, so the depth gate requires tasks; Phase 7 in
+  tasks.md lists them (agent decided; basis: owner depth-gate rule).
 
 ### Session 2026-10-04
 
@@ -155,7 +194,8 @@ mission use requires its confirmed source, query budget, authority, and evidence
 
 - Q: Where does a counter-only public video tile supply attributable content? → A: In the
   observed DOM, the visible image inside the exact canonical video link carries the public
-  content in its alt label. Retain that label verbatim, including attribution; reject hidden,
+  content in its alt label. Retain that label verbatim, including attribution [superseded on
+  2026-10-26: the attribution is removed, see FR-012]; reject hidden,
   missing or counter-only labels. Do not infer metrics or publication time from it (agent
   decided; basis: owner's bounded Chrome approval, observed three-card DOM, FR-005 and
   fresh canonical mission relay acceptance; decision check found no contradiction).

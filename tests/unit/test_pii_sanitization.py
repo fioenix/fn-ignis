@@ -214,3 +214,29 @@ def test_html_builder_defense_in_depth_sanitizes_pii():
     rendered = builder.build_topic_card_artifact(cluster, [sig])
     assert "0938.940.397" not in rendered
     assert "[REDACTED_PHONE]" in rendered
+
+
+ATTRIBUTION = ("do {author} tạo với",)
+
+
+@pytest.mark.parametrize("label,expected", [
+    # The shape of TikTok's image label: caption, then who made it and with which sound.
+    ("Áo khoác chống nắng 6 in 1 #aokhoacchongnang  do Fixture Poster tạo với bản nhạc nhạc nền - "
+     "Fixture Poster của Fixture Poster", "Áo khoác chống nắng 6 in 1 #aokhoacchongnang"),
+    # The rightmost attribution wins, so an earlier "do" in the caption survives.
+    ("Áo do xưởng may, rất mát do Fixture Poster tạo với bản nhạc âm thanh gốc",
+     "Áo do xưởng may, rất mát"),
+    ("Không có câu ghi công nào ở đây", "Không có câu ghi công nào ở đây"),
+    ("do Fixture Poster tạo với bản nhạc âm thanh gốc", ""),
+])
+def test_platform_attribution_and_everything_after_it_is_removed(label, expected):
+    from ignis.infrastructure.security.pii_sanitizer import strip_platform_attribution
+
+    assert strip_platform_attribution(label, ATTRIBUTION) == expected
+
+
+def test_attribution_templates_without_an_author_slot_strip_nothing():
+    from ignis.infrastructure.security.pii_sanitizer import strip_platform_attribution
+
+    label = "Áo khoác do Fixture Poster tạo với bản nhạc gốc"
+    assert strip_platform_attribution(label, ("tạo với",)) == label

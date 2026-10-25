@@ -33,6 +33,7 @@ class LoopbackRelay:
         self._closed = threading.Event()
         self._deadline = time.monotonic() + lifetime_seconds
         self._path = "/" + secrets.token_urlsafe(32) + "/"
+        self._nonce = secrets.token_urlsafe(16)
         self._receive = receive
         owner = self
 
@@ -54,7 +55,8 @@ class LoopbackRelay:
                 self.send_header("Referrer-Policy", "same-origin")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("X-Frame-Options", "DENY")
-                self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+                # The page's one inline script carries this nonce; nothing else may run (FR-013).
+                self.send_header("Content-Security-Policy", f"default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-{owner._nonce}'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
                 self.end_headers()
                 self.wfile.write(encoded)
 
@@ -122,9 +124,28 @@ class LoopbackRelay:
         self._template = environment.get_template("host_browser_relay.html")
         # Reuse vendored token bytes without its external font links on this capability page.
         self._theme_css = (_TEMPLATES / "_fino_theme.html").read_text().split("<style>", 1)[1].split("</style>", 1)[0]
-        self._page = self._render(request=json.dumps(request, ensure_ascii=False), extractor=extractor)
+        queries = [query for query in request.get("queries", ()) if isinstance(query, dict)]
+        self.tab_script = self._tab_script(extractor, queries) if queries else ""
+        self._page = self._render(
+            request=json.dumps(request, ensure_ascii=False), extractor=extractor, queries=queries,
+            nonce=self._nonce, tab_script=self.tab_script,
+            # Inside <script type="application/json">: no "<" may close the element early.
+            relay_data=json.dumps(dict(
+                request_id=request.get("request_id"), host_task_ref=request.get("host_task_ref"),
+                session_ref=request.get("session_ref"), extractor_version=request.get("extractor_version"),
+                queries=queries,
+            ), ensure_ascii=False).replace("<", "\\u003c"),
+        )
         self._thread = threading.Thread(target=self._serve, name="ignis-task-relay", daemon=True)
         self._thread.start()
+
+    def _tab_script(self, extractor: str, queries: list) -> str:
+        """What the host runs in each search tab: the extractor, posting its answer to this page."""
+        handoff = (Path(__file__).resolve().parent / "tiktok_handoff.js").read_text(encoding="utf-8")
+        approved = [dict(query_id=query.get("query_id"), query=query.get("query"),
+                         result_limit=query.get("result_limit")) for query in queries]
+        return (f"({handoff.strip()})({extractor.strip()}, "
+                f"{json.dumps(approved, ensure_ascii=False)}, {json.dumps(self.origin)})")
 
     def _render(self, **context) -> str:
         return self._template.render(theme_css=self._theme_css, **context)

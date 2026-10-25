@@ -13,6 +13,7 @@ from ignis.domain.source_identity import identity_free_source_url
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text
 from ignis.infrastructure.connectors.host_browser.relay import LoopbackRelay
 from ignis.infrastructure.connectors.host_browser.validator import validate_answer
+from ignis.infrastructure.config.vocabulary_loader import seeded_lexicon_terms
 
 
 def _outward(receipt):
@@ -31,17 +32,33 @@ def _outward(receipt):
     return outward
 
 
+class AttributionVocabularyMissing(ValueError):
+    """Preparation refused: without attribution templates, excerpts would keep the poster's name."""
+
+
 class HostBrowserSearchService:
     """Process-local tickets. Restart invalidates requests; no durable resume promised."""
 
-    def __init__(self) -> None:
+    def __init__(self, attribution_templates=None) -> None:
         self._tickets: dict[str, dict] = {}
         self._lock = threading.RLock()
+        # Tactical preparation opens no database, so it starts from the shipped seed (Spec 012).
+        if attribution_templates is None:
+            attribution_templates = seeded_lexicon_terms("034_tiktok_attribution.sql", "tiktok_attribution")
+        self._attribution_templates = tuple(attribution_templates)
+
+    def register_attribution_templates(self, templates) -> None:
+        """Bind the seeded tiktok_attribution templates that clean host excerpts (Spec 012 FR-012)."""
+        self._attribution_templates = tuple(templates)
 
     def prepare(self, host_task_ref: str, session_ref: str, queries: list[str],
                 result_limit: int, lifetime_seconds: int, authorized: bool, *, mode="TACTICAL") -> dict:
         if authorized is not True:
             raise ValueError("Explicit browser authorization is required")
+        if not self._attribution_templates:
+            raise AttributionVocabularyMissing(
+                "No TikTok attribution vocabulary is registered, so host excerpts cannot be cleaned"
+            )
         if type(lifetime_seconds) is not int or not 0 < lifetime_seconds <= 3600:
             raise ValueError("Lifetime must be finite and at most one hour")
         now = datetime.now(timezone.utc)
@@ -65,11 +82,12 @@ class HostBrowserSearchService:
         with self._lock:
             if len(self._tickets) >= 32:
                 raise ValueError("Too many active task receipts; finish or wait for expiry")
-            ticket = dict(request=request, state="PREPARED", receipt=None, payload=None)
+            ticket = dict(request=request, state="PREPARED", receipt=None, payload=None,
+                          attribution_templates=self._attribution_templates)
             self._tickets[request.request_id] = ticket
             try:
                 ticket["relay"] = LoopbackRelay(
-                    request.model_dump(mode="json"), extractor,
+                    {**request.model_dump(mode="json"), "extractor_version": "tiktok-public-grid-v1"}, extractor,
                     lambda payload: self.stage(request.request_id, payload), lifetime_seconds,
                 )
             except Exception:
@@ -77,6 +95,8 @@ class HostBrowserSearchService:
                 raise
             result = request.model_dump(mode="json")
             result["relay_url"] = ticket["relay"].url
+            # Browser tooling may refuse to read a script back from the page (Spec 012 FR-013).
+            result["tab_script"] = ticket["relay"].tab_script
             result["extractor_version"] = "tiktok-public-grid-v1"
             return result
 
@@ -107,7 +127,8 @@ class HostBrowserSearchService:
                 if ticket["state"] != "PREPARED":
                     raise ValueError("Task is not accepting answers")
                 try:
-                    receipt = validate_answer(ticket["request"], payload, datetime.now(timezone.utc))
+                    receipt = validate_answer(ticket["request"], payload, datetime.now(timezone.utc),
+                                              ticket["attribution_templates"])
                 except ValueError:
                     self._finish(ticket, "REJECTED")
                     raise

@@ -12,7 +12,9 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/033_connector_request_days.sql`. Migration 033 thêm
+Chuỗi migration trong mã nguồn kết thúc ở `sql/034_tiktok_attribution.sql`. Migration 034 nạp sẵn
+mẫu câu ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình
+duyệt host; nó không sửa bằng chứng đã lưu. Migration 033 thêm
 bộ đếm số lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không
 sửa bằng chứng đã lưu. Migration 032 bổ sung watchlist, các phiên
 bản không sửa được của watchlist và các lần chạy gắn với từng phiên bản; nó không sửa bằng chứng đã lưu. Migration
@@ -254,9 +256,13 @@ của Mission Relay, công việc nghiên cứu và bổ sung chứng cứ nằm
 
 Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và
 `cancel_host_browser_search` cung cấp đường thu thập chủ động chọn, chỉ trong nhiệm vụ được duyệt.
-Host dùng phiên trình duyệt được cho phép, chạy bộ trích xuất đóng gói trên đúng trang tìm kiếm,
-rồi chuyển nguyên JSON trong bộ nhớ qua form localhost. MCP nhận kết quả bằng ID; không cần
-chép lại bản ghi qua mô hình, xuất cookie hay mở cổng gỡ lỗi.
+Host dùng phiên trình duyệt được cho phép và mở trang relay localhost. Nút "Open search" trên relay
+mở đúng trang tìm kiếm công khai; `tab_script` do bước chuẩn bị trả về, chạy trong từng tab vừa mở, gửi kết quả về
+relay và chỉ trả lại số đếm. Relay tự stage khi mọi truy vấn đã có kết quả; vẫn có thể điền form bằng
+JSON giữ trong bộ nhớ như trước. MCP nhận kết quả bằng ID; không cần chép lại bản ghi qua mô hình,
+xuất cookie hay mở cổng gỡ lỗi. Câu ghi công tác giả của TikTok bị bỏ khỏi trích đoạn trước khi trả
+về hoặc lưu; nếu chưa nạp mẫu câu ghi công, bước chuẩn bị bị từ chối với mã
+`AUTHOR_ATTRIBUTION_VOCABULARY_MISSING`.
 
 Chế độ `TACTICAL` không khởi tạo database. Chế độ `MISSION` cần mission đã xác nhận,
 `queries=[]` và `result_limit=20`; truy vấn, kể cả truy vấn phản biện, được lấy từ phạm vi đã duyệt.

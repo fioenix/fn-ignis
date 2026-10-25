@@ -176,3 +176,50 @@ def test_batch_requires_one_answer_per_query_and_preserves_partial_failure(servi
     result = service.submit(request["request_id"], "task-1", "chrome-1")
     assert [outcome["status"] for outcome in result["outcomes"]] == ["HEALTHY", "DEGRADED"]
     assert len(result["observations"]) == 1
+
+
+def test_host_excerpt_loses_the_poster_attribution_before_the_receipt(service):
+    """The 26/10/2026 trial returned twelve excerpts that each ended in the poster's name (FR-012)."""
+    request = prepare(service)
+    payload = answer(request)
+    payload["answers"][0]["records"][0]["excerpt"] = (
+        "Túi đi làm siêu gọn #tuidilam do Fixture Poster tạo với bản nhạc âm thanh gốc - Fixture Poster"
+    )
+    service.stage(request["request_id"], payload)
+    assert "Fixture Poster" not in repr(service.instance._tickets[request["request_id"]])
+    receipt = service.submit(request["request_id"], "task-1", "chrome-1")
+    assert receipt["observations"][0]["excerpt"] == "Túi đi làm siêu gọn #tuidilam"
+
+
+def test_a_label_that_was_only_attribution_is_not_content(service):
+    request = prepare(service)
+    payload = answer(request)
+    payload["answers"][0]["records"][0]["excerpt"] = "do Fixture Poster tạo với bản nhạc âm thanh gốc"
+    service.stage(request["request_id"], payload)
+    receipt = service.submit(request["request_id"], "task-1", "chrome-1")
+    assert receipt["observations"] == []
+    assert receipt["outcomes"][0]["status"] == "DEGRADED"
+    assert receipt["outcomes"][0]["signals_collected"] == 0
+
+
+def test_preparation_without_attribution_vocabulary_fails_closed():
+    service = service_type()(attribution_templates=())
+    try:
+        with pytest.raises(ValueError, match="attribution"):
+            prepare(service)
+    finally:
+        service.close()
+
+
+def test_preparation_returns_the_relay_tab_script(service):
+    """Browser tooling may refuse to read the script back from the page, so preparation hands it over."""
+    import html
+    from urllib.request import urlopen
+
+    request = prepare(service)
+    with urlopen(request["relay_url"], timeout=3) as response:
+        page = response.read().decode()
+    shown = page.split('<textarea id="tab-script" readonly rows="5">', 1)[1].split("</textarea>", 1)[0]
+    assert request["tab_script"]
+    assert html.unescape(shown) == request["tab_script"]
+    assert request["relay_url"].rstrip("/").rsplit("/", 1)[0] in request["tab_script"]

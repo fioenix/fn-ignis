@@ -672,3 +672,23 @@ async def test_prepare_does_not_evict_submitting_receipt_and_retention_is_finite
         release.set()
         await first
         service.close()
+
+
+@pytest.mark.asyncio
+async def test_host_mission_stores_no_poster_attribution(repository_case, tmp_path):
+    """Constitution VII: the poster's display name in TikTok's image label never reaches storage."""
+    store, workspace, mission, executor = await assignment(repository_case.repository, tmp_path)
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
+        payload = staged_answer(request)
+        payload["answers"][0]["records"][0]["excerpt"] = (
+            "Túi đi làm siêu gọn do Fixture Poster tạo với bản nhạc âm thanh gốc - Fixture Poster"
+        )
+        service.stage(request["request_id"], payload)
+        await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        held = await repository_case.repository.get_mission_signals(mission.id)
+        assert [signal.raw_title for signal in held] == ["Túi đi làm siêu gọn"]
+        assert "Fixture Poster" not in repr([signal.metadata for signal in held])
+    finally:
+        service.close()

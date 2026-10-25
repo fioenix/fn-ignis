@@ -28,6 +28,7 @@ SEEDS = (
     "012_vocabulary_from_constants.sql",
     "013_tiktok_ui_noise.sql",
     "014_language_detection_vocabulary.sql",
+    "034_tiktok_attribution.sql",
 )
 
 
@@ -239,3 +240,33 @@ def test_the_machinery_list_is_not_duplicated_in_the_use_cases():
         "MACHINERY_DOMAINS in vocabulary_loader is the only list of non-topic domains. "
         f"Found a second one in: {offenders}"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_database_arms_the_tiktok_attribution_guard(tmp_path):
+    """Host excerpts are cleaned only if bootstrap seeds the attribution templates (Spec 012 FR-012)."""
+    from ignis.infrastructure.security.pii_sanitizer import strip_platform_attribution
+
+    repo = SqliteTrendRepository(db_path=str(tmp_path / "attribution.db"))
+    vocabulary = await load_market_vocabulary(repo)
+
+    assert vocabulary.tiktok_attribution
+    assert all("{author}" in template for template in vocabulary.tiktok_attribution)
+    label = "Túi đẹp nha #tuidilam do Fixture Poster tạo với bản nhạc Peace"
+    assert strip_platform_attribution(label, vocabulary.tiktok_attribution) == "Túi đẹp nha #tuidilam"
+
+
+@pytest.mark.asyncio
+async def test_the_synchronizer_hands_database_attribution_templates_to_host_search(tmp_path):
+    from ignis.application.use_cases.host_browser_search import HostBrowserSearchService
+    from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+
+    repo = SqliteTrendRepository(db_path=str(tmp_path / "sync.db"))
+    await repo.register_lexicon_terms("tiktok_attribution", ["created by {author} with"], "ui_attribution")
+    service = HostBrowserSearchService(attribution_templates=())
+    try:
+        await VocabularySynchronizer(repo, host_browser_search=service).synchronize()
+        assert "created by {author} with" in service._attribution_templates
+        assert "do {author} tạo với" in service._attribution_templates
+    finally:
+        service.close()

@@ -121,3 +121,24 @@ Ruling: Stop at missing deterministic relay, rather than reconstructing records 
 approved plan mandates this stop — cost if wrong: delayed implementation until a safe relay is available.
 Ruling: The owner approved a task-bound loopback relay; implement its bounded lifecycle/security tests
 before T003 — cost if wrong: reject unsafe ingress and retain the live gate as incomplete.
+
+## Phase 7: Amendment 2026-10-26 — attribution removal and relay handoff (FR-012, FR-013)
+
+Owner approval: "Cho session TikTok sửa lỗi lọt tên tác giả trong excerpt và thêm nút mở tìm kiếm
+cùng listener postMessage cho relay, mở PR riêng, chưa đổi routine." Test-first; no routine change.
+
+- [x] T031 [P] Write failing tests: attribution stripped from TACTICAL receipts, an excerpt left empty is dropped, a HEALTHY answer left empty is DEGRADED, and preparation without vocabulary fails closed (tests/unit/test_host_browser_search.py, tests/unit/test_pii_sanitizer.py)
+- [x] T032 [P] Write failing tests: seeded `tiktok_attribution` vocabulary loads on SQLite and ships in the SQL chain (tests/unit/test_vocabulary_loader.py, tests/unit/test_sql_packaging.py)
+- [x] T033 Seed `sql/034_tiktok_attribution.sql`, load it in `MarketVocabulary`, replay it in the SQLite bootstrap, and implement `strip_platform_attribution` plus validator and service binding
+- [x] T034 Read the templates in the MCP prepare handler and report `AUTHOR_ATTRIBUTION_VOCABULARY_MISSING` (src/ignis/interfaces/mcp/server.py)
+- [x] T035 Write failing browser tests: the relay button opens the search tab, the tab script posts its answer, and the relay stages it; messages from another origin, an unopened window or the wrong query are ignored (tests/unit/test_host_browser_relay.py)
+- [x] T036 Implement the relay buttons, nonce-bound listener and packaged `tiktok_handoff.js`
+- [x] T037 Update migration docs (README.md, README.vi.md, docs/USER_GUIDE.md, docs/USER_GUIDE.vi.md), the ignis-collect host steps and migration pins; run targeted tests, conventions and ruff
+- [x] T038 Live tactical check with the owner's Chrome for one G3 keyword: no attribution in the receipt, relay staged by the new controls
+
+Phase 7 evidence (2026-10-26, worktree `claude/host-relay-identity`): T031/T032/T035 observed RED
+first (missing seed, missing nonce and buttons, missing `tab_script`), then GREEN. Targeted SQLite
+run listed in the PR; PostgreSQL cases skipped locally for lack of a test DSN, so CI owns that proof.
+T038 live: the owner's Chrome, query "áo khoác chống nắng", worktree code. The relay button opened the
+search, the tab script posted 12 records and returned counts only, the relay staged without a manual
+click, and the receipt was ACCEPTED with 12 observations, 0 with attribution left and 0 handle links.
