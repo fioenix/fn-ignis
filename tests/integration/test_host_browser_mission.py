@@ -698,6 +698,15 @@ async def test_host_mission_stores_no_poster_attribution(repository_case, tmp_pa
 async def test_host_mission_applies_attribution_wording_added_in_the_database(repository_case, tmp_path):
     """A locale an operator registered must clean the ticket before it is frozen (PR #79 review)."""
     repo = repository_case.repository
+    if repository_case.dsn:
+        # The shared PostgreSQL fixture holds the evidence schema only; the vocabulary tables come
+        # from the lexicon migrations, applied here as the full chain would.
+        import psycopg
+        from pathlib import Path
+        sql = Path(__file__).resolve().parents[2] / "sql"
+        with psycopg.connect(repository_case.dsn) as conn:
+            for migration in ("003_market_lexicons.sql", "034_tiktok_attribution.sql"):
+                conn.execute((sql / migration).read_text(encoding="utf-8"))
     await repo.register_lexicon_terms("tiktok_attribution", ["created by {author} with"], "ui_attribution")
     store, workspace, mission, executor = await assignment(repo, tmp_path)
     service = HostBrowserSearchService()
