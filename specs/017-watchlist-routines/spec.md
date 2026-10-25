@@ -131,6 +131,13 @@ confirm (listed again under "Owner review"):
   measurement (`google`), and names `CALLER_CONFIG_CHANGED` as the sign that the session's server
   needs a restart; the report mentions the app's dispatch delay (07:00 shown as 07:13) (agent
   decided; basis: `.handoff/spec017/acceptance.handoff.md` findings 1, 4, 5, 6 and 8).
+- Q: A firing only collects, but Spec 016 FR-010 counts only judged evidence. Who judges? → A: The
+  firing itself, as the host agent the 21/10 decision names: after collection it judges the run's
+  evidence with `get_mission_evidence_qualification_batch` and
+  `submit_mission_evidence_qualifications` until READY, and reports how many items were on the
+  topics. Setup asks for those two approvals too (agent decided; basis: the G3 period views of
+  23–25/10/2026 showed no figure or item until the 25/10 run was judged, after which three items
+  appeared).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -231,7 +238,8 @@ no OS scheduler entry, no Ignis-side loop; the agent tells the user to run the w
   once per day.
 - **FR-005**: The routine prompt MUST be self-contained and MUST, on each firing: start exactly one
   watchlist run on the current version, collect within the daily ceilings, stop at the mission's
-  terminal state, and report the outcome. It MUST NOT backfill missed days, broaden the watchlist,
+  terminal state, judge that mission's evidence against the watchlist with the evidence-qualification
+  tools until it is READY (Spec 016 FR-010 counts only judged items), and report the outcome. It MUST NOT backfill missed days, broaden the watchlist,
   create or revise watchlists, or publish anything.
 - **FR-006**: Rendering a period view on a firing MUST happen only if the user asked for it at setup;
   the artifact MUST stay local.
@@ -239,8 +247,9 @@ no OS scheduler entry, no Ignis-side loop; the agent tells the user to run the w
   saved in it is paused until the person changes it), and MUST let a routine run in an auto mode only
   when the person explicitly accepts that for the routine, pausing it otherwise. It MUST end setup
   with an attended "Run now" that, in a mode that asks, grants approvals for only
-  `start_watchlist_run` and `execute_mission_ingress`; a routine without them MUST be described to
-  the user as attended. *(Amended 26/10/2026 from "never auto or bypass" by the owner decision of
+  `start_watchlist_run`, `execute_mission_ingress`, `get_mission_evidence_qualification_batch` and
+  `submit_mission_evidence_qualifications`; a routine without them MUST be described to the user as
+  attended. *(Amended 26/10/2026 from "never auto or bypass" by the owner decision of
   23/10/2026.)*
 - **FR-008**: Removing a routine MUST require the user's confirmation and MUST leave watchlist history
   untouched.

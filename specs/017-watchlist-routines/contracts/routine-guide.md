@@ -25,10 +25,11 @@ Returns the guide, preceded by the watchlist identifier when one is given. Refus
    folder is refused). A task saved in a bypass permission mode is paused until the person changes
    it; one saved in an auto mode runs only if the person explicitly accepts that, and is paused
    otherwise. Setup ends with an attended "Run now" that, in a mode that asks, approves only
-   `start_watchlist_run` and `execute_mission_ingress`.
+   `start_watchlist_run`, `execute_mission_ingress`, `get_mission_evidence_qualification_batch` and
+   `submit_mission_evidence_qualifications`.
 4. **Routine prompt template**: self-contained; one `start_watchlist_run`, collection via
-   `execute_mission_ingress`, ceilings respected, stop at terminal state, report mission id and
-   per-channel status; prohibitions: no backfill, no broadening, no watchlist edits, no publishing,
+   `execute_mission_ingress`, ceilings respected, stop at terminal state, judge the run's evidence
+   until READY, report mission id, per-channel status and the number of items on the topics; prohibitions: no backfill, no broadening, no watchlist edits, no publishing,
    no second run; period view only if requested at setup, local only.
 5. **Change, pause, remove**: update time; disable to pause; delete only after confirmation; history
    untouched.

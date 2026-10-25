@@ -127,8 +127,10 @@ Create it from a session opened in the research workspace's repository folder, b
 starts in that folder. Before creating it, the agent checks that each channel can collect for your
 workspace: YouTube needs its key in the workspace's own `.fnignis/.env`, and browser channels need a
 saved sign-in. A routine never runs in a Bypass permission mode, and runs in Auto only if you accept
-that during setup. Setup ends with a first run you watch; in a mode that asks, you approve only
-`start_watchlist_run` and `execute_mission_ingress`.
+that during setup. Each firing also judges which collected items are on your topics, because the
+period view counts only judged items. Setup ends with a first run you watch; in a mode that asks,
+you approve only `start_watchlist_run`, `execute_mission_ingress`,
+`get_mission_evidence_qualification_batch` and `submit_mission_evidence_qualifications`.
 You pause or remove it in the app, and removing it keeps the watchlist's history. A firing happens
 only while the app is open. Other hosts are not supported yet, and Ignis itself still schedules
 nothing.

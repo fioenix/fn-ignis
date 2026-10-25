@@ -128,8 +128,11 @@ watchlist. Hãy tạo task từ một phiên mở trong thư mục repository c�
 hoạt bắt đầu trong thư mục đó. Trước khi tạo, agent kiểm tra từng kênh có thu thập được cho
 workspace của bạn không: YouTube cần key trong `.fnignis/.env` riêng của workspace, còn các kênh
 browser cần phiên đăng nhập đã lưu. Routine không bao giờ chạy ở chế độ quyền Bypass, và chỉ chạy ở
-chế độ Auto khi bạn đồng ý lúc cài đặt. Bước cài đặt kết thúc bằng một lần chạy có bạn theo dõi; ở chế
-độ có hỏi quyền, bạn chỉ duyệt `start_watchlist_run` và `execute_mission_ingress`. Bạn tạm dừng hoặc xóa routine trong app, và xóa routine không làm mất
+chế độ Auto khi bạn đồng ý lúc cài đặt. Mỗi lần chạy, agent còn đánh giá xem item nào thu được thuộc
+đúng chủ đề của bạn, vì period view chỉ đếm những item đã được đánh giá. Bước cài đặt kết thúc bằng
+một lần chạy có bạn theo dõi; ở chế độ có hỏi quyền, bạn chỉ duyệt `start_watchlist_run`,
+`execute_mission_ingress`, `get_mission_evidence_qualification_batch` và
+`submit_mission_evidence_qualifications`. Bạn tạm dừng hoặc xóa routine trong app, và xóa routine không làm mất
 lịch sử của watchlist. Routine chỉ chạy khi app đang mở. Các host khác chưa được hỗ trợ, và bản thân
 Ignis vẫn không tự lên lịch việc gì.
 
