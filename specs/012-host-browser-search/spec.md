@@ -145,6 +145,10 @@ mission use requires its confirmed source, query budget, authority, and evidence
 
 ## Clarifications
 
+### Session 2026-10-26
+
+- Q: When TikTok blocks automated Playwright sessions, should Ignis adopt anti-detection browsers (patchright, Camoufox) or this host browser path? → A: This host browser path through Claude in Chrome, with no additional browser plugin. Anti-detection tooling is out of scope; the agent only opens the prepared search URL, runs the `tiktok-public-grid-v1` extractor and submits, and a missing host capability stays an unavailable channel (owner decided 2026-10-26; basis: on 2026-10-25 a logged-in stored session returned 0 cards in headless, headed and fixed-profile Playwright while the owner's Chrome returned 16 cards, and the Claude Code auto-mode classifier blocked a patchright probe as bot-check circumvention).
+
 ### Session 2026-10-04
 
 - Q: Should preparation documentation describe client-supplied capabilities or a host-surface argument? → A: No. List the actual current MCP parameters; MISSION scope derives from the confirmed manifest and requires tiktok_video/browser-session authority. Correct contract prose only, without changing the API or acceptance gates (agent decided; basis: inspected prepare handler and prepare_scope, exact lookup rather than semantic inference, decision check found no recorded contradiction).

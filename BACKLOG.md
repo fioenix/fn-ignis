@@ -1325,7 +1325,7 @@ Khoảng trống phải đi đường browser:
 
 | Nguồn | Nhu cầu chưa có API | Đường browser hiện tại |
 |---|---|---|
-| TikTok | Tìm video theo từ khóa và đọc bình luận | `tiktok_video_grid` với phiên đăng nhập của Ignis. Ngày 25/10/2026 phiên đã lưu không chứa cookie đăng nhập, nên tìm kiếm trả lỗi. PR #76 (merge ngày 25/10/2026) chỉ lưu phiên khi có cookie đăng nhập; phiên lưu lại cùng ngày chưa được probe |
+| TikTok | Tìm video theo từ khóa và đọc bình luận | `tiktok_video_grid` với phiên đăng nhập của Ignis. Ngày 25/10/2026 phiên đã đăng nhập nhưng Playwright vẫn ra 0 card ở cả headless lẫn headed, trong khi Chrome của Fio tìm được bình thường. Từ 26/10/2026 đi đường host browser search của Spec 012 qua Claude in Chrome |
 | TikTok | Xu hướng vĩ mô của Creative Center | `tiktok_creative_center` |
 | Meta Threads | Tìm bài công khai theo từ khóa khi chưa được duyệt `threads_keyword_search` | `threads` qua phiên browser |
 | Meta Instagram | Reels theo từ khóa, vượt giới hạn 30 hashtag mỗi 7 ngày | `reels` qua phiên browser |
@@ -1360,29 +1360,34 @@ Trạng thái: **ứng viên**, **không dùng được**, **chưa xác nhận**
 Khoảng trống: chưa có hình học cấp xã sau 2025 với giấy phép mở rõ ràng, và chưa thấy chuỗi tổng mức
 bán lẻ theo 34 tỉnh ở dạng máy đọc được.
 
-#### Công cụ browser chống chặn bot (chốt 25/10/2026)
+#### Trình duyệt cho đường browser (chốt 26/10/2026)
 
-Các đường browser ở bảng khoảng trống dùng Playwright với phiên đăng nhập của Ignis. Khi nền tảng chặn
-trình duyệt tự động, Ignis thử theo thứ tự dưới đây. Chỉ chuyển sang bước sau khi bước trước đã thất bại
-rõ ràng:
+Fio chốt ngày 26/10/2026: khi nền tảng chặn trình duyệt tự động, Ignis không dùng công cụ lẩn tránh
+phát hiện bot mà chuyển sang host browser search của Spec 012. Tìm kiếm chạy ngay trong Chrome của Fio
+qua Claude in Chrome, không cài thêm plugin nào khác.
 
-1. Bảo đảm phiên đăng nhập còn sống. Theo README của `Douyin_TikTok_Download_API` và `TikTok-Api`,
-   tìm kiếm trên TikTok phụ thuộc chủ yếu vào phiên đăng nhập. Ngày 25/10/2026, lỗi tìm kiếm TikTok
-   là do phiên đã lưu chưa từng đăng nhập; PR #76 đã sửa phần lưu phiên.
-2. Chạy trình duyệt có giao diện với profile cố định thay cho headless.
-3. **patchright** (Apache-2.0): bản thay thẳng cho Playwright Python, giữ nguyên `storage_state`, bộ bắt
-   response và DOM fallback. Nó che dấu vết tự động hóa ở tầng CDP và Playwright, nhưng không giả
-   canvas, WebGL hay font.
-4. **Camoufox** (MPL-2.0): Firefox giả fingerprint ngay trong binary. Đổi lại phải tải binary riêng và
-   kiểm lại phiên Chromium đang lưu.
+Căn cứ:
 
-Không chọn: nodriver vì dùng license AGPL; CloakBrowser vì phụ thuộc binary của nhà cung cấp và có gói
-Pro; Scrapling vì là cả một framework đè lên lớp connector; Agent-Reach vì sao chép phiên đăng nhập
-Chrome của người dùng; firecrawl và crawl4ai vì không hợp với connector của Ignis.
-`Douyin_TikTok_Download_API` chỉ dùng làm tài liệu tham khảo.
+- Ngày 25/10/2026, phiên TikTok đã có cookie đăng nhập nhưng Playwright vẫn ra 0 card ở cả headless,
+  headed và profile cố định; `/api/search/general/full/` trả 200 với body rỗng. Cùng lúc, Chrome của
+  Fio tìm cùng từ khóa ra 16 card.
+- Lệnh chạy thử patchright bị bộ phân loại auto mode của Claude Code chặn vì lý do "Bot Check
+  Circumvention". patchright và Camoufox sinh ra để lẩn tránh phát hiện bot, nên hướng này bị loại.
+  Các công cụ cùng loại cũng bị loại theo: nodriver, CloakBrowser, Scrapling, rebrowser-patches, và
+  việc dùng Brave hay một trình duyệt khác chỉ để bớt bị nhận ra là bot.
+- Không thêm Chrome DevTools MCP vì cần mở cổng remote debugging, điều Spec 012 đã loại. Không thêm
+  Playwright MCP ở chế độ extension vì trùng việc với Claude in Chrome.
 
-Hiện trạng: phiên TikTok được lưu lại ngày 25/10/2026 và chưa được probe. Chưa có probe nào chứng minh
-patchright hay Camoufox vượt được lớp chặn của TikTok.
+Cách giữ đường này ổn định:
+
+- Agent không click hay gõ trên trang. Agent chỉ mở URL do `prepare_host_browser_search` đưa ra, chạy
+  extractor cố định `tiktok-public-grid-v1`, rồi nộp kết quả bằng `submit_host_browser_search`.
+- Nếu agent vẫn hỏng ở bước điều khiển, sửa bằng cách siết quy trình hoặc extractor, không thêm plugin.
+- Routine chỉ thu được khi máy đang thức, Chrome đang mở, extension đang kết nối và profile còn đăng
+  nhập TikTok. Thiếu một điều kiện thì kênh báo không khả dụng, không chuyển sang trình duyệt khác.
+
+Hiện trạng: lần thử host browser search đầu tiên cho một từ khóa G3 đang chạy. Routine G3 chưa đổi;
+muốn routine dùng đường này phải chờ Fio duyệt riêng.
 
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 
