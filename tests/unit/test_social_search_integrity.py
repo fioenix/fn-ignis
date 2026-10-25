@@ -13,6 +13,8 @@ from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 
 
 @pytest.mark.asyncio
+# TikTok moved its web search results to /api/search/general/full/ (observed 25/10/2026).
+@pytest.mark.parametrize("api_path", ["/api/search/general/", "/api/search/general/full/"])
 @pytest.mark.parametrize("response_query,landed_page", [
     ("retail", "https://www.tiktok.com/search?q=retail"),
     ("unrelated", "https://www.tiktok.com/search?q=retail"),
@@ -30,10 +32,11 @@ from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
         "stats": {"playCount": 1234},
     }}]}, True),
 ])
-async def test_only_a_video_search_envelope_attests_execution(body, expected, response_query, landed_page):
+async def test_only_a_video_search_envelope_attests_execution(body, expected, response_query, landed_page,
+                                                              api_path):
     expected = expected and response_query == "retail" and landed_page.endswith("/search?q=retail")
     response = SimpleNamespace(
-        url=f"https://www.tiktok.com/api/search/general/?keyword={response_query}", status=200,
+        url=f"https://www.tiktok.com{api_path}?keyword={response_query}", status=200,
         headers={"content-type": "application/json"}, json=AsyncMock(return_value=body),
     )
     class Page:
