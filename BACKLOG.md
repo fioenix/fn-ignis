@@ -1332,6 +1332,58 @@ Khoảng trống phải đi đường browser:
 | Google | Đo nhu cầu theo từ khóa khi chưa có quyền Trends API | Chưa có; `search_signals` của `google` báo không khả dụng |
 | Meta Facebook | Tìm bài công khai theo từ khóa; Facebook không có API cho việc này | Chưa có |
 
+#### Dữ liệu nền theo địa lý (khảo sát 25/10/2026)
+
+Dữ liệu nền giúp phân tích tín hiệu theo vị trí: mã và ranh giới đơn vị hành chính, dân số và kinh tế
+theo tỉnh. Từ 01/07/2025 cả nước còn 34 đơn vị cấp tỉnh và bỏ cấp huyện theo Nghị quyết 202/2025/QH15.
+Mã đơn vị hành chính theo Quyết định 19/2025/QĐ-TTg: tỉnh 2 chữ số, xã 5 chữ số, mã đã dùng không cấp
+lại; nội dung quyết định này mới được đối chiếu qua trang luật bên thứ ba. Năm 2026 Đồng Nai, Quảng Ninh và Bắc Ninh
+lên thành phố trực thuộc trung ương nhưng giữ mã cũ, nên Ignis phải khóa theo mã, không khóa theo tên.
+
+Trạng thái: **ứng viên**, **không dùng được**, **chưa xác nhận**.
+
+| Nhà cung cấp | Dữ liệu | Độ chi tiết | Định dạng và cách lấy | Giấy phép | Theo cấu trúc sau 01/07/2025 | Trạng thái |
+|---|---|---|---|---|---|---|
+| Cục Thống kê | Danh mục đơn vị hành chính (danhmuchanhchinh.nso.gov.vn) | Tỉnh, xã; tra được theo ngày bất kỳ | SOAP web service `DMDVHC.asmx` (`DanhMucTinh`, `DanhMucPhuongXa`), xuất Excel, bảng chuyển đổi từ đơn vị cũ sang đơn vị mới dạng xlsx | Không ghi giấy phép mở | Có; ngày 25/10/2026 trả về 34 tỉnh và 3.321 xã | Ứng viên: nguồn mã chính thức, máy đọc được |
+| Cục Thống kê | Cơ sở dữ liệu thống kê PX-Web (pxweb.nso.gov.vn) | Tỉnh, theo năm | JSON qua PX-Web API v1; API chỉ có 8 cơ sở dữ liệu, số liệu thương mại chỉ xem được trên web | Bản quyền Cục Thống kê, phải ghi nguồn | Không; bảng dân số và diện tích vẫn theo 63 tỉnh, giai đoạn 2011–2025 | Ứng viên cho chuỗi lịch sử, phải quy đổi 63 tỉnh sang 34 tỉnh bằng bảng chuyển đổi |
+| Cục Thống kê | Niên giám thống kê 2025 | Tỉnh, theo năm | Chỉ có PDF | Phải ghi nguồn | Một phần; phụ lục có chuỗi 34 tỉnh giai đoạn 2020–2025 về dân số, lao động, GRDP và doanh nghiệp | Ứng viên, phải trích bảng thủ công |
+| Cục Thống kê | Báo cáo kinh tế, xã hội hằng tháng | Toàn quốc, một số địa phương nêu trong bài | DOCX, PDF | Phải ghi nguồn | Theo số liệu hiện hành | Ứng viên làm mốc tổng mức bán lẻ toàn quốc; chưa thấy bảng bán lẻ theo tỉnh |
+| OCHA HDX | COD-AB Việt Nam v02 | Chỉ cấp tỉnh (34) | SHP, GeoJSON, GDB, XLSX; CKAN API | CC BY-IGO | Có; ranh giới ngày 01/07/2025, nguồn Cục Thống kê, file cập nhật 26/01/2026 | Ứng viên: bộ ranh giới duy nhất có giấy phép mở theo cấu trúc mới |
+| World Bank | World Development Indicators API | Toàn quốc | JSON, CSV, không cần key | Chưa xác nhận | Không áp dụng | Ứng viên, chỉ cho bối cảnh toàn quốc |
+| Cộng đồng | `thanglequoc/vietnamese-provinces-database` v5.2.0 | 34 tỉnh, 3.321 xã, có hình học | GeoJSON, PostGIS, SQL | Repo dùng MIT, nhưng hình học lấy từ sapnhap.bando.com.vn và quyền tái sử dụng chưa rõ | Có, gồm cả các thành phố lên trực thuộc trung ương năm 2026 | Ứng viên cho mã; dùng hình học phải thận trọng |
+| bando.com.vn | Bản đồ đơn vị hành chính (sapnhap.bando.com.vn) | 34 tỉnh, 3.321 xã | Chỉ xem trên web, không có file tải hay WMS | Phát hành phi thương mại | Có | Không dùng được làm nguồn dữ liệu |
+| geoBoundaries | ADM1, ADM2 | 64 đơn vị năm 2008, 708 đơn vị năm 2020 | GeoJSON, SHP, API | Hỗn hợp | Không | Không dùng được |
+| GADM | GADM 4.1 | Tỉnh, huyện, xã | GPKG, SHP | Chỉ dùng phi thương mại, cấm phân phối lại | Không | Không dùng được |
+| OpenStreetMap | Ranh giới hành chính | Tùy khu vực | Overpass, bản trích xuất | ODbL, chia sẻ tương tự | Chưa xác nhận | Dự phòng, phải kiểm trước khi dùng |
+| Cổng dữ liệu quốc gia | data.gov.vn | Chưa rõ | Môi trường khảo sát không truy cập được | Chưa rõ | Chưa rõ | Chưa xác nhận |
+
+Khoảng trống: chưa có hình học cấp xã sau 2025 với giấy phép mở rõ ràng, và chưa thấy chuỗi tổng mức
+bán lẻ theo 34 tỉnh ở dạng máy đọc được.
+
+#### Công cụ browser chống chặn bot (chốt 25/10/2026)
+
+Các đường browser ở bảng khoảng trống dùng Playwright với phiên đăng nhập của Ignis. Khi nền tảng chặn
+trình duyệt tự động, Ignis thử theo thứ tự dưới đây. Chỉ chuyển sang bước sau khi bước trước đã thất bại
+rõ ràng:
+
+1. Bảo đảm phiên đăng nhập còn sống. Theo README của `Douyin_TikTok_Download_API` và `TikTok-Api`,
+   tìm kiếm trên TikTok phụ thuộc chủ yếu vào phiên đăng nhập. Ngày 25/10/2026, lỗi tìm kiếm TikTok
+   là do phiên đã lưu chưa từng đăng nhập; PR #76 đã sửa phần lưu phiên.
+2. Chạy trình duyệt có giao diện với profile cố định thay cho headless.
+3. **patchright** (Apache-2.0): bản thay thẳng cho Playwright Python, giữ nguyên `storage_state`, bộ bắt
+   response và DOM fallback. Nó che dấu vết tự động hóa ở tầng CDP và Playwright, nhưng không giả
+   canvas, WebGL hay font.
+4. **Camoufox** (MPL-2.0): Firefox giả fingerprint ngay trong binary. Đổi lại phải tải binary riêng và
+   kiểm lại phiên Chromium đang lưu.
+
+Không chọn: nodriver vì dùng license AGPL; CloakBrowser vì phụ thuộc binary của nhà cung cấp và có gói
+Pro; Scrapling vì là cả một framework đè lên lớp connector; Agent-Reach vì sao chép phiên đăng nhập
+Chrome của người dùng; firecrawl và crawl4ai vì không hợp với connector của Ignis.
+`Douyin_TikTok_Download_API` chỉ dùng làm tài liệu tham khảo.
+
+Hiện trạng: phiên TikTok được lưu lại ngày 25/10/2026 và chưa được probe. Chưa có probe nào chứng minh
+patchright hay Camoufox vượt được lớp chặn của TikTok.
+
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 
 Các mục dưới đây chưa có measurement, decision hay release target. Chúng được giữ để không mất ý
