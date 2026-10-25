@@ -638,7 +638,8 @@ class TikTokPlugin(IConnectorPlugin):
         """Bind a public search response or page to one exact requested query."""
         try:
             parsed = urlsplit(url)
-            paths = ("/api/search/item", "/api/search/general") if api else ("/search", "/search/video")
+            paths = (("/api/search/item", "/api/search/general", "/api/search/general/full") if api
+                     else ("/search", "/search/video"))
             return (
                 parsed.scheme == "https" and parsed.hostname == "www.tiktok.com"
                 and parsed.port in (None, 443) and not parsed.username and not parsed.password
