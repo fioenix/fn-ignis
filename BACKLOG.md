@@ -1386,8 +1386,16 @@ Cách giữ đường này ổn định:
 - Routine chỉ thu được khi máy đang thức, Chrome đang mở, extension đang kết nối và profile còn đăng
   nhập TikTok. Thiếu một điều kiện thì kênh báo không khả dụng, không chuyển sang trình duyệt khác.
 
-Hiện trạng: lần thử host browser search đầu tiên cho một từ khóa G3 đang chạy. Routine G3 chưa đổi;
-muốn routine dùng đường này phải chờ Fio duyệt riêng.
+Hiện trạng: ngày 26/10/2026, lần thử đầu tiên với từ khóa G3 "áo khoác chống nắng" ở chế độ TACTICAL
+ra 18 card trong Chrome. Ignis nhận 12 observation với trạng thái `HEALTHY`. Lần thử lộ ra hai việc phải
+làm trước khi dùng cho routine:
+
+- Excerpt vẫn giữ câu ghi công trong alt-text của TikTok, có tên hiển thị của tác giả. Ở chế độ MISSION,
+  tên này sẽ bị lưu vào DB, trái Principle VII.
+- Trang relay chưa có cách nhận kết quả từ tab TikTok, nên agent phải tự ghép bằng một nút và
+  `postMessage`. Relay cần tự cung cấp nút mở tìm kiếm và listener nhận kết quả.
+
+Routine G3 chưa đổi; muốn routine dùng đường này phải chờ Fio duyệt riêng.
 
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 
