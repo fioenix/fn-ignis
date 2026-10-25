@@ -1284,6 +1284,22 @@ tưởng, nhưng không được tính là việc đang mở cho tới khi một
 - **Time-series Projection:** Sử dụng mô hình ARIMA / Exponential Smoothing trên chuỗi dữ liệu Google Trends để dự đoán thời điểm xu hướng chạm đỉnh (Peak Interest).
 - **Saturation Index:** Tính toán ngưỡng bão hòa của thị trường dựa trên tốc độ ra mắt video mới của các nhà sáng tạo nội dung.
 
+#### Epic 6: API chính thức của TikTok cho nhà bán (ghi ngày 25/10/2026)
+*Mục tiêu: Mở rộng Ignis từ người dùng cá nhân sang nhà bán lẻ, sau khi phần cho cá nhân đã chạy ổn.*
+Fio chốt ngày 25/10/2026: Ignis ưu tiên người dùng cá nhân, các API dành cho nhà bán để sau. Những
+thông tin dưới đây lấy từ trang của TikTok và blog bên thứ ba, chưa kiểm chứng bằng tài khoản thật.
+- **TikTok Shop Partner API (Partner Center):** đọc đơn hàng, sản phẩm, tồn kho, tài chính, dữ liệu
+  affiliate và creator của chính shop, hoặc của các shop đã cấp quyền qua OAuth. Muốn dùng phải đăng
+  ký app trên Partner Center, xin đúng scope và ký mọi request. Không có endpoint phân tích riêng:
+  số liệu phân tích phải tự ghép từ đơn hàng, sản phẩm và tài chính. Chỉ đọc được dữ liệu của các
+  shop này, không dùng để lắng nghe thị trường.
+- **Commercial Content API:** dữ liệu quảng cáo, hiện chỉ gồm quảng cáo chạy ở EU. Người xin quyền ở
+  nước nào cũng được.
+- **API for Business, nhóm Organic (Accounts, Mentions, TikTok One):** báo cáo cho tài khoản
+  Business của thương hiệu. Discovery API cùng nhóm được xét riêng cho người dùng cá nhân.
+- **Không áp dụng:** Research API chỉ cấp cho nghiên cứu phi thương mại của trường đại học ở Mỹ,
+  EEA, Anh, Thụy Sĩ và Canada, hoặc tổ chức phi lợi nhuận ở EU. Ignis không đủ điều kiện.
+
 ---
 
 ## 🛠️ 3. Hướng Dẫn Kích Hoạt Cho Session Mới
