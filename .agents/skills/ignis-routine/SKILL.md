@@ -33,7 +33,17 @@ routine; the person sees, pauses and removes it in the host.
    Ignis resolves the research workspace from that folder. Run `pwd`: it must be the repository
    folder the research workspace was confirmed in, or `IGNIS_CALLER_ROOT` must be set for the
    Ignis server. A home folder or a root folder will not work.
-5. Show the person, and wait for the person to confirm:
+5. Check that each channel can collect for this workspace, and leave out one that cannot:
+   - `youtube` reads its key from the workspace's own Ignis configuration, `.fnignis/.env` in the
+     repository folder, not from the server's. Check that the file sets the YouTube key by looking
+     for the variable name only; never print a value.
+   - `threads`, `reels` and `tiktok_video_grid` need a saved sign-in: check
+     `get_platform_auth_status`.
+   - Only a channel that searches keywords belongs in a routine. `tiktok_creative_center` has no
+     keyword search, and `google` measures no keyword, so it would report `DEGRADED` every day.
+   - If that configuration file changes while a session is open, the session's Ignis server answers
+     `CALLER_CONFIG_CHANGED` until it restarts.
+6. Show the person, and wait for the person to confirm:
    - the watchlist name, version and channels, and the daily time;
    - the working folder;
    - what happens after collection: nothing, unless they ask now for a local period view;
@@ -48,12 +58,16 @@ routine; the person sees, pauses and removes it in the host.
    - `title`: the watchlist name followed by "(daily Ignis run)";
    - `cronExpression`: the daily time, for example `0 7 * * *`;
    - `prompt`: the routine prompt below, with every placeholder filled in.
-2. Read the result. If it says the task was saved in an Auto or Bypass permission mode, call
-   `update_scheduled_task` with `enabled: false` at once, tell the person, and ask them to change
-   the routine's permission mode in the app to one that asks before using tools. Resume it with
-   `enabled: true` only after they have. A routine never runs in an auto or bypass mode.
+2. Read the result for the permission mode the task was saved in. A task saved in an
+   Auto or Bypass mode runs its tools without asking first:
+   - Bypass: call `update_scheduled_task` with `enabled: false` at once and tell the person. A
+     routine never runs in a bypass mode.
+   - Auto: tell the person the routine will run without asking before each tool. Keep it enabled
+     only if they explicitly accept that for this routine. Otherwise call `update_scheduled_task`
+     with `enabled: false`, ask them to change the routine's mode in the app to one that asks
+     before using tools, and resume it with `enabled: true` only after they have.
 3. End setup with an attended first run, the app's Run now: call `run_scheduled_task` while the
-   person watches, and ask them to approve only `start_watchlist_run` and
+   person watches. In a mode that asks, ask them to approve only `start_watchlist_run` and
    `execute_mission_ingress` for this routine.
    Later firings reuse those two approvals; anything else still asks. If they decline, say the
    routine is attended: each firing waits for someone to approve it.
@@ -61,7 +75,8 @@ routine; the person sees, pauses and removes it in the host.
    wrong: delete the task and set it up again from a session opened in the repository folder, not a
    home folder, or with `IGNIS_CALLER_ROOT` set for the Ignis server.
 5. Report the task id, the next run time, and that a firing happens only while the app is open (a
-   firing missed while it is closed runs on the next launch).
+   firing missed while it is closed runs on the next launch). The app may show a time a few minutes
+   after the one asked for, such as 07:13 for 07:00, because it spreads firings out.
 
 ## Routine prompt
 

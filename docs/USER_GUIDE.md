@@ -124,8 +124,11 @@ every morning at 7". The `ignis_routine` prompt and `fn-ignis://guide/ignis-rout
 it how to set up one Claude Code Desktop scheduled task: at most one per watchlist, at most once a
 day, and only after you confirm what will run. Each firing is one watchlist run and nothing else.
 Create it from a session opened in the research workspace's repository folder, because a firing
-starts in that folder. A routine never runs in an Auto or Bypass permission mode: setup ends with a
-first run you watch, in which you approve only `start_watchlist_run` and `execute_mission_ingress`.
+starts in that folder. Before creating it, the agent checks that each channel can collect for your
+workspace: YouTube needs its key in the workspace's own `.fnignis/.env`, and browser channels need a
+saved sign-in. A routine never runs in a Bypass permission mode, and runs in Auto only if you accept
+that during setup. Setup ends with a first run you watch; in a mode that asks, you approve only
+`start_watchlist_run` and `execute_mission_ingress`.
 You pause or remove it in the app, and removing it keeps the watchlist's history. A firing happens
 only while the app is open. Other hosts are not supported yet, and Ignis itself still schedules
 nothing.

@@ -118,6 +118,20 @@ confirm (listed again under "Owner review"):
   reads its own store as before (owner decided 23/10/2026: "Sửa code để caller scope thấy phiên
   đăng nhập").
 
+### Session 2026-10-26
+
+- Q: The owner accepted the T006 routine saved in Auto mode. Does FR-007 still refuse auto? → A: No.
+  Bypass stays refused. Auto is allowed when the person explicitly accepts it for that routine; the
+  guide tells them the routine will then run without asking before each tool, and pauses it
+  otherwise (owner decided 23/10/2026: "Không cần thiết quá quan trọng việc này. Harness của Claude
+  Code đã dư sức chống lại prompt injection rồi."; recorded by the agent on 26/10/2026).
+- Q: Which T006 findings change the guide? → A: Before creating, the guide checks that each channel
+  can collect for the workspace (the YouTube key in `.fnignis/.env`, a saved sign-in for browser
+  channels), leaves out channels without keyword search (`tiktok_creative_center`) or keyword
+  measurement (`google`), and names `CALLER_CONFIG_CHANGED` as the sign that the session's server
+  needs a restart; the report mentions the app's dispatch delay (07:00 shown as 07:13) (agent
+  decided; basis: `.handoff/spec017/acceptance.handoff.md` findings 1, 4, 5, 6 and 8).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Set up a daily routine on request (Priority: P1)
@@ -221,9 +235,13 @@ no OS scheduler entry, no Ignis-side loop; the agent tells the user to run the w
   create or revise watchlists, or publish anything.
 - **FR-006**: Rendering a period view on a firing MUST happen only if the user asked for it at setup;
   the artifact MUST stay local.
-- **FR-007**: The guide MUST refuse to let a routine run in an auto or bypass permission mode (a task
-  the host saved in such a mode is paused until the person changes it), and MUST end setup with an attended "Run now" that grants approvals for only `start_watchlist_run` and
-  `execute_mission_ingress`; a routine without them MUST be described to the user as attended.
+- **FR-007**: The guide MUST refuse to let a routine run in a bypass permission mode (a task the host
+  saved in it is paused until the person changes it), and MUST let a routine run in an auto mode only
+  when the person explicitly accepts that for the routine, pausing it otherwise. It MUST end setup
+  with an attended "Run now" that, in a mode that asks, grants approvals for only
+  `start_watchlist_run` and `execute_mission_ingress`; a routine without them MUST be described to
+  the user as attended. *(Amended 26/10/2026 from "never auto or bypass" by the owner decision of
+  23/10/2026.)*
 - **FR-008**: Removing a routine MUST require the user's confirmation and MUST leave watchlist history
   untouched.
 - **FR-020**: Each routine MUST start in a validated working folder that resolves the research
@@ -279,6 +297,7 @@ Agent decisions under the owner's delegation of 21/10/2026, confirmed by the own
 1. No Ignis-side record of routines; no new tool or table (FR-011).
 2. One routine per watchlist; at most daily; proposed default time 07:00 local (FR-004).
 3. No period view on a firing unless asked at setup (FR-006).
-4. Attended setup "Run now" granting only the two Ignis tools; never auto or bypass (FR-007).
+4. Attended setup "Run now" granting only the two Ignis tools; never bypass, and auto only when the
+   person accepts it (FR-007, amended 26/10/2026).
 6. A routine's working folder is the workspace repository or an operator-set root (FR-020).
 5. Merge waits for the constitution amendment (FR-012).

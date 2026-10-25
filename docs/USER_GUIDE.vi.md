@@ -125,9 +125,11 @@ giờ". Prompt `ignis_routine` và resource `fn-ignis://guide/ignis-routine` hư
 scheduled task trong Claude Code Desktop: mỗi watchlist tối đa một task, chạy tối đa một lần mỗi
 ngày, và chỉ được tạo sau khi bạn xác nhận những gì sẽ chạy. Mỗi lần kích hoạt là đúng một lần chạy
 watchlist. Hãy tạo task từ một phiên mở trong thư mục repository của research workspace, vì lần kích
-hoạt bắt đầu trong thư mục đó. Routine không bao giờ chạy ở chế độ quyền Auto hay Bypass: bước cài
-đặt kết thúc bằng một lần chạy có bạn theo dõi, trong đó bạn chỉ duyệt `start_watchlist_run` và
-`execute_mission_ingress`. Bạn tạm dừng hoặc xóa routine trong app, và xóa routine không làm mất
+hoạt bắt đầu trong thư mục đó. Trước khi tạo, agent kiểm tra từng kênh có thu thập được cho
+workspace của bạn không: YouTube cần key trong `.fnignis/.env` riêng của workspace, còn các kênh
+browser cần phiên đăng nhập đã lưu. Routine không bao giờ chạy ở chế độ quyền Bypass, và chỉ chạy ở
+chế độ Auto khi bạn đồng ý lúc cài đặt. Bước cài đặt kết thúc bằng một lần chạy có bạn theo dõi; ở chế
+độ có hỏi quyền, bạn chỉ duyệt `start_watchlist_run` và `execute_mission_ingress`. Bạn tạm dừng hoặc xóa routine trong app, và xóa routine không làm mất
 lịch sử của watchlist. Routine chỉ chạy khi app đang mở. Các host khác chưa được hỗ trợ, và bản thân
 Ignis vẫn không tự lên lịch việc gì.
 
