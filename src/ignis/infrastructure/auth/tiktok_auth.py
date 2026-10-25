@@ -16,6 +16,8 @@ class TikTokAuthManager:
     LOGIN_URL = "https://www.tiktok.com/login"
     EXPLORE_URL = "https://www.tiktok.com/explore"
     PLATFORM_NAME = "tiktok"
+    # TikTok's own session cookie names; they must match the platform verbatim.
+    SESSION_COOKIE_NAMES = ("sessionid", "sessionid_ss", "sid_tt")
 
     def __init__(self, repository: Optional[ITrendRepository] = None):
         self._repository = repository
@@ -40,6 +42,19 @@ class TikTokAuthManager:
         if not creds or not creds.get("is_active"):
             return None
         return creds.get("credentials_data")
+
+    @classmethod
+    def _has_session_cookie(cls, cookies: list) -> bool:
+        """Whether the browser holds a non-empty TikTok session cookie on a tiktok.com domain."""
+        for c in cookies:
+            domain = (c.get("domain") or "").lstrip(".").lower()
+            if (
+                c.get("name") in cls.SESSION_COOKIE_NAMES
+                and c.get("value")
+                and (domain == "tiktok.com" or domain.endswith(".tiktok.com"))
+            ):
+                return True
+        return False
 
     async def authenticate_interactive(
         self,
@@ -94,15 +109,12 @@ class TikTokAuthManager:
             start_time = asyncio.get_event_loop().time()
             logged_in = False
 
+            # Only a TikTok session cookie proves the login finished. Leaving /login does not: on
+            # 23/10/2026 a login abandoned in Instagram's OAuth window was stored as an active
+            # session, because that page's URL carried a tiktok.com redirect and the context held
+            # Instagram's own `sessionid`.
             while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
-                cookies = await context.cookies()
-                for c in cookies:
-                    if c.get("name") in ["sessionid", "sessionid_ss", "sid_tt", "uid_tt"] and c.get("value"):
-                        logged_in = True
-                        break
-
-                current_url = page.url
-                if logged_in or (current_url and "/login" not in current_url and "tiktok.com" in current_url):
+                if self._has_session_cookie(await context.cookies()):
                     logged_in = True
                     break
 
