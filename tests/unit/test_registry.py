@@ -584,6 +584,25 @@ async def test_results_dropped_for_never_mentioning_the_keyword_are_recorded_wit
 
 
 @pytest.mark.asyncio
+async def test_a_healthy_surface_still_reports_the_keywords_it_failed():
+    """G3 run on 25/10/2026: threads returned 20 signals for 17 of 20 keywords and said nothing
+    about the other three, so a healthy outcome hid partial coverage."""
+
+    class PartlyFailingGoogle(GooglePlugin):
+        async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20,
+                                 attestation=None):
+            attestation.executed(keywords[0])
+            attestation.failed(keywords[1], "no search payload was captured")
+            return await super().search_signals(keywords[:1], geo)
+
+    result = await _registry(PartlyFailingGoogle()).search_with_outcomes(keywords=["ai agent", "ai shop"])
+
+    assert _by_surface(result) == {"google": (ChannelHealthStatus.HEALTHY, 1)}
+    assert result.outcomes[0].queried_keywords == ("ai agent",)
+    assert result.outcomes[0].note == "Partial: ai shop: no search payload was captured"
+
+
+@pytest.mark.asyncio
 async def test_two_concurrent_searches_each_keep_their_own_outcomes():
     import asyncio
 
