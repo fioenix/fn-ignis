@@ -171,6 +171,16 @@ def test_a_day_whose_evidence_is_not_judged_is_not_a_measured_zero():
     assert "unjudged_days" not in cell(compare(), "youtube")
 
 
+def test_one_unjudged_run_beside_a_judged_one_still_marks_the_day_unjudged():
+    """Two runs on one day, one judged and one not: counting only the judged one would silently
+    undercount the day, so the day stays unjudged until every run is judged."""
+    day = CURRENT.days[2]
+    extra = PeriodCoverage("youtube", "HEALTHY", ("matcha latte",), at(day, 23), judged=False)
+    youtube = cell(compare(outcomes=COVERAGE + [extra]), "youtube")
+    assert youtube["status"] == "not_comparable"
+    assert youtube["unjudged_days"] == {"current": [day.isoformat()], "previous": []}
+
+
 def test_a_collection_for_another_topic_does_not_cover_this_one():
     other = [PeriodCoverage(c.channel, c.status, ("áo khoác",), c.completed_at)
              if c.channel == "youtube" else c for c in COVERAGE]

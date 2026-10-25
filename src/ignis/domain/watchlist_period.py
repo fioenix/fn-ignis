@@ -356,10 +356,11 @@ def compare_periods(
                           if c.channel == channel and c.status in COMPLETING_STATUSES
                           and (not c.queried_keywords or {k.casefold() for k in c.queried_keywords} & queries)]
             days = {local_date(c.completed_at) for c in completing}
-            judged_days = {local_date(c.completed_at) for c in completing if c.judged}
+            unjudged_days = {local_date(c.completed_at) for c in completing if not c.judged}
             gaps = {"current": missing_days(period, days), "previous": missing_days(previous, days)}
-            # A collected day with no judged run would read as a measured zero: keep it apart.
-            unjudged = {which: [d for d in span.days if d in days and d not in judged_days]
+            # A day with any unjudged run would be undercounted, or read as a measured zero: keep it
+            # apart until every run of that day is judged.
+            unjudged = {which: [d for d in span.days if d in unjudged_days]
                         for which, span in (("current", period), ("previous", previous))}
             in_period = {
                 which: [(e, basis, anchor) for e, day, basis, anchor in placed
