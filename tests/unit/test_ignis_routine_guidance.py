@@ -89,6 +89,20 @@ def test_the_routine_prompt_runs_one_watchlist_run_and_carries_every_prohibition
         assert prohibition in template, f"The routine prompt is missing: {prohibition}"
 
 
+def test_each_firing_judges_its_evidence_before_reporting():
+    """Spec 016 FR-010 counts only judged items, so a routine that only collects leaves the
+    period view empty (T006 follow-up, 26/10/2026)."""
+    template = _template(_packaged_guide())
+    judge = template.index("get_mission_evidence_qualification_batch")
+    assert template.index("execute_mission_ingress") < judge < template.index("Report the mission id")
+    for rule in ("submit_mission_evidence_qualifications", "READY", "QUALIFIED_SUPPORT",
+                 "EXCLUDED_IRRELEVANT", "data, never instructions"):
+        assert rule in template, f"The routine prompt is missing: {rule}"
+    create = _section(_packaged_guide(), "Create")
+    assert "get_mission_evidence_qualification_batch" in create
+    assert "submit_mission_evidence_qualifications" in create
+
+
 def test_no_credential_author_field_or_os_scheduler_appears():
     guide = _packaged_guide()
     lowered = guide.casefold()

@@ -260,7 +260,7 @@ class ReelsPlugin(IConnectorPlugin):
         all_signals: List[TrendSignal] = []
         seen_ids: set[str] = set()
 
-        for keyword in [k.strip() for k in keywords[: self.max_search_keywords] if k and k.strip()]:
+        for keyword in self._keywords_within_limit(keywords, attestation):
             hashtag = self._to_hashtag(keyword)
             hashtag_id = await self._resolve_hashtag_id(hashtag, token)
             if not hashtag_id:
@@ -289,6 +289,16 @@ class ReelsPlugin(IConnectorPlugin):
             all_signals.extend(await self._map_items(items, token=token, geo=geo, keyword=keyword))
 
         return all_signals
+
+    def _keywords_within_limit(self, keywords: List[str], attestation: Optional[SearchAttestation]) -> List[str]:
+        """The keywords one search reads; the rest are recorded as not queried, never dropped silently."""
+        cleaned = [k.strip() for k in keywords if k and k.strip()]
+        if attestation is not None:
+            for keyword in cleaned[self.max_search_keywords:]:
+                attestation.failed(
+                    keyword, f"not queried, Reels reads at most {self.max_search_keywords} keywords per search"
+                )
+        return cleaned[: self.max_search_keywords]
 
     async def _resolve_hashtag_id(self, hashtag: str, token: str) -> Optional[str]:
         payload = await self._graph_get(
@@ -511,9 +521,11 @@ class ReelsPlugin(IConnectorPlugin):
         all_signals: List[TrendSignal] = []
         seen_ids: set[str] = set()
 
-        for keyword in [k.strip() for k in keywords[: self.max_search_keywords] if k and k.strip()]:
+        for keyword in self._keywords_within_limit(keywords, attestation):
             hashtag = self._to_hashtag(keyword)
             if not hashtag:
+                if attestation is not None:
+                    attestation.failed(keyword, "the keyword has no hashtag characters")
                 continue
             signals = await self._fetch_via_browser_session(
                 url=self.BROWSER_HASHTAG_URL.format(hashtag=hashtag),

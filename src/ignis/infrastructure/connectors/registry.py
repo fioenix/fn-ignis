@@ -813,7 +813,9 @@ class ConnectorPluginRegistry:
         """Classify one surface's returned list without trusting an unattested silence."""
         queried = tuple(attestation.queried) if attestation else ()
         if result:
-            status, note = ChannelHealthStatus.HEALTHY, None
+            # A keyword that failed beside one that answered is partial coverage, not silence.
+            status = ChannelHealthStatus.HEALTHY
+            note = ("Partial: " + "; ".join(attestation.failures))[:200] if attestation and attestation.failures else None
         elif blocked or (attestation and attestation.blocked_reason):
             status, note = ChannelHealthStatus.AUTH_REQUIRED, blocked or attestation.blocked_reason
         elif attestation is None:

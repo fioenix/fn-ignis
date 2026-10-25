@@ -185,6 +185,10 @@ confirm (listed again under "Owner review"):
   ledger rather than the shared count; the snapshot still reads every run's outcomes, bounded by
   retention (agent decided; basis: T018 review of 22/10/2026).
 
+### Session 2026-10-26
+
+- Q: Must a channel that returned observations still report the keywords it failed or did not query? → A: Yes. A HEALTHY outcome keeps a "Partial: …" note listing each failed keyword, and Reels records every keyword beyond its 10-keyword search limit as not queried instead of dropping it; the limit itself is unchanged (agent decided; basis: G3 run of 25/10/2026, where threads attested 17 of 20 keywords and reels 10 of 20 while both outcomes read HEALTHY with no note).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Follow a watchlist across runs (Priority: P1)
