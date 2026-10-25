@@ -1268,17 +1268,34 @@ Bảng này theo dõi việc mở rộng đường tích hợp cho từng nguồ
 đã tìm thấy và trạng thái của nó trong Ignis. Nhu cầu nghiên cứu nào không có API phù hợp thì đi
 đường browser, ghi ở bảng thứ hai. Fio chốt ngày 25/10/2026: Ignis ưu tiên người dùng cá nhân, API dành
 cho nhà bán xếp vào nhóm mở rộng sau. Điều kiện truy cập lấy từ trang developer của từng hãng và một
-số blog bên thứ ba, chưa kiểm bằng tài khoản thật, trừ các dòng có trạng thái đang dùng.
+số blog bên thứ ba, chưa kiểm bằng tài khoản thật, trừ các dòng có trạng thái đang dùng. Các dòng
+thêm cùng ngày cho YouTube, Google và Meta lấy từ tài liệu developer chính thức; chỗ nào chưa xác
+nhận được thì ghi rõ trong dòng đó.
 
 Trạng thái: **đang dùng**, **ứng viên** (cá nhân dùng được, chưa tích hợp), **mở rộng sau** (dành cho
-nhà bán), **không đủ điều kiện**.
+nhà bán), **không đủ điều kiện**, **đã ngừng**.
 
 | Nguồn | API hoặc đường tích hợp | Dữ liệu | Điều kiện truy cập | Trạng thái |
 |---|---|---|---|---|
-| YouTube | YouTube Data API v3 | Tìm video theo từ khóa, thống kê, bình luận | API key, quota theo ngày | Đang dùng (`youtube`) |
+| YouTube | YouTube Data API v3 | Tìm video theo từ khóa, thống kê, bình luận | API key; `search.list` có bucket riêng 100 lượt mỗi ngày, các endpoint khác dùng chung 10.000 đơn vị mỗi ngày | Đang dùng (`youtube`) |
+| YouTube | Data API v3, `videos.list` với `chart=mostPopular` | Video phổ biến theo quốc gia và danh mục | 1 đơn vị mỗi lần gọi; chưa xác nhận có bảng xếp hạng cho Việt Nam | Ứng viên |
+| YouTube | YouTube Analytics API, YouTube Reporting API | Khán giả và thời gian xem của kênh | Chỉ dữ liệu của kênh hoặc chủ nội dung đã cấp quyền | Mở rộng sau |
+| YouTube | YouTube Researcher Program | Quota Data API mở rộng | Phải thuộc tổ chức học thuật và có ý định công bố; Việt Nam nằm trong danh sách 60 nước | Không đủ điều kiện |
 | Google | Trends RSS | Xu hướng tìm kiếm nổi bật theo quốc gia | Công khai | Đang dùng làm bối cảnh vĩ mô (`google`) |
 | Google | Autocomplete | Gợi ý từ khóa | Công khai | Đang dùng để mở rộng từ khóa, không đo nhu cầu |
 | Google | Google Trends API (alpha) | Mức quan tâm theo từ khóa, theo ngày/tuần/tháng/năm, theo vùng, trong 5 năm | Phải nộp đơn xin làm alpha tester; chưa có gói tự đăng ký | Ứng viên: đường duy nhất để đo nhu cầu theo từ khóa |
+| Google | Google Ads API, `KeywordPlanIdeaService` | Lượng tìm kiếm hằng tháng ước tính trong tối đa 4 năm, chỉ số cạnh tranh, khoảng giá thầu | Cần tài khoản Google Ads và mức truy cập Basic cho Google Cloud project; muốn xin Basic phải xác minh thương hiệu. Mức Explorer không gọi được dịch vụ này. Developer token đã ngừng ngày 09/09/2026, quyền truy cập nay quản lý theo project. Chưa xác nhận tài khoản không chi tiêu có chỉ thấy khoảng giá trị hay không | Ứng viên: nguồn chính thức duy nhất có lượng tìm kiếm tuyệt đối ở Việt Nam |
+| Google | BigQuery public dataset `google_trends.international_top_terms` và bảng rising | Top 25 từ khóa và 25 từ khóa đang lên mỗi ngày theo quốc gia và vùng | Free tier 1 TB truy vấn mỗi tháng; khoảng 50 quốc gia, chưa xác nhận có Việt Nam | Ứng viên: kiểm bằng một truy vấn với `country_code='VN'` |
+| Google | Places API (New) | Điểm, số lượt và nội dung đánh giá của cửa hàng | Trả phí theo SKU Enterprise | Ứng viên |
+| Google | Gemini API, Grounding with Google Search | Truy vấn model đã chạy và URL được trích | Tài khoản cá nhân dùng được; 5.000 lượt tìm miễn phí mỗi tháng, sau đó 14 USD mỗi 1.000 lượt. Không phải trang kết quả tìm kiếm thô; chưa xem điều khoản lưu trữ | Ứng viên, giá trị thấp |
+| Google | Knowledge Graph Search API | Phân biệt thương hiệu và thực thể | Đang chuyển sang Cloud Enterprise Knowledge Graph; Google ghi API không phù hợp cho hệ thống production quan trọng | Ứng viên, giá trị thấp |
+| Google | Merchant API, báo cáo best sellers và price competitiveness | Sản phẩm, thương hiệu bán chạy theo danh mục và quốc gia; giá tham chiếu | Cần Merchant Center và đủ điều kiện; dữ liệu chỉ để nhà bán dùng nội bộ; chưa xác nhận có Việt Nam. Content API for Shopping ngừng hỗ trợ từ 18/08/2026 và tắt hẳn đầu năm 2027 | Mở rộng sau |
+| Google | Search Console API, Google Analytics Data API | Truy vấn tìm kiếm và lưu lượng của site mình | Chỉ property của mình | Mở rộng sau |
+| Google | Business Profile APIs | Đánh giá và insight của listing của mình | Profile đã xác minh và hoạt động hơn 60 ngày, có website, nộp form xin quyền; quota bằng 0 cho tới khi được duyệt | Mở rộng sau |
+| Google | Google Ads API, `AudienceInsightsService` và `ContentCreatorInsightsService` | Xu hướng chủ đề theo quốc gia, chỉ số creator YouTube | Beta theo allowlist cho đối tác làm công cụ lập kế hoạch | Không đủ điều kiện |
+| Google | Custom Search JSON API | Kết quả tìm kiếm | Đóng với khách hàng mới; khách hàng cũ dùng được tới 01/01/2027 | Không đủ điều kiện |
+| Google | Search Researcher Program | Kết quả Search thô, 1.000 truy vấn mỗi ngày | Chỉ cho người làm học thuật; không được bán kết quả | Không đủ điều kiện |
+| Google | Ads Transparency Center dataset trên BigQuery | Mẫu quảng cáo của đối thủ | Chỉ có EEA và Thổ Nhĩ Kỳ, không có Việt Nam | Không đủ điều kiện |
 | TikTok | API for Business, Discovery | Hashtag phổ biến, top 20 video theo hashtag, từ khóa tìm kiếm đang lên | Cần TikTok Business account và tài khoản Ads; chưa rõ có mở cho Việt Nam không | Ứng viên |
 | TikTok | Login Kit + Display API | Hồ sơ và video của chính tài khoản | App trên TikTok for Developers | Ứng viên cho bộ lọc nội dung của chính mình; không dùng để lắng nghe thị trường |
 | TikTok | Data Portability API | Dữ liệu của chính người dùng | Chỉ có dữ liệu người dùng ở EEA và Anh | Không đủ điều kiện |
@@ -1286,19 +1303,86 @@ nhà bán), **không đủ điều kiện**.
 | TikTok | TikTok Shop Partner API | Đơn hàng, sản phẩm, tồn kho, tài chính, affiliate của shop mình hoặc shop đã cấp quyền | App trên Partner Center, OAuth theo scope, ký mọi request | Mở rộng sau |
 | TikTok | Commercial Content API | Quảng cáo đang chạy ở EU | Người xin quyền ở nước nào cũng được | Mở rộng sau |
 | TikTok | API for Business, Organic (Accounts, Mentions, TikTok One) | Báo cáo tài khoản Business của thương hiệu | TikTok Business account | Mở rộng sau |
-| Meta Threads | Threads API keyword search | Bài công khai theo từ khóa | Quyền `threads_keyword_search` qua App Review; chưa duyệt thì chỉ tìm được bài của chính tài khoản; tối đa 2.200 truy vấn mỗi 24 giờ | Có trong code (`threads`), hiện chưa cấu hình token. App chưa được duyệt thì Ignis báo `SELF_ONLY` và không lấy kết quả làm bằng chứng thị trường |
-| Meta Instagram | Instagram Graph API, Hashtag Search | Top media và recent media theo hashtag | Business hoặc Creator account; App Review cho Instagram Public Content Access; tối đa 30 hashtag khác nhau mỗi 7 ngày | Có trong code (`reels`), hiện chưa cấu hình token và `INSTAGRAM_USER_ID` |
+| Meta Threads | Threads API keyword search | Bài công khai theo từ khóa hoặc topic tag (`search_mode=TAG`) | Quyền `threads_keyword_search` qua App Review; chưa duyệt thì chỉ tìm được bài của chính tài khoản; tối đa 2.200 truy vấn mỗi 24 giờ, truy vấn không có kết quả không bị tính | Có trong code (`threads`), hiện chưa cấu hình token. App chưa được duyệt thì Ignis báo `SELF_ONLY` và không lấy kết quả làm bằng chứng thị trường |
+| Meta Threads | Threads API, `threads_profile_discovery` (`profile_lookup`, `profile_posts`) | Hồ sơ công khai, số follower, tương tác trong 7 ngày và toàn bộ bài của profile công khai | Cần `threads_basic`. Mức Standard chỉ tra được @meta, @threads, @instagram và @facebook; mức Advanced cần App Review. Profile phải có từ 100 follower; tối đa 1.000 request mỗi 24 giờ | Ứng viên: xin chung một lần App Review với `threads_keyword_search` |
+| Meta Threads | Threads API mentions, insights, replies | Bài nhắc tới tài khoản mình; chỉ số và trả lời trên bài của mình | Chỉ tài khoản của mình | Mở rộng sau |
+| Meta Instagram | Instagram Graph API, Hashtag Search | Top media và recent media (chỉ 24 giờ gần nhất) theo hashtag; không có username | Business hoặc Creator account; App Review cho Instagram Public Content Access; tối đa 30 hashtag khác nhau mỗi 7 ngày | Có trong code (`reels`), hiện chưa cấu hình token và `INSTAGRAM_USER_ID` |
+| Meta Instagram | Instagram Graph API, Business Discovery | Số follower, số media và media kèm like, comment, view của tài khoản Business hoặc Creator khác | Tài khoản Instagram chuyên nghiệp liên kết Page; quyền `instagram_basic`, `instagram_manage_insights`, `pages_read_engagement`; không đọc được tài khoản giới hạn độ tuổi. Chưa xác nhận mức truy cập và rate limit | Ứng viên: so sánh thương hiệu và creator, không tính vào giới hạn 30 hashtag |
+| Meta Instagram | Instagram Graph API, mentions, mentioned_media, tags | Media và bình luận nhắc tới hoặc gắn tài khoản mình | Tài khoản chuyên nghiệp của mình | Mở rộng sau |
+| Meta Instagram | Instagram Basic Display API | Không áp dụng | Ngừng ngày 04/12/2024 | Đã ngừng |
+| Meta Facebook | Page Public Content Access | Bài và bình luận trên Page công khai, Page Search | App Review, xác minh doanh nghiệp, có thể phải ký thêm hợp đồng; không tìm được bài công khai theo từ khóa | Không đủ điều kiện với cá nhân; thành mở rộng sau nếu có doanh nghiệp đã xác minh |
+| Meta Facebook | Page Public Metadata Access | Không áp dụng | Đã được thay bằng Page Public Content Access | Đã ngừng |
+| Meta Facebook | Groups API | Không áp dụng | Bị gỡ khỏi mọi phiên bản Graph API ngày 22/04/2024 | Đã ngừng |
+| Meta | Marketing API targeting search (`adinterest`, `adinterestsuggestion`, `adinterestvalid`) | Danh mục interest và khoảng quy mô audience, dùng làm tín hiệu gián tiếp về nhu cầu | Token có `ads_read`; mặc định ở mức Limited access. Meta ghi API không trả về mọi interest và tên interest có thể đổi | Ứng viên: đo audience nhắm được, không đo lượng thảo luận |
+| Meta | Marketing API, `reachestimate` của ad account | Cận dưới và cận trên số người theo một cấu hình targeting, ví dụ Việt Nam cộng interest và độ tuổi | Cần ad account; chưa xác nhận tài khoản cá nhân dùng được | Ứng viên |
+| Meta | Ad Library API (`ads_archive`) | Quảng cáo theo từ khóa và quốc gia | Phải xác minh danh tính tại facebook.com/ID. Việt Nam chỉ có quảng cáo chính trị và xã hội; quảng cáo thương mại chỉ có khi phân phối tới EU hoặc Anh | Ứng viên, giá trị thấp cho Việt Nam |
+| Meta | oEmbed của Threads và Instagram | Mã HTML để nhúng bài | Meta cấm dùng cho phân tích hoặc lưu dữ liệu | Không đủ điều kiện |
+| Meta | CrowdTangle | Không áp dụng | Ngừng ngày 14/08/2024 | Đã ngừng |
+| Meta | Commerce, Catalog, Page Insights, Instagram Insights, Messenger, WhatsApp Business | Dữ liệu shop, khán giả và hội thoại của mình | Tài sản của doanh nghiệp mình | Mở rộng sau |
 | Meta | Meta Content Library và API | Nội dung công khai trên Facebook và Instagram | Phải thuộc trường hoặc viện nghiên cứu phi lợi nhuận | Không đủ điều kiện |
 
 Khoảng trống phải đi đường browser:
 
 | Nguồn | Nhu cầu chưa có API | Đường browser hiện tại |
 |---|---|---|
-| TikTok | Tìm video theo từ khóa và đọc bình luận | `tiktok_video_grid` với phiên đăng nhập của Ignis. Ngày 25/10/2026 phiên đã lưu không chứa cookie đăng nhập, nên tìm kiếm trả lỗi; đang sửa ở PR #76 |
+| TikTok | Tìm video theo từ khóa và đọc bình luận | `tiktok_video_grid` với phiên đăng nhập của Ignis. Ngày 25/10/2026 phiên đã lưu không chứa cookie đăng nhập, nên tìm kiếm trả lỗi. PR #76 (merge ngày 25/10/2026) chỉ lưu phiên khi có cookie đăng nhập; phiên lưu lại cùng ngày chưa được probe |
 | TikTok | Xu hướng vĩ mô của Creative Center | `tiktok_creative_center` |
 | Meta Threads | Tìm bài công khai theo từ khóa khi chưa được duyệt `threads_keyword_search` | `threads` qua phiên browser |
 | Meta Instagram | Reels theo từ khóa, vượt giới hạn 30 hashtag mỗi 7 ngày | `reels` qua phiên browser |
 | Google | Đo nhu cầu theo từ khóa khi chưa có quyền Trends API | Chưa có; `search_signals` của `google` báo không khả dụng |
+| Meta Facebook | Tìm bài công khai theo từ khóa; Facebook không có API cho việc này | Chưa có |
+
+#### Dữ liệu nền theo địa lý (khảo sát 25/10/2026)
+
+Dữ liệu nền giúp phân tích tín hiệu theo vị trí: mã và ranh giới đơn vị hành chính, dân số và kinh tế
+theo tỉnh. Từ 01/07/2025 cả nước còn 34 đơn vị cấp tỉnh và bỏ cấp huyện theo Nghị quyết 202/2025/QH15.
+Mã đơn vị hành chính theo Quyết định 19/2025/QĐ-TTg: tỉnh 2 chữ số, xã 5 chữ số, mã đã dùng không cấp
+lại; nội dung quyết định này mới được đối chiếu qua trang luật bên thứ ba. Năm 2026 Đồng Nai, Quảng Ninh và Bắc Ninh
+lên thành phố trực thuộc trung ương nhưng giữ mã cũ, nên Ignis phải khóa theo mã, không khóa theo tên.
+
+Trạng thái: **ứng viên**, **không dùng được**, **chưa xác nhận**.
+
+| Nhà cung cấp | Dữ liệu | Độ chi tiết | Định dạng và cách lấy | Giấy phép | Theo cấu trúc sau 01/07/2025 | Trạng thái |
+|---|---|---|---|---|---|---|
+| Cục Thống kê | Danh mục đơn vị hành chính (danhmuchanhchinh.nso.gov.vn) | Tỉnh, xã; tra được theo ngày bất kỳ | SOAP web service `DMDVHC.asmx` (`DanhMucTinh`, `DanhMucPhuongXa`), xuất Excel, bảng chuyển đổi từ đơn vị cũ sang đơn vị mới dạng xlsx | Không ghi giấy phép mở | Có; ngày 25/10/2026 trả về 34 tỉnh và 3.321 xã | Ứng viên: nguồn mã chính thức, máy đọc được |
+| Cục Thống kê | Cơ sở dữ liệu thống kê PX-Web (pxweb.nso.gov.vn) | Tỉnh, theo năm | JSON qua PX-Web API v1; API chỉ có 8 cơ sở dữ liệu, số liệu thương mại chỉ xem được trên web | Bản quyền Cục Thống kê, phải ghi nguồn | Không; bảng dân số và diện tích vẫn theo 63 tỉnh, giai đoạn 2011–2025 | Ứng viên cho chuỗi lịch sử, phải quy đổi 63 tỉnh sang 34 tỉnh bằng bảng chuyển đổi |
+| Cục Thống kê | Niên giám thống kê 2025 | Tỉnh, theo năm | Chỉ có PDF | Phải ghi nguồn | Một phần; phụ lục có chuỗi 34 tỉnh giai đoạn 2020–2025 về dân số, lao động, GRDP và doanh nghiệp | Ứng viên, phải trích bảng thủ công |
+| Cục Thống kê | Báo cáo kinh tế, xã hội hằng tháng | Toàn quốc, một số địa phương nêu trong bài | DOCX, PDF | Phải ghi nguồn | Theo số liệu hiện hành | Ứng viên làm mốc tổng mức bán lẻ toàn quốc; chưa thấy bảng bán lẻ theo tỉnh |
+| OCHA HDX | COD-AB Việt Nam v02 | Chỉ cấp tỉnh (34) | SHP, GeoJSON, GDB, XLSX; CKAN API | CC BY-IGO | Có; ranh giới ngày 01/07/2025, nguồn Cục Thống kê, file cập nhật 26/01/2026 | Ứng viên: bộ ranh giới duy nhất có giấy phép mở theo cấu trúc mới |
+| World Bank | World Development Indicators API | Toàn quốc | JSON, CSV, không cần key | Chưa xác nhận | Không áp dụng | Ứng viên, chỉ cho bối cảnh toàn quốc |
+| Cộng đồng | `thanglequoc/vietnamese-provinces-database` v5.2.0 | 34 tỉnh, 3.321 xã, có hình học | GeoJSON, PostGIS, SQL | Repo dùng MIT, nhưng hình học lấy từ sapnhap.bando.com.vn và quyền tái sử dụng chưa rõ | Có, gồm cả các thành phố lên trực thuộc trung ương năm 2026 | Ứng viên cho mã; dùng hình học phải thận trọng |
+| bando.com.vn | Bản đồ đơn vị hành chính (sapnhap.bando.com.vn) | 34 tỉnh, 3.321 xã | Chỉ xem trên web, không có file tải hay WMS | Phát hành phi thương mại | Có | Không dùng được làm nguồn dữ liệu |
+| geoBoundaries | ADM1, ADM2 | 64 đơn vị năm 2008, 708 đơn vị năm 2020 | GeoJSON, SHP, API | Hỗn hợp | Không | Không dùng được |
+| GADM | GADM 4.1 | Tỉnh, huyện, xã | GPKG, SHP | Chỉ dùng phi thương mại, cấm phân phối lại | Không | Không dùng được |
+| OpenStreetMap | Ranh giới hành chính | Tùy khu vực | Overpass, bản trích xuất | ODbL, chia sẻ tương tự | Chưa xác nhận | Dự phòng, phải kiểm trước khi dùng |
+| Cổng dữ liệu quốc gia | data.gov.vn | Chưa rõ | Môi trường khảo sát không truy cập được | Chưa rõ | Chưa rõ | Chưa xác nhận |
+
+Khoảng trống: chưa có hình học cấp xã sau 2025 với giấy phép mở rõ ràng, và chưa thấy chuỗi tổng mức
+bán lẻ theo 34 tỉnh ở dạng máy đọc được.
+
+#### Công cụ browser chống chặn bot (chốt 25/10/2026)
+
+Các đường browser ở bảng khoảng trống dùng Playwright với phiên đăng nhập của Ignis. Khi nền tảng chặn
+trình duyệt tự động, Ignis thử theo thứ tự dưới đây. Chỉ chuyển sang bước sau khi bước trước đã thất bại
+rõ ràng:
+
+1. Bảo đảm phiên đăng nhập còn sống. Theo README của `Douyin_TikTok_Download_API` và `TikTok-Api`,
+   tìm kiếm trên TikTok phụ thuộc chủ yếu vào phiên đăng nhập. Ngày 25/10/2026, lỗi tìm kiếm TikTok
+   là do phiên đã lưu chưa từng đăng nhập; PR #76 đã sửa phần lưu phiên.
+2. Chạy trình duyệt có giao diện với profile cố định thay cho headless.
+3. **patchright** (Apache-2.0): bản thay thẳng cho Playwright Python, giữ nguyên `storage_state`, bộ bắt
+   response và DOM fallback. Nó che dấu vết tự động hóa ở tầng CDP và Playwright, nhưng không giả
+   canvas, WebGL hay font.
+4. **Camoufox** (MPL-2.0): Firefox giả fingerprint ngay trong binary. Đổi lại phải tải binary riêng và
+   kiểm lại phiên Chromium đang lưu.
+
+Không chọn: nodriver vì dùng license AGPL; CloakBrowser vì phụ thuộc binary của nhà cung cấp và có gói
+Pro; Scrapling vì là cả một framework đè lên lớp connector; Agent-Reach vì sao chép phiên đăng nhập
+Chrome của người dùng; firecrawl và crawl4ai vì không hợp với connector của Ignis.
+`Douyin_TikTok_Download_API` chỉ dùng làm tài liệu tham khảo.
+
+Hiện trạng: phiên TikTok được lưu lại ngày 25/10/2026 và chưa được probe. Chưa có probe nào chứng minh
+patchright hay Camoufox vượt được lớp chặn của TikTok.
 
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 
