@@ -160,6 +160,7 @@ mission use requires its confirmed source, query budget, authority, and evidence
 
 ### Session 2026-10-26
 
+- Q: When TikTok blocks automated Playwright sessions, should Ignis adopt anti-detection browsers (patchright, Camoufox) or this host browser path? → A: This host browser path through Claude in Chrome, with no additional browser plugin. Anti-detection tooling is out of scope; the agent only opens the prepared search URL, runs the `tiktok-public-grid-v1` extractor and submits, and a missing host capability stays an unavailable channel (owner decided 2026-10-26; basis: on 2026-10-25 a logged-in stored session returned 0 cards in headless, headed and fixed-profile Playwright while the owner's Chrome returned 16 cards, and the Claude Code auto-mode classifier blocked a patchright probe as bot-check circumvention).
 - Q: Does the image label keep TikTok's attribution sentence? → A: No. The owner approved the fix
   on 2026-10-26 ("Cho session TikTok sửa lỗi lọt tên tác giả trong excerpt và thêm nút mở tìm kiếm
   cùng listener postMessage cho relay, mở PR riêng, chưa đổi routine"). This supersedes the
