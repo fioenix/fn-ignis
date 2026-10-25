@@ -121,17 +121,21 @@ class GetWatchlistPeriodSnapshotUseCase:
             if mission is None:
                 continue
             frame = compute_frame_fingerprint(mission, None)
-            relevant = {
-                q.observation_id for q in await self._store.list_evidence_qualifications(mission.id)
-                if q.frame_fingerprint == frame and q.relation in RELEVANT_RELATIONS
-            }
+            judgments = [q for q in await self._store.list_evidence_qualifications(mission.id)
+                         if q.frame_fingerprint == frame]
+            relevant = {q.observation_id for q in judgments if q.relation in RELEVANT_RELATIONS}
+            assessed = {q.observation_id for q in judgments if q.relation != QualificationRelation.UNASSESSED}
+            signals = await self._repo.get_mission_signals(mission.id)
+            # A channel holding any unjudged observation cannot stand as measured for its day.
+            unjudged = {_platform(s.platform) for s in signals if s.observation_id not in assessed}
             names = {a.id: a.declared_name for a in await self._repo.list_mission_declared_accounts(mission.id)}
             coverage.extend(
                 PeriodCoverage(channel=o.platform, status=_platform(o.status),
-                               queried_keywords=tuple(o.queried_keywords), completed_at=_utc(o.completed_at))
+                               queried_keywords=tuple(o.queried_keywords), completed_at=_utc(o.completed_at),
+                               judged=_platform(o.platform) not in unjudged)
                 for o in outcomes
             )
-            for signal in await self._repo.get_mission_signals(mission.id):
+            for signal in signals:
                 if signal.source_id is None:
                     continue
                 _note_sighting(first_seen, signal)

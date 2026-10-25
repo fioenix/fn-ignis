@@ -58,6 +58,9 @@ class PeriodCoverage:
     status: str
     queried_keywords: Tuple[str, ...]
     completed_at: datetime
+    # Whether every observation this run collected on the channel carries a judgment. Unjudged
+    # evidence is never counted (FR-010), so its day cannot stand as a measured one.
+    judged: bool = True
 
 
 @dataclass(frozen=True)
@@ -349,10 +352,15 @@ def compare_periods(
         topic_items: List[Tuple[_Merged, str, datetime]] = []
         cells = []
         for channel in channels:
-            days = {local_date(c.completed_at) for c in coverage
-                    if c.channel == channel and c.status in COMPLETING_STATUSES
-                    and (not c.queried_keywords or {k.casefold() for k in c.queried_keywords} & queries)}
+            completing = [c for c in coverage
+                          if c.channel == channel and c.status in COMPLETING_STATUSES
+                          and (not c.queried_keywords or {k.casefold() for k in c.queried_keywords} & queries)]
+            days = {local_date(c.completed_at) for c in completing}
+            judged_days = {local_date(c.completed_at) for c in completing if c.judged}
             gaps = {"current": missing_days(period, days), "previous": missing_days(previous, days)}
+            # A collected day with no judged run would read as a measured zero: keep it apart.
+            unjudged = {which: [d for d in span.days if d in days and d not in judged_days]
+                        for which, span in (("current", period), ("previous", previous))}
             in_period = {
                 which: [(e, basis, anchor) for e, day, basis, anchor in placed
                         if e.channel == channel and span.contains(day)]
@@ -365,6 +373,9 @@ def compare_periods(
             }
             reasons = [f"{which}_period_missing_days" for which, span in (("current", period), ("previous", previous))
                        if not comparable(span, gaps[which])]
+            reasons += [f"{which}_period_unjudged_days" for which in ("current", "previous") if unjudged[which]]
+            if any(unjudged.values()):
+                cell["unjudged_days"] = {which: [d.isoformat() for d in found] for which, found in unjudged.items()}
             topic_items.extend(in_period["current"])
             if reasons:
                 cells.append({**cell, "status": "not_comparable", "reasons": reasons})

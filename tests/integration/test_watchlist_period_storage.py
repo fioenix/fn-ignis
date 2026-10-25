@@ -66,7 +66,7 @@ def signal(platform, key, title, published, observed, metric, **metadata):
 SURFACES = {"youtube": "youtube", "tiktok_video_grid": "tiktok", "reels": "reels"}
 
 
-async def daily_run(repository, store, workspace, watchlist_id, day, signals=(), failed=()):
+async def daily_run(repository, store, workspace, watchlist_id, day, signals=(), failed=(), judged=True):
     """One routine firing: a run, its completed collection on `day`, and judged evidence."""
     run = await call("handle_start_watchlist_run", watchlist_id=watchlist_id,
                      allowed_resources=list(SURFACES), authority_boundary=AUTHORITY)
@@ -90,18 +90,23 @@ async def daily_run(repository, store, workspace, watchlist_id, day, signals=(),
         for item in signals:
             item.mission_id = mission.id
         await repository.save_signals(list(signals))
+    if signals and judged:
         frame = compute_frame_fingerprint(mission, None)
         held = await repository.get_mission_signals(mission.id)
         await store.save_evidence_qualifications(mission.id, [
             EvidenceQualification(mission_id=mission.id, observation_id=s.observation_id, frame_fingerprint=frame,
                                   relation="CONTEXT_ONLY", purpose="CONTEXT", confidence=0.9,
                                   reason_code="DIRECT_TO_FRAME", judged_by="contract-test", model="fixture")
-            for s in held if "irrelevant" not in s.raw_title
+            if "irrelevant" not in s.raw_title else
+            EvidenceQualification(mission_id=mission.id, observation_id=s.observation_id, frame_fingerprint=frame,
+                                  relation="EXCLUDED_IRRELEVANT", purpose="CONTEXT", confidence=0.9,
+                                  reason_code="KEYWORD_ONLY", judged_by="contract-test", model="fixture")
+            for s in held
         ])
     return mission
 
 
-async def two_weeks(listening, extra=None):
+async def two_weeks(listening, extra=None, unjudged=()):
     repository, store, workspace, watchlist_id = listening
     plan = {
         PREVIOUS[0]: [signal(PlatformType.YOUTUBE, "yt1", "matcha latte tại nhà", at(PREVIOUS[0], 9), at(PREVIOUS[0], 21), 50),
@@ -118,7 +123,8 @@ async def two_weeks(listening, extra=None):
     }
     for day in PREVIOUS + CURRENT:
         failed = ("reels",) if day in PREVIOUS[:3] else ()
-        await daily_run(repository, store, workspace, watchlist_id, day, plan.get(day, ()), failed)
+        await daily_run(repository, store, workspace, watchlist_id, day, plan.get(day, ()), failed,
+                        judged=day not in unjudged)
     for day, signals in (extra or {}).items():
         await daily_run(repository, store, workspace, watchlist_id, day, signals)
     return await call("handle_get_watchlist_period_snapshot", watchlist_id=watchlist_id,
@@ -144,6 +150,17 @@ async def test_a_watchlist_period_compares_deduplicated_relevant_items(listening
     assert (uploads["previous"], uploads["current"]) == (1, 1)
     tiktok = channel(snapshot, "tiktok")
     assert (indicator(tiktok, "views")["previous"], indicator(tiktok, "views")["current"]) == (400, 600)
+
+
+async def test_a_day_whose_evidence_was_never_judged_is_not_compared(listening):
+    """FR-010 counts only judged evidence; an unjudged run must not read as a measured zero."""
+    snapshot = await two_weeks(listening, unjudged=(CURRENT[2],))
+    tiktok = channel(snapshot, "tiktok")
+    assert tiktok["status"] == "not_comparable"
+    assert tiktok["reasons"] == ["current_period_unjudged_days"]
+    assert tiktok["unjudged_days"] == {"current": [CURRENT[2].isoformat()], "previous": []}
+    # YouTube collected nothing that day, so nothing was left to judge.
+    assert channel(snapshot, "youtube")["status"] == "comparable"
 
 
 async def test_an_incomplete_channel_is_never_compared(listening):
