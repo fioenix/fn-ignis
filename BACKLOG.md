@@ -1262,6 +1262,44 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Giới hạn: chưa đo trên corpus live; các ngưỡng tối thiểu là mặc định an toàn, chưa hiệu chỉnh;
   chất lượng đánh giá ngữ nghĩa phụ thuộc Agent đang chạy phiên nghiên cứu.
 
+### Bản đồ nguồn và đường tích hợp (cập nhật 25/10/2026)
+
+Bảng này theo dõi việc mở rộng đường tích hợp cho từng nguồn. Mỗi nguồn liệt kê mọi API chính thức
+đã tìm thấy và trạng thái của nó trong Ignis. Nhu cầu nghiên cứu nào không có API phù hợp thì đi
+đường browser, ghi ở bảng thứ hai. Fio chốt ngày 25/10/2026: Ignis ưu tiên người dùng cá nhân, API dành
+cho nhà bán xếp vào nhóm mở rộng sau. Điều kiện truy cập lấy từ trang developer của từng hãng và một
+số blog bên thứ ba, chưa kiểm bằng tài khoản thật, trừ các dòng có trạng thái đang dùng.
+
+Trạng thái: **đang dùng**, **ứng viên** (cá nhân dùng được, chưa tích hợp), **mở rộng sau** (dành cho
+nhà bán), **không đủ điều kiện**.
+
+| Nguồn | API hoặc đường tích hợp | Dữ liệu | Điều kiện truy cập | Trạng thái |
+|---|---|---|---|---|
+| YouTube | YouTube Data API v3 | Tìm video theo từ khóa, thống kê, bình luận | API key, quota theo ngày | Đang dùng (`youtube`) |
+| Google | Trends RSS | Xu hướng tìm kiếm nổi bật theo quốc gia | Công khai | Đang dùng làm bối cảnh vĩ mô (`google`) |
+| Google | Autocomplete | Gợi ý từ khóa | Công khai | Đang dùng để mở rộng từ khóa, không đo nhu cầu |
+| Google | Google Trends API (alpha) | Mức quan tâm theo từ khóa, theo ngày/tuần/tháng/năm, theo vùng, trong 5 năm | Phải nộp đơn xin làm alpha tester; chưa có gói tự đăng ký | Ứng viên: đường duy nhất để đo nhu cầu theo từ khóa |
+| TikTok | API for Business, Discovery | Hashtag phổ biến, top 20 video theo hashtag, từ khóa tìm kiếm đang lên | Cần TikTok Business account và tài khoản Ads; chưa rõ có mở cho Việt Nam không | Ứng viên |
+| TikTok | Login Kit + Display API | Hồ sơ và video của chính tài khoản | App trên TikTok for Developers | Ứng viên cho bộ lọc nội dung của chính mình; không dùng để lắng nghe thị trường |
+| TikTok | Data Portability API | Dữ liệu của chính người dùng | Chỉ có dữ liệu người dùng ở EEA và Anh | Không đủ điều kiện |
+| TikTok | Research API | Dữ liệu công khai cho nghiên cứu | Nghiên cứu phi thương mại của trường ở Mỹ, EEA, Anh, Thụy Sĩ, Canada hoặc tổ chức phi lợi nhuận ở EU | Không đủ điều kiện |
+| TikTok | TikTok Shop Partner API | Đơn hàng, sản phẩm, tồn kho, tài chính, affiliate của shop mình hoặc shop đã cấp quyền | App trên Partner Center, OAuth theo scope, ký mọi request | Mở rộng sau |
+| TikTok | Commercial Content API | Quảng cáo đang chạy ở EU | Người xin quyền ở nước nào cũng được | Mở rộng sau |
+| TikTok | API for Business, Organic (Accounts, Mentions, TikTok One) | Báo cáo tài khoản Business của thương hiệu | TikTok Business account | Mở rộng sau |
+| Meta Threads | Threads API keyword search | Bài công khai theo từ khóa | Quyền `threads_keyword_search` qua App Review; chưa duyệt thì chỉ tìm được bài của chính tài khoản; tối đa 2.200 truy vấn mỗi 24 giờ | Có trong code (`threads`), hiện chưa cấu hình token. App chưa được duyệt thì Ignis báo `SELF_ONLY` và không lấy kết quả làm bằng chứng thị trường |
+| Meta Instagram | Instagram Graph API, Hashtag Search | Top media và recent media theo hashtag | Business hoặc Creator account; App Review cho Instagram Public Content Access; tối đa 30 hashtag khác nhau mỗi 7 ngày | Có trong code (`reels`), hiện chưa cấu hình token và `INSTAGRAM_USER_ID` |
+| Meta | Meta Content Library và API | Nội dung công khai trên Facebook và Instagram | Phải thuộc trường hoặc viện nghiên cứu phi lợi nhuận | Không đủ điều kiện |
+
+Khoảng trống phải đi đường browser:
+
+| Nguồn | Nhu cầu chưa có API | Đường browser hiện tại |
+|---|---|---|
+| TikTok | Tìm video theo từ khóa và đọc bình luận | `tiktok_video_grid` với phiên đăng nhập của Ignis. Ngày 25/10/2026 phiên đã lưu không chứa cookie đăng nhập, nên tìm kiếm trả lỗi; đang sửa ở PR #76 |
+| TikTok | Xu hướng vĩ mô của Creative Center | `tiktok_creative_center` |
+| Meta Threads | Tìm bài công khai theo từ khóa khi chưa được duyệt `threads_keyword_search` | `threads` qua phiên browser |
+| Meta Instagram | Reels theo từ khóa, vượt giới hạn 30 hashtag mỗi 7 ngày | `reels` qua phiên browser |
+| Google | Đo nhu cầu theo từ khóa khi chưa có quyền Trends API | Chưa có; `search_signals` của `google` báo không khả dụng |
+
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 
 Các mục dưới đây chưa có measurement, decision hay release target. Chúng được giữ để không mất ý
