@@ -2,8 +2,8 @@
 
 **Branch**: `claude/goal-driven-period` | **Date**: 2026-10-26 | **Spec**: [spec.md](spec.md)
 
-**Status**: Drafted after the owner approved the clarified spec on 26/10/2026. The decisions under
-"Owner gates" are the owner's to confirm before implementation.
+**Status**: Drafted after the owner approved the clarified spec on 26/10/2026. The owner approved
+OG-1, OG-2 and OG-3 on 26/10/2026 (see "Owner gates").
 
 ## Summary
 
@@ -53,12 +53,15 @@ no write path outside the listening-plan table.
   approval for the signature change.
 - **OG-2 (migration)**: additive `sql/035_watchlist_listening_plans.sql`; the agent may decide it
   (AGENTS.md section 8, checked against Constitution VI) and records it here.
-- **OG-3 (constitution)**: Principles I and III amendment stays Proposed until the owner ratifies
-  it. The seen axis cannot merge before ratification.
+- **OG-3 (constitution)**: Principles I and III amendment as FR-013 states it.
+
+Owner decision, 26/10/2026: OG-1, OG-2 and OG-3 approved. OG-3 approves the amendment's direction;
+the owner reviews its exact wording in the Part B pull request before that pull request merges.
 
 The feature lands in two pull requests: Part A (US1, US4: listening plan storage, the new tool,
-the routine guide) needs no amendment; Part B (US2, US3: the seen axis, the optional period kind,
-the `ignis_listen` guide and the amendment) merges only after OG-3.
+the optional period kind that US1's acceptance needs, the routine guide) needs no amendment;
+Part B (US2, US3: the seen axis, the `ignis_listen` guide and the amendment wording) merges after
+the owner has reviewed that wording.
 
 ## Execution path (Spec Kit depth gate)
 

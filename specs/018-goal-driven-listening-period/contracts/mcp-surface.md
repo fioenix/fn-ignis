@@ -22,19 +22,19 @@ set_watchlist_listening_plan(watchlist_id: str, goal: str, period_kind: str,
 Response gains `listening_plans`: every plan row, oldest first, and `listening_plan` (the one in
 effect, or null). Existing fields unchanged.
 
-## Changed: `get_watchlist_period_snapshot` (Part B)
+## Changed: `get_watchlist_period_snapshot` (optional period kind in Part A; seen axis in Part B)
 
 ```text
 get_watchlist_period_snapshot(watchlist_id: str, period_kind: Optional[str] = None,
                               period_start: Optional[str] = None) -> str
 ```
 
-- `period_kind` omitted: the plan in effect decides it; with no plan the call returns `status`
-  `INVALID`, `reason_code` `PERIOD_KIND_REQUIRED`.
-- Each topic gains `seen`: one cell per channel as in [data-model.md](../data-model.md), each
+- Part A: `period_kind` omitted: the plan in effect decides it; with no plan the call returns
+  `status` `INVALID`, `reason_code` `PERIOD_KIND_REQUIRED`.
+- Part B: each topic gains `seen`: one cell per channel as in [data-model.md](../data-model.md), each
   figure with `axis: "seen"`.
-- Each existing channel cell gains `axis: "created"`; nothing else in it changes.
-- The response gains `listening_plan`: the plan in effect for each of the two periods.
+- Part B: each existing channel cell gains `axis: "created"`; nothing else in it changes.
+- Part B: the response gains `listening_plan`: the plan in effect for each of the two periods.
 
 ## Unchanged
 
