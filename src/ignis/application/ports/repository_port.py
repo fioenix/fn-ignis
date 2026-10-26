@@ -3,7 +3,7 @@ from datetime import date, datetime
 from typing import Dict, Any, List, Optional, Sequence, Tuple, TypedDict
 from uuid import UUID
 from ignis.domain.author_identity import DeclaredAccount
-from ignis.domain.watchlist import Watchlist, WatchlistDefinition
+from ignis.domain.watchlist import ListeningPlan, Watchlist, WatchlistDefinition
 from ignis.domain.entities import TrendSignal, TopicCluster, ResearchMission
 from ignis.domain.value_objects import GeoCode, Timeframe
 from ignis.domain.value_objects import IngressTrigger
@@ -179,6 +179,20 @@ class ITrendRepository(ABC):
     async def get_watchlist(self, watchlist_id: UUID) -> Optional[Watchlist]:
         """The watchlist with every version, oldest first, and its runs in start order."""
         return None
+
+    async def save_listening_plan(
+        self, watchlist_id: UUID, goal: str, period_kind: str, snapshots_per_period: int
+    ) -> Tuple[List[ListeningPlan], bool]:
+        """Append a plan effective now, or return unchanged history; reject an unknown watchlist.
+
+        Returns (oldest-first history, inserted). Identical concurrent saves insert at most once.
+        Invalid plans raise WatchlistDefinitionError with INVALID_LISTENING_PLAN.
+        """
+        raise NotImplementedError("This repository keeps no listening plans.")
+
+    async def list_listening_plans(self, watchlist_id: UUID) -> List[ListeningPlan]:
+        """Every plan oldest first, or an empty list when no plan is recorded."""
+        raise NotImplementedError("This repository keeps no listening plans.")
 
     async def record_watchlist_run(self, mission_id: UUID, watchlist_id: UUID, version: int) -> None:
         """Bind a mission to the watchlist version it collects."""

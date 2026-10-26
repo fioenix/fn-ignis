@@ -69,6 +69,8 @@ SCHEMA_MIGRATIONS = (
     "032_watchlists.sql",
     # Spec 016 US4: keyword searches per channel per day, for the daily request ceilings.
     "033_connector_request_days.sql",
+    "034_tiktok_attribution.sql",
+    "035_watchlist_listening_plans.sql",
 )
 
 

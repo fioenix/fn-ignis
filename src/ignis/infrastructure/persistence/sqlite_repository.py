@@ -26,7 +26,7 @@ from ignis.application.ports.repository_port import (
 )
 from ignis.resources import sql_seed_file
 from ignis.domain.author_identity import DeclaredAccount
-from ignis.domain.watchlist import Watchlist, WatchlistConflict, watchlist_name_key
+from ignis.domain.watchlist import ListeningPlan, Watchlist, WatchlistConflict, watchlist_name_key
 from ignis.infrastructure.persistence.watchlist_rows import (
     WATCHLIST_HEAD_SQL,
     WATCHLIST_RUNS_SQL,
@@ -269,6 +269,23 @@ _WATCHLIST_DDL = """
                 created_at TEXT NOT NULL,
                 UNIQUE (workspace_id, name_key)
             );
+            CREATE TABLE IF NOT EXISTS watchlist_listening_plans (
+                watchlist_id TEXT NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+                effective_from TEXT NOT NULL,
+                goal TEXT NOT NULL CHECK (goal = trim(goal) AND length(goal) BETWEEN 1 AND 300),
+                period_kind TEXT NOT NULL CHECK (period_kind IN ('day', 'week', 'month')),
+                snapshots_per_period INTEGER NOT NULL CHECK (
+                    typeof(snapshots_per_period) = 'integer' AND snapshots_per_period >= 1
+                    AND snapshots_per_period <= CASE period_kind
+                        WHEN 'day' THEN 1 WHEN 'week' THEN 7 WHEN 'month' THEN 28 END
+                ),
+                PRIMARY KEY (watchlist_id, effective_from)
+            );
+            CREATE TRIGGER IF NOT EXISTS refuse_watchlist_listening_plan_update
+            BEFORE UPDATE ON watchlist_listening_plans
+            BEGIN
+                SELECT RAISE(ABORT, 'watchlist listening plans are immutable');
+            END;
             CREATE TABLE IF NOT EXISTS watchlist_versions (
                 watchlist_id TEXT NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
                 version INTEGER NOT NULL CHECK (version >= 1),
@@ -3933,6 +3950,60 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     conn.close()
 
         return await asyncio.to_thread(_sync_get)
+
+    @staticmethod
+    def _sync_listening_plans(conn, watchlist_id) -> List[ListeningPlan]:
+        rows = conn.execute(
+            "SELECT effective_from, goal, period_kind, snapshots_per_period FROM watchlist_listening_plans"
+            " WHERE watchlist_id = ? ORDER BY effective_from", (str(watchlist_id),)
+        ).fetchall()
+        return [ListeningPlan(datetime.fromisoformat(row[0]), *row[1:]) for row in rows]
+
+    async def list_listening_plans(self, watchlist_id) -> List[ListeningPlan]:
+        """The append-only history, oldest first."""
+        await self._ensure_schema()
+
+        def read():
+            conn = self._get_connection()
+            try:
+                return self._sync_listening_plans(conn, watchlist_id)
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+        return await asyncio.to_thread(read)
+
+    async def save_listening_plan(self, watchlist_id, goal, period_kind, snapshots_per_period):
+        """Append only when the current plan differs; serialize identical concurrent saves."""
+        plan = ListeningPlan(datetime.now(timezone.utc), goal, period_kind, snapshots_per_period)
+        await self._ensure_schema()
+
+        def write():
+            conn = self._get_connection()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                if conn.execute("SELECT 1 FROM watchlists WHERE id = ?", (str(watchlist_id),)).fetchone() is None:
+                    raise WatchlistConflict("NOT_FOUND", "No watchlist has this id.")
+                plans = self._sync_listening_plans(conn, watchlist_id)
+                added = not plans or (plans[-1].goal, plans[-1].period_kind, plans[-1].snapshots_per_period) != (
+                    plan.goal, plan.period_kind, plan.snapshots_per_period)
+                if added:
+                    # Allocate the timestamp inside the transaction, after waiting for earlier writers.
+                    now = datetime.now(timezone.utc)
+                    conn.execute(
+                        "INSERT INTO watchlist_listening_plans"
+                        " (watchlist_id, effective_from, goal, period_kind, snapshots_per_period) VALUES (?, ?, ?, ?, ?)",
+                        (str(watchlist_id), now.isoformat(), plan.goal, plan.period_kind, plan.snapshots_per_period),
+                    )
+                result = self._sync_listening_plans(conn, watchlist_id)
+                conn.commit()
+                return result, added
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                if self._mem_conn is None:
+                    conn.close()
+        return await self._run_write(write)
 
     async def record_watchlist_run(self, mission_id, watchlist_id, version) -> None:
         """Bind a mission to the watchlist version it collects. See the port."""
