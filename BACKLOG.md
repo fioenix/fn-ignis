@@ -36,15 +36,16 @@ hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đ�
 kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
 các cổng pilot và release vẫn giữ nguyên.
 
-Nhánh `claude/goal-period-part-a` (Spec 018 phần A, chưa merge) có **53 tools**: nhánh này
-thêm `set_watchlist_listening_plan`, lưu mục tiêu, kỳ so sánh và nhịp lấy mẫu do người dùng chọn.
-`get_watchlist_period_snapshot` dùng kỳ trong kế hoạch khi không truyền `period_kind`. Bộ tool đó có `save_watchlist`,
+`main` có **53 tools** từ ngày 26/10/2026, khi PR #88 (Spec 018 phần A) được merge tại
+`25d10c3`. PR này thêm `set_watchlist_listening_plan` để lưu mục tiêu, kỳ so sánh và nhịp lấy mẫu
+do người dùng chọn; khi không truyền `period_kind`, `get_watchlist_period_snapshot` dùng kỳ so sánh
+đã lưu. Bộ tool này có `save_watchlist`,
 `get_watchlist` và `start_watchlist_run` từ ngày 21/10/2026, khi PR #59 (Spec 016 phần A) được merge
 tại `5d6794c`. Trước đó, PR #57 (Spec 015) được merge tại `1f4971e` và thêm
 `set_mission_declared_accounts`, được chủ sở hữu duyệt ngày 20/10/2026 (OG-1); PR #51 (Spec 014)
 được merge tại `474916f`; Spec 014 R2 đã bỏ `open_mission_relay` nhưng vẫn giữ
-`get_mission_relay_snapshot` và `execute_mission_follow_up`. Migration mới nhất trên nhánh là `sql/035_watchlist_listening_plans.sql`;
-main đã có migration 034; các con số 47 tools, worker, quota
+`get_mission_relay_snapshot` và `execute_mission_follow_up`. Migration mới nhất trên `main` là
+`sql/035_watchlist_listening_plans.sql`; các con số 47 tools, worker, quota
 scheduled và migration `024` trong phần lịch sử dưới đây là của bản v0.7.0 đã phát hành, khác bộ tool
 hiện tại. Tại mốc Spec 011 ngày 02/10/2026, nhánh `codex/evidence-grounded-product-reset`
 có 44 tool theo nhiệm vụ và migration mới nhất là `sql/025_evidence_grounded_claim_ledger.sql`.
