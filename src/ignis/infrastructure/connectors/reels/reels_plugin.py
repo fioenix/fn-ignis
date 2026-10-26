@@ -47,7 +47,8 @@ class ReelsPlugin(IConnectorPlugin):
     """
 
     # A keyword search reads at most this many keywords; the daily ceiling counts what is sent.
-    max_search_keywords = 10
+    # Raised from 10 to a full 20-keyword watchlist by the owner on 26/10/2026.
+    max_search_keywords = 20
 
     GRAPH_BASE_URL = "https://graph.instagram.com"
     LEGACY_DISCOVER_URL = "https://www.instagram.com/api/v1/clips/discover/"

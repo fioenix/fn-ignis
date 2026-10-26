@@ -1605,12 +1605,14 @@ async def test_a_vocabulary_failure_behind_an_active_writer_is_a_conflict_that_c
 async def test_a_measured_zero_never_covers_a_keyword_the_surfaces_did_not_query(
     repository_case, host_workspace, monkeypatch
 ):
-    """Reels truncates at ten; TikTok probes every root and falsification query, without a window."""
+    """Reels truncates at its limit; TikTok probes every root and falsification query, without a window."""
     from unittest.mock import AsyncMock, patch
 
     from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
     from ignis.interfaces.mcp import server as mcp_server
 
+    # The limit is 20 since 26/10/2026; pin it at ten so eleven keywords still exercise truncation.
+    monkeypatch.setattr(ReelsPlugin, "max_search_keywords", 10)
     keywords = [f"topic{index}" for index in range(1, 12)]
 
     class DemandFor:

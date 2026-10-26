@@ -53,6 +53,10 @@ class ThreadsPlugin(IConnectorPlugin):
       3. Legacy unauthenticated public trending endpoint when nothing is bound.
     """
 
+    # Browser captures fail intermittently for a few keywords per run (25-26/10/2026); the registry
+    # retries those once, counted against the daily ceiling.
+    retry_failed_keywords = True
+
     GRAPH_BASE_URL = "https://graph.threads.net"
     LEGACY_TRENDING_URL = "https://www.threads.net/api/trending"
     BROWSER_FEED_URL = "https://www.threads.com/"
