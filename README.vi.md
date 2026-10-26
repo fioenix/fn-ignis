@@ -7,7 +7,7 @@ lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân t
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
 **Ranh giới phát hành:** Nhánh này đang triển khai Spec 011 và chưa được phát hành. Mã nguồn
-và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 52 tool theo
+và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 53 tool theo
 nhiệm vụ được mô tả ở đây. Không dùng image đã phát hành để kiểm chứng nhánh này.
 
 ## Hợp đồng sản phẩm
@@ -38,7 +38,7 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/034_tiktok_attribution.sql`. Migration 034 nạp sẵn mẫu câu
+Cây mã nguồn hiện có migration tới `sql/035_watchlist_listening_plans.sql`. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn mẫu câu
 ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt
 host; nó không sửa bằng chứng đã lưu. Migration 033 thêm bộ đếm số
 lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không sửa bằng
@@ -76,11 +76,18 @@ chỉ nằm tại `src/ignis/infrastructure/templates/html/`.
 
 ## Năng lực dành cho agent
 
-MCP server của nhánh hiện có **52 tools**. Mô tả tool do server đang chạy trả về là nguồn
+MCP server của nhánh hiện có **53 tools**. Mô tả tool do server đang chạy trả về là nguồn
 chuẩn cho tham số. Một số thao tác đại diện:
 
 - `create_attention_mission` và `confirm_market_brief` xác lập câu hỏi và phạm vi;
   `execute_mission_ingress` thu thập khung chứng cứ được yêu cầu.
+`set_watchlist_listening_plan` lưu mục tiêu, kỳ so sánh (`day`, `week`, `month`) và số lần
+lấy mẫu trong mỗi kỳ do người dùng chọn. Lịch sử kế hoạch chỉ được thêm, không sửa; lưu lại cùng
+kế hoạch không tạo dòng mới. `get_watchlist` trả kế hoạch đang có hiệu lực cùng lịch sử.
+Khi bỏ `period_kind`, period view dùng kỳ trong kế hoạch; nếu chưa có kế hoạch, cần truyền kỳ
+rõ ràng. Routine hỏi người dùng khi chưa có kế hoạch, trình bày số lượt chạy và request mỗi kỳ,
+rồi chờ xác nhận trước khi tạo lịch trên host. Ignis không tự tạo lịch hay chạy thu thập.
+
 - `save_watchlist`, `get_watchlist` và `start_watchlist_run` lưu một watchlist gồm chủ đề và
   thương hiệu theo từng phiên bản và tạo một nhiệm vụ Attention trên phiên bản hiện tại cho mỗi
   lần chạy. Ignis không bao giờ tự chạy watchlist. `get_watchlist_period_snapshot` so một ngày,

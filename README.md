@@ -6,7 +6,7 @@ acting on it. Its two capabilities are independent: source collection can end wi
 frame, while Market analysis can end with a Gap Report rather than a forced verdict.
 
 **Release boundary:** This branch implements the unreleased Spec 011 product reset. The published
-v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 52-tool
+v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 53-tool
 mission-bound surface described here. Do not use a published image to validate this branch.
 
 ## Product contract
@@ -42,7 +42,7 @@ For a Codex-only installation with separate UAT storage, run
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
 The current source tree contains migrations through
-`sql/034_tiktok_attribution.sql`. Migration 034 seeds the TikTok author attribution wording that
+`sql/035_watchlist_listening_plans.sql`. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok author attribution wording that
 host-browser search removes from excerpts; it rewrites no stored evidence. Migration 033 adds a per-channel, per-day count of keyword
 searches for the daily request ceilings; it rewrites no stored evidence. Migration 032 adds watchlists, their immutable versions and the runs
 bound to them; it rewrites no stored evidence. Migration 031 adds per-mission author keys, declared
@@ -75,11 +75,18 @@ committed report templates live only in `src/ignis/infrastructure/templates/html
 
 ## Agent capabilities
 
-The current MCP server exposes **52 tools**. Use the server's live tool descriptions as the
+The current MCP server exposes **53 tools**. Use the server's live tool descriptions as the
 signature authority. Representative operations:
 
 - `create_attention_mission` and `confirm_market_brief` establish a bounded question and
   confirmed scope; `execute_mission_ingress` collects the requested frame.
+`set_watchlist_listening_plan` records the user's goal, comparison period (`day`, `week`,
+`month`) and snapshots per period as append-only history. An identical save is unchanged.
+`get_watchlist` returns the plan in effect and its history. Omit `period_kind` to use that plan's
+period; without a plan, pass a period explicitly. Routine setup reads the plan, asks for missing
+choices, shows firings and requests per period, and waits for confirmation before host scheduling.
+Ignis starts no collection or schedule when a plan is saved.
+
 - `save_watchlist`, `get_watchlist` and `start_watchlist_run` keep a versioned watchlist of
   topics and brands and start one Attention mission per run on its current version. Ignis never
   runs a watchlist on its own. `get_watchlist_period_snapshot` compares a complete day, week or

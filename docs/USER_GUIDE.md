@@ -12,7 +12,7 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/034_tiktok_attribution.sql`. Migration 034 seeds the TikTok
+The source migration chain ends at `sql/035_watchlist_listening_plans.sql`. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok
 author attribution wording that host-browser search removes from excerpts; it rewrites no stored
 evidence. Migration 033 adds a
 per-channel, per-day count of keyword searches for the daily request ceilings; it rewrites no
@@ -98,6 +98,13 @@ the versions and the runs. Each `start_watchlist_run` creates one Attention miss
 version and declares its brands as that mission's accounts, the only accounts Ignis ever names.
 You state the allowed sources and authority for every run; collection then goes through
 `execute_mission_ingress` as for any mission. Ignis never runs a watchlist on its own.
+
+`set_watchlist_listening_plan` records the user's goal, comparison period (`day`, `week`,
+`month`) and snapshots per period as append-only history. An identical save is unchanged.
+`get_watchlist` returns the plan in effect and its history. Omit `period_kind` to use that plan's
+period; without a plan, pass a period explicitly. Routine setup reads the plan, asks for missing
+choices, shows firings and requests per period, and waits for confirmation before host scheduling.
+Ignis starts no collection or schedule when a plan is saved.
 
 To see how a watchlist moved, ask for its period view. `get_watchlist_period_snapshot` compares a
 complete day, Monday-to-Sunday week or calendar month in Asia/Ho_Chi_Minh with the one before, and
@@ -260,7 +267,7 @@ unchanged, and reading a snapshot confers no execution authority.
 
 ## 4. Tool and deployment boundaries
 
-The local MCP server exposes **52 tools**. Discover the running server's descriptions for exact
+The local MCP server exposes **53 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
 The published OCI manifest is still v0.7.0, so neither it nor a public-image smoke test
 establishes that Spec 011 shipped. PyPI installation is not advertised. Run the branch's
