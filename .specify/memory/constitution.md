@@ -16,6 +16,25 @@ Sync Impact Report
 - Follow-up TODOs: none. The 2.2.0 report (Principles I and III for Spec 016, Principle VII for
   Spec 015, ratified 2026-10-21) is in git history.
 -->
+<!--
+Proposed Sync Impact Report (Spec 018, T027; exact wording awaits owner review)
+- Proposed version: 2.2.1 -> 2.3.0 (MINOR: materially expanded listening guidance).
+- Principle I: a watchlist may record the user's goal, comparison period and research cadence;
+  only the host schedules explicitly requested runs. Ignis gains no scheduler or worker.
+- Principle III: labelled seen figures use the exact snapshot ingestion clock and per-snapshot
+  averages; the labelled created view retains publication placement and all Spec 016 rules.
+- Added/removed principles: none.
+- Dependent artifacts checked: specs/018-goal-driven-listening-period/{spec.md,plan.md,
+  data-model.md,research.md,contracts/mcp-surface.md,tasks.md,quickstart.md}; packaged ignis_listen
+  guide. Spec 016 remains the created-view contract; Spec 017 is refined only by Spec 018's
+  user-stated cadence. Existing statements of mission autonomy remain unchanged.
+- Templates checked: .specify/templates/plan-template.md derives its Constitution Check from
+  the current constitution; spec-template.md, tasks-template.md and checklist-template.md
+  contain no duplicated listening-axis wording and need no change.
+- Follow-up: owner reviews and ratifies wording in the Part B PR, then replaces the affected
+  clauses and updates the ratified version/date footer. The current 2.2.1 text below remains
+  ratified until that decision; OG-3 approved the direction on 2026-10-26, not this wording.
+-->
 # fn-ignis Constitution
 
 This constitution defines the non-negotiable product, architecture, development, and governance
@@ -175,6 +194,31 @@ does not authorize claims of universal geographic or industry coverage.
 ---
 
 ## Governance and Spec-Driven Development
+
+### Proposed Spec 018 amendment (2.3.0; pending owner ratification)
+
+**Principle I: insert after the host-routine clause:**
+
+- A watchlist MAY record the user's stated listening goal, comparison period and research
+  cadence, with an effective history. Recording cadence is data: Ignis MUST NOT infer it or
+  acquire a scheduler, worker or recurring collection loop. The host MAY schedule that cadence
+  only after the user explicitly requests and confirms the routine under the authority above.
+
+**Principle III: replace the listening-period clause with:**
+
+- A listening period (a calendar day, week or month of a watchlist) MUST offer two labelled
+  readings. The seen axis MUST place each snapshot by its exact ingestion clock: the completed
+  channel probe's `completed_at` in that watchlist run. Each seen indicator MUST be an average
+  per successful, topic-matching snapshot held in the period, regardless of publication date.
+  Coverage MUST use the user's cadence in effect at the period's start; missing cadence and
+  unjudged snapshots MUST remain explicit, never measured zero. Ignis MUST compare a channel
+  only when neither period misses more than 20 percent of its called-for snapshots.
+- The created view MUST keep Spec 016's placement by plausible publication time, falling back
+  to the first ingestion date and flagged as such, and MUST preserve its daily coverage,
+  counting window and judged-day rules. Creation dates MAY enrich seen analysis but MUST NOT
+  decide seen coverage or collection cadence. Every listening figure MUST state `seen` or
+  `created`; values MUST NOT be summed across axes or channels. Publication time MUST NOT
+  silently substitute for ingestion time anywhere else.
 
 Large features use the Spec Kit artifact chain:
 
