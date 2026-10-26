@@ -682,6 +682,9 @@ async def get_mission_relay_snapshot(mission_id: str, page_size: int, ctx: Conte
 
 # This service opens no listener until an explicitly authorized finite request is prepared.
 _host_browser_search_service = HostBrowserSearchService()
+# A MISSION request belongs to the caller store it was prepared in. Submission carries only the
+# request's ids, so the caller-storage middleware cannot route it there by its arguments.
+_host_mission_scopes: Dict[str, Any] = {}
 
 
 async def handle_prepare_host_browser_search(
@@ -696,10 +699,12 @@ async def handle_prepare_host_browser_search(
             mission = await comp["repository"].get_mission(mission_id)
             if mission is None:
                 raise ValueError("Mission not found")
-            return await _host_browser_search_service.prepare_mission(
+            request = await _host_browser_search_service.prepare_mission(
                 comp["execute_mission_use_case"], mission.id, host_task_ref, session_ref,
                 lifetime_seconds, authorized,
             )
+            _host_mission_scopes[request["request_id"]] = current_caller_storage.get()
+            return request
         if mode != "TACTICAL" or mission_id is not None:
             raise ValueError("Invalid host search mode")
         return _host_browser_search_service.prepare(
@@ -732,12 +737,21 @@ async def prepare_host_browser_search(
 async def handle_submit_host_browser_search(request_id: str, host_task_ref: str, session_ref: str) -> dict:
     try:
         if _host_browser_search_service.mode(request_id, host_task_ref, session_ref) == "MISSION":
-            return await _host_browser_search_service.submit_mission(
-                get_components()["execute_mission_use_case"], request_id, host_task_ref, session_ref,
-            )
+            scope = _host_mission_scopes.get(request_id)
+            token = current_caller_storage.set(scope) if scope is not None else None
+            try:
+                receipt = await _host_browser_search_service.submit_mission(
+                    get_components()["execute_mission_use_case"], request_id, host_task_ref, session_ref,
+                )
+            finally:
+                if token is not None:
+                    current_caller_storage.reset(token)
+            _host_mission_scopes.pop(request_id, None)
+            return receipt
         return _host_browser_search_service.submit(request_id, host_task_ref, session_ref)
     except Exception as exc:
         if hasattr(exc, "host_search_failure"):
+            _host_mission_scopes.pop(request_id, None)
             return exc.host_search_failure
         return {"status": "BLOCKED", "reason_code": "HOST_SEARCH_NOT_ACCEPTABLE"}
 
@@ -756,7 +770,9 @@ async def submit_host_browser_search(request_id: str, host_task_ref: str, sessio
 
 async def handle_cancel_host_browser_search(request_id: str, host_task_ref: str, session_ref: str) -> dict:
     try:
-        return _host_browser_search_service.cancel(request_id, host_task_ref, session_ref)
+        cancelled = _host_browser_search_service.cancel(request_id, host_task_ref, session_ref)
+        _host_mission_scopes.pop(request_id, None)
+        return cancelled
     except ValueError:
         return {"status": "BLOCKED", "reason_code": "HOST_SEARCH_CANNOT_CANCEL"}
 
