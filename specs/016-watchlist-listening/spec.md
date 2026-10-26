@@ -188,6 +188,8 @@ confirm (listed again under "Owner review"):
 ### Session 2026-10-26
 
 - Q: Must a channel that returned observations still report the keywords it failed or did not query? → A: Yes. A HEALTHY outcome keeps a "Partial: …" note listing each failed keyword, and Reels records every keyword beyond its 10-keyword search limit as not queried instead of dropping it; the limit itself is unchanged (agent decided; basis: G3 run of 25/10/2026, where threads attested 17 of 20 keywords and reels 10 of 20 while both outcomes read HEALTHY with no note).
+- Q: A day was collected but its evidence was never judged. Is the channel's figure for it a measured zero? → A: No. FR-010 counts only judged evidence, so such a day is listed in `unjudged_days` and makes the channel `not_comparable` with reason `<period>_period_unjudged_days`; a channel-day is judged when every observation the run collected on that channel carries a judgment other than UNASSESSED. The field is additive and present only when a day is unjudged (agent decided; basis: the G3 period views of 23 and 25/10/2026, which would have shown a measured zero for runs that were collected but not yet judged).
+- Q: A day has one judged run and one unjudged run. Is it judged? → A: No. Counting only the judged run would silently undercount the day, so a channel-day is judged only when every completing run of that day is judged on that channel; otherwise it stays in `unjudged_days` (agent decided 26/10/2026; basis: on 26/10 a judged manual run and the collect-only 07:13 routine firing cover the same day).
 
 ## User Scenarios & Testing *(mandatory)*
 
