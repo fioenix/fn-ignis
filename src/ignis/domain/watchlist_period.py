@@ -504,6 +504,21 @@ def compare_seen_periods(
     return rows
 
 
+def _seen_channel_values(channel: str, metric_value: Any, metadata: Mapping[str, Any]) -> Dict[str, float]:
+    """Read snapshot counters without changing the created view's channel indicators."""
+    if channel != "youtube":
+        return channel_values(channel, metric_value, metadata)
+    values: Dict[str, float] = {}
+    views = _number(metadata.get("views"))
+    if views is not None:
+        values["views"] = views
+    likes, comments = _number(metadata.get("likes")), _number(metadata.get("comments"))
+    # A partial total is unknown; explicit zero counters still measure zero interactions.
+    if likes is not None and comments is not None:
+        values["interactions"] = likes + comments
+    return values
+
+
 def _seen_values(entries: Sequence[Tuple[SeenSnapshot, _Merged]], period: Period,
                  snapshots: int, first_snapshots: Mapping[Tuple[str, str], datetime],
                  ) -> Dict[str, Tuple[Optional[float], int]]:
@@ -518,7 +533,7 @@ def _seen_values(entries: Sequence[Tuple[SeenSnapshot, _Merged]], period: Period
         placed = place_observation(entry.published_at, snapshot.completed_at)
         if placed is not None and placed[1] == "published" and period.contains(placed[0]):
             created += 1
-        visible = channel_values(entry.channel, metric, metadata)
+        visible = _seen_channel_values(entry.channel, metric, metadata)
         for kind in counters:
             value = visible.get(kind.removesuffix("_visible"))
             if value is not None:

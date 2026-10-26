@@ -197,3 +197,45 @@ def test_first_seen_tracks_completion_order_for_overlapping_runs():
     result = cell(snapshots, [plan(1)])
     assert indicator(result, "first_seen")["previous"] == 1
     assert indicator(result, "first_seen")["current"] == 0
+
+
+@pytest.mark.parametrize("metadata,views,interactions,missing_views,missing_interactions", [
+    ({"views": 120, "likes": 10, "comments": 2}, 120, 12, 0, 0),
+    ({"views": 0, "likes": 0, "comments": 0}, 0, 0, 0, 0),
+    ({"likes": 3, "comments": 1}, None, 4, 1, 0),
+    ({"views": 80, "comments": 4}, 80, None, 0, 1),
+    ({"views": 40, "likes": 7}, 40, None, 0, 1),
+])
+def test_youtube_seen_reads_stored_counters_without_inventing_missing_values(
+        metadata, views, interactions, missing_views, missing_interactions):
+    video = replace(item("video", PERIOD.start, metric=999, metadata=metadata), channel="youtube")
+    snapshots = [replace(snapshot(PERIOD.start, [video]), channel="youtube"),
+                 replace(snapshot(PERIOD.previous().start), channel="youtube")]
+    result = cell(snapshots, [plan(1)])
+    assert result["status"] == "comparable"
+    actual_views = indicator(result, "views_visible")
+    actual_interactions = indicator(result, "interactions_visible")
+    assert actual_views["current"] == views
+    assert actual_interactions["current"] == interactions
+    assert actual_views["uncounted_items"] == {"current": missing_views, "previous": 0}
+    assert actual_interactions["uncounted_items"] == {"current": missing_interactions, "previous": 0}
+
+
+def test_youtube_seen_averages_known_counters_over_snapshots_held():
+    rows = [replace(item(str(i), PERIOD.start, metric=999, metadata=metadata), channel="youtube")
+            for i, metadata in enumerate([
+                {"views": 120, "likes": 10, "comments": 2},
+                {"likes": 3, "comments": 1},
+                {"views": 80, "comments": 4},
+                {"views": 40, "likes": 7},
+            ])]
+    zero = replace(item("zero", PERIOD.days[1], metadata={"views": 0, "likes": 0, "comments": 0}),
+                   channel="youtube")
+    snapshots = [replace(s, channel="youtube") for s in two_periods([rows, [zero]], [[], []])]
+    result = cell(snapshots)
+    views = indicator(result, "views_visible")
+    interactions = indicator(result, "interactions_visible")
+    assert views["current"] == 120
+    assert interactions["current"] == 8
+    assert views["uncounted_items"] == {"current": 1, "previous": 0}
+    assert interactions["uncounted_items"] == {"current": 2, "previous": 0}
