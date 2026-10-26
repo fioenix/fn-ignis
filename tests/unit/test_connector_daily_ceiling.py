@@ -255,3 +255,62 @@ async def test_pain_points_count_every_tiktok_keyword_searched(store):
                 keywords=[f"từ khoá {index}" for index in range(15)]))
 
     assert refused["status"] == "RATE_LIMITED" and fetch.await_count == 0
+
+
+class _FlakyPlugin(_SearchPlugin):
+    """Fails one keyword's capture on the first call, as Threads did on 25 and 26/10/2026."""
+
+    retry_failed_keywords = True
+
+    def __init__(self, platform, flaky):
+        super().__init__(platform)
+        self.flaky = set(flaky)
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20,
+                             attestation=None):
+        self.search_calls.append(list(keywords))
+        signals = []
+        for keyword in keywords:
+            if keyword in self.flaky:
+                self.flaky.discard(keyword)
+                attestation.failed(keyword, "no search payload was captured")
+                continue
+            attestation.executed(keyword)
+            signals.append(TrendSignal(platform=self._platform, raw_title=f"{keyword} post", metric_value=1.0,
+                                       geo_code=geo, source_url=f"https://example.test/{keyword}"))
+        return signals
+
+
+@pytest.mark.asyncio
+async def test_a_failed_capture_is_retried_once_and_the_retry_is_counted(store):
+    repository = SqliteTrendRepository(str(store))
+    registry = ConnectorPluginRegistry(repository=repository)
+    threads = _FlakyPlugin(PlatformType.THREADS, flaky={"áo mưa"})
+    registry.register(threads)
+
+    result = await registry.search_with_outcomes(keywords=["áo khoác", "áo mưa"])
+
+    outcome = _outcome(result, "threads")
+    assert threads.search_calls == [["áo khoác", "áo mưa"], ["áo mưa"]]
+    assert outcome.status == ChannelHealthStatus.HEALTHY
+    assert set(outcome.queried_keywords) == {"áo khoác", "áo mưa"}
+    assert outcome.note is None
+    assert _counts(store) == {"threads": 3}
+
+
+@pytest.mark.asyncio
+async def test_no_retry_runs_past_the_daily_ceiling(store):
+    repository = SqliteTrendRepository(str(store))
+    await repository.set_runtime_config("connector.threads.daily_request_ceiling", "2")
+    registry = ConnectorPluginRegistry(repository=repository)
+    threads = _FlakyPlugin(PlatformType.THREADS, flaky={"áo mưa"})
+    registry.register(threads)
+
+    result = await registry.search_with_outcomes(keywords=["áo khoác", "áo mưa"])
+
+    outcome = _outcome(result, "threads")
+    assert threads.search_calls == [["áo khoác", "áo mưa"]]
+    assert outcome.queried_keywords == ("áo khoác",)
+    assert "áo mưa: no search payload was captured" in outcome.note
+    assert "retry skipped" in outcome.note
+    assert _counts(store) == {"threads": 2}
