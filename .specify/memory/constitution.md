@@ -1,39 +1,21 @@
 <!--
 Sync Impact Report
-- Version change: 2.2.0 -> 2.2.1
+- Version change: 2.2.1 -> 2.3.0
 - Modified principles:
-  - VII. No Author Identity at Rest: the exception for identity stored before Spec 015 now records
-    the owner's OG-3 decision of 2026-10-22 (anonymise with scripts/anonymise_author_identity.py,
-    applied to the caller store; the dev Supabase store left out) instead of "until the owner
-    decides". What remains in a store the script has not run on keeps the same limits.
+  - I. Mission-Bound Autonomy: a watchlist may record the user's stated goal, comparison period and
+    research cadence; recording it is data, and Ignis gains no scheduler, worker or recurring loop.
+  - III. Evidence-First Research: a listening period offers two labelled readings, a seen axis
+    placed by each snapshot's exact ingestion clock and averaged per snapshot, and the created view
+    placed by publication time under Spec 016's rules.
 - Added principles: none. Removed sections: none.
-- Bump rationale: PATCH. The exception's wording records a decision; no obligation is added,
-  removed or changed. Owner approved on 2026-10-22.
+- Bump rationale: MINOR. Materially expanded listening guidance (Spec 018). Owner approved the
+  direction (OG-3) and the exact wording on 2026-10-26.
 - Templates checked: plan-template.md derives its gates from this file at plan time;
-  spec-template.md, tasks-template.md and checklist-template.md carry no wording on VII.
-- Dependent documents checked, unchanged: specs/015-no-author-identity-at-rest/spec.md already
-  records the decision (Clarifications, session 2026-10-22).
-- Follow-up TODOs: none. The 2.2.0 report (Principles I and III for Spec 016, Principle VII for
-  Spec 015, ratified 2026-10-21) is in git history.
--->
-<!--
-Proposed Sync Impact Report (Spec 018, T027; exact wording awaits owner review)
-- Proposed version: 2.2.1 -> 2.3.0 (MINOR: materially expanded listening guidance).
-- Principle I: a watchlist may record the user's goal, comparison period and research cadence;
-  only the host schedules explicitly requested runs. Ignis gains no scheduler or worker.
-- Principle III: labelled seen figures use the exact snapshot ingestion clock and per-snapshot
-  averages; the labelled created view retains publication placement and all Spec 016 rules.
-- Added/removed principles: none.
-- Dependent artifacts checked: specs/018-goal-driven-listening-period/{spec.md,plan.md,
-  data-model.md,research.md,contracts/mcp-surface.md,tasks.md,quickstart.md}; packaged ignis_listen
-  guide. Spec 016 remains the created-view contract; Spec 017 is refined only by Spec 018's
-  user-stated cadence. Existing statements of mission autonomy remain unchanged.
-- Templates checked: .specify/templates/plan-template.md derives its Constitution Check from
-  the current constitution; spec-template.md, tasks-template.md and checklist-template.md
-  contain no duplicated listening-axis wording and need no change.
-- Follow-up: owner reviews and ratifies wording in the Part B PR, then replaces the affected
-  clauses and updates the ratified version/date footer. The current 2.2.1 text below remains
-  ratified until that decision; OG-3 approved the direction on 2026-10-26, not this wording.
+  spec-template.md, tasks-template.md and checklist-template.md carry no listening-axis wording.
+- Dependent documents checked: specs/018-goal-driven-listening-period (all artifacts) and the
+  packaged ignis_listen and ignis_routine guides follow this wording; Spec 016 remains the
+  created-view contract; Spec 017's cadence is refined by the user-stated plan.
+- Follow-up TODOs: none. The 2.2.1 report (Principle VII exception, 2026-10-22) is in git history.
 -->
 # fn-ignis Constitution
 
@@ -54,6 +36,10 @@ principles for `fn-ignis`.
   watchlist version, the run's own stated authority and the per-channel daily request ceilings.
   An agent MUST NOT set up, widen or resume such a routine without the user's explicit request,
   and the user MUST be able to see, pause and remove it in the host.
+- A watchlist MAY record the user's stated listening goal, comparison period and research
+  cadence, with an effective history. Recording cadence is data: Ignis MUST NOT infer it or
+  acquire a scheduler, worker or recurring collection loop. The host MAY schedule that cadence
+  only after the user explicitly requests and confirms the routine under the authority above.
 - Once assigned a task, Ignis MAY autonomously select and execute the bounded collection and
   analysis steps needed to satisfy that task, subject to connector authorization and evidence
   gates.
@@ -92,10 +78,19 @@ principles for `fn-ignis`.
 - Collection windows, evidence frames and every other time-window query MUST use an ingestion
   clock whose provenance is exact. Legacy observations whose ingestion time was never recorded keep
   `observed_at = NULL` with explicit provenance.
-- A listening period (a calendar day, week or month of a watchlist) places each observation by its
-  publication time when a plausible one exists, and otherwise by its ingestion date, flagged as
-  such. The basis MUST be stated with every figure; publication time MUST NOT silently substitute
-  for ingestion time anywhere else.
+- A listening period (a calendar day, week or month of a watchlist) MUST offer two labelled
+  readings. The seen axis MUST place each snapshot by its exact ingestion clock: the completed
+  channel probe's `completed_at` in that watchlist run. Each seen indicator MUST be an average
+  per successful, topic-matching snapshot held in the period, regardless of publication date.
+  Coverage MUST use the user's cadence in effect at the period's start; missing cadence and
+  unjudged snapshots MUST remain explicit, never measured zero. Ignis MUST compare a channel
+  only when neither period misses more than 20 percent of its called-for snapshots.
+- The created view MUST keep Spec 016's placement by plausible publication time, falling back
+  to the first ingestion date and flagged as such, and MUST preserve its daily coverage,
+  counting window and judged-day rules. Creation dates MAY enrich seen analysis but MUST NOT
+  decide seen coverage or collection cadence. Every listening figure MUST state `seen` or
+  `created`; values MUST NOT be summed across axes or channels. Publication time MUST NOT
+  silently substitute for ingestion time anywhere else.
 
 ### IV. Deterministic Report Builders
 
@@ -195,31 +190,6 @@ does not authorize claims of universal geographic or industry coverage.
 
 ## Governance and Spec-Driven Development
 
-### Proposed Spec 018 amendment (2.3.0; pending owner ratification)
-
-**Principle I: insert after the host-routine clause:**
-
-- A watchlist MAY record the user's stated listening goal, comparison period and research
-  cadence, with an effective history. Recording cadence is data: Ignis MUST NOT infer it or
-  acquire a scheduler, worker or recurring collection loop. The host MAY schedule that cadence
-  only after the user explicitly requests and confirms the routine under the authority above.
-
-**Principle III: replace the listening-period clause with:**
-
-- A listening period (a calendar day, week or month of a watchlist) MUST offer two labelled
-  readings. The seen axis MUST place each snapshot by its exact ingestion clock: the completed
-  channel probe's `completed_at` in that watchlist run. Each seen indicator MUST be an average
-  per successful, topic-matching snapshot held in the period, regardless of publication date.
-  Coverage MUST use the user's cadence in effect at the period's start; missing cadence and
-  unjudged snapshots MUST remain explicit, never measured zero. Ignis MUST compare a channel
-  only when neither period misses more than 20 percent of its called-for snapshots.
-- The created view MUST keep Spec 016's placement by plausible publication time, falling back
-  to the first ingestion date and flagged as such, and MUST preserve its daily coverage,
-  counting window and judged-day rules. Creation dates MAY enrich seen analysis but MUST NOT
-  decide seen coverage or collection cadence. Every listening figure MUST state `seen` or
-  `created`; values MUST NOT be summed across axes or channels. Publication time MUST NOT
-  silently substitute for ingestion time anywhere else.
-
 Large features use the Spec Kit artifact chain:
 
 1. `/speckit-specify` — requirements and acceptance scenarios.
@@ -238,5 +208,5 @@ pays the cost, its expiry condition, and the owner approval that permits it. Tes
 labels, and remembered command output are not evidence by themselves: run the command against the
 surface that owns the claim, read the output, and record what was not checked.
 
-**Version**: 2.2.1 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-10-22
+**Version**: 2.3.0 | **Ratified**: 2026-08-31 | **Last Amended**: 2026-10-26
 
