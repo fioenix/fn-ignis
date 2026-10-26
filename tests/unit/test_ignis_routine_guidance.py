@@ -165,3 +165,29 @@ def test_repository_skill_mirrors_the_packaged_guide():
 
 def test_the_guide_ships_in_the_package_tree():
     assert (REPOSITORY / "src/ignis/interfaces/mcp/guides/ignis_routine.md").is_file()
+
+
+def test_setup_reads_the_recorded_plan_and_collects_missing_user_choices_before_saving():
+    before = ' '.join(_section(_packaged_guide(), 'Before creating').split())
+    assert 'listening_plan' in before and 'get_watchlist' in before
+    for rule in ('goal', 'period', 'cadence', 'set_watchlist_listening_plan', 'after the person states',
+                 'label it as a suggestion'):
+        assert rule in before, f'Setup must cover: {rule}'
+    assert before.index('get_watchlist') < before.index('set_watchlist_listening_plan')
+
+
+def test_cadence_maps_to_distinct_days_and_shows_requests_per_period_before_confirmation():
+    before = ' '.join(_section(_packaged_guide(), 'Before creating').split())
+    for rule in ('N distinct weekdays', 'N distinct days of the month', '1..28', 'requests per period',
+                 'faster than daily', 'wait for the person to confirm'):
+        assert rule in before, f'The recorded cadence needs: {rule}'
+    assert 'coverage is judged per day' not in before
+    create = _section(_packaged_guide(), 'Create')
+    assert '0 7 * * 1,3,5' in create and '0 7 1,8,15,22 * *' in create
+    assert 'confirmed cadence' in create
+
+
+def test_cadence_changes_need_reconfirmation_and_do_not_mutate_the_routine_inside_a_firing():
+    change = _section(_packaged_guide(), 'Change, pause and remove')
+    assert 'set_watchlist_listening_plan' in change and 'confirm' in change
+    assert 'Do not create or revise' in _template(_packaged_guide())
