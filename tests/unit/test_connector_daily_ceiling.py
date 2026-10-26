@@ -314,3 +314,62 @@ async def test_no_retry_runs_past_the_daily_ceiling(store):
     assert "áo mưa: no search payload was captured" in outcome.note
     assert "retry skipped" in outcome.note
     assert _counts(store) == {"threads": 2}
+
+
+class _RetryCrashPlugin(_FlakyPlugin):
+    """The retry's browser navigation fails, as collect_json_payloads can raise."""
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20,
+                             attestation=None):
+        if self.search_calls:
+            self.search_calls.append(list(keywords))
+            raise RuntimeError("browser navigation failed")
+        return await super().search_signals(keywords, geo, timeframe, limit, attestation)
+
+
+@pytest.mark.asyncio
+async def test_a_failing_retry_keeps_the_first_pass(store):
+    """PR #84 review: a retry error must not discard the observations the first pass collected."""
+    registry = ConnectorPluginRegistry(repository=SqliteTrendRepository(str(store)))
+    threads = _RetryCrashPlugin(PlatformType.THREADS, flaky={"áo mưa"})
+    registry.register(threads)
+
+    result = await registry.search_with_outcomes(keywords=["áo khoác", "áo mưa"])
+
+    outcome = _outcome(result, "threads")
+    assert outcome.status == ChannelHealthStatus.HEALTHY and outcome.signals_collected == 1
+    assert outcome.queried_keywords == ("áo khoác",)
+    assert "áo mưa: no search payload was captured" in outcome.note
+    assert "retry failed" in outcome.note
+
+
+class _SharedPostPlugin(_FlakyPlugin):
+    """Both keywords return the same post; the first pass only captures it for one of them."""
+
+    async def search_signals(self, keywords, geo=GeoCode.VN, timeframe=Timeframe.LAST_24H, limit=20,
+                             attestation=None):
+        self.search_calls.append(list(keywords))
+        signals = []
+        for keyword in keywords:
+            if keyword in self.flaky:
+                self.flaky.discard(keyword)
+                attestation.failed(keyword, "no search payload was captured")
+                continue
+            attestation.executed(keyword)
+            signals.append(TrendSignal(platform=self._platform, raw_title="shared post", metric_value=1.0,
+                                       geo_code=geo, source_url="https://example.test/shared",
+                                       metadata={"keyword": keyword, "matched_keywords": [keyword]}))
+        return signals
+
+
+@pytest.mark.asyncio
+async def test_a_recovered_keyword_is_bound_to_a_post_the_first_pass_kept():
+    """PR #84 review: dropping the retry's duplicate must not drop its query binding."""
+    registry = ConnectorPluginRegistry(repository=None)
+    threads = _SharedPostPlugin(PlatformType.THREADS, flaky={"áo mưa"})
+    registry.register(threads)
+
+    result = await registry.search_with_outcomes(keywords=["áo khoác", "áo mưa"])
+
+    [signal] = result.signals
+    assert signal.metadata["matched_keywords"] == ["áo khoác", "áo mưa"]

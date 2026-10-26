@@ -1046,7 +1046,14 @@ class ConnectorPluginRegistry:
                 attestation.failures.append(f"retry skipped: {ceiling_note}")
                 return []
         retry = SearchAttestation()
-        retried = await plugin.search_signals(**{**kwargs, "keywords": failed, "attestation": retry})
+        try:
+            retried = await plugin.search_signals(**{**kwargs, "keywords": failed, "attestation": retry})
+        except FollowUpExecutionBoundaryError:
+            raise
+        except Exception as error:
+            # The retry is optional: its failure leaves the first pass and its failures standing.
+            attestation.failures.append(f"retry failed: {sanitize_pii_text(str(error))[:120]}")
+            return []
         recovered = [k for k in failed if k in retry.queried]
         for keyword in recovered:
             attestation.executed(keyword)
@@ -1056,8 +1063,19 @@ class ConnectorPluginRegistry:
             attestation.dropped_off_keyword[keyword] = attestation.dropped_off_keyword.get(keyword, 0) + count
         if attestation.window is None and retry.window is not None:
             attestation.applied_window(retry.window)
-        seen = {s.source_url for s in signals if s.source_url}
-        return [s for s in retried if not s.source_url or s.source_url not in seen]
+        # A recovered keyword may find a post the first pass kept: bind the query to that post.
+        kept = {s.source_url: s for s in signals if s.source_url}
+        fresh = []
+        for signal in retried:
+            first = kept.get(signal.source_url) if signal.source_url else None
+            if first is None:
+                fresh.append(signal)
+                continue
+            queries = first.metadata.setdefault("matched_keywords", [])
+            for keyword in (signal.metadata or {}).get("matched_keywords", ()):
+                if keyword not in queries:
+                    queries.append(keyword)
+        return fresh
 
     async def fetch_suggestions_across_all(
         self,
