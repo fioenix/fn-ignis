@@ -10,11 +10,13 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from ignis.domain.author_identity import scrub_handle_links
 from ignis.domain.listening_period import (
+    LISTENING_TZ,
+    MAX_MISSING_SHARE,
     Period,
     comparable,
     counted_value,
@@ -22,6 +24,7 @@ from ignis.domain.listening_period import (
     missing_days,
     place_observation,
 )
+from ignis.domain.watchlist import ListeningPlan, plan_in_effect
 
 # R3: only a collection that measured something, or measured a zero, completes a channel-day.
 COMPLETING_STATUSES = frozenset({"HEALTHY", "EMPTY_NO_DATA"})
@@ -89,6 +92,13 @@ class TermsPolicy:
     rising_min_count: int = 2
     rising_min_growth: float = 0.5
     noise: frozenset = field(default_factory=frozenset)
+
+
+@dataclass(frozen=True)
+class SeenSnapshot(PeriodCoverage):
+    """One run/channel outcome at its exact completion time, with only that run's items."""
+
+    items: Tuple[PeriodItem, ...] = ()
 
 
 def _number(value: Any) -> Optional[float]:
@@ -159,12 +169,12 @@ class _Merged:
     first_seen: Optional[datetime] = None
 
 
-def _merge(items: Iterable[PeriodItem]) -> List[_Merged]:
+def _merge(items: Iterable[PeriodItem], *, dated_google: bool = True) -> List[_Merged]:
     """One entry per source, so two runs that saw the same post count it once (SC-001)."""
     merged: Dict[Tuple[str, str, Optional[datetime]], _Merged] = {}
     for item in items:
         # A Google Trends source is a search term; each appearance is its own dated measurement.
-        key = (item.channel, item.source_id, item.published_at if item.channel == "google" else None)
+        key = (item.channel, item.source_id, item.published_at if dated_google and item.channel == "google" else None)
         entry = merged.get(key)
         if entry is None:
             entry = merged[key] = _Merged(item.source_id, item.channel, item.published_at, item.title,
@@ -234,7 +244,8 @@ def _terms(entry: _Merged, keywords: frozenset, noise: frozenset) -> set:
 
 
 def _term_lists(current: Sequence[Tuple[_Merged, str]], previous: Sequence[_Merged],
-                keywords: frozenset, policy: TermsPolicy) -> Tuple[List[dict], List[dict]]:
+                keywords: frozenset, policy: TermsPolicy, *,
+                current_snapshots: int = 1, previous_snapshots: int = 1) -> Tuple[List[dict], List[dict]]:
     now_counts: Dict[str, int] = defaultdict(int)
     basis: Dict[str, Dict[str, int]] = defaultdict(lambda: {"published": 0, "collection_date": 0})
     for entry, entry_basis in current:
@@ -247,11 +258,14 @@ def _term_lists(current: Sequence[Tuple[_Merged, str]], previous: Sequence[_Merg
             before[term] += 1
     new, rising = [], []
     for term, count in now_counts.items():
-        row = {"term": term, "current_items": count, "previous_items": before[term], "basis": basis[term]}
+        count = count / current_snapshots
+        prior = before[term] / previous_snapshots
+        row = {"term": term, "current_items": _plain(count), "previous_items": _plain(prior),
+               "basis": {key: _plain(value / current_snapshots) for key, value in basis[term].items()}}
         if not before[term]:
             new.append(row)
-        elif (count - before[term] >= policy.rising_min_count
-              and count >= before[term] * (1 + policy.rising_min_growth)):
+        elif (count - prior >= policy.rising_min_count
+              and count >= prior * (1 + policy.rising_min_growth)):
             rising.append(row)
     order = lambda row: (-row["current_items"], row["term"])  # noqa: E731
     return sorted(rising, key=order)[:MAX_TERMS], sorted(new, key=order)[:MAX_TERMS]
@@ -368,6 +382,7 @@ def compare_periods(
                 for which, span in (("current", period), ("previous", previous))
             }
             cell: Dict[str, Any] = {
+                "axis": "created",
                 "channel": channel,
                 "measured_on_sample": channel in SAMPLED_CHANNELS,
                 "missing_days": {which: [d.isoformat() for d in gap] for which, gap in gaps.items()},
@@ -404,3 +419,113 @@ def compare_periods(
         },
         "topics": topic_rows,
     }
+
+
+def period_listening_plans(plans: Sequence[ListeningPlan], period: Period) -> Dict[str, Optional[ListeningPlan]]:
+    """Read the history at each period's local midnight, never at display time."""
+    return {which: plan_in_effect(plans, datetime.combine(span.start, time.min, LISTENING_TZ))
+            for which, span in (("current", period), ("previous", period.previous()))}
+
+
+def compare_seen_periods(
+    *, topics: Sequence[Mapping[str, Any]], snapshots: Sequence[SeenSnapshot],
+    plans: Sequence[ListeningPlan], period: Period, policy: TermsPolicy,
+    first_snapshots: Optional[Mapping[Tuple[str, str], datetime]] = None,
+) -> List[List[Dict[str, Any]]]:
+    """Per-topic channel cells; successful run/channel snapshots are the denominator.
+
+    Sources deduplicate within a snapshot, never across snapshots. Missing counters stay unknown;
+    an empty, judged snapshot measures zero. No created-view counting window applies here.
+    """
+    # Supplied by the use case across the entire watchlist history, including older runs.
+    # Pure callers can instead supply the whole snapshot history, including irrelevant items.
+    first = dict(first_snapshots or {})
+    for snapshot in snapshots:
+        if snapshot.status not in COMPLETING_STATUSES:
+            continue
+        for item in snapshot.items:
+            key = (snapshot.channel, item.source_id)
+            first[key] = min(first.get(key, snapshot.completed_at), snapshot.completed_at)
+    spans = {"current": period, "previous": period.previous()}
+    effective = period_listening_plans(plans, period)
+    called_for = {which: plan.snapshots_per_period if plan and plan.period_kind == period.kind.value else None
+                  for which, plan in effective.items()}
+    channels = sorted({s.channel for s in snapshots},
+                      key=lambda c: (CHANNEL_ORDER.index(c) if c in CHANNEL_ORDER else len(CHANNEL_ORDER), c))
+    rows = []
+    for topic in topics:
+        keywords = frozenset(k.casefold() for k in topic.get("keywords", ()))
+        queries = keywords | {str(b.get("declared_name", "")).casefold()
+                              for b in topic.get("brands", ()) or ()} - {""}
+        cells = []
+        for channel in channels:
+            held = {which: [s for s in snapshots if s.channel == channel and s.status in COMPLETING_STATUSES
+                            and span.contains(local_date(s.completed_at))
+                            and {k.casefold() for k in s.queried_keywords} & queries]
+                    for which, span in spans.items()}
+            counts = {which: len(found) for which, found in held.items()}
+            cell = {"axis": "seen", "channel": channel, "measured_on_sample": channel in SAMPLED_CHANNELS,
+                    "snapshots": counts, "snapshots_called_for": dict(called_for)}
+            reasons = []
+            if any(value is None for value in called_for.values()):
+                reasons.append("seen_period_without_cadence")
+            if any(expected is not None and expected - counts[which] > MAX_MISSING_SHARE * expected
+                   for which, expected in called_for.items()):
+                reasons.append("seen_period_missing_snapshots")
+            if any(not s.judged for found in held.values() for s in found):
+                reasons.append("seen_period_unjudged_snapshots")
+            if reasons:
+                cells.append({**cell, "status": "not_comparable", "reasons": reasons})
+                continue
+            # Keep one merged entry per source in each snapshot, using only its own qualified
+            # observations and query bindings. Repeated appearances still count in each snapshot.
+            entries = {which: [(s, e) for s in found for e in _merge(s.items, dated_google=False)
+                               if e.channel == channel and _belongs(e, queries, len(topics) == 1)]
+                       for which, found in held.items()}
+            measurements = {which: _seen_values(entries[which], span, counts[which], first)
+                            for which, span in spans.items()}
+            indicators = []
+            for kind, unit in (("relevant_shown", "items per snapshot"),
+                               ("views_visible", "views per snapshot"),
+                               ("interactions_visible", "interactions per snapshot"),
+                               ("first_seen", "items per snapshot"),
+                               ("created_in_period", "items per snapshot")):
+                current, uncounted_now = measurements["current"][kind]
+                previous, uncounted_before = measurements["previous"][kind]
+                indicators.append({"kind": kind, "unit": unit, "current": _plain(current),
+                                   "previous": _plain(previous), "change": _change(current, previous),
+                                   "uncounted_items": {"current": uncounted_now, "previous": uncounted_before}})
+            rising, new = _term_lists([(e, "collection_date") for _, e in entries["current"]],
+                                      [e for _, e in entries["previous"]], keywords, policy,
+                                      current_snapshots=counts["current"], previous_snapshots=counts["previous"])
+            cells.append({**cell, "status": "comparable", "indicators": indicators,
+                          "rising_terms": rising, "new_terms": new})
+        rows.append(cells)
+    return rows
+
+
+def _seen_values(entries: Sequence[Tuple[SeenSnapshot, _Merged]], period: Period,
+                 snapshots: int, first_snapshots: Mapping[Tuple[str, str], datetime],
+                 ) -> Dict[str, Tuple[Optional[float], int]]:
+    """Average sums by snapshots held; report absent counters rather than inventing them."""
+    values = {"relevant_shown": (len(entries) / snapshots, 0)}
+    first_seen = created = 0
+    counters: Dict[str, List[float]] = {"views_visible": [], "interactions_visible": []}
+    for snapshot, entry in entries:
+        _, metric, metadata = max(entry.observations, key=lambda obs: obs[0])
+        if first_snapshots.get((entry.channel, entry.source_id)) == snapshot.completed_at:
+            first_seen += 1
+        placed = place_observation(entry.published_at, snapshot.completed_at)
+        if placed is not None and placed[1] == "published" and period.contains(placed[0]):
+            created += 1
+        visible = channel_values(entry.channel, metric, metadata)
+        for kind in counters:
+            value = visible.get(kind.removesuffix("_visible"))
+            if value is not None:
+                counters[kind].append(value)
+    values["first_seen"] = (first_seen / snapshots, 0)
+    values["created_in_period"] = (created / snapshots, 0)
+    for kind, found in counters.items():
+        value = sum(found) / snapshots if found or not entries else None
+        values[kind] = (value, len(entries) - len(found))
+    return values

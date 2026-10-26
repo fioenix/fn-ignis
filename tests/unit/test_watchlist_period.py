@@ -192,7 +192,7 @@ def test_no_value_is_summed_across_channels():
     (topic,) = snapshot["topics"]
     assert set(topic) == {"name", "channels", "items"}
     for channel_cell in topic["channels"]:
-        assert set(channel_cell) <= {"channel", "status", "measured_on_sample", "indicators", "basis",
+        assert set(channel_cell) <= {"axis", "channel", "status", "measured_on_sample", "indicators", "basis",
                                      "rising_terms", "new_terms", "missing_days", "reasons"}
 
 
@@ -425,3 +425,31 @@ async def test_optional_period_uses_the_plan_at_now_and_explicit_kind_overrides_
     assert default['periods']['current']['start'] == '2026-10-19'
     assert default['periods']['previous']['start'] == '2026-10-12'
     assert (await use_case.execute(str(target), 'month'))['period_kind'] == 'month'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,start", [("day", "2026-10-19"), ("week", "2026-10-19"), ("month", "2026-09-01")])
+async def test_created_view_matches_the_frozen_pre_feature_response(kind, start):
+    """SC-004: compare the entire old response after removing only the approved additions."""
+    import json
+    import runpy
+    from pathlib import Path
+
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+
+    directory = Path(__file__).parents[1] / "fixtures/watchlist_period_created_baseline"
+    fixture = runpy.run_path(str(directory / "capture.py"))
+    store = fixture["FixtureStore"]()
+    # The pre-Part-A capture adapter has no listening-plan storage.
+    async def no_plans(_target):
+        return []
+    store.list_listening_plans = no_plans
+    result = await GetWatchlistPeriodSnapshotUseCase(store, store, lambda: NOW).execute(
+        str(fixture["WATCHLIST_ID"]), kind, start)
+    assert result.pop("listening_plan") == {"current": None, "previous": None}
+    for topic in result["topics"]:
+        for seen in topic.pop("seen"):
+            assert seen["axis"] == "seen"
+        for created in topic["channels"]:
+            assert created.pop("axis") == "created"
+    assert result == json.loads((directory / f"{kind}.json").read_text())
