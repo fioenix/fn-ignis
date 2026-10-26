@@ -37,7 +37,7 @@ depends on the plan storage built for US1.
 ## Phase 1: Setup
 
 - [ ] T001 Rebase `claude/goal-driven-period` on `main` and record a green baseline of
-  `.venv/bin/pytest tests/unit/test_watchlist_period.py tests/unit/test_watchlist_definition.py tests/unit/test_watchlist_mcp.py tests/integration/test_watchlist_repository.py tests/integration/test_watchlist_period_storage.py`
+  `.venv/bin/pytest tests/unit/test_watchlist_period.py tests/unit/test_watchlist_definition.py tests/integration/test_watchlist_mcp.py tests/integration/test_watchlist_repository.py tests/integration/test_watchlist_period_storage.py`
 - [ ] T002 Capture the pre-feature created-view output for SC-004: run
   `GetWatchlistPeriodSnapshotUseCase` on the fixtures used by `tests/unit/test_watchlist_period.py`
   for one day, one week and one month view and store the JSON responses under
@@ -90,11 +90,11 @@ defaults to that period.
 **Independent Test**: record goal "Track weekly demand for sun-protection jackets", period week,
 3 snapshots; the period view without `period_kind` compares the last two complete weeks.
 
-- [ ] T010 [P] [US1] Write failing tests in `tests/unit/test_watchlist_mcp.py` for
+- [ ] T010 [P] [US1] Write failing tests in `tests/integration/test_watchlist_mcp.py` for
   `set_watchlist_listening_plan` per contracts/mcp-surface.md: `SAVED`, `UNCHANGED` on an
   identical second call, `INVALID` with `INVALID_LISTENING_PLAN` for each refusal in quickstart
   step 2 and nothing written, `NOT_FOUND`; the call starts no run
-- [ ] T011 [P] [US1] Write failing tests in `tests/unit/test_watchlist_mcp.py` for
+- [ ] T011 [P] [US1] Write failing tests in `tests/integration/test_watchlist_mcp.py` for
   `get_watchlist` returning `listening_plans` (oldest first) and `listening_plan` (in effect or
   null), with every existing field unchanged
 - [ ] T012 [P] [US1] Write failing tests in `tests/unit/test_watchlist_period.py`: without
