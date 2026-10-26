@@ -57,6 +57,7 @@ no write path outside the listening-plan table.
 
 Owner decision, 26/10/2026: OG-1, OG-2 and OG-3 approved. OG-3 approves the amendment's direction;
 the owner reviews its exact wording in the Part B pull request before that pull request merges.
+The owner approved the exact wording on 26/10/2026; the constitution is 2.3.0.
 
 The feature lands in two pull requests: Part A (US1, US4: listening plan storage, the new tool,
 the optional period kind that US1's acceptance needs, the routine guide) needs no amendment;

@@ -151,7 +151,7 @@ effect for each period.
 week view's seen cells count every relevant item of each snapshot, including items published
 months earlier, divided by the snapshots held (SC-001).
 
-- [ ] T020 [P] [US2] Write failing pure tests in `tests/unit/test_watchlist_seen_axis.py`:
+- [x] T020 [P] [US2] Write failing pure tests in `tests/unit/test_watchlist_seen_axis.py`:
   snapshots showing 40 and 30 relevant items average 35 (acceptance 1); an item shown on 25/10 and
   26/10 counts in both snapshots and is first seen only in the first (acceptance 2); a channel
   missing more than 20 percent of the snapshots called for is `not_comparable` with `snapshots`
@@ -161,16 +161,16 @@ months earlier, divided by the snapshots held (SC-001).
   plan in effect yields `seen_period_without_cadence`; each period uses the plan in effect at its
   start; `created_in_period` counts shown items published in the period (FR-007); every figure
   carries `axis: "seen"`
-- [ ] T021 [US2] Implement the seen-axis computation in `src/ignis/domain/watchlist_period.py`
+- [x] T021 [US2] Implement the seen-axis computation in `src/ignis/domain/watchlist_period.py`
   per data-model.md and research R2 to R5, reusing `MAX_MISSING_SHARE`, `channel_values` and
   `_term_lists` (makes T020 pass)
-- [ ] T022 [US2] In `src/ignis/application/use_cases/watchlist_period.py`, build snapshots from
+- [x] T022 [US2] In `src/ignis/application/use_cases/watchlist_period.py`, build snapshots from
   `get_latest_completed_probe_outcomes` per run and channel timed at `completed_at`, look up the
   plan in effect for each period, attach `seen` cells to each topic and `listening_plan` for both
   periods to the response
-- [ ] T023 [US2] Extend `tests/integration/test_watchlist_period_storage.py` so the seen axis
+- [x] T023 [US2] Extend `tests/integration/test_watchlist_period_storage.py` so the seen axis
   reads the same on SQLite and PostgreSQL
-- [ ] T024 [US2] Update `src/ignis/interfaces/mcp/guides/ignis_listen.md` and its mirror
+- [x] T024 [US2] Update `src/ignis/interfaces/mcp/guides/ignis_listen.md` and its mirror
   `.agents/skills/ignis-listen/SKILL.md`: seen axis first, created view second, each labelled;
   never sum across channels or axes; extend the guide's existing test if one exists
 
@@ -182,12 +182,12 @@ months earlier, divided by the snapshots held (SC-001).
 
 **Independent Test**: created-axis figures equal the T002 baseline field for field.
 
-- [ ] T025 [P] [US3] Write failing tests in `tests/unit/test_watchlist_period.py`: the created
+- [x] T025 [P] [US3] Write failing tests in `tests/unit/test_watchlist_period.py`: the created
   cells equal the T002 baseline with only `axis: "created"` added (SC-004, acceptance 1); every
   figure in a period response states its axis (SC-003, acceptance 2)
-- [ ] T026 [US3] Add `axis: "created"` to each existing channel cell in
+- [x] T026 [US3] Add `axis: "created"` to each existing channel cell in
   `src/ignis/domain/watchlist_period.py`, changing nothing else (makes T025 pass)
-- [ ] T027 [US3] Draft the Principles I and III amendment in `.specify/memory/constitution.md`
+- [x] T027 [US3] Draft the Principles I and III amendment in `.specify/memory/constitution.md`
   per FR-013 (seen axis by exact ingestion clock beside the created view by publication time,
   each labelled; a watchlist may record the user's cadence without Ignis gaining a scheduler),
   with the version bump and Sync Impact Report the constitution's governance section requires;
@@ -197,12 +197,12 @@ months earlier, divided by the snapshots held (SC-001).
 
 ## Phase 7: Polish and acceptance
 
-- [ ] T028 Run `.venv/bin/pytest tests/unit/test_repo_conventions.py` and `ruff check` on the
+- [x] T028 Run `.venv/bin/pytest tests/unit/test_repo_conventions.py` and `ruff check` on the
   changed files
-- [ ] T029 Run quickstart step 6 on SQLite and PostgreSQL:
+- [x] T029 Run quickstart step 6 on SQLite and PostgreSQL:
   `.venv/bin/pytest tests/unit/test_watchlist_listening_plan.py tests/unit/test_watchlist_seen_axis.py tests/integration/test_watchlist_listening_plan_storage.py`
   plus every test file touched above
-- [ ] T030 Run quickstart steps 1 to 5 on a copy of the caller store with the clock frozen after
+- [x] T030 Run quickstart steps 1 to 5 on a copy of the caller store with the clock frozen after
   a complete week, and record the outcome in `.handoff/` (not `docs/`)
 
 ---
@@ -234,3 +234,31 @@ months earlier, divided by the snapshots held (SC-001).
 
 - T001: existing branch `claude/goal-period-part-a` contains `ba2e064`; no rebase needed (owner instruction). Baseline: 103 passed, 25 skipped; PostgreSQL DSN absent.
 - T002: captured fixed-clock day/week/month use-case responses before source changes; fixture adapter and JSON live in `tests/fixtures/watchlist_period_created_baseline/`.
+
+
+## Part B execution evidence
+
+- Scope: T020–T029 in `claude/goal-period-part-b`; no commits, MCP signature changes,
+  external-store operations, or credentials. T030 belongs to the coordinator and is untouched.
+- Workflow source: owner-supplied exact `coding-workflow.md` copy in the coordinator scratchpad;
+  Spec Kit `speckit-implement`. Prerequisites resolved with `SPECIFY_FEATURE_DIRECTORY` pointing
+  to this feature. Requirements checklist: 16/16 checked; no extension hooks configured.
+- T020–T023: pure seen-axis tests and dual-backend storage tests authored; SQLite verified.
+  PostgreSQL cases are collected but skipped locally without `IGNIS_TEST_POSTGRES_DSN`.
+- T024 is complete within the owner's local scope exception: only the packaged guide and guide
+  tests changed. The coordinator must mirror the guide into `.agents/skills/ignis-listen/SKILL.md`;
+  `test_repository_skill_mirrors_the_packaged_guide` remains an expected failure until then.
+- T025–T026: frozen pre-feature day/week/month JSON is unchanged. Full response equality holds
+  after removing only `listening_plan`, topic `seen`, and each created cell's `axis` label.
+- T027: proposed Principles I/III wording and Sync Impact Report are in
+  `.specify/memory/constitution.md`, proposing 2.3.0. Ratified 2.2.1 remains effective pending
+  owner review of the exact wording in the Part B PR.
+- T028: changed Python files pass Ruff; repository convention checks pass.
+- T029 remains unchecked: local targeted verification is recorded in
+  `.handoff/spec018-part-b-verification.md`; PostgreSQL verification belongs to the coordinator.
+- Implementation refinement to research R3: seen first sightings use earliest successful channel
+  completion across all watchlist runs, rather than reusing the created view's capture-time
+  first-sighting map. Tests cover reused observations, overlapping runs and historical channel
+  completions across run-wide cutoffs. This preserves both research R2 and created-view parity.
+- Clarifications record the conservative cadence-period mismatch behavior; no cadence conversion
+  is invented when an explicit view overrides the plan's period kind.
