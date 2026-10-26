@@ -7,6 +7,7 @@ the mission's declared accounts (Spec 015). Collection then goes through the exi
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional
 from uuid import UUID
 
@@ -18,6 +19,8 @@ from ignis.domain.exceptions import IgnisDomainException
 from ignis.domain.research_workspace import MissionManifest, MissionOutputType
 from ignis.domain.watchlist import (
     Watchlist,
+    ListeningPlan,
+    plan_in_effect,
     WatchlistConflict,
     WatchlistDefinitionError,
     parse_watchlist_definition,
@@ -132,7 +135,36 @@ class GetWatchlistUseCase:
         watchlist = await self._repo.get_watchlist(target)
         if watchlist is None:
             return _refused("NOT_FOUND", "NOT_FOUND", "No watchlist has this id.", watchlist_id=str(target))
-        return {"status": "FOUND", **watchlist_payload(watchlist)}
+        plans = await self._repo.list_listening_plans(target)
+        return {"status": "FOUND", **watchlist_payload(watchlist), **listening_plan_payload(plans)}
+
+
+def listening_plan_payload(plans) -> Dict[str, Any]:
+    current = plan_in_effect(plans, datetime.now(timezone.utc))
+    return {"listening_plans": [plan.to_payload() for plan in plans],
+            "listening_plan": current.to_payload() if current else None}
+
+
+class SetWatchlistListeningPlanUseCase:
+    def __init__(self, repository: ITrendRepository):
+        self._repo = repository
+
+    async def execute(self, watchlist_id: Any, goal: Any, period_kind: Any,
+                      snapshots_per_period: Any) -> Dict[str, Any]:
+        target = _uuid(watchlist_id)
+        if target is None:
+            return _refused("INVALID", "INVALID_REQUEST", "watchlist_id must be a UUID.")
+        try:
+            # Validate before reaching the store; the store also guards direct callers.
+            plan = ListeningPlan(datetime.now(timezone.utc), goal, period_kind, snapshots_per_period)
+            plans, added = await self._repo.save_listening_plan(
+                target, plan.goal, plan.period_kind, plan.snapshots_per_period)
+        except WatchlistDefinitionError as exc:
+            return _refused("INVALID", exc.code, str(exc), watchlist_id=str(target))
+        except WatchlistConflict as exc:
+            return _refused("NOT_FOUND", exc.code, str(exc), watchlist_id=str(target))
+        return {"status": "SAVED" if added else "UNCHANGED", "watchlist_id": str(target),
+                **listening_plan_payload(plans)}
 
 
 class StartWatchlistRunUseCase:

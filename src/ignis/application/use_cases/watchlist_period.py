@@ -20,6 +20,7 @@ from ignis.application.use_cases.watchlists import _refused, _uuid
 from ignis.domain.listening_period import PeriodKind, latest_complete_period, local_date, period_of
 from ignis.domain.research_workspace import QualificationRelation, compute_frame_fingerprint
 from ignis.domain.source_identity import identity_free_source_url
+from ignis.domain.watchlist import plan_in_effect
 from ignis.domain.watchlist_period import PeriodCoverage, PeriodItem, TermsPolicy, compare_periods
 from ignis.infrastructure.security.pii_sanitizer import render_mention_tokens, sanitize_pii_text
 
@@ -61,15 +62,21 @@ class GetWatchlistPeriodSnapshotUseCase:
         self._store = store
         self._clock = clock
 
-    async def execute(self, watchlist_id: Any, period_kind: Any, period_start: Any = None) -> Dict[str, Any]:
+    async def execute(self, watchlist_id: Any, period_kind: Any = None, period_start: Any = None) -> Dict[str, Any]:
         target = _uuid(watchlist_id)
         if target is None:
             return _refused("INVALID", "INVALID_REQUEST", "watchlist_id must be a UUID.")
+        now = self._clock()
+        if period_kind is None:
+            current_plan = plan_in_effect(await self._repo.list_listening_plans(target), now)
+            if current_plan is None:
+                return _refused("INVALID", "PERIOD_KIND_REQUIRED",
+                                "State period_kind or record a listening plan first.")
+            period_kind = current_plan.period_kind
         try:
             kind = PeriodKind(str(period_kind).strip().lower())
         except ValueError:
             return _refused("INVALID", "INVALID_PERIOD_KIND", "period_kind is day, week or month.")
-        now = self._clock()
         if period_start is None:
             period = latest_complete_period(kind, now)
         else:

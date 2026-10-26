@@ -15,6 +15,7 @@ from tests.unit.test_caller_root_startup_folder import _consumer
 @pytest.mark.parametrize('name,arguments', [
     ('save_watchlist', {'workspace_id': 'w', 'name': 'n', 'definition': {}}),
     ('save_watchlist', {'watchlist_id': 'x', 'name': 'n', 'definition': {}}),
+    ('set_watchlist_listening_plan', {'watchlist_id': 'x', 'goal': 'Track.', 'period_kind': 'week', 'snapshots_per_period': 3}),
     ('get_watchlist', {'watchlist_id': 'x'}),
     ('start_watchlist_run', {'watchlist_id': 'x', 'allowed_resources': [], 'authority_boundary': {}}),
     ('get_watchlist_period_snapshot', {'watchlist_id': 'x', 'period_kind': 'week'}),

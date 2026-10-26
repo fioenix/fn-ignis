@@ -1,0 +1,186 @@
+{
+  "watchlist_id": "00000000-0000-0000-0000-000000000018",
+  "name": "Baseline",
+  "period_kind": "week",
+  "status": "OK",
+  "periods": {
+    "current": {
+      "kind": "week",
+      "start": "2026-10-19",
+      "end": "2026-10-25",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "versions": [
+        1
+      ]
+    },
+    "previous": {
+      "kind": "week",
+      "start": "2026-10-12",
+      "end": "2026-10-18",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "versions": []
+    }
+  },
+  "topics": [
+    {
+      "name": "Matcha drinks",
+      "channels": [
+        {
+          "channel": "youtube",
+          "measured_on_sample": false,
+          "missing_days": {
+            "current": [],
+            "previous": []
+          },
+          "status": "comparable",
+          "indicators": [
+            {
+              "kind": "new_uploads",
+              "unit": "items",
+              "current": 2,
+              "previous": 1,
+              "change": {
+                "absolute": 1,
+                "relative": 1.0
+              },
+              "uncounted_items": {
+                "current": 0,
+                "previous": 0
+              }
+            }
+          ],
+          "basis": {
+            "current": {
+              "published": 2,
+              "collection_date": 0
+            },
+            "previous": {
+              "published": 1,
+              "collection_date": 0
+            }
+          },
+          "rising_terms": [],
+          "new_terms": []
+        },
+        {
+          "channel": "tiktok",
+          "measured_on_sample": true,
+          "missing_days": {
+            "current": [],
+            "previous": []
+          },
+          "status": "comparable",
+          "indicators": [
+            {
+              "kind": "views",
+              "unit": "plays",
+              "current": 670,
+              "previous": 400,
+              "change": {
+                "absolute": 270,
+                "relative": 0.675
+              },
+              "uncounted_items": {
+                "current": 1,
+                "previous": 0
+              }
+            },
+            {
+              "kind": "interactions",
+              "unit": "likes + comments + shares",
+              "current": 40,
+              "previous": 12,
+              "change": {
+                "absolute": 28,
+                "relative": 2.3333
+              },
+              "uncounted_items": {
+                "current": 0,
+                "previous": 0
+              }
+            }
+          ],
+          "basis": {
+            "current": {
+              "published": 2,
+              "collection_date": 1
+            },
+            "previous": {
+              "published": 1,
+              "collection_date": 0
+            }
+          },
+          "rising_terms": [],
+          "new_terms": [
+            {
+              "term": "latte trà",
+              "current_items": 1,
+              "previous_items": 0,
+              "basis": {
+                "published": 1,
+                "collection_date": 0
+              }
+            },
+            {
+              "term": "sữa matcha",
+              "current_items": 1,
+              "previous_items": 0,
+              "basis": {
+                "published": 1,
+                "collection_date": 0
+              }
+            },
+            {
+              "term": "trà sữa",
+              "current_items": 1,
+              "previous_items": 0,
+              "basis": {
+                "published": 1,
+                "collection_date": 0
+              }
+            }
+          ]
+        },
+        {
+          "channel": "reels",
+          "measured_on_sample": true,
+          "missing_days": {
+            "current": [],
+            "previous": [
+              "2026-10-12",
+              "2026-10-13",
+              "2026-10-14"
+            ]
+          },
+          "status": "not_comparable",
+          "reasons": [
+            "previous_period_missing_days"
+          ]
+        }
+      ],
+      "items": [
+        {
+          "excerpt": "matcha latte ngon",
+          "link": "https://example.test/v/1",
+          "channel": "youtube",
+          "published_on": "2026-10-21",
+          "basis": "published"
+        },
+        {
+          "excerpt": "matcha latte trà sữa matcha muối",
+          "link": "https://example.test/v/1",
+          "channel": "tiktok",
+          "published_on": "2026-10-20",
+          "basis": "published"
+        },
+        {
+          "excerpt": "matcha latte ngon",
+          "link": "https://example.test/v/1",
+          "channel": "reels",
+          "published_on": "2026-10-19",
+          "basis": "published"
+        }
+      ]
+    }
+  ]
+}

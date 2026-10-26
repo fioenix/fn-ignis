@@ -1,0 +1,29 @@
+{
+  "watchlist_id": "00000000-0000-0000-0000-000000000018",
+  "name": "Baseline",
+  "period_kind": "month",
+  "status": "OK",
+  "periods": {
+    "current": {
+      "kind": "month",
+      "start": "2026-09-01",
+      "end": "2026-09-30",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "versions": []
+    },
+    "previous": {
+      "kind": "month",
+      "start": "2026-08-01",
+      "end": "2026-08-31",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "versions": []
+    }
+  },
+  "topics": [
+    {
+      "name": "Matcha drinks",
+      "channels": [],
+      "items": []
+    }
+  ]
+}

@@ -233,3 +233,20 @@ async def test_year_one_has_no_earlier_period_and_is_refused(listening):
     refused = await call("handle_get_watchlist_period_snapshot", watchlist_id=watchlist_id,
                          period_kind="week", period_start="0001-01-01")
     assert refused["reason_code"] == "INVALID_PERIOD_START"
+
+
+async def test_changing_a_plan_preserves_runs_evidence_and_explicit_period_output(listening):
+    repository, store, workspace, target = listening
+    await two_weeks(listening)
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+    use_case = GetWatchlistPeriodSnapshotUseCase(repository, store, lambda: at(date(2026, 10, 12)))
+    before = await use_case.execute(target, 'week')
+    watchlist = await repository.get_watchlist(target)
+    evidence = [await repository.get_mission_signals(run.mission_id) for run in watchlist.runs]
+    assert hasattr(mcp_server, 'handle_set_watchlist_listening_plan'), 'The MCP surface must expose plan saving'
+    for kind in ('week', 'month'):
+        await call('handle_set_watchlist_listening_plan', watchlist_id=target, goal='Track demand.',
+                   period_kind=kind, snapshots_per_period=3)
+        assert await repository.get_watchlist(target) == watchlist
+        assert [await repository.get_mission_signals(run.mission_id) for run in watchlist.runs] == evidence
+        assert await use_case.execute(target, 'week') == before
