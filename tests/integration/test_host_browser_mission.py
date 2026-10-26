@@ -672,3 +672,51 @@ async def test_prepare_does_not_evict_submitting_receipt_and_retention_is_finite
         release.set()
         await first
         service.close()
+
+
+@pytest.mark.asyncio
+async def test_host_mission_stores_no_poster_attribution(repository_case, tmp_path):
+    """Constitution VII: the poster's display name in TikTok's image label never reaches storage."""
+    store, workspace, mission, executor = await assignment(repository_case.repository, tmp_path)
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
+        payload = staged_answer(request)
+        payload["answers"][0]["records"][0]["excerpt"] = (
+            "Túi đi làm siêu gọn do Fixture Poster tạo với bản nhạc âm thanh gốc - Fixture Poster"
+        )
+        service.stage(request["request_id"], payload)
+        await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        held = await repository_case.repository.get_mission_signals(mission.id)
+        assert [signal.raw_title for signal in held] == ["Túi đi làm siêu gọn"]
+        assert "Fixture Poster" not in repr([signal.metadata for signal in held])
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_host_mission_applies_attribution_wording_added_in_the_database(repository_case, tmp_path):
+    """A locale an operator registered must clean the ticket before it is frozen (PR #79 review)."""
+    repo = repository_case.repository
+    if repository_case.dsn:
+        # The shared PostgreSQL fixture holds the evidence schema only; the vocabulary tables come
+        # from the lexicon migrations, applied here as the full chain would.
+        import psycopg
+        from pathlib import Path
+        sql = Path(__file__).resolve().parents[2] / "sql"
+        with psycopg.connect(repository_case.dsn) as conn:
+            for migration in ("003_market_lexicons.sql", "034_tiktok_attribution.sql"):
+                conn.execute((sql / migration).read_text(encoding="utf-8"))
+    await repo.register_lexicon_terms("tiktok_attribution", ["created by {author} with"], "ui_attribution")
+    store, workspace, mission, executor = await assignment(repo, tmp_path)
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
+        payload = staged_answer(request)
+        payload["answers"][0]["records"][0]["excerpt"] = "Work bag review created by Fixture Poster with original sound"
+        service.stage(request["request_id"], payload)
+        await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        held = await repo.get_mission_signals(mission.id)
+        assert [signal.raw_title for signal in held] == ["Work bag review"]
+    finally:
+        service.close()

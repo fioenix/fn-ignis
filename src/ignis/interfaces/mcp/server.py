@@ -31,7 +31,10 @@ from ignis.application.use_cases.create_research_workspace import (
     CreateResearchWorkspaceUseCase,
 )
 from ignis.application.use_cases.execute_mission import ExecuteMissionUseCase
-from ignis.application.use_cases.host_browser_search import HostBrowserSearchService
+from ignis.application.use_cases.host_browser_search import (
+    AttributionVocabularyMissing,
+    HostBrowserSearchService,
+)
 from ignis.application.use_cases.get_evidence_qualification_batch import (
     DEFAULT_BATCH_LIMIT,
     GetEvidenceQualificationBatchUseCase,
@@ -702,6 +705,8 @@ async def handle_prepare_host_browser_search(
         return _host_browser_search_service.prepare(
             host_task_ref, session_ref, queries, result_limit, lifetime_seconds, authorized,
         )
+    except AttributionVocabularyMissing:
+        return {"status": "BLOCKED", "reason_code": "AUTHOR_ATTRIBUTION_VOCABULARY_MISSING"}
     except (ValueError, InvalidMissionAuthorizationError, InvalidMissionManifestError):
         return {"status": "BLOCKED", "reason_code": "INVALID_HOST_SEARCH_SCOPE"}
 
@@ -855,6 +860,7 @@ def _init_components(*, caller_scope=None):
         tiktok_plugin=tiktok_plugin,
         registry=registry,
         credential_repository=credentials,
+        host_browser_search=_host_browser_search_service,
     )
 
     execute_mission_use_case = ExecuteMissionUseCase(

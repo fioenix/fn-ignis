@@ -38,7 +38,9 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/033_connector_request_days.sql`. Migration 033 thêm bộ đếm số
+Cây mã nguồn hiện có migration tới `sql/034_tiktok_attribution.sql`. Migration 034 nạp sẵn mẫu câu
+ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt
+host; nó không sửa bằng chứng đã lưu. Migration 033 thêm bộ đếm số
 lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không sửa bằng
 chứng đã lưu. Migration 032 bổ sung watchlist, các phiên bản
 không sửa được của watchlist và các lần chạy gắn với từng phiên bản; nó không sửa bằng chứng đã lưu. Migration 031 bổ sung khóa tác giả

@@ -12,7 +12,9 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/033_connector_request_days.sql`. Migration 033 adds a
+The source migration chain ends at `sql/034_tiktok_attribution.sql`. Migration 034 seeds the TikTok
+author attribution wording that host-browser search removes from excerpts; it rewrites no stored
+evidence. Migration 033 adds a
 per-channel, per-day count of keyword searches for the daily request ceilings; it rewrites no
 stored evidence. Migration 032 adds watchlists, their
 immutable versions and the runs bound to them; it rewrites no stored evidence. Migration 031 adds
@@ -275,9 +277,13 @@ research-work and follow-up gates that remain open.
 
 `prepare_host_browser_search`, `submit_host_browser_search` and `cancel_host_browser_search` provide
 an opt-in, task-bound host path. It needs an explicitly authorized browser and supported host DOM
-evaluation; Python does not drive the host or export its cookies. Prepare a finite batch, read the
-packaged extractor from the returned localhost relay, execute it on the exact public search URLs,
-and fill that relay's form from retained JSON. MCP submit consumes the staged answer by IDs only.
+evaluation; Python does not drive the host or export its cookies. Prepare a finite batch and open
+the returned localhost relay. Its "Open search" buttons open the exact public search URLs; the
+`tab_script` that preparation returns, run in each opened tab, posts the answer back and returns only counts, and the
+relay stages the batch once every query has an answer. Filling the relay's form from retained JSON
+still works. MCP submit consumes the staged answer by IDs only. Excerpts lose TikTok's author
+attribution sentence before any receipt or storage; preparation is refused with
+`AUTHOR_ATTRIBUTION_VOCABULARY_MISSING` when no attribution wording is seeded.
 
 TACTICAL returns observations without database initialization. MISSION requires a confirmed mission
 ID, mode=MISSION, queries=[] and result_limit=20; it derives the complete query/falsifier union,

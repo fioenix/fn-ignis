@@ -5,10 +5,11 @@ from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
 
 from ignis.domain.host_browser_search import HostSearchAnswer, HostSearchRequest
-from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text
+from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text, strip_platform_attribution
 
 
-def validate_answer(request: HostSearchRequest, payload: dict, now: datetime) -> dict:
+def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
+                    attribution_templates: tuple[str, ...] = ()) -> dict:
     answer = HostSearchAnswer.model_validate(payload)
     if (answer.request_id, answer.host_task_ref, answer.session_ref) != (
         request.request_id, request.host_task_ref, request.session_ref
@@ -49,17 +50,23 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime) ->
                 raise ValueError("Publication cannot follow capture")
             if record.source_url in seen:
                 continue
+            # The image label ends by naming the poster; that sentence is not content (FR-012).
+            excerpt = strip_platform_attribution(record.excerpt, attribution_templates)
+            if not excerpt.strip():
+                continue
             seen.add(record.source_url)
             count += 1
             observations.append(dict(
-                source_url=record.source_url, excerpt=sanitize_pii_text(record.excerpt), query=query.query,
+                source_url=record.source_url, excerpt=sanitize_pii_text(excerpt), query=query.query,
                 query_id=query.query_id, request_id=request.request_id,
                 captured_at=item.captured_at.isoformat(),
                 published_at=record.published_at.isoformat() if record.published_at else None,
                 metric_value=None, metric_kind=None, metric_known=False,
                 collection_path="host_browser:" + answer.extractor_version,
             ))
-        outcomes.append(dict(query_id=query.query_id, query=query.query, status=item.status,
+        # A healthy answer whose every label was only attribution measured no content.
+        status = "DEGRADED" if item.status == "HEALTHY" and not count else item.status
+        outcomes.append(dict(query_id=query.query_id, query=query.query, status=status,
                              signals_collected=count, queried_window=None,
                              search_verified=item.search_verified,
                              note="Bounded visible public video grid; window and counters unmeasured"))

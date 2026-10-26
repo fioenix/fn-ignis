@@ -138,3 +138,29 @@ local submission form from its in-memory extractor output via documented UI tool
 the implementation boundary. HTTP receives/stages the typed answer; MCP submit consumes it without
 model reconstruction. Use a standard-library server, no extra dependency. Model/relay/tactical-tool
 foundation must precede the actual T003 round-trip; mission work still waits for that gate.
+
+## Amendment: 2026-10-26 — attribution removal and relay handoff
+
+Owner-approved scope (FR-012, FR-013): remove TikTok's author attribution from host excerpts, and let
+the relay page open the search tabs and receive answers by `postMessage`. No MCP signature, connector
+tier, routine or watchlist changes.
+
+- **Vocabulary**: migration `sql/034_tiktok_attribution.sql` seeds `market_lexicons` domain
+  `tiktok_attribution` with `{author}` templates. The SQLite bootstrap replays it with the other
+  system vocabulary; PostgreSQL applies it as the next file in the chain. `MarketVocabulary` gains
+  `tiktok_attribution`.
+- **Stripping**: `strip_platform_attribution` in the PII sanitizer removes the rightmost match and
+  everything after it. `validate_answer` applies it before PII masking; a record left empty is dropped
+  and a HEALTHY answer left empty becomes DEGRADED. Both TACTICAL receipts and MISSION ingestion read
+  the validated receipt, so one seam covers both.
+- **Binding**: `HostBrowserSearchService` takes the templates; the MCP prepare handler reads them from
+  the repository first and returns `AUTHOR_ATTRIBUTION_VOCABULARY_MISSING` when none are stored.
+  Preparation fails closed rather than accepting excerpts it cannot clean.
+- **Relay**: the page gains one button per query, a nonce-bound script and a packaged tab script
+  (`tiktok_handoff.js`) composed with the extractor and the relay origin. The CSP adds only
+  `script-src 'nonce-…'`. Manual paste stays. Preparation returns the composed script as an additive
+  `tab_script` field; no MCP parameter changes.
+- **Depth gate**: tasks path (privacy and relay security boundaries); Phase 7 in tasks.md.
+- **Known limit**: a caption that itself contains `do … tạo với …` loses its tail, which errs towards
+  privacy. The extractor's `innerText` fallback (no visible image label) is unchanged and not covered
+  by this amendment.

@@ -45,12 +45,14 @@ Prepare explicit task/session references, result and lifetime bounds, and author
 use the existing confirmed mission ID, queries=[] and result_limit=20; the complete query union
 including falsifiers comes from that mission. Preparation holds no mission writer while waiting.
 
-Open the returned loopback relay through host browser tooling. Read its #request and #extractor
-fields into host memory. Reuse one authorized session and one task-created public search tab.
-Before each navigation check task cancellation/expiry and owner interruption; execute only the
-returned exact URLs. Evaluate the packaged extractor on each matching page and retain the JSON.
-Once every query has an answer, fill the relay's Search answer JSON field directly from that retained
-object and click Stage answer. Call MCP submit with IDs only, then read back observations/outcomes
+Open the returned loopback relay through host browser tooling. For each approved query, click its
+"Open search" button: the relay opens the exact search URL in a new tab. Before each click check task
+cancellation/expiry and owner interruption. In that tab, evaluate the `tab_script` that preparation returned
+(the same script the relay page shows) once the grid has loaded; it runs the packaged extractor, posts the answer to the relay and returns only status and
+counts. The relay accepts answers only from tabs it opened and stages them once every query has one.
+If the host cannot click or evaluate in the opened tab, the manual path remains: evaluate the packaged
+extractor, fill the Search answer JSON field directly from the retained object and click Stage answer.
+Call MCP submit with IDs only, then read back observations/outcomes
 or canonical mission run/frame. A failed or uncertain ingestion requires journal/frame readback.
 
 Unsupported host transport stops before collection. Never reconstruct result records in model

@@ -7,11 +7,13 @@ vocabulary, otherwise a stopword like "new" would count as a reason a signal is 
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from ignis.application.ports.repository_port import ITrendRepository
 from ignis.domain.exceptions import VocabularySynchronizationError
+from ignis.resources import sql_seed_file
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ MACHINERY_DOMAINS = frozenset({
     "search_intent",
     "customer_inquiry",
     "tiktok_ui_noise",
+    "tiktok_attribution",
     "foreign_phrases",
     "portuguese_words",
 })
@@ -50,11 +53,26 @@ class MarketVocabulary:
     search_intent: List[str] = field(default_factory=list)
     customer_inquiry: List[str] = field(default_factory=list)
     tiktok_ui_noise: List[str] = field(default_factory=list)
+    tiktok_attribution: List[str] = field(default_factory=list)
     foreign_phrases: List[str] = field(default_factory=list)
     portuguese_words: List[str] = field(default_factory=list)
     probe_templates: Dict[str, List[str]] = field(default_factory=dict)
     tiktok_suggest_templates: Dict[str, List[str]] = field(default_factory=dict)
     by_domain_and_category: Dict[tuple, List[str]] = field(default_factory=dict)
+
+
+def seeded_lexicon_terms(filename: str, domain: str) -> List[str]:
+    """One domain's terms as a shipped SQL seed lists them, for a caller that opens no database.
+
+    The seed is the same file the database is bootstrapped from; a synchronizer later replaces
+    these with whatever the database holds, including rows an operator added.
+    """
+    path = sql_seed_file(filename)
+    if path is None:
+        return []
+    return [term for seeded_domain, term, _category in re.findall(
+        r"\('([^']+)',\s*'([^']+)',\s*'([^']+)'", path.read_text(encoding="utf-8")
+    ) if seeded_domain == domain]
 
 
 async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabulary:
@@ -90,6 +108,7 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
         search_intent=grouped.get("search_intent", []),
         customer_inquiry=grouped.get("customer_inquiry", []),
         tiktok_ui_noise=grouped.get("tiktok_ui_noise", []),
+        tiktok_attribution=grouped.get("tiktok_attribution", []),
         foreign_phrases=grouped.get("foreign_phrases", []),
         portuguese_words=grouped.get("portuguese_words", []),
         probe_templates=_templates_for(PROBE_TEMPLATE_PREFIX),
@@ -120,6 +139,7 @@ class VocabularySynchronizer:
         tiktok_plugin: Optional[Any] = None,
         registry: Optional[Any] = None,
         credential_repository: Optional[ITrendRepository] = None,
+        host_browser_search: Optional[Any] = None,
     ):
         self._repository = repository
         # The store holding the connected accounts' sessions, when it is not the evidence store.
@@ -131,6 +151,7 @@ class VocabularySynchronizer:
         self._language_detector = language_detector
         self._tiktok_plugin = tiktok_plugin
         self._registry = registry
+        self._host_browser_search = host_browser_search
         self.self_identities: List[Any] = []
 
     async def synchronize(self) -> MarketVocabulary:
@@ -182,6 +203,9 @@ class VocabularySynchronizer:
         if self._tiktok_plugin is not None:
             self._tiktok_plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
             self._tiktok_plugin.register_suggest_templates(vocabulary.tiktok_suggest_templates)
+        # An empty domain keeps the packaged seed rather than leaving host excerpts uncleaned.
+        if self._host_browser_search is not None and vocabulary.tiktok_attribution:
+            self._host_browser_search.register_attribution_templates(vocabulary.tiktok_attribution)
         if stop_terms:
             for engine in (self._quality_evaluator, self._strategic_reasoner):
                 if engine is not None:

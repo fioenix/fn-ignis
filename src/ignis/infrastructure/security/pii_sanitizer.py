@@ -1,6 +1,6 @@
 import re
 import unicodedata
-from typing import Any, Dict, List, Mapping, Union
+from typing import Any, Dict, Iterable, List, Mapping, Union
 
 from ignis.domain.author_identity import scrub_handle_links
 
@@ -107,6 +107,32 @@ def mask_author_identity_text(text: Any) -> Any:
     if not text or not isinstance(text, str):
         return text
     return tokenise_mentions(scrub_handle_links(text), {}, keep_declared_tokens=True)
+
+
+def strip_platform_attribution(text: Any, templates: Iterable[str]) -> Any:
+    """Text without a platform's author attribution sentence, nor anything after it.
+
+    Each template marks the display name with {author}; TikTok's wording per locale lives in the
+    market_lexicons domain tiktok_attribution. The rightmost match is cut, so an earlier
+    use of the same words inside a caption survives. A template without {author}, or with nothing
+    on either side of it, is ignored rather than allowed to cut on a lone word.
+    """
+    if not text or not isinstance(text, str):
+        return text
+    for template in templates:
+        lead, slot, tail = str(template).partition("{author}")
+        lead, tail = lead.strip(), tail.strip()
+        if not slot or not lead or not tail:
+            continue
+        start = re.compile(rf"(?:^|\s){re.escape(lead)}\s", re.IGNORECASE)
+        attribution = re.compile(
+            rf"(?:^|\s){re.escape(lead)}\s+\S.*?\s{re.escape(tail)}(?:\s.*)?\Z", re.IGNORECASE | re.DOTALL,
+        )
+        for position in reversed([match.start() for match in start.finditer(text)]):
+            if attribution.match(text, position):
+                text = text[:position].rstrip()
+                break
+    return text
 
 
 def render_mention_tokens(text: str, declared_names: Mapping[str, str]) -> str:

@@ -4,6 +4,7 @@ import importlib
 import http.client
 import json
 import socket
+from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -136,4 +137,96 @@ def test_html_escapes_task_content_and_does_not_load_external_resources():
         assert "https://fonts.googleapis.com" not in page
         assert "&lt;/textarea&gt;" in page
     finally:
+        relay.close()
+
+
+SEARCH_FIXTURE = (
+    '<html><body><div data-e2e="search_top-item">'
+    '<a href="https://www.tiktok.com/@fixture/video/7417820067028536584">'
+    '<img alt="Túi đi làm siêu gọn do Fixture Poster tạo với bản nhạc gốc" width="10" height="10" '
+    'src="data:image/gif;base64,R0lGODlhAQABAAAAACw="></a></div></body></html>'
+)
+
+
+def handoff_request():
+    return {
+        "request_id": "request-1", "host_task_ref": "task-1", "session_ref": "chrome-1",
+        "extractor_version": "tiktok-public-grid-v1",
+        "queries": [{"query_id": "query-1", "query": "túi đi làm", "result_limit": 3,
+                     "search_url": "https://www.tiktok.com/search?q=t%C3%BAi%20%C4%91i%20l%C3%A0m"}],
+    }
+
+
+def open_relay_in_browser(relay):
+    """A real Chromium on the relay page, with TikTok served from a fixture rather than the network."""
+    playwright = pytest.importorskip("playwright.sync_api").sync_playwright().start()
+    try:
+        browser = playwright.chromium.launch()
+    except Exception as error:
+        playwright.stop()
+        pytest.skip(f"Chromium is not installed: {type(error).__name__}")
+    context = browser.new_context()
+    context.route("https://www.tiktok.com/**", lambda route: route.fulfill(
+        status=200, content_type="text/html; charset=utf-8", body=SEARCH_FIXTURE))
+    page = context.new_page()
+    response = page.goto(relay.url)
+    return playwright, browser, context, page, response.headers
+
+
+def test_relay_opens_the_search_and_stages_the_answer_the_tab_posts_back():
+    seen = []
+    extractor = (Path(__file__).resolve().parents[2]
+                 / "src/ignis/infrastructure/connectors/host_browser/tiktok_search.js").read_text()
+    relay = relay_type()(handoff_request(), extractor,
+                         lambda answer: seen.append(answer) or {"status": "STAGED"}, 20)
+    playwright, browser, context, page, headers = open_relay_in_browser(relay)
+    try:
+        assert "script-src 'nonce-" in headers["content-security-policy"]
+        with context.expect_page() as opened:
+            page.click("button[data-query-id='query-1']")
+        tab = opened.value
+        tab.wait_for_load_state()
+        # The tab script answers with counts only; the records go tab-to-relay.
+        assert tab.evaluate(page.locator("#tab-script").input_value()) == {
+            "posted": True, "status": "HEALTHY", "records": 1}
+        page.wait_for_selector("text=STAGED")
+        assert len(seen) == 1
+        assert {key: seen[0][key] for key in ("request_id", "host_task_ref", "session_ref", "extractor_version")} == {
+            "request_id": "request-1", "host_task_ref": "task-1", "session_ref": "chrome-1",
+            "extractor_version": "tiktok-public-grid-v1"}
+        assert [answer["query_id"] for answer in seen[0]["answers"]] == ["query-1"]
+        assert seen[0]["answers"][0]["records"][0]["source_url"].endswith("/video/7417820067028536584")
+    finally:
+        browser.close()
+        playwright.stop()
+        relay.close()
+
+
+def test_relay_ignores_answers_from_another_origin_an_unopened_tab_or_the_wrong_query():
+    seen = []
+    relay = relay_type()(handoff_request(), "arg => arg", lambda answer: seen.append(answer) or {}, 20)
+    playwright, browser, context, page, _headers = open_relay_in_browser(relay)
+    answer = {"query_id": "query-1", "query": "túi đi làm", "records": []}
+    try:
+        # Same page, wrong origin.
+        page.evaluate("answer => window.postMessage({kind: 'ignis-host-answer', answer}, '*')", answer)
+        # A TikTok tab the relay did not open.
+        with context.expect_page() as stray:
+            page.evaluate("window.open('https://www.tiktok.com/search?q=other')")
+        stray.value.wait_for_load_state()
+        stray.value.evaluate(f"answer => window.opener.postMessage({{kind: 'ignis-host-answer', answer}}, '{relay.origin}')", answer)
+        # The tab the relay opened, answering for a query it was not opened for.
+        with context.expect_page() as opened:
+            page.click("button[data-query-id='query-1']")
+        opened.value.wait_for_load_state()
+        opened.value.evaluate(
+            f"answer => window.opener.postMessage({{kind: 'ignis-host-answer', answer: {{...answer, query_id: 'other'}}}}, '{relay.origin}')",
+            answer)
+        page.wait_for_timeout(500)
+        assert seen == []
+        assert page.locator("#payload").input_value() == ""
+        assert page.locator("#handoff-status").inner_text().startswith("0 of 1")
+    finally:
+        browser.close()
+        playwright.stop()
         relay.close()
