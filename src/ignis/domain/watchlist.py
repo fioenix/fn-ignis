@@ -272,3 +272,38 @@ class WatchlistConflict(Exception):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+@dataclass(frozen=True)
+class ListeningPlan:
+    """A user's goal and cadence, effective from one exact instant (Spec 018)."""
+
+    effective_from: datetime
+    goal: str
+    period_kind: str
+    snapshots_per_period: int
+
+    def __post_init__(self) -> None:
+        goal = _clean(self.goal)
+        limit = {"day": 1, "week": 7, "month": 28}.get(self.period_kind) if isinstance(self.period_kind, str) else None
+        if (goal is None or len(goal) > 300 or limit is None
+                or type(self.snapshots_per_period) is not int
+                or not 1 <= self.snapshots_per_period <= limit):
+            raise WatchlistDefinitionError(
+                "INVALID_LISTENING_PLAN",
+                "A listening plan needs a goal of 1..300 characters, day/week/month and a cadence no faster than daily.",
+            )
+        object.__setattr__(self, "goal", goal)
+
+    def to_payload(self) -> dict:
+        return {"effective_from": self.effective_from.isoformat(), "goal": self.goal,
+                "period_kind": self.period_kind, "snapshots_per_period": self.snapshots_per_period}
+
+
+def plan_in_effect(plans, at: datetime) -> Optional[ListeningPlan]:
+    """Select by instant, including equality, regardless of the supplied time-zone offset."""
+    from ignis.domain.listening_period import LISTENING_TZ
+
+    instant = at.astimezone(LISTENING_TZ)
+    return max((plan for plan in plans if plan.effective_from.astimezone(LISTENING_TZ) <= instant),
+               key=lambda plan: plan.effective_from, default=None)

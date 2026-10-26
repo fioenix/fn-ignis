@@ -1,0 +1,204 @@
+{
+  "watchlist_id": "00000000-0000-0000-0000-000000000018",
+  "name": "Baseline",
+  "period_kind": "day",
+  "status": "OK",
+  "periods": {
+    "current": {
+      "kind": "day",
+      "start": "2026-10-19",
+      "end": "2026-10-19",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "versions": []
+    },
+    "previous": {
+      "kind": "day",
+      "start": "2026-10-18",
+      "end": "2026-10-18",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "versions": []
+    }
+  },
+  "topics": [
+    {
+      "name": "Matcha drinks",
+      "channels": [
+        {
+          "channel": "youtube",
+          "measured_on_sample": false,
+          "missing_days": {
+            "current": [],
+            "previous": []
+          },
+          "status": "comparable",
+          "indicators": [
+            {
+              "kind": "new_uploads",
+              "unit": "items",
+              "current": 1,
+              "previous": 0,
+              "change": {
+                "absolute": 1,
+                "relative": null
+              },
+              "uncounted_items": {
+                "current": 0,
+                "previous": 0
+              }
+            }
+          ],
+          "basis": {
+            "current": {
+              "published": 1,
+              "collection_date": 0
+            },
+            "previous": {
+              "published": 0,
+              "collection_date": 0
+            }
+          },
+          "rising_terms": [],
+          "new_terms": [
+            {
+              "term": "latte ngon",
+              "current_items": 1,
+              "previous_items": 0,
+              "basis": {
+                "published": 1,
+                "collection_date": 0
+              }
+            }
+          ]
+        },
+        {
+          "channel": "tiktok",
+          "measured_on_sample": true,
+          "missing_days": {
+            "current": [],
+            "previous": []
+          },
+          "status": "comparable",
+          "indicators": [
+            {
+              "kind": "views",
+              "unit": "plays",
+              "current": 0,
+              "previous": 0,
+              "change": {
+                "absolute": 0,
+                "relative": null
+              },
+              "uncounted_items": {
+                "current": 0,
+                "previous": 0
+              }
+            },
+            {
+              "kind": "interactions",
+              "unit": "likes + comments + shares",
+              "current": 0,
+              "previous": 0,
+              "change": {
+                "absolute": 0,
+                "relative": null
+              },
+              "uncounted_items": {
+                "current": 0,
+                "previous": 0
+              }
+            }
+          ],
+          "basis": {
+            "current": {
+              "published": 0,
+              "collection_date": 0
+            },
+            "previous": {
+              "published": 0,
+              "collection_date": 0
+            }
+          },
+          "rising_terms": [],
+          "new_terms": []
+        },
+        {
+          "channel": "reels",
+          "measured_on_sample": true,
+          "missing_days": {
+            "current": [],
+            "previous": []
+          },
+          "status": "comparable",
+          "indicators": [
+            {
+              "kind": "views",
+              "unit": "plays",
+              "current": 80,
+              "previous": 0,
+              "change": {
+                "absolute": 80,
+                "relative": null
+              },
+              "uncounted_items": {
+                "current": 0,
+                "previous": 0
+              }
+            },
+            {
+              "kind": "interactions",
+              "unit": "likes + comments",
+              "current": 8,
+              "previous": 0,
+              "change": {
+                "absolute": 8,
+                "relative": null
+              },
+              "uncounted_items": {
+                "current": 0,
+                "previous": 0
+              }
+            }
+          ],
+          "basis": {
+            "current": {
+              "published": 1,
+              "collection_date": 0
+            },
+            "previous": {
+              "published": 0,
+              "collection_date": 0
+            }
+          },
+          "rising_terms": [],
+          "new_terms": [
+            {
+              "term": "latte ngon",
+              "current_items": 1,
+              "previous_items": 0,
+              "basis": {
+                "published": 1,
+                "collection_date": 0
+              }
+            }
+          ]
+        }
+      ],
+      "items": [
+        {
+          "excerpt": "matcha latte ngon",
+          "link": "https://example.test/v/1",
+          "channel": "youtube",
+          "published_on": "2026-10-19",
+          "basis": "published"
+        },
+        {
+          "excerpt": "matcha latte ngon",
+          "link": "https://example.test/v/1",
+          "channel": "reels",
+          "published_on": "2026-10-19",
+          "basis": "published"
+        }
+      ]
+    }
+  ]
+}

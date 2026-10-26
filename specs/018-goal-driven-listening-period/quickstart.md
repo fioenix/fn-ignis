@@ -18,5 +18,5 @@ runs; the MCP server built from the feature branch.
 5. **Created view parity** — the same call's `axis: "created"` cells equal the pre-feature output
    field for field (spec SC-004).
 6. **Both backends** — `pytest tests/unit/test_watchlist_listening_plan.py
-   tests/unit/test_watchlist_seen_axis.py tests/integration/test_watchlist_listening_plan.py`
+   tests/unit/test_watchlist_seen_axis.py tests/integration/test_watchlist_listening_plan_storage.py`
    passes on SQLite and PostgreSQL.

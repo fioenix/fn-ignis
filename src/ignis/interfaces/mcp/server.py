@@ -3188,6 +3188,24 @@ async def handle_get_watchlist(watchlist_id: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
+async def handle_set_watchlist_listening_plan(
+    watchlist_id: str, goal: str, period_kind: str, snapshots_per_period: int
+) -> str:
+    from ignis.application.use_cases.watchlists import SetWatchlistListeningPlanUseCase
+
+    result = await SetWatchlistListeningPlanUseCase(get_components()["repository"]).execute(
+        watchlist_id, goal, period_kind, snapshots_per_period
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+@mcp.tool(name="set_watchlist_listening_plan", description="Record the user's stated goal (1..300 characters), comparison period (day, week or month) and snapshots_per_period (1..1 for day, 1..7 for week, 1..28 for month). Appends a plan effective now; an identical plan returns UNCHANGED. Returns the plan in effect and its oldest-first history. Collects nothing, starts no run and schedules nothing.")
+async def set_watchlist_listening_plan(
+    watchlist_id: str, goal: str, period_kind: str, snapshots_per_period: int
+) -> str:
+    return await handle_set_watchlist_listening_plan(watchlist_id, goal, period_kind, snapshots_per_period)
+
+
 async def handle_start_watchlist_run(
     watchlist_id: str,
     allowed_resources: List[str],
@@ -3231,7 +3249,7 @@ async def save_watchlist(
     return await handle_save_watchlist(workspace_id, name, definition, watchlist_id)
 
 
-@mcp.tool(name="get_watchlist", description="Read one watchlist: every version's definition and digest, and every run with its mission and the version it collected. Returns no observations.")
+@mcp.tool(name="get_watchlist", description="Read one watchlist: every version's definition and digest, and every run with its mission and the version it collected. Returns no observations; also returns listening_plans oldest first and listening_plan in effect, or null.")
 async def get_watchlist(watchlist_id: str) -> str:
     return await handle_get_watchlist(watchlist_id)
 
@@ -3260,7 +3278,7 @@ async def start_watchlist_run(
 
 
 async def handle_get_watchlist_period_snapshot(
-    watchlist_id: str, period_kind: str, period_start: Optional[str] = None
+    watchlist_id: str, period_kind: Optional[str] = None, period_start: Optional[str] = None
 ) -> str:
     from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
 
@@ -3271,9 +3289,9 @@ async def handle_get_watchlist_period_snapshot(
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
-@mcp.tool(name="get_watchlist_period_snapshot", description="Read one complete listening period of a watchlist (day, Monday-to-Sunday week or calendar month, in Asia/Ho_Chi_Minh) against the period before it: per topic and channel, that channel's own indicators in their own units, or not_comparable with the missing days; rising and new terms; and up to three items with content only. Refuses a period that has not ended yet. Collects nothing; render it with the ignis_listen guide.")
+@mcp.tool(name="get_watchlist_period_snapshot", description="Read one complete listening period of a watchlist (day, Monday-to-Sunday week or calendar month, in Asia/Ho_Chi_Minh) against the period before it: per topic and channel, that channel's own indicators in their own units, or not_comparable with the missing days; rising and new terms; and up to three items with content only. Refuses a period that has not ended yet. Omit period_kind to use the listening plan in effect; without a plan return PERIOD_KIND_REQUIRED. Collects nothing; render it with the ignis_listen guide.")
 async def get_watchlist_period_snapshot(
-    watchlist_id: str, period_kind: str, period_start: Optional[str] = None
+    watchlist_id: str, period_kind: Optional[str] = None, period_start: Optional[str] = None
 ) -> str:
     return await handle_get_watchlist_period_snapshot(watchlist_id, period_kind, period_start)
 

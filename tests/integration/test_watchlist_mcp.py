@@ -154,3 +154,60 @@ async def test_a_run_that_cannot_be_bound_says_so(tools, monkeypatch):
                      allowed_resources=["youtube"], authority_boundary=AUTHORITY)
     assert run["status"] == "FAILED" and run["reason_code"] == "RUN_NOT_BOUND"
     assert run["mission_id"] and "execute_mission_ingress" not in run.get("next_step", "")
+
+
+async def test_listening_plan_save_is_idempotent_and_does_not_start_a_run(tools):
+    workspace, repo = tools
+    saved = await call('handle_save_watchlist', workspace_id=workspace, name='Plans', definition=definition())
+    target = saved['watchlist_id']
+    before = await call('handle_get_watchlist', watchlist_id=target)
+    assert hasattr(mcp_server, 'handle_set_watchlist_listening_plan'), 'The MCP surface must expose plan saving'
+    request = dict(watchlist_id=target, goal=' Track weekly demand. ', period_kind='week', snapshots_per_period=3)
+    result = await call('handle_set_watchlist_listening_plan', **request)
+    assert result['status'] == 'SAVED'
+    assert result['listening_plan']['goal'] == 'Track weekly demand.'
+    assert result['listening_plan']['period_kind'] == 'week'
+    assert len(result['listening_plans']) == 1
+    same = await call('handle_set_watchlist_listening_plan', **request)
+    assert same == {**result, 'status': 'UNCHANGED'}
+    after = await call('handle_get_watchlist', watchlist_id=target)
+    assert {key: after[key] for key in before if key not in ('listening_plan', 'listening_plans')} == {
+        key: value for key, value in before.items() if key not in ('listening_plan', 'listening_plans')}
+    assert after['runs'] == []
+    assert after['listening_plans'] == result['listening_plans']
+    changed = await call('handle_set_watchlist_listening_plan', **{**request, 'period_kind': 'month'})
+    history = (await call('handle_get_watchlist', watchlist_id=target))['listening_plans']
+    assert [p['period_kind'] for p in history] == ['week', 'month']
+    assert history == changed['listening_plans']
+    assert history[-1] == changed['listening_plan']
+
+
+async def test_legacy_watchlist_has_no_listening_plan(tools):
+    workspace, _ = tools
+    saved = await call('handle_save_watchlist', workspace_id=workspace, name='Legacy', definition=definition())
+    read = await call('handle_get_watchlist', watchlist_id=saved['watchlist_id'])
+    assert read.get('listening_plans') == []
+    assert 'listening_plan' in read and read['listening_plan'] is None
+
+
+@pytest.mark.parametrize('change', [
+    {'period_kind': 'hour'}, {'snapshots_per_period': 0}, {'snapshots_per_period': 8},
+    {'goal': ''}, {'goal': 'x' * 301}, {'period_kind': 'day', 'snapshots_per_period': 2},
+    {'period_kind': 'month', 'snapshots_per_period': 29},
+])
+async def test_invalid_listening_plan_writes_nothing(tools, change):
+    workspace, repo = tools
+    saved = await call('handle_save_watchlist', workspace_id=workspace, name='Invalid', definition=definition())
+    assert hasattr(mcp_server, 'handle_set_watchlist_listening_plan'), 'The MCP surface must expose plan saving'
+    refused = await call('handle_set_watchlist_listening_plan', **{
+        'watchlist_id': saved['watchlist_id'], 'goal': 'Track.', 'period_kind': 'week',
+        'snapshots_per_period': 3, **change})
+    assert (refused['status'], refused['reason_code']) == ('INVALID', 'INVALID_LISTENING_PLAN')
+    assert await repo.list_listening_plans(saved['watchlist_id']) == []
+
+
+async def test_setting_a_plan_for_an_unknown_watchlist_returns_not_found(tools):
+    assert hasattr(mcp_server, 'handle_set_watchlist_listening_plan'), 'The MCP surface must expose plan saving'
+    refused = await call('handle_set_watchlist_listening_plan', watchlist_id=str(uuid4()), goal='Track.',
+                         period_kind='week', snapshots_per_period=3)
+    assert refused['status'] == 'NOT_FOUND'

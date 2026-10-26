@@ -385,3 +385,43 @@ async def test_a_non_finite_or_invalid_counting_window_falls_back_to_the_default
     use_case = GetWatchlistPeriodSnapshotUseCase(_Config(), None, lambda: NOW)
     assert await use_case._config("listening.counter_observation_days", 7) == 7
     assert MAX_COUNTER_DAYS == 31
+
+
+@pytest.mark.asyncio
+async def test_optional_period_uses_the_plan_at_now_and_explicit_kind_overrides_it():
+    from types import SimpleNamespace
+    from uuid import UUID
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+    from ignis.domain import watchlist
+
+    target = UUID('00000000-0000-0000-0000-000000000018')
+    class Store:
+        plans = []
+
+        async def get_watchlist(self, value):
+            return SimpleNamespace(id=str(target), name='Demand', runs=(),
+                                   current=SimpleNamespace(definition=watchlist.parse_watchlist_definition({'topics': [TOPIC]})))
+
+        async def list_listening_plans(self, value):
+            return self.plans
+
+        async def get_runtime_config(self, key):
+            return None
+
+        async def get_domain_lexicons(self, domain):
+            return []
+
+    store = Store()
+    use_case = GetWatchlistPeriodSnapshotUseCase(store, store, lambda: NOW)
+    # Passing None exercises the old required argument without a setup TypeError.
+    missing = await use_case.execute(str(target), None)
+    assert (missing['status'], missing['reason_code']) == ('INVALID', 'PERIOD_KIND_REQUIRED')
+    explicit = await use_case.execute(str(target), 'day')
+    assert explicit['status'] == 'OK' and explicit['period_kind'] == 'day'
+    store.plans = [watchlist.ListeningPlan(NOW - timedelta(days=1), 'Weekly.', 'week', 3),
+                   watchlist.ListeningPlan(NOW + timedelta(days=1), 'Future.', 'month', 4)]
+    default = await use_case.execute(str(target))
+    assert default['period_kind'] == 'week'
+    assert default['periods']['current']['start'] == '2026-10-19'
+    assert default['periods']['previous']['start'] == '2026-10-12'
+    assert (await use_case.execute(str(target), 'month'))['period_kind'] == 'month'

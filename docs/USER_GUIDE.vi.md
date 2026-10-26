@@ -12,7 +12,7 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/034_tiktok_attribution.sql`. Migration 034 nạp sẵn
+Chuỗi migration trong mã nguồn kết thúc ở `sql/035_watchlist_listening_plans.sql`. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn
 mẫu câu ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình
 duyệt host; nó không sửa bằng chứng đã lưu. Migration 033 thêm
 bộ đếm số lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không
@@ -99,6 +99,13 @@ các lần chạy. Mỗi lần gọi `start_watchlist_run` tạo một nhiệm v
 và khai báo các thương hiệu đó làm tài khoản của nhiệm vụ. Đây là những tài khoản duy nhất Ignis gọi
 tên. Lần chạy nào bạn cũng phải nêu rõ nguồn được phép và quyền hạn; sau đó việc thu thập đi qua
 `execute_mission_ingress` như mọi nhiệm vụ khác. Ignis không bao giờ tự chạy watchlist.
+
+`set_watchlist_listening_plan` lưu mục tiêu, kỳ so sánh (`day`, `week`, `month`) và số lần
+lấy mẫu trong mỗi kỳ do người dùng chọn. Lịch sử kế hoạch chỉ được thêm, không sửa; lưu lại cùng
+kế hoạch không tạo dòng mới. `get_watchlist` trả kế hoạch đang có hiệu lực cùng lịch sử.
+Khi bỏ `period_kind`, period view dùng kỳ trong kế hoạch; nếu chưa có kế hoạch, cần truyền kỳ
+rõ ràng. Routine hỏi người dùng khi chưa có kế hoạch, trình bày số lượt chạy và request mỗi kỳ,
+rồi chờ xác nhận trước khi tạo lịch trên host. Ignis không tự tạo lịch hay chạy thu thập.
 
 Muốn xem một watchlist thay đổi ra sao, hãy nhờ agent mở bản xem theo kỳ.
 `get_watchlist_period_snapshot` so một ngày, một tuần (từ thứ Hai đến Chủ nhật) hoặc một tháng đã
@@ -247,7 +254,7 @@ cấp quyền thực hiện.
 
 ## 4. Ranh giới tool và triển khai
 
-MCP server cục bộ có **52 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
+MCP server cục bộ có **53 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
 manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu

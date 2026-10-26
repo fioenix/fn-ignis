@@ -94,7 +94,7 @@ src/ignis/interfaces/mcp/guides/ignis_routine.md        # cadence from the plan,
 .specify/memory/constitution.md                          # Proposed amendment (Part B)
 README.md, README.vi.md, docs/USER_GUIDE.md, docs/USER_GUIDE.vi.md   # tool count, migration endpoint
 tests/unit/test_watchlist_listening_plan.py, tests/unit/test_watchlist_seen_axis.py
-tests/integration/test_watchlist_listening_plan.py      # both backends
+tests/integration/test_watchlist_listening_plan_storage.py      # both backends
 ```
 
 Consumers of the migration chain endpoint that move from 034 to 035: `tests/integration/conftest.py`,

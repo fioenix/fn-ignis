@@ -34,7 +34,7 @@ from ignis.application.ports.repository_port import (
     PlatformCredentialRecord,
     PlatformCredentialSummary,
 )
-from ignis.domain.watchlist import Watchlist, WatchlistConflict, watchlist_name_key
+from ignis.domain.watchlist import ListeningPlan, Watchlist, WatchlistConflict, watchlist_name_key
 from ignis.infrastructure.persistence.watchlist_rows import (
     WATCHLIST_HEAD_SQL,
     WATCHLIST_RUNS_SQL,
@@ -1987,6 +1987,52 @@ class PostgresTimescaleRepository(ITrendRepository):
                         return await self._watchlist(cur, str(watchlist_id))
         except Exception as e:
             raise RepositoryException(f"Failed to read watchlist {watchlist_id}: {type(e).__name__}") from e
+
+    @staticmethod
+    async def _listening_plans(cur, watchlist_id) -> List[ListeningPlan]:
+        await cur.execute(
+            "SELECT effective_from, goal, period_kind, snapshots_per_period FROM watchlist_listening_plans"
+            " WHERE watchlist_id = %s ORDER BY effective_from;", (str(watchlist_id),)
+        )
+        return [ListeningPlan(*row) for row in await cur.fetchall()]
+
+    async def list_listening_plans(self, watchlist_id) -> List[ListeningPlan]:
+        """The append-only history, oldest first."""
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.cursor(row_factory=tuple_row) as cur:
+                    return await self._listening_plans(cur, watchlist_id)
+        except Exception as exc:
+            raise RepositoryException(f"Failed to read listening plans: {type(exc).__name__}") from exc
+
+    async def save_listening_plan(self, watchlist_id, goal, period_kind, snapshots_per_period):
+        """Append only when the current plan differs, under the watchlist row lock."""
+        plan = ListeningPlan(datetime.now(timezone.utc), goal, period_kind, snapshots_per_period)
+        pool = await self._get_pool()
+        try:
+            async with pool.connection() as conn:
+                async with conn.transaction():
+                    async with conn.cursor(row_factory=tuple_row) as cur:
+                        await cur.execute("SELECT 1 FROM watchlists WHERE id = %s FOR UPDATE;", (str(watchlist_id),))
+                        if await cur.fetchone() is None:
+                            raise WatchlistConflict("NOT_FOUND", "No watchlist has this id.")
+                        plans = await self._listening_plans(cur, watchlist_id)
+                        added = not plans or (plans[-1].goal, plans[-1].period_kind, plans[-1].snapshots_per_period) != (
+                            plan.goal, plan.period_kind, plan.snapshots_per_period)
+                        if added:
+                            await cur.execute(
+                                "INSERT INTO watchlist_listening_plans"
+                                " (watchlist_id, effective_from, goal, period_kind, snapshots_per_period)"
+                                " VALUES (%s, %s, %s, %s, %s);",
+                                (str(watchlist_id), datetime.now(timezone.utc), plan.goal, plan.period_kind,
+                                 plan.snapshots_per_period),
+                            )
+                        return await self._listening_plans(cur, watchlist_id), added
+        except WatchlistConflict:
+            raise
+        except Exception as exc:
+            raise RepositoryException(f"Failed to save a listening plan: {type(exc).__name__}") from exc
 
     async def record_watchlist_run(self, mission_id, watchlist_id, version) -> None:
         """Bind a mission to the watchlist version it collects. See the port."""
