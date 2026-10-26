@@ -74,6 +74,7 @@ EXPECTED_TOOL_NAMES = {
     "register_noise_blacklist",
     "release_mission_writer",
     "save_watchlist",
+    "set_watchlist_listening_plan",
     "set_mission_declared_accounts",
     "start_watchlist_run",
     "get_watchlist_period_snapshot",
