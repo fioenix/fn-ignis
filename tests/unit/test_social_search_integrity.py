@@ -158,7 +158,7 @@ async def test_all_requested_queries_are_executed_without_a_silent_ten_query_cap
 async def test_reels_records_the_keywords_beyond_its_search_limit_as_not_queried(path):
     """G3 run on 25/10/2026: reels read 10 of 20 keywords (its Spec 016 limit) and said nothing
     about the other ten, so the outcome looked like full coverage."""
-    queries = [f"retail-query-{index}" for index in range(12)]
+    queries = [f"retail-query-{index}" for index in range(22)]
     attestation = SearchAttestation()
     plugin = ReelsPlugin()
     async def fetch(**kwargs):
@@ -174,9 +174,10 @@ async def test_reels_records_the_keywords_beyond_its_search_limit_as_not_queried
                 patch.object(plugin, "_resolve_hashtag_id", AsyncMock(return_value="17840000000000000")), \
                 patch.object(plugin, "_graph_get", AsyncMock(return_value={"data": []})):
             await plugin.search_signals(queries, attestation=attestation)
-    assert attestation.queried == queries[:10]
+    # Owner decision 26/10/2026: Reels reads every keyword of a 20-keyword watchlist.
+    assert attestation.queried == queries[:20]
     assert attestation.failures == [
-        f"{query}: not queried, Reels reads at most 10 keywords per search" for query in queries[10:]
+        f"{query}: not queried, Reels reads at most 20 keywords per search" for query in queries[20:]
     ]
 
 

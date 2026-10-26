@@ -1006,6 +1006,9 @@ class ConnectorPluginRegistry:
             if "trigger" in sig.parameters:
                 kwargs["trigger"] = trigger
             signals = await plugin.search_signals(**kwargs)
+            if attestation is not None and getattr(type(plugin), "retry_failed_keywords", False):
+                signals = signals + await self._retry_failed_keywords(
+                    plugin, keywords, kwargs, attestation, signals, count_requests)
             breaker.record_success()
             return self._stamp_connector_surface(plugin, signals)
         except FollowUpExecutionBoundaryError:
@@ -1017,6 +1020,62 @@ class ConnectorPluginRegistry:
         except Exception as e:
             breaker.record_failure(e)
             raise e
+
+    async def _retry_failed_keywords(
+        self,
+        plugin: IConnectorPlugin,
+        keywords: List[str],
+        kwargs: Dict[str, Any],
+        attestation: SearchAttestation,
+        signals: List[TrendSignal],
+        count_requests: bool,
+    ) -> List[TrendSignal]:
+        """Search once more for each keyword whose capture failed, inside the daily ceiling.
+
+        A surface opts in with `retry_failed_keywords` when its failures are intermittent captures
+        (Threads, 25-26/10/2026). The retry is counted like any search (owner decision 26/10/2026);
+        when the ceiling refuses it, the failure stands and the note says the retry was skipped.
+        """
+        failed = [k for k in dict.fromkeys(keywords) if k not in attestation.queried
+                  and any(f.startswith(f"{k}: ") for f in attestation.failures)]
+        if not failed:
+            return []
+        if count_requests:
+            ceiling_note = await self._daily_ceiling_note(plugin, len(failed))
+            if ceiling_note is not None:
+                attestation.failures.append(f"retry skipped: {ceiling_note}")
+                return []
+        retry = SearchAttestation()
+        try:
+            retried = await plugin.search_signals(**{**kwargs, "keywords": failed, "attestation": retry})
+        except FollowUpExecutionBoundaryError:
+            raise
+        except Exception as error:
+            # The retry is optional: its failure leaves the first pass and its failures standing.
+            attestation.failures.append(f"retry failed: {sanitize_pii_text(str(error))[:120]}")
+            return []
+        recovered = [k for k in failed if k in retry.queried]
+        for keyword in recovered:
+            attestation.executed(keyword)
+        attestation.failures[:] = [f for f in attestation.failures
+                                   if not any(f.startswith(f"{k}: ") for k in recovered)]
+        for keyword, count in retry.dropped_off_keyword.items():
+            attestation.dropped_off_keyword[keyword] = attestation.dropped_off_keyword.get(keyword, 0) + count
+        if attestation.window is None and retry.window is not None:
+            attestation.applied_window(retry.window)
+        # A recovered keyword may find a post the first pass kept: bind the query to that post.
+        kept = {s.source_url: s for s in signals if s.source_url}
+        fresh = []
+        for signal in retried:
+            first = kept.get(signal.source_url) if signal.source_url else None
+            if first is None:
+                fresh.append(signal)
+                continue
+            queries = first.metadata.setdefault("matched_keywords", [])
+            for keyword in (signal.metadata or {}).get("matched_keywords", ()):
+                if keyword not in queries:
+                    queries.append(keyword)
+        return fresh
 
     async def fetch_suggestions_across_all(
         self,
