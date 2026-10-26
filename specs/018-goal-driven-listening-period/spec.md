@@ -60,6 +60,19 @@ of each period showed alongside what was created in it, each labelled.
   is collected, a known creation date enriches the analysis, but it does not decide coverage or
   cadence.
 
+- Q: How is a saved cadence used when an explicit view names a different period kind? → A:
+  Return the saved plan for each period but mark the seen axis `seen_period_without_cadence`
+  when the plan's period kind differs from the view. No conversion between days, weeks and
+  months is defined or inferred; the created view still renders. (agent decided; basis:
+  FR-001 prohibits inferring cadence, US1 acceptance 2 preserves explicit period overrides,
+  and research R4 requires a cadence for comparability.)
+- Q: Which clock decides first-seen when observations are reused or runs overlap? → A:
+  Use the earliest successful channel snapshot's `completed_at` across the watchlist history,
+  including runs before both compared periods, independent of relevance judgment order.
+  Keep the created view's capture-time first-sighting lookup unchanged. (agent decided; basis:
+  research R2 defines snapshot time, US2 acceptance 2 counts first-seen only once, and SC-004
+  preserves the created view.)
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - State what to compare when following a watchlist (Priority: P1)
