@@ -58,14 +58,14 @@ host-path checkpoint; real-account readiness remains separately gated at the end
 
 **Purpose**: Establish the exact checkout, accepted scope and pre-change parity without using accounts.
 
-- [ ] T001 Verify branch, working tree, accepted owner decision and migration endpoint 035 against
+- [X] T001 Verify branch, working tree, accepted owner decision and migration endpoint 035 against
   `specs/020-meta-host-browser-search/plan.md` and `sql/`; record scope/baseline in
   `.handoff/spec020-verification.md` using `tests/unit/test_host_browser_search.py`,
   `tests/unit/test_host_browser_relay.py`, `tests/unit/test_watchlist_period.py`,
   `tests/unit/test_watchlist_seen_axis.py`, `tests/integration/test_host_browser_mission.py` and
   `tests/integration/test_host_browser_search_mcp.py` with mocked sources, no live requests; disclose
   failures/skips before dependent work.
-- [ ] T002 Capture synthetic pre-feature TikTok prepare/receipt defaults, public submit/cancel schemas
+- [X] T002 Capture synthetic pre-feature TikTok prepare/receipt defaults, public submit/cancel schemas
   and equal-path seen/created day/week/month outputs using `tests/unit/test_host_browser_search.py`,
   `tests/unit/test_watchlist_period.py` and `tests/unit/test_watchlist_seen_axis.py`; place sanitized
   expected JSON under `tests/fixtures/meta_host_browser_baseline/` before source changes, preserving
@@ -77,7 +77,7 @@ host-path checkpoint; real-account readiness remains separately gated at the end
 
 **Purpose**: Settle the composition feasibility boundary before building the dependent feature.
 
-- [ ] T003 SPIKE the single-run composition through the seams in
+- [X] T003 SPIKE the single-run composition through the seams in
   `src/ignis/application/use_cases/host_browser_search.py`,
   `src/ignis/application/use_cases/host_browser_mission.py` and `src/ignis/interfaces/mcp/server.py`;
   put only a disposable mock-backed executable probe and its result in
@@ -92,6 +92,15 @@ host-path checkpoint; real-account readiness remains separately gated at the end
   failing boundary and minimal alternatives. If STOP or inconclusive, **all T004 onward remain
   blocked**; do not implement a new tool/parameter or narrow acceptance to continue. No real
   browser/account/API or production-code edits in this spike.
+  **Result (27/10/2026): STOP.** A mock-backed probe over the unchanged submit/cancel handlers showed
+  that today's seams do not coordinate siblings: each submit runs its own writer with no shared
+  receipt, a Threads ticket is still mapped to TikTok and sent to the registry, a caller change and a
+  missing or duplicate sibling are not refused before the write, and a cancelled or expired sibling
+  can still be submitted. No new public parameter or tool was shown to be necessary. The candidate
+  is an internal group coordinator (admission keyed by mission, caller storage and frame; atomic
+  claim; one canonical writer; shared receipt; group-wide cancel, expiry and drain), to be prototyped
+  in a follow-up spike before any GO. Baseline outside the sandbox: 170 passed, 2 skipped with a
+  disposable PostgreSQL; the sandbox-only run failed 55 relay cases on loopback binding.
 - [ ] T004 [P] Write and run failing source/counter model tests in new
   `tests/unit/test_threads_host_answer_validation.py`: default TikTok compatibility, immutable Threads
   source/version, limits and exact publication clock, structured raw-display/unit/precision counters,

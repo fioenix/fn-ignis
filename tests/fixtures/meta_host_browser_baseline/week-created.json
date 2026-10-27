@@ -1,0 +1,136 @@
+{
+  "periods": {
+    "current": {
+      "end": "2026-10-25",
+      "kind": "week",
+      "start": "2026-10-19",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "versions": [
+        1
+      ]
+    },
+    "previous": {
+      "end": "2026-10-18",
+      "kind": "week",
+      "start": "2026-10-12",
+      "timezone": "Asia/Ho_Chi_Minh",
+      "versions": [
+        1
+      ]
+    }
+  },
+  "status": "OK",
+  "topics": [
+    {
+      "channels": [
+        {
+          "axis": "created",
+          "basis": {
+            "current": {
+              "collection_date": 0,
+              "published": 1
+            },
+            "previous": {
+              "collection_date": 0,
+              "published": 1
+            }
+          },
+          "channel": "youtube",
+          "indicators": [
+            {
+              "change": {
+                "absolute": 0,
+                "relative": 0.0
+              },
+              "current": 1,
+              "kind": "new_uploads",
+              "previous": 1,
+              "uncounted_items": {
+                "current": 0,
+                "previous": 0
+              },
+              "unit": "items"
+            }
+          ],
+          "measured_on_sample": false,
+          "missing_days": {
+            "current": [],
+            "previous": []
+          },
+          "new_terms": [],
+          "rising_terms": [],
+          "status": "comparable"
+        },
+        {
+          "axis": "created",
+          "basis": {
+            "current": {
+              "collection_date": 0,
+              "published": 1
+            },
+            "previous": {
+              "collection_date": 0,
+              "published": 1
+            }
+          },
+          "channel": "tiktok",
+          "indicators": [
+            {
+              "change": {
+                "absolute": 0,
+                "relative": 0.0
+              },
+              "current": 100,
+              "kind": "views",
+              "previous": 100,
+              "uncounted_items": {
+                "current": 0,
+                "previous": 0
+              },
+              "unit": "plays"
+            },
+            {
+              "change": {
+                "absolute": 0,
+                "relative": 0.0
+              },
+              "current": 8,
+              "kind": "interactions",
+              "previous": 8,
+              "uncounted_items": {
+                "current": 0,
+                "previous": 0
+              },
+              "unit": "likes + comments + shares"
+            }
+          ],
+          "measured_on_sample": true,
+          "missing_days": {
+            "current": [],
+            "previous": []
+          },
+          "new_terms": [],
+          "rising_terms": [],
+          "status": "comparable"
+        }
+      ],
+      "items": [
+        {
+          "basis": "published",
+          "channel": "youtube",
+          "excerpt": "matcha latte ngon",
+          "link": "https://example.test/v/1",
+          "published_on": "2026-10-19"
+        },
+        {
+          "basis": "published",
+          "channel": "tiktok",
+          "excerpt": "matcha latte ngon",
+          "link": "https://example.test/v/1",
+          "published_on": "2026-10-19"
+        }
+      ],
+      "name": "Matcha drinks"
+    }
+  ]
+}
