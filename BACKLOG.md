@@ -1,5 +1,19 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
+> - **Cập nhật lần cuối:** 27/10/2026
+> - **Phiên bản:** `v0.8.0`
+> - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
+>   + FastMCP Server (53 tools); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
+> - **Schema:** Migration mới nhất là `sql/035_watchlist_listening_plans.sql`.
+>   Ignis không có worker hay lịch khám phá hằng ngày; routine chạy trên host khi được yêu cầu.
+> - **Trạng thái:** Release candidate `v0.8.0`, chưa tag và chưa publish. Bản public hiện tại vẫn
+>   là `v0.7.0` qua source, GitHub Release và GHCR; PyPI tiếp tục được hoãn. Tag và publish do chủ
+>   sở hữu quyết định; kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`.
+
+---
+
+## Lịch sử phát hành v0.7.0 — 29/09/2026
+
 > - **Cập nhật lần cuối:** 29/09/2026
 > - **Phiên bản:** `v0.7.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
@@ -29,7 +43,10 @@ khi người dùng yêu cầu; server Ignis không có lịch hay worker riêng.
 (watchlist và so sánh theo kỳ), lượt mốc golden set, Spec 017 (skill dựng routine), rồi spike kênh
 thương mại.
 
-## Spec 011 — trạng thái nhánh phát triển, chưa phát hành
+## Spec 011 — trạng thái triển khai
+
+Ngày 27/10/2026, chủ sở hữu cho phép chuẩn bị v0.8.0 tới hồ sơ PR sẵn sàng để tag.
+Các checkpoint bên dưới giữ nguyên ngày và phạm vi kiểm chứng của chúng.
 
 **Mục tiêu phiên bản đã duyệt: `v0.8.0`** (02/10/2026). MINOR dành cho thay đổi chức năng
 hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đổi còn lại không làm khác đáng
@@ -66,7 +83,7 @@ từ GitHub trước khi coi là hoàn tất. Các cổng còn lại nằm trong
 [`tasks.md`](specs/011-evidence-grounded-product-reset/tasks.md). Không xóa baseline corpus
 hiện hữu chỉ vì chế độ nền đã bị loại; disposition đang giữ dữ liệu để đánh giá giá trị và
 xác minh bản phục hồi, không còn chờ quyền thao tác database dev.
-**Trạng thái: implementation đã merge, schema dev đã cập nhật; v0.8.0 chưa tag hoặc publish.**
+**Trạng thái triển khai: implementation đã merge, schema dev đã cập nhật.**
 
 ---
 
