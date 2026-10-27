@@ -142,27 +142,34 @@ class HostBrowserSearchService:
             relays = self._prune(now)
         for relay in relays:
             relay.close()
-        with self._lock:
-            if len(self._tickets) >= 32:
-                raise ValueError("Too many active task receipts; finish or wait for expiry")
-            ticket = dict(request=request, state="PREPARED", receipt=None, payload=None,
-                          attribution_templates=attribution_templates, self_identities=tuple(self_identities),
-                          caller=current_caller_storage.get())
-            self._tickets[request.request_id] = ticket
-            try:
-                ticket["relay"] = LoopbackRelay(
+        ticket, relay = None, None
+        try:
+            with self._lock:
+                if len(self._tickets) >= 32:
+                    raise ValueError("Too many active task receipts; finish or wait for expiry")
+                ticket = dict(request=request, state="PREPARED", receipt=None, payload=None,
+                              attribution_templates=attribution_templates, self_identities=tuple(self_identities),
+                              caller=current_caller_storage.get())
+                self._tickets[request.request_id] = ticket
+                relay = ticket["relay"] = LoopbackRelay(
                     {**request.model_dump(mode="json"), "extractor_version": request.extractor_version}, extractor,
                     lambda payload: self.stage(request.request_id, payload), lifetime_seconds,
                 )
-            except Exception:
-                self._tickets.pop(request.request_id)
-                raise
-            result = request.model_dump(mode="json")
-            result["relay_url"] = ticket["relay"].url
-            # Browser tooling may refuse to read a script back from the page (Spec 012 FR-013).
-            result["tab_script"] = ticket["relay"].tab_script
-            result["extractor_version"] = request.extractor_version
-            return result
+                result = request.model_dump(mode="json")
+                result["relay_url"] = relay.url
+                # Browser tooling may refuse to read a script back from the page (Spec 012 FR-013).
+                result["tab_script"] = relay.tab_script
+                result["extractor_version"] = request.extractor_version
+                return result
+        except BaseException:
+            # Until prepare returns, this call alone owns its newly allocated ticket/relay.
+            with self._lock:
+                if ticket is not None and self._tickets.get(request.request_id) is ticket:
+                    self._finish(ticket, "REJECTED", payload=None, receipt=None)
+                    self._tickets.pop(request.request_id)
+            if relay is not None:
+                relay.close()
+            raise
 
     def _ticket(self, request_id: str) -> dict:
         if request_id not in self._tickets:
@@ -293,6 +300,7 @@ class HostBrowserSearchService:
 
     async def prepare_mission(self, executor, mission_id, host_task_ref, session_ref, lifetime_seconds, authorized,
                               *, source="tiktok"):
+        group, owned_request_id, previous_deadline = None, None, None
         try:
             from ignis.application.use_cases.host_browser_mission import prepare_scope
             from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
@@ -311,13 +319,12 @@ class HostBrowserSearchService:
             caller = current_caller_storage.get()
             key = (str(mission_id), caller, binding["digest"], binding["plan"]["plan_digest"])
             with self._lock:
-                for existing in list(self._groups.values()):
-                    if existing.key[:2] == key[:2] and existing.key != key:
-                        self._stop_group(existing, "REJECTED")
-
+                stale = [existing for existing in self._groups.values()
+                         if existing.key[:2] == key[:2] and existing.key != key]
+                if any(existing.state in {"SUBMITTING", "DRAINING"} for existing in stale):
+                    raise ValueError("Mission group ingestion is already running")
                 group = self._groups.get(key)
                 if group is not None and (group.state != "PREPARED" or source in group.members):
-                    self._stop_group(group, "REJECTED")
                     raise ValueError("Duplicate or terminal source group")
                 if group is not None and datetime.now(timezone.utc) >= self._deadline(group):
                     self._stop_group(group, "EXPIRED")
@@ -325,30 +332,49 @@ class HostBrowserSearchService:
                 if group is not None:
                     first = self._tickets[next(iter(group.members.values()))]["request"]
                     if (host_task_ref, session_ref) != (first.host_task_ref, first.session_ref):
-                        self._stop_group(group, "REJECTED")
                         raise ValueError("Sibling identity mismatch")
+                    previous_deadline = group.binding.get("expires_at")
                 request = self.prepare(host_task_ref, session_ref, binding["queries"], 20, lifetime_seconds, authorized,
                                        mode="MISSION", attribution_templates=attribution_templates,
                                        source=source, self_identities=identities)
+                owned_request_id = request["request_id"]
                 if group is None:
                     group = _MissionGroup(key, binding, caller, binding["required_host_sources"])
                     self._groups[key] = group
-                group.members[source] = request["request_id"]
-                ticket = self._tickets[request["request_id"]]
+                group.members[source] = owned_request_id
+                ticket = self._tickets[owned_request_id]
                 ticket.update(group=group, binding=group.binding)
                 group.binding["expires_at"] = self._deadline(group)
-            request.update(mission_id=str(mission_id), collection_plan_digest=binding["plan"]["plan_digest"])
-            return request
+                request.update(mission_id=str(mission_id), collection_plan_digest=binding["plan"]["plan_digest"])
+                # Reject stale prepared scope only after the replacement was successfully admitted.
+                for existing in stale:
+                    if existing.state == "PREPARED":
+                        self._stop_group(existing, "REJECTED")
+                return request
         except BaseException:
-            # Every partial preparation failure revokes its caller's collectible siblings.
+            relay = None
             with self._lock:
-                failed = [group for group in self._all_groups()
-                          if group.key[:2] == (str(mission_id), current_caller_storage.get())
-                          and group.state in {"PREPARED", "SUBMITTING", "DRAINING"}]
-                for group in failed:
-                    self._stop_group(group, "REJECTED")
-                relays = [self._tickets[key]["relay"] for group in failed for key in group.members.values()]
-            for relay in relays:
+                # Validation owns nothing. Once a writer owns a group, preparation cannot revoke it.
+                if owned_request_id is not None and (group is None or group.state == "PREPARED"):
+                    ticket = self._tickets.pop(owned_request_id, None)
+                    if ticket is not None:
+                        self._finish(ticket, "REJECTED", payload=None, receipt=None)
+                        relay = ticket.get("relay")
+                    if group is not None:
+                        if group.members.get(source) == owned_request_id:
+                            group.members.pop(source)
+                        if previous_deadline is not None:
+                            group.binding["expires_at"] = previous_deadline
+                        collectible = any(self._tickets[key]["state"] in {"PREPARED", "STAGED"}
+                                          for key in group.members.values())
+                        if not collectible:
+                            if group.members:
+                                self._stop_group(group, "REJECTED")
+                            else:
+                                group.state, group.stop_reason = "REJECTED", "REJECTED"
+                                if self._groups.get(group.key) is group:
+                                    self._groups.pop(group.key)
+            if relay is not None:
                 relay.close()
             raise
 

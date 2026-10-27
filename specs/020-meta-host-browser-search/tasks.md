@@ -462,7 +462,7 @@ live-account authority visible. No tool-count change, release, version bump or r
   activation or repaired-channel claim. Use applicable Vietnamese editing review for localized copy;
   skip `.agents/` mirrors and all routine/context changes, disclose existing mirror check consequences
   (T045).
-- [ ] T047 Complete PostgreSQL parity and SQLite regression proof in
+- [X] T047 Complete PostgreSQL parity and SQLite regression proof in
   `tests/integration/test_meta_host_evidence_backend_parity.py`,
   `tests/integration/test_watchlist_period_storage.py`,
   `tests/integration/test_author_identity_parity.py` and changed migration-chain cases in
@@ -481,7 +481,7 @@ live-account authority visible. No tool-count change, release, version bump or r
   server shutdown. Record wheel hash/environment/command/output in `.handoff/spec020-verification.md`;
   missing cache/tooling is an explicit blocker, not a reason to use editable source or install over the
   shared wheel.
-- [ ] T049 Obtain required independent code/security review of the exact implementation diff covering
+- [X] T049 Obtain required independent code/security review of the exact implementation diff covering
   source-origin relay trust, untrusted staged input, identity-free receipts/storage, caller/group
   concurrency, unavailable classification, unchanged public boundaries and canonical evidence parity;
   record revision-bound findings/disposition in `.handoff/spec020-review.md`. Resolve blocking findings
@@ -498,7 +498,7 @@ live-account authority visible. No tool-count change, release, version bump or r
   PostgreSQL/socket proof and revision-bound coordinator/reviewer acceptance remain separate;
   this note does not complete T049/T050 or authorize live runs.
 
-- [ ] T050 Run final targeted verification of every changed behavioral test and traced affected consumer
+- [X] T050 Run final targeted verification of every changed behavioral test and traced affected consumer
   from T004–T049, plus `tests/unit/test_repo_conventions.py`, `tests/unit/test_public_mcp_contract.py`,
   `tests/unit/test_public_distribution_contract.py`, `tests/unit/test_public_doc_conventions.py`,
   `tests/unit/test_tool_manifests_drift.py` and `tests/unit/test_sql_packaging.py` with the source-check
@@ -508,6 +508,26 @@ live-account authority visible. No tool-count change, release, version bump or r
   backend/wheel/review limits, immutable evidence baseline and no implementation of deferred scope in
   `.handoff/spec020-verification.md`; do not run the full suite, weaken a mirror gate, commit or claim
   live repair.
+**Coordinator closure of T047, T049 and T050 (28/10/2026)**, outside the sandbox with a disposable
+PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
+- T047: backend parity, period storage, author-identity parity and host mission cases run on both
+  backends inside the T050 run below; the compose migration-chain case needs Docker Compose and
+  stays with CI.
+- T049: Antigravity (`gemini-4-argon-high`, read-only) reviewed `origin/main...26ed2a8` and found
+  six confirmed defects plus three suspicions; all six and suspicion 2.2 were fixed in `1ee1419`.
+  Its re-review of `1ee1419` marked every finding resolved, traced the transient author records on
+  all success, error, cancellation and shutdown paths with no leak, and found one new defect (a
+  failed preparation could cancel an in-flight submit), fixed in the next commit. Residual risks for
+  T051: the Threads header-exclusion layout assumption, and a pre-existing INFO log of the
+  operator's own connected identities.
+- T050: every changed test and traced consumer, plus the convention, MCP contract, distribution,
+  doc, manifest and SQL packaging gates: 4627 passed, 11 skipped (backend-specific by design),
+  3 deselected (two `.env`-writing bootstrap cases and the pooler case that needs a worktree
+  `.venv`; both pass in CI). Host consumers after the last fix: 376 passed, 6 skipped. Ruff and
+  `git diff --check` clean; no `AutomationControlled` or user-agent override under `src/`; unique
+  test basenames; wheel built from the branch and smoke-tested in an isolated venv (53 tools,
+  optional prepare `source`, submit/cancel unchanged).
+
 - [ ] T051 **Needs separate owner approval**: after T050 and explicit bounded real-session/G3-run
   authority, execute the implemented Ignis prepare → Threads/TikTok host extraction → relay → submit →
   single G3 mission run and canonical readback per `specs/020-meta-host-browser-search/quickstart.md`;
