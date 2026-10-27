@@ -85,7 +85,7 @@ def _backlog_current_accomplishments(path: Path) -> str:
 
 def _backlog_unreleased_status(path: Path) -> str:
     """Only the current branch's runtime claim, not its explicit v0.7.0 comparison."""
-    section = _read(path).split("## Spec 011 — trạng thái nhánh phát triển, chưa phát hành", 1)[1]
+    section = _read(path).split("## Spec 011 — trạng thái triển khai", 1)[1]
     return section.split("\n---", 1)[0].split("; các con số", 1)[0]
 
 
@@ -246,8 +246,8 @@ def test_every_release_version_carrier_agrees():
 
 # The release this branch prepares and the date of the release before it. Both move with
 # the next version bump, in the same commit as the carriers themselves.
-RELEASE_CANDIDATE = "0.7.0"
-PREVIOUS_RELEASE_DATE = "2026-09-28"
+RELEASE_CANDIDATE = "0.8.0"
+PREVIOUS_RELEASE_DATE = "2026-09-29"
 
 
 def test_every_carrier_names_the_release_candidate():
@@ -1957,7 +1957,7 @@ def test_a_daemon_digest_that_differs_from_the_release_tag_is_caught(tmp_path, m
 def _backlog_history(path: Path) -> str:
     """The dated release history outside the current development section."""
     text = _read(path)
-    current = text.split("## Spec 011 — trạng thái nhánh phát triển, chưa phát hành", 1)[1].split("\n---", 1)[0]
+    current = text.split("## Spec 011 — trạng thái triển khai", 1)[1].split("\n---", 1)[0]
     return text.replace(current, "")
 
 
@@ -1977,7 +1977,7 @@ def test_a_dated_history_entry_is_not_governed_but_a_current_one_is(governed_cop
     _mutate(governed_copy, "BACKLOG.md", history_anchor, r"\1\n\nMeasured 14/09/2026: 39 tools.")
     assert not tool_count_offenders(expected), "a dated history line was treated as a current claim"
 
-    _mutate(governed_copy, "BACKLOG.md", r"^(## Spec 011 — trạng thái nhánh phát triển, chưa phát hành.*)$", r"\1\n\nIgnis exposes 39 tools.")
+    _mutate(governed_copy, "BACKLOG.md", r"^(## Spec 011 — trạng thái triển khai.*)$", r"\1\n\nIgnis exposes 39 tools.")
     assert tool_count_offenders(expected), "an unlabeled current claim inside a governed section passed"
 
 
