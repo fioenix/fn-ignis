@@ -3,11 +3,12 @@
 Observed **27/10/2026, approximately 22:45–22:54, Asia/Ho_Chi_Minh**.
 Branch: `claude/meta-host-browser-spec`. Keyword: **áo khoác chống nắng**.
 
-**Disposition: partial; G2 is not fully observed.** Threads was usable; the Instagram-only
-retry on **27/10/2026, approximately 22:59, Asia/Ho_Chi_Minh** was still denied by the
-browser origin approval gate before its page could be read. The tool reported a saved
-permission or managed-policy denial despite the owner's renewed authorization.
-This record does not establish extractor implementation, relay acceptance, or channel repair.
+**Disposition: both populated surfaces observed within the bounded G2 visit.**
+Threads was usable in the earlier visit. The third Instagram attempt on
+**27/10/2026, approximately 23:00–23:04, Asia/Ho_Chi_Minh** passed origin approval
+and rendered signed-in keyword results. Unobserved properties remain explicit below.
+This record does not establish a G2 pass, planning readiness, extractor implementation,
+relay acceptance, or channel repair.
 
 ## Scope and method
 
@@ -139,62 +140,101 @@ This record does not establish extractor implementation, relay acceptance, or ch
 
 ## Instagram keyword search
 
-### Navigation attempt and availability
+### Navigation and availability
 
-- Retried **27/10/2026, approximately 22:59, Asia/Ho_Chi_Minh**, after the owner said
-  they would approve the Instagram origin; whether that approval was saved is not known. Reconfirmed browser inventory before navigation:
-  `family: chrome`, `type: extension`, `profileName: Finos`, browser ID `2`.
-- Exact attempted URL:
+- Earlier attempts, including approximately 22:59 on 27/10/2026, were denied by the browser origin gate before Instagram could be observed.
+- Third attempt: **27/10/2026, approximately 23:00–23:04, Asia/Ho_Chi_Minh**.
+  Fresh inventory confirmed `family: chrome`, `type: extension`, `profileName: Finos`,
+  browser ID `1`; the other profile was not used. IDs are session-local; ID `2` in
+  the earlier method record describes the earlier visit.
+- Requested and final URL, unchanged through scrolling:
   `https://www.instagram.com/explore/search/keyword/?q=%C3%A1o%20kho%C3%A1c%20ch%E1%BB%91ng%20n%E1%BA%AFng`
-- Origin approval **did not work** for this attempt. The browser tool rejected
-  navigation before page observation, reporting: **"A saved user permission setting
-  blocks this action"** and **"A saved permission or managed policy denies access."**
-  The denied origin was `https://www.instagram.com`. The tool did not establish
-  which of those policy sources applied. This was a browser authority denial,
-  **not** an Instagram page response or proof of a nonexistent search route.
-- Stopped this surface immediately. No settings changes, alternate origin, browser,
-  profile, Playwright instance, API, guessed route or indirect access was attempted.
-- Final page URL, redirect and actual Instagram search URL: **not observed**.
-  Whether the requested route exists: **not observed**.
-- Signed-in results, login wall, consent interstitial, checkpoint or challenge:
+- Origin approval **worked**. The requested route rendered a populated grid, without
+  an observed redirect or nonexistent-route message.
+- Existing signed-in session: profile navigation, messages, notifications and new-post
+  controls were present; none was opened. Heading: **`Áo khoác chống nắng`**.
+  Navigation was English. Login wall, checkpoint, challenge and consent interstitial:
   **not observed**.
+- Only URL navigation, one downward scroll and read-only rendered-DOM/accessibility
+  inspection were used. No post opening, page-content click, typing, sign-in,
+  consent handling, settings or social action. No cookies, storage or credentials
+  were read; no screenshots were captured or saved. No fallback browser, profile,
+  separate Playwright instance, API or alternate origin was used.
 
 ### Counts and scrolling
 
-- Distinct result-item count: **not observed**, not zero. No result paths were
-  available to track in memory.
-- Scrolling, lazy loading, per-load increments, DOM virtualization and exhaustion:
-  **not observed**. No page was available for the authorized scroll observation.
+- The initial accessibility read exposed the signed-in shell without result cards.
+  A subsequent DOM read found **24 distinct canonical post paths**, tracked from
+  that read in an in-memory set only.
+- One two-page downward scroll moved the document to approximately `scrollY=1690.5`
+  (viewport height `862`, document height `4768`). The next read still held **24**
+  DOM cards and **24** tracked distinct paths: **0** new paths in that interval.
+- A main-region `role="progressbar"` was present before and after scrolling.
+  This does not prove another batch completed or loading failed.
+- Lazy-load additions, per-load batch size and DOM virtualization: **not observed**
+  in this bounded interval. No sampled card removal was established.
+- Stopped because the approximately 20-item target was exceeded, not at proven
+  exhaustion. End of results and no-more-load behaviour: **not observed**.
 
 ### Card contents and measurement formats
 
-- Canonical post URL pattern (`/p/`, `/reel/` or other), and whether it embeds an
-  author handle: **not observed**.
-- Excerpt/caption availability on the results page: **not observed**. No post was
-  opened; caption availability after opening a post is also **not observed**.
-- Media type (text, image, video or carousel): **not observed**.
-- Likes, comments, plays/views, other counters and their exact display formats:
-  **not observed**. This attempt does not establish that a grid shows no counters.
-- Publication time, relative time and display format: **not observed**.
+- All **24** canonical links used **`/p/<post-id>/`**, including the tile marked
+  `Reel`. These paths do **not** embed an author handle. `/reel/` and other post
+  path shapes: **not observed** in the sampled grid.
+- All sampled tile links had empty rendered text; main-region rendered text was
+  only the keyword heading. A separate visible excerpt/caption field: **not observed**.
+  Caption availability after opening a post: **not observed**; no post was opened.
+- **23** image nodes had nonempty alt text, approximately **16–111 whitespace-separated
+  words** each. Text is available in the results DOM/accessibility surface, but its
+  provenance as caption, generated image description or mixed content is **not
+  established**. No alt text is reproduced; it must not automatically become an excerpt.
+- Media: **23** image tiles and **1** tile containing a `video` element. Descendant
+  SVG labels: **`Carousel`** on **22** tiles, **`Reel`** on **1**. One image tile
+  had neither label. The carousel icon does not establish a slide count.
+- The sampled grid showed **no likes, comments, plays/views or other numeric counters**
+  as rendered tile text. Main-region Like/Comment aria-label checks also found none.
+  Exact counter display formats: **not observed**. No hover or detail interaction
+  was used; absence on this grid is not an exact zero engagement count.
+- Publication time and format: **not observed**. Main contained **0** `time`
+  elements and no observed visible relative or calendar timestamp.
 
 ### Author elements and extractor hooks
 
-- Handle, display name, avatar, profile link, verified badge and their placement:
-  **not observed**.
-- Attribution templates in image alt text or captions, including English
-  `Photo by <author>` or Vietnamese equivalents: **not observed**.
-- Stable structural hooks (roles, link shapes, aria labels, data attributes) and
-  opaque/unstable classes: **not observed**. No Instagram selector is established.
+- Result tiles had no observed separate handle, display name, avatar, profile link
+  or verified badge. Main-region links were the **24** post links only. Sampled SVG
+  labels were `Carousel` and `Reel`, with no `Verified` label.
+- The signed-in account's profile picture/name and profile link sat in the navigation
+  rail, outside results; their values are not recorded and are not result-author data.
+- English `Photo by <author>`, `Photo shared by <author>` and `Video by <author>`
+  prefixes: **not observed** in sampled image alts. Exact Vietnamese author-attribution
+  templates and author-identity placement within free-form alt text: **not established**.
+  Broad Vietnamese phrase matches were inconclusive, not proof of attribution.
+  No claim that the alt strings are identity-free is made.
+- Candidate structural hooks observed: `main`; canonical `a[href]` matching
+  `/p/<post-id>/`; `img[alt]`; `video`; roles `link`, `img`, `progressbar`;
+  SVG `aria-label="Carousel"` and `aria-label="Reel"`. The 24 tile anchors had
+  no aria label themselves.
+- Main contained **0** `article` elements and **0** `data-testid` or `data-e2e`
+  hooks. Opaque tile/image classes included `x1i10hfl`, `xjbqb8w`, `_a6hd`,
+  `x5yr21d`, `xu96u03`; treat these as unstable. Structural hooks are observations,
+  not validated selectors or guarantees across locales/layouts.
+- Deduplicate canonical post paths, not images, carousel badges or media types.
+  Behaviour under longer scrolling remains **not observed**.
 
 ### Empty-answer ambiguity
 
-- Suggestion-only views and explicit no-results text, including exact Vietnamese
-  wording: **not observed**.
-- The origin denial cannot be classified as healthy emptiness, a login wall or
-  an Instagram search result. No healthy-empty signature was established.
+- The initial shell exposed no result cards, then **24** rendered without another
+  navigation. The initial shell is not a measured empty result.
+- A progressbar and unchanged count do not establish exhaustion or measured zero.
+  This visit was populated, not suggestion-only.
+- Exact no-results wording (English or Vietnamese) and healthy-empty signature:
+  **not observed**.
 
-The Instagram retry remains blocked before page observation; G2 is still partial.
-All Instagram surface properties remain **not observed**. Threads Recent rendering,
-video cards, result-card verification badges and explicit empty-state wording also remain
-unobserved from the earlier visit. The Threads section is unchanged by this retry.
+Both surfaces now have bounded populated-result observations. Instagram origin access
+succeeded; the former origin blocker is no longer the current outcome. Instagram
+lazy-load additions, virtualization, exhaustion, publication time, counter formats,
+post-detail captions, exact alt-text provenance/identity attribution and empty-state
+wording remain unobserved or unestablished as detailed above. Threads Recent rendering,
+video cards, result-card verification badges and explicit empty-state wording remain
+unobserved from the earlier visit. The Threads section is byte-for-byte unchanged.
 No G2 pass, planning readiness or working extractor is claimed.

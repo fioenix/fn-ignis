@@ -71,11 +71,13 @@ author identity at rest, and whose period view says when the collection path cha
   on Instagram keyword search records what each result card shows (post link, excerpt, counters, date,
   author elements) and whether results appear while signed in. The extractors are designed from
   that record, as `tiktok-public-grid-v1` was from the TikTok trial of 26/10/2026.
-  Partial on 27/10/2026, see [g2-surfaces.md](g2-surfaces.md): Threads observed (results while
-  signed in; post links embed the author handle, which Spec 015 FR-005/FR-006 already turn into an
-  identity-free link or "link unavailable"; image alt text carries an English "Photo by …"
-  attribution). Instagram not observed: the browser tool's origin approval for
-  `www.instagram.com` was declined.
+  Observed on 27/10/2026, see [g2-surfaces.md](g2-surfaces.md). Threads: results while signed in,
+  counters (`1.4K` style) and `time[datetime]` on each card; post links embed the author handle,
+  which Spec 015 FR-005/FR-006 already turn into an identity-free link or "link unavailable";
+  image alt text carries an English "Photo by …" attribution. Instagram keyword search: 24 posts
+  as `/p/<post-id>/` links without a handle, but the grid shows no counters, no publication time
+  and no caption, only image alt text of unknown provenance. Whether Instagram stays in scope
+  is open for the owner.
 
 ## User Scenarios & Testing *(mandatory)*
 
