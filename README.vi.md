@@ -6,9 +6,9 @@ Ignis là bộ công cụ tự lưu trữ để nghiên cứu thị trường t�
 lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân tích có thể kết thúc bằng báo cáo
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
-**Ranh giới phát hành:** Nhánh này đang triển khai Spec 011 và chưa được phát hành. Mã nguồn
-và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 52 tool theo
-nhiệm vụ được mô tả ở đây. Không dùng image đã phát hành để kiểm chứng nhánh này.
+**Ranh giới phát hành:** v0.8.0 gồm Spec 011, watchlist và bản xem theo kỳ gắn với mục tiêu đã lưu. Mã nguồn
+và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 53 tool theo
+nhiệm vụ được mô tả ở đây.
 
 ## Hợp đồng sản phẩm
 
@@ -38,7 +38,7 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/034_tiktok_attribution.sql`. Migration 034 nạp sẵn mẫu câu
+Cây mã nguồn hiện có migration tới `sql/035_watchlist_listening_plans.sql`. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn mẫu câu
 ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt
 host; nó không sửa bằng chứng đã lưu. Migration 033 thêm bộ đếm số
 lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không sửa bằng
@@ -54,7 +54,8 @@ Migration 028 (`sql/028_research_work.sql`) bổ sung các bảng lưu hoạt đ
 của host trong phạm vi được duyệt và các loại sự kiện tiến độ, không chuyển đổi dữ liệu bằng chứng đã lưu.
 Migration 027 chỉ bổ sung các bảng lưu revision, sự kiện tiến độ và receipt của lệnh trên PostgreSQL; dữ liệu bằng chứng
 chuẩn được giữ nguyên. SQLite và PostgreSQL hiện ghi dữ kiện thu thập, qualification và claim cùng sự kiện tiến độ
-tương ứng trong một giao dịch. Relay cung cấp giao diện chỉ đọc cục bộ có thời hạn và snapshot giới hạn từ dữ liệu nhiệm vụ đã khởi tạo.
+tương ứng trong một giao dịch. Relay cung cấp snapshot giới hạn từ dữ liệu nhiệm vụ đã khởi tạo;
+Ignis không tự dựng trang theo dõi.
 Migration 026 chỉ sửa constraint số quan sát; kết quả DEGRADED
 vẫn không phải phép đo hoàn chỉnh. Khởi tạo
 SQLite mới đã được kiểm tra cục bộ; rehearsal PostgreSQL tạm không xác minh database hiện hữu
@@ -69,25 +70,37 @@ vận hành phê duyệt. Các file trước đó gồm `sql/022_builtin_uuid_de
 Không chạy lại 025 khi đã có hàng DEGRADED chứa kết quả một phần: constraint cũ sẽ chặn chúng
 trước khi 026 chạy. Kiểm chứng chạy lại 026 không đồng nghĩa chạy lại toàn bộ lịch sử migration.
 
-OCI image và manifest công khai vẫn trỏ tới v0.7.0. Hãy build nhánh mã nguồn này tại máy để
-kiểm chứng Spec 011; đừng giả định image công khai đã có `025` hoặc tool mới. Chưa công bố
-gói PyPI. HTML tạo lúc chạy nằm trong `reports/` và không được commit; mã template báo cáo
-chỉ nằm tại `src/ignis/infrastructure/templates/html/`.
+Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.8.0` khi tag `v0.8.0` được push.
+Image v0.7.0 không có quy trình được mô tả ở đây. Chưa công bố
+gói PyPI. Lệnh mission được chấp nhận ghi HTML vào `<root>/.fnignis/reports/`; phương án dự phòng
+trong source checkout là `reports/` không được commit. Mã template báo cáo chỉ nằm tại
+`src/ignis/infrastructure/templates/html/`.
 
 ## Năng lực dành cho agent
 
-MCP server của nhánh hiện có **52 tools**. Mô tả tool do server đang chạy trả về là nguồn
+MCP server của nhánh hiện có **53 tools**. Mô tả tool do server đang chạy trả về là nguồn
 chuẩn cho tham số. Một số thao tác đại diện:
 
 - `create_attention_mission` và `confirm_market_brief` xác lập câu hỏi và phạm vi;
   `execute_mission_ingress` thu thập khung chứng cứ được yêu cầu.
+- `set_watchlist_listening_plan` lưu mục tiêu, kỳ so sánh (`day`, `week`, `month`) và số lần
+  lấy mẫu trong mỗi kỳ do người dùng chọn. Lịch sử kế hoạch chỉ được thêm, không sửa; lưu lại cùng
+  kế hoạch không tạo dòng mới. `get_watchlist` trả kế hoạch đang có hiệu lực cùng lịch sử.
+  `period_kind` là tham số tùy chọn của `get_watchlist_period_snapshot`: nếu bỏ qua thì dùng kỳ
+  trong kế hoạch; nếu chưa có kế hoạch, cần truyền kỳ rõ ràng. Routine hỏi các lựa chọn còn thiếu,
+  trình bày số lượt chạy và request mỗi kỳ, rồi chờ xác nhận trước khi tạo lịch trên host.
+  Lưu kế hoạch không tạo lịch hay chạy thu thập.
 - `save_watchlist`, `get_watchlist` và `start_watchlist_run` lưu một watchlist gồm chủ đề và
   thương hiệu theo từng phiên bản và tạo một nhiệm vụ Attention trên phiên bản hiện tại cho mỗi
   lần chạy. Ignis không bao giờ tự chạy watchlist. `get_watchlist_period_snapshot` so một ngày,
   tuần hoặc tháng đã trọn vẹn với kỳ liền trước, theo từng kênh và theo đơn vị riêng của kênh đó;
-  guide `ignis_listen` dựng kết quả thành bản xem trên máy. Mỗi kênh dừng khi chạm trần request
-  theo ngày (bạn có thể nâng trần), và `scripts/prune_expired_observations.py` xóa lịch sử cũ hơn
-  13 tháng khi bạn chạy nó. Với guide `ignis_routine`, agent có thể tạo một scheduled task hằng ngày
+  guide `ignis_listen` dựng trục `seen` trước (những gì các lần lấy mẫu thành công ghi nhận,
+  tính trung bình trên mỗi lần lấy mẫu và so với nhịp đã lưu), rồi đến trục `created`
+  (nội dung được xếp theo ngày đăng). Mỗi trục báo riêng khả năng so sánh; không cộng dồn
+  giữa các kênh hay hai trục. Mỗi kênh dừng khi chạm trần request
+  theo ngày (bạn có thể nâng trần). `scripts/prune_expired_observations.py` liệt kê lịch sử cũ hơn
+  13 tháng và chỉ xóa khi có `--apply`, giữ các quan sát còn được claim hoặc công việc nghiên cứu
+  tham chiếu. Với guide `ignis_routine`, agent có thể tạo một scheduled task hằng ngày
   trong Claude Code Desktop để chạy một watchlist; bản thân Ignis vẫn không tự lên lịch việc gì.
 - Các tool nguồn riêng lẻ như `get_tiktok_search_suggestions` và
   `get_tiktok_video_comments` có thể trả lời câu hỏi cụ thể mà không cần kết luận thị trường.
@@ -121,11 +134,9 @@ biểu diễn nhánh này.
 
 ## Kiểm chứng và trạng thái phát hành
 
-Chạy `.venv/bin/pytest tests/unit/` cho kiểm thử cục bộ và `uv lock --check` để kiểm tra
-lockfile. Kiểm thử cục bộ đạt không có nghĩa là nhánh đã được merge, đóng gói, công bố hoặc
-triển khai. Các cổng pilot và phát hành nằm trong
-[danh sách việc Spec 011](specs/011-evidence-grounded-product-reset/tasks.md). Nhánh phát triển
-này không tự tăng số phiên bản phát hành.
+Chạy `.venv/bin/pytest tests/` theo phạm vi CI và `uv lock --check` để kiểm tra
+lockfile. Các cổng pilot và phát hành nằm trong
+[danh sách việc Spec 011](specs/011-evidence-grounded-product-reset/tasks.md).
 
 ## Giấy phép
 

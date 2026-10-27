@@ -192,7 +192,7 @@ def test_no_value_is_summed_across_channels():
     (topic,) = snapshot["topics"]
     assert set(topic) == {"name", "channels", "items"}
     for channel_cell in topic["channels"]:
-        assert set(channel_cell) <= {"channel", "status", "measured_on_sample", "indicators", "basis",
+        assert set(channel_cell) <= {"axis", "channel", "status", "measured_on_sample", "indicators", "basis",
                                      "rising_terms", "new_terms", "missing_days", "reasons"}
 
 
@@ -385,3 +385,71 @@ async def test_a_non_finite_or_invalid_counting_window_falls_back_to_the_default
     use_case = GetWatchlistPeriodSnapshotUseCase(_Config(), None, lambda: NOW)
     assert await use_case._config("listening.counter_observation_days", 7) == 7
     assert MAX_COUNTER_DAYS == 31
+
+
+@pytest.mark.asyncio
+async def test_optional_period_uses_the_plan_at_now_and_explicit_kind_overrides_it():
+    from types import SimpleNamespace
+    from uuid import UUID
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+    from ignis.domain import watchlist
+
+    target = UUID('00000000-0000-0000-0000-000000000018')
+    class Store:
+        plans = []
+
+        async def get_watchlist(self, value):
+            return SimpleNamespace(id=str(target), name='Demand', runs=(),
+                                   current=SimpleNamespace(definition=watchlist.parse_watchlist_definition({'topics': [TOPIC]})))
+
+        async def list_listening_plans(self, value):
+            return self.plans
+
+        async def get_runtime_config(self, key):
+            return None
+
+        async def get_domain_lexicons(self, domain):
+            return []
+
+    store = Store()
+    use_case = GetWatchlistPeriodSnapshotUseCase(store, store, lambda: NOW)
+    # Passing None exercises the old required argument without a setup TypeError.
+    missing = await use_case.execute(str(target), None)
+    assert (missing['status'], missing['reason_code']) == ('INVALID', 'PERIOD_KIND_REQUIRED')
+    explicit = await use_case.execute(str(target), 'day')
+    assert explicit['status'] == 'OK' and explicit['period_kind'] == 'day'
+    store.plans = [watchlist.ListeningPlan(NOW - timedelta(days=1), 'Weekly.', 'week', 3),
+                   watchlist.ListeningPlan(NOW + timedelta(days=1), 'Future.', 'month', 4)]
+    default = await use_case.execute(str(target))
+    assert default['period_kind'] == 'week'
+    assert default['periods']['current']['start'] == '2026-10-19'
+    assert default['periods']['previous']['start'] == '2026-10-12'
+    assert (await use_case.execute(str(target), 'month'))['period_kind'] == 'month'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,start", [("day", "2026-10-19"), ("week", "2026-10-19"), ("month", "2026-09-01")])
+async def test_created_view_matches_the_frozen_pre_feature_response(kind, start):
+    """SC-004: compare the entire old response after removing only the approved additions."""
+    import json
+    import runpy
+    from pathlib import Path
+
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+
+    directory = Path(__file__).parents[1] / "fixtures/watchlist_period_created_baseline"
+    fixture = runpy.run_path(str(directory / "capture.py"))
+    store = fixture["FixtureStore"]()
+    # The pre-Part-A capture adapter has no listening-plan storage.
+    async def no_plans(_target):
+        return []
+    store.list_listening_plans = no_plans
+    result = await GetWatchlistPeriodSnapshotUseCase(store, store, lambda: NOW).execute(
+        str(fixture["WATCHLIST_ID"]), kind, start)
+    assert result.pop("listening_plan") == {"current": None, "previous": None}
+    for topic in result["topics"]:
+        for seen in topic.pop("seen"):
+            assert seen["axis"] == "seen"
+        for created in topic["channels"]:
+            assert created.pop("axis") == "created"
+    assert result == json.loads((directory / f"{kind}.json").read_text())

@@ -176,7 +176,7 @@ async def test_no_value_is_summed_across_channels(listening):
     snapshot = await two_weeks(listening)
     # SC-003: values live only inside a channel cell.
     topic = snapshot["topics"][0]
-    assert set(topic) == {"name", "channels", "items"}
+    assert set(topic) == {"name", "channels", "items", "seen"}
     assert all(set(i) == {"excerpt", "link", "channel", "published_on", "basis"} for i in topic["items"])
 
 
@@ -233,3 +233,154 @@ async def test_year_one_has_no_earlier_period_and_is_refused(listening):
     refused = await call("handle_get_watchlist_period_snapshot", watchlist_id=watchlist_id,
                          period_kind="week", period_start="0001-01-01")
     assert refused["reason_code"] == "INVALID_PERIOD_START"
+
+
+async def test_changing_a_plan_preserves_runs_evidence_and_explicit_period_output(listening):
+    repository, store, workspace, target = listening
+    await two_weeks(listening)
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+    use_case = GetWatchlistPeriodSnapshotUseCase(repository, store, lambda: at(date(2026, 10, 12)))
+    before = await use_case.execute(target, 'week')
+    watchlist = await repository.get_watchlist(target)
+    evidence = [await repository.get_mission_signals(run.mission_id) for run in watchlist.runs]
+    assert hasattr(mcp_server, 'handle_set_watchlist_listening_plan'), 'The MCP surface must expose plan saving'
+    for kind in ('week', 'month'):
+        await call('handle_set_watchlist_listening_plan', watchlist_id=target, goal='Track demand.',
+                   period_kind=kind, snapshots_per_period=3)
+        assert await repository.get_watchlist(target) == watchlist
+        assert [await repository.get_mission_signals(run.mission_id) for run in watchlist.runs] == evidence
+        assert await use_case.execute(target, 'week') == before
+
+
+async def test_seen_axis_uses_run_channel_snapshots_and_historical_cadence(listening, monkeypatch):
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+
+    repository, store, workspace, target = listening
+    await save_plan_at(repository, target, at(PREVIOUS[0], 0), 7, monkeypatch)
+    await save_plan_at(repository, target, at(CURRENT[0], 0), 6, monkeypatch)
+    await two_weeks(listening)
+    result = await GetWatchlistPeriodSnapshotUseCase(repository, store, lambda: at(date(2026, 10, 12))).execute(
+        target, "week")
+    assert result["listening_plan"]["current"]["snapshots_per_period"] == 6
+    assert result["listening_plan"]["previous"]["snapshots_per_period"] == 7
+    seen = {c["channel"]: c for c in result["topics"][0]["seen"]}
+    youtube = seen["youtube"]
+    assert youtube["axis"] == "seen" and youtube["status"] == "comparable"
+    assert youtube["snapshots"] == {"current": 7, "previous": 7}
+    assert indicator(youtube, "relevant_shown")["current"] == 0.2857
+    assert indicator(youtube, "first_seen")["current"] == 0.1429
+    assert indicator(youtube, "created_in_period")["current"] == 0.1429
+    assert indicator(seen["tiktok"], "views_visible")["previous"] == 71.4286
+    assert seen["reels"]["status"] == "not_comparable"
+    assert seen["reels"]["snapshots"] == {"current": 7, "previous": 4}
+    assert seen["reels"]["snapshots_called_for"] == {"current": 6, "previous": 7}
+
+
+async def test_seen_axis_without_a_plan_or_with_unjudged_evidence_fails_closed(listening, monkeypatch):
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+
+    repository, store, workspace, target = listening
+    await two_weeks(listening, unjudged=(CURRENT[2],))
+    use_case = GetWatchlistPeriodSnapshotUseCase(repository, store, lambda: at(date(2026, 10, 12)))
+    result = await use_case.execute(target, "week")
+    assert result["listening_plan"] == {"current": None, "previous": None}
+    assert "seen_period_without_cadence" in result["topics"][0]["seen"][0]["reasons"]
+    await save_plan_at(repository, target, at(PREVIOUS[0], 0), 7, monkeypatch)
+    result = await use_case.execute(target, "week")
+    tiktok = next(c for c in result["topics"][0]["seen"] if c["channel"] == "tiktok")
+    assert tiktok["reasons"] == ["seen_period_unjudged_snapshots"]
+    assert "indicators" not in tiktok
+
+
+async def save_plan_at(repository, target, instant, count, monkeypatch):
+    """Use the public save path with a controlled repository clock, on either backend."""
+    import importlib
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return instant.astimezone(tz)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(importlib.import_module(type(repository).__module__), "datetime", FrozenDatetime)
+        await repository.save_listening_plan(target, "Track drinks.", "week", count)
+
+
+async def test_seen_uses_each_channels_completion_time_even_when_another_finishes_later(listening, monkeypatch):
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+
+    repository, store, workspace, target = listening
+    await save_plan_at(repository, target, at(PREVIOUS[0], 0), 1, monkeypatch)
+    await daily_run(repository, store, workspace, target, PREVIOUS[0])
+    mission = await daily_run(repository, store, workspace, target, CURRENT[-1])
+    original = store.get_latest_completed_probe_outcomes
+
+    async def staggered(mission_id):
+        outcomes = await original(mission_id)
+        if str(mission_id) != str(mission.id):
+            return outcomes
+        # A channel can finish beyond the created counting window; YouTube still belongs to
+        # this week. A run-wide latest timestamp would incorrectly discard that snapshot.
+        return [dataclasses.replace(o, completed_at=at(CURRENT[-1] + timedelta(days=8)))
+                if o.platform == "reels" else o for o in outcomes]
+
+    monkeypatch.setattr(store, "get_latest_completed_probe_outcomes", staggered)
+    result = await GetWatchlistPeriodSnapshotUseCase(repository, store, lambda: at(date(2026, 10, 20))).execute(
+        target, "week", CURRENT[0].isoformat())
+    seen = {c["channel"]: c for c in result["topics"][0]["seen"]}
+    assert seen["youtube"]["snapshots"] == {"current": 1, "previous": 1}
+    assert seen["youtube"]["status"] == "comparable"
+    assert seen["reels"]["snapshots"] == {"current": 0, "previous": 1}
+
+
+async def test_seen_first_sighting_reads_snapshots_before_both_compared_periods(listening, monkeypatch):
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+
+    repository, store, workspace, target = listening
+    early = PREVIOUS[0] - timedelta(days=3)
+    await save_plan_at(repository, target, at(early, 0), 1, monkeypatch)
+    # The same observation may be associated with a later mission; captured_at alone cannot
+    # decide which completed snapshot first showed it.
+    for day in (early, PREVIOUS[0], CURRENT[0]):
+        await daily_run(repository, store, workspace, target, day, [
+            signal(PlatformType.TIKTOK, "8001", "matcha latte trà sữa", None, at(early, 21), 100,
+                   metric_kind="views", likes=2),
+        ])
+    result = await GetWatchlistPeriodSnapshotUseCase(repository, store, lambda: at(date(2026, 10, 12))).execute(
+        target, "week")
+    tiktok = next(c for c in result["topics"][0]["seen"] if c["channel"] == "tiktok")
+    assert indicator(tiktok, "relevant_shown")["current"] == 1
+    assert indicator(tiktok, "relevant_shown")["previous"] == 1
+    assert indicator(tiktok, "first_seen")["current"] == 0
+    assert indicator(tiktok, "first_seen")["previous"] == 0
+
+
+async def test_seen_history_is_not_truncated_by_another_channels_late_completion(listening, monkeypatch):
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+
+    repository, store, workspace, target = listening
+    early = PREVIOUS[0] - timedelta(days=3)
+    await save_plan_at(repository, target, at(early, 0), 1, monkeypatch)
+    old_mission = None
+    for day in (early, PREVIOUS[0], CURRENT[0]):
+        mission = await daily_run(repository, store, workspace, target, day, [
+            signal(PlatformType.TIKTOK, "8002", "matcha latte trà sữa", None, at(day, 21), 100,
+                   metric_kind="views", likes=2),
+        ])
+        if day == early:
+            old_mission = mission
+    original = store.get_latest_completed_probe_outcomes
+
+    async def staggered(mission_id):
+        outcomes = await original(mission_id)
+        if str(mission_id) != str(old_mission.id):
+            return outcomes
+        return [dataclasses.replace(o, completed_at=at(CURRENT[-1] + timedelta(days=8)))
+                if o.platform == "reels" else o for o in outcomes]
+
+    monkeypatch.setattr(store, "get_latest_completed_probe_outcomes", staggered)
+    result = await GetWatchlistPeriodSnapshotUseCase(repository, store, lambda: at(date(2026, 10, 20))).execute(
+        target, "week", CURRENT[0].isoformat())
+    tiktok = next(c for c in result["topics"][0]["seen"] if c["channel"] == "tiktok")
+    assert indicator(tiktok, "first_seen")["current"] == 0
+    assert indicator(tiktok, "first_seen")["previous"] == 0

@@ -1,5 +1,19 @@
 # 📋 FN-IGNIS BACKLOG & SYSTEM STATUS
 
+> - **Cập nhật lần cuối:** 27/10/2026
+> - **Phiên bản:** `v0.8.0`
+> - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
+>   + FastMCP Server (53 tools); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
+> - **Schema:** Migration mới nhất là `sql/035_watchlist_listening_plans.sql`.
+>   Ignis không có worker hay lịch khám phá hằng ngày; routine chạy trên host khi được yêu cầu.
+> - **Trạng thái:** Release candidate `v0.8.0`, chưa tag và chưa publish. Bản public hiện tại vẫn
+>   là `v0.7.0` qua source, GitHub Release và GHCR; PyPI tiếp tục được hoãn. Tag và publish do chủ
+>   sở hữu quyết định; kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`.
+
+---
+
+## Lịch sử phát hành v0.7.0 — 29/09/2026
+
 > - **Cập nhật lần cuối:** 29/09/2026
 > - **Phiên bản:** `v0.7.0`
 > - **Kiến trúc:** Clean Architecture + Dual-Backend (Postgres TimescaleDB & Zero-Docker SQLite)
@@ -29,21 +43,26 @@ khi người dùng yêu cầu; server Ignis không có lịch hay worker riêng.
 (watchlist và so sánh theo kỳ), lượt mốc golden set, Spec 017 (skill dựng routine), rồi spike kênh
 thương mại.
 
-## Spec 011 — trạng thái nhánh phát triển, chưa phát hành
+## Spec 011 — trạng thái triển khai
+
+Ngày 27/10/2026, chủ sở hữu cho phép chuẩn bị v0.8.0 tới hồ sơ PR sẵn sàng để tag.
+Các checkpoint bên dưới giữ nguyên ngày và phạm vi kiểm chứng của chúng.
 
 **Mục tiêu phiên bản đã duyệt: `v0.8.0`** (02/10/2026). MINOR dành cho thay đổi chức năng
 hoặc cách dùng đủ rõ với người dùng; PATCH dành cho các thay đổi còn lại không làm khác đáng
 kể trải nghiệm sản phẩm. Chốt mục tiêu không đồng nghĩa đã bump metadata, merge hay phát hành;
 các cổng pilot và release vẫn giữ nguyên.
 
-Nhánh `codex/spec016-period-comparison` (Spec 016 phần B, chưa merge) có **52 tools**: nhánh này
-thêm `get_watchlist_period_snapshot` vào bộ tool của `main`. Bộ tool đó có `save_watchlist`,
+`main` có **53 tools** từ ngày 26/10/2026, khi PR #88 (Spec 018 phần A) được merge tại
+`25d10c3`. PR này thêm `set_watchlist_listening_plan` để lưu mục tiêu, kỳ so sánh và nhịp lấy mẫu
+do người dùng chọn; khi không truyền `period_kind`, `get_watchlist_period_snapshot` dùng kỳ so sánh
+đã lưu. Bộ tool này có `save_watchlist`,
 `get_watchlist` và `start_watchlist_run` từ ngày 21/10/2026, khi PR #59 (Spec 016 phần A) được merge
 tại `5d6794c`. Trước đó, PR #57 (Spec 015) được merge tại `1f4971e` và thêm
 `set_mission_declared_accounts`, được chủ sở hữu duyệt ngày 20/10/2026 (OG-1); PR #51 (Spec 014)
 được merge tại `474916f`; Spec 014 R2 đã bỏ `open_mission_relay` nhưng vẫn giữ
-`get_mission_relay_snapshot` và `execute_mission_follow_up`. Migration mới nhất trên cả nhánh lẫn
-`main` là `sql/033_connector_request_days.sql`; các con số 47 tools, worker, quota
+`get_mission_relay_snapshot` và `execute_mission_follow_up`. Migration mới nhất trên `main` là
+`sql/035_watchlist_listening_plans.sql`; các con số 47 tools, worker, quota
 scheduled và migration `024` trong phần lịch sử dưới đây là của bản v0.7.0 đã phát hành, khác bộ tool
 hiện tại. Tại mốc Spec 011 ngày 02/10/2026, nhánh `codex/evidence-grounded-product-reset`
 có 44 tool theo nhiệm vụ và migration mới nhất là `sql/025_evidence_grounded_claim_ledger.sql`.
@@ -64,7 +83,7 @@ từ GitHub trước khi coi là hoàn tất. Các cổng còn lại nằm trong
 [`tasks.md`](specs/011-evidence-grounded-product-reset/tasks.md). Không xóa baseline corpus
 hiện hữu chỉ vì chế độ nền đã bị loại; disposition đang giữ dữ liệu để đánh giá giá trị và
 xác minh bản phục hồi, không còn chờ quyền thao tác database dev.
-**Trạng thái: implementation đã merge, schema dev đã cập nhật; v0.8.0 chưa tag hoặc publish.**
+**Trạng thái triển khai: implementation đã merge, schema dev đã cập nhật.**
 
 ---
 
@@ -1287,7 +1306,7 @@ nhà bán), **không đủ điều kiện**, **đã ngừng**.
 | Google | Autocomplete | Gợi ý từ khóa | Công khai | Đang dùng để mở rộng từ khóa, không đo nhu cầu |
 | Google | Google Trends API (alpha) | Mức quan tâm theo từ khóa, theo ngày/tuần/tháng/năm, theo vùng, trong 5 năm | Phải nộp đơn xin làm alpha tester; chưa có gói tự đăng ký | Ứng viên: đường duy nhất để đo nhu cầu theo từ khóa |
 | Google | Google Ads API, `KeywordPlanIdeaService` | Lượng tìm kiếm hằng tháng ước tính trong tối đa 4 năm, chỉ số cạnh tranh, khoảng giá thầu | Cần tài khoản Google Ads và mức truy cập Basic cho Google Cloud project; muốn xin Basic phải xác minh thương hiệu. Mức Explorer không gọi được dịch vụ này. Developer token đã ngừng ngày 09/09/2026, quyền truy cập nay quản lý theo project. Chưa xác nhận tài khoản không chi tiêu có chỉ thấy khoảng giá trị hay không | Ứng viên: nguồn chính thức duy nhất có lượng tìm kiếm tuyệt đối ở Việt Nam |
-| Google | BigQuery public dataset `google_trends.international_top_terms` và bảng rising | Top 25 từ khóa và 25 từ khóa đang lên mỗi ngày theo quốc gia và vùng | Free tier 1 TB truy vấn mỗi tháng; khoảng 50 quốc gia, chưa xác nhận có Việt Nam | Ứng viên: kiểm bằng một truy vấn với `country_code='VN'` |
+| Google | BigQuery public dataset `google_trends.international_top_terms` và bảng rising | Top 25 từ khóa và 25 từ khóa đang lên mỗi ngày theo quốc gia và vùng; điểm 0–100 so với đỉnh của chính từ khóa, không phải lượng tìm. Không tra được một từ khóa tùy ý: từ khóa của watchlist chỉ hiện ra khi lọt top | Free tier 1 TB truy vấn mỗi tháng; khoảng 50 quốc gia, chưa xác nhận có Việt Nam | Không đủ điều kiện để đo nhu cầu theo watchlist (khảo sát 27/10/2026); chỉ là bối cảnh vĩ mô, trùng với Trends RSS. Hướng Google tạm dừng tới khi có quyền Google Trends API |
 | Google | Places API (New) | Điểm, số lượt và nội dung đánh giá của cửa hàng | Trả phí theo SKU Enterprise | Ứng viên |
 | Google | Gemini API, Grounding with Google Search | Truy vấn model đã chạy và URL được trích | Tài khoản cá nhân dùng được; 5.000 lượt tìm miễn phí mỗi tháng, sau đó 14 USD mỗi 1.000 lượt. Không phải trang kết quả tìm kiếm thô; chưa xem điều khoản lưu trữ | Ứng viên, giá trị thấp |
 | Google | Knowledge Graph Search API | Phân biệt thương hiệu và thực thể | Đang chuyển sang Cloud Enterprise Knowledge Graph; Google ghi API không phù hợp cho hệ thống production quan trọng | Ứng viên, giá trị thấp |

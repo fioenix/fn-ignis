@@ -69,6 +69,8 @@ SCHEMA_MIGRATIONS = (
     "032_watchlists.sql",
     # Spec 016 US4: keyword searches per channel per day, for the daily request ceilings.
     "033_connector_request_days.sql",
+    # Spec 018: the user's listening plans, append-only.
+    "035_watchlist_listening_plans.sql",
 )
 
 

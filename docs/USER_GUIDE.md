@@ -1,8 +1,7 @@
-# Ignis User Guide — Spec 011 source branch
+# Ignis User Guide — v0.8.0
 
-This guide describes the unreleased mission-bound source branch, not the published v0.7.0
-image. The v0.7.0 Dual-Track worker and its diagrams are historical and do not describe this
-branch. See [README](../README.md) for the product contract and release boundary.
+This guide describes v0.8.0, including Spec 011 and watchlists. The v0.7.0 Dual-Track
+worker and its diagrams are historical and do not describe this branch. See [README](../README.md) for the product contract and release boundary.
 
 ## 1. Start and inspect
 
@@ -12,7 +11,7 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/034_tiktok_attribution.sql`. Migration 034 seeds the TikTok
+The source migration chain ends at `sql/035_watchlist_listening_plans.sql`. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok
 author attribution wording that host-browser search removes from excerpts; it rewrites no stored
 evidence. Migration 033 adds a
 per-channel, per-day count of keyword searches for the daily request ceilings; it rewrites no
@@ -89,7 +88,7 @@ The [collection skill](../.agents/skills/ignis-collect/SKILL.md) is the method f
 an inspectable frame. The [analysis skill](../.agents/skills/ignis-analyze/SKILL.md) is a
 separate method for testing the Market hypothesis. Ask for either or both.
 
-### Follow a watchlist (development branch)
+### Follow a watchlist
 
 To follow the same subject across runs, ask the agent to save a watchlist in a confirmed research
 workspace: up to 10 topics, each with categories, up to 20 keywords and the brand accounts you
@@ -99,16 +98,35 @@ version and declares its brands as that mission's accounts, the only accounts Ig
 You state the allowed sources and authority for every run; collection then goes through
 `execute_mission_ingress` as for any mission. Ignis never runs a watchlist on its own.
 
+`set_watchlist_listening_plan` records the user's goal, comparison period (`day`, `week`,
+`month`) and snapshots per period as append-only history. An identical save is unchanged.
+`get_watchlist` returns the plan in effect and its history. Omit `period_kind` to use that plan's
+period; without a plan, pass a period explicitly. Routine setup reads the plan, asks for missing
+choices, shows firings and requests per period, and waits for confirmation before host scheduling.
+Ignis starts no collection or schedule when a plan is saved.
+
 To see how a watchlist moved, ask for its period view. `get_watchlist_period_snapshot` compares a
-complete day, Monday-to-Sunday week or calendar month in Asia/Ho_Chi_Minh with the one before, and
-refuses a period that has not ended. Each channel keeps its own figures in its own unit -- Google
-Trends interest, YouTube new uploads, and TikTok, Threads and Reels views and interactions measured
-on the posts Ignis collected -- and channels are never added together. A channel that missed more
-than a fifth of its days in either period shows "not comparable" and its missing days instead of
-numbers. Only observations the agent qualified as relevant count, and each post counts the value
-seen within seven days of publication, so an earlier period does not change after later runs. The
-`ignis_listen` prompt and `fn-ignis://guide/ignis-listen` resource tell the agent how to render the
-view as a local file.
+complete day, Monday-to-Sunday week or calendar month in Asia/Ho_Chi_Minh with the one before,
+and refuses an unfinished period. Its optional `period_kind` defaults to the saved plan's period;
+without a plan, pass it explicitly. The `ignis_listen` prompt and
+`fn-ignis://guide/ignis-listen` resource render a local file with two separate axes:
+
+- `seen` comes first: what successful snapshots showed, placed at each channel's collection
+  completion time. Relevant items, visible views, interactions, first sightings and items created
+  in the period are averages per snapshot held. An old post counts each time it appears.
+  Each period uses the plan in effect at its start. More than 20% missing snapshots, no cadence
+  for that period kind, or unjudged snapshot evidence makes the cell "not comparable": show
+  reasons and snapshot counts, never indicators or change.
+- `created` comes second: items placed by publication date, or by collection date with an explicit
+  label when no plausible publication date exists. It retains Spec 016's daily coverage rules and
+  seven-day counting window. More than 20% missing days in either period, or an unjudged day,
+  makes the channel "not comparable", showing missing or unjudged dates instead of numbers.
+  Only observations qualified as relevant count.
+
+Each channel keeps its own units and sample labels. Comparability is independent between axes;
+never sum across channels or axes. Unknown values are not zero. Google Trends RSS supplies macro
+feed topics and feed-reported traffic; keyword Trends measurement remains unavailable and
+reports `DEGRADED`, not a demand score.
 
 Each channel has a daily request ceiling: one request is one keyword searched on that channel, and
 the count is shared by every session on the same store for the calendar day in Asia/Ho_Chi_Minh.
@@ -207,7 +225,7 @@ Rows stored before Spec 015 keep their identity at rest until the owner decides 
 them; every report and tool response strips it on output, and
 `scripts/inventory_author_identity.py` counts it without showing any value.
 
-### Mission Relay on the development branch
+### Mission Relay
 
 Ignis serves no tracking page. To follow a mission, ask your agent to read
 `get_mission_relay_snapshot` and build a tracking artifact with the `ignis-track` guide: the MCP
@@ -260,10 +278,11 @@ unchanged, and reading a snapshot confers no execution authority.
 
 ## 4. Tool and deployment boundaries
 
-The local MCP server exposes **52 tools**. Discover the running server's descriptions for exact
+The local MCP server exposes **53 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
-The published OCI manifest is still v0.7.0, so neither it nor a public-image smoke test
-establishes that Spec 011 shipped. PyPI installation is not advertised. Run the branch's
+The release workflow builds `ghcr.io/fioenix/fn-ignis:0.8.0` when the `v0.8.0` tag is pushed.
+The v0.7.0 image does not contain the workflow described here.
+PyPI publication is not advertised. Run the branch's
 `.venv/bin/pytest tests/` (the CI scope; PostgreSQL cases skip unless `IGNIS_TEST_POSTGRES_DSN`
 names a disposable test database) and `uv lock --check` for local checks. The test suite
 replaces credentials with inert values; to also keep the checkout's `.env` out of a run, use the

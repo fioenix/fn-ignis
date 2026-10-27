@@ -20,7 +20,11 @@ from ignis.application.use_cases.watchlists import _refused, _uuid
 from ignis.domain.listening_period import PeriodKind, latest_complete_period, local_date, period_of
 from ignis.domain.research_workspace import QualificationRelation, compute_frame_fingerprint
 from ignis.domain.source_identity import identity_free_source_url
-from ignis.domain.watchlist_period import PeriodCoverage, PeriodItem, TermsPolicy, compare_periods
+from ignis.domain.watchlist import plan_in_effect
+from ignis.domain.watchlist_period import (
+    COMPLETING_STATUSES, PeriodCoverage, PeriodItem, SeenSnapshot, TermsPolicy, compare_periods,
+    compare_seen_periods, period_listening_plans,
+)
 from ignis.infrastructure.security.pii_sanitizer import render_mention_tokens, sanitize_pii_text
 
 # R4: what counts toward a volume indicator. Unassessed and irrelevant observations do not.
@@ -61,15 +65,22 @@ class GetWatchlistPeriodSnapshotUseCase:
         self._store = store
         self._clock = clock
 
-    async def execute(self, watchlist_id: Any, period_kind: Any, period_start: Any = None) -> Dict[str, Any]:
+    async def execute(self, watchlist_id: Any, period_kind: Any = None, period_start: Any = None) -> Dict[str, Any]:
         target = _uuid(watchlist_id)
         if target is None:
             return _refused("INVALID", "INVALID_REQUEST", "watchlist_id must be a UUID.")
+        now = self._clock()
+        plans = await self._repo.list_listening_plans(target)
+        if period_kind is None:
+            current_plan = plan_in_effect(plans, now)
+            if current_plan is None:
+                return _refused("INVALID", "PERIOD_KIND_REQUIRED",
+                                "State period_kind or record a listening plan first.")
+            period_kind = current_plan.period_kind
         try:
             kind = PeriodKind(str(period_kind).strip().lower())
         except ValueError:
             return _refused("INVALID", "INVALID_PERIOD_KIND", "period_kind is day, week or month.")
-        now = self._clock()
         if period_start is None:
             period = latest_complete_period(kind, now)
         else:
@@ -97,21 +108,31 @@ class GetWatchlistPeriodSnapshotUseCase:
 
         items: List[PeriodItem] = []
         coverage: List[PeriodCoverage] = []
+        seen_snapshots: List[SeenSnapshot] = []
         versions: Dict[date, set] = {period.start: set(), period.previous().start: set()}
         # The first sighting of each source in any run up to the later period's counting window:
         # an item without a publication time takes its period from it.
         first_seen: Dict[str, datetime] = {}
+        first_snapshots: Dict[tuple, datetime] = {}
         for run in watchlist.runs:
             # A run's day is the day its collection completed; a run that never completed one
             # covers no day and holds no counted evidence.
             outcomes = await self._store.get_latest_completed_probe_outcomes(run.mission_id)
             if not outcomes:
                 continue
+            # Seen first-sighting history is channel-scoped and independent of the created
+            # view's run-wide window. Read it before applying any created-view date filter.
+            signals = await self._repo.get_mission_signals(run.mission_id)
+            _note_snapshot_sightings(first_snapshots, signals, outcomes)
             collected = local_date(max(_utc(o.completed_at) for o in outcomes))
-            if collected > last_day:
+            # Keep created-view run eligibility unchanged. The seen axis reads each channel's
+            # own completion time, even when another channel completes after the window.
+            include_created = first_day <= collected <= last_day
+            if collected > last_day and not any(
+                    first_day <= local_date(_utc(o.completed_at)) <= period.last_day for o in outcomes):
                 continue
             if collected < first_day:
-                for signal in await self._repo.get_mission_signals(run.mission_id):
+                for signal in signals:
                     _note_sighting(first_seen, signal)
                 continue
             for span in (period, period.previous()):
@@ -125,24 +146,27 @@ class GetWatchlistPeriodSnapshotUseCase:
                          if q.frame_fingerprint == frame]
             relevant = {q.observation_id for q in judgments if q.relation in RELEVANT_RELATIONS}
             assessed = {q.observation_id for q in judgments if q.relation != QualificationRelation.UNASSESSED}
-            signals = await self._repo.get_mission_signals(mission.id)
             # A channel holding any unjudged observation cannot stand as measured for its day.
             unjudged = {_platform(s.platform) for s in signals if s.observation_id not in assessed}
             names = {a.id: a.declared_name for a in await self._repo.list_mission_declared_accounts(mission.id)}
-            coverage.extend(
+            run_coverage = [
                 PeriodCoverage(channel=o.platform, status=_platform(o.status),
                                queried_keywords=tuple(o.queried_keywords), completed_at=_utc(o.completed_at),
                                judged=_platform(o.platform) not in unjudged)
                 for o in outcomes
-            )
+            ]
+            if include_created:
+                coverage.extend(run_coverage)
+            run_items: List[PeriodItem] = []
             for signal in signals:
                 if signal.source_id is None:
                     continue
-                _note_sighting(first_seen, signal)
+                if include_created:
+                    _note_sighting(first_seen, signal)
                 metadata = dict(signal.metadata or {})
                 channel = _platform(signal.platform)
                 excerpt = recorded_excerpt(metadata)
-                items.append(PeriodItem(
+                run_items.append(PeriodItem(
                     source_id=str(signal.source_id),
                     channel=channel,
                     published_at=_utc(signal.published_at),
@@ -154,18 +178,31 @@ class GetWatchlistPeriodSnapshotUseCase:
                     query_keywords=_query_keywords(metadata),
                     observations=((_utc(signal.captured_at), signal.metric_value, metadata),),
                 ))
+            if include_created:
+                items.extend(run_items)
+            seen_snapshots.extend(SeenSnapshot(
+                c.channel, c.status, c.queried_keywords, c.completed_at, c.judged,
+                tuple(item for item in run_items if item.channel == c.channel),
+            ) for c in run_coverage)
 
         items = [dataclasses.replace(item, first_seen=first_seen.get(item.source_id)) for item in items]
+        policy = await self._policy()
         snapshot = compare_periods(
             topics=topics,
             items=items,
             coverage=coverage,
             period=period,
             now=now,
-            policy=await self._policy(),
+            policy=policy,
             versions={start: sorted(found) for start, found in versions.items()},
             window_days=window_days,
         )
+        seen = compare_seen_periods(topics=topics, snapshots=seen_snapshots, plans=plans, period=period,
+                                    policy=policy, first_snapshots=first_snapshots)
+        for topic, cells in zip(snapshot["topics"], seen):
+            topic["seen"] = cells
+        snapshot["listening_plan"] = {which: plan.to_payload() if plan else None
+                                      for which, plan in period_listening_plans(plans, period).items()}
         return {**base, **snapshot}
 
     async def _config(self, key: str, default: float) -> float:
@@ -199,3 +236,14 @@ def _note_sighting(first_seen: Dict[str, datetime], signal: Any) -> None:
     key, seen = str(signal.source_id), _utc(signal.captured_at)
     if key not in first_seen or seen < first_seen[key]:
         first_seen[key] = seen
+
+
+def _note_snapshot_sightings(first: Dict[tuple, datetime], signals: list, outcomes: list) -> None:
+    """First successful snapshot per channel/source, independent of capture or judgment order."""
+    completed = {_platform(o.platform): _utc(o.completed_at) for o in outcomes
+                 if _platform(o.status) in COMPLETING_STATUSES}
+    for signal in signals:
+        at = completed.get(_platform(signal.platform))
+        if signal.source_id is not None and at is not None:
+            key = (_platform(signal.platform), str(signal.source_id))
+            first[key] = min(first.get(key, at), at)

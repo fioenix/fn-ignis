@@ -2,7 +2,7 @@
   "$schema": "https://openclaw.dev/schemas/plugin.v1.json",
   "name": "fn-ignis",
   "title": "fnIgnis",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Self-hosted mission-bound social evidence collection and Market analysis by FINOLABS",
   "author": "FINOLABS",
   "capabilities": [
@@ -28,7 +28,7 @@
   },
   "protocols": {
     "sop": "6_step_market_research",
-    "tools_count": 52,
+    "tools_count": 53,
     "prompts": [
       "market_research_pipeline",
       "voice_of_customer_audit",

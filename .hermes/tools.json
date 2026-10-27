@@ -1615,7 +1615,7 @@
     "type": "function",
     "function": {
       "name": "get_watchlist",
-      "description": "Read one watchlist: every version's definition and digest, and every run with its mission and the version it collected. Returns no observations.",
+      "description": "Read one watchlist: every version's definition and digest, and every run with its mission and the version it collected. Returns no observations; also returns listening_plans oldest first and listening_plan in effect, or null.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -1741,7 +1741,7 @@
     "type": "function",
     "function": {
       "name": "get_watchlist_period_snapshot",
-      "description": "Read one complete listening period of a watchlist (day, Monday-to-Sunday week or calendar month, in Asia/Ho_Chi_Minh) against the period before it: per topic and channel, that channel's own indicators in their own units, or not_comparable with the missing days; rising and new terms; and up to three items with content only. Refuses a period that has not ended yet. Collects nothing; render it with the ignis_listen guide.",
+      "description": "Read one complete listening period of a watchlist (day, Monday-to-Sunday week or calendar month, in Asia/Ho_Chi_Minh) against the period before it: per topic and channel, that channel's own indicators in their own units, or not_comparable with the missing days; rising and new terms; and up to three items with content only. Refuses a period that has not ended yet. Omit period_kind to use the listening plan in effect; without a plan return PERIOD_KIND_REQUIRED. Collects nothing; render it with the ignis_listen guide.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -1749,7 +1749,15 @@
             "type": "string"
           },
           "period_kind": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "period_start": {
             "anyOf": [
@@ -1764,8 +1772,38 @@
           }
         },
         "required": [
+          "watchlist_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "set_watchlist_listening_plan",
+      "description": "Record the user's stated goal (1..300 characters), comparison period (day, week or month) and snapshots_per_period (1..1 for day, 1..7 for week, 1..28 for month). Appends a plan effective now; an identical plan returns UNCHANGED. Returns the plan in effect and its oldest-first history. Collects nothing, starts no run and schedules nothing.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "watchlist_id": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "period_kind": {
+            "type": "string"
+          },
+          "snapshots_per_period": {
+            "type": "integer"
+          }
+        },
+        "required": [
           "watchlist_id",
-          "period_kind"
+          "goal",
+          "period_kind",
+          "snapshots_per_period"
         ],
         "type": "object"
       }

@@ -96,3 +96,12 @@ def test_repository_skill_mirrors_the_packaged_guide():
 
 def test_the_guide_ships_in_the_package_tree():
     assert (REPOSITORY / "src/ignis/interfaces/mcp/guides/ignis_listen.md").is_file()
+
+
+def test_both_axes_are_labelled_and_seen_is_presented_first():
+    guide = _packaged_guide()
+    assert guide.index('### Seen axis') < guide.index('### Created view')
+    for field in ('axis: "seen"', 'axis: "created"', 'snapshots_called_for', 'listening_plan',
+                  'seen_period_unjudged_snapshots', 'seen_period_without_cadence',
+                  'Never sum across channels or axes'):
+        assert field in guide

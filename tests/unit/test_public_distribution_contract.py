@@ -85,7 +85,7 @@ def _backlog_current_accomplishments(path: Path) -> str:
 
 def _backlog_unreleased_status(path: Path) -> str:
     """Only the current branch's runtime claim, not its explicit v0.7.0 comparison."""
-    section = _read(path).split("## Spec 011 — trạng thái nhánh phát triển, chưa phát hành", 1)[1]
+    section = _read(path).split("## Spec 011 — trạng thái triển khai", 1)[1]
     return section.split("\n---", 1)[0].split("; các con số", 1)[0]
 
 
@@ -246,8 +246,8 @@ def test_every_release_version_carrier_agrees():
 
 # The release this branch prepares and the date of the release before it. Both move with
 # the next version bump, in the same commit as the carriers themselves.
-RELEASE_CANDIDATE = "0.7.0"
-PREVIOUS_RELEASE_DATE = "2026-09-28"
+RELEASE_CANDIDATE = "0.8.0"
+PREVIOUS_RELEASE_DATE = "2026-09-29"
 
 
 def test_every_carrier_names_the_release_candidate():
@@ -875,7 +875,7 @@ SMOKE_SCRIPT = REPO / "scripts" / "wheel_mcp_smoke.py"
 FAKE_SERVER = r'''
 import json, sys, time
 mode = sys.argv[1]
-tools = int(sys.argv[2]) if len(sys.argv) > 2 else 52
+tools = int(sys.argv[2]) if len(sys.argv) > 2 else 53
 if mode == "banner":
     print("starting worker loop", flush=True)
 for raw in sys.stdin:
@@ -937,6 +937,7 @@ for raw in sys.stdin:
             "register_noise_blacklist",
             "release_mission_writer",
             "save_watchlist",
+            "set_watchlist_listening_plan",
             "set_mission_declared_accounts",
             "start_watchlist_run",
             "get_watchlist_period_snapshot",
@@ -986,7 +987,7 @@ def _smoke():
     return wheel_mcp_smoke
 
 
-def _fake(tmp_path, mode, tools=52) -> list[str]:
+def _fake(tmp_path, mode, tools=53) -> list[str]:
     import sys
 
     server = tmp_path / "fake_server.py"
@@ -1012,7 +1013,7 @@ def test_a_wrong_tool_count_fails_the_smoke(tmp_path):
     module = _smoke()
     import pytest
 
-    with pytest.raises(module.SmokeFailure, match="expected 52 tools, discovered 39"):
+    with pytest.raises(module.SmokeFailure, match="expected 53 tools, discovered 39"):
         module.run_smoke(_fake(tmp_path, "ok", tools=39), response_timeout=10, exit_timeout=10)
 
 
@@ -1116,7 +1117,7 @@ cd "$(dirname "$0")/.."
 env > bootstrap-env.txt
 [ "${FAKE_BOOTSTRAP_FAIL:-}" = "1" ] && { echo "boom" >&2; exit 3; }
 mkdir -p .venv/bin
-printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-52}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
+printf '#!/bin/sh\nexec "%s" "%s/fake_server.py" ok "${FAKE_TOOLS:-53}"\n' "$FAKE_PYTHON" "$PWD" > .venv/bin/python
 chmod +x .venv/bin/python
 printf 'DATABASE_URL=sqlite:///ignis.db\n' > .env
 "$FAKE_PYTHON" - <<'PY'
@@ -1468,7 +1469,7 @@ if args[0] == "pull":
     print("Digest: " + os.environ["FAKE_DOCKER_REPO_DIGEST"].split("@", 1)[1])
     sys.exit(0)
 if args[0] == "run":
-    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "52"])
+    os.execv(sys.executable, [sys.executable, os.environ["FAKE_SERVER_PATH"], os.environ.get("FAKE_SERVER_MODE", "ok"), "53"])
 if args[:2] == ["image", "rm"]:
     sys.exit(0)
 print("unexpected docker call: " + " ".join(args), file=sys.stderr)
@@ -1853,19 +1854,19 @@ def _mutate(root: Path, relative: str, pattern: str, replacement: str) -> None:
 
 # (control name, file, regex, replacement, contract test it must turn red)
 NEGATIVE_CONTROLS = (
-    ("AGENTS tool count", "AGENTS.md", r"all 52 FastMCP tools", "all 39 FastMCP tools",
+    ("AGENTS tool count", "AGENTS.md", r"all 53 FastMCP tools", "all 39 FastMCP tools",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("CLAUDE tool count", "CLAUDE.md", r"All 52 tools", "All 39 tools",
+    ("CLAUDE tool count", "CLAUDE.md", r"All 53 tools", "All 39 tools",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("BACKLOG branch tool count", "BACKLOG.md", r"\*\*52 tools\*\*", "**39 tools**",
+    ("BACKLOG branch tool count", "BACKLOG.md", r"\*\*53 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("README tool count", "README.md", r"\*\*52 tools\*\*", "**39 tools**",
+    ("README tool count", "README.md", r"\*\*53 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("user guide tool count", "docs/USER_GUIDE.md", r"\*\*52 tools\*\*", "**39 tools**",
+    ("user guide tool count", "docs/USER_GUIDE.md", r"\*\*53 tools\*\*", "**39 tools**",
      "test_every_governed_tool_count_claim_matches_the_runtime_catalog"),
-    ("README migration endpoint", "README.md", r"`sql/034_tiktok_attribution\.sql`", "`sql/024_youtube_quota_ledger.sql`",
+    ("README migration endpoint", "README.md", r"`sql/035_watchlist_listening_plans\.sql`", "`sql/024_youtube_quota_ledger.sql`",
      "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
-    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/034_tiktok_attribution\.sql`",
+    ("Vietnamese guide upgrade file", "docs/USER_GUIDE.vi.md", r"`sql/035_watchlist_listening_plans\.sql`",
      "`sql/023_evidence_qualification.sql`", "test_install_and_upgrade_guidance_reaches_the_newest_migration"),
     ("PyPI install claim", "README.md", r"^(## Local source setup)$", r"\1\n\npip install fn-ignis\n",
      "test_no_public_surface_claims_a_pypi_package"),
@@ -1956,7 +1957,7 @@ def test_a_daemon_digest_that_differs_from_the_release_tag_is_caught(tmp_path, m
 def _backlog_history(path: Path) -> str:
     """The dated release history outside the current development section."""
     text = _read(path)
-    current = text.split("## Spec 011 — trạng thái nhánh phát triển, chưa phát hành", 1)[1].split("\n---", 1)[0]
+    current = text.split("## Spec 011 — trạng thái triển khai", 1)[1].split("\n---", 1)[0]
     return text.replace(current, "")
 
 
@@ -1976,7 +1977,7 @@ def test_a_dated_history_entry_is_not_governed_but_a_current_one_is(governed_cop
     _mutate(governed_copy, "BACKLOG.md", history_anchor, r"\1\n\nMeasured 14/09/2026: 39 tools.")
     assert not tool_count_offenders(expected), "a dated history line was treated as a current claim"
 
-    _mutate(governed_copy, "BACKLOG.md", r"^(## Spec 011 — trạng thái nhánh phát triển, chưa phát hành.*)$", r"\1\n\nIgnis exposes 39 tools.")
+    _mutate(governed_copy, "BACKLOG.md", r"^(## Spec 011 — trạng thái triển khai.*)$", r"\1\n\nIgnis exposes 39 tools.")
     assert tool_count_offenders(expected), "an unlabeled current claim inside a governed section passed"
 
 
