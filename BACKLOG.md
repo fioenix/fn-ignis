@@ -1415,15 +1415,22 @@ Cách giữ đường này ổn định:
   nhập TikTok. Thiếu một điều kiện thì kênh báo không khả dụng, không chuyển sang trình duyệt khác.
 
 Hiện trạng: ngày 26/10/2026, lần thử đầu tiên với từ khóa G3 "áo khoác chống nắng" ở chế độ TACTICAL
-ra 18 card trong Chrome. Ignis nhận 12 observation với trạng thái `HEALTHY`. Lần thử lộ ra hai việc phải
-làm trước khi dùng cho routine:
+ra 18 card trong Chrome, Ignis nhận 12 observation với trạng thái `HEALTHY`. Lần thử này lộ ra hai lỗi,
+PR #79 đã sửa cả hai trong cùng ngày:
 
-- Excerpt vẫn giữ câu ghi công trong alt-text của TikTok, có tên hiển thị của tác giả. Ở chế độ MISSION,
-  tên này sẽ bị lưu vào DB, trái Principle VII.
-- Trang relay chưa có cách nhận kết quả từ tab TikTok, nên agent phải tự ghép bằng một nút và
-  `postMessage`. Relay cần tự cung cấp nút mở tìm kiếm và listener nhận kết quả.
+- Excerpt giữ câu ghi công trong alt-text của TikTok, có tên hiển thị của tác giả; ở chế độ MISSION, tên
+  này sẽ bị lưu vào DB, trái Principle VII. Giờ Ignis cắt câu ghi công theo mẫu seed trong
+  `sql/034_tiktok_attribution.sql` trước khi che PII. Lần chạy lại thực tế cho 12 record, không còn
+  record nào giữ câu ghi công.
+- Trang relay không nhận được kết quả từ tab TikTok. Giờ relay có nút "Open search" cho từng truy vấn và
+  listener `postMessage` chỉ nhận từ tab do chính nó mở; bước chuẩn bị trả thêm `tab_script` để agent
+  chạy trong tab đó.
 
-Routine G3 chưa đổi; muốn routine dùng đường này phải chờ Fio duyệt riêng.
+Giới hạn còn lại: mẫu ghi công mới có bản tiếng Việt; caption tự chứa cụm "do … tạo với …" sẽ mất phần
+sau cụm đó.
+
+Routine G3 hiện thu TikTok qua đường này trên Chrome profile Finos, trước mọi kênh khác. Nếu profile
+Finos chưa kết nối, routine bỏ qua bước TikTok.
 
 ### Parking lot — giả thuyết roadmap, không phải backlog đã cam kết
 
