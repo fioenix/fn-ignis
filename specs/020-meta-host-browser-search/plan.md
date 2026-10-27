@@ -2,9 +2,10 @@
 
 **Branch**: `claude/meta-host-browser-spec` | **Date**: 2026-10-27 | **Spec**: [spec.md](spec.md)
 
-**Status**: Planning draft for owner review. Settled Clarifications are preserved. G1 is accepted;
-G2 supplies bounded surface evidence, not extractor or channel readiness. No implementation,
-routine activation, session use, migration application or release is authorized by this document.
+**Status**: Plan accepted with owner gate decisions of 27/10/2026 (see "Owner decision" below).
+Settled Clarifications are preserved. G1 is accepted; G2 supplies bounded surface evidence, not
+extractor or channel readiness. No routine activation, session use, migration application to a live
+store or release is authorized by this document.
 
 ## Summary
 
@@ -54,7 +55,27 @@ gates and implementation proof**; no runtime acceptance is claimed.
 
 ## Owner Gates
 
-Each item is a proposal and alternative, not a decision taken by this planning run.
+### Owner decision (27/10/2026)
+
+The owner's words: "Duyệt OG-1, OG-3, OG-4, OG-5; OG-2 hoãn phần Threads MCP tới khi App Review
+được duyệt, giữ phần ghép TikTok và Threads trong một lượt chạy (spike trước)."
+
+- **OG-1 approved**: optional `source` (`tiktok` | `threads`, default `tiktok`) on
+  `prepare_host_browser_search`; Threads collection moves to host submission.
+- **OG-2 split**: the Threads MCP submission path (API variant of the staged answer, structured
+  value transport, `threads-mcp-keyword-v1`) is **deferred** until Meta approves
+  `threads_keyword_search` for the owner's app; it is out of this implementation and returns as a
+  spec amendment then. Spec story 3 and FR-008 stay as the target but are not implemented now; until
+  then Threads uses the host browser only. The **single-run composition** of TikTok and Threads host
+  tickets in one mission run is **kept**, with a spike first; if the spike shows unchanged tools
+  cannot express it safely, that seam stops for owner review.
+- **OG-3 approved**: seed-only `sql/036_threads_attribution.sql` (recheck numbering at
+  implementation).
+- **OG-4 approved**: no constitution amendment.
+- **OG-5 approved**: no G3 routine change in this feature; live runs and routine change need separate
+  approval.
+
+### Proposals as written before the decision
 
 - **OG-1 — MCP prepare signature / Threads tier**: propose only optional `source: str = "tiktok"`
   (`tiktok` or `threads`) on `prepare_host_browser_search`; source is frozen in the ticket. Includes
