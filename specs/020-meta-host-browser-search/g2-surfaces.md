@@ -3,8 +3,10 @@
 Observed **27/10/2026, approximately 22:45–22:54, Asia/Ho_Chi_Minh**.
 Branch: `claude/meta-host-browser-spec`. Keyword: **áo khoác chống nắng**.
 
-**Disposition: partial; G2 is not fully observed.** Threads was usable; Instagram
-navigation was denied by the browser origin approval gate before its page could be read.
+**Disposition: partial; G2 is not fully observed.** Threads was usable; the Instagram-only
+retry on **27/10/2026, approximately 22:59, Asia/Ho_Chi_Minh** was still denied by the
+browser origin approval gate before its page could be read. The tool reported a saved
+permission or managed-policy denial despite the owner's renewed authorization.
 This record does not establish extractor implementation, relay acceptance, or channel repair.
 
 ## Scope and method
@@ -137,33 +139,62 @@ This record does not establish extractor implementation, relay acceptance, or ch
 
 ## Instagram keyword search
 
-### Attempt and blocker
+### Navigation attempt and availability
 
-- Attempted URL:
+- Retried **27/10/2026, approximately 22:59, Asia/Ho_Chi_Minh**, after the owner said
+  they would approve the Instagram origin; whether that approval was saved is not known. Reconfirmed browser inventory before navigation:
+  `family: chrome`, `type: extension`, `profileName: Finos`, browser ID `2`.
+- Exact attempted URL:
   `https://www.instagram.com/explore/search/keyword/?q=%C3%A1o%20kho%C3%A1c%20ch%E1%BB%91ng%20n%E1%BA%AFng`
-- The browser tool rejected navigation: the origin approval gate did not grant
-  access to `https://www.instagram.com`, reporting that approval was declined.
-  This was a browser authority denial, **not** an Instagram page response.
-- Stopped this surface immediately. No alternate origin, browser, profile, API,
-  guessed URL or indirect access was attempted.
-- Final page URL, redirect, actual Instagram search URL and whether the attempted
-  route exists: **not observed**.
+- Origin approval **did not work** for this attempt. The browser tool rejected
+  navigation before page observation, reporting: **"A saved user permission setting
+  blocks this action"** and **"A saved permission or managed policy denies access."**
+  The denied origin was `https://www.instagram.com`. The tool did not establish
+  which of those policy sources applied. This was a browser authority denial,
+  **not** an Instagram page response or proof of a nonexistent search route.
+- Stopped this surface immediately. No settings changes, alternate origin, browser,
+  profile, Playwright instance, API, guessed route or indirect access was attempted.
+- Final page URL, redirect and actual Instagram search URL: **not observed**.
+  Whether the requested route exists: **not observed**.
 - Signed-in results, login wall, consent interstitial, checkpoint or challenge:
   **not observed**.
 
-### Unobserved surface fields
+### Counts and scrolling
 
-- Result-card count: **not observed**, not zero. Scrolling and lazy-load size:
-  **not observed**.
-- Post URL pattern, excerpt availability, media types, counters and exact display
-  formats, publication date/relative time: **not observed**.
-- Handle, display name, avatar, profile link, verified badge and attribution
-  placement/templates: **not observed**.
-- Stable roles, aria labels, data attributes and unstable class names:
-  **not observed**. `/p/` and `/reel/` are not asserted from this visit.
-- Suggestion-only views and exact no-results wording in Vietnamese:
-  **not observed**.
+- Distinct result-item count: **not observed**, not zero. No result paths were
+  available to track in memory.
+- Scrolling, lazy loading, per-load increments, DOM virtualization and exhaustion:
+  **not observed**. No page was available for the authorized scroll observation.
 
-Instagram remains the missing G2 observation. Threads Recent rendering, video cards,
-result-card verification badges and explicit empty-state wording also remain unobserved.
+### Card contents and measurement formats
+
+- Canonical post URL pattern (`/p/`, `/reel/` or other), and whether it embeds an
+  author handle: **not observed**.
+- Excerpt/caption availability on the results page: **not observed**. No post was
+  opened; caption availability after opening a post is also **not observed**.
+- Media type (text, image, video or carousel): **not observed**.
+- Likes, comments, plays/views, other counters and their exact display formats:
+  **not observed**. This attempt does not establish that a grid shows no counters.
+- Publication time, relative time and display format: **not observed**.
+
+### Author elements and extractor hooks
+
+- Handle, display name, avatar, profile link, verified badge and their placement:
+  **not observed**.
+- Attribution templates in image alt text or captions, including English
+  `Photo by <author>` or Vietnamese equivalents: **not observed**.
+- Stable structural hooks (roles, link shapes, aria labels, data attributes) and
+  opaque/unstable classes: **not observed**. No Instagram selector is established.
+
+### Empty-answer ambiguity
+
+- Suggestion-only views and explicit no-results text, including exact Vietnamese
+  wording: **not observed**.
+- The origin denial cannot be classified as healthy emptiness, a login wall or
+  an Instagram search result. No healthy-empty signature was established.
+
+The Instagram retry remains blocked before page observation; G2 is still partial.
+All Instagram surface properties remain **not observed**. Threads Recent rendering,
+video cards, result-card verification badges and explicit empty-state wording also remain
+unobserved from the earlier visit. The Threads section is unchanged by this retry.
 No G2 pass, planning readiness or working extractor is claimed.
