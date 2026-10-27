@@ -1290,7 +1290,9 @@ Bảng này theo dõi việc mở rộng đường tích hợp cho từng nguồ
 cho nhà bán xếp vào nhóm mở rộng sau. Điều kiện truy cập lấy từ trang developer của từng hãng và một
 số blog bên thứ ba, chưa kiểm bằng tài khoản thật, trừ các dòng có trạng thái đang dùng. Các dòng
 thêm cùng ngày cho YouTube, Google và Meta lấy từ tài liệu developer chính thức; chỗ nào chưa xác
-nhận được thì ghi rõ trong dòng đó.
+nhận được thì ghi rõ trong dòng đó. Các dòng Shopee thêm ngày 26/10/2026 lấy từ open.shopee.com, điều khoản
+dịch vụ trên help.shopee.vn và một tài liệu bên thứ ba cho Affiliate Open API; khảo sát này không
+đăng nhập và không gọi API nào của Shopee.
 
 Trạng thái: **đang dùng**, **ứng viên** (cá nhân dùng được, chưa tích hợp), **mở rộng sau** (dành cho
 nhà bán), **không đủ điều kiện**, **đã ngừng**.
@@ -1340,6 +1342,11 @@ nhà bán), **không đủ điều kiện**, **đã ngừng**.
 | Meta | CrowdTangle | Không áp dụng | Ngừng ngày 14/08/2024 | Đã ngừng |
 | Meta | Commerce, Catalog, Page Insights, Instagram Insights, Messenger, WhatsApp Business | Dữ liệu shop, khán giả và hội thoại của mình | Tài sản của doanh nghiệp mình | Mở rộng sau |
 | Meta | Meta Content Library và API | Nội dung công khai trên Facebook và Instagram | Phải thuộc trường hoặc viện nghiên cứu phi lợi nhuận | Không đủ điều kiện |
+| Shopee | Shopee Affiliate Open API (GraphQL), `productOfferV2` | Sản phẩm theo từ khóa hoặc danh mục, sắp theo số lượng bán, có danh sách Top performing; trả lượt bán lũy kế, khoảng giá, điểm đánh giá, mã danh mục. Không có cửa sổ thời gian, muốn có số theo kỳ phải chụp hằng ngày; chỉ gồm sản phẩm tham gia affiliate | Tài khoản Shopee Affiliate, cá nhân đăng ký được, cộng thêm quyền Open API phải xin riêng. Trường dữ liệu bản VN lấy từ tài liệu bên thứ ba; điều khoản lưu trữ dữ liệu offer chưa đọc được vì cổng tài liệu bắt đăng nhập | Ứng viên: đường chính thức duy nhất có lượt bán liên shop; chờ kiểm quyền truy cập, điều khoản và trường dữ liệu |
+| Shopee | Open Platform, `v2.ads.get_recommended_keyword_list` | Lượt tìm của từ khóa trên Shopee trong 30 ngày, giá thầu gợi ý | App được duyệt và shop cấp quyền OAuth; mỗi lần gọi phải kèm `item_id` của chính shop đó | Mở rộng sau |
+| Shopee | Open Platform, Product, Order, Ads, AMS, Brand Portal | Danh mục, sản phẩm, đơn hàng và hiệu quả bán của shop mình | Shop đã cấp quyền | Mở rộng sau |
+| Shopee | Open Platform, `v2.business_insights.get_marketing_hot_listing` | Doanh số, lượt hiển thị và sản phẩm bán chạy của shop mình theo kỳ | Tài liệu ghi chỉ có ở Brazil | Không đủ điều kiện |
+| Shopee | Trang Top Bán Chạy, kết quả tìm kiếm và trang thống kê trong Kênh Người Bán | Sản phẩm bán chạy theo nhóm tìm kiếm hoặc danh mục | `robots.txt` chặn `/top_products`. Điều khoản dịch vụ, mục 3.1, cấm dùng robot, spider, thiết bị tự động hoặc phương thức thủ công để theo dõi, thống kê, thu thập nội dung khi chưa có chấp thuận bằng văn bản. Áp dụng cả khi đọc bằng phiên đăng nhập của Fio | Không đủ điều kiện |
 
 Khoảng trống phải đi đường browser:
 
@@ -1351,6 +1358,7 @@ Khoảng trống phải đi đường browser:
 | Meta Instagram | Reels theo từ khóa, vượt giới hạn 30 hashtag mỗi 7 ngày | `reels` qua phiên browser |
 | Google | Đo nhu cầu theo từ khóa khi chưa có quyền Trends API | Chưa có; `search_signals` của `google` báo không khả dụng |
 | Meta Facebook | Tìm bài công khai theo từ khóa; Facebook không có API cho việc này | Chưa có |
+| Shopee | Top Bán Chạy và lượt bán liên shop | Không đi đường browser, kể cả host browser search của Spec 012, vì điều khoản dịch vụ của Shopee cấm theo dõi và thống kê nội dung khi chưa có chấp thuận bằng văn bản. Thay bằng Shopee Affiliate Open API khi qua được bước kiểm quyền truy cập |
 
 #### Dữ liệu nền theo địa lý (khảo sát 25/10/2026)
 
