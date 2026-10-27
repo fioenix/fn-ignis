@@ -6,9 +6,9 @@
 >   + FastMCP Server (53 tools); watchlist có phiên bản, kế hoạch nghe và hai trục `seen` / `created`.
 > - **Schema:** Migration mới nhất là `sql/035_watchlist_listening_plans.sql`.
 >   Ignis không có worker hay lịch khám phá hằng ngày; routine chạy trên host khi được yêu cầu.
-> - **Trạng thái:** Release candidate `v0.8.0`, chưa tag và chưa publish. Bản public hiện tại vẫn
->   là `v0.7.0` qua source, GitHub Release và GHCR; PyPI tiếp tục được hoãn. Tag và publish do chủ
->   sở hữu quyết định; kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`.
+> - **Trạng thái:** `v0.8.0` đã tag và publish ngày 27/10/2026 qua source, GitHub Release và GHCR
+>   (`ghcr.io/fioenix/fn-ignis:0.8.0`); PyPI tiếp tục được hoãn. Kiểm tra trạng thái thật bằng
+>   `python scripts/check_release_state.py`.
 
 ---
 
@@ -45,7 +45,8 @@ thương mại.
 
 ## Spec 011 — trạng thái triển khai
 
-Ngày 27/10/2026, chủ sở hữu cho phép chuẩn bị v0.8.0 tới hồ sơ PR sẵn sàng để tag.
+Ngày 27/10/2026, chủ sở hữu cho phép chuẩn bị v0.8.0 tới hồ sơ PR sẵn sàng để tag; PR #97 được
+merge tại `acd48ea` và tag `v0.8.0` cùng ngày.
 Các checkpoint bên dưới giữ nguyên ngày và phạm vi kiểm chứng của chúng.
 
 **Mục tiêu phiên bản đã duyệt: `v0.8.0`** (02/10/2026). MINOR dành cho thay đổi chức năng
