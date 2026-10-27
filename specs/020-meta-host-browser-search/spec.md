@@ -47,6 +47,11 @@ that hides automation, or is reported unavailable when the platform blocks it.
   `reels` channel keeps its Playwright path, with all eight flags removed; if the platform blocks it,
   the channel reports unavailable with the reason and nothing hides automation or switches path.
   Threads moves to the host browser and its Playwright collection is removed.
+- Q: Which Threads path comes first? → A: The owner's Threads MCP whenever it can search public
+  posts; the host browser serves Threads only until then. Owner direction (27/10/2026): "Threads nếu
+  dùng được MCP thì nên ưu tiên MCP. Nói chung là Ignis sẽ tập trung vào phân tích và cố gắng dùng
+  các mcp & plugin có sẵn" (prefer the Threads MCP when usable; Ignis focuses on analysis and uses
+  existing MCP servers and plugins where it can).
 
 ## Context: current state (observed 27/10/2026 on `main` at `8a816fb`)
 
@@ -142,14 +147,15 @@ browser and no approved API reports Threads unavailable rather than collecting t
 
 ---
 
-### User Story 3 - Threads moves to the official API when approved (Priority: P2)
+### User Story 3 - Threads uses the owner's Threads MCP once it can search public posts (Priority: P1, takes precedence over story 1 when available)
 
 When the owner's Threads MCP holds an approved keyword-search grant, Threads collects through the
 official API via that MCP, and the host-browser path for Threads is used only if the owner keeps it
 as a separate choice.
 
-**Why this priority**: the API is the path Meta permits; it depends on App Review and business
-verification, which are outside this feature's control.
+**Why this priority**: the owner prefers existing MCP servers for collection so Ignis can focus on
+analysis, and the API is the path Meta permits. Its availability depends on App Review and business
+verification, which are outside this feature's control, so story 1 covers Threads until then.
 
 **Independent Test**: with an approved grant in Threads MCP, a G3 run's Threads outcome comes from
 the API path; without approval, results limited to the account's own posts are not counted as
@@ -200,8 +206,8 @@ evidence.
   that hides automation is added. `reels` keeps Playwright without the flag and MUST report
   unavailable, with the reason, when it meets a login wall, checkpoint, challenge or unusable page. This covers all eight launch sites, including the TikTok
   Playwright plugin, TikTok login and Creative Center.
-- **FR-008**: Threads MUST use the official API when the owner's Threads MCP holds an approved
-  keyword-search grant: the host agent calls its keyword search and submits the results to Ignis
+- **FR-008**: Threads MUST prefer the owner's Threads MCP whenever it holds an approved
+  keyword-search grant, and use the host browser only otherwise: the host agent calls its keyword search and submits the results to Ignis
   under the same request, provenance and identity rules as a host-browser answer. Results that
   Threads MCP marks as limited to the account's own posts stay excluded from evidence. Ignis's own
   Threads OAuth tier is not used for collection. Accepting those results is an MCP surface change
