@@ -5,9 +5,9 @@ inspectable evidence from accessible social sources, then challenge a market hyp
 acting on it. Its two capabilities are independent: source collection can end with an evidence
 frame, while Market analysis can end with a Gap Report rather than a forced verdict.
 
-**Release boundary:** This branch implements the unreleased Spec 011 product reset. The published
-v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 53-tool
-mission-bound surface described here. Do not use a published image to validate this branch.
+**Release boundary:** v0.8.0 includes the Spec 011 product reset, watchlists and goal-driven
+period views. The v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 53-tool
+mission-bound surface described here.
 
 ## Product contract
 
@@ -53,7 +53,8 @@ Migration 029 adds immutable parent/child follow-up links and reservation storag
 migration backfills evidence or adopts old authority. Migration 028 (`sql/028_research_work.sql`) adds bounded host research-work storage
 and progress-event kinds without transforming persisted evidence. Migration 027 adds only PostgreSQL revision, progress-event,
 and command-receipt tables, preserving canonical evidence. SQLite and PostgreSQL now commit collection, qualification and claim facts together with
-their matching progress events. Relay provides a finite read-only local viewer and bounded snapshots of installed mission storage.
+their matching progress events. Relay provides bounded snapshots of installed mission storage;
+Ignis serves no tracking page.
 Migration 026
 changes only the outcome-count constraint: partial DEGRADED results remain incomplete measurements.
 A fresh SQLite bootstrap is exercised locally;
@@ -68,10 +69,11 @@ the operator's approval. The previous files include `sql/022_builtin_uuid_defaul
 Do not rerun historical 025 after partial DEGRADED rows exist: it reinstalls the stricter count
 CHECK before 026 can run. Replay verification for 026 is not whole-history replay verification.
 
-The published OCI image and manifest still refer to v0.7.0. Build and run this source branch
-locally for Spec 011 validation; do not assume the public image includes `025` or the new tools.
-PyPI publication is not advertised. Runtime HTML output belongs in gitignored `reports/`; the
-committed report templates live only in `src/ignis/infrastructure/templates/html/`.
+The release workflow builds `ghcr.io/fioenix/fn-ignis:0.8.0` when the `v0.8.0` tag is pushed.
+The v0.7.0 image does not contain the workflow described here.
+PyPI publication is not advertised. Admitted mission calls write HTML to
+`<root>/.fnignis/reports/`; the source-checkout fallback is gitignored `reports/`.
+Committed report templates live only in `src/ignis/infrastructure/templates/html/`.
 
 ## Agent capabilities
 
@@ -80,19 +82,22 @@ signature authority. Representative operations:
 
 - `create_attention_mission` and `confirm_market_brief` establish a bounded question and
   confirmed scope; `execute_mission_ingress` collects the requested frame.
-`set_watchlist_listening_plan` records the user's goal, comparison period (`day`, `week`,
-`month`) and snapshots per period as append-only history. An identical save is unchanged.
-`get_watchlist` returns the plan in effect and its history. Omit `period_kind` to use that plan's
-period; without a plan, pass a period explicitly. Routine setup reads the plan, asks for missing
-choices, shows firings and requests per period, and waits for confirmation before host scheduling.
-Ignis starts no collection or schedule when a plan is saved.
-
+- `set_watchlist_listening_plan` records the user's goal, comparison period (`day`, `week`,
+  `month`) and snapshots per period as append-only history. An identical save is unchanged.
+  `get_watchlist` returns the plan in effect and its history. The optional `period_kind` on
+  `get_watchlist_period_snapshot` defaults to the saved plan's period; without a plan, pass it
+  explicitly. Routine setup asks for missing choices, shows firings and requests per period,
+  and waits for confirmation before host scheduling. Saving a plan starts no collection or schedule.
 - `save_watchlist`, `get_watchlist` and `start_watchlist_run` keep a versioned watchlist of
   topics and brands and start one Attention mission per run on its current version. Ignis never
   runs a watchlist on its own. `get_watchlist_period_snapshot` compares a complete day, week or
   month with the one before, per channel and in each channel's own unit; the `ignis_listen` guide
-  renders it as a local view. Each channel stops at a daily request ceiling you can raise, and
-  `scripts/prune_expired_observations.py` removes history older than 13 months when you run it.
+  renders the `seen` axis first (what successful snapshots showed, averaged per snapshot against
+  the saved cadence) and the `created` axis second (items placed by publication date).
+  Each axis reports comparability separately; never sum across channels or axes.
+  Each channel stops at a daily request ceiling you can raise, and
+  `scripts/prune_expired_observations.py` previews history older than 13 months and removes it
+  only with `--apply`, keeping observations still cited by a stored claim or research work.
   With the `ignis_routine` guide your agent can set up a daily Claude Code Desktop scheduled task
   that runs one watchlist; Ignis itself still schedules nothing.
 - Atomic source tools such as `get_tiktok_search_suggestions` and
@@ -125,11 +130,9 @@ diagrams of this branch.
 
 ## Verification and release status
 
-Run `.venv/bin/pytest tests/unit/` for the local unit gate and `uv lock --check` for lock
-consistency. A passing local gate does not mean this branch is merged, packaged, published, or
-deployed. The pilot and release gates are tracked in
-[Spec 011 tasks](specs/011-evidence-grounded-product-reset/tasks.md). No release version is
-bumped by this development branch.
+Run `.venv/bin/pytest tests/` for the CI test scope and `uv lock --check` for lock
+consistency. The pilot and release gates are tracked in
+[Spec 011 tasks](specs/011-evidence-grounded-product-reset/tasks.md).
 
 ## License
 

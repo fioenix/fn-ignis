@@ -1,7 +1,7 @@
-# Hướng dẫn sử dụng Ignis — nhánh mã nguồn Spec 011
+# Hướng dẫn sử dụng Ignis — v0.8.0
 
-Tài liệu này mô tả nhánh mã nguồn theo nhiệm vụ chưa phát hành, không phải image v0.7.0
-đã công bố. Worker và sơ đồ Dual-Track của v0.7.0 là lịch sử, không mô tả nhánh này. Xem
+Tài liệu này mô tả v0.8.0, gồm Spec 011 và watchlist. Worker và sơ đồ Dual-Track của v0.7.0
+là lịch sử, không mô tả phiên bản này. Xem
 [README tiếng Việt](../README.vi.md) để biết hợp đồng sản phẩm và ranh giới phát hành.
 
 ## 1. Khởi động và kiểm tra
@@ -89,7 +89,7 @@ thu thập hằng ngày.
 tra. [Skill phân tích](../.agents/skills/ignis-analyze/SKILL.md) là năng lực riêng để thử
 giả thuyết Market. Có thể yêu cầu một trong hai hoặc cả hai.
 
-### Theo dõi một watchlist (nhánh phát triển)
+### Theo dõi một watchlist
 
 Muốn theo dõi cùng một chủ đề qua nhiều lần chạy, hãy nhờ agent lưu một watchlist trong research
 workspace đã xác nhận. Mỗi watchlist có tối đa 10 chủ đề; mỗi chủ đề gồm các ngành hàng, tối đa 20
@@ -109,14 +109,28 @@ rồi chờ xác nhận trước khi tạo lịch trên host. Ignis không tự 
 
 Muốn xem một watchlist thay đổi ra sao, hãy nhờ agent mở bản xem theo kỳ.
 `get_watchlist_period_snapshot` so một ngày, một tuần (từ thứ Hai đến Chủ nhật) hoặc một tháng đã
-trọn vẹn theo giờ Việt Nam với kỳ liền trước, và từ chối kỳ chưa kết thúc. Mỗi kênh giữ số liệu và
-đơn vị riêng: Google Trends là mức quan tâm, YouTube là số video mới đăng, còn TikTok, Threads và
-Reels là lượt xem và lượt tương tác, đo trên những bài Ignis đã thu thập. Các kênh không bao giờ
-được cộng dồn với nhau. Kênh nào thiếu quá một phần năm số ngày ở một trong hai kỳ thì chỉ hiện
-"không so được" kèm danh sách ngày thiếu, không hiện con số. Chỉ những quan sát agent đã đánh giá
-là liên quan mới được tính, và mỗi bài chỉ tính giá trị ghi nhận trong vòng bảy ngày kể từ khi
-đăng, nên số liệu của kỳ trước không đổi sau các lần chạy tiếp theo. Prompt `ignis_listen` và resource
-`fn-ignis://guide/ignis-listen` hướng dẫn agent dựng bản xem này thành một file trên máy.
+trọn vẹn theo giờ Việt Nam với kỳ liền trước, và từ chối kỳ chưa kết thúc. `period_kind` là tham số
+tùy chọn: nếu bỏ qua thì dùng kỳ trong kế hoạch đã lưu; nếu chưa có kế hoạch, cần truyền kỳ rõ ràng.
+Prompt `ignis_listen` và resource `fn-ignis://guide/ignis-listen` hướng dẫn agent dựng kết quả
+thành một file trên máy, trình bày hai trục riêng:
+
+- `seen` trình bày trước: những gì mỗi lần lấy mẫu thành công đã ghi nhận, xếp theo thời điểm kênh
+  thu thập xong. Số nội dung liên quan, lượt xem, tương tác, nội dung thấy lần đầu và nội dung đăng
+  trong kỳ đều là trung bình trên mỗi lần lấy mẫu. Bài cũ vẫn được tính mỗi lần xuất hiện.
+  Mỗi kỳ dùng kế hoạch có hiệu lực lúc kỳ đó bắt đầu. Thiếu tối đa 20% số lần lấy mẫu yêu cầu vẫn
+  có thể so sánh; thiếu quá 20%, chưa có nhịp phù hợp hoặc còn quan sát chưa được đánh giá thì
+  hiện "không so được" cùng lý do và số lần lấy mẫu, không hiện chỉ số hay mức thay đổi.
+- `created` trình bày sau: nội dung được xếp theo ngày đăng; nếu thiếu ngày đăng hợp lý thì dùng
+  ngày thu thập và ghi rõ điều đó. Trục này giữ quy tắc bao phủ theo ngày và cửa sổ ghi nhận bảy
+  ngày của Spec 016. Kênh thiếu quá 20% số ngày ở một trong hai kỳ, hoặc có ngày chưa đánh giá
+  xong, chỉ hiện "không so được" cùng ngày thiếu hay chưa đánh giá. Chỉ những quan sát được đánh
+  giá là liên quan mới được tính.
+
+Mỗi kênh giữ đơn vị riêng; kênh đo trên mẫu phải ghi rõ số liệu chỉ tính trên mẫu đã thu thập.
+Trạng thái so sánh của
+hai trục độc lập với nhau; không cộng dồn giữa các kênh hay hai trục. Chỉ số chưa biết không phải
+bằng 0. Google Trends RSS chỉ cung cấp chủ đề vĩ mô và traffic do feed báo; phép đo Trends theo
+từ khóa hiện chưa có và trả `DEGRADED`, không phải điểm nhu cầu.
 
 Mỗi kênh có một trần request theo ngày. Một request là một lần tìm một từ khóa trên kênh đó và
 mọi phiên dùng chung một store đều dùng chung bộ đếm của ngày đó theo giờ Việt Nam. Mặc định YouTube
@@ -207,7 +221,7 @@ liệu lưu trước Spec 015 vẫn còn danh tính cho đến khi chủ sở h�
 và phản hồi của tool đều loại bỏ danh tính khi xuất ra, còn `scripts/inventory_author_identity.py`
 chỉ đếm mà không hiển thị giá trị.
 
-### Mission Relay trên nhánh phát triển
+### Mission Relay
 
 Ignis không tự dựng trang theo dõi. Muốn theo dõi một nhiệm vụ, hãy yêu cầu agent đọc
 `get_mission_relay_snapshot` rồi dựng artifact theo dõi theo hướng dẫn `ignis-track`: prompt MCP
@@ -255,8 +269,9 @@ cấp quyền thực hiện.
 ## 4. Ranh giới tool và triển khai
 
 MCP server cục bộ có **53 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
-các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại khỏi nhánh này. OCI
-manifest công khai vẫn là v0.7.0, nên image công khai không chứng minh Spec 011 đã ship.
+các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại.
+Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.8.0` khi tag `v0.8.0` được push.
+Image v0.7.0 không có quy trình được mô tả ở đây.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu
 `IGNIS_TEST_POSTGRES_DSN` không trỏ tới một database kiểm thử dùng một lần) và `uv lock --check`
 để kiểm tra cục bộ. Bộ kiểm thử tự thay credential bằng giá trị trơ; nếu muốn tách hẳn khỏi
