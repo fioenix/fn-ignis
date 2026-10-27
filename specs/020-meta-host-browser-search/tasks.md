@@ -101,6 +101,19 @@ host-path checkpoint; real-account readiness remains separately gated at the end
   claim; one canonical writer; shared receipt; group-wide cancel, expiry and drain), to be prototyped
   in a follow-up spike before any GO. Baseline outside the sandbox: 170 passed, 2 skipped with a
   disposable PostgreSQL; the sandbox-only run failed 55 relay cases on loopback binding.
+  **Follow-up spike (28/10/2026): GO.** A disposable in-probe group coordinator (mocked relay and
+  browser; real canonical executor, journal and SQLite) passed 33/33 boundaries: either submit order
+  runs one canonical executor with one shared receipt; Threads and TikTok outcomes stay separate and
+  both host surfaces are skipped in the registry; caller, frame or plan changes and missing,
+  duplicate or stale siblings are refused before any write; cancel, expiry, rejection and replay end
+  the whole group; in-flight cancellation drains the writer and reads back without retry. Public MCP
+  stays at the approved change (optional prepare `source`, 53 tools). Production changes for
+  T017–T020: `host_browser_search.py` (group admission, atomic claim, shared cache, cancel/drain,
+  expiry), `host_browser_mission.py` (group guards, per-source mapping, one executor call),
+  `server.py` (optional `source`, original-caller checks), `execute_mission.py`
+  (`_record_probe_outcomes` provenance per T020). Risk is high in caller isolation,
+  cancellation/drain and retention; PostgreSQL and live transport are unproven. T004 onward
+  unblocked.
 - [ ] T004 [P] Write and run failing source/counter model tests in new
   `tests/unit/test_threads_host_answer_validation.py`: default TikTok compatibility, immutable Threads
   source/version, limits and exact publication clock, structured raw-display/unit/precision counters,
