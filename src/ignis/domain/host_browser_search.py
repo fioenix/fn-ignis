@@ -78,7 +78,7 @@ class CounterMeasurement(HostEnvelope):
 
 
 class HostPublicRecord(HostEnvelope):
-    source_url: str = Field(min_length=1, max_length=2048)
+    source_url: str | None = Field(default=None, min_length=1, max_length=2048)
     excerpt: str = Field(min_length=1, max_length=2000)
     published_at: AwareDatetime | None = None
     counters: tuple[CounterMeasurement, ...] = Field(default=(), max_length=4)
@@ -106,6 +106,14 @@ class HostQueryAnswer(HostEnvelope):
     empty_state_visible: bool = Field(strict=True)
     status: Literal["HEALTHY", "EMPTY_NO_DATA", "DEGRADED"]
     records: tuple[HostPublicRecord, ...] = Field(max_length=100)
+    locale: str | None = Field(default=None, max_length=16)
+
+    @model_serializer(mode="wrap")
+    def serialize_legacy_locale(self, handler):
+        data = handler(self)
+        if self.locale is None:
+            data.pop("locale", None)
+        return data
 
 
 class HostSearchAnswer(HostEnvelope):

@@ -29,6 +29,10 @@ class LoopbackRelay:
     ) -> None:
         if not math.isfinite(lifetime_seconds) or not 0 < lifetime_seconds <= 3600:
             raise ValueError("Relay lifetime must be positive and at most one hour")
+        self._source = request.get("source", "tiktok")
+        if self._source not in {"tiktok", "threads"}:
+            raise ValueError("Unsupported host source")
+        self._request_id = request.get("request_id")
         self._stop = threading.Event()
         self._closed = threading.Event()
         self._deadline = time.monotonic() + lifetime_seconds
@@ -133,6 +137,7 @@ class LoopbackRelay:
             relay_data=json.dumps(dict(
                 request_id=request.get("request_id"), host_task_ref=request.get("host_task_ref"),
                 session_ref=request.get("session_ref"), extractor_version=request.get("extractor_version"),
+                source=self._source, origin="https://www.threads.com" if self._source == "threads" else "https://www.tiktok.com",
                 queries=queries,
             ), ensure_ascii=False).replace("<", "\\u003c"),
         )
@@ -141,11 +146,12 @@ class LoopbackRelay:
 
     def _tab_script(self, extractor: str, queries: list) -> str:
         """What the host runs in each search tab: the extractor, posting its answer to this page."""
-        handoff = (Path(__file__).resolve().parent / "tiktok_handoff.js").read_text(encoding="utf-8")
+        handoff = (Path(__file__).resolve().parent / (self._source + "_handoff.js")).read_text(encoding="utf-8")
         approved = [dict(query_id=query.get("query_id"), query=query.get("query"),
                          result_limit=query.get("result_limit")) for query in queries]
         return (f"({handoff.strip()})({extractor.strip()}, "
-                f"{json.dumps(approved, ensure_ascii=False)}, {json.dumps(self.origin)})")
+                f"{json.dumps(approved, ensure_ascii=False)}, {json.dumps(self.origin)}"
+                + (f", {json.dumps(self._request_id)}" if self._source == "threads" else "") + ")")
 
     def _render(self, **context) -> str:
         return self._template.render(theme_css=self._theme_css, **context)

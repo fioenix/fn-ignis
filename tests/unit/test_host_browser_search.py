@@ -229,3 +229,30 @@ def test_a_batch_cannot_repeat_a_query(service):
     """The tab script binds a tab to its query by text, so a repeated query could never stage."""
     with pytest.raises(ValueError, match="once"):
         prepare(service, queries=["túi đi làm", "túi đi làm"])
+
+
+def test_threads_tactical_ticket_checks_original_caller_and_expiry(service, monkeypatch):
+    from datetime import timedelta
+    from ignis.application.use_cases import host_browser_search as module
+    from ignis.infrastructure.caller_storage import current_caller_storage
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    token = current_caller_storage.set(object())
+    try:
+        original = current_caller_storage.get()
+        request = prepare(service, source="threads")
+        service.stage(request["request_id"], host_answer(request))
+        current_caller_storage.set(object())
+        with pytest.raises(ValueError, match="caller"):
+            service.submit(request["request_id"], "task-1", "chrome-1")
+        current_caller_storage.set(original)
+        class Clock(datetime):
+            @classmethod
+            def now(cls, zone=None):
+                return datetime.fromisoformat(request["expires_at"]) + timedelta(seconds=1)
+        monkeypatch.setattr(module, "datetime", Clock)
+        with pytest.raises(ValueError, match="expired"):
+            service.submit(request["request_id"], "task-1", "chrome-1")
+        assert service.instance._tickets[request["request_id"]]["receipt"] is None
+    finally:
+        current_caller_storage.reset(token)

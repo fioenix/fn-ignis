@@ -370,3 +370,11 @@ def test_a_link_with_no_identity_free_form_is_unavailable():
     assert identity_free_source_url("threads", "https://www.threads.net/@someone", {"post_id": "1790"}) is None
     assert identity_free_source_url("tiktok", "https://www.tiktok.com/@someone", {}) is None
     assert identity_free_source_url("tiktok", None, {"item_id": "42"}) is None
+
+
+@pytest.mark.parametrize("suffix", ["", "/media", "/media/"])
+def test_threads_host_permalink_media_and_identity_free_link_name_one_shortcode(suffix):
+    raw = "https://www.threads.com/@synthetic.header/post/Synthetic020" + suffix
+    link = identity_free_source_url("threads", raw, {})
+    assert link == "https://www.threads.com/t/Synthetic020"
+    assert resolve_source_identity("threads", raw, {}).canonical_identity == resolve_source_identity("threads", link, {}).canonical_identity

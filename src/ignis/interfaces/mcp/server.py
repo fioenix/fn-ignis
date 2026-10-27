@@ -537,7 +537,10 @@ async def _mission_relay_lifespan(server):
     try:
         yield {"mission_relay": runtime}
     finally:
-        await runtime.close()
+        try:
+            await _host_browser_search_service.aclose()
+        finally:
+            await runtime.close()
 
 
 # Initialize FastMCP Server with Non-Prescriptive Harness Instructions
@@ -682,14 +685,12 @@ async def get_mission_relay_snapshot(mission_id: str, page_size: int, ctx: Conte
 
 # This service opens no listener until an explicitly authorized finite request is prepared.
 _host_browser_search_service = HostBrowserSearchService()
-# A MISSION request belongs to the caller store it was prepared in. Submission carries only the
-# request's ids, so the caller-storage middleware cannot route it there by its arguments.
-_host_mission_scopes: Dict[str, Any] = {}
 
 
 async def handle_prepare_host_browser_search(
     host_task_ref: str, session_ref: str, queries: List[str], result_limit: int,
     lifetime_seconds: int, authorized: bool, mode: str = "TACTICAL", mission_id: Optional[str] = None,
+    source: str = "tiktok",
 ) -> dict:
     try:
         if mode == "MISSION":
@@ -701,14 +702,13 @@ async def handle_prepare_host_browser_search(
                 raise ValueError("Mission not found")
             request = await _host_browser_search_service.prepare_mission(
                 comp["execute_mission_use_case"], mission.id, host_task_ref, session_ref,
-                lifetime_seconds, authorized,
+                lifetime_seconds, authorized, source=source,
             )
-            _host_mission_scopes[request["request_id"]] = current_caller_storage.get()
             return request
         if mode != "TACTICAL" or mission_id is not None:
             raise ValueError("Invalid host search mode")
         return _host_browser_search_service.prepare(
-            host_task_ref, session_ref, queries, result_limit, lifetime_seconds, authorized,
+            host_task_ref, session_ref, queries, result_limit, lifetime_seconds, authorized, source=source,
         )
     except AttributionVocabularyMissing:
         return {"status": "BLOCKED", "reason_code": "AUTHOR_ATTRIBUTION_VOCABULARY_MISSING"}
@@ -720,38 +720,32 @@ async def handle_prepare_host_browser_search(
 async def prepare_host_browser_search(
     host_task_ref: str, session_ref: str, queries: List[str], result_limit: int,
     lifetime_seconds: int, authorized: bool, mode: str = "TACTICAL", mission_id: Optional[str] = None,
+    source: str = "tiktok",
 ) -> dict:
-    """Prepare one explicit finite public TikTok search batch through an authorized host browser.
+    """Prepare one finite public TikTok or Threads search batch through an authorized host browser.
 
     This opt-in loopback relay does not export cookies or collect in the background. TACTICAL
-    creates no mission. MISSION requires an existing confirmed mission_id, queries=[] and
+    creates no mission. Source defaults to tiktok; threads uses the bounded Top browser sample.
+    MISSION requires an existing confirmed mission_id, queries=[] and
     result_limit=20; its full query union and limit derive from authority, including falsifiers.
     The host executes the packaged deterministic extractor and stages its JSON via
     the same-origin local form. It is not a default collector or a Market recommendation.
     """
     return await handle_prepare_host_browser_search(
-        host_task_ref, session_ref, queries, result_limit, lifetime_seconds, authorized, mode, mission_id,
+        host_task_ref, session_ref, queries, result_limit, lifetime_seconds, authorized, mode, mission_id, source,
     )
 
 
 async def handle_submit_host_browser_search(request_id: str, host_task_ref: str, session_ref: str) -> dict:
     try:
         if _host_browser_search_service.mode(request_id, host_task_ref, session_ref) == "MISSION":
-            scope = _host_mission_scopes.get(request_id)
-            token = current_caller_storage.set(scope) if scope is not None else None
-            try:
-                receipt = await _host_browser_search_service.submit_mission(
-                    get_components()["execute_mission_use_case"], request_id, host_task_ref, session_ref,
-                )
-            finally:
-                if token is not None:
-                    current_caller_storage.reset(token)
-            _host_mission_scopes.pop(request_id, None)
-            return receipt
+            # mode() checked the invoking caller against the ticket before component routing.
+            return await _host_browser_search_service.submit_mission(
+                get_components()["execute_mission_use_case"], request_id, host_task_ref, session_ref,
+            )
         return _host_browser_search_service.submit(request_id, host_task_ref, session_ref)
     except Exception as exc:
         if hasattr(exc, "host_search_failure"):
-            _host_mission_scopes.pop(request_id, None)
             return exc.host_search_failure
         return {"status": "BLOCKED", "reason_code": "HOST_SEARCH_NOT_ACCEPTABLE"}
 
@@ -770,9 +764,9 @@ async def submit_host_browser_search(request_id: str, host_task_ref: str, sessio
 
 async def handle_cancel_host_browser_search(request_id: str, host_task_ref: str, session_ref: str) -> dict:
     try:
-        cancelled = _host_browser_search_service.cancel(request_id, host_task_ref, session_ref)
-        _host_mission_scopes.pop(request_id, None)
-        return cancelled
+        if _host_browser_search_service.mode(request_id, host_task_ref, session_ref) == "MISSION":
+            return await _host_browser_search_service.cancel_mission(request_id, host_task_ref, session_ref)
+        return _host_browser_search_service.cancel(request_id, host_task_ref, session_ref)
     except ValueError:
         return {"status": "BLOCKED", "reason_code": "HOST_SEARCH_CANNOT_CANCEL"}
 
@@ -1113,7 +1107,10 @@ def _caller_runtime(scope, owner):
     return runtime
 
 
-mcp.add_middleware(CallerStorageMiddleware(_compose_caller_scope, _caller_runtime))
+mcp.add_middleware(CallerStorageMiddleware(
+    _compose_caller_scope, _caller_runtime,
+    host_request_mode=lambda request_id: _host_browser_search_service.request_mode(request_id),
+))
 
 
 def get_components():

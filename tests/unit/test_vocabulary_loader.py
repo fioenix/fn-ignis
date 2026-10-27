@@ -398,10 +398,11 @@ async def test_mission_ticket_keeps_its_repository_templates_across_an_interleav
         await repo.register_lexicon_terms("tiktok_attribution", ["created by {author} with"], "ui_attribution")
         async def interleaved_scope(*args):
             service.register_attribution_templates(["another wording {author} with"])
-            return {"queries": ["túi đi làm"], "plan": {"plan_digest": "p" * 64}}
+            return {"queries": ["túi đi làm"], "plan": {"plan_digest": "p" * 64}, "digest": "d" * 64,
+                    "source": "tiktok", "host_sources": ("tiktok",), "required_host_sources": ("tiktok",)}
         monkeypatch.setattr(host_browser_mission, "prepare_scope", interleaved_scope)
         monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
-        request = await service.prepare_mission(SimpleNamespace(_repo=repo), "mission", "task-1", "chrome-1", 60, True)
+        request = await service.prepare_mission(SimpleNamespace(_repo=repo, _registry=SimpleNamespace(self_identities=())), "mission", "task-1", "chrome-1", 60, True)
         payload = unit["answer"](request)
         payload["answers"][0]["records"][0]["excerpt"] = "Synthetic body created by Synthetic Sentinel with sound"
         service.stage(request["request_id"], payload)

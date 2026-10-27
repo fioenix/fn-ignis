@@ -167,3 +167,108 @@ def test_current_validator_rejects_a_threads_header_on_a_tiktok_ticket():
     payload["answers"][0]["records"][0]["source_url"] = "https://www.tiktok.com/@synthetic/video/7417820067028536584"
     with pytest.raises(ValidationError, match="source"):
         validate_answer(request, payload, datetime(2026, 10, 28, 1, 3, tzinfo=timezone.utc))
+
+
+@pytest.fixture
+def threads_service(monkeypatch):
+    from ignis.application.use_cases import host_browser_search as module
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    service = module.HostBrowserSearchService()
+    yield service
+    service.close()
+
+
+def threads_request(service, **overrides):
+    inputs = dict(host_task_ref="task", session_ref="session", queries=["synthetic query"], result_limit=3,
+                  lifetime_seconds=60, authorized=True, source="threads")
+    inputs.update(overrides)
+    return service.prepare(**inputs)
+
+
+def test_threads_staging_removes_identity_and_keeps_exact_clock_counters_and_path(threads_service):
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    request = threads_request(threads_service)
+    assert request["queries"][0]["search_url"] == "https://www.threads.com/search?q=synthetic%20query"
+    threads_service.stage(request["request_id"], host_answer(request))
+    assert "synthetic.header" not in repr(threads_service._tickets)
+    assert "Synthetic Other Person" not in repr(threads_service._tickets)
+    receipt = threads_service.submit(request["request_id"], "task", "session")
+    assert threads_service.submit(request["request_id"], "task", "session") == receipt
+    record = receipt["observations"][0]
+    assert record["source_url"] == "https://www.threads.com/t/Synthetic020Q0"
+    assert "synthetic.mention" not in record["excerpt"]
+    assert record["published_at"] == "2026-10-27T01:02:03.123456+00:00"
+    assert record["counters"][0]["precision"] == "rounded" and record["counters"][1]["value"] is None
+    assert record["collection_path"] == "host_browser:threads-search-top-v1"
+    assert receipt["outcomes"][0]["sampling"]["limit"] == 3
+
+
+@pytest.mark.parametrize("mutation", ["origin", "port", "route", "filter", "fragment", "missing", "extra", "duplicate",
+                                       "oversize", "past", "future", "locale", "empty", "record-route", "version"])
+def test_threads_bad_scope_refuses_entire_batch_without_collectible_receipt(threads_service, mutation):
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    request = threads_request(threads_service, queries=["synthetic query", "falsifier"])
+    payload = host_answer(request)
+    answer = payload["answers"][0]
+    if mutation == "origin":
+        answer["page_url"] = answer["page_url"].replace("www.threads.com", "threads.net")
+    elif mutation == "port":
+        answer["page_url"] = answer["page_url"].replace("www.threads.com", "www.threads.com:443")
+    elif mutation == "route":
+        answer["page_url"] = answer["page_url"].replace("/search?", "/profile?")
+    elif mutation == "filter":
+        answer["page_url"] += "&filter=recent"
+    elif mutation == "fragment":
+        answer["page_url"] += "#fragment"
+    elif mutation == "missing":
+        payload["answers"].pop()
+    elif mutation == "extra":
+        payload["answers"].append(answer)
+    elif mutation == "duplicate":
+        payload["answers"][1] = answer
+    elif mutation == "oversize":
+        answer["records"] *= 4
+    elif mutation == "past":
+        answer["captured_at"] = "2000-01-01T00:00:00Z"
+    elif mutation == "future":
+        answer["captured_at"] = "2099-01-01T00:00:00Z"
+    elif mutation == "locale":
+        answer["locale"] = "vi"
+    elif mutation == "empty":
+        answer.update(status="EMPTY_NO_DATA", records=[], empty_state_visible=True)
+    elif mutation == "record-route":
+        answer["records"][0]["source_url"] = "https://www.threads.com/@synthetic.header"
+    else:
+        payload["extractor_version"] = "threads-mcp-keyword-v1"
+    with pytest.raises(ValueError):
+        threads_service.stage(request["request_id"], payload)
+    with pytest.raises(ValueError):
+        threads_service.submit(request["request_id"], "task", "session")
+
+
+def test_threads_all_attribution_dropped_is_degraded_not_empty(threads_service):
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    request = threads_request(threads_service)
+    payload = host_answer(request)
+    payload["answers"][0]["records"][0]["excerpt"] = "Photo by Synthetic Other Person on October 27"
+    threads_service.stage(request["request_id"], payload)
+    receipt = threads_service.submit(request["request_id"], "task", "session")
+    assert receipt["observations"] == [] and receipt["outcomes"][0]["status"] == "DEGRADED"
+
+
+def test_threads_missing_vocabulary_never_opens_a_relay(threads_service, monkeypatch):
+    from ignis.application.use_cases import host_browser_search as module
+    threads_service.register_attribution_templates([], source="threads")
+    monkeypatch.setattr(module, "LoopbackRelay", lambda *args: pytest.fail("Relay opened without vocabulary"))
+    with pytest.raises(module.AttributionVocabularyMissing):
+        threads_request(threads_service)
+
+
+def test_threads_missing_content_reference_is_explicit_context(threads_service):
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    request = threads_request(threads_service)
+    threads_service.stage(request["request_id"], host_answer(request, context=True))
+    receipt = threads_service.submit(request["request_id"], "task", "session")
+    assert receipt["observations"][0]["source_url"] is None
+    assert receipt["observations"][0]["source_verifiable"] is False

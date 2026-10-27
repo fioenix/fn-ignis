@@ -320,9 +320,11 @@ def _root_required(category, ctx, *, rpc_error="UNKNOWN", owner_state="UNKNOWN")
 class CallerStorageMiddleware(Middleware):
     """Scope mission tools to the folder the agent was opened in, or an operator override."""
 
-    def __init__(self, compose, runtime_for_scope):
+    def __init__(self, compose, runtime_for_scope, *, host_request_mode=None):
         self.compose = compose
         self.runtime_for_scope = runtime_for_scope
+        # A routing hint only: ticket authorization still checks the pinned scope in the service.
+        self.host_request_mode = host_request_mode
         # Construction occurs at server startup; request arguments and later env edits are not grants.
         # The agent host starts the server in the folder the session was opened in, so that working
         # directory is the caller root unless IGNIS_CALLER_ROOT overrides it.
@@ -372,9 +374,15 @@ class CallerStorageMiddleware(Middleware):
     async def on_call_tool(self, context, call_next):
         name = context.message.name
         arguments = context.message.arguments or {}
+        # Explicit null mission_id is still tactical; it must not initialize caller storage.
+        if name == 'prepare_host_browser_search' and arguments.get('mode', 'TACTICAL') != 'MISSION':
+            return await call_next(context)
         # Watchlists live in the caller's store like the missions their runs create; a tool that
         # carries only a watchlist_id must not fall through to the global store.
-        if not ('mission' in name or 'research_workspace' in name or 'watchlist' in name
+        host_mission = (name in {'submit_host_browser_search', 'cancel_host_browser_search'}
+                        and self.host_request_mode is not None
+                        and self.host_request_mode(arguments.get('request_id')) == 'MISSION')
+        if not (host_mission or 'mission' in name or 'research_workspace' in name or 'watchlist' in name
                 or name == 'confirm_market_brief' or 'mission_id' in arguments
                 or 'workspace_id' in arguments or 'watchlist_id' in arguments):
             return await call_next(context)

@@ -155,29 +155,29 @@ mixed or unknown path pairs are not comparable on seen or created. Real-account 
 
 ### Tests first (after the foundation; observe RED before covered implementation)
 
-- [ ] T009 [US1] Extend failing validation/lifecycle cases in
+- [X] T009 [US1] Extend failing validation/lifecycle cases in
   `tests/unit/test_threads_host_answer_validation.py` and `tests/unit/test_host_browser_search.py`:
   exact www.threads.com Top query/page, allowed permalink/media canonicalization, wrong
   route/filter/origin, missing/extra/duplicate queries, oversize/stale/future data, unsupported locale,
   absent vocabulary, all-content-dropped degradation, rejected healthy-empty, expiry/replay/caller
   binding and no receipt identity.
-- [ ] T010 [P] [US1] Add synthetic G2-shaped DOM fixtures under `tests/fixtures/threads_host_search/`
+- [X] T010 [P] [US1] Add synthetic G2-shaped DOM fixtures under `tests/fixtures/threads_host_search/`
   and failing tests in new `tests/integration/test_threads_host_dom_contract.py`: timestamp/action-row
   card isolation, multiline body, text/image/carousel/quote/media dedup, virtualized removals,
   sidebar/header/avatar/alt attribution exclusion, exact datetime and rounded `1.4K`, blank counters,
   loading/shell/challenge/wrong page; no invented Recent/video/empty-state selectors.
-- [ ] T011 [P] [US1] Write failing source-specific relay/handoff tests in
+- [X] T011 [P] [US1] Write failing source-specific relay/handoff tests in
   `tests/unit/test_host_browser_relay.py`: exact Threads/TikTok origin and opened-window/query/request
   binding, no cross-source acceptance, hostile-query escaping/nonce CSP, exact Host/Origin, body limits,
   opener loss and terminal shutdown; browser returns only status/counts, never record content.
-- [ ] T012 [P] [US1] Convert T003's accepted lifecycle into failing integration/contract tests in
+- [X] T012 [P] [US1] Convert T003's accepted lifecycle into failing integration/contract tests in
   `tests/integration/test_host_browser_mission.py` and
   `tests/integration/test_host_browser_search_mcp.py`: one run/writer for both host sources, unchanged
   submit/cancel signatures, prepare source default, complete falsifier query union and
   authority/budget/caller guards, missing/duplicate/stale sibling rejection, concurrent
   submit/replay/cancel/expiry and uncertain-persistence drain/readback, unrelated outcomes preserved
   with zero internal Threads collection calls.
-- [ ] T013 [P] [US1] Extend failing privacy/storage cases in
+- [X] T013 [P] [US1] Extend failing privacy/storage cases in
   `tests/integration/test_meta_host_evidence_backend_parity.py` and
   `tests/integration/test_author_identity_conformance.py` using synthetic sentinels in
   `tests/fixtures/author_identity_sentinels.py`: identity-free links before receipts/writes, attribution
@@ -187,7 +187,7 @@ mixed or unknown path pairs are not comparable on seen or created. Real-account 
 
 ### Implementation (after the corresponding RED)
 
-- [ ] T014 [US1] Implement source-specific `validate_answer` and outward receipt cleanup in
+- [X] T014 [US1] Implement source-specific `validate_answer` and outward receipt cleanup in
   `src/ignis/infrastructure/connectors/host_browser/validator.py` and
   `src/ignis/application/use_cases/host_browser_search.py`; reuse attribution/PII/mention policy in
   `src/ignis/infrastructure/security/pii_sanitizer.py` and identity-free content URLs in
@@ -195,43 +195,43 @@ mixed or unknown path pairs are not comparable on seen or created. Real-account 
   before destroying it, never retain raw identity in staged/outward receipts; preserve cleaned body,
   clocks, counter precision and query lineage, degrade all-dropped content and reject unproven Threads
   empty (T009/T013).
-- [ ] T015 [US1] Add packaged `src/ignis/infrastructure/connectors/host_browser/threads_search.js`
+- [X] T015 [US1] Add packaged `src/ignis/infrastructure/connectors/host_browser/threads_search.js`
   version `threads-search-top-v1` from `specs/020-meta-host-browser-search/g2-surfaces.md`: exact Top
   page, smallest timestamp/action-row ancestor, isolated visible body, shortcode dedup, ISO datetime and
   SVG-title counter components; bounded visible sample, no page
   clicks/typing/storage/fetch/whole-card/alt-only fallback (makes T010 pass).
-- [ ] T016 [US1] Add `src/ignis/infrastructure/connectors/host_browser/threads_handoff.js` and
+- [X] T016 [US1] Add `src/ignis/infrastructure/connectors/host_browser/threads_handoff.js` and
   source-specific composition/origin-window validation in
   `src/ignis/infrastructure/connectors/host_browser/relay.py` and
   `src/ignis/infrastructure/templates/html/host_browser_relay.html`; preserve
   `src/ignis/infrastructure/connectors/host_browser/tiktok_handoff.js` behavior and all existing
   transport security/termination bounds (makes T011 pass).
-- [ ] T017 [US1] Implement source-bound preparation and source-specific vocabulary snapshots in
+- [X] T017 [US1] Implement source-bound preparation and source-specific vocabulary snapshots in
   `src/ignis/application/use_cases/host_browser_search.py`: exact URLs/extractor/handoff resources,
   immutable source, task bounds, packaged tactical versus fresh mission vocabulary, fail before relay
   creation on missing vocabulary and no new collection fallback (T009).
-- [ ] T018 [US1] Add only optional `source` defaulting to `tiktok` to prepare handler/public tool in
+- [X] T018 [US1] Add only optional `source` defaulting to `tiktok` to prepare handler/public tool in
   `src/ignis/interfaces/mcp/server.py`; retain submit/cancel signatures, caller-storage binding, derived
   mission queries/limit and TikTok defaults; return source-specific descriptors without API-adapter
   fields (T012).
-- [ ] T019 [US1] Implement the GO composition design in
+- [X] T019 [US1] Implement the GO composition design in
   `src/ignis/application/use_cases/host_browser_search.py` and
   `src/ignis/application/use_cases/host_browser_mission.py`: sibling source tickets bound to same
   mission/caller/frame, complete staged group, one writer/run, shared receipt cache,
   duplicate/incomplete/stale refusal and coordinated cancellation/expiry/drain. Stage/degraded outcomes
   must retain all required surfaces; execute remaining non-host surfaces only once (T012).
-- [ ] T020 [US1] Map validated Threads/TikTok results into canonical `SearchPassResult` in
+- [X] T020 [US1] Map validated Threads/TikTok results into canonical `SearchPassResult` in
   `src/ignis/application/use_cases/host_browser_mission.py` and persist normalized
   method/revision/sampling in observation metadata and probe `scope_attestation` via
   `src/ignis/application/use_cases/execute_mission.py`, including zero-record outcomes; preserve scope
   keys, ingestion clocks, complete outcome set and qualification, with no schema/backfill (T013).
-- [ ] T021 [US1] Complete author-identity conformance and query/content-reference parity in
+- [X] T021 [US1] Complete author-identity conformance and query/content-reference parity in
   `tests/integration/test_author_identity_pipeline.py`,
   `tests/integration/test_author_identity_parity.py`, `tests/unit/test_identity_free_mcp_responses.py`
   and `tests/unit/test_source_identity.py`; prove unknown author markers, link-unavailable/context
   behavior, duplicate media/query dedup once per topic and zero identity leakage without collecting
   authors merely for voice counts. Any needed source correction returns to T014 with new RED evidence.
-- [ ] T022 [US1] Run the host receipt/mission subset of
+- [X] T022 [US1] Run the host receipt/mission subset of
   `tests/integration/test_meta_host_evidence_backend_parity.py` on SQLite and PostgreSQL: immutable
   observation/association/probe JSON, clocks, counters, path, caller/writer guards and complete
   sibling-source outcomes agree; record actual passed/skipped results in
@@ -240,6 +240,13 @@ mixed or unknown path pairs are not comparable on seen or created. Real-account 
   `src/ignis/infrastructure/persistence/postgres_repository.py` or
   `src/ignis/infrastructure/persistence/workspace_repository.py` after a failing parity case, with no
   schema migration.
+**T009–T022 local verification (28/10/2026):** 227 passed, 71 PostgreSQL skips with only the
+listener mocked; caller/manifest/convention/DOM checks 113 passed. T022 dedicated file: 7 SQLite
+passed, 7 PostgreSQL skipped (no injected DSN; coordinator verification pending). Native listener
+subset: 46 passed, 50 skipped, 55 sandbox socket-bind failures. These ticks record scoped
+implementation and the requested local runs, not PostgreSQL or real-transport acceptance. Exact
+commands, RED/GREEN evidence and limitations: `.handoff/spec020-verification.md`. T023 is not started.
+
 - [ ] T023 [P] [US1] Write and run failing pure path/precision tests in new
   `tests/unit/test_collection_path_comparability.py` and existing `tests/unit/test_watchlist_period.py`,
   `tests/unit/test_watchlist_seen_axis.py`: changed/mixed/unknown/conflicting method, revision/sampling

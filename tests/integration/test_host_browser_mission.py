@@ -22,7 +22,7 @@ from ignis.domain.harness_models import ChannelHealthStatus
 from ignis.infrastructure.persistence.workspace_repository import WorkspaceRepository
 
 
-async def assignment(repository, tmp_path, *, market=False, budget=2, required=("tiktok_video",), optional=()):
+async def assignment(repository, tmp_path, *, market=False, budget=2, required=("tiktok_video",), optional=(), youtube_budget=1):
     root = tmp_path / "host"
     root.mkdir()
     store = WorkspaceRepository(repository=repository)
@@ -33,7 +33,7 @@ async def assignment(repository, tmp_path, *, market=False, budget=2, required=(
         required_channels=required, optional_channels=optional,
         authority_boundary=AuthorityBoundary(public_http=True, official_api=True,
                                              browser_session=True, paid_quota=False),
-        quota_budget={"queries": budget, "youtube_search_calls": 1},
+        quota_budget={"queries": budget, "youtube_search_calls": youtube_budget},
         output_type=MissionOutputType.MARKET_ANALYSIS if market else MissionOutputType.COLLECTION_FRAME,
         stop_conditions=("one completed run",),
         analysis_policy="evidence-gated-v1", retention_policy="mission-only", created_by="fixture",
@@ -523,8 +523,8 @@ async def test_changed_mission_scope_rejects_staged_answer_before_evidence_write
         with pytest.raises(ValueError, match="STALE_SCOPE") as caught:
             await service.submit_mission(executor, request["request_id"], "task", "chrome")
         failure = getattr(caught.value, "host_search_failure", None)
-        assert failure is not None, "Failed ingestion needs a journal identity for readback"
-        assert failure["run"]["run_id"]
+        assert failure is None, "A preflight refusal never started an ingestion run"
+        assert not await store.list_run_journals(mission.id)
         assert repository_case.counts()["observations"] == 0
         with pytest.raises(ValueError):
             await service.submit_mission(executor, request["request_id"], "task", "chrome")
@@ -718,5 +718,298 @@ async def test_host_mission_applies_attribution_wording_added_in_the_database(re
         await service.submit_mission(executor, request["request_id"], "task", "chrome")
         held = await repo.get_mission_signals(mission.id)
         assert [signal.raw_title for signal in held] == ["Work bag review"]
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", ["tiktok", "threads"])
+async def test_composed_host_sources_share_one_canonical_run_and_source_outcomes(repository_case, tmp_path, monkeypatch, first):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path, market=True,
+        required=("tiktok_video", "threads", "youtube"), youtube_budget=2)
+    executor._registry.register(LocalYouTube())
+    service = HostBrowserSearchService()
+    try:
+        descriptors = {source: await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source=source)
+                       for source in ("tiktok", "threads")}
+        for request in descriptors.values():
+            assert [q["query"] for q in request["queries"]] == ["túi đi làm", "túi đi làm bất tiện"]
+            service.stage(request["request_id"], host_answer(request))
+        a, b = descriptors[first], descriptors["threads" if first == "tiktok" else "tiktok"]
+        receipts = await asyncio.gather(service.submit_mission(executor, a["request_id"], "task", "chrome"),
+                                        service.submit_mission(executor, b["request_id"], "task", "chrome"))
+        assert receipts[0] == receipts[1]
+        assert await service.submit_mission(executor, b["request_id"], "task", "chrome") == receipts[0]
+        journals = await store.list_run_journals(mission.id)
+        assert len(journals) == 1 and journals[0].status == "COMPLETED"
+        probes = {p.connector_surface: p for p in await store.get_latest_completed_probe_outcomes(mission.id)}
+        assert set(probes) == {"tiktok_video", "threads", "youtube"}
+        assert all(len(probes[s].scope_attestation["query_outcomes"]) == 2 for s in ("tiktok_video", "threads"))
+        signals = await repository_case.repository.get_mission_signals(mission.id)
+        assert sum(s.platform is PlatformType.THREADS for s in signals) == 2
+        assert all(s.metadata["connector_surface"] == "threads" for s in signals if s.platform is PlatformType.THREADS)
+        assert await store.get_mission_writer_claim(mission.id) is None
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["missing", "duplicate", "frame", "caller", "cancel", "expiry", "rejection"])
+async def test_group_faults_never_collect_a_sibling_or_fallback(repository_case, tmp_path, monkeypatch, fault):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    from ignis.infrastructure.caller_storage import current_caller_storage
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path,
+                                                   required=("tiktok_video", "threads"))
+    service = HostBrowserSearchService()
+    token = current_caller_storage.set(object())
+    try:
+        a = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
+        service.stage(a["request_id"], host_answer(a))
+        if fault == "duplicate":
+            with pytest.raises(ValueError):
+                await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
+            assert repository_case.counts()["observations"] == 0
+            return
+        b = None
+        if fault != "missing":
+            b = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+            service.stage(b["request_id"], host_answer(b))
+        if fault == "frame":
+            mission.keywords[0] = "changed scope"
+            await repository_case.repository.update_mission(mission)
+        elif fault == "caller":
+            current_caller_storage.set(object())
+        elif fault == "cancel":
+            service.cancel(a["request_id"], "task", "chrome")
+        elif fault == "expiry":
+            class Clock(datetime):
+                @classmethod
+                def now(cls, zone=None):
+                    return datetime.fromisoformat(a["expires_at"]) + timedelta(seconds=1)
+            monkeypatch.setattr(module, "datetime", Clock)
+        elif fault == "rejection":
+            with pytest.raises(ValueError):
+                service.stage(a["request_id"], {"invalid": "fixture"})
+        target = b if fault in {"cancel", "expiry", "rejection"} else a
+        with pytest.raises(ValueError):
+            await service.submit_mission(executor, target["request_id"], "task", "chrome")
+        assert repository_case.counts()["observations"] == 0
+        assert not await store.list_run_journals(mission.id)
+    finally:
+        current_caller_storage.reset(token)
+        service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event", ["cancel", "expiry", "uncertain", "shutdown"])
+async def test_composed_sqlite_commit_drains_and_readback_never_retries_a_sibling(repository_case, tmp_path, monkeypatch, event):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    if repository_case.name != "sqlite":
+        pytest.skip("SQLite worker fault injection; normal host contracts run on both backends")
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path,
+                                                   required=("tiktok_video", "threads"))
+    repo = repository_case.repository
+    service = HostBrowserSearchService()
+    release, entered = threading.Event(), asyncio.Event()
+    loop = asyncio.get_running_loop()
+    original_connection = repo._get_connection
+    armed = True
+    class CommitBoundary:
+        def __init__(self, conn):
+            self.conn = conn
+        def __getattr__(self, name):
+            return getattr(self.conn, name)
+        def __enter__(self):
+            self.conn.__enter__()
+            return self
+        def __exit__(self, *args):
+            return self.conn.__exit__(*args)
+        def commit(self):
+            nonlocal armed
+            self.conn.commit()
+            if armed and self.conn.execute("SELECT count(*) FROM observations").fetchone()[0] == 2:
+                armed = False
+                loop.call_soon_threadsafe(entered.set)
+                if not release.wait(8):
+                    raise RuntimeError("Worker fixture was not released")
+                if event == "uncertain":
+                    raise RuntimeError("Synthetic lost acknowledgement after commit")
+    first, stopping = None, None
+    try:
+        a = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
+        b = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+        for request in (a, b):
+            service.stage(request["request_id"], host_answer(request))
+        monkeypatch.setattr(repo, "_get_connection", lambda: CommitBoundary(original_connection()))
+        first = asyncio.create_task(service.submit_mission(executor, a["request_id"], "task", "chrome"))
+        await asyncio.wait_for(entered.wait(), 3)
+        assert repository_case.counts()["observations"] == 2
+        assert await store.get_mission_writer_claim(mission.id) is not None
+        if event == "shutdown":
+            stopping = asyncio.create_task(service.aclose())
+        elif event == "cancel":
+            stopping = asyncio.create_task(service.cancel_mission(b["request_id"], "task", "chrome"))
+            first.cancel()
+            await asyncio.sleep(0)
+            first.cancel()
+        elif event == "expiry":
+            class Clock(datetime):
+                @classmethod
+                def now(cls, zone=None):
+                    return datetime.fromisoformat(a["expires_at"]) + timedelta(seconds=1)
+            monkeypatch.setattr(module, "datetime", Clock)
+        await asyncio.sleep(0)
+        assert not first.done()
+        assert await store.get_mission_writer_claim(mission.id) is not None
+        release.set()
+        await asyncio.gather(first, *([stopping] if stopping else []), return_exceptions=True)
+        if event == "shutdown":
+            assert not service._tickets and not service._groups
+            assert await store.get_mission_writer_claim(mission.id) is None
+            assert repository_case.counts()["observations"] == 2
+            journals = await store.list_run_journals(mission.id)
+            assert len(journals) == 1 and journals[0].status == "FAILED"
+            return
+        with pytest.raises(ValueError) as retry:
+            await service.submit_mission(executor, b["request_id"], "task", "chrome")
+        failure = retry.value.host_search_failure
+        assert failure["readback"]["observations"] == 2 and failure["readback"]["writer_active"] is False
+        journals = await store.list_run_journals(mission.id)
+        assert len(journals) == 1 and journals[0].status == "FAILED"
+        assert await store.get_mission_writer_claim(mission.id) is None
+        assert repository_case.counts()["observations"] == 2
+    finally:
+        release.set()
+        if first:
+            await asyncio.gather(first, *([stopping] if stopping else []), return_exceptions=True)
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_composed_nonhost_budget_cannot_be_bypassed(repository_case, tmp_path, monkeypatch):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path, market=True,
+        required=("tiktok_video", "threads", "youtube"), youtube_budget=1)
+    executor._registry.register(LocalYouTube())
+    service = HostBrowserSearchService()
+    try:
+        with pytest.raises(InvalidMissionAuthorizationError):
+            await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+        assert not await store.list_run_journals(mission.id)
+        assert repository_case.counts()["observations"] == 0
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_terminal_group_retention_is_pruned_before_new_mission_preparation(repository_case, tmp_path, monkeypatch):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("threads",))
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+        service.cancel(request["request_id"], "task", "chrome")
+        group = service._tickets[request["request_id"]]["group"]
+        group.retain_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+        replacement = await service.prepare_mission(executor, mission.id, "new-task", "chrome", 60, True, source="threads")
+        assert replacement["request_id"] != request["request_id"]
+        assert request["request_id"] not in service._tickets
+        assert len(service._groups) == 1
+        assert not await store.list_run_journals(mission.id)
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["cancel", "concurrent"])
+async def test_group_preflight_is_owned_before_writer_entry(repository_case, tmp_path, monkeypatch, action):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path,
+                                                   required=("tiktok_video", "threads"))
+    service = HostBrowserSearchService()
+    entered, release, second_read = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original = store.load_mission_evidence_snapshot
+    calls = 0
+    async def gated_snapshot(*args):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            entered.set()
+            await release.wait()
+        else:
+            second_read.set()
+        return await original(*args)
+    tasks = []
+    try:
+        a = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
+        b = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+        for request in (a, b):
+            service.stage(request["request_id"], host_answer(request))
+        monkeypatch.setattr(store, "load_mission_evidence_snapshot", gated_snapshot)
+        first = asyncio.create_task(service.submit_mission(executor, a["request_id"], "task", "chrome"))
+        tasks.append(first)
+        await asyncio.wait_for(entered.wait(), 3)
+        if action == "cancel":
+            first.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await first
+            assert service._tickets[b["request_id"]]["state"] == "CANCELLED"
+            with pytest.raises(ValueError):
+                await service.submit_mission(executor, b["request_id"], "task", "chrome")
+            assert not await store.list_run_journals(mission.id)
+        else:
+            second = asyncio.create_task(service.submit_mission(executor, b["request_id"], "task", "chrome"))
+            tasks.append(second)
+            await asyncio.sleep(0)
+            assert not second_read.is_set(), "A sibling entered preflight before group admission was claimed"
+            release.set()
+            receipts = await asyncio.gather(first, second)
+            assert receipts[0] == receipts[1]
+            assert len(await store.list_run_journals(mission.id)) == 1
+    finally:
+        release.set()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", ["tiktok", "threads"])
+async def test_prepared_optional_host_sibling_joins_one_run_without_internal_collection(repository_case, tmp_path, monkeypatch, first):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path, optional=("threads",))
+    attempts = []
+    class ForbiddenInternalThreads(LocalYouTube):
+        platform = PlatformType.THREADS
+        async def search_signals(self, *args, **kwargs):
+            attempts.append("internal collection")
+            raise AssertionError("A staged host source reached the internal Threads collector")
+    executor._registry.register(ForbiddenInternalThreads())
+    service = HostBrowserSearchService()
+    try:
+        sources = (first, "threads" if first == "tiktok" else "tiktok")
+        requests = [await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source=s) for s in sources]
+        for request in requests:
+            service.stage(request["request_id"], host_answer(request))
+        receipts = await asyncio.gather(*(service.submit_mission(executor, r["request_id"], "task", "chrome") for r in requests))
+        assert receipts[0] == receipts[1]
+        assert len(await store.list_run_journals(mission.id)) == 1
+        assert repository_case.counts()["observations"] == 2
+        assert attempts == []
     finally:
         service.close()

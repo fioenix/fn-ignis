@@ -1387,7 +1387,7 @@
     "type": "function",
     "function": {
       "name": "prepare_host_browser_search",
-      "description": "Prepare one explicit finite public TikTok search batch through an authorized host browser.\n\nThis opt-in loopback relay does not export cookies or collect in the background. TACTICAL\ncreates no mission. MISSION requires an existing confirmed mission_id, queries=[] and\nresult_limit=20; its full query union and limit derive from authority, including falsifiers.\nThe host executes the packaged deterministic extractor and stages its JSON via\nthe same-origin local form. It is not a default collector or a Market recommendation.",
+      "description": "Prepare one finite public TikTok or Threads search batch through an authorized host browser.\n\nThis opt-in loopback relay does not export cookies or collect in the background. TACTICAL\ncreates no mission. Source defaults to tiktok; threads uses the bounded Top browser sample.\nMISSION requires an existing confirmed mission_id, queries=[] and\nresult_limit=20; its full query union and limit derive from authority, including falsifiers.\nThe host executes the packaged deterministic extractor and stages its JSON via\nthe same-origin local form. It is not a default collector or a Market recommendation.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -1426,6 +1426,10 @@
               }
             ],
             "default": null
+          },
+          "source": {
+            "default": "tiktok",
+            "type": "string"
           }
         },
         "required": [

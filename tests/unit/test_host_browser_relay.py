@@ -230,3 +230,75 @@ def test_relay_ignores_answers_from_another_origin_an_unopened_tab_or_the_wrong_
         browser.close()
         playwright.stop()
         relay.close()
+
+
+@pytest.mark.parametrize("source,mutation", [("threads", "valid"), ("threads", "origin"), ("threads", "window"),
+    ("threads", "query"), ("threads", "request"), ("tiktok", "valid"), ("tiktok", "origin")])
+def test_source_bound_relay_script_uses_opened_window_query_and_request_without_socket(monkeypatch, source, mutation):
+    import re
+    import shutil
+    import subprocess
+    import time
+    from ignis.infrastructure.connectors.host_browser import relay as module
+
+    class FakeHTTP:
+        server_port = 12345
+        def __init__(self, *args):
+            pass
+        def handle_request(self):
+            time.sleep(0.001)
+        def server_close(self):
+            pass
+    monkeypatch.setattr(module, "HTTPServer", FakeHTTP)
+    request = handoff_request()
+    request["source"] = source
+    request["extractor_version"] = "threads-search-top-v1" if source == "threads" else "tiktok-public-grid-v1"
+    request["queries"][0]["search_url"] = request["queries"][0]["search_url"].replace("www.tiktok.com", "www.threads.com") if source == "threads" else request["queries"][0]["search_url"]
+    relay = module.LoopbackRelay(request, "arg => ({records: []})", lambda answer: {}, 10)
+    try:
+        node = shutil.which("node")
+        assert node, "Node is required for the relay contract"
+        script = re.search(r'<script nonce="[^"]+">(.*?)</script>', relay._page, re.S).group(1)
+        data = re.search(r'<script type="application/json" id="relay-data">(.*?)</script>', relay._page, re.S).group(1)
+        harness = r'''
+const vm=require('vm'), data=JSON.parse(process.argv[1]), script=process.argv[2];
+let click, message, submitted=0, payload={value:''}; const tab={}, wrong={};
+const document={getElementById:id=> id==='relay-data'?{textContent:JSON.stringify(data)}:id==='payload'?payload:{textContent:''},
+ querySelector:selector=>selector==='form'?{requestSubmit:()=>submitted++}:{addEventListener:(name,cb)=>click=cb}};
+vm.runInNewContext(script,{document,window:{open:()=>tab,addEventListener:(name,cb)=>message=cb},CSS:{escape:x=>x},Map,JSON});
+const mutation=process.argv[3],source=process.argv[4];
+if(mutation!=='window')click();
+const answer={query_id:'query-1',query:mutation==='query'?'wrong':data.queries[0].query,records:[]};
+message({origin:mutation==='origin'?'https://attacker.invalid':source==='threads'?'https://www.threads.com':'https://www.tiktok.com',
+ source:mutation==='window'?wrong:tab,data:{kind:'ignis-host-answer',request_id:mutation==='request'?'wrong':data.request_id,answer}});
+message({origin:'https://attacker.invalid',source:tab,data:{kind:'ignis-host-answer',answer}});
+console.log(JSON.stringify({submitted,payload:payload.value?JSON.parse(payload.value):null}));
+'''
+        result = subprocess.run([node, "-e", harness, data, script, mutation, source], capture_output=True, text=True, check=True)
+        result = json.loads(result.stdout)
+        assert result["submitted"] == (1 if mutation == "valid" else 0)
+        if mutation == "valid":
+            assert result["payload"].get("source", "tiktok") == source
+    finally:
+        relay.close()
+
+
+def test_threads_handoff_returns_only_counts_and_refuses_opener_loss():
+    import shutil
+    import subprocess
+    path = Path(__file__).resolve().parents[2] / "src/ignis/infrastructure/connectors/host_browser/threads_handoff.js"
+    assert path.is_file(), "Threads handoff must be packaged"
+    code = r'''
+const fs=require('fs'),vm=require('vm');const source=fs.readFileSync(process.argv[1],'utf8');
+let posted; const context={URL,location:{href:'https://www.threads.com/search?q=synthetic'},
+ window:{opener:{postMessage:(value,origin)=>posted={value,origin}}}};
+const fn=vm.runInNewContext('('+source+')',context), extract=()=>({status:'HEALTHY',records:[{excerpt:'Synthetic private transport fixture'}]});
+const result=fn(extract,[{query_id:'q',query:'synthetic',result_limit:3}],'http://127.0.0.1:12345','request');
+context.window.opener=null;const lost=fn(extract,[{query_id:'q',query:'synthetic',result_limit:3}],'http://127.0.0.1:12345','request');
+console.log(JSON.stringify({result,lost,request:posted.value.request_id,origin:posted.origin}));
+'''
+    result = subprocess.run([shutil.which("node"), "-e", code, str(path)], capture_output=True, text=True, check=True)
+    value = json.loads(result.stdout)
+    assert value["result"] == {"posted": True, "status": "HEALTHY", "records": 1}
+    assert value["lost"]["posted"] is False
+    assert value["request"] == "request"

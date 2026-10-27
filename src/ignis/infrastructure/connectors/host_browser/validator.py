@@ -1,16 +1,63 @@
-"""Validate trusted-host observations; identifiers bind scope, not authenticity."""
+"""Validate transient browser records and destroy identity before staging any receipt."""
 
 import re
 from datetime import datetime
+from decimal import Decimal
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 from ignis.domain.host_browser_search import HostSearchAnswer, HostSearchRequest
-from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text, strip_platform_attribution
+from ignis.domain.self_content import is_self_authored
+from ignis.domain.source_identity import identity_free_source_url
+from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, sanitize_pii_text, strip_platform_attribution
+
+
+def collection_path(source, version, limit):
+    """Normalized measurement facts, independent of random task ids and capture time."""
+    return dict(collection_path="host_browser:" + version, connector_revision=version,
+                sampling=dict(limit=limit, ordering="top_visible_sample" if source == "threads" else "visible_grid"))
+
+
+def _content_url(source, raw):
+    if raw is None:
+        return None
+    url = urlsplit(raw)
+    expected = "www.threads.com" if source == "threads" else "www.tiktok.com"
+    if url.scheme != "https" or url.netloc != expected or url.query or url.fragment:
+        raise ValueError("Expected canonical public content URL")
+    pattern = (r"/(?:@[A-Za-z0-9_.]+/post/|t/)([A-Za-z0-9_-]+)(?:/media)?/?" if source == "threads"
+               else r"/(?:@[A-Za-z0-9_.]+/video/|share/video/)[0-9]+")
+    match = re.fullmatch(pattern, url.path)
+    if not match:
+        raise ValueError("Expected canonical public content URL")
+    if source == "threads":
+        return "https://www.threads.com/t/" + match.group(1)
+    return identity_free_source_url(source, raw, {})
+
+
+def _counters(components):
+    result = []
+    for counter in components:
+        raw = counter.raw_display.strip()
+        if re.fullmatch(r"[0-9]+", raw):
+            expected, precision = int(raw), "exact"
+        elif re.fullmatch(r"[0-9]+\.[0-9]+K", raw):
+            expected, precision = int(Decimal(raw[:-1]) * 1000), "rounded"
+        else:
+            expected, precision = None, "unknown"
+        if (counter.value, counter.precision) != (expected, precision):
+            raise ValueError("Counter does not preserve displayed precision")
+        value = counter.model_dump(mode="json")
+        value["raw_display"] = mask_author_identity_text(sanitize_pii_text(value["raw_display"]))
+        result.append(value)
+    return result
 
 
 def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
-                    attribution_templates: tuple[str, ...] = ()) -> dict:
+                    attribution_templates: tuple[str, ...] = (), self_identities=()) -> dict:
     answer = HostSearchAnswer.model_validate(payload, context={"request": request})
+    if not attribution_templates:
+        raise ValueError("Source attribution vocabulary is unavailable")
     if (answer.request_id, answer.host_task_ref, answer.session_ref) != (
         request.request_id, request.host_task_ref, request.session_ref
     ):
@@ -21,54 +68,59 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
     if len(answer.answers) != len(expected) or {item.query_id for item in answer.answers} != set(expected):
         raise ValueError("Every approved query requires exactly one answer")
     observations, outcomes = [], []
+    origin = "www.threads.com" if request.source == "threads" else "www.tiktok.com"
     for item in answer.answers:
         query = expected[item.query_id]
         page = urlsplit(item.page_url)
-        if (page.scheme != "https" or page.netloc != "www.tiktok.com" or page.path != "/search"
-                or page.fragment or parse_qs(page.query) != {"q": [query.query]} or item.query != query.query):
+        if (page.scheme != "https" or page.netloc != origin or page.path != "/search" or page.fragment
+                or parse_qs(page.query, keep_blank_values=True) != {"q": [query.query]} or item.query != query.query):
             raise ValueError("Search page does not match the approved query")
+        if request.source == "threads" and (item.locale != "en" or item.status == "EMPTY_NO_DATA"):
+            raise ValueError("Unsupported Threads locale or unproved empty state")
         if not request.issued_at <= item.captured_at <= min(now, request.expires_at):
             raise ValueError("Capture is outside the task lifetime")
         if len(item.records) > query.result_limit:
             raise ValueError("Answer exceeds approved record limit")
         if item.status == "HEALTHY" and (not item.search_verified or not item.records):
             raise ValueError("Healthy search requires verified records")
-        if item.status == "EMPTY_NO_DATA" and (
-            not item.search_verified or not item.empty_state_visible or item.records
-        ):
+        if item.status == "EMPTY_NO_DATA" and (not item.search_verified or not item.empty_state_visible or item.records):
             raise ValueError("Empty search requires explicit matching no-results evidence")
         if item.records and not item.search_verified:
             raise ValueError("Unverified page cannot provide observations")
-        seen = set()
-        count = 0
+        seen, count = set(), 0
+        path = collection_path(request.source, request.extractor_version, query.result_limit)
         for record in item.records:
-            source = urlsplit(record.source_url)
-            if (source.scheme != "https" or source.netloc != "www.tiktok.com" or source.query
-                    or source.fragment or not re.fullmatch(r"/@[A-Za-z0-9_.]+/video/[0-9]+", source.path)):
-                raise ValueError("Expected canonical public TikTok video URL")
+            cleaned_url = _content_url(request.source, record.source_url)
             if record.published_at and record.published_at > item.captured_at:
                 raise ValueError("Publication cannot follow capture")
-            if record.source_url in seen:
+            # Match the transient author-bearing URL before destroying it. Never stage it.
+            if is_self_authored(SimpleNamespace(platform=request.source, source_url=record.source_url, metadata={}), self_identities):
                 continue
-            # The image label ends by naming the poster; that sentence is not content (FR-012).
-            excerpt = strip_platform_attribution(record.excerpt, attribution_templates)
+            excerpt = mask_author_identity_text(sanitize_pii_text(strip_platform_attribution(record.excerpt, attribution_templates)))
             if not excerpt.strip():
                 continue
-            seen.add(record.source_url)
+            identity = cleaned_url or excerpt
+            if identity in seen:
+                continue
+            seen.add(identity)
             count += 1
-            observations.append(dict(
-                source_url=record.source_url, excerpt=sanitize_pii_text(excerpt), query=query.query,
-                query_id=query.query_id, request_id=request.request_id,
-                captured_at=item.captured_at.isoformat(),
+            observation = dict(source_url=cleaned_url, excerpt=excerpt, query=query.query, query_id=query.query_id,
+                request_id=request.request_id, captured_at=item.captured_at.isoformat(),
                 published_at=record.published_at.isoformat() if record.published_at else None,
-                metric_value=None, metric_kind=None, metric_known=False,
-                collection_path="host_browser:" + answer.extractor_version,
-            ))
-        # A healthy answer whose every label was only attribution measured no content.
+                metric_value=None, metric_kind=None, metric_known=False, collection_path=path["collection_path"])
+            if request.source == "threads":
+                observation.update(source=request.source, source_verifiable=cleaned_url is not None,
+                                   counters=_counters(record.counters), **path)
+            observations.append(observation)
         status = "DEGRADED" if item.status == "HEALTHY" and not count else item.status
-        outcomes.append(dict(query_id=query.query_id, query=query.query, status=status,
-                             signals_collected=count, queried_window=None,
-                             search_verified=item.search_verified,
-                             note="Bounded visible public video grid; window and counters unmeasured"))
-    return dict(status="ACCEPTED", mode=request.mode, request_id=request.request_id,
-                observations=observations, outcomes=outcomes)
+        outcome = dict(query_id=query.query_id, query=query.query, status=status, signals_collected=count,
+                       queried_window=None, search_verified=item.search_verified,
+                       note="Bounded visible public video grid; window and counters unmeasured")
+        if request.source == "threads":
+            outcome.update(**path, note="Bounded visible Top sample; rounded and unknown counters retained")
+        outcomes.append(outcome)
+    receipt = dict(status="ACCEPTED", mode=request.mode, request_id=request.request_id,
+                   observations=observations, outcomes=outcomes)
+    if request.source == "threads":
+        receipt["source"] = request.source
+    return receipt
