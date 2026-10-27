@@ -575,7 +575,7 @@ async def test_concurrent_submit_and_cancel_cannot_claim_running_host_ingestion(
     store, workspace, mission, executor = await assignment(repository_case.repository, tmp_path)
     service = HostBrowserSearchService()
     entered, release = asyncio.Event(), asyncio.Event()
-    async def ingress(executor, binding, receipt):
+    async def ingress(executor, binding, receipt, **kwargs):
         entered.set()
         await release.wait()
         return dict(status="COMPLETED")
@@ -641,7 +641,7 @@ async def test_prepare_does_not_evict_submitting_receipt_and_retention_is_finite
     store, workspace, mission, executor = await assignment(repository_case.repository, tmp_path)
     service = HostBrowserSearchService()
     entered, release = asyncio.Event(), asyncio.Event()
-    async def hold(*args):
+    async def hold(*args, **kwargs):
         entered.set()
         await release.wait()
         return {"status": "COMPLETED"}
@@ -741,8 +741,10 @@ async def test_composed_host_sources_share_one_canonical_run_and_source_outcomes
         a, b = descriptors[first], descriptors["threads" if first == "tiktok" else "tiktok"]
         receipts = await asyncio.gather(service.submit_mission(executor, a["request_id"], "task", "chrome"),
                                         service.submit_mission(executor, b["request_id"], "task", "chrome"))
-        assert receipts[0] == receipts[1]
-        assert await service.submit_mission(executor, b["request_id"], "task", "chrome") == receipts[0]
+        assert receipts[0]["request_id"] == a["request_id"]
+        assert receipts[1]["request_id"] == b["request_id"]
+        assert {k: v for k, v in receipts[0].items() if k != "request_id"} == {k: v for k, v in receipts[1].items() if k != "request_id"}
+        assert await service.submit_mission(executor, b["request_id"], "task", "chrome") == receipts[1]
         journals = await store.list_run_journals(mission.id)
         assert len(journals) == 1 and journals[0].status == "COMPLETED"
         probes = {p.connector_surface: p for p in await store.get_latest_completed_probe_outcomes(mission.id)}
@@ -911,27 +913,6 @@ async def test_composed_nonhost_budget_cannot_be_bypassed(repository_case, tmp_p
 
 
 @pytest.mark.asyncio
-async def test_terminal_group_retention_is_pruned_before_new_mission_preparation(repository_case, tmp_path, monkeypatch):
-    from tests.fixtures.meta_host_browser_answers import NoSocketRelay
-    from ignis.application.use_cases import host_browser_search as module
-    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
-    store, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("threads",))
-    service = HostBrowserSearchService()
-    try:
-        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
-        service.cancel(request["request_id"], "task", "chrome")
-        group = service._tickets[request["request_id"]]["group"]
-        group.retain_until = datetime.now(timezone.utc) - timedelta(seconds=1)
-        replacement = await service.prepare_mission(executor, mission.id, "new-task", "chrome", 60, True, source="threads")
-        assert replacement["request_id"] != request["request_id"]
-        assert request["request_id"] not in service._tickets
-        assert len(service._groups) == 1
-        assert not await store.list_run_journals(mission.id)
-    finally:
-        service.close()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["cancel", "concurrent"])
 async def test_group_preflight_is_owned_before_writer_entry(repository_case, tmp_path, monkeypatch, action):
     from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
@@ -977,7 +958,9 @@ async def test_group_preflight_is_owned_before_writer_entry(repository_case, tmp
             assert not second_read.is_set(), "A sibling entered preflight before group admission was claimed"
             release.set()
             receipts = await asyncio.gather(first, second)
-            assert receipts[0] == receipts[1]
+            assert receipts[0]["request_id"] == a["request_id"]
+            assert receipts[1]["request_id"] == b["request_id"]
+            assert {k: v for k, v in receipts[0].items() if k != "request_id"} == {k: v for k, v in receipts[1].items() if k != "request_id"}
             assert len(await store.list_run_journals(mission.id)) == 1
     finally:
         release.set()
@@ -1007,7 +990,8 @@ async def test_prepared_optional_host_sibling_joins_one_run_without_internal_col
         for request in requests:
             service.stage(request["request_id"], host_answer(request))
         receipts = await asyncio.gather(*(service.submit_mission(executor, r["request_id"], "task", "chrome") for r in requests))
-        assert receipts[0] == receipts[1]
+        assert [r["request_id"] for r in receipts] == [r["request_id"] for r in requests]
+        assert {k: v for k, v in receipts[0].items() if k != "request_id"} == {k: v for k, v in receipts[1].items() if k != "request_id"}
         assert len(await store.list_run_journals(mission.id)) == 1
         assert repository_case.counts()["observations"] == 2
         assert attempts == []
@@ -1043,5 +1027,153 @@ async def test_host_exact_publication_survives_pre_strip_self_exclusion(reposito
         assert signals[0].published_at.microsecond == 123456
         assert signals[0].published_at != signals[0].captured_at
         assert "synthetic.header" not in repr(signals) and "synthetic.other" not in repr(signals)
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["cancel", "accepted", "stale", "rejected", "expired"])
+async def test_review_terminal_or_stale_group_never_blocks_repreparation(repository_case, tmp_path, monkeypatch, terminal):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, workspace, mission, executor = await assignment(repository_case.repository, tmp_path, required=("threads",))
+    service = HostBrowserSearchService()
+    try:
+        first = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+        old = service._tickets[first["request_id"]]["group"]
+        if terminal == "cancel":
+            await service.cancel_mission(first["request_id"], "task", "chrome")
+        elif terminal == "accepted":
+            service.stage(first["request_id"], host_answer(first))
+            accepted = await service.submit_mission(executor, first["request_id"], "task", "chrome")
+        elif terminal == "rejected":
+            invalid = host_answer(first)
+            invalid["answers"][0]["query"] = "unapproved synthetic query"
+            with pytest.raises(ValueError):
+                service.stage(first["request_id"], invalid)
+        elif terminal == "expired":
+            deadline = service._tickets[first["request_id"]]["request"].expires_at
+            class Clock(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    return deadline + timedelta(seconds=1)
+            monkeypatch.setattr(module, "datetime", Clock)
+        else:
+            mission.keywords = ["new synthetic scope"]
+            await repository_case.repository.update_mission(mission)
+        target = mission
+        if terminal == "accepted":
+            # Collection completion is terminal. The supported flow creates a fresh mission,
+            # just as each watchlist run does; do not reopen the completed mission by editing it.
+            from dataclasses import replace
+            with pytest.raises(ValueError, match="not pending collection"):
+                await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+            assert old.key not in service._groups
+            manifest = replace(await store.get_mission_manifest(mission.id), mission_id=None)
+            target = await CreateAttentionMissionUseCase(repository_case.repository, store).execute(
+                workspace.workspace_id, "Replacement host run", manifest, keywords=["túi đi làm"])
+        replacement = await service.prepare_mission(executor, target.id, "task", "chrome", 60, True, source="threads")
+        assert replacement["request_id"] != first["request_id"]
+        assert service._tickets[replacement["request_id"]]["group"] is not old
+        assert old.state == {"cancel": "CANCELLED", "accepted": "ACCEPTED", "stale": "REJECTED", "rejected": "REJECTED", "expired": "EXPIRED"}[terminal]
+        assert first["request_id"] in service._tickets
+        if terminal == "accepted":
+            assert await service.submit_mission(executor, first["request_id"], "task", "chrome") == accepted
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["tiktok", "threads"])
+@pytest.mark.parametrize("empty", [False, True])
+async def test_review_mission_vocabulary_never_mutates_tactical_source_snapshots(repository_case, tmp_path, monkeypatch, source, empty):
+    from types import SimpleNamespace
+    from ignis.application.use_cases import host_browser_search as module
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    from ignis.infrastructure.caller_storage import current_caller_storage
+    token = current_caller_storage.set(object())
+    service = HostBrowserSearchService()
+    before = {s: service.attribution_templates_for(s) for s in ("tiktok", "threads")}
+    async def vocabulary(repo):
+        return SimpleNamespace(tiktok_attribution=[] if empty else ["Synthetic custom {author}"],
+                               threads_attribution=[] if empty else ["Synthetic caller {author}"])
+    monkeypatch.setattr(module, "load_market_vocabulary", vocabulary)
+    _, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("threads",))
+    try:
+        if empty:
+            with pytest.raises(module.AttributionVocabularyMissing):
+                await service.refresh_attribution_templates(executor._repo, source=source)
+        else:
+            request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+            assert service._tickets[request["request_id"]]["attribution_templates"] == ("Synthetic caller {author}",)
+        current_caller_storage.set(object())
+        for selected in ("tiktok", "threads"):
+            assert service.attribution_templates_for(selected) == before[selected]
+            request = service.prepare("other-caller", "chrome", ["synthetic"], 3, 60, True, source=selected)
+            assert service._tickets[request["request_id"]]["attribution_templates"] == before[selected]
+    finally:
+        service.close()
+        current_caller_storage.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_review_group_failure_receipts_keep_each_callers_request_id(repository_case, tmp_path, monkeypatch):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    from ignis.application.use_cases import host_browser_mission
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    _, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("tiktok_video", "threads"))
+    service = HostBrowserSearchService()
+    async def fail(*args, **kwargs):
+        raise RuntimeError("Synthetic ingestion failure")
+    monkeypatch.setattr(host_browser_mission, "ingest_scope", fail)
+    try:
+        requests = [await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source=s)
+                    for s in ("tiktok", "threads")]
+        for request in requests:
+            service.stage(request["request_id"], host_answer(request))
+        errors = await asyncio.gather(*(service.submit_mission(executor, request["request_id"], "task", "chrome")
+                                        for request in requests), return_exceptions=True)
+        assert [error.host_search_failure["request_id"] for error in errors] == [request["request_id"] for request in requests]
+        for request in reversed(requests):
+            with pytest.raises(Exception) as caught:
+                await service.submit_mission(executor, request["request_id"], "task", "chrome")
+            assert caught.value.host_search_failure["request_id"] == request["request_id"]
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_at", ["vocabulary", "scope", "identity", "relay"])
+async def test_review_second_prepare_failure_closes_the_first_sibling(repository_case, tmp_path, monkeypatch, failure_at):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay
+    from ignis.application.use_cases import host_browser_search as module
+    from ignis.application.use_cases import host_browser_mission
+    from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    _, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("tiktok_video", "threads"))
+    service = HostBrowserSearchService()
+    async def fail(*args, **kwargs):
+        raise ValueError("Synthetic second preparation failure")
+    def relay_failure(*args):
+        raise ValueError("Synthetic second preparation failure")
+    try:
+        first = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
+        ticket = service._tickets[first["request_id"]]
+        if failure_at == "vocabulary":
+            monkeypatch.setattr(service, "refresh_attribution_templates", fail)
+        elif failure_at == "scope":
+            monkeypatch.setattr(host_browser_mission, "prepare_scope", fail)
+        elif failure_at == "identity":
+            monkeypatch.setattr(SelfIdentityRegistry, "load", fail)
+        else:
+            monkeypatch.setattr(module, "LoopbackRelay", relay_failure)
+        with pytest.raises(ValueError, match="Synthetic second"):
+            await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+        assert ticket["state"] == "REJECTED"
+        # The public await returns only after the sibling's transport has closed.
+        assert ticket["relay"].closed
     finally:
         service.close()

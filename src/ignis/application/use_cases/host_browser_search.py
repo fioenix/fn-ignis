@@ -104,11 +104,13 @@ class HostBrowserSearchService:
             return templates
 
     async def refresh_attribution_templates(self, repository, *, source="tiktok") -> tuple[str, ...]:
-        """Replace source snapshots from the mission repository before a ticket freezes them."""
+        """Load a caller-local immutable snapshot without changing tactical packaged vocabulary."""
         vocabulary = await load_market_vocabulary(repository)
-        self.register_attribution_templates(vocabulary.tiktok_attribution)
-        self.register_attribution_templates(vocabulary.threads_attribution, source="threads")
-        return self.attribution_templates_for(source)
+        templates = (vocabulary.tiktok_attribution if source == "tiktok" else
+                     vocabulary.threads_attribution if source == "threads" else ())
+        if not templates:
+            raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
+        return tuple(templates)
 
     def prepare(self, host_task_ref: str, session_ref: str, queries: list[str],
                 result_limit: int, lifetime_seconds: int, authorized: bool, *, mode="TACTICAL",
@@ -170,8 +172,12 @@ class HostBrowserSearchService:
     @staticmethod
     def _finish(ticket: dict, state: str, **fields) -> None:
         request = ticket["request"]
+        for record in ticket.get("author_records") or ():
+            record.clear()
+        if ticket.get("author_records") is not None:
+            ticket["author_records"].clear()
         # Keep a finite readback window after completion, without renewing collection authority.
-        ticket.update(state=state, retain_until=datetime.now(timezone.utc)
+        ticket.update(state=state, author_records=None, retain_until=datetime.now(timezone.utc)
                       + (request.expires_at - request.issued_at), **fields)
 
     @staticmethod
@@ -193,9 +199,11 @@ class HostBrowserSearchService:
                     if group is not None and group.state in {"PREPARED", "SUBMITTING"}:
                         self._stop_group(group, "REJECTED")
                     raise ValueError("Task is not accepting answers")
+                author_records = [] if ticket["request"].mode == "MISSION" else None
                 try:
                     receipt = validate_answer(ticket["request"], payload, datetime.now(timezone.utc),
-                                              ticket["attribution_templates"], ticket["self_identities"])
+                                              ticket["attribution_templates"], ticket["self_identities"],
+                                              author_records=author_records)
                 except ValueError:
                     group = ticket.get("group")
                     if group is not None:
@@ -203,8 +211,8 @@ class HostBrowserSearchService:
                     else:
                         self._finish(ticket, "REJECTED", receipt=None)
                     raise
-                # Only the masked receipt is needed after validation; do not retain raw excerpts.
-                ticket.update(state="STAGED", payload=None, receipt=receipt)
+                # Only mission policy input stays transient in memory; receipts are always masked.
+                ticket.update(state="STAGED", payload=None, receipt=receipt, author_records=author_records)
                 return dict(status="STAGED", request_id=request_id)
         finally:
             # Never join a server callback while holding the ticket lock.
@@ -230,7 +238,7 @@ class HostBrowserSearchService:
     def _prune(self, now):
         """Evict whole retained groups, never one collectible sibling or an owned writer."""
         relays = []
-        for group in list(self._groups.values()):
+        for group in self._all_groups():
             if group.task is not None and not group.task.done():
                 continue
             if group.state == "PREPARED" and now >= self._deadline(group):
@@ -240,11 +248,17 @@ class HostBrowserSearchService:
                     ticket = self._tickets.pop(key, None)
                     if ticket:
                         relays.append(ticket["relay"])
-                self._groups.pop(group.key, None)
+                if self._groups.get(group.key) is group:
+                    self._groups.pop(group.key, None)
         for key, item in list(self._tickets.items()):
             if item.get("group") is None and item.get("retain_until", item["request"].expires_at) <= now:
                 relays.append(self._tickets.pop(key)["relay"])
         return relays
+
+    def _all_groups(self):
+        """Ticket ownership retains replay/drain state independently of preparation lookup."""
+        return list({id(ticket["group"]): ticket["group"] for ticket in self._tickets.values()
+                     if ticket.get("group") is not None}.values())
 
     def _deadline(self, group):
         return min(self._tickets[key]["request"].expires_at for key in group.members.values())
@@ -258,6 +272,8 @@ class HostBrowserSearchService:
             self._finish(ticket, state, payload=None, receipt=None)
             lifetimes.append(ticket["request"].expires_at - ticket["request"].issued_at)
         group.retain_until = now + min(lifetimes)
+        if self._groups.get(group.key) is group:
+            self._groups.pop(group.key, None)
 
     def _stop_group(self, group, reason):
         if group.state in {"ACCEPTED", "FAILED", "CANCELLED", "EXPIRED", "REJECTED"}:
@@ -277,51 +293,64 @@ class HostBrowserSearchService:
 
     async def prepare_mission(self, executor, mission_id, host_task_ref, session_ref, lifetime_seconds, authorized,
                               *, source="tiktok"):
-        from ignis.application.use_cases.host_browser_mission import prepare_scope
-        from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
-        if authorized is not True:
-            raise ValueError("Explicit browser authorization is required")
-        with self._lock:
-            relays = self._prune(datetime.now(timezone.utc))
-        for relay in relays:
-            relay.close()
-        attribution_templates = await self.refresh_attribution_templates(executor._repo, source=source)
-        binding = await prepare_scope(executor, mission_id, source)
-        sync = getattr(executor, "_vocabulary_sync", None)
-        identity_repo = getattr(sync, "_credential_repository", executor._repo)
-        identities = await SelfIdentityRegistry(identity_repo).load()
-        identities += list(getattr(executor._registry, "self_identities", ()))
-        caller = current_caller_storage.get()
-        key = (str(mission_id), caller, binding["digest"], binding["plan"]["plan_digest"])
-        with self._lock:
-            for existing in list(self._groups.values()):
-                if existing.key[:2] == key[:2] and existing.key != key:
-                    self._stop_group(existing, "REJECTED")
-                    raise ValueError("STALE_SCOPE")
-            group = self._groups.get(key)
-            if group is not None and (group.state != "PREPARED" or source in group.members):
-                self._stop_group(group, "REJECTED")
-                raise ValueError("Duplicate or terminal source group")
-            if group is not None and datetime.now(timezone.utc) >= self._deadline(group):
-                self._stop_group(group, "EXPIRED")
-                raise ValueError("Mission group expired")
-            if group is not None:
-                first = self._tickets[next(iter(group.members.values()))]["request"]
-                if (host_task_ref, session_ref) != (first.host_task_ref, first.session_ref):
+        try:
+            from ignis.application.use_cases.host_browser_mission import prepare_scope
+            from ignis.infrastructure.auth.self_identity import SelfIdentityRegistry
+            if authorized is not True:
+                raise ValueError("Explicit browser authorization is required")
+            with self._lock:
+                relays = self._prune(datetime.now(timezone.utc))
+            for relay in relays:
+                relay.close()
+            attribution_templates = await self.refresh_attribution_templates(executor._repo, source=source)
+            binding = await prepare_scope(executor, mission_id, source)
+            sync = getattr(executor, "_vocabulary_sync", None)
+            identity_repo = getattr(sync, "_credential_repository", executor._repo)
+            identities = await SelfIdentityRegistry(identity_repo).load()
+            identities += list(getattr(executor._registry, "self_identities", ()))
+            caller = current_caller_storage.get()
+            key = (str(mission_id), caller, binding["digest"], binding["plan"]["plan_digest"])
+            with self._lock:
+                for existing in list(self._groups.values()):
+                    if existing.key[:2] == key[:2] and existing.key != key:
+                        self._stop_group(existing, "REJECTED")
+
+                group = self._groups.get(key)
+                if group is not None and (group.state != "PREPARED" or source in group.members):
                     self._stop_group(group, "REJECTED")
-                    raise ValueError("Sibling identity mismatch")
-            request = self.prepare(host_task_ref, session_ref, binding["queries"], 20, lifetime_seconds, authorized,
-                                   mode="MISSION", attribution_templates=attribution_templates,
-                                   source=source, self_identities=identities)
-            if group is None:
-                group = _MissionGroup(key, binding, caller, binding["required_host_sources"])
-                self._groups[key] = group
-            group.members[source] = request["request_id"]
-            ticket = self._tickets[request["request_id"]]
-            ticket.update(group=group, binding=group.binding)
-            group.binding["expires_at"] = self._deadline(group)
-        request.update(mission_id=str(mission_id), collection_plan_digest=binding["plan"]["plan_digest"])
-        return request
+                    raise ValueError("Duplicate or terminal source group")
+                if group is not None and datetime.now(timezone.utc) >= self._deadline(group):
+                    self._stop_group(group, "EXPIRED")
+                    group = None
+                if group is not None:
+                    first = self._tickets[next(iter(group.members.values()))]["request"]
+                    if (host_task_ref, session_ref) != (first.host_task_ref, first.session_ref):
+                        self._stop_group(group, "REJECTED")
+                        raise ValueError("Sibling identity mismatch")
+                request = self.prepare(host_task_ref, session_ref, binding["queries"], 20, lifetime_seconds, authorized,
+                                       mode="MISSION", attribution_templates=attribution_templates,
+                                       source=source, self_identities=identities)
+                if group is None:
+                    group = _MissionGroup(key, binding, caller, binding["required_host_sources"])
+                    self._groups[key] = group
+                group.members[source] = request["request_id"]
+                ticket = self._tickets[request["request_id"]]
+                ticket.update(group=group, binding=group.binding)
+                group.binding["expires_at"] = self._deadline(group)
+            request.update(mission_id=str(mission_id), collection_plan_digest=binding["plan"]["plan_digest"])
+            return request
+        except BaseException:
+            # Every partial preparation failure revokes its caller's collectible siblings.
+            with self._lock:
+                failed = [group for group in self._all_groups()
+                          if group.key[:2] == (str(mission_id), current_caller_storage.get())
+                          and group.state in {"PREPARED", "SUBMITTING", "DRAINING"}]
+                for group in failed:
+                    self._stop_group(group, "REJECTED")
+                relays = [self._tickets[key]["relay"] for group in failed for key in group.members.values()]
+            for relay in relays:
+                relay.close()
+            raise
 
     async def submit_mission(self, executor, request_id, host_task_ref, session_ref):
         with self._lock:
@@ -336,9 +365,9 @@ class HostBrowserSearchService:
             async with group.admission:
                 worker, cached = await self._claim_mission(executor, request_id, host_task_ref, session_ref)
             if cached is not None:
-                return _outward(cached)
+                return {**_outward(cached), "request_id": request_id}
             try:
-                return _outward(await asyncio.shield(worker))
+                return {**_outward(await asyncio.shield(worker)), "request_id": request_id}
             except asyncio.CancelledError:
                 if not asyncio.current_task().cancelling() and group.failure is not None:
                     exc = ValueError("Mission group terminated")
@@ -354,6 +383,12 @@ class HostBrowserSearchService:
                     await _settle(worker)
                 except BaseException:
                     pass
+            raise
+        except Exception as exc:
+            if getattr(exc, "host_search_failure", None) is not None:
+                detached = copy.copy(exc)
+                detached.host_search_failure = {**copy.deepcopy(exc.host_search_failure), "request_id": request_id}
+                raise detached from None
             raise
 
     async def _claim_mission(self, executor, request_id, host_task_ref, session_ref):
@@ -431,7 +466,10 @@ class HostBrowserSearchService:
                 receipt["outcomes"] = [{**o, "source": source} for source, part in staged.items() for o in part["outcomes"]]
             remaining = (self._deadline(group) - datetime.now(timezone.utc)).total_seconds()
             async with asyncio.timeout(max(0, remaining)):
-                receipt["mission"] = await ingest_scope(executor, group.binding, {**receipt, "sources": staged})
+                policy_records = {source: self._tickets[key].get("author_records") or []
+                                  for source, key in group.members.items()}
+                receipt["mission"] = await ingest_scope(executor, group.binding, {**receipt, "sources": staged},
+                                                        author_records=policy_records)
         except BaseException as exc:
             failure = exc
 
@@ -520,7 +558,7 @@ class HostBrowserSearchService:
         """Drain every owned group before caller repositories and the event loop close."""
         self.close()
         with self._lock:
-            workers = [group.task for group in self._groups.values() if group.task is not None]
+            workers = [group.task for group in self._all_groups() if group.task is not None]
         for worker in workers:
             try:
                 await _settle(worker)
@@ -532,9 +570,9 @@ class HostBrowserSearchService:
     def close(self) -> None:
         with self._lock:
             tickets = list(self._tickets.values())
-            for group in self._groups.values():
+            for group in self._all_groups():
                 self._stop_group(group, "CANCELLED")
-            if any(group.task is not None and not group.task.done() for group in self._groups.values()):
+            if any(group.task is not None and not group.task.done() for group in self._all_groups()):
                 # Retain owned tickets until their executor drains; shutdown may call close again.
                 pass
             else:

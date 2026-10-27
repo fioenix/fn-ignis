@@ -84,7 +84,7 @@ async def prepare_scope(executor, mission_id, source="tiktok"):
                     if ("tiktok_video" if name == "tiktok" else name) in manifest.required_channels))
 
 
-async def ingest_scope(executor, binding, receipt):
+async def ingest_scope(executor, binding, receipt, *, author_records=None):
     # A legacy single-host receipt and a composed source receipt use the same writer seam.
     receipts = receipt.get("sources") or {binding.get("source", "tiktok"): receipt}
     host_surfaces = {"tiktok_video" if name == "tiktok" else name for name in binding["host_sources"]}
@@ -128,10 +128,15 @@ async def ingest_scope(executor, binding, receipt):
                 published_at=datetime.fromisoformat(record["published_at"]) if record["published_at"] else None,
                 metadata={**record, **path, "connector_surface": surface, "keyword": record["query"],
                           "metric_known": False, "metric_kind": None},
-            ) for record in staged["observations"]]
+            ) for record in (author_records[source] if author_records is not None else staged["observations"])]
+            if author_records is not None:
+                # Transfer only to the canonical transient signals; erase the staging sidecar.
+                for record in author_records[source]:
+                    record.clear()
+                author_records[source].clear()
             statuses = {item["status"] for item in staged["outcomes"]}
             status = "DEGRADED" if "DEGRADED" in statuses else "HEALTHY" if host_signals else "EMPTY_NO_DATA"
-            # Pre-strip self exclusion/sanitation happened before staging; no author is retained here.
+            # Canonical executor assigns markers/declared tokens before any clustering or write.
             outcomes.append(SurfaceProbeResult(
                 platform=source, connector_surface=surface, status=ChannelHealthStatus(status),
                 signals_collected=len(host_signals), queried_keywords=tuple(binding["queries"]), queried_window=None,

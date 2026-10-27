@@ -121,3 +121,13 @@ def test_timestamp_wrapper_depth_does_not_change_header_body_ownership(depth):
     cards = cards.replace(start, '<span>' * depth + start).replace(end, end + '</span>' * depth)
     result = extract([cards])
     assert result["records"][0]["excerpt"] == "First body line\nSecond body line #synthetic"
+
+
+def test_review_malformed_anchor_is_skipped_without_losing_valid_posts():
+    cards = (FIXTURES / "cards.html").read_text()
+    malformed = '<a href="http://[invalid">Malformed link</a>'
+    cards = cards.replace('First body line<br>', malformed + 'First body line<br>')
+    result = extract([cards])
+    assert result["status"] == "HEALTHY"
+    assert len(result["records"]) == 1
+    assert "First body line" in result["records"][0]["excerpt"]

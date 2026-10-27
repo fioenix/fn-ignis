@@ -8,7 +8,8 @@
   if (!/^en(?:-|$)/i.test(document.documentElement.lang || '')) { answer.locale = 'unsupported'; return answer; }
   answer.search_verified = true;
   const visible = node => node.getClientRects().length && !node.closest('[hidden]');
-  const post = href => { const url = new URL(href, page.origin);
+  const anchorURL = href => { try { return new URL(href, page.origin); } catch { return null; } };
+  const post = href => { const url = anchorURL(href); if (!url) return null;
     const match = url.pathname.match(/^\/@[A-Za-z0-9_.]+\/post\/([A-Za-z0-9_-]+)(?:\/media)?\/?$/);
     return url.origin === page.origin && !url.search && !url.hash && match ? {id: match[1], url: url.origin + url.pathname.replace(/\/media\/?$/, '')} : null; };
   // Locale-dependent UI titles match G2's observed English action controls verbatim.
@@ -17,7 +18,7 @@
   const complete = card => titles.every(label => actions(card).some(node => node.textContent.trim() === label));
   const candidates = [], blocked = [];
   for (const anchor of document.querySelectorAll('a[href]')) {
-    if (!anchor.querySelector('time[datetime]') || !post(anchor.href) || !visible(anchor) ||
+    if (!anchor.querySelector('time[datetime]') || !post(anchor.getAttribute('href')) || !visible(anchor) ||
         anchor.closest('aside,nav,header,[role="complementary"],[role="navigation"]')) continue;
     let card = anchor.parentElement;
     while (card && !complete(card)) card = card.parentElement;
@@ -33,7 +34,8 @@
     const tag = node.tagName.toLowerCase(), role = node.getAttribute('role');
     if (['img', 'svg', 'time', 'button', 'script', 'style'].includes(tag) || role === 'button' || role === 'img') return '';
     if (tag === 'a') { const href = node.getAttribute('href') || '';
-      if (node.querySelector('time[datetime]') || /^\/@/.test(new URL(href, page.origin).pathname) || post(node.href)) return ''; }
+      const url = anchorURL(href);
+      if (!url || node.querySelector('time[datetime]') || /^\/@/.test(url.pathname) || post(href)) return ''; }
     if (tag === 'br') return '\n';
     const body = [...node.childNodes].map(child => text(child, header)).join('');
     return tag === 'div' || tag === 'p' ? body + '\n' : body;
@@ -48,7 +50,7 @@
   let dropped = blocked.length > 0;
   for (const {anchor, card} of candidates) {
     if (blocked.some(parent => parent.contains(card))) { dropped = true; continue; }
-    const identity = post(anchor.href), clock = anchor.querySelector('time[datetime]').getAttribute('datetime');
+    const identity = post(anchor.getAttribute('href')), clock = anchor.querySelector('time[datetime]').getAttribute('datetime');
     if (!/(?:Z|[+-]\d\d:\d\d)$/.test(clock || '') || !Number.isFinite(Date.parse(clock)) || Date.parse(clock) > Date.now()) { dropped = true; continue; }
     let header = anchor.parentElement;
     if (header === card) { dropped = true; continue; }
@@ -66,7 +68,7 @@
       if (!Number.isSafeInteger(value)) { value = null; precision = 'unknown'; }
       return {kind: kinds[index], unit: 'count', raw_display, value, precision};
     });
-    // The timestamp URL is transient for self-exclusion; Ignis strips its handle before staging.
+    // Timestamp URL stays transient for self-exclusion and canonical mission author policy.
     if (!sample.rows.has(identity.id) && sample.rows.size < result_limit) sample.rows.set(identity.id,
       {source_url: identity.url, excerpt, published_at: clock, counters});
   }

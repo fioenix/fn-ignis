@@ -20,11 +20,6 @@ from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigMana
 logger = logging.getLogger(__name__)
 
 
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-)
-
 # Project in the page so unrelated account/bootstrap JSON never leaves the browser.
 def get_threads_web_client_id() -> str:
     """Retrieve dynamic Meta web client ID (X-IG-App-ID) from runtime configuration."""
@@ -283,7 +278,6 @@ async def collect_json_payloads(
 
             try:
                 context_kwargs: Dict[str, Any] = {
-                    "user_agent": USER_AGENT,
                     "viewport": {"width": 1280, "height": 900},
                     "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
                     "storage_state": storage_state,

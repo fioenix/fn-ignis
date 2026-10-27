@@ -54,7 +54,7 @@ def _counters(components):
 
 
 def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
-                    attribution_templates: tuple[str, ...] = (), self_identities=()) -> dict:
+                    attribution_templates: tuple[str, ...] = (), self_identities=(), *, author_records=None) -> dict:
     answer = HostSearchAnswer.model_validate(payload, context={"request": request})
     if not attribution_templates:
         raise ValueError("Source attribution vocabulary is unavailable")
@@ -96,7 +96,8 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
             # Match the transient author-bearing URL before destroying it. Never stage it.
             if is_self_authored(SimpleNamespace(platform=request.source, source_url=record.source_url, metadata={}), self_identities):
                 continue
-            excerpt = mask_author_identity_text(sanitize_pii_text(strip_platform_attribution(record.excerpt, attribution_templates)))
+            policy_excerpt = sanitize_pii_text(strip_platform_attribution(record.excerpt, attribution_templates))
+            excerpt = mask_author_identity_text(policy_excerpt)
             if not excerpt.strip():
                 continue
             identity = cleaned_url or excerpt
@@ -112,6 +113,9 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
                 observation.update(source=request.source, source_verifiable=cleaned_url is not None,
                                    counters=_counters(record.counters), **path)
             observations.append(observation)
+            if author_records is not None:
+                # This private in-memory input reaches canonical author policy, never a receipt/store.
+                author_records.append({**observation, "source_url": record.source_url, "excerpt": policy_excerpt})
         status = "DEGRADED" if item.status == "HEALTHY" and not count else item.status
         outcome = dict(query_id=query.query_id, query=query.query, status=status, signals_collected=count,
                        queried_window=None, search_verified=item.search_verified,

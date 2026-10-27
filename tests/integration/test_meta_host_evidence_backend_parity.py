@@ -93,7 +93,7 @@ async def test_threads_seed_replay_is_idempotent_without_schema_or_evidence_chan
 
 
 @pytest.mark.asyncio
-async def test_missing_mission_source_vocabulary_clears_stale_templates(repository_case):
+async def test_missing_mission_source_vocabulary_refuses_without_mutating_packaged_templates(repository_case):
     service = HostBrowserSearchService()
     try:
         frozen = await service.refresh_attribution_templates(repository_case.repository, source="threads")
@@ -103,8 +103,7 @@ async def test_missing_mission_source_vocabulary_clears_stale_templates(reposito
         with pytest.raises(AttributionVocabularyMissing):
             await service.refresh_attribution_templates(repository_case.repository, source="threads")
         assert frozen == ("Photo by {author} on",)
-        with pytest.raises(AttributionVocabularyMissing):
-            service.attribution_templates_for("threads")
+        assert service.attribution_templates_for("threads") == ("Photo by {author} on",)
         assert service.attribution_templates_for("tiktok")
     finally:
         service.close()

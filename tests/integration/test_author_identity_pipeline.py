@@ -194,7 +194,10 @@ async def test_host_threads_without_collected_author_gets_unknown_marker(reposit
     service = module.HostBrowserSearchService()
     try:
         request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
-        service.stage(request["request_id"], host_answer(request))
+        payload = host_answer(request)
+        for answer in payload["answers"]:
+            answer["records"][0]["source_url"] = "https://www.threads.com/t/Synthetic020Q0"
+        service.stage(request["request_id"], payload)
         await service.submit_mission(executor, request["request_id"], "task", "chrome")
         row = repository_case.query_one(
             "SELECT author_state, author_marker FROM mission_evidence WHERE mission_id = ?",

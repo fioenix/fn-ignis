@@ -142,7 +142,6 @@ class VocabularySynchronizer:
         tiktok_plugin: Optional[Any] = None,
         registry: Optional[Any] = None,
         credential_repository: Optional[ITrendRepository] = None,
-        host_browser_search: Optional[Any] = None,
     ):
         self._repository = repository
         # The store holding the connected accounts' sessions, when it is not the evidence store.
@@ -154,7 +153,6 @@ class VocabularySynchronizer:
         self._language_detector = language_detector
         self._tiktok_plugin = tiktok_plugin
         self._registry = registry
-        self._host_browser_search = host_browser_search
         self.self_identities: List[Any] = []
 
     async def synchronize(self) -> MarketVocabulary:
@@ -206,11 +204,8 @@ class VocabularySynchronizer:
         if self._tiktok_plugin is not None:
             self._tiktok_plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
             self._tiktok_plugin.register_suggest_templates(vocabulary.tiktok_suggest_templates)
-        # A successful repository read replaces both snapshots, including empty domains.
-        # Otherwise a removed source template could survive from a seed or another caller.
-        if self._host_browser_search is not None:
-            self._host_browser_search.register_attribution_templates(vocabulary.tiktok_attribution)
-            self._host_browser_search.register_attribution_templates(vocabulary.threads_attribution, source="threads")
+        # Mission host tickets load their own caller-local snapshots during preparation.
+        # Tactical templates come only from packaged seeds, never repository synchronization.
         if stop_terms:
             for engine in (self._quality_evaluator, self._strategic_reasoner):
                 if engine is not None:

@@ -258,19 +258,22 @@ async def test_a_fresh_database_arms_the_tiktok_attribution_guard(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_the_synchronizer_hands_database_attribution_templates_to_host_search(tmp_path):
+async def test_the_synchronizer_does_not_promote_caller_templates_into_tactical_search(tmp_path):
     from ignis.application.use_cases.host_browser_search import HostBrowserSearchService
     from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 
     repo = SqliteTrendRepository(db_path=str(tmp_path / "sync.db"))
     await repo.register_lexicon_terms("tiktok_attribution", ["created by {author} with"], "ui_attribution")
-    service = HostBrowserSearchService(attribution_templates=())
+    service = HostBrowserSearchService()
+    before = service.attribution_templates_for()
     try:
-        await VocabularySynchronizer(repo, host_browser_search=service).synchronize()
-        assert "created by {author} with" in service._attribution_templates
-        assert "do {author} tạo với" in service._attribution_templates
+        await VocabularySynchronizer(repo).synchronize()
+        assert service.attribution_templates_for() == before
+        frozen = await service.refresh_attribution_templates(repo)
+        assert "created by {author} with" in frozen
     finally:
         service.close()
+        await repo.close()
 
 
 @pytest.mark.asyncio
@@ -304,7 +307,7 @@ def test_tactical_threads_templates_come_from_the_packaged_seed_and_never_tiktok
 
 
 @pytest.mark.asyncio
-async def test_mission_refresh_replaces_each_source_and_freezes_the_selected_templates(tmp_path):
+async def test_mission_refresh_freezes_local_templates_without_replacing_tactical_sources(tmp_path):
     import sqlite3
     from ignis.application.use_cases.host_browser_search import AttributionVocabularyMissing, HostBrowserSearchService
 
@@ -320,17 +323,16 @@ async def test_mission_refresh_replaces_each_source_and_freezes_the_selected_tem
             await service.refresh_attribution_templates(repo, source="threads")
         assert frozen == ("Photo by {author} on", "observed fixture {author} suffix")
         assert service.attribution_templates_for("tiktok")
-        with pytest.raises(AttributionVocabularyMissing):
-            service.attribution_templates_for("threads")
+        assert service.attribution_templates_for("threads") == ("Photo by {author} on",)
     finally:
         service.close()
         await repo.close()
 
 
 @pytest.mark.asyncio
-async def test_synchronizer_clears_stale_source_templates_instead_of_cross_source_fallback(tmp_path):
+async def test_synchronizer_missing_caller_vocabulary_leaves_packaged_templates_intact(tmp_path):
     import sqlite3
-    from ignis.application.use_cases.host_browser_search import AttributionVocabularyMissing, HostBrowserSearchService
+    from ignis.application.use_cases.host_browser_search import HostBrowserSearchService
     from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 
     repo = SqliteTrendRepository(str(tmp_path / "threads-sync.db"))
@@ -339,9 +341,8 @@ async def test_synchronizer_clears_stale_source_templates_instead_of_cross_sourc
         await repo.get_domain_lexicons()
         with sqlite3.connect(repo._db_path) as conn:
             conn.execute("DELETE FROM market_lexicons WHERE domain = 'threads_attribution'")
-        await VocabularySynchronizer(repo, host_browser_search=service).synchronize_vocabulary()
-        with pytest.raises(AttributionVocabularyMissing):
-            service.attribution_templates_for("threads")
+        await VocabularySynchronizer(repo).synchronize_vocabulary()
+        assert service.attribution_templates_for("threads") == ("Photo by {author} on",)
         assert service.attribution_templates_for("tiktok")
     finally:
         service.close()
@@ -411,3 +412,10 @@ async def test_mission_ticket_keeps_its_repository_templates_across_an_interleav
     finally:
         service.close()
         await repo.close()
+
+
+def test_review_synchronizer_cannot_receive_the_process_global_host_template_service():
+    """Caller vocabulary sync must not retain a route into tactical packaged templates."""
+    import inspect
+    from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+    assert "host_browser_search" not in inspect.signature(VocabularySynchronizer).parameters

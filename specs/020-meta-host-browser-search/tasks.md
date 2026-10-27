@@ -487,6 +487,17 @@ live-account authority visible. No tool-count change, release, version bump or r
   record revision-bound findings/disposition in `.handoff/spec020-review.md`. Resolve blocking findings
   with targeted RED/GREEN and invalidate only affected evidence; review does not grant merge/release
   authority.
+
+  **Review findings and fixes (28/10/2026)**: coordinator verified Antigravity's read-only review
+  of `origin/main...26ed2a8`; fixes start from `bc99fd7`. Added RED/GREEN for terminal/stale group
+  replacement, transient canonical author policy with declared mentions, caller-local vocabulary
+  (including synchronizer isolation), default Playwright UA, per-member failure IDs, malformed
+  anchors and failed sibling preparation cleanup. Mission lifecycle stays unchanged: COMPLETED is
+  refused; accepted-group replay survives the supported fresh-mission flow. Removed the test that
+  rewound retention. Local evidence and residual T051 risks are in `.handoff/spec020-verification.md`.
+  PostgreSQL/socket proof and revision-bound coordinator/reviewer acceptance remain separate;
+  this note does not complete T049/T050 or authorize live runs.
+
 - [ ] T050 Run final targeted verification of every changed behavioral test and traced affected consumer
   from T004–T049, plus `tests/unit/test_repo_conventions.py`, `tests/unit/test_public_mcp_contract.py`,
   `tests/unit/test_public_distribution_contract.py`, `tests/unit/test_public_doc_conventions.py`,

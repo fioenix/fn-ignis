@@ -870,7 +870,6 @@ def _init_components(*, caller_scope=None):
         tiktok_plugin=tiktok_plugin,
         registry=registry,
         credential_repository=credentials,
-        host_browser_search=_host_browser_search_service,
     )
 
     execute_mission_use_case = ExecuteMissionUseCase(

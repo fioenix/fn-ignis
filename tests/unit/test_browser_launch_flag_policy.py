@@ -1,5 +1,6 @@
 """Spec 020: no Chromium automation concealment in retained launch sites."""
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -105,3 +106,23 @@ async def test_retained_sites_pass_only_original_non_hiding_launch_arguments(mon
     assert launches, "The retained production launch site was not exercised"
     assert all(call["args"] == ["--no-sandbox", "--disable-setuid-sandbox"] for call in launches)
     assert all(set(call) == {"headless", "args"} for call in launches)
+
+
+def test_review_no_browser_user_agent_override_or_navigator_patch_under_src():
+    """Playwright must report its own UA and automation state on every platform."""
+    violations = []
+    for path in (ROOT / "src").rglob("*"):
+        if not path.is_file() or "__pycache__" in path.parts or path.suffix not in {".py", ".js"}:
+            continue
+        source = path.read_text()
+        if path.suffix == ".py":
+            for node in ast.walk(ast.parse(source)):
+                if isinstance(node, ast.keyword) and node.arg == "user_agent":
+                    violations.append(str(path.relative_to(ROOT)))
+                if isinstance(node, ast.Constant) and node.value == "user_agent":
+                    violations.append(str(path.relative_to(ROOT)))
+        if (re.search(r"navigator\s*(?:\.\s*webdriver|\[\s*['\"]webdriver['\"]\s*\])", source)
+                or re.search(r"Object\s*\.\s*definePropert(?:y|ies)\s*\(\s*(?:window\s*\.\s*)?(?:navigator|Navigator\s*\.\s*prototype)", source)
+                or re.search(r"navigator\s*\.\s*(?:userAgent|platform)\s*=", source)):
+            violations.append(str(path.relative_to(ROOT)))
+    assert violations == [], f"Browser identity overrides: {violations}"
