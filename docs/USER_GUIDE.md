@@ -11,7 +11,7 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/035_watchlist_listening_plans.sql`. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok
+The source migration chain ends at `sql/036_threads_attribution.sql`. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok
 author attribution wording that host-browser search removes from excerpts; it rewrites no stored
 evidence. Migration 033 adds a
 per-channel, per-day count of keyword searches for the daily request ceilings; it rewrites no

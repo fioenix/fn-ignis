@@ -7,6 +7,8 @@ runtime config was ever seeded and the failure was silent.
 
 import copy
 import tomllib
+
+import pytest
 from pathlib import Path
 
 import ignis.resources as resources
@@ -16,13 +18,15 @@ SEED_FILES = (
     "003_market_lexicons.sql",
     "004_global_lexicons.sql",
     "007_runtime_configs.sql",
+    "036_threads_attribution.sql",
     # Run by the SQLite bootstrap after the vocabulary replay; missing from a wheel, the retired
     # UI-noise terms would silently come back on every installed SQLite database.
     "020_retire_ambiguous_tiktok_ui_noise.sql",
 )
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
-NEWEST_POSTGRES_MIGRATION = "035_watchlist_listening_plans.sql"
+NEWEST_POSTGRES_ONLY_MIGRATION = "035_watchlist_listening_plans.sql"
+NEWEST_MIGRATION = "036_threads_attribution.sql"
 # The closed sdist member list: runtime package, the SQL chain, and the build metadata. Anything
 # else -- tests, docs, examples, reports, handoff notes, agent or local settings -- must not ship.
 SDIST_MEMBERS = {"src/ignis", "sql", "pyproject.toml", "README.md", "LICENSE"}
@@ -104,10 +108,10 @@ def test_wheel_ships_the_seeds_alongside_the_package():
 def test_the_whole_postgres_migration_chain_ships_not_only_the_seeds():
     """The wheel copies the directory and the sdist keeps it, so no migration is left behind."""
     directory = sql_seed_dir()
-    assert directory is not None and (directory / NEWEST_POSTGRES_MIGRATION).is_file(), (
-        f"{NEWEST_POSTGRES_MIGRATION} is missing from the SQL directory the package ships"
+    assert directory is not None and (directory / NEWEST_POSTGRES_ONLY_MIGRATION).is_file(), (
+        f"{NEWEST_POSTGRES_ONLY_MIGRATION} is missing from the SQL directory the package ships"
     )
-    assert NEWEST_POSTGRES_MIGRATION not in SEED_FILES, "a PostgreSQL-only migration is not a seed"
+    assert NEWEST_POSTGRES_ONLY_MIGRATION not in SEED_FILES, "a PostgreSQL-only migration is not a seed"
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     project = tomllib.loads(pyproject.read_text(encoding="utf-8"))
     assert _packaging_offenders(project) == []
@@ -135,7 +139,7 @@ def test_the_migration_inventory_includes_partial_outcomes_and_both_backends_sta
     """Compose and a hand-applied chain need 025 in order; SQLite restates it, not reads it."""
     directory = sql_seed_dir()
     names = sorted(path.name for path in directory.glob("*.sql"))
-    assert names[-1] == NEWEST_POSTGRES_MIGRATION
+    assert names[-1] == NEWEST_MIGRATION
     assert [int(name[:3]) for name in names] == list(range(1, len(names) + 1))
 
     migration = (directory / "025_evidence_grounded_claim_ledger.sql").read_text(encoding="utf-8")
@@ -162,3 +166,30 @@ def test_the_two_evidence_grounded_skills_ship_with_the_checkout():
 
     assert (root / ".agents/skills/ignis-collect/SKILL.md").is_file()
     assert (root / ".agents/skills/ignis-analyze/SKILL.md").is_file()
+
+
+def test_threads_seed_resolves_in_checkout_and_packaged_tactical_layout(tmp_path, monkeypatch):
+    from ignis.application.use_cases.host_browser_search import AttributionVocabularyMissing, HostBrowserSearchService
+    from ignis.infrastructure.config.vocabulary_loader import seeded_lexicon_terms
+
+    seed = sql_seed_file("036_threads_attribution.sql")
+    assert seed is not None, "Threads attribution seed must be shipped"
+    packaged = tmp_path / "packaged"
+    packaged.mkdir()
+    (packaged / seed.name).write_bytes(seed.read_bytes())
+    monkeypatch.setattr(resources, "PACKAGED_SQL_DIR", packaged)
+    monkeypatch.setattr(resources, "REPOSITORY_SQL_DIR", tmp_path / "absent")
+    assert seeded_lexicon_terms("036_threads_attribution.sql", "threads_attribution") == ["Photo by {author} on"]
+    service = HostBrowserSearchService()
+    try:
+        assert service.attribution_templates_for("threads") == ("Photo by {author} on",)
+    finally:
+        service.close()
+    (packaged / seed.name).unlink()
+    assert seeded_lexicon_terms("036_threads_attribution.sql", "threads_attribution") == []
+    service = HostBrowserSearchService()
+    try:
+        with pytest.raises(AttributionVocabularyMissing):
+            service.attribution_templates_for("threads")
+    finally:
+        service.close()

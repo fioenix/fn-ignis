@@ -39,26 +39,56 @@ class AttributionVocabularyMissing(ValueError):
 class HostBrowserSearchService:
     """Process-local tickets. Restart invalidates requests; no durable resume promised."""
 
-    def __init__(self, attribution_templates=None) -> None:
+    def __init__(self, attribution_templates=None, *, threads_attribution_templates=None) -> None:
         self._tickets: dict[str, dict] = {}
         self._lock = threading.RLock()
         # Tactical preparation opens no database, so it starts from the shipped seed (Spec 012).
         if attribution_templates is None:
             attribution_templates = seeded_lexicon_terms("034_tiktok_attribution.sql", "tiktok_attribution")
         self._attribution_templates = tuple(attribution_templates)
+        if threads_attribution_templates is None:
+            threads_attribution_templates = seeded_lexicon_terms("036_threads_attribution.sql", "threads_attribution")
+        self._threads_attribution_templates = tuple(threads_attribution_templates)
 
-    def register_attribution_templates(self, templates) -> None:
-        """Bind the seeded tiktok_attribution templates that clean host excerpts (Spec 012 FR-012)."""
-        self._attribution_templates = tuple(templates)
+    def register_attribution_templates(self, templates, *, source="tiktok") -> None:
+        """Replace one source's templates; empty means unavailable, never a cross-source fallback."""
+        with self._lock:
+            if source == "tiktok":
+                self._attribution_templates = tuple(templates)
+            elif source == "threads":
+                self._threads_attribution_templates = tuple(templates)
+            else:
+                raise ValueError("Unsupported host search source")
+
+    def attribution_templates_for(self, source="tiktok") -> tuple[str, ...]:
+        """Return an immutable source snapshot or fail before creating a ticket/relay."""
+        with self._lock:
+            if source == "tiktok":
+                templates = self._attribution_templates
+            elif source == "threads":
+                templates = self._threads_attribution_templates
+            else:
+                raise ValueError("Unsupported host search source")
+            if not templates:
+                raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
+            return templates
+
+    async def refresh_attribution_templates(self, repository, *, source="tiktok") -> tuple[str, ...]:
+        """Replace source snapshots from the mission repository before a ticket freezes them."""
+        vocabulary = await load_market_vocabulary(repository)
+        self.register_attribution_templates(vocabulary.tiktok_attribution)
+        self.register_attribution_templates(vocabulary.threads_attribution, source="threads")
+        return self.attribution_templates_for(source)
 
     def prepare(self, host_task_ref: str, session_ref: str, queries: list[str],
-                result_limit: int, lifetime_seconds: int, authorized: bool, *, mode="TACTICAL") -> dict:
+                result_limit: int, lifetime_seconds: int, authorized: bool, *, mode="TACTICAL",
+                attribution_templates=None) -> dict:
         if authorized is not True:
             raise ValueError("Explicit browser authorization is required")
-        if not self._attribution_templates:
-            raise AttributionVocabularyMissing(
-                "No TikTok attribution vocabulary is registered, so host excerpts cannot be cleaned"
-            )
+        attribution_templates = (self.attribution_templates_for() if attribution_templates is None
+                                 else tuple(attribution_templates))
+        if not attribution_templates:
+            raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
         if type(lifetime_seconds) is not int or not 0 < lifetime_seconds <= 3600:
             raise ValueError("Lifetime must be finite and at most one hour")
         now = datetime.now(timezone.utc)
@@ -86,7 +116,7 @@ class HostBrowserSearchService:
             if len(self._tickets) >= 32:
                 raise ValueError("Too many active task receipts; finish or wait for expiry")
             ticket = dict(request=request, state="PREPARED", receipt=None, payload=None,
-                          attribution_templates=self._attribution_templates)
+                          attribution_templates=attribution_templates)
             self._tickets[request.request_id] = ticket
             try:
                 ticket["relay"] = LoopbackRelay(
@@ -165,12 +195,11 @@ class HostBrowserSearchService:
             raise ValueError("Explicit browser authorization is required")
         # The ticket freezes its templates, so a locale added in the database must be read first;
         # ingestion does not clean the validated receipt again (PR #79 review).
-        vocabulary = await load_market_vocabulary(executor._repo)
-        if vocabulary.tiktok_attribution:
-            self.register_attribution_templates(vocabulary.tiktok_attribution)
+        attribution_templates = await self.refresh_attribution_templates(executor._repo)
         binding = await prepare_scope(executor, mission_id)
         request = self.prepare(host_task_ref, session_ref, binding["queries"], 20,
-                               lifetime_seconds, authorized, mode="MISSION")
+                               lifetime_seconds, authorized, mode="MISSION",
+                               attribution_templates=attribution_templates)
         with self._lock:
             binding["expires_at"] = self._tickets[request["request_id"]]["request"].expires_at
             self._tickets[request["request_id"]]["binding"] = binding

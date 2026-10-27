@@ -10,7 +10,7 @@ from ignis.infrastructure.security.pii_sanitizer import sanitize_pii_text, strip
 
 def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
                     attribution_templates: tuple[str, ...] = ()) -> dict:
-    answer = HostSearchAnswer.model_validate(payload)
+    answer = HostSearchAnswer.model_validate(payload, context={"request": request})
     if (answer.request_id, answer.host_task_ref, answer.session_ref) != (
         request.request_id, request.host_task_ref, request.session_ref
     ):

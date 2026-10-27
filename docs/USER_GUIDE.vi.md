@@ -12,7 +12,7 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/035_watchlist_listening_plans.sql`. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn
+Chuỗi migration trong mã nguồn kết thúc ở `sql/036_threads_attribution.sql`. Migration 036 nạp sẵn mẫu câu ghi công tác giả của Threads, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn
 mẫu câu ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình
 duyệt host; nó không sửa bằng chứng đã lưu. Migration 033 thêm
 bộ đếm số lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không

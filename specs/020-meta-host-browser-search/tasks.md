@@ -114,27 +114,27 @@ host-path checkpoint; real-account readiness remains separately gated at the end
   (`_record_probe_outcomes` provenance per T020). Risk is high in caller isolation,
   cancellation/drain and retention; PostgreSQL and live transport are unproven. T004 onward
   unblocked.
-- [ ] T004 [P] Write and run failing source/counter model tests in new
+- [X] T004 [P] Write and run failing source/counter model tests in new
   `tests/unit/test_threads_host_answer_validation.py`: default TikTok compatibility, immutable Threads
   source/version, limits and exact publication clock, structured raw-display/unit/precision counters,
   unknown versus zero, no Share-to-quotes alias and rejection of unsupported source/version; preserve
   legacy TikTok answer shape on TikTok tickets only.
-- [ ] T005 [P] Write and run failing Threads vocabulary/seed tests in
+- [X] T005 [P] Write and run failing Threads vocabulary/seed tests in
   `tests/unit/test_vocabulary_loader.py`, `tests/unit/test_sql_packaging.py` and new
   `tests/integration/test_meta_host_evidence_backend_parity.py`: observed English template available to
   packaged tactical and repository mission paths, source-specific missing vocabulary fails closed,
   repeated seed application is idempotent and changes no evidence/schema; use both-backend fixtures from
   `tests/integration/conftest.py`.
-- [ ] T006 Add seed-only `sql/036_threads_attribution.sql` with domain `threads_attribution`, category
+- [X] T006 Add seed-only `sql/036_threads_attribution.sql` with domain `threads_attribution`, category
   `ui_attribution`, observed `Photo by {author} on` template and system ownership; add SQLite seed
   replay in `src/ignis/infrastructure/persistence/sqlite_repository.py` and the PostgreSQL fixture chain
   entry in `tests/integration/conftest.py`; recheck numbering first, stop on a conflicting 036 rather
   than overwriting it. No historical data rewrite.
-- [ ] T007 Extend `src/ignis/infrastructure/config/vocabulary_loader.py` with Threads attribution
+- [X] T007 Extend `src/ignis/infrastructure/config/vocabulary_loader.py` with Threads attribution
   domain/model/loading and source-specific registration, packaged tactical seed and mission-repository
   refresh before ticket freeze; do not retain a stale other-source template or add unobserved locales
   (satisfies vocabulary portion of T005).
-- [ ] T008 Extend typed request/record/answer models in `src/ignis/domain/host_browser_search.py` for
+- [X] T008 Extend typed request/record/answer models in `src/ignis/domain/host_browser_search.py` for
   TikTok/Threads browser sources, frozen versions and counter components/precision; retain strict
   allowlists and legacy TikTok payload compatibility, with no additional public parameter or API variant
   (makes T004 pass).

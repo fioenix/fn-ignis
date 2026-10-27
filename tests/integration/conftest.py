@@ -40,6 +40,8 @@ SCHEMA_MIGRATIONS = (
     # any credential contract, and a test that needs it would fail on a missing relation -- a
     # fixture error dressed up as a behavioural one.
     "002_platform_credentials.sql",
+    # Attribution seeds need the vocabulary schema, as on SQLite.
+    "003_market_lexicons.sql",
     "008_deduplicate_signal_metrics.sql",
     "015_split_published_at.sql",
     "016_source_observation_model.sql",
@@ -69,8 +71,11 @@ SCHEMA_MIGRATIONS = (
     "032_watchlists.sql",
     # Spec 016 US4: keyword searches per channel per day, for the daily request ceilings.
     "033_connector_request_days.sql",
+    "034_tiktok_attribution.sql",
     # Spec 018: the user's listening plans, append-only.
     "035_watchlist_listening_plans.sql",
+    # Spec 020: seed-only host attribution; never an evidence transformation.
+    "036_threads_attribution.sql",
 )
 
 

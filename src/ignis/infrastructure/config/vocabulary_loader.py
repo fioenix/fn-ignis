@@ -26,6 +26,7 @@ MACHINERY_DOMAINS = frozenset({
     "customer_inquiry",
     "tiktok_ui_noise",
     "tiktok_attribution",
+    "threads_attribution",
     "foreign_phrases",
     "portuguese_words",
 })
@@ -54,6 +55,7 @@ class MarketVocabulary:
     customer_inquiry: List[str] = field(default_factory=list)
     tiktok_ui_noise: List[str] = field(default_factory=list)
     tiktok_attribution: List[str] = field(default_factory=list)
+    threads_attribution: List[str] = field(default_factory=list)
     foreign_phrases: List[str] = field(default_factory=list)
     portuguese_words: List[str] = field(default_factory=list)
     probe_templates: Dict[str, List[str]] = field(default_factory=dict)
@@ -109,6 +111,7 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
         customer_inquiry=grouped.get("customer_inquiry", []),
         tiktok_ui_noise=grouped.get("tiktok_ui_noise", []),
         tiktok_attribution=grouped.get("tiktok_attribution", []),
+        threads_attribution=grouped.get("threads_attribution", []),
         foreign_phrases=grouped.get("foreign_phrases", []),
         portuguese_words=grouped.get("portuguese_words", []),
         probe_templates=_templates_for(PROBE_TEMPLATE_PREFIX),
@@ -203,9 +206,11 @@ class VocabularySynchronizer:
         if self._tiktok_plugin is not None:
             self._tiktok_plugin.register_ui_noise(vocabulary.tiktok_ui_noise)
             self._tiktok_plugin.register_suggest_templates(vocabulary.tiktok_suggest_templates)
-        # An empty domain keeps the packaged seed rather than leaving host excerpts uncleaned.
-        if self._host_browser_search is not None and vocabulary.tiktok_attribution:
+        # A successful repository read replaces both snapshots, including empty domains.
+        # Otherwise a removed source template could survive from a seed or another caller.
+        if self._host_browser_search is not None:
             self._host_browser_search.register_attribution_templates(vocabulary.tiktok_attribution)
+            self._host_browser_search.register_attribution_templates(vocabulary.threads_attribution, source="threads")
         if stop_terms:
             for engine in (self._quality_evaluator, self._strategic_reasoner):
                 if engine is not None:
