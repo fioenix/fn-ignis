@@ -238,7 +238,6 @@ class TikTokCreativeCenterPlugin(IConnectorPlugin):
                 browser = await p.chromium.launch(
                     headless=True,
                     args=[
-                        "--disable-blink-features=AutomationControlled",
                         "--no-sandbox",
                         "--disable-setuid-sandbox",
                     ]

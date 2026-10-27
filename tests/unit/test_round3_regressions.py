@@ -90,8 +90,8 @@ async def test_dual_tier_auth_status_and_resolution():
     mock_oauth.get_access_token.return_value = None
     threads_plugin = ThreadsPlugin(auth_manager=mock_oauth, browser_auth_manager=mock_browser)
     tier, cred = await threads_plugin.resolve_auth_tier()
-    assert tier == "session_cookies"
-    assert cred == {"cookies": []}
+    assert tier == "host_required"
+    assert cred is None
 
     # ReelsPlugin resolve_auth_tier
     reels_plugin = ReelsPlugin(auth_manager=mock_oauth, browser_auth_manager=mock_browser)
@@ -150,8 +150,10 @@ async def test_verify_connectors_health_remediation_labels():
         res = await handle_verify_connectors_health()
         payload = json.loads(res)
         connector_diag = payload["connectors"]["Meta Threads Ingress"]
-        assert connector_diag["status"] == "NOT_CONFIGURED"
-        assert "authenticate_threads" in connector_diag["remediation"]
+        assert connector_diag["status"] == "UNAVAILABLE"
+        assert connector_diag["reason_code"] == "HOST_BROWSER_REQUIRED"
+        assert "authenticate_threads" not in connector_diag["remediation"]
+        mock_plugin.is_healthy.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -205,3 +207,25 @@ async def test_save_clusters_canonical_name_conflict_resolution():
     # Assert that existing cluster was updated
     second_call_query = mock_cursor.execute.call_args_list[1][0][0]
     assert "UPDATE topic_clusters SET" in second_call_query
+
+
+@pytest.mark.asyncio
+async def test_stored_threads_credentials_are_not_reported_as_collectible():
+    from unittest.mock import AsyncMock, MagicMock
+    from ignis.interfaces.mcp import server
+    from ignis.infrastructure.harness.refinement_orchestrator import AutonomousRefinementOrchestrator
+    repo = AsyncMock()
+    repo.list_platform_credentials.return_value = [{"platform": "threads_browser", "is_active": True},
+                                                  {"platform": "threads", "is_active": True},
+                                                  {"platform": "instagram_browser", "is_active": True}]
+    from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+    from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
+    registry = ConnectorPluginRegistry()
+    registry.register(ThreadsPlugin())
+    status, health = await server._collect_channel_context({"repository": repo, "registry": registry})
+    harness = AutonomousRefinementOrchestrator(repo, registry, MagicMock(), MagicMock(), MagicMock())
+    harness_status, harness_health = await harness._collect_channel_context()
+    assert status["threads"] is True and harness_status["threads"] is True  # Stored credential fact only.
+    assert health["threads"]["collection_available"] is False
+    assert harness_health["threads"]["reason_code"] == "HOST_BROWSER_REQUIRED"
+    assert status["reels"] is True and harness_status["reels"] is True

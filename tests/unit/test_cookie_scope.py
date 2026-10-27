@@ -85,7 +85,7 @@ def test_csrf_uses_longest_eligible_path_and_ignores_foreign_tokens():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("platform", ["tiktok", "threads", "instagram"])
-async def test_health_http_sends_only_eligible_cookies(platform, requests, monkeypatch):
+async def test_health_scopes_cookies_or_refuses_retired_threads(platform, requests, monkeypatch):
     domain = f".{platform}.com"
     state = {"cookies": [
         cookie("sessionid", "allowed", domain),
@@ -102,59 +102,12 @@ async def test_health_http_sends_only_eligible_cookies(platform, requests, monke
         plugin = ThreadsPlugin() if platform == "threads" else ReelsPlugin()
         plugin._browser_auth_manager = AsyncMock()
         plugin._browser_storage_state = AsyncMock(return_value=state)
-    assert await plugin.is_healthy() is True
-    assert requests[0].headers["cookie"] == "sessionid=allowed"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("url,expected", [
-    ("https://www.threads.com/api/graphql", "sessionid=allowed; csrftoken=local"),
-    ("https://www.threads.net/api/graphql", ""),
-    ("http://www.threads.com/api/graphql", ""),
-    ("https://www.threads.com.evil.test/api/graphql", ""),
-])
-async def test_graphql_scopes_cookie_and_csrf_to_resolved_url(url, expected, requests):
-    state = {"cookies": [
-        cookie("csrftoken", "foreign", ".google.com"),
-        cookie("sessionid", "allowed", ".threads.com"),
-        cookie("csrftoken", "local", ".threads.com"),
-    ]}
-    result = await meta_browser_ingress.fetch_graphql_direct("123", {}, state, url=url)
-    if expected:
-        assert result == {"data": {"ok": True}}
-        assert requests[0].headers["cookie"] == expected
-        assert requests[0].headers["x-csrftoken"] == "local"
-    else:
-        assert result is None
+    if platform == "threads":
+        assert await plugin.is_healthy() is False
         assert requests == []
-
-
-@pytest.mark.asyncio
-async def test_graphql_redirect_does_not_forward_csrf(monkeypatch):
-    captured = []
-    client_type = httpx.AsyncClient
-
-    def respond(request):
-        captured.append(request)
-        return httpx.Response(302, headers={"location": "https://other.test/"})
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: client_type(
-        transport=httpx.MockTransport(respond), **kw))
-    result = await meta_browser_ingress.fetch_graphql_direct("123", {}, {"cookies": [
-        cookie("sessionid", "allowed", ".threads.com"),
-        cookie("csrftoken", "local", ".threads.com"),
-    ]}, url="https://www.threads.com/api/graphql")
-    assert result is None
-    assert len(captured) == 1
-
-
-@pytest.mark.asyncio
-async def test_graphql_cookie_scope_uses_normalized_http_request_path(requests):
-    result = await meta_browser_ingress.fetch_graphql_direct("123", {}, {"cookies": [
-        cookie("csrftoken", "restricted", ".threads.com", path="/api"),
-    ]}, url="https://www.threads.com/api/../outside")
-    assert result is None
-    assert requests == []
+    else:
+        assert await plugin.is_healthy() is True
+        assert requests[0].headers["cookie"] == "sessionid=allowed"
 
 
 @pytest.mark.asyncio
@@ -171,3 +124,15 @@ async def test_public_surface_still_follows_redirects(monkeypatch):
         transport=httpx.MockTransport(respond), **kw))
     assert await browser_support.surface_reachable("https://public.test/start") is True
     assert [r.url.path for r in captured] == ["/start", "/final"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url", ["https://www.threads.com/api/graphql", "https://www.threads.net/api/graphql",
+    "http://www.threads.com/api/graphql", "https://www.threads.com.evil.test/api/graphql",
+    "https://www.threads.com/api/../outside"])
+async def test_retired_cookie_graphql_cannot_send_cookies_or_follow_redirects(url, requests):
+    from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
+    with pytest.raises(ConnectorCapabilityUnavailableException, match="HOST_BROWSER_REQUIRED"):
+        await meta_browser_ingress.fetch_graphql_direct("123", {}, {"cookies": [
+            cookie("sessionid", "allowed", ".threads.com"), cookie("csrftoken", "local", ".threads.com")]}, url=url)
+    assert requests == []

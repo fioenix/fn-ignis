@@ -322,7 +322,7 @@ and verify observations or unavailable-with-reason; real Reels acceptance remain
 
 ### Tests first (only after T028; fail before retirement/flag changes)
 
-- [ ] T029 [P] [US2] Write failing retirement/no-fallback assertions in
+- [X] T029 [P] [US2] Write failing retirement/no-fallback assertions in
   `tests/unit/test_threads_plugin.py`, `tests/unit/test_threads_relay_search.py`,
   `tests/unit/test_threads_direct_graphql.py`, `tests/unit/test_threads_graph_ingress.py`,
   `tests/unit/test_threads_keyword_search_access.py`,
@@ -330,13 +330,13 @@ and verify observations or unavailable-with-reason; real Reels acceptance remain
   `tests/unit/test_bug03_threads_empty_status.py`: existing cookies/OAuth never collect
   search/OWN_PROFILE/trending/suggestions through Playwright, cookie HTTP, internal OAuth or legacy
   fallback; unavailable has reason, auth/status/clear and public signatures remain compatible.
-- [ ] T030 [P] [US2] Write failing static and mocked-launch tests in new
+- [X] T030 [P] [US2] Write failing static and mocked-launch tests in new
   `tests/unit/test_browser_launch_flag_policy.py` plus affected `tests/unit/test_tiktok_auth.py`,
   `tests/unit/test_tiktok_suggestions.py`, `tests/unit/test_tiktok_comments.py`,
   `tests/unit/test_tiktok_plugin.py`, `tests/unit/test_tiktok_creative_center.py`,
   `tests/unit/test_tiktok_health_probes.py`: eight original sites accounted for, all retained launches
   flag-free, retired Threads helper has no executable caller and no replacement evasion flag/tool.
-- [ ] T031 [P] [US2] Write failing blocked/unusable-versus-empty and shared-helper parity cases in
+- [X] T031 [P] [US2] Write failing blocked/unusable-versus-empty and shared-helper parity cases in
   `tests/unit/test_meta_browser_ingress.py`, `tests/unit/test_meta_browser_auth.py`,
   `tests/unit/test_instagram_mcp_tools.py`, `tests/unit/test_cookie_scope.py`,
   `tests/unit/test_docid_sniffer_dedupe.py` and `tests/unit/test_runtime_config.py`: Reels still
@@ -346,44 +346,44 @@ and verify observations or unavailable-with-reason; real Reels acceptance remain
 
 ### Implementation
 
-- [ ] T032 [US2] Remove Threads Playwright collection/callers in
+- [X] T032 [US2] Remove Threads Playwright collection/callers in
   `src/ignis/infrastructure/connectors/threads/threads_plugin.py` and Threads-only helper
   `collect_threads_search_suggestions_via_browser` in
   `src/ignis/infrastructure/connectors/meta_browser_ingress.py`; disable cookie GraphQL/internal
   OAuth/legacy collection fallback in search, OWN_PROFILE, trending and suggestions. Preserve
   port-compatible explicit unavailable and shared Reels ingress, without deleting stored sessions or
   changing auth tool signatures (T029).
-- [ ] T033 [US2] Write failing admission/health/retry assertions in `tests/unit/test_registry.py`,
+- [X] T033 [US2] Write failing admission/health/retry assertions in `tests/unit/test_registry.py`,
   `tests/unit/test_round3_regressions.py`, `tests/unit/test_insights_ttl_cache.py`,
   `tests/unit/test_source_map_matches_connectors.py` and `tests/unit/test_connector_daily_ceiling.py`,
   then update `src/ignis/infrastructure/connectors/registry.py` and
   `src/ignis/infrastructure/harness/refinement_orchestrator.py`: cookies or Ignis OAuth do not imply
   usable Threads search, host absence is unavailable, host-injected surfaces skip internal dispatch,
   ceilings and unrelated connector isolation remain.
-- [ ] T034 [US2] Preserve authenticate/status/clear/trending/suggestions MCP signatures while fixing
+- [X] T034 [US2] Preserve authenticate/status/clear/trending/suggestions MCP signatures while fixing
   unavailable response descriptions, retired-login remedies and credential-readiness diagnostics in
   `src/ignis/interfaces/mcp/server.py`; retain needed compatibility exports in
   `src/ignis/infrastructure/auth/__init__.py`; run targeted `tests/unit/test_threads_mcp_tools.py`,
   `tests/unit/test_credential_clear_wording.py`, `tests/unit/test_caller_platform_sessions.py`,
   `tests/unit/test_caller_analysis_composition.py` and
   `tests/unit/test_caller_relay_read_composition.py` (T029).
-- [ ] T035 [US2] Remove flags from `MetaBrowserAuthManager.authenticate_interactive` in
+- [X] T035 [US2] Remove flags from `MetaBrowserAuthManager.authenticate_interactive` in
   `src/ignis/infrastructure/auth/meta_browser_auth.py` and `collect_json_payloads` in
   `src/ignis/infrastructure/connectors/meta_browser_ingress.py`; count the retired suggestions-helper
   launch as removed by T032. Keep Reels shared helper and auth behavior; these account for three of the
   original eight sites (T030/T031).
-- [ ] T036 [US2] Remove flags from `TikTokAuthManager.authenticate_interactive` in
+- [X] T036 [US2] Remove flags from `TikTokAuthManager.authenticate_interactive` in
   `src/ignis/infrastructure/auth/tiktok_auth.py`, `fetch_suggestions`, `fetch_video_comments`,
   `_fetch_via_playwright` in `src/ignis/infrastructure/connectors/tiktok/tiktok_plugin.py`, and
   `fetch_macro_trends` in `src/ignis/infrastructure/connectors/tiktok/creative_center_plugin.py`;
   preserve remaining arguments, authority and TikTok host defaults. These are the other five original
   sites (T030).
-- [ ] T037 [US2] Implement precise blocked/unusable classification and reason propagation through
+- [X] T037 [US2] Implement precise blocked/unusable classification and reason propagation through
   `src/ignis/infrastructure/connectors/meta_browser_ingress.py`,
   `src/ignis/infrastructure/connectors/reels/reels_plugin.py` and affected registry mapping in
   `src/ignis/infrastructure/connectors/registry.py`; retain flag-free Reels healthy collection, never
   infer absence from parser-zero or mask blocking with fallback (makes T031 pass).
-- [ ] T038 [US2] Add failing affected follow-up/composition cases in
+- [X] T038 [US2] Add failing affected follow-up/composition cases in
   `tests/unit/test_follow_up_root_composition.py`, `tests/unit/test_follow_up_caller_activation.py`,
   `tests/integration/test_t022_operational_surface_parity.py` and
   `tests/integration/test_ingest_orchestration.py`, then reconcile required path/revision/availability
@@ -392,12 +392,21 @@ and verify observations or unavailable-with-reason; real Reels acceptance remain
   `src/ignis/infrastructure/follow_up_caller_activation.py` and
   `src/ignis/application/use_cases/watchlists.py` only where traced; no historical mission restart, new
   routine or automatic browser collection.
-- [ ] T039 [US2] Run the T029–T038 targeted consumer cases plus T028's host-path regressions and `rg -n
+- [X] T039 [US2] Run the T029–T038 targeted consumer cases plus T028's host-path regressions and `rg -n
   -- 'AutomationControlled' src` (expect no matches, exit 1); record all eight sites, mock launch
   arguments, stored-cookie no-fallback proof and Reels unavailable reasons in
   `.handoff/spec020-verification.md`. No real-account run or live-repair claim at this checkpoint.
 
 ---
+
+**Phase 4 local result (28/10/2026):** T029–T039 implemented and targeted checks recorded.
+563 passed, 33 PostgreSQL skips in the Phase 4 consumer run; 240 passed, 84 PostgreSQL skips,
+1 native-page deselection with only the host listener mocked. Native host regression run:
+204 passed, 84 skipped, 56 sandbox socket-bind failures. Guard and all seven retained mock launches:
+14 passed; `rg -n -- 'AutomationControlled' src` has no matches (exit 1). Ruff, conventions,
+53-tool contract and generated-manifest drift pass; TikTok/period baselines 9 MATCH. No real-account
+run, live repair, routine change, commit or Phase 5/6 work. Exact evidence and limitations:
+`.handoff/spec020-verification.md`. New PostgreSQL cases remain coordinator verification work.
 
 ## Phase 5: User Story 3 - Deferred by owner decision (Priority: P1 target; no tasks)
 

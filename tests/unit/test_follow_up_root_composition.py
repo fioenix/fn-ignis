@@ -127,7 +127,8 @@ def test_default_market_policy_includes_falsifier_query():
 
 
 @pytest.mark.parametrize('field,value', [('video_limit',6),('search_calls',3),('other_calls',5),
-    ('run_minutes',16),('retention','SEVEN_DAYS'),('source','unapproved'),('geo','GeoCode.US')])
+    ('run_minutes',16),('retention','SEVEN_DAYS'),('source','unapproved'),('source','threads'),
+    ('platform','threads'),('tier','browser_session'),('geo','GeoCode.US')])
 @pytest.mark.asyncio
 async def test_private_root_scope_refuses_expansion_before_any_storage(tmp_path,field,value):
     instruction=dict(INSTRUCTION,**{field:value})

@@ -241,6 +241,7 @@ class ConnectorPluginRegistry:
             if plugin.supports_search
             and plugin.platform in target_platforms
             and plugin.plugin_id in allowed
+            and getattr(type(plugin), "host_collection_required", False) is not True
         ]
         selected_ids = {plugin.plugin_id for plugin in selected}
         required = set(allowed_surfaces if required_surfaces is None else required_surfaces)
@@ -296,6 +297,8 @@ class ConnectorPluginRegistry:
                 "last_failure": breaker.last_failure_time.isoformat() if breaker.last_failure_time else None,
                 "last_error_type": breaker.last_error_type,
                 "last_error": breaker.last_error_message,
+                **({"collection_available": False, "reason_code": "HOST_BROWSER_REQUIRED"}
+                   if getattr(type(plugin), "host_collection_required", False) is True else {}),
             }
         return status
 
@@ -336,8 +339,12 @@ class ConnectorPluginRegistry:
         probe_is_account_only: Dict[str, bool] = {}
         account_scoped_skipped: List[str] = []
         no_probe_skipped: List[str] = []
+        unavailable_surfaces: Dict[str, str] = {}
 
         for plugin_id, plugin in self._plugins.items():
+            if getattr(type(plugin), "host_collection_required", False) is True:
+                unavailable_surfaces[plugin_id] = "HOST_BROWSER_REQUIRED"
+                continue
             breaker = self._breakers[plugin_id]
             if not breaker.can_execute():
                 logger.warning(f"Skipping plugin [{plugin.name}] because Circuit Breaker is OPEN.")
@@ -438,6 +445,8 @@ class ConnectorPluginRegistry:
 
         kept = await self._apply_scope_guard(all_signals, scope, account_scoped_skipped)
         self.last_pass_report["untargeted_feed_skipped"] = no_probe_skipped
+        if unavailable_surfaces:
+            self.last_pass_report["unavailable_surfaces"] = unavailable_surfaces
         return kept
 
     @staticmethod
@@ -538,7 +547,7 @@ class ConnectorPluginRegistry:
         selected, unavailable, requirements, quotas, tiers = [], [], {}, {}, []
         for source in sources:
             plugin = self.get_plugin_by_id(source.source)
-            if plugin is None or not plugin.supports_search or plugin.platform not in target_platforms:
+            if plugin is None or not plugin.supports_search or plugin.platform not in target_platforms or getattr(type(plugin), "host_collection_required", False) is True:
                 unavailable.append(source.source)
                 continue
             selected.append(plugin.plugin_id)
@@ -661,6 +670,10 @@ class ConnectorPluginRegistry:
                 logger.debug(f"Skipping search on [{plugin.name}]: no keyword search probe.")
                 continue
 
+            if getattr(type(plugin), "host_collection_required", False) is True:
+                outcomes[plugin_id] = SurfaceProbeResult(platform=plugin.platform.value, connector_surface=plugin_id,
+                    status=ChannelHealthStatus.DEGRADED, signals_collected=0, note=plugin.UNAVAILABLE_REASON)
+                continue
             if boundary_guard is not None:
                 boundary_guard()
             runtime = await plugin.resolve_ingest_runtime()
@@ -957,6 +970,8 @@ class ConnectorPluginRegistry:
         timeframe: Timeframe,
         scope: IngressScope = IngressScope.PUBLIC_MARKET,
     ) -> List[TrendSignal]:
+        if getattr(type(plugin), "host_collection_required", False) is True:
+            raise ConnectorCapabilityUnavailableException(plugin.UNAVAILABLE_REASON)
         try:
             # `scope` is only forwarded to plugins that declare it, the same way custom_timeframe
             # is handled below: a third-party connector written against the older signature keeps
@@ -985,6 +1000,8 @@ class ConnectorPluginRegistry:
         trigger: IngressTrigger = IngressTrigger.REQUESTED,
         count_requests: bool = True,
     ) -> List[TrendSignal]:
+        if getattr(type(plugin), "host_collection_required", False) is True:
+            raise ConnectorCapabilityUnavailableException(plugin.UNAVAILABLE_REASON)
         # Every keyword search passes here, so the daily ceiling holds on every path. A refusal is
         # not a connector failure and leaves the circuit breaker alone.
         if count_requests:

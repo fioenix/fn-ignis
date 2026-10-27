@@ -13,6 +13,7 @@ from ignis.domain.entities import TrendSignal
 from ignis.domain.exceptions import (
     ConnectorAuthenticationException,
     ConnectorExecutionException,
+    ConnectorCapabilityUnavailableException,
     ConnectorQuotaExceededException,
 )
 from ignis.domain.value_objects import GeoCode, IngestRuntime, IngressScope, PlatformType, Timeframe, timeframe_to_days
@@ -560,19 +561,50 @@ class ReelsPlugin(IConnectorPlugin):
             url_markers=self.BROWSER_API_MARKERS,
             geo=geo,
         )
-        if attestation is not None and keyword:
-            # A captured payload proves the hashtag page answered; none proves nothing.
-            if payloads:
-                attestation.executed(keyword)
-            else:
-                attestation.failed(keyword, "no search payload was captured")
         records = extract_records(
             payloads,
             is_record=self._is_browser_reel,
             identity=lambda node: str(node.get("pk") or node.get("id") or ""),
             limit=min(max(limit, 1), 100),
         )
+        if not records and not self._verified_empty_browser_search(payloads):
+            if attestation is not None and keyword:
+                attestation.failed(keyword, "REELS_PAGE_UNUSABLE: no verified cards or empty search answer")
+            raise ConnectorCapabilityUnavailableException("REELS_PAGE_UNUSABLE: Neither verified cards nor an answered-empty search; absence is unmeasured.")
+        if attestation is not None and keyword:
+            attestation.executed(keyword)
         return [self._map_browser_reel(node, geo=geo, keyword=keyword) for node in records]
+
+    @staticmethod
+    def _verified_empty_browser_search(payloads: List[Dict[str, Any]]) -> bool:
+        """Recognize answered-empty search sections, never infer emptiness from parser-zero.
+
+        The capture helper owns page/status/response settlement checks. At this boundary,
+        every captured search envelope must be structurally empty; unrelated JSON alone
+        cannot attest a search, and malformed/error answers cannot be hidden by an empty one.
+        """
+        answered = False
+        for payload in payloads:
+            if not isinstance(payload, dict):
+                return False
+            if (payload.get("status") == "fail" or payload.get("errors") or payload.get("error")
+                    or payload.get("message") in ("login_required", "challenge_required", "checkpoint_required")
+                    or payload.get("challenge") or payload.get("checkpoint_url")):
+                return False
+            data = payload.get("data")
+            if not isinstance(data, dict) or "recent" not in data:
+                continue
+            recent = data["recent"]
+            if not isinstance(recent, dict) or not isinstance(recent.get("sections"), list):
+                return False
+            for section in recent["sections"]:
+                if not isinstance(section, dict):
+                    return False
+                layout = section.get("layout_content")
+                if not isinstance(layout, dict) or not isinstance(layout.get("medias"), list) or layout["medias"]:
+                    return False
+            answered = True
+        return answered
 
     @staticmethod
     def _is_browser_reel(node: Dict[str, Any]) -> bool:

@@ -1,20 +1,15 @@
-import json
-import urllib.parse
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ignis.domain.exceptions import ConnectorAuthenticationException
 from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType
 from ignis.infrastructure.connectors.meta_browser_ingress import (
     caption_text,
     coerce_int,
-    collect_json_payloads,
     extract_records,
     walk_dicts,
 )
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
-from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 
 STORAGE_STATE = {"cookies": [
     {"name": "sessionid", "value": "SECRET", "domain": domain, "path": "/",
@@ -146,161 +141,6 @@ def test_caption_text_handles_both_dict_and_plain_string_shapes():
 # --- Threads Tier 1 ingress ---
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("variables,status,body,expected_query,accepted", [
-    ({"query": "retail"}, 200, THREADS_PAYLOAD, "retail", True),
-    ({"search_query": "retail"}, 200, THREADS_PAYLOAD, "retail", True),
-    ({"query": "other"}, 200, THREADS_PAYLOAD, "retail", False),
-    ({"unrelated": "retail"}, 200, THREADS_PAYLOAD, "retail", False),
-    ({"query": "retail", "search_query": "other"}, 200, THREADS_PAYLOAD, "retail", False),
-    ({"query": "retail"}, 500, THREADS_PAYLOAD, "retail", False),
-    ({"query": "retail"}, 200, {"data": {"custom_feeds": []}}, "retail", False),
-    ({"query": "retail"}, 200, {"errors": [{"message": "failed"}], **THREADS_PAYLOAD}, "retail", False),
-    ({"query": "retail"}, 200, {"data": {"searchResults": {"edges": []}}}, "retail", True),
-    ({"query": "retail"}, 200, {"data": {"custom_feeds": []}}, None, True),
-])
-async def test_query_capture_requires_exact_request_and_public_response(variables, status, body, expected_query, accepted):
-    """Removing request/status/envelope admission must fail this real capture callback test."""
-    handlers = {}
-    page = AsyncMock()
-    page.on = MagicMock(side_effect=lambda event, callback: handlers.__setitem__(event, callback))
-    request = MagicMock(url="https://www.threads.com/api/graphql", method="POST")
-    request.post_data = urllib.parse.urlencode({"variables": json.dumps(variables), "doc_id": "test-doc"})
-    response = MagicMock(url=request.url, status=status, request=request)
-    response.headers = {"content-type": "application/json"}
-    response.json = AsyncMock(return_value=body)
-
-    async def navigate(*args, **kwargs):
-        await handlers["request"](request)
-        await handlers["response"](response)
-
-    page.goto.side_effect = navigate
-    browser = AsyncMock()
-    browser.new_context.return_value.new_page.return_value = page
-    playwright = MagicMock()
-    playwright.chromium.launch = AsyncMock(return_value=browser)
-    manager = MagicMock()
-    manager.__aenter__ = AsyncMock(return_value=playwright)
-    manager.__aexit__ = AsyncMock(return_value=None)
-    with patch("playwright.async_api.async_playwright", return_value=manager), patch(
-        "ignis.infrastructure.connectors.meta_browser_ingress.GraphQLDocIdCache.set"
-    ) as cache:
-        payloads = await collect_json_payloads(
-            url="https://www.threads.com/search?q=retail", storage_state={},
-            url_markers=["/api/graphql"], scrolls=0, expected_query=expected_query,
-            payload_validator=ThreadsPlugin._public_search_results,
-        )
-    assert payloads == ([body] if accepted else [])
-    assert cache.called is (accepted and expected_query is not None)
-
-
-@pytest.mark.asyncio
-async def test_threads_background_payload_cannot_attest_or_admit_posts():
-    from ignis.application.ports.connector_port import SearchAttestation
-
-    plugin = ThreadsPlugin()
-    attestation = SearchAttestation()
-    with patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.collect_json_payloads",
-        AsyncMock(return_value=[{"data": {"custom_feeds": []}}]),
-    ):
-        signals = await plugin._fetch_via_browser_session(
-            url="https://www.threads.com/search?q=retail", storage_state={},
-            geo=GeoCode.VN, limit=10, keyword="retail", attestation=attestation,
-        )
-    assert signals == []
-    assert attestation.queried == []
-
-
-@pytest.mark.asyncio
-async def test_threads_public_search_does_not_extract_background_siblings():
-    plugin = ThreadsPlugin()
-    body = {"data": {"searchResults": {"edges": []}, "background": THREADS_PAYLOAD}}
-    with patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.collect_json_payloads",
-        AsyncMock(return_value=[body]),
-    ):
-        signals = await plugin._fetch_via_browser_session(
-            url="https://www.threads.com/search?q=retail", storage_state={},
-            geo=GeoCode.VN, limit=10, keyword="retail",
-        )
-    assert signals == []
-
-
-@pytest.mark.asyncio
-async def test_threads_search_uses_the_browser_session_when_no_oauth_token_exists():
-    plugin = ThreadsPlugin(
-        auth_manager=_oauth_manager(None), browser_auth_manager=_browser_manager()
-    )
-
-    with patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.collect_json_payloads",
-        AsyncMock(return_value=[THREADS_PAYLOAD]),
-    ) as collect:
-        signals = await plugin.search_signals(keywords=["quản lý kho"], geo=GeoCode.VN, limit=10)
-
-    assert len(signals) == 1
-    signal = signals[0]
-    assert signal.platform == PlatformType.THREADS
-    assert "quản lý kho" in signal.raw_title
-    assert signal.metric_value == 412.0
-    assert signal.source_url == "https://www.threads.net/@fashion_ops_vn/post/C9xYzAbc"
-    assert signal.metadata["reply_count"] == 57
-    assert signal.metadata["reposts"] == 9
-    assert signal.metadata["quotes"] == 3
-    assert signal.metadata["source"] == "threads_browser_session"
-    assert signal.metadata["tier"] == "TIER_1_BROWSER_SESSION"
-    assert signal.metadata["matched_keyword"] == "quản lý kho"
-    assert signal.metadata["published_at"].startswith("2026-")
-
-    kwargs = collect.await_args.kwargs
-    assert kwargs["storage_state"] == STORAGE_STATE
-    assert "q=qu" in kwargs["url"]  # keyword is URL-encoded into the public search page
-
-
-@pytest.mark.asyncio
-async def test_threads_prefers_the_graph_api_when_a_token_is_available():
-    plugin = ThreadsPlugin(
-        auth_manager=_oauth_manager("LONG_LIVED_TOKEN"), browser_auth_manager=_browser_manager()
-    )
-
-    with patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.collect_json_payloads",
-        AsyncMock(return_value=[THREADS_PAYLOAD]),
-    ) as collect, patch.object(
-        ThreadsPlugin, "_graph_get", AsyncMock(return_value={"data": []})
-    ) as graph_get:
-        await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
-
-    collect.assert_not_awaited()
-    graph_get.assert_awaited()
-
-
-@pytest.mark.asyncio
-async def test_threads_still_raises_when_oauth_is_configured_but_unusable_and_no_session_exists():
-    plugin = ThreadsPlugin(
-        auth_manager=_oauth_manager(None), browser_auth_manager=_browser_manager(state=None)
-    )
-
-    with pytest.raises(ConnectorAuthenticationException):
-        await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
-
-
-@pytest.mark.asyncio
-async def test_threads_is_healthy_on_a_browser_session_alone():
-    plugin = ThreadsPlugin(auth_manager=_oauth_manager(None), browser_auth_manager=_browser_manager())
-    with patch("httpx.AsyncClient.get") as mock_get:
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_get.return_value = mock_resp
-        assert await plugin.is_healthy() is True
-
-    offline = ThreadsPlugin(
-        auth_manager=_oauth_manager(None), browser_auth_manager=_browser_manager(state=None)
-    )
-    assert await offline.is_healthy() is False
-
-
 # --- Reels Tier 1 ingress ---
 
 
@@ -380,3 +220,142 @@ async def test_reels_is_healthy_synthetic_probe():
         auth_manager=_oauth_manager(None), browser_auth_manager=_browser_manager(state=None)
     )
     assert await offline.is_healthy() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state,reason", [("healthy", None), ("login", "REELS_LOGIN_REQUIRED"),
+    ("checkpoint", "REELS_CHECKPOINT"), ("challenge", "REELS_CHALLENGE"),
+    ("captcha", "REELS_CHALLENGE"), ("answered_empty", None), ("unusable", "REELS_PAGE_UNUSABLE"),
+    ("unrelated_json", "REELS_PAGE_UNUSABLE"), ("late_checkpoint", "REELS_CHECKPOINT"),
+    ("response403", "REELS_LOGIN_REQUIRED"), ("response_fail", "REELS_PAGE_UNUSABLE"),
+    ("html_response", "REELS_PAGE_UNUSABLE"), ("response_challenge", "REELS_CHALLENGE")])
+async def test_reels_flag_free_pages_require_cards_or_a_verified_empty_envelope(state, reason):
+    from types import SimpleNamespace
+    from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
+    from ignis.application.ports.connector_port import SearchAttestation
+    handlers = {}
+    page = AsyncMock()
+    page.url = {"login": "https://www.instagram.com/accounts/login/", "checkpoint": "https://www.instagram.com/checkpoint/",
+                "challenge": "https://www.instagram.com/challenge/"}.get(state, "https://www.instagram.com/explore/tags/synthetic/")
+    page.on = MagicMock(side_effect=lambda name, callback: handlers.__setitem__(name, callback))
+    page.remove_listener = MagicMock()
+    page.locator = MagicMock(side_effect=lambda selector: SimpleNamespace(count=AsyncMock(
+        return_value=int(state == "captcha" and "captcha" in selector))))
+    body = {"viewer": {"id": "not-a-reel"}} if state == "unrelated_json" else {"data": {"recent": {"sections": None}}} if state == "unusable" else {"data": {"recent": {"sections": []}}} if state == "answered_empty" else REELS_PAYLOAD
+    if state in {"response403", "response_fail", "response_challenge"}:
+        body = {**body, "status": "fail", "message": {"response403": "login_required", "response_challenge": "challenge_required"}.get(state, "unavailable")}
+    response = SimpleNamespace(url="https://www.instagram.com/api/v1/tags/web_info/", status=403 if state == "response403" else 200,
+        headers={"content-type": "text/html" if state == "html_response" else "application/json"}, json=AsyncMock(return_value=body))
+    if state == "late_checkpoint":
+        async def wheel(*args):
+            page.url = "https://www.instagram.com/checkpoint/"
+        page.mouse.wheel.side_effect = wheel
+    async def navigate(*args, **kwargs):
+        await handlers["response"](response)
+        return SimpleNamespace(status=200)
+    page.goto.side_effect = navigate
+    browser = AsyncMock()
+    browser.new_context.return_value.new_page.return_value = page
+    engine = MagicMock()
+    engine.chromium.launch = AsyncMock(return_value=browser)
+    manager = MagicMock(__aenter__=AsyncMock(return_value=engine), __aexit__=AsyncMock(return_value=None))
+    attestation = SearchAttestation()
+    plugin = ReelsPlugin()
+    with patch("playwright.async_api.async_playwright", return_value=manager):
+        if reason:
+            with pytest.raises(ConnectorCapabilityUnavailableException, match=reason):
+                await plugin._fetch_via_browser_session("https://www.instagram.com/explore/tags/synthetic/", {}, GeoCode.VN,
+                                                       20, "synthetic", attestation)
+            assert attestation.queried == []
+        else:
+            signals = await plugin._fetch_via_browser_session("https://www.instagram.com/explore/tags/synthetic/", {}, GeoCode.VN,
+                                                             20, "synthetic", attestation)
+            if state == "answered_empty":
+                assert signals == []
+            else:
+                assert len(signals) == 1 and signals[0].metric_value == 96400
+            assert attestation.queried == ["synthetic"]
+    assert "AutomationControlled" not in str(engine.chromium.launch.await_args.kwargs)
+    browser.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_capture", [False, True])
+async def test_reels_unsettled_response_cannot_become_healthy_during_browser_close(cancel_capture):
+    import asyncio
+    from types import SimpleNamespace
+    from ignis.application.ports.connector_port import SearchAttestation
+    from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
+    handlers, late_tasks = {}, []
+    started, release = asyncio.Event(), asyncio.Event()
+    page = AsyncMock()
+    page.url = "https://www.instagram.com/explore/tags/synthetic/"
+    page.on = MagicMock(side_effect=lambda name, callback: handlers.__setitem__(name, callback))
+    page.remove_listener = MagicMock()
+    page.locator = MagicMock(return_value=SimpleNamespace(count=AsyncMock(return_value=0)))
+    async def late_json():
+        started.set()
+        await release.wait()
+        return {"status": "fail", "message": "challenge_required", **REELS_PAYLOAD}
+    def response(reader):
+        return SimpleNamespace(url="https://www.instagram.com/api/v1/tags/web_info/", status=200,
+                               headers={"content-type": "application/json"}, json=reader)
+    async def navigate(*args, **kwargs):
+        await handlers["response"](response(AsyncMock(return_value=REELS_PAYLOAD)))
+        late_tasks.append(asyncio.ensure_future(handlers["response"](response(late_json))))
+        await started.wait()
+        if cancel_capture:
+            await asyncio.Event().wait()
+        return SimpleNamespace(status=200)
+    page.goto.side_effect = navigate
+    browser = AsyncMock()
+    browser.new_context.return_value.new_page.return_value = page
+    async def close():
+        release.set()
+        await asyncio.gather(*late_tasks, return_exceptions=True)
+    browser.close.side_effect = close
+    engine = MagicMock()
+    engine.chromium.launch = AsyncMock(return_value=browser)
+    manager = MagicMock(__aenter__=AsyncMock(return_value=engine), __aexit__=AsyncMock(return_value=None))
+    attestation = SearchAttestation()
+    with patch("playwright.async_api.async_playwright", return_value=manager):
+        if cancel_capture:
+            capture = asyncio.create_task(ReelsPlugin()._fetch_via_browser_session(page.url, {}, GeoCode.VN, 20, "synthetic", attestation))
+            await started.wait()
+            capture.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await capture
+        else:
+            with pytest.raises(ConnectorCapabilityUnavailableException, match="REELS_(PAGE_UNUSABLE|CHALLENGE)"):
+                await ReelsPlugin()._fetch_via_browser_session(page.url, {}, GeoCode.VN, 20, "synthetic", attestation)
+    assert attestation.queried == []
+    assert late_tasks and all(task.cancelled() for task in late_tasks)
+    browser.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payloads,verified_empty", [
+    ([{"data": {"recent": {"sections": []}}}], True),
+    ([{"data": {"recent": {"sections": [{"layout_content": {"medias": []}}]}}}], True),
+    ([], False), ([{"viewer": {"id": "synthetic"}}], False),
+    ([{"data": {"recent": {"sections": None}}}], False),
+    ([{"data": {"recent": {"sections": [{}]}}}], False),
+    ([{"data": {"recent": {"sections": []}}}, {"status": "fail", "message": "login_required"}], False),
+    ([{"data": {"recent": {"sections": []}}}, {"data": {"recent": {"sections": [{}]}}}], False),
+])
+async def test_reels_answered_empty_attests_only_a_well_formed_executed_search(payloads, verified_empty):
+    from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+    registry = ConnectorPluginRegistry()
+    registry.register(ReelsPlugin(auth_manager=_oauth_manager(None), browser_auth_manager=_browser_manager()))
+    with patch("ignis.infrastructure.connectors.reels.reels_plugin.collect_json_payloads", AsyncMock(return_value=payloads)):
+        result = await registry.search_with_outcomes(keywords=["synthetic"])
+    [outcome] = result.outcomes
+    assert not result.signals
+    if verified_empty:
+        assert outcome.status.value == "EMPTY_NO_DATA"
+        assert outcome.queried_keywords == ("synthetic",)
+        assert outcome.queried_window is None
+    else:
+        assert outcome.status.value == "DEGRADED"
+        assert outcome.queried_keywords == ()
+        assert "REELS_PAGE_UNUSABLE" in outcome.note

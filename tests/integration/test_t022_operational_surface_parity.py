@@ -829,3 +829,26 @@ async def test_a_malformed_stored_timestamp_reads_as_none_and_the_row_is_left_al
         assert secret not in caplog.text, f"stored content reached the log: {secret[:7]}..."
     with sqlite3.connect(tmp_path / "malformed.sqlite") as conn:
         assert conn.execute(stored_bytes).fetchone() == before, "a read rewrote the row"
+
+
+@pytest.mark.asyncio
+async def test_retained_threads_credentials_never_grant_internal_collection(repository_case):
+    from unittest.mock import patch
+    from ignis.infrastructure.auth.meta_browser_auth import ThreadsBrowserAuthManager
+    from ignis.infrastructure.auth.meta_oauth import ThreadsAuthManager
+    from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
+    from ignis.infrastructure.connectors.registry import ConnectorPluginRegistry
+    repository = repository_case.repository
+    await repository.save_platform_credentials(platform="threads", auth_type="oauth", credentials_data={"access_token": "synthetic-token"})
+    await repository.save_platform_credentials(platform="threads_browser", auth_type="session_cookies",
+        credentials_data={"cookies": [{"name": "sessionid", "value": "synthetic-cookie", "domain": ".threads.com"}]})
+    before = await repository.list_platform_credentials()
+    plugin = ThreadsPlugin(auth_manager=ThreadsAuthManager(repository), browser_auth_manager=ThreadsBrowserAuthManager(repository))
+    registry = ConnectorPluginRegistry(repository)
+    registry.register(plugin)
+    with patch("httpx.AsyncClient", side_effect=AssertionError("Retired Threads HTTP")), \
+            patch("playwright.async_api.async_playwright", side_effect=AssertionError("Retired Threads browser")):
+        result = await registry.search_with_outcomes(keywords=["synthetic"])
+    assert len(result.signals) == 0 and "HOST_BROWSER_REQUIRED" in result.outcomes[0].note
+    assert result.outcomes[0].status.value == "DEGRADED"
+    assert await repository.list_platform_credentials() == before

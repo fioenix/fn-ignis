@@ -317,7 +317,7 @@
     "type": "function",
     "function": {
       "name": "authenticate_threads",
-      "description": "Connect Meta Threads with either tier: call with no auth_code (or browser_login=true) for the 1-click browser session capture that needs no Meta Developer App, or pass auth_code to run the Graph API OAuth 2.0 flow and store a 60-day long-lived token AES-encrypted.",
+      "description": "Store Meta Threads browser or OAuth credentials for compatibility. Stored credentials do not enable internal collection; Threads evidence requires an explicitly authorized host-browser search.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -386,7 +386,7 @@
     "type": "function",
     "function": {
       "name": "get_threads_auth_status",
-      "description": "Inspect the stored Meta Threads credentials across both tiers: OAuth 2.0 token state, granted scopes, key version, days remaining and refresh due, plus any captured browser session.",
+      "description": "Inspect stored Meta Threads OAuth and browser credential state. Stored login is not collection readiness; internal collection is retired and host-browser authority is separate.",
       "parameters": {
         "additionalProperties": false,
         "properties": {},
@@ -410,7 +410,7 @@
     "type": "function",
     "function": {
       "name": "get_threads_trending_topics",
-      "description": "Fetch real-time Trending Topics from Threads search surface (threads.net/search) for macro market awareness.",
+      "description": "Retained compatibility tool. Internal Threads trending collection is unavailable; no browser, cookie or OAuth fallback runs.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -431,7 +431,7 @@
     "type": "function",
     "function": {
       "name": "get_threads_search_suggestions",
-      "description": "Fetch search autocomplete suggestions and derivative queries from Threads search for keyword expansion and slang discovery.",
+      "description": "Retained compatibility tool. Internal Threads suggestions collection is unavailable; no browser, cookie or OAuth fallback runs.",
       "parameters": {
         "additionalProperties": false,
         "properties": {

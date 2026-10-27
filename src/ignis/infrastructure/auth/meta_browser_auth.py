@@ -110,7 +110,6 @@ class MetaBrowserAuthManager:
             browser = await p.chromium.launch(
                 headless=headless,
                 args=[
-                    "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                 ],

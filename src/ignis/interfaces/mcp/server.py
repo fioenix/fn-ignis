@@ -1132,7 +1132,7 @@ def get_components():
 # --- Data Provenance serialization helpers ---
 
 # A mission platform can be served by credentials stored under a different key
-# (Reels rides on the Instagram session, Threads has a browser + Graph tier).
+# Reels uses the Instagram session; stored Threads credentials are compatibility state only.
 _PLATFORM_CREDENTIAL_KEYS = {
     "tiktok": ("tiktok",),
     "threads": ("threads", "threads_browser"),
@@ -1723,7 +1723,9 @@ async def handle_diagnose_system_health() -> str:
     for plat, info in health_status.items():
         if plat == "tiktok" and info["circuit_state"] != "CLOSED":
             diagnostics["recommendations"].append("TikTok connector throttled or challenged by bot detection. Launch Playwright authentication or refresh cookies.")
-        elif plat in ["threads", "reels"] and info["circuit_state"] != "CLOSED":
+        elif plat == "threads":
+            diagnostics["recommendations"].append("Threads collection requires an explicitly authorized host-browser search; stored login does not enable internal collection.")
+        elif plat == "reels" and info["circuit_state"] != "CLOSED":
             diagnostics["recommendations"].append(f"Meta ({plat}) requires authentication or GraphQL token verification. Check credentials.")
         elif plat == "youtube" and not reveal_secret(settings.YOUTUBE_API_KEY):
             diagnostics["recommendations"].append("YOUTUBE_API_KEY is not configured in .env.")
@@ -1846,7 +1848,7 @@ async def _run_meta_auth(
 
 
 async def _meta_auth_status(oauth_manager: Any, browser_manager: Any) -> Dict[str, Any]:
-    """Report both tiers and the active_tier so the agent can see which ingress path is live."""
+    """Report stored credential tiers; source collection readiness is a separate capability."""
     status = await oauth_manager.get_auth_status()
     browser_status = None
     if browser_manager:
@@ -1886,35 +1888,17 @@ async def handle_authenticate_threads(
         headless=headless,
         timeout_seconds=timeout_seconds,
     )
-    if isinstance(result, dict) and not browser_login:
-        result["keyword_search_access"] = await _probe_threads_keyword_search(comp)
+    if isinstance(result, dict):
+        result.update(collection_available=False, reason_code="HOST_BROWSER_REQUIRED",
+                      collection_note="Stored Threads credentials are compatibility state; collection requires an authorized host ticket.")
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 async def _probe_threads_keyword_search(comp: Dict[str, Any]) -> Dict[str, Any]:
-    """Report whether the Threads Graph token can search public posts at all.
-
-    The probe keyword comes from the persisted market lexicon rather than a constant, and the
-    result carries its own remediation: the Tier-1 browser session needs no App Review, which is
-    what a self-hosted install can realistically obtain.
-    """
-    # An auxiliary probe must never break the authentication it reports on.
-    registry = comp.get("registry")
-    plugin = registry.get_plugin(PlatformType.THREADS) if registry else None
-    if plugin is None or not hasattr(plugin, "check_keyword_search_access"):
-        return {"status": "UNAVAILABLE", "detail": "No Threads connector is registered."}
-
-    try:
-        ingest_use_case = comp.get("ingest_use_case")
-        seeds = await ingest_use_case.load_seed_keywords() if ingest_use_case else []
-        report = await plugin.check_keyword_search_access(seeds[0] if seeds else "")
-    except Exception as e:
-        return {"status": "INCONCLUSIVE", "detail": f"The keyword search probe failed: {e}"}
-
-    if report.get("status") in (plugin.KEYWORD_SEARCH_SELF_ONLY, plugin.KEYWORD_SEARCH_NOT_PERMITTED):
-        logger.warning(f"Threads public keyword search is unavailable: {report.get('detail')}")
-        report["recommended_path"] = "authenticate_threads(browser_login=True)"
-    return report
+    """Compatibility diagnostic; external Threads MCP grants and API probing are deferred."""
+    return {"status": "UNAVAILABLE", "reason_code": "HOST_BROWSER_REQUIRED",
+            "detail": "Internal Threads collection is retired; stored credentials do not enable search.",
+            "recommended_path": 'prepare_host_browser_search(source="threads")'}
 
 
 async def handle_get_threads_auth_status() -> str:
@@ -1922,6 +1906,8 @@ async def handle_get_threads_auth_status() -> str:
     status = await _meta_auth_status(
         comp["threads_auth_manager"], comp.get("threads_browser_auth_manager")
     )
+    status.update(collection_available=False, reason_code="HOST_BROWSER_REQUIRED",
+                  collection_note="Stored credentials do not enable internal Threads collection.")
     return json.dumps(status, ensure_ascii=False, indent=2)
 
 
@@ -3381,7 +3367,7 @@ async def clear_platform_auth(platform: str) -> str:
     return await handle_clear_platform_auth(platform=platform)
 
 
-@mcp.tool(name="authenticate_threads", description="Connect Meta Threads with either tier: call with no auth_code (or browser_login=true) for the 1-click browser session capture that needs no Meta Developer App, or pass auth_code to run the Graph API OAuth 2.0 flow and store a 60-day long-lived token AES-encrypted.")
+@mcp.tool(name="authenticate_threads", description="Store Meta Threads browser or OAuth credentials for compatibility. Stored credentials do not enable internal collection; Threads evidence requires an explicitly authorized host-browser search.")
 async def authenticate_threads(
     auth_code: Optional[str] = None,
     client_id: Optional[str] = None,
@@ -3402,7 +3388,7 @@ async def authenticate_threads(
     )
 
 
-@mcp.tool(name="get_threads_auth_status", description="Inspect the stored Meta Threads credentials across both tiers: OAuth 2.0 token state, granted scopes, key version, days remaining and refresh due, plus any captured browser session.")
+@mcp.tool(name="get_threads_auth_status", description="Inspect stored Meta Threads OAuth and browser credential state. Stored login is not collection readiness; internal collection is retired and host-browser authority is separate.")
 async def get_threads_auth_status() -> str:
     return await handle_get_threads_auth_status()
 
@@ -3413,125 +3399,27 @@ async def clear_threads_auth() -> str:
 
 
 async def handle_get_threads_trending_topics(geo: str = "VN", limit: int = 15) -> str:
-    comp = get_components()
-    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
-    threads_plugin = comp["registry"].get_plugin(PlatformType.THREADS)
-    if not threads_plugin or not hasattr(threads_plugin, "fetch_trending_topics"):
-        return json.dumps({"status": "ERROR", "message": "Threads plugin not available or does not support trending topics."}, ensure_ascii=False)
-
-    # Check authentication state first
-    if hasattr(threads_plugin, "resolve_auth_tier") and callable(threads_plugin.resolve_auth_tier):
-        try:
-            auth_res = await threads_plugin.resolve_auth_tier()
-            if isinstance(auth_res, tuple) and len(auth_res) == 2:
-                tier, cred = auth_res
-                if tier == "none":
-                    return json.dumps({
-                        "status": "AUTH_REQUIRED",
-                        "platform": "THREADS",
-                        "geo": geo_code.value,
-                        "total_topics": 0,
-                        "topics": [],
-                        "message": "Threads is not authenticated. Run authenticate_threads(browser_login=True) to capture browser session.",
-                    }, ensure_ascii=False, indent=2)
-        except Exception as auth_err:
-            logger.debug(f"Auth tier check error: {auth_err}")
-
-    try:
-        topics = await threads_plugin.fetch_trending_topics(geo=geo_code, limit=max(1, min(limit, 30)))
-        if not topics:
-            return json.dumps(
-                {
-                    "status": "PARSE_EMPTY",
-                    "platform": "THREADS",
-                    "geo": geo_code.value,
-                    "total_topics": 0,
-                    "topics": [],
-                    "message": "Meta Threads does not currently surface 'Today's Topics' in this region or no trending topics were returned by GraphQL.",
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-
-        return json.dumps(
-            {
-                "status": "SUCCESS",
-                "platform": "THREADS",
-                "geo": geo_code.value,
-                "total_topics": len(topics),
-                "topics": topics,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    except Exception as e:
-        logger.error(f"Error fetching Threads trending topics: {e}")
-        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+    """Retained tool signature; retired internal trending has no collection fallback."""
+    return json.dumps({"status": "UNAVAILABLE", "reason_code": "HOST_BROWSER_REQUIRED", "platform": "THREADS",
+        "geo": "VN" if geo.upper() == "VN" else "GLOBAL", "total_topics": 0, "topics": [],
+        "message": "Internal Threads trending collection is retired. Authorized host keyword search is available separately."},
+        ensure_ascii=False, indent=2)
 
 
-@mcp.tool(name="get_threads_trending_topics", description="Fetch real-time Trending Topics from Threads search surface (threads.net/search) for macro market awareness.")
+@mcp.tool(name="get_threads_trending_topics", description="Retained compatibility tool. Internal Threads trending collection is unavailable; no browser, cookie or OAuth fallback runs.")
 async def get_threads_trending_topics(geo: str = "VN", limit: int = 15) -> str:
     return await handle_get_threads_trending_topics(geo=geo, limit=limit)
 
 
 async def handle_get_threads_search_suggestions(keyword: str, geo: str = "VN", limit: int = 10) -> str:
-    comp = get_components()
-    geo_code = GeoCode.VN if geo.upper() == "VN" else GeoCode.GLOBAL
-    threads_plugin = comp["registry"].get_plugin(PlatformType.THREADS)
-    if not threads_plugin or not hasattr(threads_plugin, "fetch_search_suggestions"):
-        return json.dumps({"status": "ERROR", "message": "Threads plugin not available or does not support search suggestions."}, ensure_ascii=False)
-
-    # Check authentication state first
-    if hasattr(threads_plugin, "resolve_auth_tier") and callable(threads_plugin.resolve_auth_tier):
-        try:
-            auth_res = await threads_plugin.resolve_auth_tier()
-            if isinstance(auth_res, tuple) and len(auth_res) == 2:
-                tier, cred = auth_res
-                if tier == "none":
-                    return json.dumps({
-                        "status": "AUTH_REQUIRED",
-                        "platform": "THREADS",
-                        "keyword": keyword,
-                        "total_suggestions": 0,
-                        "suggestions": [],
-                        "message": "Threads is not authenticated. Run authenticate_threads(browser_login=True) to capture browser session.",
-                    }, ensure_ascii=False, indent=2)
-        except Exception as auth_err:
-            logger.debug(f"Auth tier check error: {auth_err}")
-
-    try:
-        suggestions = await threads_plugin.fetch_search_suggestions(keyword=keyword, geo=geo_code, limit=max(1, min(limit, 20)))
-        if not suggestions:
-            return json.dumps(
-                {
-                    "status": "PARSE_EMPTY",
-                    "platform": "THREADS",
-                    "keyword": keyword,
-                    "total_suggestions": 0,
-                    "suggestions": [],
-                    "message": f"No search suggestions returned by Threads for keyword '{keyword}'.",
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-
-        return json.dumps(
-            {
-                "status": "SUCCESS",
-                "platform": "THREADS",
-                "keyword": keyword,
-                "total_suggestions": len(suggestions),
-                "suggestions": suggestions,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-    except Exception as e:
-        logger.error(f"Error fetching Threads search suggestions: {e}")
-        return json.dumps({"status": "ERROR", "message": str(e)}, ensure_ascii=False)
+    """Retained tool signature; retired internal suggestions have no collection fallback."""
+    return json.dumps({"status": "UNAVAILABLE", "reason_code": "HOST_BROWSER_REQUIRED", "platform": "THREADS",
+        "geo": "VN" if geo.upper() == "VN" else "GLOBAL", "total_suggestions": 0, "suggestions": [],
+        "message": "Internal Threads suggestions collection is retired. Authorized host keyword search is available separately."},
+        ensure_ascii=False, indent=2)
 
 
-@mcp.tool(name="get_threads_search_suggestions", description="Fetch search autocomplete suggestions and derivative queries from Threads search for keyword expansion and slang discovery.")
+@mcp.tool(name="get_threads_search_suggestions", description="Retained compatibility tool. Internal Threads suggestions collection is unavailable; no browser, cookie or OAuth fallback runs.")
 async def get_threads_search_suggestions(keyword: str, geo: str = "VN", limit: int = 10) -> str:
     return await handle_get_threads_search_suggestions(keyword=keyword, geo=geo, limit=limit)
 
@@ -4031,7 +3919,8 @@ async def handle_verify_connectors_health() -> str:
     - YouTube Data API v3 (API Key & Quota verification)
     - Google Trends RSS (Feed responsiveness & parsing)
     - TikTok Connectors & Playwright (Browser engine & optional proxy routing)
-    - Threads & Instagram Reels (Active synthetic HTTP probe & session expiry check)
+    - Threads (host-required availability; no internal network probe)
+    - Instagram Reels (Active synthetic HTTP probe & session expiry check)
     - Real-time Alert generation for consecutive failures, expiring credentials, and parse-empty probes.
     """
     comp = get_components()
@@ -4106,6 +3995,14 @@ async def handle_verify_connectors_health() -> str:
     # 2. Check each connector plugin
     for plugin_id, plugin in registry._plugins.items():
         platform_value = plugin.platform.value if hasattr(plugin.platform, "value") else str(plugin.platform)
+        if platform_value == "threads":
+            diagnostics["connectors"][plugin.name] = {
+                "plugin_id": plugin_id, "platform": platform_value, "status": "UNAVAILABLE",
+                "reason_code": "HOST_BROWSER_REQUIRED", "collection_available": False,
+                "expires_at": None, "days_remaining": None,
+                "remediation": "Prepare an explicitly authorized host-browser Threads search. Stored credentials do not enable internal collection.",
+            }
+            continue
         breaker = registry._breakers.get(plugin_id)
         quota_status = None
         quota_reader = getattr(plugin, "quota_status", None)

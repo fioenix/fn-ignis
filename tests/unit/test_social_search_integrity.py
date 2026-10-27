@@ -136,7 +136,7 @@ async def test_dom_fallback_keeps_the_full_sanitized_caption_for_qualification()
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("platform", ["tiktok", "threads"])
-async def test_all_requested_queries_are_executed_without_a_silent_ten_query_cap(platform):
+async def test_tiktok_query_union_stays_complete_and_threads_never_collects_internally(platform):
     queries = [f"retail-query-{index}" for index in range(12)]
     attestation = SearchAttestation()
     async def fetch(**kwargs):
@@ -147,9 +147,11 @@ async def test_all_requested_queries_are_executed_without_a_silent_ten_query_cap
         with patch.object(plugin, "_fetch_via_playwright", side_effect=fetch):
             await plugin.search_signals(queries, attestation=attestation)
     else:
-        plugin = ThreadsPlugin()
-        with patch("ignis.infrastructure.connectors.threads.threads_plugin.GraphQLDocIdCache.get", return_value=(None, None)), patch.object(plugin, "_fetch_via_browser_session", side_effect=fetch):
-            await plugin._search_via_browser_session(queries, {}, GeoCode.VN, 20, attestation)
+        from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
+        with pytest.raises(ConnectorCapabilityUnavailableException, match="HOST_BROWSER_REQUIRED"):
+            await ThreadsPlugin().search_signals(queries, attestation=attestation)
+        assert attestation.queried == []
+        return
     assert attestation.queried == queries
 
 

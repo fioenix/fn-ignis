@@ -1,5 +1,5 @@
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -81,42 +81,16 @@ async def test_clear_threads_auth_reports_outcome(cleared, expected_fragment):
 
 
 @pytest.mark.asyncio
-async def test_get_threads_trending_topics_mcp_tool():
-    from ignis.interfaces.mcp.server import handle_get_threads_trending_topics
-
-    mock_plugin = AsyncMock()
-    mock_plugin.fetch_trending_topics.return_value = [
-        {"topic": "AI Coding", "post_count": 5000, "post_count_label": "5K posts"}
-    ]
-    mock_registry = MagicMock()
-    mock_registry.get_plugin.return_value = mock_plugin
-
-    with patch("ignis.interfaces.mcp.server.get_components", return_value={"registry": mock_registry}):
-        res = json.loads(await handle_get_threads_trending_topics(geo="VN", limit=5))
-
-    assert res["status"] == "SUCCESS"
-    assert res["platform"] == "THREADS"
-    assert res["total_topics"] == 1
-    assert res["topics"][0]["topic"] == "AI Coding"
-
-
-@pytest.mark.asyncio
-async def test_get_threads_search_suggestions_mcp_tool():
-    from ignis.interfaces.mcp.server import handle_get_threads_search_suggestions
-
-    mock_plugin = AsyncMock()
-    mock_plugin.fetch_search_suggestions.return_value = [
-        "ai coding agent",
-        "ai coding assistant",
-    ]
-    mock_registry = MagicMock()
-    mock_registry.get_plugin.return_value = mock_plugin
-
-    with patch("ignis.interfaces.mcp.server.get_components", return_value={"registry": mock_registry}):
-        res = json.loads(await handle_get_threads_search_suggestions(keyword="ai coding", geo="VN", limit=5))
-
-    assert res["status"] == "SUCCESS"
-    assert res["keyword"] == "ai coding"
-    assert res["total_suggestions"] == 2
-    assert "ai coding agent" in res["suggestions"]
-
+async def test_stored_threads_auth_is_not_collection_readiness_and_never_probes():
+    from ignis.interfaces.mcp import server
+    auth = AsyncMock()
+    auth.get_auth_status.return_value = {"authenticated": True, "status": "CONNECTED"}
+    auth.exchange_code_for_token.return_value = {"success": True}
+    with patch.object(server, "get_components", return_value={"threads_auth_manager": auth}), \
+            patch.object(server, "_probe_threads_keyword_search", AsyncMock(side_effect=AssertionError("No provider grant probe"))):
+        report = json.loads(await server.handle_get_threads_auth_status())
+        authenticated = json.loads(await server.handle_authenticate_threads(auth_code="synthetic"))
+    for result in [report, authenticated]:
+        assert result["collection_available"] is False
+        assert result["reason_code"] == "HOST_BROWSER_REQUIRED"
+    assert report["authenticated"] is True

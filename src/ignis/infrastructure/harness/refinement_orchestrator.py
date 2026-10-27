@@ -34,7 +34,7 @@ class AutonomousRefinementOrchestrator:
         self._evaluator = quality_evaluator
         self._reasoner = strategic_reasoner
 
-    # Reels rides on the Instagram session; Threads has a browser and a Graph tier.
+    # Reels uses the Instagram session; stored Threads credentials are not collection readiness.
     _PLATFORM_CREDENTIAL_KEYS = {
         "tiktok": ("tiktok",),
         "threads": ("threads", "threads_browser"),

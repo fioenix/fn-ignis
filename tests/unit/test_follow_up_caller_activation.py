@@ -1001,3 +1001,28 @@ async def test_original_budget_refuses_fifth_other_call_and_any_call_after_deadl
         await objects.host.revoke()
     finally:
         await components['repository'].close()
+
+
+@pytest.mark.asyncio
+async def test_retired_threads_cannot_enter_a_bounded_caller_source_activation(tmp_path):
+    from unittest.mock import AsyncMock
+    from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
+    components = await _caller_components(tmp_path)
+    retired = ThreadsPlugin(auth_manager=AsyncMock(), browser_auth_manager=AsyncMock())
+    retired.search_signals = AsyncMock(side_effect=AssertionError("Retired caller source dispatched"))
+    components['registry'].register(retired)
+    mission_id = uuid4()
+    activation = None
+    try:
+        activation, host, bridge, accounting, calls, resolutions = await _activation(_Scope(components), mission_id, tmp_path)
+        assert [p.plugin_id for p in activation.executor._registry.list_plugins()] == ['youtube']
+        result = await components['registry'].search_with_outcomes(keywords=['synthetic'])
+        assert result.outcomes[0].status.value == 'DEGRADED'
+        assert 'HOST_BROWSER_REQUIRED' in result.outcomes[0].note
+        retired.search_signals.assert_not_awaited()
+        assert calls == [] and resolutions == []
+        assert await components['repository'].get_mission(mission_id) is None
+    finally:
+        if activation:
+            await activation.close()
+        await components['repository'].close()

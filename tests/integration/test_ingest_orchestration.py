@@ -83,3 +83,23 @@ async def test_circuit_breaker_tripping_on_repeated_failures():
     breaker = registry._breakers[PlatformType.YOUTUBE]
     assert breaker.state == "OPEN"
     assert breaker.can_execute() is False
+
+
+@pytest.mark.asyncio
+async def test_retired_threads_does_not_dispatch_or_break_other_ingress():
+    from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
+    threads = ThreadsPlugin(auth_manager=AsyncMock(), browser_auth_manager=AsyncMock())
+    threads.search_signals = AsyncMock(side_effect=AssertionError("Retired collection dispatched"))
+    registry = ConnectorPluginRegistry()
+    registry.register(MockSuccessPlugin())
+    registry.register(threads)
+    repository = AsyncMock()
+    repository.get_domain_lexicons.return_value = [{"term": "synthetic", "domain": "synthetic"}]
+    repository.save_signals.return_value = 1
+    result = await IngestTrendsUseCase(registry=registry, repository=repository).execute()
+    assert result["total_fetched"] == result["total_saved"] == 1
+    assert result["scope_guard"]["unavailable_surfaces"] == {"threads": "HOST_BROWSER_REQUIRED"}
+    assert repository.save_signals.await_args.args[0][0].platform is PlatformType.GOOGLE_TRENDS
+    threads.search_signals.assert_not_awaited()
+    threads._auth_manager.get_access_token.assert_not_awaited()
+    threads._browser_auth_manager.get_storage_state.assert_not_awaited()
