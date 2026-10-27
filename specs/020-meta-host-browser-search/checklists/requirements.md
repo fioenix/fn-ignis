@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -31,10 +31,8 @@
 
 ## Notes
 
-- Three [NEEDS CLARIFICATION] markers remain on purpose (FR-002 Instagram surface, FR-007 scope of
-  the flag removal, FR-008 Threads API through Ignis OAuth or the owner's Threads MCP). They are for
-  `/speckit-clarify`, after the owner reviews this draft.
-- Planning also waits on gates G1 (Meta terms for host-browser reading) and G2 (manual look at the
-  two search surfaces).
+- Clarified 27/10/2026 (Session 2026-10-27 in spec.md): G1 passed; Instagram keyword search; all
+  eight flags removed; Threads API through the owner's Threads MCP.
+- Planning waits on gate G2 (manual look at both search surfaces in the Finos profile).
 - The spec names files, the evasion flag and external APIs because the removal and the platforms'
   terms are the feature's subject; it names no new Ignis implementation.

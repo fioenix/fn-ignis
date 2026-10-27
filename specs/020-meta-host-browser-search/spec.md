@@ -4,8 +4,7 @@
 
 **Created**: 2026-10-27
 
-**Status**: Draft, stopped before `/speckit-clarify` for the owner's review. Planning also waits on
-the gates in "Gates before planning".
+**Status**: Clarified 27/10/2026. G1 passed; planning waits on G2 (see "Gates before planning").
 
 **Input**: Owner decision of 27/10/2026, after declining bot-detection evasion: "OK chốt vậy đi"
 (settled), approving a spec that moves Threads and Instagram collection to the host browser of
@@ -19,6 +18,21 @@ same way the owner would look them up by hand, so the channels keep working with
 automation from the platform. The observable proof is a G3 watchlist run whose Threads and
 Instagram outcomes come from the owner's own Chrome through the host-browser relay, with no
 author identity at rest, and whose period view says when the collection path changed.
+
+## Clarifications
+
+### Session 2026-10-27
+
+- Q: G1 — may a packaged extractor read Threads and Instagram search pages opened in the owner's own
+  Chrome without Meta's written permission? → A: Yes, the owner accepts this (G1 passed).
+- Q: Which Instagram surface? → A: Keyword search results, which follow watchlist keywords
+  directly; no hashtag mapping.
+- Q: Does this feature remove the evasion flag from the TikTok Playwright plugin, TikTok login and
+  Creative Center too? → A: Yes, all eight launch sites; TikTok already has the host-browser path and
+  the 26/10/2026 decision covers every platform.
+- Q: How does Threads obtain an approved keyword-search credential? → A: Through the owner's Threads
+  MCP: the host agent calls its keyword search and submits the results to Ignis, so one Meta app and
+  one App Review serve both projects. Ignis's own Threads OAuth tier is not used for collection.
 
 ## Context: current state (observed 27/10/2026 on `main` at `8a816fb`)
 
@@ -49,12 +63,12 @@ author identity at rest, and whose period view says when the collection path cha
 
 ## Gates before planning
 
-- **G1 Terms**: the owner decides whether running a packaged extractor over Threads and Instagram
+- **G1 Terms** (passed 27/10/2026, owner accepted): the owner decides whether running a packaged extractor over Threads and Instagram
   search pages opened in their own Chrome is acceptable under Meta's terms. If not, the host-browser
   stories (1 and 2) stop: Threads waits for the API (story 4), Instagram has no channel, and story 3
   still retires the Playwright path, which carries the same terms question plus evasion.
 - **G2 Surfaces**: one manual look in the Finos Chrome profile at a G3 keyword on Threads search and
-  on Instagram search records what each result card shows (post link, excerpt, counters, date,
+  on Instagram keyword search records what each result card shows (post link, excerpt, counters, date,
   author elements) and whether results appear while signed in. The extractors are designed from
   that record, as `tiktok-public-grid-v1` was from the TikTok trial of 26/10/2026.
 
@@ -86,8 +100,8 @@ path identity, and none with a handle, display name or profile link.
 
 ### User Story 2 - Collect Instagram results through the host browser (Priority: P1)
 
-The same flow serves Instagram for a run that allows `reels`, on the Instagram surface chosen in
-clarification.
+The same flow serves Instagram for a run that allows `reels`, on Instagram's keyword search
+results.
 
 **Why this priority**: the Instagram API cannot follow keyword topics (hashtags only, 30 per week),
 so the host browser is its only route that matches a watchlist.
@@ -126,14 +140,16 @@ browser and no approved API reports Threads and Instagram unavailable rather tha
 
 ### User Story 4 - Threads moves to the official API when approved (Priority: P2)
 
-When an approved Threads keyword-search credential is available, Threads collects through the API,
-and the host-browser path for Threads is used only if the owner keeps it as a separate choice.
+When the owner's Threads MCP holds an approved keyword-search grant, Threads collects through the
+official API via that MCP, and the host-browser path for Threads is used only if the owner keeps it
+as a separate choice.
 
 **Why this priority**: the API is the path Meta permits; it depends on App Review and business
 verification, which are outside this feature's control.
 
-**Independent Test**: with an approved credential, a G3 run's Threads outcome comes from the API
-path; with only an unapproved credential, it stays `SELF_ONLY` and is not counted as evidence.
+**Independent Test**: with an approved grant in Threads MCP, a G3 run's Threads outcome comes from
+the API path; without approval, results limited to the account's own posts are not counted as
+evidence.
 
 **Acceptance Scenarios**:
 
@@ -163,9 +179,8 @@ path; with only an unapproved credential, it stays `SELF_ONLY` and is not counte
   explicit bounded request, the owner's connected Chrome, the loopback relay, no cookie export, no
   debugging port, no unattended or fallback collection.
 - **FR-002**: Each surface MUST have one packaged, versioned extractor; the agent only opens the
-  prepared URL and runs it, with no clicking or typing on the page. [NEEDS CLARIFICATION: which
-  Instagram surface — keyword search results, which follow watchlist keywords directly, or hashtag
-  pages, which need each topic keyword mapped to a hashtag held in the taxonomy?]
+  prepared URL and runs it, with no clicking or typing on the page. Instagram is read from its
+  keyword search results for the watchlist keyword; hashtag pages are out of scope.
 - **FR-003**: No observation, receipt or excerpt MAY carry a handle, display name, profile link or
   platform attribution sentence; removal uses seeded vocabulary per locale and fails closed without
   it (Constitution VII, Spec 012 FR-012).
@@ -179,12 +194,14 @@ path; with only an unapproved credential, it stays `SELF_ONLY` and is not counte
   comparable with a path-change reason.
 - **FR-007**: The Playwright session collection for `threads` and `reels` and every
   `--disable-blink-features=AutomationControlled` flag MUST be removed; no replacement flag or tool
-  that hides automation is added. [NEEDS CLARIFICATION: does this feature also remove the flag from
-  the TikTok Playwright plugin, TikTok login and Creative Center, or are those a separate change?]
-- **FR-008**: Threads MUST use the official API when an approved keyword-search credential exists;
-  `SELF_ONLY` results stay excluded from evidence. [NEEDS CLARIFICATION: obtain that credential
-  through Ignis's own Threads OAuth tier, or have the host agent call the owner's Threads MCP and
-  submit its results, so one Meta app and one App Review serve both projects?]
+  that hides automation is added. This covers all eight launch sites, including the TikTok
+  Playwright plugin, TikTok login and Creative Center.
+- **FR-008**: Threads MUST use the official API when the owner's Threads MCP holds an approved
+  keyword-search grant: the host agent calls its keyword search and submits the results to Ignis
+  under the same request, provenance and identity rules as a host-browser answer. Results that
+  Threads MCP marks as limited to the account's own posts stay excluded from evidence. Ignis's own
+  Threads OAuth tier is not used for collection. Accepting those results is an MCP surface change
+  under the same owner gate as FR-005.
 - **FR-009**: Changing the G3 routine to use the new paths MUST wait for a separate owner approval.
 - **FR-010**: Behaviour MUST be identical on SQLite and PostgreSQL; any migration only seeds
   vocabulary rows.
