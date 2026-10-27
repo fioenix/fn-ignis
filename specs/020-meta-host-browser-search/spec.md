@@ -1,0 +1,220 @@
+# Feature Specification: Threads and Instagram Through the Host Browser
+
+**Feature Branch**: `claude/meta-host-browser-spec`
+
+**Created**: 2026-10-27
+
+**Status**: Draft, stopped before `/speckit-clarify` for the owner's review. Planning also waits on
+the gates in "Gates before planning".
+
+**Input**: Owner decision of 27/10/2026, after declining bot-detection evasion: "OK chốt vậy đi"
+(settled), approving a spec that moves Threads and Instagram collection to the host browser of
+Spec 012, moves Threads to the official API once Meta approves keyword search, and retires the
+current Playwright session path with its evasion flags.
+
+## Outcome and audience
+
+A person following a watchlist (Spec 016) needs Threads and Instagram in each run, collected the
+same way the owner would look them up by hand, so the channels keep working without hiding
+automation from the platform. The observable proof is a G3 watchlist run whose Threads and
+Instagram outcomes come from the owner's own Chrome through the host-browser relay, with no
+author identity at rest, and whose period view says when the collection path changed.
+
+## Context: current state (observed 27/10/2026 on `main` at `8a816fb`)
+
+- The `threads` and `reels` channels collect through Playwright with session cookies captured by
+  `authenticate_threads` and `authenticate_instagram` (tier 1). Ignis gives each capture a fixed
+  30-day lifetime; both current sessions expire on 22/11/2026. G3 snapshots of 25 and 26/10 hold
+  data from both channels.
+- Eight Chromium launch sites pass `--disable-blink-features=AutomationControlled`, a flag that
+  hides automation from the page: `meta_browser_auth.py`, `tiktok_auth.py`,
+  `meta_browser_ingress.py` (two), `tiktok_plugin.py` (three) and `creative_center_plugin.py`.
+  The owner's decision of 26/10/2026 in `BACKLOG.md` rules out tools that evade bot detection;
+  on 27/10/2026 the owner chose the non-evading path.
+- Host-browser search (Spec 012) serves TikTok only: `prepare_host_browser_search` has no source
+  choice and runs the packaged extractor `tiktok-public-grid-v1`. The G3 routine collects TikTok
+  this way on the Finos Chrome profile from the run of 28/10/2026.
+- The Threads API tier exists in code (`authenticate_threads(auth_code=...)`). Without Meta's
+  approval of `threads_keyword_search`, keyword search returns only the account's own posts and
+  Ignis marks it `SELF_ONLY`. The owner's Threads MCP project (`fioenix/threads-mcp`, installed in
+  Codex) wraps the same official API and holds an unsubmitted App Review draft dated 14/10/2026,
+  which records that Advanced Access needs a verified business.
+- Instagram Graph API Hashtag Search takes hashtags only, allows 30 distinct hashtags per 7 days,
+  returns recent media for 24 hours, and needs a Business or Creator account linked to a Facebook
+  Page plus App Review.
+- Meta's Automated Data Collection Terms require Meta's express written permission before
+  "Automated Data Collection"; the Terms of Service (section 3.2.3) bar automated access without
+  prior permission. Both apply to the current Playwright path; whether they cover a script that
+  reads a page the owner opened in their own browser is the subject of gate G1.
+
+## Gates before planning
+
+- **G1 Terms**: the owner decides whether running a packaged extractor over Threads and Instagram
+  search pages opened in their own Chrome is acceptable under Meta's terms. If not, the host-browser
+  stories (1 and 2) stop: Threads waits for the API (story 4), Instagram has no channel, and story 3
+  still retires the Playwright path, which carries the same terms question plus evasion.
+- **G2 Surfaces**: one manual look in the Finos Chrome profile at a G3 keyword on Threads search and
+  on Instagram search records what each result card shows (post link, excerpt, counters, date,
+  author elements) and whether results appear while signed in. The extractors are designed from
+  that record, as `tiktok-public-grid-v1` was from the TikTok trial of 26/10/2026.
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Collect Threads search results through the host browser (Priority: P1)
+
+A watchlist run that allows `threads` prepares a host-browser batch for Threads. The owner's Chrome
+opens each prepared Threads search, the packaged extractor reads the visible result cards, and the
+relay stages the answer, as for TikTok.
+
+**Why this priority**: Threads already feeds G3 through the Playwright path that carries the
+evasion flag; this story gives it a replacement before that path is removed.
+
+**Independent Test**: run G3 with `threads` allowed and the Finos profile connected; the Threads
+outcome is measured from host-browser observations, each with source URL, query, capture time and
+path identity, and none with a handle, display name or profile link.
+
+**Acceptance Scenarios**:
+
+1. **Given** the Finos profile is connected and signed in to Threads, **When** the run prepares
+   Threads queries, **Then** each query receives its own measured outcome from the host path.
+2. **Given** the Finos profile is not connected, **When** Threads is requested, **Then** the outcome
+   is unavailable with the reason, and no other browser or path collects instead.
+3. **Given** a card whose excerpt names its author, **When** the answer is validated, **Then** the
+   name is removed before any receipt or stored observation, or the record is dropped.
+
+---
+
+### User Story 2 - Collect Instagram results through the host browser (Priority: P1)
+
+The same flow serves Instagram for a run that allows `reels`, on the Instagram surface chosen in
+clarification.
+
+**Why this priority**: the Instagram API cannot follow keyword topics (hashtags only, 30 per week),
+so the host browser is its only route that matches a watchlist.
+
+**Independent Test**: as story 1, for Instagram.
+
+**Acceptance Scenarios**:
+
+1. **Given** a connected, signed-in Finos profile, **When** Instagram queries run, **Then** each has
+   a measured outcome from host-browser observations without author identity.
+2. **Given** a counter shown only as rounded text (for example "1,2K"), **When** it is normalised,
+   **Then** it is stored as a rounded value or left uncounted, never as an exact figure.
+
+---
+
+### User Story 3 - Retire the Playwright session path and the evasion flags (Priority: P1)
+
+Once stories 1 and 2 are live, or once G1 stops them, the Playwright collection path for `threads`
+and `reels` and every `AutomationControlled` flag are removed. A channel with no permitted path
+reports itself unavailable.
+
+**Why this priority**: the flags contradict the owner's decision of 26/10/2026; this story makes
+the code match it.
+
+**Independent Test**: a search of `src/` finds no `AutomationControlled`; a run with no host
+browser and no approved API reports Threads and Instagram unavailable rather than collecting.
+
+**Acceptance Scenarios**:
+
+1. **Given** the change is merged, **When** the source is searched, **Then** no launch site passes a
+   flag that hides automation.
+2. **Given** stored tier-1 cookies still exist, **When** a run asks for Threads or Instagram, **Then**
+   they are not used for collection.
+
+---
+
+### User Story 4 - Threads moves to the official API when approved (Priority: P2)
+
+When an approved Threads keyword-search credential is available, Threads collects through the API,
+and the host-browser path for Threads is used only if the owner keeps it as a separate choice.
+
+**Why this priority**: the API is the path Meta permits; it depends on App Review and business
+verification, which are outside this feature's control.
+
+**Independent Test**: with an approved credential, a G3 run's Threads outcome comes from the API
+path; with only an unapproved credential, it stays `SELF_ONLY` and is not counted as evidence.
+
+**Acceptance Scenarios**:
+
+1. **Given** approval is granted, **When** G3 runs, **Then** Threads observations carry the API path
+   identity and the period view marks the path change.
+2. **Given** no approval, **When** G3 runs, **Then** Threads uses the host path (if G1 passed) or is
+   unavailable.
+
+---
+
+### Edge Cases
+
+- The Threads or Instagram page shows a login wall, a checkpoint or a challenge: the outcome is
+  degraded with the reason; the agent does not sign in, solve it or change a setting.
+- A result card is a repost, quote or carousel: one observation per public post URL, with the
+  queries that found it.
+- The page language or layout changes: the extractor fails closed as degraded, never as zero.
+- A period spans two collection paths (Playwright, host browser, API): the period view reports the
+  channel as not comparable for that pair, with a path-change reason.
+- The same post appears under two topic keywords: counted once per topic.
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+- **FR-001**: Threads and Instagram host-browser collection MUST keep every Spec 012 boundary:
+  explicit bounded request, the owner's connected Chrome, the loopback relay, no cookie export, no
+  debugging port, no unattended or fallback collection.
+- **FR-002**: Each surface MUST have one packaged, versioned extractor; the agent only opens the
+  prepared URL and runs it, with no clicking or typing on the page. [NEEDS CLARIFICATION: which
+  Instagram surface — keyword search results, which follow watchlist keywords directly, or hashtag
+  pages, which need each topic keyword mapped to a hashtag held in the taxonomy?]
+- **FR-003**: No observation, receipt or excerpt MAY carry a handle, display name, profile link or
+  platform attribution sentence; removal uses seeded vocabulary per locale and fails closed without
+  it (Constitution VII, Spec 012 FR-012).
+- **FR-004**: Observations MUST keep source URL, exact query, capture time, path identity, excerpt,
+  and counters with their units as shown; publication date only when the card shows it.
+- **FR-005**: Host-browser preparation MUST let the caller choose the source among TikTok, Threads
+  and Instagram through one optional parameter that defaults to TikTok; no other MCP signature
+  changes (owner gate on the MCP surface, AGENTS.md section 8).
+- **FR-006**: Host-browser and API observations MUST feed the existing `threads` and `reels`
+  channels, and the period view MUST mark a pair of periods collected on different paths as not
+  comparable with a path-change reason.
+- **FR-007**: The Playwright session collection for `threads` and `reels` and every
+  `--disable-blink-features=AutomationControlled` flag MUST be removed; no replacement flag or tool
+  that hides automation is added. [NEEDS CLARIFICATION: does this feature also remove the flag from
+  the TikTok Playwright plugin, TikTok login and Creative Center, or are those a separate change?]
+- **FR-008**: Threads MUST use the official API when an approved keyword-search credential exists;
+  `SELF_ONLY` results stay excluded from evidence. [NEEDS CLARIFICATION: obtain that credential
+  through Ignis's own Threads OAuth tier, or have the host agent call the owner's Threads MCP and
+  submit its results, so one Meta app and one App Review serve both projects?]
+- **FR-009**: Changing the G3 routine to use the new paths MUST wait for a separate owner approval.
+- **FR-010**: Behaviour MUST be identical on SQLite and PostgreSQL; any migration only seeds
+  vocabulary rows.
+- **FR-011**: A live run through the implemented Ignis-to-host path is required before the channel
+  is reported repaired; a manual lookup or a fixture test alone does not count (Spec 012 FR-010).
+
+### Key Entities
+
+- **Surface extractor**: a packaged, versioned script for one platform's search page that returns
+  public post records and counts only.
+- **Collection path identity**: which path produced an observation (Playwright session, host
+  browser with extractor version, or API); used to decide period comparability.
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: A live G3 run returns at least one Threads and one Instagram observation through the
+  host path when the Finos profile shows results for the same keyword.
+- **SC-002**: Zero handles, display names or profile links are found at rest after such a run (the
+  author-identity scan of Spec 015 passes).
+- **SC-003**: Zero occurrences of `AutomationControlled` remain in `src/` after story 3.
+- **SC-004**: Every wrong-page, login-wall, challenge and malformed-answer case is reported as
+  degraded or unavailable; none is reported as a measured zero.
+- **SC-005**: Every period pair that spans a path change is reported as not comparable.
+
+## Assumptions
+
+- The owner's Finos Chrome profile is signed in to Threads and Instagram, as it is to TikTok.
+- Rounded counters are acceptable as rounded values; exact figures are not inferred.
+- App Review and business verification for Threads are the owner's actions and may not succeed;
+  story 4 waits for them and does not block stories 1 to 3.
+- Session lifetime of tier-1 cookies (30 days, set by Ignis) stops mattering once story 3 lands.
