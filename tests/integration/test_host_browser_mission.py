@@ -1013,3 +1013,35 @@ async def test_prepared_optional_host_sibling_joins_one_run_without_internal_col
         assert attempts == []
     finally:
         service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["tiktok", "threads"])
+async def test_host_exact_publication_survives_pre_strip_self_exclusion(repository_case, tmp_path, monkeypatch, source):
+    from copy import deepcopy
+    from ignis.application.use_cases import host_browser_search as module
+    from ignis.domain.self_content import SelfIdentity
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    _, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("tiktok_video" if source == "tiktok" else source,))
+    executor._registry.register_self_identities([SelfIdentity(source, username="synthetic.header")])
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source=source)
+        payload = host_answer(request)
+        own = payload["answers"][0]["records"][0]
+        public = deepcopy(own)
+        public["source_url"] = public["source_url"].replace("synthetic.header", "synthetic.other").replace("Synthetic020Q0", "Synthetic027")
+        if source == "tiktok":
+            prefix, identifier = public["source_url"].rsplit("/", 1)
+            public["source_url"] = prefix + "/" + str(int(identifier) + 1)
+        payload["answers"][0]["records"].append(public)
+        service.stage(request["request_id"], payload)
+        await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        signals = await repository_case.repository.get_mission_signals(mission.id)
+        assert len(signals) == 1
+        assert signals[0].published_at.microsecond == 123456
+        assert signals[0].published_at != signals[0].captured_at
+        assert "synthetic.header" not in repr(signals) and "synthetic.other" not in repr(signals)
+    finally:
+        service.close()

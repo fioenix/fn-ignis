@@ -72,8 +72,15 @@ themselves prove persisted probe provenance. Empty probes need attestation becau
 Read-time legacy classification uses explicit metadata or matching persisted plan, records its
 basis, never writes history or infers from dates/cookies. Missing/conflicting path is unknown.
 Extend internal PeriodCoverage/SeenSnapshot and PeriodItem inputs before merge; per topic/channel/
-axis require one proven identical method each period plus existing coverage/cadence/judgment gates.
-Changed/mixed/unknown reasons suppress deltas; do not discard measurements or alter placement.
+axis apply the coordinator's delegated acceptance decision (28/10/2026), preserving the existing
+coverage/cadence/judgment gates: both sides wholly unknown retain legacy comparability and response
+shape, without a path reason; one proven identical identity on both sides is comparable; different
+proven identities refuse with `collection_path_changed`; one proven side versus one wholly unknown
+side refuses with `collection_path_unknown`. A side with two or more proven identities, or with a
+proven identity and an unknown observation/probe, refuses with `collection_path_mixed`, even if both
+periods contain the same mixture. These path reasons suppress deltas; do not discard measurements,
+alter placement or infer missing provenance. This supersedes the earlier blanket unknown refusal
+in research R6 and preserves unchanged Spec 016/018 legacy channels.
 
 ## Lifecycle
 

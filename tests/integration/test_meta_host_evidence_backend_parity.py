@@ -206,3 +206,12 @@ async def test_empty_host_probe_persists_descriptor_path_without_overwriting_que
     assert "collection_path" not in attestation
     assert not probe.measures_zero
     assert repository_case.counts()["observations"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("empty", [False, True])
+async def test_period_paths_round_trip_on_both_axes_and_leave_evidence_immutable(repository_case, tmp_path, monkeypatch, empty):
+    from test_watchlist_period_storage import listening, test_path_change_reaches_both_period_axes_without_rewriting_history
+    # Reuse the real repository/workspace fixture setup, not a mock period-store adapter.
+    bundle = await listening.__wrapped__(repository_case, tmp_path, monkeypatch)
+    await test_path_change_reaches_both_period_axes_without_rewriting_history(bundle, monkeypatch, empty)

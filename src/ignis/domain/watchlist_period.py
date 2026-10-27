@@ -8,9 +8,10 @@ indicator in its own unit (research R4, R11); nothing here adds values across ch
 from __future__ import annotations
 
 import re
+import json
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from ignis.domain.author_identity import scrub_handle_links
@@ -64,6 +65,7 @@ class PeriodCoverage:
     # Whether every observation this run collected on the channel carries a judgment. Unjudged
     # evidence is never counted (FR-010), so its day cannot stand as a measured one.
     judged: bool = True
+    path_metadata: Mapping[str, Any] | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,95 @@ class SeenSnapshot(PeriodCoverage):
     items: Tuple[PeriodItem, ...] = ()
 
 
+def collection_path_identity(metadata: Mapping[str, Any] | None) -> dict:
+    """Classify persisted measurement proof only; never infer a path from channel or dates."""
+    metadata = metadata or {}
+    path = metadata.get("collection_path")
+    legacy = metadata.get("source") == "threads_browser_session" and metadata.get("tier") == "TIER_1_BROWSER_SESSION"
+    basis = "observation_metadata" if metadata.get("collection_path_basis") == "observation_metadata" else "explicit_metadata"
+    if legacy and path and path != "playwright:threads_session":
+        return {"collection_path": None, "basis": "conflicting_metadata"}
+    if not path and legacy:
+        path, basis = "playwright:threads_session", "legacy_source_and_tier"
+    if not isinstance(path, str) or not re.fullmatch(r"[a-z_]+:[A-Za-z0-9_.:-]+", path):
+        return {"collection_path": None, "basis": "unknown"}
+    sampling = metadata.get("sampling", {})
+    if not isinstance(sampling, Mapping):
+        return {"collection_path": None, "basis": "conflicting_metadata"}
+    # Measurement semantics only. Random request/session ids, ports and capture clocks are not identity.
+    sampling = {k: sampling[k] for k in ("ordering", "limit", "result_limit", "window", "selection") if k in sampling}
+    if any(not isinstance(v, (str, int, float, bool, type(None))) for v in sampling.values()):
+        return {"collection_path": None, "basis": "conflicting_metadata"}
+    revision = metadata.get("connector_revision") or path.split(":", 1)[1]
+    if not isinstance(revision, str):
+        return {"collection_path": None, "basis": "conflicting_metadata"}
+    return {"collection_path": path, "connector_revision": revision, "sampling": sampling, "basis": basis}
+
+
+def _path_gate(paths: Mapping[str, list]) -> tuple[dict, list]:
+    """Preserve unknown legacy pairs; refuse a possible change or a mixed measurement path."""
+    sets, identities, reasons = {}, {}, []
+    for which, facts in paths.items():
+        descriptors = [collection_path_identity(fact) for fact in facts] or [collection_path_identity(None)]
+        unique = {json.dumps(d, sort_keys=True): d for d in descriptors}
+        sets[which] = [unique[k] for k in sorted(unique)]
+        identities[which] = {json.dumps({k: v for k, v in d.items() if k != "basis"}, sort_keys=True)
+                             for d in descriptors if d["collection_path"] is not None}
+        unknown = any(d["collection_path"] is None for d in descriptors)
+        if (len(identities[which]) > 1 or (identities[which] and unknown)) and "collection_path_mixed" not in reasons:
+            reasons.append("collection_path_mixed")
+    if identities["current"] and identities["previous"] and identities["current"] != identities["previous"]:
+        reasons.append("collection_path_changed")
+    if bool(identities["current"]) != bool(identities["previous"]):
+        reasons.append("collection_path_unknown")
+    # No proof on either side preserves the old response as well as the old comparison.
+    return (sets if any(identities.values()) else {}), reasons
+
+
+def _counter_views(paths):
+    """Keep displayed components apart from exact aggregates, including when a path gate refuses."""
+    return {which: [[{k: c.get(k) for k in ("kind", "unit", "raw_display", "value", "precision")}
+                      for c in fact.get("counters", ()) if isinstance(c, Mapping)]
+                    for fact in facts if fact and "counters" in fact] for which, facts in paths.items()}
+
+
+def _snapshot_entries(snapshot, queries, single_topic):
+    """One source-membership authority shared by measurements and the raw provenance gate."""
+    return [e for e in _merge(snapshot.items, dated_google=False)
+            if e.channel == snapshot.channel and _belongs(e, queries, single_topic)]
+
+
+def _snapshot_paths(snapshot, queries, single_topic):
+    selected = {(e.channel, e.source_id) for e in _snapshot_entries(snapshot, queries, single_topic)}
+    rows = [i for i in snapshot.items if i.relevant and (i.channel, i.source_id) in selected]
+    facts = [metadata for i in rows for _, _, metadata in i.observations]
+    if snapshot.path_metadata is not None:
+        facts.append(snapshot.path_metadata)
+    return facts or [None]
+
+
+def _created_paths(raw_items, placed, completing, channel, queries, single_topic, spans, window_days):
+    paths = {which: [c.path_metadata for c in completing if span.contains(local_date(c.completed_at))]
+             for which, span in spans.items()}
+    # Placement is source-wide, but every original qualified observation supplies its own path
+    # before latest-counter selection. Dedup must not hide two methods for the same post.
+    anchors = {(e.source_id, e.published_at if channel == "google" else None): (day, anchor)
+               for e, day, _, anchor in placed if e.channel == channel}
+    for item in raw_items:
+        if item.channel != channel or not item.relevant:
+            continue
+        key = (item.source_id, item.published_at if channel == "google" else None)
+        if key not in anchors:
+            continue
+        day, anchor = anchors[key]
+        for which, span in spans.items():
+            if span.contains(day):
+                paths[which].extend(metadata for observed, _, metadata in item.observations
+                                    if observed is not None and anchor <= observed <= anchor + timedelta(days=window_days))
+    sets, reasons = _path_gate(paths)
+    return sets, reasons, _counter_views(paths)
+
+
 def _number(value: Any) -> Optional[float]:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -120,6 +211,14 @@ def channel_values(channel: str, metric_value: Any, metadata: Mapping[str, Any])
     counted for that indicator.
     """
     metadata = metadata or {}
+    if "counters" in metadata:
+        # Structured host components supersede legacy copies. Share never aliases quotes.
+        required = {"likes", "replies", "reposts", "quotes"} if channel == "threads" else set()
+        components = metadata.get("counters") or []
+        exact = {c.get("kind"): _number(c.get("value")) for c in components
+                 if isinstance(c, Mapping) and c.get("precision") == "exact"}
+        return ({"interactions": sum(exact[k] for k in required)}
+                if required and required.issubset(exact) and all(exact[k] is not None for k in required) else {})
     values: Dict[str, float] = {}
     if channel == "google":
         interest = _number(metric_value)
@@ -204,7 +303,7 @@ def _belongs(entry: _Merged, queries: frozenset, single_topic: bool) -> bool:
     """The query that found the item decides, even after its topic left the watchlist. Without a
     recorded query, a one-topic watchlist holds the item; otherwise its text decides, word by word."""
     if entry.query_keywords:
-        return bool(entry.query_keywords & queries)
+        return bool(set(k.casefold() for k in entry.query_keywords) & queries)
     if single_topic:
         return True
     text = f"{entry.title} {entry.excerpt}".casefold()
@@ -352,6 +451,7 @@ def compare_periods(
                 "completes_at": period.completes_at.isoformat(),
                 "error": "Only complete periods can be compared; this one is still open."}
     coverage = list(coverage)
+    items = list(items)
     merged = _merge(items)
     channels = sorted({c.channel for c in coverage} | {e.channel for e in merged},
                       key=lambda c: (CHANNEL_ORDER.index(c) if c in CHANNEL_ORDER else len(CHANNEL_ORDER), c))
@@ -392,6 +492,13 @@ def compare_periods(
             reasons += [f"{which}_period_unjudged_days" for which in ("current", "previous") if unjudged[which]]
             if any(unjudged.values()):
                 cell["unjudged_days"] = {which: [d.isoformat() for d in found] for which, found in unjudged.items()}
+            path_sets, path_reasons, components = _created_paths(items, placed, completing, channel, queries, single_topic,
+                {"current": period, "previous": previous}, window_days)
+            if path_sets:
+                cell["collection_paths"] = path_sets
+            if any(components.values()):
+                cell["counter_components"] = components
+            reasons.extend(path_reasons)
             topic_items.extend(in_period["current"])
             if reasons:
                 cells.append({**cell, "status": "not_comparable", "reasons": reasons})
@@ -474,13 +581,21 @@ def compare_seen_periods(
                 reasons.append("seen_period_missing_snapshots")
             if any(not s.judged for found in held.values() for s in found):
                 reasons.append("seen_period_unjudged_snapshots")
+            path_facts = {which: [fact for s in found
+                for fact in _snapshot_paths(s, queries, len(topics) == 1)] for which, found in held.items()}
+            path_sets, path_reasons = _path_gate(path_facts)
+            components = _counter_views(path_facts)
+            if path_sets:
+                cell["collection_paths"] = path_sets
+            if any(components.values()):
+                cell["counter_components"] = components
+            reasons.extend(path_reasons)
             if reasons:
                 cells.append({**cell, "status": "not_comparable", "reasons": reasons})
                 continue
             # Keep one merged entry per source in each snapshot, using only its own qualified
             # observations and query bindings. Repeated appearances still count in each snapshot.
-            entries = {which: [(s, e) for s in found for e in _merge(s.items, dated_google=False)
-                               if e.channel == channel and _belongs(e, queries, len(topics) == 1)]
+            entries = {which: [(s, e) for s in found for e in _snapshot_entries(s, queries, len(topics) == 1)]
                        for which, found in held.items()}
             measurements = {which: _seen_values(entries[which], span, counts[which], first)
                             for which, span in spans.items()}

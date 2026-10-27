@@ -23,7 +23,7 @@ from ignis.domain.source_identity import identity_free_source_url
 from ignis.domain.watchlist import plan_in_effect
 from ignis.domain.watchlist_period import (
     COMPLETING_STATUSES, PeriodCoverage, PeriodItem, SeenSnapshot, TermsPolicy, compare_periods,
-    compare_seen_periods, period_listening_plans,
+    compare_seen_periods, period_listening_plans, collection_path_identity,
 )
 from ignis.infrastructure.security.pii_sanitizer import render_mention_tokens, sanitize_pii_text
 
@@ -56,6 +56,19 @@ def _utc(moment: Optional[datetime]) -> Optional[datetime]:
 
 def _platform(value: Any) -> str:
     return str(getattr(value, "value", value) or "")
+
+
+def _probe_path(outcome, signals):
+    """Empty probes need their own proof; populated legacy probes may use immutable observations."""
+    attestation = getattr(outcome, "scope_attestation", None) or {}
+    if "collection_path" in attestation:
+        return attestation
+    facts = [collection_path_identity(s.metadata) for s in signals if _platform(s.platform) == _platform(outcome.platform)]
+    if facts and all(f["collection_path"] is not None for f in facts):
+        identities = [{k: v for k, v in f.items() if k != "basis"} for f in facts]
+        if all(identity == identities[0] for identity in identities):
+            return {**identities[0], "collection_path_basis": "observation_metadata"}
+    return attestation
 
 
 class GetWatchlistPeriodSnapshotUseCase:
@@ -152,7 +165,8 @@ class GetWatchlistPeriodSnapshotUseCase:
             run_coverage = [
                 PeriodCoverage(channel=o.platform, status=_platform(o.status),
                                queried_keywords=tuple(o.queried_keywords), completed_at=_utc(o.completed_at),
-                               judged=_platform(o.platform) not in unjudged)
+                               judged=_platform(o.platform) not in unjudged,
+                               path_metadata=_probe_path(o, signals))
                 for o in outcomes
             ]
             if include_created:
@@ -182,7 +196,7 @@ class GetWatchlistPeriodSnapshotUseCase:
                 items.extend(run_items)
             seen_snapshots.extend(SeenSnapshot(
                 c.channel, c.status, c.queried_keywords, c.completed_at, c.judged,
-                tuple(item for item in run_items if item.channel == c.channel),
+                tuple(item for item in run_items if item.channel == c.channel), path_metadata=c.path_metadata,
             ) for c in run_coverage)
 
         items = [dataclasses.replace(item, first_seen=first_seen.get(item.source_id)) for item in items]

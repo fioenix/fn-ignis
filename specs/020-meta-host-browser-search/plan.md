@@ -126,8 +126,11 @@ The owner's words: "Duyệt OG-1, OG-3, OG-4, OG-5; OG-2 hoãn phần Threads MC
    for all members; reject duplicate sources, incomplete/stale groups before writes. Cancel/expiry
    of a member invalidates the group. No new MCP argument, implicit second run or terminal restart.
 6. Persist normalized path in observation metadata and probe attestation, including empty probes.
-   Period assembly propagates it before source merging; both axes refuse different, mixed or
-   unproven paths without changing placement, cadence or coverage rules.
+   Period assembly propagates it before source merging. Per the delegated coordinator decision
+   (28/10/2026), both axes preserve legacy comparison when both sides are wholly unknown and compare
+   identical proven identities. Different proven identities, proven-versus-unknown, or a mixture
+   of proven identities or proven/unknown within one side refuse with the respective path reason.
+   Do not change placement, cadence, coverage or the unknown-versus-unknown response shape.
 7. After host readiness proof, retire Threads internal collection; remove all eight flags. Keep
    shared Reels helpers flag-free. Reels blocked/unusable pages are unavailable with reason, never
    measured empty. Retain legacy public signatures with unavailable compatibility behavior.

@@ -211,3 +211,10 @@ async def test_setting_a_plan_for_an_unknown_watchlist_returns_not_found(tools):
     refused = await call('handle_set_watchlist_listening_plan', watchlist_id=str(uuid4()), goal='Track.',
                          period_kind='week', snapshots_per_period=3)
     assert refused['status'] == 'NOT_FOUND'
+
+
+async def test_period_path_reasons_do_not_add_public_snapshot_parameters():
+    tools = {tool.name: tool for tool in await mcp_server.mcp.list_tools()}
+    assert len(tools) == 53
+    assert set(tools["get_watchlist_period_snapshot"].parameters["properties"]) == {
+        "watchlist_id", "period_kind", "period_start"}

@@ -197,6 +197,11 @@ class QualityEvaluator:
                     signal_dt = datetime.fromisoformat(str(pub_str).replace("Z", "+00:00"))
                 except Exception:
                     signal_dt = None
+            if signal_dt is not None and str(s.metadata.get("collection_path", "")).startswith("host_browser:"):
+                captured = s.captured_at
+                if signal_dt.tzinfo is None or (captured is not None and signal_dt > captured):
+                    unmeasured_publication_count += 1
+                    continue
             if signal_dt is None:
                 # A host grid attests capture time, not publication time or a filtered window.
                 if s.metadata.get("publication_known") is False or str(s.metadata.get("collection_path", "")).startswith("host_browser:"):

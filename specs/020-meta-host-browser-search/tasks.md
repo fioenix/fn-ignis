@@ -245,34 +245,34 @@ listener mocked; caller/manifest/convention/DOM checks 113 passed. T022 dedicate
 passed, 7 PostgreSQL skipped (no injected DSN; coordinator verification pending). Native listener
 subset: 46 passed, 50 skipped, 55 sandbox socket-bind failures. These ticks record scoped
 implementation and the requested local runs, not PostgreSQL or real-transport acceptance. Exact
-commands, RED/GREEN evidence and limitations: `.handoff/spec020-verification.md`. T023 is not started.
+commands, RED/GREEN evidence and limitations: `.handoff/spec020-verification.md`. Subsequent period work is recorded below.
 
-- [ ] T023 [P] [US1] Write and run failing pure path/precision tests in new
+- [X] T023 [P] [US1] Write and run failing pure path/precision tests in new
   `tests/unit/test_collection_path_comparability.py` and existing `tests/unit/test_watchlist_period.py`,
   `tests/unit/test_watchlist_seen_axis.py`: changed/mixed/unknown/conflicting method, revision/sampling
   change, equal paths, all-empty probes, same post on several paths before merge, created counter-window
   paths, rounded/incomplete aggregates and unchanged coverage/cadence/judgment/other-channel behavior.
-- [ ] T024 [P] [US1] Write and run failing use-case/storage response tests in
+- [X] T024 [P] [US1] Write and run failing use-case/storage response tests in
   `tests/integration/test_watchlist_period_storage.py`, `tests/integration/test_watchlist_mcp.py` and
   the period subset of `tests/integration/test_meta_host_evidence_backend_parity.py`: both axes
   propagate observation/probe paths and reasons, explicitly proved legacy metadata versus unknown
   history, exact clocks, no historical writes, once-per-topic query lineage and unchanged snapshot tool
   parameters on both backends.
-- [ ] T025 [US1] Extend path-bearing internal period inputs and both-axis comparisons in
+- [X] T025 [US1] Extend path-bearing internal period inputs and both-axis comparisons in
   `src/ignis/domain/watchlist_period.py`; gate before source merge, require one proven identical method
   on each side, append changed/mixed/unknown reasons without comparison delta, preserve existing
   coverage/cadence/unjudged rules and raw/rounded counter semantics (makes T023 pass).
-- [ ] T026 [US1] Propagate immutable observation/probe path/revision/sampling and classification basis
+- [X] T026 [US1] Propagate immutable observation/probe path/revision/sampling and classification basis
   in `src/ignis/application/use_cases/watchlist_period.py`; read legacy proof conservatively, handle
   empty probes, never infer from dates/cookies or backfill history, and retain ingestion/publication
   placement (makes T024 pass).
-- [ ] T027 [US1] Add failing exact-publication/self-exclusion regression cases to
+- [X] T027 [US1] Add failing exact-publication/self-exclusion regression cases to
   `tests/unit/test_social_search_integrity.py` and `tests/integration/test_host_browser_mission.py`,
   then adjust `src/ignis/infrastructure/harness/quality_evaluator.py` and affected
   `src/ignis/domain/self_content.py` / `src/ignis/infrastructure/auth/self_identity.py` consumers only
   as needed so Threads datetime is known, capture is not publication and pre-strip self-content
   exclusion survives host ingestion; rerun both-source default parity.
-- [ ] T028 [US1] Prove the automated host-path checkpoint with
+- [X] T028 [US1] Prove the automated host-path checkpoint with
   `tests/unit/test_threads_host_answer_validation.py`, `tests/unit/test_host_browser_search.py`,
   `tests/unit/test_host_browser_relay.py`, `tests/integration/test_threads_host_dom_contract.py`,
   `tests/integration/test_host_browser_search_mcp.py`, `tests/integration/test_host_browser_mission.py`,
@@ -281,6 +281,29 @@ commands, RED/GREEN evidence and limitations: `.handoff/spec020-verification.md`
   unaffected outputs to `tests/fixtures/meta_host_browser_baseline/` and record evidence in
   `.handoff/spec020-verification.md` before starting T029. Missing local prerequisites are a checkpoint
   blocker, not a pass; PostgreSQL proof still must complete in T047.
+
+**T028 coordinator run (28/10/2026), outside the sandbox with a disposable PostgreSQL:** the
+listed checkpoint files plus `test_meta_host_evidence_backend_parity.py` and
+`test_watchlist_period_storage.py`: 338 passed, 6 skipped (all six are SQLite-only lifecycle and
+fault-injection cases by design); native relay listener included. Baselines: 9 MATCH. Broader
+period, host and contract consumers: 715 passed, 7 skipped.
+
+**T023–T028 local result (28/10/2026):** T023–T027 implemented. Final period/consumer run:
+225 passed, 48 PostgreSQL skipped. Equal-path baselines: 3 created snapshots pass, 9 synthetic JSON
+MATCH (frozen JSON unchanged). Host checkpoint with listener mocked: 206 passed, 84 PostgreSQL
+skipped, 1 native-page test deselected; native checkpoint: 187 passed, 84 skipped, 56 sandbox
+socket-bind failures. The final classification-label guard adds one passing period test afterward.
+T028 remains unchecked: these missing prerequisites block checkpoint acceptance, per its rule;
+coordinator must run new PostgreSQL cases and native relay outside this sandbox. No live proof or
+US2 development authorized by this local result; T029 is not started. Exact commands and RED/GREEN:
+`.handoff/spec020-verification.md`.
+
+**Coordinator policy correction (28/10/2026):** Wholly unknown paths on both sides retain
+legacy comparison and response shape; only known/unknown across sides or internally mixed paths
+refuse. Synthetic default provenance and legacy-baseline path stripping removed. Corrected period
+and consumer verification: 192 passed, 48 PostgreSQL skipped; T002 9 MATCH and frozen created baseline
+unchanged. This supersedes the earlier blanket unknown refusal. T028 remains unchecked; T029 has
+not started. See the correction receipt in `.handoff/spec020-verification.md`.
 
 **Checkpoint**: Source preparation → packaged DOM extraction → relay staging → unchanged submit →
 one canonical mission writer/run is proved by deterministic tests. Threads channel and both period

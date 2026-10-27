@@ -26,11 +26,11 @@ os.environ.update(DATABASE_URL="sqlite:///:memory:", IGNIS_ENV_ISOLATED="0",
                   IGNIS_ENV_FILE="", YOUTUBE_API_KEY="", IGNIS_ENCRYPTION_KEY="",
                   THREADS_APP_SECRET="", INSTAGRAM_APP_SECRET="")
 
-from ignis.application.use_cases import host_browser_search as host
-from ignis.domain import watchlist_period as periods
-from ignis.domain.listening_period import LISTENING_TZ, PeriodKind, period_of
-from ignis.domain.watchlist import ListeningPlan
-from ignis.interfaces.mcp import server
+from ignis.application.use_cases import host_browser_search as host  # noqa: E402
+from ignis.domain import watchlist_period as periods  # noqa: E402
+from ignis.domain.listening_period import LISTENING_TZ, PeriodKind, period_of  # noqa: E402
+from ignis.domain.watchlist import ListeningPlan  # noqa: E402
+from ignis.interfaces.mcp import server  # noqa: E402
 
 DIRECTORY = Path(__file__).resolve().parent
 CLOCK = datetime(2026, 10, 27, 12, tzinfo=timezone.utc)
@@ -92,9 +92,11 @@ async def outputs():
                                       [(created["at"](day, 21), 100, metadata)])
                 rows.append(row)
                 snapshots.append(periods.SeenSnapshot(channel, "HEALTHY", ("matcha latte",),
-                                                       created["at"](day, 22), True, (row,)))
+                                                       created["at"](day, 22), True, (row,), path_metadata={"collection_path": metadata["collection_path"]}))
         coverage = [c for channel in ("youtube", "tiktok") for c in
                     created["coverage"](channel, previous.days + period.days)]
+        from dataclasses import replace
+        coverage = [replace(c, path_metadata={"collection_path": "host_browser:tiktok-public-grid-v1" if c.channel == "tiktok" else "official_api:youtube"}) for c in coverage]
         created_output = periods.compare_periods(
             topics=[created["TOPIC"]], items=rows, coverage=coverage, period=period,
             now=datetime(2026, 11, 2, tzinfo=LISTENING_TZ), policy=created["POLICY"], versions={period.start: [1], previous.start: [1]})
@@ -105,6 +107,12 @@ async def outputs():
         assert created_output["status"] == "OK"
         assert all(c["status"] == "comparable" for c in created_output["topics"][0]["channels"])
         assert all(c["status"] == "comparable" for c in seen_output[0])
+        for cell in created_output["topics"][0]["channels"] + seen_output[0]:
+            # These fixtures explicitly prove equal paths. Strip only the genuinely additive
+            # descriptor, never status/reasons/indicators or unknown-history response fields.
+            paths = cell.pop("collection_paths")
+            assert all(paths.values()) and all(p["collection_path"] is not None
+                                               for side in paths.values() for p in side)
         result[f"{kind.value}-created.json"] = created_output
         result[f"{kind.value}-seen.json"] = seen_output
     return result
