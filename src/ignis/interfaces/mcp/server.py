@@ -3406,7 +3406,7 @@ async def handle_get_threads_trending_topics(geo: str = "VN", limit: int = 15) -
         ensure_ascii=False, indent=2)
 
 
-@mcp.tool(name="get_threads_trending_topics", description="Retained compatibility tool. Internal Threads trending collection is unavailable; no browser, cookie or OAuth fallback runs.")
+@mcp.tool(name="get_threads_trending_topics", description="Retained compatibility tool. Internal Threads trending collection is unavailable (HOST_BROWSER_REQUIRED); no browser, cookie or OAuth fallback runs.")
 async def get_threads_trending_topics(geo: str = "VN", limit: int = 15) -> str:
     return await handle_get_threads_trending_topics(geo=geo, limit=limit)
 
@@ -3419,7 +3419,7 @@ async def handle_get_threads_search_suggestions(keyword: str, geo: str = "VN", l
         ensure_ascii=False, indent=2)
 
 
-@mcp.tool(name="get_threads_search_suggestions", description="Retained compatibility tool. Internal Threads suggestions collection is unavailable; no browser, cookie or OAuth fallback runs.")
+@mcp.tool(name="get_threads_search_suggestions", description="Retained compatibility tool. Internal Threads suggestions collection is unavailable (HOST_BROWSER_REQUIRED); no browser, cookie or OAuth fallback runs.")
 async def get_threads_search_suggestions(keyword: str, geo: str = "VN", limit: int = 10) -> str:
     return await handle_get_threads_search_suggestions(keyword=keyword, geo=geo, limit=limit)
 

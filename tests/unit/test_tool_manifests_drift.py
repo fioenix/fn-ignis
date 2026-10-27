@@ -124,3 +124,17 @@ async def test_claim_ledger_tools_match_both_manifest_schemas():
             function = _manifest_function(manifest, name)
             assert function["parameters"] == tools[name].parameters
             assert function["description"] == tools[name].description
+
+
+@pytest.mark.asyncio
+async def test_host_source_contract_matches_each_manifest_and_frozen_submit_cancel():
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    baseline = json.loads(Path("tests/fixtures/meta_host_browser_baseline/submit-cancel-schemas.json").read_text())
+    prepare = tools["prepare_host_browser_search"].parameters
+    assert prepare["properties"]["source"] == {"default": "tiktok", "type": "string"}
+    assert "source" not in prepare.get("required", [])
+    for name, schema in baseline.items():
+        assert tools[name].parameters == schema
+    for manifest in ("hermes_manifest.json", ".hermes/tools.json"):
+        for name in (*baseline, "prepare_host_browser_search"):
+            assert _manifest_function(manifest, name)["parameters"] == tools[name].parameters

@@ -137,3 +137,14 @@ def test_mcp_instructions_resources_and_prompts_respect_the_claim_gate():
     assert "without changing" not in public_guidance[0]
     assert "before creating a mission or collecting" in public_guidance[3]
     assert "Do not compute, display, or interpret" in public_guidance[2]
+
+
+@pytest.mark.asyncio
+async def test_threads_compatibility_descriptions_do_not_offer_cookie_collection():
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    for name in ("get_threads_search_suggestions", "get_threads_trending_topics"):
+        description = tools[name].description
+        assert "HOST_BROWSER_REQUIRED" in description
+        assert "unavailable" in description.lower()
+    prepare = tools["prepare_host_browser_search"]
+    assert "threads" in prepare.description.lower() and "tiktok" in prepare.description.lower()

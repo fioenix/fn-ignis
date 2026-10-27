@@ -423,39 +423,39 @@ The generic path-comparison rules above do not require an API adapter to test me
 **Purpose**: Verify the accepted browser-only increment, package its resources and leave separate
 live-account authority visible. No tool-count change, release, version bump or routine activation.
 
-- [ ] T040 Write and run failing seed endpoint/resource packaging assertions for
+- [X] T040 Write and run failing seed endpoint/resource packaging assertions for
   `sql/036_threads_attribution.sql` and the new Threads JS/handoff in
   `tests/unit/test_sql_packaging.py`, `tests/unit/test_public_distribution_contract.py` and
   `tests/integration/test_compose_init.py`; verify fresh PostgreSQL migration chain and no
   evidence/schema transformation on repeated vocabulary seed, reusing the fixture chain from T006.
-- [ ] T041 Update the migration endpoint 035 → 036 in `tests/integration/test_compose_init.py`,
+- [X] T041 Update the migration endpoint 035 → 036 in `tests/integration/test_compose_init.py`,
   `tests/unit/test_sql_packaging.py` and migration-specific expectations in
   `tests/unit/test_public_distribution_contract.py`, consistent with `tests/integration/conftest.py`;
   preserve relation counts/RLS expectations because the migration adds no table. Documentation endpoint
   updates are T046 (T040).
-- [ ] T042 Verify and, only where needed, extend existing resource inclusion in `pyproject.toml` so
+- [X] T042 Verify and, only where needed, extend existing resource inclusion in `pyproject.toml` so
   built wheel/sdist ship `sql/036_threads_attribution.sql`,
   `src/ignis/infrastructure/connectors/host_browser/threads_search.js`,
   `src/ignis/infrastructure/connectors/host_browser/threads_handoff.js` and the relay template; use
   packaged resource reads, not source-path fallback (makes resource cases in T040 pass; no
   dependency/version/lock churn).
-- [ ] T043 Write and run failing optional-source schema/description drift cases in
+- [X] T043 Write and run failing optional-source schema/description drift cases in
   `tests/unit/test_tool_manifests_drift.py`, `tests/unit/test_public_mcp_contract.py` and affected
   `tests/integration/test_host_browser_search_mcp.py`: source defaults to TikTok, invalid source
   refuses, submit/cancel parameter sets unchanged, browser-only Threads descriptors, exact tool set
   still 53 and retained Threads descriptions no longer promise cookie collection; do not add count-bump
   tasks.
-- [ ] T044 Regenerate `hermes_manifest.json` and `.hermes/tools.json` with the prescribed
+- [X] T044 Regenerate `hermes_manifest.json` and `.hermes/tools.json` with the prescribed
   `scripts/sync_tool_manifests.py --write` using checkout source and an isolated synthetic
   configuration; inspect schema/description-only differences and rerun T043, then generator check mode.
   Do not modify count-only consumers such as `openclaw.json` or `AGENTS.md`/`CLAUDE.md`; no new tools.
-- [ ] T045 Write and run failing regional/public documentation and period-guide behavior assertions in
+- [X] T045 Write and run failing regional/public documentation and period-guide behavior assertions in
   `tests/unit/test_public_doc_conventions.py`, migration-related cases in
   `tests/unit/test_public_distribution_contract.py` and `tests/unit/test_ignis_listen_guidance.py`:
   optional source/default, host-only Threads, flag-free/unavailable Reels, counter precision, both-axis
   path-change reasons and upgrade endpoint 036; preserve FR-009 routine boundary and avoid requiring
   excluded agent-context edits.
-- [ ] T046 Update `README.md`, `README.vi.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE.vi.md`,
+- [X] T046 Update `README.md`, `README.vi.md`, `docs/USER_GUIDE.md`, `docs/USER_GUIDE.vi.md`,
   `src/ignis/interfaces/mcp/guides/ignis_listen.md` and validated command/outcome guidance in
   `specs/020-meta-host-browser-search/quickstart.md` to match accepted owner scope, signature and
   migration endpoint; document source/privacy/precision/path limitations and unchanged count 53, no API
@@ -472,7 +472,7 @@ live-account authority visible. No tool-count change, release, version bump or r
   changed/mixed/unknown/equal responses. Record actual DSN availability and outcomes in
   `.handoff/spec020-verification.md`; missing injected test DSN leaves parity pending, never read
   credentials or substitute a live store.
-- [ ] T048 Build wheel/sdist with existing locked tooling into `.handoff/spec020-dist/`, install the
+- [X] T048 Build wheel/sdist with existing locked tooling into `.handoff/spec020-dist/`, install the
   wheel without changing the shared venv into disposable `.handoff/spec020-wheel-venv/` using existing
   approved local dependencies, and run `scripts/wheel_mcp_smoke.py` with that environment's interpreter
   and no checkout PYTHONPATH. Use only newly generated synthetic configuration, no existing

@@ -957,7 +957,20 @@ for raw in sys.stdin:
             names[-1] = "execute_unassigned_follow_up"
         if mode == "duplicate-tool":
             names[-1] = names[0]
-        result = {"tools": [{"name": name, "inputSchema": {}} for name in names]}
+        schemas = {name: {"type": "object", "additionalProperties": False,
+                            "properties": {key: {"type": "string"} for key in
+                                           ("request_id", "host_task_ref", "session_ref")},
+                            "required": ["request_id", "host_task_ref", "session_ref"]}
+                   for name in ("submit_host_browser_search", "cancel_host_browser_search")}
+        schemas["prepare_host_browser_search"] = {"properties": {"source": {"type": "string", "default": "tiktok"}}}
+        if mode == "host-source-required":
+            schemas["prepare_host_browser_search"]["required"] = ["source"]
+        if mode == "host-source-wrong-default":
+            schemas["prepare_host_browser_search"]["properties"]["source"]["default"] = "threads"
+        for operation in ("submit", "cancel"):
+            if mode == f"host-{operation}-extra":
+                schemas[f"{operation}_host_browser_search"]["properties"]["source"] = {"type": "string"}
+        result = {"tools": [{"name": name, "inputSchema": schemas.get(name, {})} for name in names]}
     elif method == "resources/read":
         if mode == "no-guide":
             print(json.dumps({"jsonrpc": "2.0", "id": message["id"],
@@ -2309,3 +2322,10 @@ def test_all_mode_combines_every_observation_into_one_verdict(tmp_path, monkeypa
     assert json.loads(_read(output))["verdict"] == "RELEASED"
     assert seen["parity_tree"] == seen["checkout"] and seen["registry_tree"] == seen["checkout"]
     assert seen["provenance_digest"] == digest
+
+
+@pytest.mark.parametrize("mode", ["host-source-required", "host-source-wrong-default", "host-submit-extra", "host-cancel-extra"])
+def test_wheel_smoke_refuses_host_contract_drift_at_53_tools(tmp_path, mode):
+    module = _smoke()
+    with pytest.raises(module.SmokeFailure, match="host-browser schema"):
+        module.run_smoke(_fake(tmp_path, mode), response_timeout=10, exit_timeout=10)

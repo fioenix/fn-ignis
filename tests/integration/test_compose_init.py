@@ -465,3 +465,12 @@ def test_full_chain_oracle_matches_every_declared_table_and_uuid_default():
         "supabase_roles": "0", "builtin_uuid_defaults": str(len(columns)),
         "builtin_uuid_columns": ",".join(columns), "uuid_ossp_defaults": "0",
     })
+
+
+def test_threads_vocabulary_endpoint_keeps_the_existing_relation_inventory():
+    """036 adds words only; the fixture chain and table/RLS oracle must not gain a table."""
+    assert all_postgres_migrations()[-1] == NEWEST_MIGRATION == "036_threads_attribution.sql"
+    seed = _migration_sources()[-1]
+    assert not re.search(r"\b(CREATE|ALTER|DROP|UPDATE|DELETE)\b", seed, re.I)
+    assert "INSERT INTO market_lexicons" in seed
+    assert _declared_public_tables() == set(EXPECTED_PUBLIC_TABLES)

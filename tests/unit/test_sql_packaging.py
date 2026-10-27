@@ -193,3 +193,14 @@ def test_threads_seed_resolves_in_checkout_and_packaged_tactical_layout(tmp_path
             service.attribution_templates_for("threads")
     finally:
         service.close()
+
+
+@pytest.mark.parametrize("relative", [
+    "infrastructure/connectors/host_browser/threads_search.js",
+    "infrastructure/connectors/host_browser/threads_handoff.js",
+    "infrastructure/connectors/host_browser/tiktok_search.js",
+    "infrastructure/templates/html/host_browser_relay.html",
+])
+def test_host_resources_are_readable_through_the_package(relative):
+    from importlib.resources import files
+    assert files("ignis").joinpath(relative).read_text(encoding="utf-8").strip()

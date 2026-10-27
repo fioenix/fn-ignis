@@ -410,7 +410,7 @@
     "type": "function",
     "function": {
       "name": "get_threads_trending_topics",
-      "description": "Retained compatibility tool. Internal Threads trending collection is unavailable; no browser, cookie or OAuth fallback runs.",
+      "description": "Retained compatibility tool. Internal Threads trending collection is unavailable (HOST_BROWSER_REQUIRED); no browser, cookie or OAuth fallback runs.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -431,7 +431,7 @@
     "type": "function",
     "function": {
       "name": "get_threads_search_suggestions",
-      "description": "Retained compatibility tool. Internal Threads suggestions collection is unavailable; no browser, cookie or OAuth fallback runs.",
+      "description": "Retained compatibility tool. Internal Threads suggestions collection is unavailable (HOST_BROWSER_REQUIRED); no browser, cookie or OAuth fallback runs.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
