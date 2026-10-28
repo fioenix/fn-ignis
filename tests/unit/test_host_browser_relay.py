@@ -302,3 +302,25 @@ console.log(JSON.stringify({result,lost,request:posted.value.request_id,origin:p
     assert value["result"] == {"posted": True, "status": "HEALTHY", "records": 1}
     assert value["lost"]["posted"] is False
     assert value["request"] == "request"
+
+
+def test_manual_threads_unsupported_locale_stages_through_the_real_form():
+    from ignis.application.use_cases.host_browser_search import HostBrowserSearchService
+    from tests.fixtures.meta_host_browser_answers import host_answer
+
+    service = HostBrowserSearchService()
+    try:
+        request = service.prepare(host_task_ref="task", session_ref="session", queries=["synthetic query"],
+                                  result_limit=3, lifetime_seconds=60, authorized=True, source="threads")
+        relay = service._tickets[request["request_id"]]["relay"]
+        payload = host_answer(request, degraded=True)
+        payload["answers"][0]["locale"] = "unsupported"
+        status, body, _ = post(relay, payload)
+        assert status == 200 and b"STAGED" in body
+        assert relay.wait_closed(2)
+        receipt = service.submit(request["request_id"], "task", "session")
+        assert receipt["observations"] == []
+        assert receipt["outcomes"][0]["status"] == "DEGRADED"
+        assert "English only" in receipt["outcomes"][0]["note"]
+    finally:
+        service.close()

@@ -272,3 +272,67 @@ def test_threads_missing_content_reference_is_explicit_context(threads_service):
     receipt = threads_service.submit(request["request_id"], "task", "session")
     assert receipt["observations"][0]["source_url"] is None
     assert receipt["observations"][0]["source_verifiable"] is False
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+def test_unsupported_threads_locale_is_recorded_as_degraded(threads_service, mixed):
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    request = threads_request(threads_service, queries=["synthetic query", "falsifier"] if mixed else ["synthetic query"])
+    payload = host_answer(request)
+    payload["answers"][0].update(locale="unsupported", status="DEGRADED", search_verified=False, records=[])
+    threads_service.stage(request["request_id"], payload)
+    receipt = threads_service.submit(request["request_id"], "task", "session")
+    assert receipt["status"] == "ACCEPTED"
+    outcome = receipt["outcomes"][0]
+    assert outcome["status"] == "DEGRADED" and outcome["signals_collected"] == 0
+    assert outcome["search_verified"] is False
+    assert "page locale is unsupported" in outcome["note"].lower()
+    assert "English only" in outcome["note"]
+    assert outcome["collection_path"] == "host_browser:threads-search-top-v1"
+    assert len(receipt["observations"]) == int(mixed)
+    if mixed:
+        assert receipt["outcomes"][1]["status"] == "HEALTHY"
+        assert receipt["outcomes"][1]["note"] == "Bounded visible Top sample; rounded and unknown counters retained"
+    assert threads_service.submit(request["request_id"], "task", "session") == receipt
+
+
+@pytest.mark.parametrize("changes", [
+    {"status": "HEALTHY"}, {"status": "EMPTY_NO_DATA", "empty_state_visible": True},
+    {"search_verified": True}, {"records": [record_data()]},
+    {"status": "HEALTHY", "search_verified": True, "records": [record_data()]},
+    {"search_verified": True, "records": [record_data()]},
+    {"locale": "vi"}, {"locale": "en-US"}, {"locale": ""}, {"locale": None},
+])
+def test_unsupported_threads_locale_cannot_claim_measurement(threads_service, changes):
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    request = threads_request(threads_service)
+    payload = host_answer(request, degraded=True)
+    payload["answers"][0].update(locale="unsupported")
+    payload["answers"][0].update(changes)
+    with pytest.raises(ValueError):
+        threads_service.stage(request["request_id"], payload)
+    with pytest.raises(ValueError):
+        threads_service.submit(request["request_id"], "task", "session")
+
+
+@pytest.mark.parametrize("source", ["threads", "tiktok"])
+@pytest.mark.parametrize("status", ["HEALTHY", "DEGRADED", "EMPTY_NO_DATA"])
+def test_english_threads_and_legacy_tiktok_outcomes_keep_their_contract(threads_service, source, status):
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    request = threads_request(threads_service, source=source)
+    payload = host_answer(request, empty=status == "EMPTY_NO_DATA", degraded=status == "DEGRADED")
+    if source == "threads" and status == "EMPTY_NO_DATA":
+        with pytest.raises(ValueError):
+            threads_service.stage(request["request_id"], payload)
+        return
+    threads_service.stage(request["request_id"], payload)
+    receipt = threads_service.submit(request["request_id"], "task", "session")
+    outcome = receipt["outcomes"][0]
+    assert outcome["status"] == status
+    assert outcome["signals_collected"] == (1 if status == "HEALTHY" else 0)
+    assert len(receipt["observations"]) == (1 if status == "HEALTHY" else 0)
+    assert outcome["note"] == ("Bounded visible Top sample; rounded and unknown counters retained"
+                               if source == "threads" else
+                               "Bounded visible public video grid; window and counters unmeasured")
+    if source == "tiktok":
+        assert "source" not in receipt and "collection_path" not in outcome

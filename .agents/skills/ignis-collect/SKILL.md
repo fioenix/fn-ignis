@@ -59,9 +59,12 @@ evaluate `tab_script` once in the relay-opened source tab, then read its status 
 The packaged script posts records directly to the relay; the agent only moves between prepared URL,
 extractor and relay. Source-tab conduct is read-only: wait for load and run that script only;
 no typing, clicking, scrolling, signing in, consenting or challenge solving.
-If automatic handoff fails, the manual Stage-answer path transfers the packaged extractor's
-retained object directly into the relay's Search answer JSON field and clicks Stage answer;
-never reconstruct, transcribe or repair model-built records. Missing host capabilities still stop collection.
+If automatic handoff fails, manual Stage-answer requires the full envelope: `source` (Threads only,
+`"threads"`), `request_id`, `host_task_ref`, `session_ref`, `extractor_version` from prepare, and
+`answers`: one answer per approved query in prepare order, each the packaged extractor's retained object.
+Transfer that envelope directly into Search answer JSON and click Stage answer; never reconstruct, transcribe or repair
+model-built records. A rejected payload closes the relay: prepare a new ticket before staging again.
+Missing host capabilities still stop collection.
 Call `submit_host_browser_search` with IDs only after all queries are staged; read back observations/outcomes
 or canonical mission run/frame. Failed or uncertain ingestion requires journal/frame readback.
 

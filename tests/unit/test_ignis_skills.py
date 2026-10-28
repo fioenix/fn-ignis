@@ -128,3 +128,14 @@ def test_routine_distinguishes_threads_host_search_from_saved_sign_in():
     assert "`threads` collects only through host-browser search" in routine
     assert "host-browser search section of the `ignis-collect` skill" in routine
     assert "`threads`, `reels` and `tiktok_video_grid` need a saved sign-in" not in routine
+
+
+def test_manual_stage_requires_the_complete_envelope_and_reprepare_after_rejection():
+    section = _host_browser_section()
+    for rule in ("full envelope", "`source`", "Threads only", "`request_id`", "`host_task_ref`",
+                 "`session_ref`", "`extractor_version`", "`answers`", "one answer per approved query",
+                 "prepare order", "extractor's retained object", "never reconstruct, transcribe or repair",
+                 "rejected payload closes the relay", "prepare a new ticket"):
+        assert rule in section, rule
+    raw = COLLECT.read_text(encoding="utf-8").split("## Opt-in host-browser search\n", 1)[1]
+    assert len(raw.splitlines()) <= 50

@@ -214,3 +214,58 @@ async def test_period_paths_round_trip_on_both_axes_and_leave_evidence_immutable
     # Reuse the real repository/workspace fixture setup, not a mock period-store adapter.
     bundle = await listening.__wrapped__(repository_case, tmp_path, monkeypatch)
     await test_path_change_reaches_both_period_axes_without_rewriting_history(bundle, monkeypatch, empty)
+
+
+@pytest.mark.asyncio
+async def test_unsupported_locale_reaches_mission_channel_and_both_period_axes(repository_case, tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+    from uuid import UUID
+    from ignis.application.use_cases import host_browser_search as module
+    from ignis.application.use_cases.watchlists import SaveWatchlistUseCase
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+    from ignis.domain.listening_period import LISTENING_TZ
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from test_host_browser_mission import assignment
+    from test_watchlist_period_storage import save_plan_at
+
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    repo = repository_case.repository
+    store, workspace, mission, executor = await assignment(repo, tmp_path, required=("threads",))
+    saved = await SaveWatchlistUseCase(repo, store).execute(workspace.workspace_id, "Locale coverage", {
+        "topics": [{"name": "Office bags", "keywords": ["túi đi làm"]}]})
+    target = UUID(saved["watchlist_id"])
+    await repo.record_watchlist_run(mission.id, target, 1)
+    today = datetime.now(LISTENING_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+    await save_plan_at(repo, target, today - timedelta(days=1), 1, monkeypatch, kind="day")
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+        payload = host_answer(request, degraded=True)
+        for answer in payload["answers"]:
+            answer["locale"] = "unsupported"
+        service.stage(request["request_id"], payload)
+        receipt = await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        assert receipt["status"] == "ACCEPTED"
+        assert repository_case.counts()["observations"] == 0
+        assert await repo.get_mission_signals(mission.id) == []
+        probe = (await store.get_latest_completed_probe_outcomes(mission.id))[0]
+        assert probe.status.value == "DEGRADED" and probe.signals_collected == 0
+        assert not probe.measures_zero
+        query_outcome = probe.scope_attestation["query_outcomes"][0]
+        assert query_outcome["status"] == "DEGRADED"
+        assert "page locale is unsupported" in query_outcome["note"].lower()
+        assert "English only" in query_outcome["note"]
+        channel = receipt["mission"]["channel_outcomes"][0]
+        assert channel["status"] == "DEGRADED" and channel["signals_collected"] == 0
+        assert channel["scope_attestation"]["query_outcomes"][0] == query_outcome
+        snapshot = await GetWatchlistPeriodSnapshotUseCase(
+            repo, store, lambda: today + timedelta(days=1)).execute(target, "day", today.date().isoformat())
+        for axis in ("channels", "seen"):
+            cell = next(c for c in snapshot["topics"][0][axis] if c["channel"] == "threads")
+            assert cell["status"] == "not_comparable"
+            assert "indicators" not in cell
+        seen = next(c for c in snapshot["topics"][0]["seen"] if c["channel"] == "threads")
+        assert seen["snapshots"]["current"] == 0
+        assert (await store.get_latest_completed_probe_outcomes(mission.id))[0] == probe
+    finally:
+        service.close()

@@ -75,8 +75,11 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
         if (page.scheme != "https" or page.netloc != origin or page.path != "/search" or page.fragment
                 or parse_qs(page.query, keep_blank_values=True) != {"q": [query.query]} or item.query != query.query):
             raise ValueError("Search page does not match the approved query")
-        if request.source == "threads" and (item.locale != "en" or item.status == "EMPTY_NO_DATA"):
-            raise ValueError("Unsupported Threads locale or unproved empty state")
+        if request.source == "threads":
+            if item.locale not in {"en", "unsupported"} or item.status == "EMPTY_NO_DATA":
+                raise ValueError("Unsupported Threads locale or unproved empty state")
+            if item.locale == "unsupported" and (item.status != "DEGRADED" or item.records or item.search_verified):
+                raise ValueError("Unsupported Threads locale cannot provide verified observations")
         if not request.issued_at <= item.captured_at <= min(now, request.expires_at):
             raise ValueError("Capture is outside the task lifetime")
         if len(item.records) > query.result_limit:
@@ -121,7 +124,9 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
                        queried_window=None, search_verified=item.search_verified,
                        note="Bounded visible public video grid; window and counters unmeasured")
         if request.source == "threads":
-            outcome.update(**path, note="Bounded visible Top sample; rounded and unknown counters retained")
+            outcome.update(**path, note=("Threads page locale is unsupported (English only); no observations collected"
+                                         if item.locale == "unsupported" else
+                                         "Bounded visible Top sample; rounded and unknown counters retained"))
         outcomes.append(outcome)
     receipt = dict(status="ACCEPTED", mode=request.mode, request_id=request.request_id,
                    observations=observations, outcomes=outcomes)

@@ -558,6 +558,19 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   routine prompts and schedules (FR-009); no runtime or live-session work. Ticked after
   coordinator integration and verification (63 passed).
 
+- [X] T054 Fix the two live-run defects, owner-approved 28/10/2026; evidence:
+  `.handoff/spec020-live-run-20261028.md`. Test-first, accept only Threads `locale=unsupported`
+  with `DEGRADED`, unverified search and no records; record the English-only locale reason and
+  zero observations. Keep invalid locale/measurement claims rejected, English and TikTok parity;
+  trace tactical submit, mission ingestion, channel outcome and both period axes. Correct the
+  ignis-collect manual Stage-answer guidance to require the full source-bound envelope, all
+  approved queries in prepare order, unchanged extractor output and a new ticket after rejection.
+  Deliver the full skill replacement in `.handoff/spec020-skill/ignis-collect/SKILL.md` and add
+  assertions in `tests/unit/test_ignis_skills.py`; installed-skill RED remains until coordinator copy.
+  Preserve handoff transport, relay origin checks and `tab_script`; Threads opener is owner-pending.
+  Run targeted tests, changed-Python ruff and `git diff --check`; no commit or live session.
+  Coordinator copied the skill and verified 374 passed, 6 SQLite-only skips, PostgreSQL parity included.
+
 ## Dependencies and execution order
 
 ```text
