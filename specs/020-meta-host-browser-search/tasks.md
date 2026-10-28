@@ -546,6 +546,18 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
 
 ---
 
+## Owner-approved follow-up: host-browser skill guidance (28/10/2026)
+
+- [X] T053 Update host-neutral TikTok/Threads search guidance in
+  `.agents/skills/ignis-collect/SKILL.md` and correct only the source-readiness bullet in
+  `.agents/skills/ignis-routine/SKILL.md` and its packaged source
+  `src/ignis/interfaces/mcp/guides/ignis_routine.md` (kept byte-identical), owner-approved 28/10/2026. This lifts the earlier
+  agent-context skip for exactly those two files. Deliver full replacements under
+  `.handoff/spec020-skill/` for coordinator copy; add test-first guidance assertions and verify
+  the targeted skill/convention/packaging consumers. Preserve frontmatter, unrelated sections,
+  routine prompts and schedules (FR-009); no runtime or live-session work. Ticked after
+  coordinator integration and verification (63 passed).
+
 ## Dependencies and execution order
 
 ```text

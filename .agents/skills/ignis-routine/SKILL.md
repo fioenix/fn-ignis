@@ -48,8 +48,9 @@ routine; the person sees, pauses and removes it in the host.
    - `youtube` reads its key from the workspace's own Ignis configuration, `.fnignis/.env` in the
      repository folder, not from the server's. Check that the file sets the YouTube key by looking
      for the variable name only; never print a value.
-   - `threads`, `reels` and `tiktok_video_grid` need a saved sign-in: check
-     `get_platform_auth_status`.
+   - `reels` and `tiktok_video_grid` need a saved sign-in: check `get_platform_auth_status`.
+     `threads` collects only through host-browser search; follow the host-browser search
+     section of the `ignis-collect` skill.
    - Only a channel that searches keywords belongs in a routine. `tiktok_creative_center` has no
      keyword search, and `google` measures no keyword, so it would report `DEGRADED` every day.
    - If that configuration file changes while a session is open, the session's Ignis server answers
