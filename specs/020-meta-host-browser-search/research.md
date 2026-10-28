@@ -208,3 +208,37 @@ explicit runtime gates, not unanswered product Clarifications or claims that the
   present as changes. Original spec/G2, source, tests, configuration and context files are unchanged.
 - No feature tests, PostgreSQL, installed wheel, actual relay transport, API grant or live-run proof.
   No full suite, tasks generation, implementation, commit, routine update or agent-context update.
+
+
+## R11. Threads same-tab encrypted fragment (owner decision, 28/10/2026)
+
+- Live facts supplied by the owner/coordinator (not repeated in this implementation): signed-in
+  Chrome `threads.com/search` sends `Cross-Origin-Opener-Policy: same-origin-allow-popups` and a
+  relay-opened Threads tab has `window.opener === null`. Scripted `window.open` returns null
+  without a user gesture. Scripted `location.replace` to a loopback URL with a 20,000-character
+  fragment preserves that fragment; BroadcastChannel exists on the receiver origin. TikTok's
+  opener handoff staged and accepted 10 records and remains unchanged.
+- Decision: amend the opener-loss prohibition for Threads only. Encrypt `{kind, request_id, answer}`
+  with AES-GCM using a random 256-bit ticket key and fresh 96-bit IV, base64url encode
+  `iv||ciphertext`, then navigate the same tab to the exact relay receiver. A 1,000,000-character
+  fragment bound is checked before navigation; the 100 ms timer allows status/counts to return.
+  The live probe established 20,000 characters only; the larger configured ceiling needs browser
+  acceptance testing and is not a claim that all browsers accept a URL of that size.
+- Privacy: transient Threads source URLs contain author handles before server validation. Plaintext
+  history fragments would violate the intended at-rest boundary. URLs/history therefore carry
+  ciphertext only; key material lives in `tab_script` and main relay data, never in the receiver,
+  URL, log or another MCP response field. Task-end tab cleanup remains mandatory; browser memory
+  and supported host tool-value retention are outside server erasure guarantees.
+- Receiver: Threads-only exact GET `<token path>receive`, static nonce-CSP, no external resources,
+  no-store/no-referrer. Read and immediately clear the hash before broadcasting the raw fragment
+  on `ignis-host-answer:<request_id>`; no decryption or record rendering. The main relay decrypts,
+  validates the binding/limits and first answer, and stages the unchanged complete envelope once.
+  Tampered, malformed, wrong-binding, duplicate and late messages cannot change accepted state.
+- Rejected alternatives: popup (observed blocked); manual Stage-answer as the default (requires
+  full-envelope value transfer, brittle and not automatic); CORS/fetch to loopback (widens the
+  network trust boundary); window.name (persists plaintext across navigation and browser behavior
+  is not an established transport). Plaintext fragments are rejected for history privacy.
+- Impact: no dependencies, signatures, database changes or collection/extractor behavior changes.
+  Validator, staging/rejection/lifetime/shutdown and TikTok opener transport remain authoritative.
+  Deterministic tests are offline evidence; live Chrome, actual navigation limits and end-to-end
+  staging remain coordinator checks. This decision does not complete T051 or T052.

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Ignis — Answer receiver</title></head>
+<body>
+<p>Answer sent to the relay; close this tab</p>
+<script nonce="{{ nonce }}">
+(() => {
+  const fragment = location.hash.slice(1);
+  history.replaceState(null, '', location.pathname);
+  const channel = new BroadcastChannel({{ channel | safe }});
+  channel.postMessage(fragment);
+  channel.close();
+})();
+</script>
+</body>
+</html>

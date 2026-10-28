@@ -36,11 +36,33 @@ The initial version supports visible sample, not search exhaustion. No HTML/tran
 
 ## Handoff and outcomes
 
-Packaged handoff sends directly to exact relay opener origin; host sees status/counts only. Relay
-accepts only https://www.threads.com, exact opened window/query/request and current limits/lifetime.
-Threads tickets do not accept TikTok messages, and TikTok's default security policy remains.
-Preserve nonce CSP/query escaping, Host/Origin, no CORS and existing same-origin form. Opener loss
-is degraded, never permission for alternate transport.
+Owner amendment, **28/10/2026 (T055)**: opener loss no longer blocks the Threads handoff.
+The Threads tab navigates the **same tab** to the ticket's exact loopback `receive` page with an
+**encrypted** fragment. TikTok retains its opener postMessage path unchanged. FR-013 remains:
+the host sees only `{posted, status, records}` or `{posted: false, reason}`, never record content.
+
+Prepare creates a random 256-bit AES-GCM key per Threads ticket, embedded in `tab_script` and main
+relay data only. Never include it in URLs, logs, other MCP response fields or the receiver page.
+After exact page/query checks and packaged extraction, encrypt message JSON
+`{kind: "ignis-host-answer", request_id, answer}` with a fresh 96-bit IV and base64url encode
+`iv||ciphertext` (including the GCM tag). Refuse fragments exceeding **1,000,000 characters**, any
+failed check or encryption error without navigation. Otherwise schedule `location.replace` after
+100 ms to `<relay URL>receive#<payload>` and return status/counts. No opener requirement for Threads.
+
+Only Threads tickets serve GET at the exact token-bound receiver path. The static nonce-CSP page
+uses `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and no external resources. It reads
+and immediately clears the hash through `history.replaceState`, then posts the raw fragment to
+BroadcastChannel `ignis-host-answer:<request_id>`. It has no key or decryption and shows only
+"Answer sent to the relay; close this tab". Close this task-created tab in host cleanup.
+All other methods/paths and every TikTok receiver request retain today's behavior.
+
+The main Threads relay listens on that channel, decrypts, checks kind, request id, query id/text,
+record limit, one answer per query and nothing after submission. Ignore failed decryption/checks
+without state change. Reuse the answers map, status line and `requestSubmit` of the full envelope.
+Preserve nonce CSP/query escaping, Host/Origin, no CORS, server validation, single-use staging,
+rejection closure, lifetime and shutdown. No CORS/fetch, popup, window.name or default manual
+transport is authorized by this amendment. History contains ciphertext only; tab cleanup bounds
+transient key retention. The configured size ceiling still requires live browser verification.
 
 | Surface state | Outcome |
 |---|---|

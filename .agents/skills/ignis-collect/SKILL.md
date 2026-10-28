@@ -56,10 +56,10 @@ stage both before submitting either, and compose one mission run. Preparation ho
 Open the returned loopback relay in the confirmed browser. For each query, check
 cancellation/expiry and owner interruption, click "Open search" in the relay, wait for results to load,
 evaluate `tab_script` once in the relay-opened source tab, then read its status and counts.
-The packaged script posts records directly to the relay; the agent only moves between prepared URL,
-extractor and relay. Source-tab conduct is read-only: wait for load and run that script only;
+Threads encrypts the answer and navigates the same tab to a relay receiver page; close it as a task-created tab.
+TikTok posts to its relay opener. The host sees status and counts only. Source-tab conduct is read-only:
 no typing, clicking, scrolling, signing in, consenting or challenge solving.
-If automatic handoff fails, manual Stage-answer requires the full envelope: `source` (Threads only,
+If automatic handoff fails, stop and report; manual Stage-answer requires the full envelope: `source` (Threads only,
 `"threads"`), `request_id`, `host_task_ref`, `session_ref`, `extractor_version` from prepare, and
 `answers`: one answer per approved query in prepare order, each the packaged extractor's retained object.
 Transfer that envelope directly into Search answer JSON and click Stage answer; never reconstruct, transcribe or repair

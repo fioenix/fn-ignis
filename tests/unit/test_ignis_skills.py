@@ -139,3 +139,13 @@ def test_manual_stage_requires_the_complete_envelope_and_reprepare_after_rejecti
         assert rule in section, rule
     raw = COLLECT.read_text(encoding="utf-8").split("## Opt-in host-browser search\n", 1)[1]
     assert len(raw.splitlines()) <= 50
+
+
+
+def test_t055_replacement_closes_the_threads_same_tab_receiver():
+    replacement = ROOT / ".handoff/spec020-skill/ignis-collect/SKILL.md"
+    text = replacement.read_text(encoding="utf-8") if replacement.exists() else COLLECT.read_text(encoding="utf-8")
+    section = " ".join(text.split("## Opt-in host-browser search\n", 1)[1].split())
+    for rule in ("Threads", "same tab", "relay receiver page", "task-created tab", "status and counts"):
+        assert rule in section, rule
+    assert len(text.split("## Opt-in host-browser search\n", 1)[1].splitlines()) <= 50

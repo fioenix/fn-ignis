@@ -571,6 +571,24 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   Run targeted tests, changed-Python ruff and `git diff --check`; no commit or live session.
   Coordinator copied the skill and verified 374 passed, 6 SQLite-only skips, PostgreSQL parity included.
 
+- [X] T055 Implement Threads-only encrypted same-tab handoff, owner-approved 28/10/2026.
+  Amend `plan.md`, `research.md` and `contracts/threads-search.md` with the live facts and decision.
+  Test first: per-ticket AES-GCM key and fresh IV, bounded encrypted fragment, exact GET receiver,
+  immediate hash clearing, BroadcastChannel decryption/bindings/limits/first-answer/submission
+  guards; no key in URLs, receiver or other prepare fields. Cover one/two queries, tampering,
+  wrong request/query, oversize refusal, TikTok absence/parity and T054 locales. Reuse lifecycle
+  and full-envelope form. Deliver the full skill replacement under `.handoff/spec020-skill/`,
+  about 50 host-browser lines, with matching `test_ignis_skills.py` assertion; coordinator copies
+  the installed skill and runs live Chrome. Run targeted consumers, changed-Python ruff and
+  `git diff --check`. No commit, credentials, live session or routine work.
+  Offline delivery: 152 focused passes; targeted consumers 242 passed, 56 socket-bind failures,
+  87 PostgreSQL-DSN skips. Ruff/diff checks passed. Keep unchecked pending coordinator integration
+  and environment/browser proof; exact blocked names and evidence: `.handoff/spec020-t055-20261028.md`.
+  Coordinator integration 28/10/2026: 384 passed, 6 SQLite-only skips with real loopback and
+  PostgreSQL. Live Chrome (Fioenix profile, Vietnamese UI): two Threads queries handed off through
+  the encrypted receiver without opener, relay STAGED, submit ACCEPTED with two DEGRADED
+  unsupported-locale outcomes and zero observations. English card parsing remains live-unverified.
+
 ## Dependencies and execution order
 
 ```text

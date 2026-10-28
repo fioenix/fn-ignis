@@ -1,5 +1,6 @@
 """One-task loopback form transport without cookies, CORS or persistent access."""
 
+import base64
 import json
 import math
 import secrets
@@ -33,6 +34,8 @@ class LoopbackRelay:
         if self._source not in {"tiktok", "threads"}:
             raise ValueError("Unsupported host source")
         self._request_id = request.get("request_id")
+        self._fragment_key = (base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+                              if self._source == "threads" else None)
         self._stop = threading.Event()
         self._closed = threading.Event()
         self._deadline = time.monotonic() + lifetime_seconds
@@ -50,13 +53,13 @@ class LoopbackRelay:
                 # Request paths are single-use capabilities; never log them or payloads.
                 pass
 
-            def _send(self, status: int, body: str) -> None:
+            def _send(self, status: int, body: str, *, receiver: bool = False) -> None:
                 encoded = body.encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.send_header("Cache-Control", "no-store")
-                self.send_header("Referrer-Policy", "same-origin")
+                self.send_header("Referrer-Policy", "no-referrer" if receiver else "same-origin")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("X-Frame-Options", "DENY")
                 # The page's one inline script carries this nonce; nothing else may run (FR-013).
@@ -64,11 +67,12 @@ class LoopbackRelay:
                 self.end_headers()
                 self.wfile.write(encoded)
 
-            def _authorized(self, submission: bool = False) -> bool:
+            def _authorized(self, submission: bool = False, *, receiver: bool = False) -> bool:
                 if self.headers.get_all("Host") != [owner.origin.removeprefix("http://")]:
                     self._send(403, "Invalid host")
                     return False
-                if self.path != owner._path:
+                expected_path = owner._path + "receive" if receiver and owner._source == "threads" else owner._path
+                if self.path != expected_path:
                     self._send(404, "Unknown task")
                     return False
                 if submission and self.headers.get_all("Origin") != [owner.origin]:
@@ -80,8 +84,9 @@ class LoopbackRelay:
                 return True
 
             def do_GET(self):
-                if self._authorized():
-                    self._send(200, owner._page)
+                receiver = owner._source == "threads" and self.path == owner._path + "receive"
+                if self._authorized(receiver=receiver):
+                    self._send(200, owner._receiver_page if receiver else owner._page, receiver=receiver)
 
             def do_POST(self):
                 if not self._authorized(submission=True):
@@ -126,32 +131,37 @@ class LoopbackRelay:
         self.url = self.origin + self._path
         environment = Environment(loader=FileSystemLoader(_TEMPLATES), autoescape=select_autoescape(["html"]))
         self._template = environment.get_template("host_browser_relay.html")
+        self._receiver_page = (environment.get_template("host_browser_receiver.html").render(
+            nonce=self._nonce, channel=json.dumps("ignis-host-answer:" + self._request_id).replace("<", "\\u003c"),
+        ) if self._source == "threads" else None)
         # Reuse vendored token bytes without its external font links on this capability page.
         self._theme_css = (_TEMPLATES / "_fino_theme.html").read_text().split("<style>", 1)[1].split("</style>", 1)[0]
         queries = [query for query in request.get("queries", ()) if isinstance(query, dict)]
         self.tab_script = self._tab_script(extractor, queries) if queries else ""
         self._page = self._render(
             request=json.dumps(request, ensure_ascii=False), extractor=extractor, queries=queries,
-            nonce=self._nonce, tab_script=self.tab_script,
+            nonce=self._nonce, tab_script=self.tab_script, fragment_transport=self._source == "threads",
             # Inside <script type="application/json">: no "<" may close the element early.
             relay_data=json.dumps(dict(
                 request_id=request.get("request_id"), host_task_ref=request.get("host_task_ref"),
                 session_ref=request.get("session_ref"), extractor_version=request.get("extractor_version"),
                 source=self._source, origin="https://www.threads.com" if self._source == "threads" else "https://www.tiktok.com",
                 queries=queries,
+                **({"fragment_key": self._fragment_key} if self._source == "threads" else {}),
             ), ensure_ascii=False).replace("<", "\\u003c"),
         )
         self._thread = threading.Thread(target=self._serve, name="ignis-task-relay", daemon=True)
         self._thread.start()
 
     def _tab_script(self, extractor: str, queries: list) -> str:
-        """What the host runs in each search tab: the extractor, posting its answer to this page."""
+        """Run the packaged extractor and source-specific answer handoff in a search tab."""
         handoff = (Path(__file__).resolve().parent / (self._source + "_handoff.js")).read_text(encoding="utf-8")
         approved = [dict(query_id=query.get("query_id"), query=query.get("query"),
                          result_limit=query.get("result_limit")) for query in queries]
         return (f"({handoff.strip()})({extractor.strip()}, "
-                f"{json.dumps(approved, ensure_ascii=False)}, {json.dumps(self.origin)}"
-                + (f", {json.dumps(self._request_id)}" if self._source == "threads" else "") + ")")
+                f"{json.dumps(approved, ensure_ascii=False)}, "
+                f"{json.dumps(self.url + 'receive' if self._source == 'threads' else self.origin)}"
+                + (f", {json.dumps(self._request_id)}, {json.dumps(self._fragment_key)}" if self._source == "threads" else "") + ")")
 
     def _render(self, **context) -> str:
         return self._template.render(theme_css=self._theme_css, **context)
@@ -162,6 +172,11 @@ class LoopbackRelay:
                 self._server.handle_request()
         finally:
             self._server.server_close()
+            if self._source == "threads":
+                # Retained terminal receipts must not retain the ticket's decryption capability.
+                self._fragment_key = None
+                self.tab_script = ""
+                self._page = ""
             self._closed.set()
 
     def close(self) -> None:

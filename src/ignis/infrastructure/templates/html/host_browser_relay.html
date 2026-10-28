@@ -54,7 +54,7 @@
 <script type="application/json" id="relay-data">{{ relay_data | safe }}</script>
 <script nonce="{{ nonce }}">
 (() => {
-  // Accept only the bound source, opened tab, request and query (FR-013).
+  // Source-specific transport binds the approved request and query (FR-013).
   const data = JSON.parse(document.getElementById('relay-data').textContent);
   const form = document.querySelector('form');
   const payload = document.getElementById('payload');
@@ -69,6 +69,28 @@
         if (tab) opened.set(tab, query);
       });
   }
+  {% if fragment_transport %}
+  const channel = new BroadcastChannel('ignis-host-answer:' + data.request_id);
+  const rawKey = Uint8Array.from(atob(data.fragment_key.replace(/-/g, '+').replace(/_/g, '/')), ch => ch.charCodeAt(0));
+  const key = crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['decrypt']);
+  channel.onmessage = async event => {
+    if (submitted || typeof event.data !== 'string' || event.data.length > 1000000 ||
+        !/^[A-Za-z0-9_-]+$/.test(event.data)) return;
+    try {
+      const bytes = Uint8Array.from(atob(event.data.replace(/-/g, '+').replace(/_/g, '/')), ch => ch.charCodeAt(0));
+      const plain = await crypto.subtle.decrypt({name: 'AES-GCM', iv: bytes.slice(0, 12)}, await key, bytes.slice(12));
+      const message = JSON.parse(new TextDecoder().decode(plain));
+      const answer = message && message.kind === 'ignis-host-answer' ? message.answer : null;
+      const query = answer && data.queries.find(item => item.query_id === answer.query_id);
+      if (submitted || message.request_id !== data.request_id || !query || !answer || typeof answer !== 'object'
+          || answers.has(query.query_id) || answer.query !== query.query
+          || !Array.isArray(answer.records) || answer.records.length > query.result_limit) return;
+      accept(query, answer);
+    } catch {
+      // Malformed or unauthenticated fragments never change relay state or expose content.
+    }
+  };
+  {% else %}
   window.addEventListener('message', event => {
     const query = opened.get(event.source);
     const answer = event.data && event.data.kind === 'ignis-host-answer' ? event.data.answer : null;
@@ -76,6 +98,10 @@
         || data.source === 'threads' && event.data.request_id !== data.request_id
         || answer.query_id !== query.query_id || answer.query !== query.query
         || !Array.isArray(answer.records) || answer.records.length > query.result_limit) return;
+    accept(query, answer);
+  });
+  {% endif %}
+  function accept(query, answer) {
     answers.set(query.query_id, answer);
     status.textContent = answers.size + ' of ' + data.queries.length + ' answers received';
     if (answers.size === data.queries.length) {
@@ -88,7 +114,7 @@
       });
       form.requestSubmit();
     }
-  });
+  }
 })();
 </script>
 {% endif %}

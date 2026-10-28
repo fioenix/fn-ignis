@@ -75,6 +75,41 @@ The owner's words: "Duyệt OG-1, OG-3, OG-4, OG-5; OG-2 hoãn phần Threads MC
 - **OG-5 approved**: no G3 routine change in this feature; live runs and routine change need separate
   approval.
 
+### Owner decision (28/10/2026): T055 Threads same-tab handoff
+
+The owner amends the Threads-only opener-loss rule: the packaged Threads handoff navigates the
+same task-created tab to the ticket's exact loopback receiver with an encrypted answer fragment.
+FR-013 remains: the host agent sees status and counts only. TikTok keeps its opener postMessage
+transport unchanged. This is an approved contract amendment, not a constitution or MCP signature
+change, and grants no live-session, routine, release or commit authority.
+
+Prepare generates a random per-ticket 256-bit AES-GCM key, embedded only in `tab_script` and the
+main relay's data (never URLs, logs, other response fields or the receiver). Encrypt message JSON
+`{kind, request_id, answer}` using a fresh 96-bit IV; base64url encode `iv||ciphertext` into a
+fragment capped at 1,000,000 characters. Refuse oversize/check/encryption failures before navigation.
+After a 100 ms timer, `location.replace` navigates to `<token path>receive#<ciphertext>`.
+The static nonce-CSP receiver clears the hash immediately with `history.replaceState`, broadcasts
+only the raw fragment on `ignis-host-answer:<request_id>`, and shows neutral close-tab guidance.
+It has no key, decryption, external resources or record display; use no-store and no-referrer.
+
+The main relay decrypts and checks kind, request/query id and text, result limit, first answer per
+query and no answers after submission, then reuses the answers map and full-envelope form submit.
+Invalid ciphertext/messages leave state unchanged. Only Threads GET admits the exact receiver
+path; TikTok, other paths/methods, Host/Origin checks, validator, single-use staging, rejection
+closure, lifetime and shutdown retain their existing behavior. The agent closes the receiver as a
+task-created tab. Keys and decrypted data are transient; history holds ciphertext only. Browser
+cleanup and the ticket lifetime bound the key's usefulness; relay shutdown drops its key-bearing
+page/script copies. No durable key store is introduced.
+
+Execution resumes accepted Spec Kit tasks/implement at T055 (NORMAL, privacy/transport scrutiny),
+using `.handoff/spec020-skill/coding-workflow.vault-read.md`, explicitly supplied as canonical.
+Its review-by 2026-10-21 is overdue; owner-supplied copy is retained. Requirements checklist: 16/16.
+No extension hooks are configured. Tests precede implementation; socket-free Node Web Crypto and
+handler probes cover this seam. Real loopback binding and live Chrome remain separately reported
+limits. No semantic activity-selection ambiguity remains after the owner's explicit design.
+Full skill replacement is delivered under `.handoff/spec020-skill/ignis-collect/SKILL.md` for
+coordinator integration; the installed skill is unchanged. See research R11 and the Threads contract.
+
 ### Proposals as written before the decision
 
 - **OG-1 — MCP prepare signature / Threads tier**: propose only optional `source: str = "tiktok"`
