@@ -95,10 +95,14 @@ class LoopbackRelay:
                 if self.headers.get("Transfer-Encoding") or self.headers.get("Content-Encoding"):
                     self._send(400, "Unsupported encoding")
                     return
-                if len(lengths) != 1 or not lengths[0].isdigit():
+                if len(lengths) != 1 or not (lengths[0].isascii() and lengths[0].isdigit()):
                     self._send(400, "Invalid body length")
                     return
-                size = int(lengths[0])
+                digits = lengths[0].lstrip("0") or "0"
+                if len(digits) > len(str(MAX_BODY_BYTES)):
+                    self._send(413, "Payload exceeds task transport limit")
+                    return
+                size = int(digits)
                 if not 0 < size <= MAX_BODY_BYTES:
                     self._send(413, "Payload exceeds task transport limit")
                     return

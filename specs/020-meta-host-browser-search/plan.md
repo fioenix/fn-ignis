@@ -239,3 +239,19 @@ handoff transport. Attribution remains source-specific and locale-independent. N
 credentials, version-release bump or commit. Targeted migration-chain, packaging, convention,
 consumer checks and changed-Python ruff/diff checks are required; report unavailable PostgreSQL or
 loopback separately. The skill has no English-only Threads claim and requires no replacement.
+
+## T058 execution receipt (28/10/2026)
+
+Resume `speckit-implement` for owner-approved T058 only; retain its unticked acceptance marker.
+Canonical workflow is the owner-supplied `.handoff/t058/coding-workflow.vault-read.md`; review-by
+2026-10-21 is overdue but this task explicitly designates the copy. Requirements checklist 16/16;
+no extensions file/hooks. Security/privacy/answer-contract/migration boundaries require task-based
+execution, not the direct-depth exception. Supporting fix-finding, debugging, TDD and verification
+procedures apply within this phase; one read-only investigator and one fresh candidate reviewer.
+No network/evaluator budget is used: exact routing and implementation rules are settled; optional
+semantic assurance is unvalidated. Session title capability is unavailable. No live-browser,
+credentials, commit, migration application to live stores or release authority.
+
+T058 adds seed 038 (034/036/037 preserved) and TikTok public-grid-v2. See spec Clarifications,
+research R14 and contracts/tiktok-search.md. Targeted RED/GREEN and final checks are retained under
+`.handoff/t058/`; socket/browser/PostgreSQL proof is reported separately from offline tests.

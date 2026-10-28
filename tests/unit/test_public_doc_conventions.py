@@ -413,7 +413,7 @@ def test_spec020_public_docs_explain_the_browser_only_boundary(relative):
     text = _read(relative)
     for term in ('source="threads"', 'source="tiktok"', "threads-search-top-v2", "Playwright",
                  "Reels", "collection_path_changed", "collection_path_mixed", "collection_path_unknown",
-                 "53", "sql/037_threads_action_labels.sql"):
+                 "53", "sql/038_tiktok_attribution_locales.sql"):
         assert term in text, f"{relative} must explain {term}"
     assert "AutomationControlled" not in text, "Do not publish an evasion recipe"
 

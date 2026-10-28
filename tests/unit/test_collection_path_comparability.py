@@ -30,15 +30,15 @@ def row(key, day, path, *, observed=None, channel="threads", counters=None):
                         ((observed or at(day, 21), 0, {**path, "views": 10, **(counters or {})}),))
 
 
-def compare(axis, previous, current, *, kind="week", empty=False, extra=()):
+def compare(axis, previous, current, *, kind="week", empty=False, extra=(), channel="threads"):
     period = period_of(PeriodKind(kind), date(2026, 10, 19))
     items, probes = [], []
     for span, paths in ((period.previous(), previous), (period, current)):
         for i, day in enumerate(span.days):
             path = paths[i % len(paths)]
-            rs = () if empty else (row("same" if i else str(day), day, path),)
+            rs = () if empty else (row("same" if i else str(day), day, path, channel=channel),)
             items.extend(rs)
-            probes.append(probe(day, path, rs))
+            probes.append(probe(day, path, rs, channel))
     if extra:
         items.extend(extra)
     if axis == "created":
@@ -217,5 +217,14 @@ def test_unchanged_native_channels_without_provenance_keep_exact_indicators(axis
 def test_threads_v1_and_language_independent_v2_periods_are_not_comparable(axis):
     current = {**HOST, "collection_path": "host_browser:threads-search-top-v2", "connector_revision": "threads-search-top-v2"}
     result = compare(axis, [HOST], [current])
+    assert result["status"] == "not_comparable"
+    assert "collection_path_changed" in result["reasons"]
+
+
+@pytest.mark.parametrize("axis", ["seen", "created"])
+def test_t058_tiktok_v1_and_locale_gated_v2_periods_are_not_comparable(axis):
+    before = {"collection_path": "host_browser:tiktok-public-grid-v1", "connector_revision": "tiktok-public-grid-v1"}
+    after = {"collection_path": "host_browser:tiktok-public-grid-v2", "connector_revision": "tiktok-public-grid-v2"}
+    result = compare(axis, [before], [after], channel="tiktok")
     assert result["status"] == "not_comparable"
     assert "collection_path_changed" in result["reasons"]

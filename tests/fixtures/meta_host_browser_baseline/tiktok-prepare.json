@@ -1,6 +1,6 @@
 {
   "expires_at": "2026-10-27T12:01:00Z",
-  "extractor_version": "tiktok-public-grid-v1",
+  "extractor_version": "tiktok-public-grid-v2",
   "host_task_ref": "task-1",
   "issued_at": "2026-10-27T12:00:00Z",
   "mode": "TACTICAL",

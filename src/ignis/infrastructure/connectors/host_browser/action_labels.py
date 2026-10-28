@@ -21,7 +21,7 @@ def action_labels_from_rows(rows):
             raise ValueError("Invalid Threads action vocabulary")
         locale = match.group(1)
         current = labels.setdefault(locale, {})
-        if kind in current or label in current.values():
+        if kind in current or label.casefold() in {value.casefold() for value in current.values()}:
             raise ValueError("Ambiguous Threads action vocabulary")
         current[kind] = label
     return labels

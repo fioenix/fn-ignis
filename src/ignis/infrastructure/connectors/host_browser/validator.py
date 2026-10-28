@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 from ignis.infrastructure.connectors.host_browser.action_labels import seeded_action_labels
+from ignis.infrastructure.connectors.host_browser.attribution_locales import seeded_attribution_locales
 from ignis.domain.host_browser_search import HostSearchAnswer, HostSearchRequest
 from ignis.domain.self_content import is_self_authored
 from ignis.domain.source_identity import identity_free_source_url
@@ -64,8 +65,9 @@ def _counters(components, labels):
 
 
 def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
-                    attribution_templates: tuple[str, ...] = (), self_identities=(), *, author_records=None, action_labels=None) -> dict:
+                    attribution_templates: tuple[str, ...] = (), self_identities=(), *, author_records=None, action_labels=None, attribution_locales=None) -> dict:
     action_labels = seeded_action_labels() if action_labels is None else action_labels
+    attribution_locales = seeded_attribution_locales() if attribution_locales is None else attribution_locales
     answer = HostSearchAnswer.model_validate(payload, context={"request": request})
     if not attribution_templates:
         raise ValueError("Source attribution vocabulary is unavailable")
@@ -101,6 +103,14 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
             raise ValueError("Empty search requires explicit matching no-results evidence")
         if item.records and not item.search_verified:
             raise ValueError("Unverified page cannot provide observations")
+        templates = attribution_templates
+        if request.source == "tiktok":
+            templates = attribution_locales.get(item.locale, ()) if re.fullmatch(r"[a-z]{2,8}", item.locale or "") else ()
+            if not templates:
+                outcomes.append(dict(query_id=query.query_id, query=query.query, status="DEGRADED",
+                    signals_collected=0, queried_window=None, search_verified=False,
+                    note="TikTok attribution locale is unseeded or unsupported; absence and content unmeasured"))
+                continue
         seen, count = set(), 0
         path = collection_path(request.source, request.extractor_version, query.result_limit)
         for record in item.records:
@@ -110,7 +120,7 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
             # Match the transient author-bearing URL before destroying it. Never stage it.
             if is_self_authored(SimpleNamespace(platform=request.source, source_url=record.source_url, metadata={}), self_identities):
                 continue
-            policy_excerpt = sanitize_pii_text(strip_platform_attribution(record.excerpt, attribution_templates))
+            policy_excerpt = sanitize_pii_text(strip_platform_attribution(record.excerpt, templates))
             excerpt = mask_author_identity_text(policy_excerpt)
             if not excerpt.strip():
                 continue

@@ -30,7 +30,7 @@ def host_answer(request, *, empty=False, degraded=False, context=False):
         answer = dict(query_id=query["query_id"], query=query["query"], page_url=query["search_url"],
                       captured_at=datetime.now(timezone.utc).isoformat(), search_verified=not degraded,
                       empty_state_visible=empty, status="DEGRADED" if degraded else "EMPTY_NO_DATA" if empty else "HEALTHY",
-                      records=[] if empty or degraded else [record])
+                      records=[] if empty or degraded else [record], locale="vi")
         if source == "threads":
             answer["locale"] = "en"
         answers.append(answer)

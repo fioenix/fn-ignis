@@ -78,3 +78,13 @@ reasons and unrelated-channel behavior. Counters keep display/precision; no fals
 
 Implementation regenerates `hermes_manifest.json`/`.hermes/tools.json` with the prescribed generator
 and proves exact count 53, only prepare parameter delta, TikTok default parity; see research R9.
+
+## T058 current behavior amendment (28/10/2026)
+
+The accepted implementation uses threads-search-top-v2. New default TikTok tickets/answers use
+`tiktok-public-grid-v2` and the locale gate in [tiktok-search.md](tiktok-search.md), superseding the
+legacy TikTok version/answer-parity statements above. No MCP tool signature or tier changes.
+Reels keyword browser attestations require matching requested hashtag GET tag web_info provenance,
+an admitted response and exact landed `/explore/tags/<hashtag>/` path. Other or unbound responses
+are unavailable, not EMPTY/HEALTHY; login/challenge/HTTP/JSON/settlement failures remain unavailable.
+The no-keyword OWN_PROFILE path retains its separate behavior and never attests a keyword search.

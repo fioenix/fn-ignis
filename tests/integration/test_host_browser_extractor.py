@@ -11,7 +11,7 @@ import pytest
 EXTRACTOR = Path(__file__).resolve().parents[2] / "src/ignis/infrastructure/connectors/host_browser/tiktok_search.js"
 
 
-def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi đi làm", image_alt="", image_visible=True):
+def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi đi làm", image_alt="Túi đi làm", image_visible=True, locale="vi-VN"):
     assert EXTRACTOR.exists(), "The packaged deterministic extractor is missing"
     node = shutil.which("node")
     if not node:
@@ -30,6 +30,7 @@ def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi �
         } : null
       });
       const document = {
+        documentElement: {lang: process.argv[7]},
         querySelectorAll: selector => selector === 'div[data-e2e="search_top-item"], div[data-e2e="search_video-item"]' ? [
           makeCard('https://www.tiktok.com/@public/video/7417820067028536584?tracking=1', process.argv[4], true),
           makeCard('https://www.tiktok.com/messages', 'Private surface', true),
@@ -44,7 +45,7 @@ def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi �
       console.log(JSON.stringify(fn({query_id: 'query-1', query: process.argv[2], result_limit: 3})));
     """
     result = subprocess.run([node, "-e", code, str(EXTRACTOR), query, page_query, card_text,
-                             image_alt, str(image_visible).lower()],
+                             image_alt, str(image_visible).lower(), locale],
                             check=True, capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -69,7 +70,7 @@ def test_wrong_query_grid_is_not_promoted_as_search_evidence():
 
 @pytest.mark.parametrize("counter", ["290", "1,623", "5.2K", "2M", "522\n236"])
 def test_counter_only_grid_is_degraded_not_content_evidence(counter):
-    result = extract(card_text=counter)
+    result = extract(card_text=counter, image_alt=counter)
     assert result["search_verified"] is True
     assert result["status"] == "DEGRADED"
     assert result["records"] == []
@@ -88,5 +89,24 @@ def test_counter_tile_uses_visible_video_image_label_as_content():
 @pytest.mark.parametrize("label,visible", [("Caption from hidden image", False), ("493", True), ("", True)])
 def test_missing_hidden_or_counter_image_label_does_not_restore_content(label, visible):
     result = extract(card_text="290", image_alt=label, image_visible=visible)
+    assert result["records"] == []
+    assert result["status"] == "DEGRADED"
+
+
+@pytest.mark.parametrize("label,visible", [("", True), ("Caption", False), ("493", True)])
+def test_t058_card_chrome_never_becomes_content(label, visible):
+    result = extract(card_text="Caption\nfixture.poster\n290", image_alt=label, image_visible=visible)
+    assert result["records"] == []
+    assert result["status"] == "DEGRADED"
+
+
+@pytest.mark.parametrize("lang,expected", [("vi-VN", "vi"), ("EN-us", "en"), ("", "unsupported"), ("vi_VN", "unsupported")])
+def test_t058_tiktok_reports_primary_page_language(lang, expected):
+    assert extract(locale=lang)["locale"] == expected
+
+
+def test_t058_oversized_alt_cannot_cut_attribution_before_validation():
+    label = "x" * 1980 + " do Fixture Poster tạo với music"
+    result = extract(image_alt=label)
     assert result["records"] == []
     assert result["status"] == "DEGRADED"

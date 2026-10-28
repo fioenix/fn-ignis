@@ -312,3 +312,56 @@ blocks that card and marks the whole query `DEGRADED`, while keeping other valid
 conservative outcomes remain accepted for v0.9.0; follow up on card/action-row ownership and quote
 isolation with deterministic fixtures and separately authorized live verification. T057 does not
 change either detection behavior or claim those counters/quotes are fully supported.
+
+## R14. T058 security-audit follow-up (owner-approved 28/10/2026)
+
+The five supplied records are needs-validation leads, not demonstrated live exploits. Independent
+source tracing confirms the conditional boundaries: TikTok alt text lacked locale coverage and
+whole-card fallback included author chrome; Reels responses/final pages lacked hashtag binding;
+comments navigated a caller URL after a substring ID regex; shared window.open retained openers.
+No lead is refuted at that narrow source level. Actual platform reachability, attacker control,
+identity persistence from live DOM and reverse-tabnabbing remain unproved. No credentials or real
+social sessions are used by this pass.
+
+TikTok v2 reports the primary page language (lowercase [a-z]{2,8}, else unsupported). Additive 038
+uses `tiktok_attribution_<locale>` domains, like 037, with `ui_attribution` category; it preserves
+034 and transforms no stored evidence. Only observed vi wording is seeded. Tactical executes the
+packaged seed in isolated in-memory SQLite; mission reads caller repository rows. Each ticket
+freezes its map for staging, including private author-policy inputs. A missing/malformed/unseeded
+locale becomes record-free DEGRADED with unmeasured content/absence, never EMPTY. Seed machinery
+cannot enter positive market vocabulary. The stripper receives only that locale's templates.
+Locale is a coverage gate, not proof of every future attribution wording: registered templates
+still need observed platform evidence, and Spec 015's free-text-name limit remains. Whole-card
+innerText is removed; only a visible linked image with a usable label can supply content. v2 path
+identity differs from v1; history is not rewritten and comparisons must refuse changed versions.
+
+Reels keyword collection admits only a matching HTTPS www Instagram GET tag web_info request
+and response (`tag_name` exactly once), a recognized records/empty payload, and the exact requested
+landed hashtag path without query/fragment. Unbound clips/GraphQL captures are unavailable; no
+GraphQL hashtag semantics are invented. Existing login/challenge/HTTP/JSON/settlement failures
+stay fail closed. OWN_PROFILE collection without keyword attestation remains unchanged.
+
+Comments accept only www.tiktok.com HTTPS, no userinfo/port, full ASCII numeric-ID video paths
+(permalink, /video, /share/video; optional trailing slash). Bare tiktok.com is rejected to keep one
+origin. Query/fragment tracking is discarded. Both plugin and MCP handler share canonical share-URL
+validation; invalid inputs raise before auth/browser and use the existing ERROR response. Navigation
+is rebuilt from that ID; document requests leaving the same validated video are aborted, landed ID
+is checked, and the in-page API uses fixed HTTPS origin with redirect:error. Public signatures and
+connector tiers remain unchanged.
+
+Threads opens with noopener and retains the encrypted-fragment/BroadcastChannel transport.
+**Accepted T058 limitation:** TikTok still requires an opener for postMessage and relay window
+binding. Content executing in that TikTok tab may retain the ability to navigate the relay opener
+(reverse-tabnabbing); attacker script reachability and successful navigation are unverified. COOP
+headers remain unchanged: an offline fixture cannot confirm that adding same-origin-allow-popups
+keeps TikTok's opener working, and no live-browser test is authorized.
+
+Small hardening: Content-Length requires ASCII digits; action-label ambiguity compares casefolded
+labels (stricter than JavaScript lowercase for some Unicode); normalized Threads excerpts are
+bounded to the model's 2000-character limit before entering the sample cache. Offline synthetic
+DOM and mocked Playwright tests establish these branches, not live channel readiness.
+
+T058 review hardening: reject TikTok alt labels longer than 2000 before extraction; truncating an
+attribution tail before sanitation could leave the poster name. This conservative card drop is
+covered by a synthetic long-vi-label test; live label length reachability remains unverified.
+Matching-tag malformed Reels responses poison the capture even if another bound response is empty.

@@ -31,6 +31,7 @@ SEEDS = (
     "034_tiktok_attribution.sql",
     "036_threads_attribution.sql",
     "037_threads_action_labels.sql",
+    "038_tiktok_attribution_locales.sql",
 )
 
 
@@ -378,6 +379,7 @@ async def test_missing_mission_tiktok_templates_fail_before_ticket_freeze_or_rel
 
 @pytest.mark.asyncio
 async def test_mission_ticket_keeps_its_repository_templates_across_an_interleaved_refresh(tmp_path, monkeypatch):
+    import sqlite3
     import runpy
     from types import SimpleNamespace
     from ignis.application.use_cases import host_browser_search as module
@@ -397,19 +399,57 @@ async def test_mission_ticket_keeps_its_repository_templates_across_an_interleav
     service = module.HostBrowserSearchService()
     unit = runpy.run_path(str(Path(__file__).with_name("test_host_browser_search.py")))
     try:
-        await repo.register_lexicon_terms("tiktok_attribution", ["created by {author} with"], "ui_attribution")
+        await repo.register_lexicon_terms("tiktok_attribution_en", ["created by {author} with"], "ui_attribution")
         async def interleaved_scope(*args):
-            service.register_attribution_templates(["another wording {author} with"])
+            with sqlite3.connect(repo._db_path) as connection:
+                connection.execute("DELETE FROM market_lexicons WHERE domain = 'tiktok_attribution_en'")
+            await repo.register_lexicon_terms("tiktok_attribution_en", ["another wording {author} with"], "ui_attribution")
             return {"queries": ["túi đi làm"], "plan": {"plan_digest": "p" * 64}, "digest": "d" * 64,
                     "source": "tiktok", "host_sources": ("tiktok",), "required_host_sources": ("tiktok",)}
         monkeypatch.setattr(host_browser_mission, "prepare_scope", interleaved_scope)
         monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
         request = await service.prepare_mission(SimpleNamespace(_repo=repo, _registry=SimpleNamespace(self_identities=())), "mission", "task-1", "chrome-1", 60, True)
         payload = unit["answer"](request)
+        payload["answers"][0]["locale"] = "en"
         payload["answers"][0]["records"][0]["excerpt"] = "Synthetic body created by Synthetic Sentinel with sound"
+        current_locales = module.attribution_locales_from_rows(await repo.get_domain_lexicons())
+        assert current_locales["en"] == ("another wording {author} with",)
+        assert service._tickets[request["request_id"]]["attribution_locales"]["en"] == ("created by {author} with",)
         service.stage(request["request_id"], payload)
         held = service._tickets[request["request_id"]]["receipt"]
         assert held["observations"][0]["excerpt"] == "Synthetic body"
+    finally:
+        service.close()
+        await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_t058_mission_missing_locale_vocabulary_refuses_before_relay(tmp_path, monkeypatch):
+    import sqlite3
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+    from ignis.application.use_cases import host_browser_search as module
+    from ignis.application.use_cases import host_browser_mission
+
+    repo = SqliteTrendRepository(str(tmp_path / "missing-locales.db"))
+    service = module.HostBrowserSearchService()
+    relay = Mock(side_effect=AssertionError("Missing locales must refuse before relay creation"))
+    monkeypatch.setattr(module, "LoopbackRelay", relay)
+    scope = AsyncMock(return_value={"queries": ["synthetic"], "plan": {"plan_digest": "p" * 64},
+                                   "digest": "d" * 64})
+    monkeypatch.setattr(host_browser_mission, "prepare_scope", scope)
+    try:
+        await repo.get_domain_lexicons()
+        with sqlite3.connect(repo._db_path) as connection:
+            connection.execute("DELETE FROM market_lexicons WHERE domain GLOB 'tiktok_attribution_*'")
+        assert await service.refresh_attribution_templates(repo)
+        with pytest.raises(module.AttributionVocabularyMissing, match="attribution"):
+            await service.prepare_mission(
+                SimpleNamespace(_repo=repo, _registry=SimpleNamespace(self_identities=())),
+                "mission", "task", "session", 60, True,
+            )
+        relay.assert_not_called()
+        assert service._tickets == {}
     finally:
         service.close()
         await repo.close()

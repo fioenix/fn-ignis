@@ -633,6 +633,23 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   Coordinator integration 28/10/2026: skill copied (plus "a few seconds apart"), 645 passed and
   7 SQLite-only skips with PostgreSQL and real loopback; ruff and diff checks clean.
 
+- [X] T058 Validate and fix the five v0.9.0 security-audit leads, owner-approved 28/10/2026
+  ("Giao Codex sửa"), with RED then GREEN for each fix: TikTok primary locale and seeded
+  attribution gate for tactical/mission (additive 038 seed, v2 answer contract, migration docs/
+  bootstrap/package/PostgreSQL paths); remove whole-card innerText fallback; bind Reels captured
+  response and landed page to requested hashtag; validate TikTok comment URL before browser/auth,
+  navigate and return canonical numeric-ID provenance without changing tool signatures; Threads
+  search tabs use noopener while TikTok retains its required opener and documented residual risk.
+  Harden ASCII Content-Length, casefold action-label ambiguity and 2000-character Threads excerpts.
+  Record decisions in spec Clarifications, research and contracts; run changed tests/traced consumers,
+  conventions, changed-Python ruff and diff checks. No commit, network, credentials or live browser.
+  Leave unticked for coordinator acceptance; offline fixtures do not prove live-browser behavior.
+  Accepted 28/10/2026 after independent review (Antigravity: approve-with-fixes; three findings
+  fixed: comment fetch errors fail closed, empty TikTok locale vocabulary refused before any relay
+  opens, guest/hyphenated TikTok video paths canonicalised). Coordinator rerun: 711 passed, 93
+  skipped (PostgreSQL DSN absent); ruff and diff checks clean. Live browser behaviour unverified:
+  Reels `/api/v1/tags/web_info/` binding and TikTok comment redirect containment.
+
 ## Dependencies and execution order
 
 ```text

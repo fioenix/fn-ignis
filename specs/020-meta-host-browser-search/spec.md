@@ -63,6 +63,38 @@ that hides automation, or is reported unavailable when the platform blocks it.
   path change and unchanged Spec 016/018 channels must retain their existing comparisons. This
   supersedes research R6's earlier blanket unknown refusal.)
 
+
+- Q: How does T058 bind TikTok attribution to locale without rewriting 034 or evidence? → A: Add
+  038 with domain `tiktok_attribution_<locale>`, category `ui_attribution`, seeded vi wording only;
+  freeze caller-repository rows for MISSION and packaged in-memory SQLite seed rows for TACTICAL.
+  Missing, malformed, unsupported or unseeded page locale yields no records/author sidecar and a
+  DEGRADED unmeasured outcome, including claimed empty answers. Bump TikTok to public-grid-v2.
+  (agent decided; basis: owner T058 direction, 037 representation and Constitution VII.)
+- Q: May an oversized TikTok alt label be truncated before attribution removal? → A: No; drop
+  labels longer than 2000 rather than cutting a template tail and retaining a poster name. Threads
+  still caps its isolated body at 2000. (agent decided; basis: T058 review and synthetic RED showing
+  the first 2000 characters retain a name with a partial attribution tail.)
+- Q: Which content may TikTok emit when a tile has no usable labelled image? → A: None; remove
+  whole-card text fallback and retain DEGRADED when no records remain. (agent decided; basis:
+  owner T058 direction and author chrome bypasses attribution templates.)
+- Q: Which Reels captures can attest a keyword search? → A: Only matching HTTPS www Instagram
+  GET `/api/v1/tags/web_info/` response/request with exactly the requested `tag_name`, admitted
+  payload and landed `/explore/tags/<hashtag>/` without query/fragment. Unbound clips/GraphQL are
+  unavailable until their provenance is supported. OWN_PROFILE remains outside keyword attestation.
+  (agent decided; basis: existing collector hooks and source-backed request binding.)
+- Q: Which TikTok comment URLs are accepted? → A: Only HTTPS `www.tiktok.com` with no userinfo/port
+  and full ASCII-ID permalink, `/video/<id>` or `/share/video/<id>` path (optional trailing slash).
+  Reject bare tiktok.com. Discard query/fragment while rebuilding canonical share URL; contain
+  document redirects and verify the landed ID before API evaluation. Return existing ERROR shape
+  for rejected URLs. (agent decided; basis: narrow fixed-origin boundary and identity-free parity.)
+- Q: How are relay openers isolated? → A: Threads uses noopener; TikTok retains its opener-based
+  transport and its residual reverse-tabnabbing risk. Keep headers unchanged because no authorized
+  live-browser proof establishes COOP compatibility with TikTok opener delivery. (agent decided;
+  basis: source-specific transports and owner instruction to confirm before adding COOP.)
+- Q: How are the three small fail-closed items handled? → A: Require ASCII digits for body length,
+  reject action labels colliding under casefold, and cap normalized Threads excerpts at 2000 before
+  caching. (agent decided; basis: parser/model bounds and case-insensitive action matching.)
+
 ## Context: current state (observed 27/10/2026 on `main` at `8a816fb`)
 
 - The `threads` and `reels` channels collect through Playwright with session cookies captured by

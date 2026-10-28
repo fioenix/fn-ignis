@@ -474,6 +474,20 @@ class TikTokPlugin(IConnectorPlugin):
         return results
 
 
+    @staticmethod
+    def canonical_comment_video_url(video_url: str) -> str:
+        """Accept www TikTok HTTPS video forms only; discard tracking and author identity."""
+        try:
+            if not isinstance(video_url, str) or any(ord(char) <= 32 for char in video_url):
+                raise ValueError
+            parsed = urlsplit(video_url)
+            match = re.fullmatch(r"/(?:@[\w.-]*/video|video|share/video)/([0-9]+)/?", parsed.path)
+            if parsed.scheme != "https" or parsed.netloc != "www.tiktok.com" or not match:
+                raise ValueError
+        except ValueError:
+            raise ValueError("Invalid TikTok video URL") from None
+        return "https://www.tiktok.com/share/video/" + match.group(1)
+
     async def fetch_video_comments(
         self,
         video_url: str,
@@ -487,12 +501,8 @@ class TikTokPlugin(IConnectorPlugin):
         so a caller can count distinct commenters in one response. The key is the caller's and
         is never stored; without it no author fact is produced at all (Spec 015).
         """
-        match = re.search(r"/video/(\d+)", video_url)
-        if not match:
-            # The URL is not logged: a profile link names an account (Spec 015).
-            logger.warning("Could not extract a video ID from the comment URL.")
-            return []
-        aweme_id = match.group(1)
+        canonical_url = self.canonical_comment_video_url(video_url)
+        aweme_id = canonical_url.rsplit("/", 1)[1]
 
         storage_state = None
         if self._auth_manager:
@@ -515,72 +525,92 @@ class TikTokPlugin(IConnectorPlugin):
                         "--disable-setuid-sandbox",
                     ]
                 )
-                context_kwargs: Dict[str, Any] = {
-                    "viewport": {"width": 1280, "height": 800},
-                    "locale": "vi-VN",
-                }
-                if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
-                    context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
-                if storage_state:
-                    context_kwargs["storage_state"] = storage_state
+                try:
+                    context_kwargs: Dict[str, Any] = {
+                        "viewport": {"width": 1280, "height": 800},
+                        "locale": "vi-VN",
+                    }
+                    if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
+                        context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
+                    if storage_state:
+                        context_kwargs["storage_state"] = storage_state
 
 
-                context = await browser.new_context(**context_kwargs)
-                page = await context.new_page()
+                    context = await browser.new_context(**context_kwargs)
+                    page = await context.new_page()
 
-                await page.goto(video_url, wait_until="domcontentloaded", timeout=25000)
+                    async def contain_navigation(route):
+                        request = route.request
+                        if request.is_navigation_request():
+                            try:
+                                allowed = self.canonical_comment_video_url(request.url) == canonical_url
+                            except ValueError:
+                                allowed = False
+                            if not allowed:
+                                await route.abort()
+                                return
+                        await route.continue_()
 
-                safe_limit = max(5, min(limit, 50))
-                js_fetch = f"""
-                    async () => {{
-                        try {{
-                            const url = `/api/comment/list/?aid=1988&aweme_id={aweme_id}&count={safe_limit}&cursor=0`;
-                            const resp = await fetch(url);
-                            return await resp.json();
-                        }} catch (e) {{
-                            return {{ error: e.toString() }};
+                    await context.route("**/*", contain_navigation)
+                    await page.goto(canonical_url, wait_until="domcontentloaded", timeout=25000)
+                    if self.canonical_comment_video_url(page.url) != canonical_url:
+                        raise ValueError("TikTok comment navigation left the requested video")
+
+                    safe_limit = max(5, min(limit, 50))
+                    js_fetch = f"""
+                        async () => {{
+                            try {{
+                                if (location.origin !== 'https://www.tiktok.com') throw new Error('Invalid comment origin');
+                                const url = `https://www.tiktok.com/api/comment/list/?aid=1988&aweme_id={aweme_id}&count={safe_limit}&cursor=0`;
+                                const resp = await fetch(url, {{redirect: 'error'}});
+                                return await resp.json();
+                            }} catch (e) {{
+                                return {{ error: e.toString() }};
+                            }}
                         }}
-                    }}
-                """
-                api_data = await page.evaluate(js_fetch)
-                raw_comments = api_data.get("comments", []) if isinstance(api_data, dict) else []
+                    """
+                    api_data = await page.evaluate(js_fetch)
+                    if not isinstance(api_data, dict) or "error" in api_data:
+                        raise ValueError("TikTok comment API request failed")
+                    raw_comments = api_data.get("comments", [])
 
-                # No commenter identity leaves this loop, not even a pseudonym: a fixed-salt hash
-                # links one commenter across every mission and leaks a prefix of the name
-                # (Spec 015, research R3). The comment id is the comment's own content reference.
-                for c in raw_comments:
-                    if isinstance(c, dict):
-                        cmt_text = c.get("text", "").strip()
-                        if cmt_text:
-                            # Redact phone numbers, emails, and credentials
-                            redacted_text = tokenise_mentions(sanitize_pii_text(cmt_text), {})
+                    # No commenter identity leaves this loop, not even a pseudonym: a fixed-salt hash
+                    # links one commenter across every mission and leaks a prefix of the name
+                    # (Spec 015, research R3). The comment id is the comment's own content reference.
+                    for c in raw_comments:
+                        if isinstance(c, dict):
+                            cmt_text = c.get("text", "").strip()
+                            if cmt_text:
+                                # Redact phone numbers, emails, and credentials
+                                redacted_text = tokenise_mentions(sanitize_pii_text(cmt_text), {})
 
-                            comment = {
-                                "comment_id": str(c.get("cid") or "") or None,
-                                "text": redacted_text,
-                                "likes": c.get("digg_count", 0),
-                                "reply_count": c.get("reply_comment_total", 0),
-                                "created_at": c.get("create_time"),
-                            }
-                            if author_key is not None:
-                                user = c.get("user") or {}
-                                comment["author_assignment"] = assign_author(
-                                    PlatformType.TIKTOK,
-                                    {"user_id": user.get("uid"), "unique_id": user.get("unique_id")},
-                                    None,
-                                    author_key,
-                                )
-                            comments.append(comment)
-
-
+                                comment = {
+                                    "comment_id": str(c.get("cid") or "") or None,
+                                    "text": redacted_text,
+                                    "likes": c.get("digg_count", 0),
+                                    "reply_count": c.get("reply_comment_total", 0),
+                                    "created_at": c.get("create_time"),
+                                }
+                                if author_key is not None:
+                                    user = c.get("user") or {}
+                                    comment["author_assignment"] = assign_author(
+                                        PlatformType.TIKTOK,
+                                        {"user_id": user.get("uid"), "unique_id": user.get("unique_id")},
+                                        None,
+                                        author_key,
+                                    )
+                                comments.append(comment)
 
 
-                await browser.close()
+
+
+                finally:
+                    await browser.close()
 
         except Exception as e:
             logger.error(
                 "Error scraping comments for video %s: %s",
-                identity_free_source_url("tiktok", video_url, {}) or "with no identity-free link",
+                canonical_url,
                 mask_author_identity_text(str(e)),
             )
             raise ConnectorExecutionException(

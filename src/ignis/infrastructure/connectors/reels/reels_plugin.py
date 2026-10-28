@@ -555,11 +555,20 @@ class ReelsPlugin(IConnectorPlugin):
         keyword: Optional[str] = None,
         attestation: Optional[SearchAttestation] = None,
     ) -> List[TrendSignal]:
+        hashtag = self._to_hashtag(keyword) if keyword is not None else None
+        if keyword is not None and not hashtag:
+            raise ConnectorCapabilityUnavailableException("REELS_PAGE_UNUSABLE: no requested hashtag")
         payloads = await collect_json_payloads(
             url=url,
             storage_state=storage_state,
             url_markers=self.BROWSER_API_MARKERS,
             geo=geo,
+            expected_query=hashtag,
+            payload_validator=(lambda body: body if (
+                self._verified_empty_browser_search([body]) or extract_records(
+                    [body], is_record=self._is_browser_reel,
+                    identity=lambda node: str(node.get("pk") or node.get("id") or ""), limit=1)
+            ) else None) if hashtag else None,
         )
         records = extract_records(
             payloads,

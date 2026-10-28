@@ -65,7 +65,7 @@
   for (const query of data.queries) {
     document.querySelector('button[data-query-id="' + CSS.escape(query.query_id) + '"]')
       .addEventListener('click', () => {
-        const tab = window.open(query.search_url, '_blank');
+        const tab = window.open(query.search_url, '_blank'{% if fragment_transport %}, 'noopener'{% endif %});
         if (tab) opened.set(tab, query);
       });
   }
