@@ -54,9 +54,11 @@ When both sources are in scope, prepare sibling tickets for the same mission/tas
 stage both before submitting either, and compose one mission run. Preparation holds no mission writer.
 
 Open the returned loopback relay in the confirmed browser. For each query, check
-cancellation/expiry and owner interruption, click "Open search" in the relay, wait for results to load,
+cancellation/expiry and owner interruption, click "Open search" in the relay (a few seconds apart), wait for results to load,
 evaluate `tab_script` once in the relay-opened source tab, then read its status and counts.
-Threads encrypts the answer and navigates the same tab to a relay receiver page; close it as a task-created tab.
+Threads encrypts the answer and navigates the same tab to a relay receiver page (a task-created tab).
+Close task-created tabs only after the relay shows `STAGED` or after submit.
+Never close a tab immediately after `posted: true`; navigation is delayed and the answer may be lost.
 TikTok posts to its relay opener. The host sees status and counts only. Source-tab conduct is read-only:
 no typing, clicking, scrolling, signing in, consenting or challenge solving.
 If automatic handoff fails, stop and report; manual Stage-answer requires the full envelope: `source` (Threads only,
@@ -64,8 +66,7 @@ If automatic handoff fails, stop and report; manual Stage-answer requires the fu
 `answers`: one answer per approved query in prepare order, each the packaged extractor's retained object.
 Transfer that envelope directly into Search answer JSON and click Stage answer; never reconstruct, transcribe or repair
 model-built records. A rejected payload closes the relay: prepare a new ticket before staging again.
-Missing host capabilities still stop collection.
-Call `submit_host_browser_search` with IDs only after all queries are staged; read back observations/outcomes
+Missing host capabilities still stop collection. Call `submit_host_browser_search` with IDs only after all queries are staged; read back observations/outcomes
 or canonical mission run/frame. Failed or uncertain ingestion requires journal/frame readback.
 
 For a visible sign-in wall, challenge, error page or missing grid, the extractor reports `DEGRADED`

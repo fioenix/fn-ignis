@@ -337,12 +337,12 @@ def socket_free_relay(monkeypatch):
         relay.close()
 
 
-def run_node(code, *args):
+def run_node(code, *args, stdin=None):
     import shutil
     import subprocess
     node = shutil.which("node")
     assert node, "Node is required for the relay contract"
-    result = subprocess.run([node, "-e", code, *args], capture_output=True, text=True, check=True)
+    result = subprocess.run([node, "-e", code, *args], capture_output=True, text=True, check=True, input=stdin)
     return json.loads(result.stdout)
 
 
@@ -480,11 +480,11 @@ def test_threads_receiver_exact_route_headers_hash_clear_and_no_key(socket_free_
     value = run_node(r'''
 const vm=require('vm');let order=[],sent=[];
 class BroadcastChannel {constructor(name){this.name=name}postMessage(raw){sent.push([this.name,raw]);order.push('post')}close(){}}
-vm.runInNewContext(process.argv[1],{location:{hash:'#ciphertext',pathname:'/cap/receive',search:''},
+vm.runInNewContext(process.argv[1],{location:{hash:'#'+'A'.repeat(39),pathname:'/cap/receive',search:''},
  history:{replaceState:(...args)=>order.push(args[2])},BroadcastChannel});
 console.log(JSON.stringify({order,sent}));
 ''', js)
-    assert value == dict(order=["/cap/receive", "post"], sent=[["ignis-host-answer:request-1", "ciphertext"]])
+    assert value == dict(order=["/cap/receive", "post"], sent=[["ignis-host-answer:request-1", "A" * 39]])
     for wrong in (path + "/", path + "?x=1", "/receive"):
         assert get(wrong)[0]["status"] == 404
     assert get(path, "POST")[0]["status"] == 404
@@ -515,3 +515,42 @@ def test_threads_prepare_exposes_key_only_in_tab_script_and_releases_relay_copie
         assert key not in relay._page and key not in relay.tab_script
     finally:
         service.close()
+
+
+@pytest.mark.parametrize("fragment,allowed", [
+    ("", False), ("A" * 38, False), ("A" * 39, True), ("Ab0_-" * 8, True),
+    ("A" * 1000000, True), ("A" * 1000001, False),
+    ("A" * 39 + "=", False), ("A" * 39 + "+", False), ("A" * 39 + "/", False),
+    ("A" * 39 + "\n", False),
+], ids=["empty", "short", "minimum", "alphabet", "ceiling", "oversize", "padding", "plus", "slash", "newline"])
+def test_receiver_posts_only_bounded_base64url_fragments(socket_free_relay, fragment, allowed):
+    import re
+    relay = socket_free_relay()
+    script = re.search(r'<script nonce="[^"]+">(.*?)</script>', relay._receiver_page, re.S).group(1)
+    result = run_node(r'''
+const vm=require('vm'),fs=require('fs');let sent=[],cleared=false;
+class BroadcastChannel {postMessage(raw){sent.push(raw)}close(){}}
+vm.runInNewContext(process.argv[1],{location:{hash:'#'+fs.readFileSync(0,'utf8'),pathname:'/cap/receive'},
+ history:{replaceState:()=>cleared=true},BroadcastChannel});
+console.log(JSON.stringify({sent:sent.map(raw=>raw.length),cleared}));
+''', script, stdin=fragment)
+    assert result == {"sent": [len(fragment)] if allowed else [], "cleared": True}
+
+
+@pytest.mark.parametrize("length", [0, 12, 27, 28, 29])
+def test_relay_rejects_iv_tag_only_before_decrypt(socket_free_relay, length):
+    relay = socket_free_relay()
+    script, data = relay_scripts(relay)
+    result = run_node(r'''
+const vm=require('vm');let listener,decrypts=0,submitted=0;
+const data=JSON.parse(process.argv[1]),script=process.argv[2],length=Number(process.argv[3]);
+const document={getElementById:id=>id==='relay-data'?{textContent:JSON.stringify(data)}:{value:'',textContent:'initial'},
+ querySelector:s=>s==='form'?{requestSubmit:()=>submitted++}:{addEventListener:()=>{}}};
+class BroadcastChannel {set onmessage(cb){listener=cb}}
+const crypto={subtle:{importKey:async()=>({}),decrypt:async()=>{decrypts++;throw Error('stop')}}};
+(async()=>{vm.runInNewContext(script,{document,BroadcastChannel,crypto,atob,Uint8Array,Map,TextDecoder,
+ window:{addEventListener:()=>{}},CSS:{escape:x=>x}});
+await listener({data:Buffer.alloc(length).toString('base64url')});
+console.log(JSON.stringify({decrypts,submitted}));})().catch(e=>{console.error(e);process.exit(1)});
+''', json.dumps(data), script, str(length))
+    assert result == {"decrypts": int(length > 28), "submitted": 0}

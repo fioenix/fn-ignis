@@ -41,7 +41,7 @@ def _counters(components, labels):
     for counter in components:
         raw = counter.raw_display.strip()
         label = labels.get(counter.kind)
-        if label and raw.startswith(label):
+        if label and raw.lower().startswith(label.lower()):
             raw = raw[len(label):].strip()
         if not label:
             expected, precision = None, "unknown"

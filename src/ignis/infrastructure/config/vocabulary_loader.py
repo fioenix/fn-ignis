@@ -43,6 +43,13 @@ def _is_template_domain(domain: str) -> bool:
     return any(domain.startswith(prefix) for prefix in TEMPLATE_PREFIXES)
 
 
+def is_market_vocabulary_domain(domain: str) -> bool:
+    """Keep mechanism labels and templates out of positive market vocabulary."""
+    domain = domain.lower()
+    return (domain not in MACHINERY_DOMAINS and not _is_template_domain(domain)
+            and not domain.startswith("threads_action_labels_"))
+
+
 @dataclass(frozen=True)
 class MarketVocabulary:
     """The persisted vocabulary, split by the mechanism each domain feeds."""
@@ -92,7 +99,7 @@ async def load_market_vocabulary(repository: ITrendRepository) -> MarketVocabula
             continue
         domain = str(row.get("domain") or "")
         grouped.setdefault(domain, []).append(term)
-        if domain not in MACHINERY_DOMAINS and not _is_template_domain(domain) and not domain.startswith("threads_action_labels_"):
+        if is_market_vocabulary_domain(domain):
             buckets.setdefault((domain, row.get("category")), []).append(term)
 
     def _templates_for(prefix: str) -> Dict[str, List[str]]:

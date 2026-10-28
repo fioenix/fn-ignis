@@ -118,7 +118,7 @@ from ignis.infrastructure.harness.language_detector import HeuristicLanguageDete
 from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
 from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
-from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer, is_market_vocabulary_domain
 from ignis.infrastructure.caller_storage import CallerStorageMiddleware, current_caller_storage
 from ignis.infrastructure.persistence import create_repository
 from ignis.infrastructure.templates.html_builder import HtmlArtifactBuilder
@@ -3725,7 +3725,7 @@ async def handle_register_domain_lexicon(
                 comp["strategic_reasoner"].register_foreign_stopwords(terms)
             if "clusterer" in comp and hasattr(comp["clusterer"], "register_stopwords"):
                 comp["clusterer"].register_stopwords(terms)
-        else:
+        elif is_market_vocabulary_domain(d_lower):
             if "quality_evaluator" in comp:
                 comp["quality_evaluator"].register_terms(terms)
             if "strategic_reasoner" in comp:

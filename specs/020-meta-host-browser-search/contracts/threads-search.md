@@ -32,14 +32,15 @@ The initial version supports visible sample, not search exhaustion. No HTML/tran
    (`vi-VN` → `vi`). Missing/malformed language yields `locale=unsupported`, DEGRADED, unverified,
    zero records (T054). Any well-formed primary locale may collect records by structure.
    Prepare freezes `market_lexicons` domain `threads_action_labels_<locale>`, category `<kind>`,
-   term equal to the SVG title. Migration 037 seeds en/vi observed titles. Tactical reads the
-   packaged seed in an isolated in-memory SQLite table without opening caller storage; mission
+   term matching the SVG title case-insensitively (`toLowerCase()` / `.lower()`). Migration 037
+   seeds en/vi observed titles. Tactical reads the packaged seed in an isolated in-memory SQLite table without opening caller storage; mission
    reads its caller repository. Both inject the frozen table as data into the packaged extractor
    and validate against that same snapshot. New locales require rows, not source changes.
    Match counters only by SVG title, never by button position; absent/ambiguous title is unknown.
    No labels for the locale means all counters unknown/null, records still allowed, and an outcome
    note saying counters are unmeasured for that locale. A partial label map measures only its kinds.
-   Strip the matched leading label from button text for parsing only; preserve `raw_display`.
+   Strip the matched leading label case-insensitively from button text for parsing only; preserve
+   `raw_display`.
    Plain digits are exact; K/M suffixes accept dot/comma decimal and round half up to an integer
    (`Thích1,4K` → rounded 1400, `4.1K` → rounded 4100). Empty/label-only/unrecognized/unsafe integer
    displays stay unknown/null. Never promote rounded precision to exact or Share to quotes.
@@ -64,12 +65,14 @@ failed check or encryption error without navigation. Otherwise schedule `locatio
 
 Only Threads tickets serve GET at the exact token-bound receiver path. The static nonce-CSP page
 uses `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and no external resources. It reads
-and immediately clears the hash through `history.replaceState`, then posts the raw fragment to
-BroadcastChannel `ignis-host-answer:<request_id>`. It has no key or decryption and shows only
-"Answer sent to the relay; close this tab". Close this task-created tab in host cleanup.
+and immediately clears the hash through `history.replaceState`, then posts only a base64url fragment
+of 39 through 1,000,000 characters to BroadcastChannel `ignis-host-answer:<request_id>`. It has no key or decryption and shows only
+"Answer sent to the relay; close this tab". Invalid fragments post nothing. Close task-created
+tabs only after the relay shows `STAGED` or after submit; `posted: true` alone precedes navigation.
 All other methods/paths and every TikTok receiver request retain today's behavior.
 
-The main Threads relay listens on that channel, decrypts, checks kind, request id, query id/text,
+The main Threads relay listens on that channel, requires decoded input longer than 28 bytes
+(12-byte IV + 16-byte tag + nonempty ciphertext) before decrypting, checks kind, request id, query id/text,
 record limit, one answer per query and nothing after submission. Ignore failed decryption/checks
 without state change. Reuse the answers map, status line and `requestSubmit` of the full envelope.
 Preserve nonce CSP/query escaping, Host/Origin, no CORS, server validation, single-use staging,
@@ -90,3 +93,12 @@ transient key retention. The configured size ceiling still requires live browser
 
 Synthetic fixture identities only. Scan receipts, metadata, journal, responses, reports and logs;
 zero header/attribution/profile leakage. Spec 015's free-text-name limitation stays documented.
+
+
+## Accepted v0.9.0 limitation — structural card detection follow-up
+
+Independent review finding 2, accepted by the owner for v0.9.0 on 28/10/2026 (T057): media with SVG
+buttons inside a card can satisfy structural detection below the action row, leaving counters
+unknown. A quoted post with two timestamps in one card blocks that card and marks the whole query
+`DEGRADED` while retaining other valid records. Follow up on structural card/action-row ownership
+and quoted-post isolation; these remain conservative limitations, not complete counter/quote support.

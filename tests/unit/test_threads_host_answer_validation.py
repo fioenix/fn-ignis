@@ -381,3 +381,10 @@ def test_ticket_freezes_caller_action_labels_for_validation(threads_service):
     threads_service.stage(request["request_id"], payload)
     receipt = threads_service.submit(request["request_id"], "task", "session")
     assert receipt["observations"][0]["counters"][0]["value"] == 12
+
+
+@pytest.mark.parametrize("raw", ["Me gusta12", "ME GUSTA12", "Me GuStA12"])
+def test_lowercase_operator_label_validates_mixed_case_prefix_verbatim(raw):
+    from ignis.infrastructure.connectors.host_browser.validator import _counters
+    record = HostPublicRecord.model_validate(record_data(counters=[counter(raw_display=raw)]))
+    assert _counters(record.counters, {"likes": "me gusta"}) == [counter(raw_display=raw)]

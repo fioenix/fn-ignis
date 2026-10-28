@@ -78,6 +78,7 @@
         !/^[A-Za-z0-9_-]+$/.test(event.data)) return;
     try {
       const bytes = Uint8Array.from(atob(event.data.replace(/-/g, '+').replace(/_/g, '/')), ch => ch.charCodeAt(0));
+      if (bytes.length <= 28) return;
       const plain = await crypto.subtle.decrypt({name: 'AES-GCM', iv: bytes.slice(0, 12)}, await key, bytes.slice(12));
       const message = JSON.parse(new TextDecoder().decode(plain));
       const answer = message && message.kind === 'ignis-host-answer' ? message.answer : null;
@@ -95,7 +96,6 @@
     const query = opened.get(event.source);
     const answer = event.data && event.data.kind === 'ignis-host-answer' ? event.data.answer : null;
     if (submitted || event.origin !== data.origin || !query || !answer || typeof answer !== 'object'
-        || data.source === 'threads' && event.data.request_id !== data.request_id
         || answer.query_id !== query.query_id || answer.query !== query.query
         || !Array.isArray(answer.records) || answer.records.length > query.result_limit) return;
     accept(query, answer);

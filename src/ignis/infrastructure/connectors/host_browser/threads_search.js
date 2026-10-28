@@ -63,12 +63,12 @@
     if (!excerpt) { dropped = true; continue; }
     const counters = kinds.map(kind => {
       const label = labels[kind];
-      const matches = label ? actions(card).filter(node => node.textContent.trim() === label) : [];
+      const matches = label ? actions(card).filter(node => node.textContent.trim().toLowerCase() === label.toLowerCase()) : [];
       const title = matches.length === 1 ? matches[0] : null;
       const control = title && title.closest('[role="button"],button');
       const raw_display = control ? [...control.childNodes].filter(node => node.nodeType === 3 || node.tagName.toLowerCase() !== 'svg').map(node => node.textContent).join('').trim() : '';
       let value = null, precision = 'unknown';
-      const numeric = label && raw_display.startsWith(label) ? raw_display.slice(label.length).trim() : raw_display;
+      const numeric = label && raw_display.toLowerCase().startsWith(label.toLowerCase()) ? raw_display.slice(label.length).trim() : raw_display;
       if (/^\d+$/.test(numeric)) { value = Number(numeric); precision = 'exact'; }
       else if (/^\d+(?:[.,]\d+)?[KM]$/.test(numeric)) {
         value = Math.round(Number(numeric.slice(0,-1).replace(',', '.')) * (numeric.endsWith('M') ? 1000000 : 1000));

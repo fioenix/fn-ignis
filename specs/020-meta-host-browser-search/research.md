@@ -289,3 +289,26 @@ comparison. Preserve historical v1 fixtures; add explicit two-axis v1/v2 rejecti
 baseline/manifest artifacts only with their prescribed scripts; unchanged output is expected because
 those fixtures cover legacy TikTok/public input schemas, not the Threads extractor revision.
 Live language/card/counter/receiver acceptance remains coordinator-owned; no live session is used.
+
+
+## R13. Independent review follow-up (T057, owner-approved 28/10/2026)
+
+Release preparation fixes T053–T056 without reopening the accepted T055 transport. Compare SVG
+action titles and leading display labels case-insensitively (`toLowerCase()` / `.lower()`), since
+operator registration lowercases stored terms; preserve `raw_display` verbatim. Share the market
+vocabulary domain predicate between startup grouping and runtime registration so action labels,
+attribution and query templates never enter the evaluators' positive vocabulary.
+
+The receiver clears the hash before handling it, broadcasts only base64url fragments of 39 through
+1,000,000 characters, and otherwise posts nothing. A nonempty AES-GCM payload requires at least
+29 decoded bytes (12-byte IV + 16-byte tag + ciphertext); the relay refuses shorter decoded input
+before decrypting. Host guidance closes task-created tabs only after relay `STAGED` or submit,
+never immediately after the delayed handoff returns `posted: true`.
+
+**Accepted v0.9.0 limitation — review finding 2; structural card detection follow-up:** media
+inside a card can contain SVG buttons, causing the nearest qualifying structural ancestor to stop
+below the action row and leave counters unknown. A quoted post with two timestamps in one card
+blocks that card and marks the whole query `DEGRADED`, while keeping other valid records. These
+conservative outcomes remain accepted for v0.9.0; follow up on card/action-row ownership and quote
+isolation with deterministic fixtures and separately authorized live verification. T057 does not
+change either detection behavior or claim those counters/quotes are fully supported.

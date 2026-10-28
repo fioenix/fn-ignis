@@ -537,12 +537,14 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   SC-005). Preserve owner browser/tabs, stop on login/challenge/denial, no fallback, credentials or G3
   routine change. Leave unchecked without approval or actual live proof; manual G2/fixtures/wheel smoke
   are insufficient.
-- [ ] T052 **Needs separate owner approval**: after T050 and explicit bounded real Reels session/run
+- [X] T052 **Needs separate owner approval**: after T050 and explicit bounded real Reels session/run
   authority, execute flag-free Reels and read back either observations or unavailable with the actual
   login/checkpoint/challenge/unusable reason, never measured zero from a blocked page; record sanitized
   run/status/readback evidence in `.handoff/spec020-live-reels.md` per
   `specs/020-meta-host-browser-search/quickstart.md` (FR-007, SC-006). No reauthentication, account
   action, routine update or evasion; leave unchecked without approval and observed outcome.
+  Owner-approved live run 28/10/2026: flag-free Reels with the stored Tier-1 session returned
+  `REELS_PAGE_UNUSABLE` (unavailable, no measured zero); evidence `.handoff/spec020-live-reels.md`.
 
 ---
 
@@ -610,6 +612,22 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   Live Chrome (Vietnamese UI): two queries, 20 HEALTHY observations via the T055 receiver, vi
   counters parsed (`Thích1,4K` rounded, plain digits exact, blank unknown), 20/20 identity-free
   links, zero stored `threads.com/@` rows. Repost-banner display-name risk remains live-unverified.
+
+- [X] T057 Fix independent review findings on T053–T056, owner-approved release preparation
+  28/10/2026. Test first: case-insensitive action-title and prefix matching in extractor/validator
+  with lowercased operator-registered labels and verbatim raw display; shared market-vocabulary
+  predicate for startup and registration, excluding action-label/attribution/template machinery;
+  receiver base64url/39–1,000,000-character bounds and relay decoded length >28 before decrypt.
+  Remove the unreachable Threads disjunct from the TikTok-only message branch; prove TikTok parity.
+  Stage the full ignis-collect replacement from current `.agents` in
+  `.handoff/spec020-skill/ignis-collect/SKILL.md`: close task-created tabs only after relay STAGED
+  or submit, never immediately after posted:true; assert the rule and keep the section <=50 lines.
+  Record review finding 2 as an accepted v0.9.0 structural-card/quoted-post limitation and follow-up
+  in research.md and contracts/threads-search.md. Run changed tests and traced consumers, ruff and
+  git diff --check; report RED then GREEN and unverified gates. No commit, credentials, live browser,
+  repository lowercasing changes or other T055 transport changes. Leave unticked for coordinator acceptance.
+  Coordinator integration 28/10/2026: skill copied (plus "a few seconds apart"), 645 passed and
+  7 SQLite-only skips with PostgreSQL and real loopback; ruff and diff checks clean.
 
 ## Dependencies and execution order
 

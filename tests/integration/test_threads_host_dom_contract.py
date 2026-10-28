@@ -203,3 +203,31 @@ def test_future_and_zoneless_timestamps_are_dropped_in_vietnamese(clock):
     html = (FIXTURES / "cards.vi.html").read_text().replace("2026-10-27T01:02:03.123456Z", clock)
     result = extract([html], locale="vi")
     assert result["records"] == [] and result["status"] == "DEGRADED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("title,display", [("Me gusta", "Me GuStA1,4K"), ("ME GUSTA", "me gusta1,4K")])
+async def test_operator_registered_lowercase_labels_match_titles_and_prefixes(tmp_path, monkeypatch, title, display):
+    from ignis.interfaces.mcp import server
+    from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
+    from ignis.infrastructure.connectors.host_browser.action_labels import action_labels_from_rows
+    from ignis.infrastructure.connectors.host_browser.validator import _counters
+    from ignis.domain.host_browser_search import HostPublicRecord
+
+    repo = SqliteTrendRepository(str(tmp_path / "labels.db"))
+    monkeypatch.setattr(server, "get_components", lambda: {"repository": repo})
+    try:
+        response = json.loads(await server.handle_register_domain_lexicon(
+            "threads_action_labels_es", ["Me gusta"], "likes"))
+        assert response["status"] == "SUCCESS"
+        labels = action_labels_from_rows(await repo.get_domain_lexicons("threads_action_labels_es"))
+        assert labels == {"es": {"likes": "me gusta"}}
+        html = (FIXTURES / "cards.vi.html").read_text().replace(
+            "<title>Thích</title>", "<title>" + title + "</title>").replace("Thích1,4K", display)
+        result = extract([html], locale="es", action_labels=labels)
+        counters = result["records"][0]["counters"]
+        assert counters[0] == dict(kind="likes", unit="count", raw_display=display, value=1400, precision="rounded")
+        record = HostPublicRecord.model_validate(dict(source_url=None, excerpt="Synthetic body", counters=counters))
+        assert _counters(record.counters, labels["es"]) == counters
+    finally:
+        await repo.close()
