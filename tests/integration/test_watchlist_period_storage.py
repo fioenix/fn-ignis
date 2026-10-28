@@ -57,7 +57,8 @@ async def call(handler, **kwargs):
 
 def signal(platform, key, title, published, observed, metric, **metadata):
     urls = {PlatformType.YOUTUBE: f"https://www.youtube.com/watch?v={key:0<11}"[:43],
-            PlatformType.TIKTOK: f"https://www.tiktok.com/share/video/{key}"}
+            PlatformType.TIKTOK: f"https://www.tiktok.com/share/video/{key}",
+            PlatformType.THREADS: f"https://www.threads.com/t/{key}"}
     return TrendSignal(platform=platform, raw_title=title, metric_value=float(metric), source_url=urls[platform],
                        geo_code=GeoCode.VN, captured_at=observed, published_at=published,
                        metadata={"connector_surface": platform.value, "keyword": "matcha latte", **metadata})
@@ -66,7 +67,7 @@ def signal(platform, key, title, published, observed, metric, **metadata):
 SURFACES = {"youtube": "youtube", "tiktok_video_grid": "tiktok", "reels": "reels"}
 
 
-async def daily_run(repository, store, workspace, watchlist_id, day, signals=(), failed=(), judged=True):
+async def daily_run(repository, store, workspace, watchlist_id, day, signals=(), failed=(), judged=True, paths=None):
     """One routine firing: a run, its completed collection on `day`, and judged evidence."""
     run = await call("handle_start_watchlist_run", watchlist_id=watchlist_id,
                      allowed_resources=list(SURFACES), authority_boundary=AUTHORITY)
@@ -81,7 +82,7 @@ async def daily_run(repository, store, workspace, watchlist_id, day, signals=(),
                             queried_keywords=() if surface in failed else ("matcha latte",),
                             query_fingerprint="q" * 64, completed_at=at(day, 22),
                             scope_attestation=None if surface in failed else
-                            {"geo": "VN", "timeframe": "7d", "keywords": ["matcha latte"]},
+                            {"geo": "VN", "timeframe": "7d", "keywords": ["matcha latte"], **(paths or {}).get(platform, {})},
                             note="Fixture outcome.", collection_plan_digest="p" * 64)
         for surface, platform in SURFACES.items()
     ])
@@ -292,7 +293,7 @@ async def test_seen_axis_without_a_plan_or_with_unjudged_evidence_fails_closed(l
     assert "indicators" not in tiktok
 
 
-async def save_plan_at(repository, target, instant, count, monkeypatch):
+async def save_plan_at(repository, target, instant, count, monkeypatch, kind="week"):
     """Use the public save path with a controlled repository clock, on either backend."""
     import importlib
 
@@ -303,7 +304,7 @@ async def save_plan_at(repository, target, instant, count, monkeypatch):
 
     with monkeypatch.context() as patch:
         patch.setattr(importlib.import_module(type(repository).__module__), "datetime", FrozenDatetime)
-        await repository.save_listening_plan(target, "Track drinks.", "week", count)
+        await repository.save_listening_plan(target, "Track drinks.", kind, count)
 
 
 async def test_seen_uses_each_channels_completion_time_even_when_another_finishes_later(listening, monkeypatch):
@@ -384,3 +385,55 @@ async def test_seen_history_is_not_truncated_by_another_channels_late_completion
     tiktok = next(c for c in result["topics"][0]["seen"] if c["channel"] == "tiktok")
     assert indicator(tiktok, "first_seen")["current"] == 0
     assert indicator(tiktok, "first_seen")["previous"] == 0
+
+
+@pytest.mark.parametrize("empty", [False, True])
+async def test_path_change_reaches_both_period_axes_without_rewriting_history(listening, monkeypatch, empty):
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+    repository, store, workspace, target = listening
+    await save_plan_at(repository, target, at(PREVIOUS[0], 0), 7, monkeypatch)
+    for day in PREVIOUS + CURRENT:
+        path = {"collection_path": "host_browser:tiktok-public-grid-v1" if day in CURRENT else "playwright:tiktok_grid",
+                "sampling": {"limit": 20}}
+        rows = [] if empty else [signal(PlatformType.TIKTOK, "9001" if day in CURRENT else "9002",
+            "matcha latte", at(day, 9), at(day, 21), 10, metric_kind="views", **path)]
+        await daily_run(repository, store, workspace, target, day, rows, paths={"tiktok": path})
+    watchlist = await repository.get_watchlist(target)
+    signals = [await repository.get_mission_signals(r.mission_id) for r in watchlist.runs]
+    probes = [await store.get_latest_completed_probe_outcomes(r.mission_id) for r in watchlist.runs]
+    snapshot = await GetWatchlistPeriodSnapshotUseCase(repository, store, lambda: at(date(2026, 10, 12))).execute(
+        target, "week", CURRENT[0].isoformat())
+    for axis in ("channels", "seen"):
+        cell = next(c for c in snapshot["topics"][0][axis] if c["channel"] == "tiktok")
+        assert cell["status"] == "not_comparable"
+        assert "collection_path_changed" in cell["reasons"]
+        assert cell["collection_paths"]["current"][0]["basis"] == "explicit_metadata"
+        assert "indicators" not in cell
+    assert signals == [await repository.get_mission_signals(r.mission_id) for r in watchlist.runs]
+    assert probes == [await store.get_latest_completed_probe_outcomes(r.mission_id) for r in watchlist.runs]
+
+
+@pytest.mark.parametrize("proof,expected", [("legacy", "comparable"), ("unknown", "comparable")])
+async def test_legacy_proof_is_reported_without_blocking_two_unknown_periods(listening, monkeypatch, proof, expected):
+    from ignis.application.use_cases.watchlist_period import GetWatchlistPeriodSnapshotUseCase
+    repository, store, workspace, target = listening
+    monkeypatch.setitem(SURFACES, "threads", "threads")
+    await save_plan_at(repository, target, at(PREVIOUS[0], 0), 1, monkeypatch, kind="day")
+    # Explicit legacy proof is observation-local; no stored probe path or inferred cookie/date.
+    for day in [CURRENT[0] - timedelta(days=1), CURRENT[0]]:
+        row = signal(PlatformType.THREADS, "8001" if day == CURRENT[0] else "8002", "matcha latte",
+                     at(day, 9), at(day, 21), 10, metric_kind="views")
+        row.metadata.pop("collection_path", None)
+        if proof == "legacy":
+            row.metadata.update(source="threads_browser_session", tier="TIER_1_BROWSER_SESSION")
+        await daily_run(repository, store, workspace, target, day, [row], paths={"threads": {}})
+    snapshot = await GetWatchlistPeriodSnapshotUseCase(repository, store, lambda: at(date(2026, 10, 12))).execute(
+        target, "day", CURRENT[0].isoformat())
+    for axis in ("channels", "seen"):
+        cell = next(c for c in snapshot["topics"][0][axis] if c["channel"] == "threads")
+        assert cell["status"] == expected
+        if proof == "unknown":
+            assert "reasons" not in cell
+            assert "collection_paths" not in cell
+        else:
+            assert "observation_metadata" in {p["basis"] for p in cell["collection_paths"]["current"]}

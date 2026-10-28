@@ -183,3 +183,25 @@ async def test_the_journal_writer_records_the_same_author_facts(ingress_case, tm
     _source_url, metadata, _external_id, state, marker, _declared = _stored(ingress_case, mission)
     assert state == "KNOWN" and MARKER.match(marker), ingress_case.name
     assert [value for value in undeclared_sentinels() if value in str(metadata)] == [], ingress_case.name
+
+
+async def test_host_threads_without_collected_author_gets_unknown_marker(repository_case, tmp_path, monkeypatch):
+    from ignis.application.use_cases import host_browser_search as module
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from test_host_browser_mission import assignment
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("threads",))
+    service = module.HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+        payload = host_answer(request)
+        for answer in payload["answers"]:
+            answer["records"][0]["source_url"] = "https://www.threads.com/t/Synthetic020Q0"
+        service.stage(request["request_id"], payload)
+        await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        row = repository_case.query_one(
+            "SELECT author_state, author_marker FROM mission_evidence WHERE mission_id = ?",
+            "SELECT author_state, author_marker FROM mission_evidence WHERE mission_id = %s", (str(mission.id),))
+        assert tuple(row) == ("UNKNOWN", None)
+    finally:
+        service.close()

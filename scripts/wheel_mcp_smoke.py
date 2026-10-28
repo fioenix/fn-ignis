@@ -209,6 +209,23 @@ class _Session:
             pass
 
 
+def _check_host_schemas(tools: list[dict]) -> None:
+    """Reject contract drift even when a server still advertises exactly 53 names."""
+    schemas = {tool["name"]: tool.get("inputSchema", {}) for tool in tools}
+    prepare = schemas.get("prepare_host_browser_search", {})
+    if (prepare.get("properties", {}).get("source") != {"default": "tiktok", "type": "string"}
+            or "source" in prepare.get("required", [])):
+        raise SmokeFailure("host-browser schema: prepare source must be optional and default to tiktok")
+    unchanged = {
+        "type": "object", "additionalProperties": False,
+        "properties": {key: {"type": "string"} for key in ("request_id", "host_task_ref", "session_ref")},
+        "required": ["request_id", "host_task_ref", "session_ref"],
+    }
+    for name in ("submit_host_browser_search", "cancel_host_browser_search"):
+        if schemas.get(name) != unchanged:
+            raise SmokeFailure(f"host-browser schema: {name} must retain its ID-only contract")
+
+
 def run_smoke(
     command: list[str] | None = None,
     *,
@@ -254,7 +271,8 @@ def run_smoke(
                 raise SmokeFailure(
                     f"mission-bound catalog mismatch: missing {sorted(missing)}, retained {sorted(retained)}"
                 )
-        log(f"tool discovery ok, {len(tools)} tools")
+        _check_host_schemas(tools)
+        log(f"tool discovery ok, {len(tools)} tools; optional prepare source=tiktok, submit/cancel unchanged")
 
         session.send(
             {

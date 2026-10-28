@@ -12,7 +12,7 @@ việc client đã được cấu hình hoặc kiểm tra tổng hợp đạt kh
 truy cập được. Chỉ cấp credentials hoặc phiên browser cho đúng nguồn và nhiệm vụ đã cho phép.
 Không đặt bí mật trong prompt, transcript lệnh hay báo cáo.
 
-Chuỗi migration trong mã nguồn kết thúc ở `sql/035_watchlist_listening_plans.sql`. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn
+Chuỗi migration trong mã nguồn kết thúc ở `sql/037_threads_action_labels.sql`. Migration 037 nạp sẵn nhãn các nút hành động của Threads theo từng ngôn ngữ giao diện, dùng để đọc chỉ số khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 036 nạp sẵn mẫu câu ghi công tác giả của Threads, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn
 mẫu câu ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình
 duyệt host; nó không sửa bằng chứng đã lưu. Migration 033 thêm
 bộ đếm số lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không
@@ -63,13 +63,12 @@ thực đã lưu tự chúng không cấp quyền đó.
   Playwright trả về `SUCCESS` với 0 bình luận. Trang bị chặn hoặc không phân tích được cũng có thể
   cho 0 bình luận, hoặc trả về `ERROR`, tùy chỗ bị lỗi. Vì vậy con số 0 không chứng minh video
   không có thảo luận.
-- `get_tiktok_search_suggestions(keywords, geo="VN")` và
-  `get_threads_search_suggestions(keyword, geo="VN", limit=10)` (tối đa 20) trả về gợi ý tìm kiếm
-  mở rộng. `get_threads_trending_topics(geo="VN", limit=15)` (tối đa 30) và
-  `get_tiktok_creative_center_trends(geo="VN", period=7, limit=20, industry=None)` (`limit` tối đa
-  50) trả về danh sách xu hướng vĩ mô. Tool Threads trả về `AUTH_REQUIRED` khi chưa có phiên đăng
-  nhập và `PARSE_EMPTY` khi trang không cho kết quả. Gợi ý và xu hướng chỉ mở rộng từ khóa hoặc chủ
-  đề, không phải lượng tìm kiếm, nhu cầu hay kết luận thị trường.
+- `get_tiktok_search_suggestions(keywords, geo="VN")` trả về gợi ý tìm kiếm.
+  `get_tiktok_creative_center_trends(geo="VN", period=7, limit=20, industry=None)` trả về xu hướng
+  vĩ mô (`limit` tối đa 50). Các kết quả này mở rộng chủ đề, không đo nhu cầu.
+  Hai chữ ký cũ `get_threads_search_suggestions(keyword, geo="VN", limit=10)` và
+  `get_threads_trending_topics(geo="VN", limit=15)` trả về `UNAVAILABLE/HOST_BROWSER_REQUIRED`.
+  Không có phương án dự phòng qua browser, cookie hay OAuth.
 - `execute_mission_ingress(mission_id)` là lựa chọn riêng cho nhiệm vụ đã xác nhận: tool này chỉ
   chạy kế hoạch đã ghi của nhiệm vụ đó và ghi kết quả cho từng kênh được yêu cầu.
 
@@ -168,15 +167,10 @@ cập được hoặc đo thất bại là thiếu bao phủ, còn bề mặt n�
 ủng hộ, phản bác hay chỉ cung cấp bối cảnh và kiểm tra khung chứng cứ đã đi đến trạng thái
 cuối trước khi lập nhận định Market.
 
-Truy cập Threads cần được kiểm tra riêng. Token Graph đã lưu có thể vẫn hợp lệ nhưng probe tìm
-kiếm từ khóa lại báo `SELF_ONLY` (endpoint chỉ trả về bài của chính tài khoản) hoặc `NOT_PERMITTED`.
-Cả hai đều nghĩa là token không trả lời được câu hỏi về thị trường công khai, và Ignis từ chối các
-kết quả đó thay vì coi dòng thời gian của chính tài khoản là chứng cứ thị trường.
-`get_threads_auth_status` chỉ báo credential đã lưu và tier, chưa chứng minh có quyền truy cập công
-khai; `authenticate_threads` khi gọi với `auth_code` trả kết quả probe trong `keyword_search_access`.
-Khi token bị chặn, Ignis ưu tiên phiên trình duyệt đã có, và chỉ được dùng phiên đó khi quyền với
-nguồn, phiên và nhiệm vụ cho phép. Nếu không, hãy ghi nhận thiếu bao phủ và giữ đúng phạm vi nguồn
-đã duyệt, không tự mở rộng phạm vi hay thu thập lại.
+Thu thập Threads cần trình duyệt host được cho phép riêng. Credential Graph đã lưu chỉ là trạng
+thái tương thích, không chứng minh quyền tìm kiếm công khai. `authenticate_threads`,
+`get_threads_auth_status` và `clear_threads_auth` giữ chữ ký cũ; chúng không kích hoạt thu thập
+hay probe quyền API. Hãy chuẩn bị host một cách tường minh hoặc báo phần thiếu dữ liệu.
 
 Mỗi nhận định chiến lược phải nằm trong Claim Ledger được lưu. `submit_mission_claims` gắn
 nó với quan sát hoặc kết quả không thấy dữ liệu đã được đo hợp lệ;
@@ -300,3 +294,36 @@ Yêu cầu tối đa một giờ, payload form tối đa 1 MiB. Listener chỉ m
 Host/Origin và đóng khi kết thúc. Chỉ số, ngày đăng và khoảng thời gian chưa đo vẫn là chưa biết.
 Lưới video hữu hạn không đại diện cho toàn thị trường, không bao gồm bình luận và không phải
 khuyến nghị kinh doanh. Host chỉ đóng tab do nhiệm vụ tạo, giữ nguyên trình duyệt và tab của chủ.
+
+### Thu thập Threads qua host và so sánh đường thu thập
+
+`prepare_host_browser_search` có tham số tùy chọn `source="threads"`. Khi bỏ qua tham số này,
+tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool vẫn là 53.
+Threads chỉ thu thập qua trình duyệt host được cho phép. Phần thu thập Threads bằng Playwright
+đã bị loại bỏ. Hai tool gợi ý và xu hướng cũ trả về `UNAVAILABLE/HOST_BROWSER_REQUIRED`.
+Credential Threads đã lưu không chứng minh có thể thu thập. Ignis không kích hoạt đường API,
+không probe quyền API và không tự chuyển sang cách thu thập dự phòng khi lỗi.
+
+Reels vẫn dùng Playwright, không dùng cờ che giấu tự động hóa. Trang yêu cầu đăng nhập,
+checkpoint, challenge, phản hồi không đọc được hoặc thiếu search envelope đều là kết quả
+không khả dụng có lý do, không phải số 0 đã đo. Search envelope rỗng, đúng cấu trúc và đã được
+xác minh có thể trả về `EMPTY_NO_DATA` cho từ khóa đã chạy. Kết quả này không chứng minh đã
+bao phủ từ khóa khác hay biết rõ khoảng thời gian.
+
+Threads `threads-search-top-v2` chỉ lấy mẫu Top hữu hạn đang hiển thị trên
+`www.threads.com/search`. Bài viết được nhận diện theo cấu trúc trang ở mọi ngôn ngữ giao diện.
+Chỉ số chỉ đọc được khi ngôn ngữ giao diện đã có nhãn nút trong dữ liệu seed (hiện là tiếng Anh
+và tiếng Việt); với ngôn ngữ khác, chỉ số để ở trạng thái chưa biết.
+Trang đang tải, khung trang rỗng hoặc toàn bộ bản ghi bị loại không chứng minh thị trường rỗng.
+Thời điểm chụp và thời điểm đăng được giữ riêng. Chỉ số giữ nguyên chữ hiển thị và độ chính xác:
+`1.4K` hay `1,4K` là số làm tròn, ô trống là chưa biết; shares không phải quotes.
+Số làm tròn không trở thành tổng chính xác trong kỳ. Tiêu đề tác giả và câu ghi công bị bỏ trước khi trả receipt hoặc lưu.
+Link dùng tham chiếu nội dung không chứa danh tính. Tên người trong văn bản tự do vẫn là một
+giới hạn của bước làm sạch.
+
+Trên cả trục seen và created, `collection_path_changed` từ chối hai đường thu thập đã xác định
+nhưng khác nhau. `collection_path_unknown` từ chối một đường đã xác định so với một đường chưa biết.
+`collection_path_mixed` từ chối khi một kỳ trộn nhiều đường đã xác định, hoặc trộn đường đã xác định
+với đường chưa biết. Các ô này không có chỉ số hay chênh lệch. Hai đường đã xác định giống nhau
+vẫn có thể so sánh. Khi cả hai kỳ chỉ có đường chưa biết, quy tắc và kết quả so sánh cũ được giữ
+nguyên. Nhịp lấy mẫu, độ bao phủ, cách xếp theo ngày đăng và điều kiện đánh giá vẫn áp dụng.

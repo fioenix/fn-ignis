@@ -1,0 +1,42 @@
+{
+  "cancel_host_browser_search": {
+    "additionalProperties": false,
+    "properties": {
+      "host_task_ref": {
+        "type": "string"
+      },
+      "request_id": {
+        "type": "string"
+      },
+      "session_ref": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "request_id",
+      "host_task_ref",
+      "session_ref"
+    ],
+    "type": "object"
+  },
+  "submit_host_browser_search": {
+    "additionalProperties": false,
+    "properties": {
+      "host_task_ref": {
+        "type": "string"
+      },
+      "request_id": {
+        "type": "string"
+      },
+      "session_ref": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "request_id",
+      "host_task_ref",
+      "session_ref"
+    ],
+    "type": "object"
+  }
+}

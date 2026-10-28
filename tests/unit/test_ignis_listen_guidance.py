@@ -105,3 +105,11 @@ def test_both_axes_are_labelled_and_seen_is_presented_first():
                   'seen_period_unjudged_snapshots', 'seen_period_without_cadence',
                   'Never sum across channels or axes'):
         assert field in guide
+
+
+def test_path_discontinuity_is_explained_for_both_axes_without_recollecting():
+    guide = _packaged_guide()
+    for term in ("collection_path_changed", "collection_path_unknown", "collection_path_mixed",
+                 "both axes", "both periods have only unknown paths", "legacy comparison rules",
+                 "rounded", "capture time", "publication time"):
+        assert term in guide, term

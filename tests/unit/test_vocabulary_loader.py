@@ -23,12 +23,14 @@ from ignis.infrastructure.harness.language_detector import HeuristicLanguageDete
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
 SQL = Path(__file__).resolve().parents[2] / "sql"
-# Both files the SQLite bootstrap re-applies. Keep in step with sqlite_repository.
+# Vocabulary seeds replayed by SQLite bootstrap. Keep in step with sqlite_repository.
 SEEDS = (
     "012_vocabulary_from_constants.sql",
     "013_tiktok_ui_noise.sql",
     "014_language_detection_vocabulary.sql",
     "034_tiktok_attribution.sql",
+    "036_threads_attribution.sql",
+    "037_threads_action_labels.sql",
 )
 
 
@@ -257,16 +259,164 @@ async def test_a_fresh_database_arms_the_tiktok_attribution_guard(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_the_synchronizer_hands_database_attribution_templates_to_host_search(tmp_path):
+async def test_the_synchronizer_does_not_promote_caller_templates_into_tactical_search(tmp_path):
     from ignis.application.use_cases.host_browser_search import HostBrowserSearchService
     from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
 
     repo = SqliteTrendRepository(db_path=str(tmp_path / "sync.db"))
     await repo.register_lexicon_terms("tiktok_attribution", ["created by {author} with"], "ui_attribution")
-    service = HostBrowserSearchService(attribution_templates=())
+    service = HostBrowserSearchService()
+    before = service.attribution_templates_for()
     try:
-        await VocabularySynchronizer(repo, host_browser_search=service).synchronize()
-        assert "created by {author} with" in service._attribution_templates
-        assert "do {author} tạo với" in service._attribution_templates
+        await VocabularySynchronizer(repo).synchronize()
+        assert service.attribution_templates_for() == before
+        frozen = await service.refresh_attribution_templates(repo)
+        assert "created by {author} with" in frozen
     finally:
         service.close()
+        await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_threads_attribution_is_loaded_as_machinery_not_positive_evidence(tmp_path):
+    from ignis.infrastructure.security.pii_sanitizer import strip_platform_attribution
+
+    repo = SqliteTrendRepository(str(tmp_path / "threads-vocabulary.db"))
+    try:
+        vocabulary = await load_market_vocabulary(repo)
+        assert vocabulary.threads_attribution == ["Photo by {author} on"]
+        assert "Photo by {author} on" not in vocabulary.positive_terms
+        assert ("threads_attribution", "ui_attribution") not in vocabulary.by_domain_and_category
+        assert strip_platform_attribution("Synthetic body Photo by Synthetic Sentinel on October 28",
+                                          vocabulary.threads_attribution) == "Synthetic body"
+    finally:
+        await repo.close()
+
+
+def test_tactical_threads_templates_come_from_the_packaged_seed_and_never_tiktok():
+    from ignis.application.use_cases.host_browser_search import AttributionVocabularyMissing, HostBrowserSearchService
+
+    service = HostBrowserSearchService()
+    try:
+        assert service.attribution_templates_for("threads") == ("Photo by {author} on",)
+        service.register_attribution_templates([], source="threads")
+        assert service.attribution_templates_for("tiktok")
+        with pytest.raises(AttributionVocabularyMissing):
+            service.attribution_templates_for("threads")
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_mission_refresh_freezes_local_templates_without_replacing_tactical_sources(tmp_path):
+    import sqlite3
+    from ignis.application.use_cases.host_browser_search import AttributionVocabularyMissing, HostBrowserSearchService
+
+    repo = SqliteTrendRepository(str(tmp_path / "threads-refresh.db"))
+    service = HostBrowserSearchService()
+    try:
+        await repo.register_lexicon_terms("threads_attribution", ["observed fixture {author} suffix"], "ui_attribution")
+        frozen = await service.refresh_attribution_templates(repo, source="threads")
+        assert frozen == ("Photo by {author} on", "observed fixture {author} suffix")
+        with sqlite3.connect(repo._db_path) as conn:
+            conn.execute("DELETE FROM market_lexicons WHERE domain = 'threads_attribution'")
+        with pytest.raises(AttributionVocabularyMissing):
+            await service.refresh_attribution_templates(repo, source="threads")
+        assert frozen == ("Photo by {author} on", "observed fixture {author} suffix")
+        assert service.attribution_templates_for("tiktok")
+        assert service.attribution_templates_for("threads") == ("Photo by {author} on",)
+    finally:
+        service.close()
+        await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_synchronizer_missing_caller_vocabulary_leaves_packaged_templates_intact(tmp_path):
+    import sqlite3
+    from ignis.application.use_cases.host_browser_search import HostBrowserSearchService
+    from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+
+    repo = SqliteTrendRepository(str(tmp_path / "threads-sync.db"))
+    service = HostBrowserSearchService()
+    try:
+        await repo.get_domain_lexicons()
+        with sqlite3.connect(repo._db_path) as conn:
+            conn.execute("DELETE FROM market_lexicons WHERE domain = 'threads_attribution'")
+        await VocabularySynchronizer(repo).synchronize_vocabulary()
+        assert service.attribution_templates_for("threads") == ("Photo by {author} on",)
+        assert service.attribution_templates_for("tiktok")
+    finally:
+        service.close()
+        await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_missing_mission_tiktok_templates_fail_before_ticket_freeze_or_relay(tmp_path, monkeypatch):
+    import sqlite3
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from ignis.application.use_cases import host_browser_search as module
+    from ignis.application.use_cases import host_browser_mission
+
+    repo = SqliteTrendRepository(str(tmp_path / "missing-tiktok.db"))
+    service = module.HostBrowserSearchService()
+    try:
+        await repo.get_domain_lexicons()
+        with sqlite3.connect(repo._db_path) as conn:
+            conn.execute("DELETE FROM market_lexicons WHERE domain = 'tiktok_attribution'")
+        monkeypatch.setattr(host_browser_mission, "prepare_scope", AsyncMock(return_value={
+            "queries": ["synthetic"], "plan": {"plan_digest": "p" * 64}}))
+        def forbid_relay(*args):
+            pytest.fail("Missing source vocabulary must refuse before opening the relay")
+        monkeypatch.setattr(module, "LoopbackRelay", forbid_relay)
+        with pytest.raises(module.AttributionVocabularyMissing):
+            await service.prepare_mission(SimpleNamespace(_repo=repo), "mission", "task", "session", 60, True)
+    finally:
+        service.close()
+        await repo.close()
+
+
+@pytest.mark.asyncio
+async def test_mission_ticket_keeps_its_repository_templates_across_an_interleaved_refresh(tmp_path, monkeypatch):
+    import runpy
+    from types import SimpleNamespace
+    from ignis.application.use_cases import host_browser_search as module
+    from ignis.application.use_cases import host_browser_mission
+
+    class NoSocketRelay:
+        url = "http://127.0.0.1:0/synthetic-relay"
+        tab_script = "synthetic script"
+
+        def __init__(self, *args):
+            pass
+
+        def close(self):
+            pass
+
+    repo = SqliteTrendRepository(str(tmp_path / "interleaved-vocabulary.db"))
+    service = module.HostBrowserSearchService()
+    unit = runpy.run_path(str(Path(__file__).with_name("test_host_browser_search.py")))
+    try:
+        await repo.register_lexicon_terms("tiktok_attribution", ["created by {author} with"], "ui_attribution")
+        async def interleaved_scope(*args):
+            service.register_attribution_templates(["another wording {author} with"])
+            return {"queries": ["túi đi làm"], "plan": {"plan_digest": "p" * 64}, "digest": "d" * 64,
+                    "source": "tiktok", "host_sources": ("tiktok",), "required_host_sources": ("tiktok",)}
+        monkeypatch.setattr(host_browser_mission, "prepare_scope", interleaved_scope)
+        monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+        request = await service.prepare_mission(SimpleNamespace(_repo=repo, _registry=SimpleNamespace(self_identities=())), "mission", "task-1", "chrome-1", 60, True)
+        payload = unit["answer"](request)
+        payload["answers"][0]["records"][0]["excerpt"] = "Synthetic body created by Synthetic Sentinel with sound"
+        service.stage(request["request_id"], payload)
+        held = service._tickets[request["request_id"]]["receipt"]
+        assert held["observations"][0]["excerpt"] == "Synthetic body"
+    finally:
+        service.close()
+        await repo.close()
+
+
+def test_review_synchronizer_cannot_receive_the_process_global_host_template_service():
+    """Caller vocabulary sync must not retain a route into tactical packaged templates."""
+    import inspect
+    from ignis.infrastructure.config.vocabulary_loader import VocabularySynchronizer
+    assert "host_browser_search" not in inspect.signature(VocabularySynchronizer).parameters

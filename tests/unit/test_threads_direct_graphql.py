@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from ignis.domain.value_objects import GeoCode, PlatformType
 from ignis.infrastructure.connectors.meta_browser_ingress import (
     GraphQLDocIdCache,
     build_cookie_header,
@@ -14,7 +13,6 @@ from ignis.infrastructure.connectors.meta_browser_ingress import (
     extract_trending_topics,
     fetch_graphql_direct,
 )
-from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
 
 
 # --- Fixtures & Mocks ---
@@ -90,118 +88,6 @@ SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD = {
 
 
 # --- Tests for Ingress Helpers ---
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("direct", [True, False])
-@pytest.mark.parametrize("limit", [1, 2])
-async def test_search_only_emits_ranked_roots_not_nested_quotes(direct, limit):
-    payload = json.loads(json.dumps(SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD))
-    edges = payload["data"]["searchResults"]["edges"]
-    first = edges[0]["node"]
-    quoted = json.loads(json.dumps(first))
-    quoted.update(pk="quoted", code="QuotedFixture")
-    second = json.loads(json.dumps(first))
-    second.update(pk="second-ranked", code="SecondFixture")
-    first["text_post_app_info"]["quoted_post"] = quoted
-    edges.extend([{"node": first}, {"node": second}])
-    plugin = ThreadsPlugin()
-    with patch.object(GraphQLDocIdCache, "get", return_value=("doc-test" if direct else None, None)), patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
-        AsyncMock(return_value=payload),
-    ), patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.collect_json_payloads",
-        AsyncMock(return_value=[payload]),
-    ):
-        signals = await plugin._search_via_browser_session(["retail"], {}, GeoCode.VN, limit)
-    assert [signal.metadata["post_id"] for signal in signals] == ["3399887766", "second-ranked"][:limit]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("direct", [True, False])
-async def test_overlapping_browser_queries_keep_one_post_and_every_query(direct):
-    from ignis.application.ports.connector_port import SearchAttestation
-
-    plugin = ThreadsPlugin()
-    attestation = SearchAttestation()
-    queries = ["retail need", "retail counterevidence", "retail need"]
-    with patch.object(GraphQLDocIdCache, "get", return_value=("doc-test" if direct else None, None)), patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
-        AsyncMock(return_value=SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD),
-    ), patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.collect_json_payloads",
-        AsyncMock(return_value=[SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD]),
-    ):
-        signals = await plugin._search_via_browser_session(queries, {}, GeoCode.VN, 10, attestation)
-    assert len(signals) == 1
-    assert signals[0].metadata["matched_keyword"] == queries[0]
-    assert signals[0].metadata["matched_keywords"] == queries[:2]
-    assert attestation.queried == queries[:2]
-
-
-@pytest.mark.asyncio
-async def test_overlapping_graph_queries_preserve_attribution_without_duplicate_insights():
-    from ignis.application.ports.connector_port import SearchAttestation
-
-    plugin = ThreadsPlugin()
-    attestation = SearchAttestation()
-    queries = ["retail need", "retail counterevidence"]
-    payload = {"data": [{"id": "public-post", "text": "Public fixture post"}]}
-    with patch.object(plugin, "_has_graph_token", AsyncMock(return_value=True)), patch.object(
-        plugin, "_keyword_search_is_blocked", AsyncMock(return_value=False),
-    ), patch.object(plugin, "_require_token", AsyncMock(return_value="fixture-token")), patch.object(
-        plugin, "_graph_get", AsyncMock(return_value=payload),
-    ), patch.object(plugin, "_fetch_insights_batch", AsyncMock(return_value={})) as insights:
-        signals = await plugin.search_signals(queries, attestation=attestation)
-    assert len(signals) == 1
-    assert signals[0].metadata["matched_keyword"] == queries[0]
-    assert signals[0].metadata["matched_keywords"] == queries
-    assert attestation.queried == queries
-    assert [call.args[0] for call in insights.await_args_list if call.args[0]] == [["public-post"]]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("payload,should_fallback", [
-    ({"data": {"searchResults": {"edges": []}}}, False),
-    ({"data": {"custom_feeds": []}}, True),
-    ({"data": {"searchResults": {"edges": None}}}, True),
-    ({"data": {"searchResults": {"edges": [{"node": None}]}}}, True),
-    ({"errors": [{"message": "failed"}], **SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD}, True),
-])
-async def test_direct_public_search_proof_distinguishes_valid_empty_from_unavailable(payload, should_fallback):
-    from ignis.application.ports.connector_port import SearchAttestation
-
-    plugin = ThreadsPlugin()
-    attestation = SearchAttestation()
-    with patch.object(GraphQLDocIdCache, "get", return_value=("doc-test", None)), patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
-        AsyncMock(return_value=payload),
-    ), patch.object(plugin, "_fetch_via_browser_session", AsyncMock(return_value=[])) as browser:
-        signals = await plugin._search_via_browser_session(
-            ["retail"], {}, GeoCode.VN, 10, attestation=attestation,
-        )
-    assert signals == []
-    assert browser.await_count == int(should_fallback)
-    assert attestation.queried == ([] if should_fallback else ["retail"])
-
-
-@pytest.mark.asyncio
-async def test_direct_empty_search_excludes_background_posts_and_proves_each_query():
-    from ignis.application.ports.connector_port import SearchAttestation
-
-    plugin = ThreadsPlugin()
-    attestation = SearchAttestation()
-    payload = {"data": {"searchResults": {"edges": []}, "background": SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD}}
-    with patch.object(GraphQLDocIdCache, "get", return_value=("doc-test", None)), patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
-        AsyncMock(return_value=payload),
-    ), patch.object(plugin, "_fetch_via_browser_session", AsyncMock(return_value=[])) as browser:
-        signals = await plugin._search_via_browser_session(
-            ["retail", "office"], {}, GeoCode.VN, 10, attestation=attestation,
-        )
-    assert signals == []
-    assert attestation.queried == ["retail", "office"]
-    browser.assert_not_awaited()
 
 
 @pytest.fixture(autouse=True)
@@ -281,104 +167,13 @@ def test_extract_search_suggestions():
 # --- Tests for Direct GraphQL HTTP Fetch ---
 
 
-@pytest.mark.asyncio
-async def test_fetch_graphql_direct_success():
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = SAMPLE_TRENDING_TOPICS_PAYLOAD
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = mock_resp
-        payload = await fetch_graphql_direct(
-            doc_id="doc_trending_001",
-            variables={},
-            storage_state=SAMPLE_STORAGE_STATE,
-            lsd="AVq0",
-            geo=GeoCode.VN,
-        )
-
-        assert payload is not None
-        assert "data" in payload
-        # Ensure correct headers were sent
-        sent_headers = mock_post.call_args.kwargs["headers"]
-        assert sent_headers["X-IG-App-ID"] == "238260118693652"
-        assert "sessionid=test_session_123" in sent_headers["Cookie"]
-
-
-@pytest.mark.asyncio
-async def test_fetch_graphql_direct_error_returns_none_for_fallback():
-    mock_resp = MagicMock()
-    mock_resp.status_code = 400
-    mock_resp.json.return_value = {"errors": [{"message": "Invalid doc_id"}]}
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
-        mock_post.return_value = mock_resp
-        payload = await fetch_graphql_direct(
-            doc_id="doc_invalid",
-            variables={},
-            storage_state=SAMPLE_STORAGE_STATE,
-        )
-        assert payload is None
-
-
 # --- Tests for ThreadsPlugin with Direct GraphQL & Fallback ---
 
 
 @pytest.mark.asyncio
-async def test_threads_plugin_fetch_trending_topics_fast_path():
-    plugin = ThreadsPlugin()
-    plugin._browser_storage_state = AsyncMock(return_value=SAMPLE_STORAGE_STATE)
-
-    # Set cached doc_id to test fast path
-    GraphQLDocIdCache.set("trending_topics", "doc_trending_fast", "lsd_fast")
-
-    with patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
-        new_callable=AsyncMock,
-    ) as mock_direct:
-        mock_direct.return_value = SAMPLE_TRENDING_TOPICS_PAYLOAD
-
-        topics = await plugin.fetch_trending_topics(geo=GeoCode.VN, limit=5)
-        assert len(topics) == 3
-        assert topics[0]["topic"] == "AI Coding Assistant"
-        mock_direct.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_threads_plugin_fetch_search_suggestions_fast_path():
-    plugin = ThreadsPlugin()
-    plugin._browser_storage_state = AsyncMock(return_value=SAMPLE_STORAGE_STATE)
-
-    GraphQLDocIdCache.set("search_suggestions", "doc_suggest_fast", "lsd_fast")
-
-    with patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
-        new_callable=AsyncMock,
-    ) as mock_direct:
-        mock_direct.return_value = SAMPLE_SEARCH_SUGGESTIONS_PAYLOAD
-
-        suggestions = await plugin.fetch_search_suggestions("ai coding", geo=GeoCode.VN, limit=5)
-        assert len(suggestions) == 3
-        assert "ai coding agent" in suggestions
-
-
-@pytest.mark.asyncio
-async def test_threads_plugin_search_signals_uses_fast_path():
-    plugin = ThreadsPlugin()
-    plugin._browser_storage_state = AsyncMock(return_value=SAMPLE_STORAGE_STATE)
-
-    GraphQLDocIdCache.set("search_posts", "doc_search_fast", "lsd_fast")
-
-    with patch(
-        "ignis.infrastructure.connectors.threads.threads_plugin.fetch_graphql_direct",
-        new_callable=AsyncMock,
-    ) as mock_direct:
-        mock_direct.return_value = SAMPLE_GRAPHQL_SEARCH_POSTS_PAYLOAD
-
-        signals = await plugin.search_signals(["AI Agent"], geo=GeoCode.VN, limit=5)
-        assert len(signals) == 1
-        sig = signals[0]
-        assert sig.platform == PlatformType.THREADS
-        assert "Chia sẻ kinh nghiệm tự động hóa quy trình" in sig.raw_title
-        assert sig.metric_value == 890.0
-        assert sig.metadata["username"] == "tech_lead_vn"
+@pytest.mark.parametrize("url", [None, "https://www.threads.com/api/graphql", "https://www.threads.net/api/graphql"])
+async def test_retired_cookie_graphql_refuses_even_with_cached_doc_id_and_cookies(url):
+    from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
+    with patch("httpx.AsyncClient", side_effect=AssertionError("Retired cookie request")):
+        with pytest.raises(ConnectorCapabilityUnavailableException, match="HOST_BROWSER_REQUIRED"):
+            await fetch_graphql_direct("cached-doc", {"query": "synthetic"}, SAMPLE_STORAGE_STATE, url=url)

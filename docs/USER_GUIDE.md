@@ -11,7 +11,7 @@ diagnostic result for each connector; a configured client or synthetic check is 
 live social access. Supply credentials or browser sessions only for the exact source and
 research task you authorize. Never place a secret in a prompt, command transcript, or report.
 
-The source migration chain ends at `sql/035_watchlist_listening_plans.sql`. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok
+The source migration chain ends at `sql/037_threads_action_labels.sql`. Migration 037 seeds the Threads action-button labels for each UI language that host-browser search uses to read counters; it rewrites no stored evidence. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok
 author attribution wording that host-browser search removes from excerpts; it rewrites no stored
 evidence. Migration 033 adds a
 per-channel, per-day count of keyword searches for the daily request ceilings; it rewrites no
@@ -62,13 +62,12 @@ session or authentication status does not by itself grant that permission.
   missing Playwright install returns `SUCCESS` with zero comments. A blocked or unparsed page can
   also yield zero parsed comments, or fail with `ERROR`, depending on where it breaks. Zero is
   therefore not proof that the video has no discussion.
-- `get_tiktok_search_suggestions(keywords, geo="VN")` and
-  `get_threads_search_suggestions(keyword, geo="VN", limit=10)` (capped at 20) return autocomplete
-  expansions. `get_threads_trending_topics(geo="VN", limit=15)` (capped at 30) and
-  `get_tiktok_creative_center_trends(geo="VN", period=7, limit=20, industry=None)` (`limit` capped
-  at 50) return macro trend lists. The Threads calls return `AUTH_REQUIRED` without a session and
-  `PARSE_EMPTY` when the page yields nothing. Suggestions and trends expand keywords or topics;
-  they are not search volume, demand or a market verdict.
+- `get_tiktok_search_suggestions(keywords, geo="VN")` returns autocomplete expansions.
+  `get_tiktok_creative_center_trends(geo="VN", period=7, limit=20, industry=None)` returns macro
+  trends (`limit` capped at 50). These expand topics; they do not measure demand.
+  The retained `get_threads_search_suggestions(keyword, geo="VN", limit=10)` and
+  `get_threads_trending_topics(geo="VN", limit=15)` signatures return
+  `UNAVAILABLE/HOST_BROWSER_REQUIRED`, without browser, cookie or OAuth fallback.
 - `execute_mission_ingress(mission_id)` is the separate option for a confirmed mission: it runs only
   that mission's recorded plan and records a channel outcome for each requested source.
 
@@ -152,8 +151,7 @@ period view counts only judged items. Setup ends with a first run you watch; in 
 you approve only `start_watchlist_run`, `execute_mission_ingress`,
 `get_mission_evidence_qualification_batch` and `submit_mission_evidence_qualifications`.
 You pause or remove it in the app, and removing it keeps the watchlist's history. A firing happens
-only while the app is open. Other hosts are not supported yet, and Ignis itself still schedules
-nothing.
+Ignis itself schedules nothing.
 
 ## 3. Understand evidence and analysis
 
@@ -164,15 +162,10 @@ requested plan was not measured; neither is proof that the market is empty. The 
 qualification batch, records typed support, contradiction, or context judgments, and checks
 that the current frame is terminal before making Market claims.
 
-Threads access needs its own check. A stored Graph token can be valid while its keyword-search
-probe reports `SELF_ONLY` (the endpoint returns the account's own posts) or `NOT_PERMITTED`. Both
-mean the token cannot answer a public-market question, and Ignis refuses those results rather than
-presenting the account's own timeline as market evidence. `get_threads_auth_status` reports stored
-credentials and tier, not proven public access; `authenticate_threads` called with an `auth_code`
-reports the probe as `keyword_search_access`. When the token is blocked, an existing browser
-session takes precedence, and it may be used only where the source, session and mission authority
-permit. Otherwise record the coverage gap and stay within the approved source scope; do not
-broaden the scope or recollect.
+Threads collection requires a separately authorized host browser. Stored Graph credentials are
+compatibility state, not proof of public keyword access. `authenticate_threads`,
+`get_threads_auth_status` and `clear_threads_auth` retain their public signatures; they do not
+activate collection or probe an API grant. Use explicit host preparation or report the gap.
 
 Google Trends RSS supplies current macro topics and feed-reported traffic, not a keyword
 time series. Keyword Trends measurement is currently unavailable and reports `DEGRADED`
@@ -300,7 +293,7 @@ evaluation; Python does not drive the host or export its cookies. Prepare a fini
 the returned localhost relay. Its "Open search" buttons open the exact public search URLs; the
 `tab_script` that preparation returns, run in each opened tab, posts the answer back and returns only counts, and the
 relay stages the batch once every query has an answer. Filling the relay's form from retained JSON
-still works. MCP submit consumes the staged answer by IDs only. Excerpts lose TikTok's author
+still works. MCP submit consumes the staged answer by IDs only. Excerpts lose the selected source's author
 attribution sentence before any receipt or storage; preparation is refused with
 `AUTHOR_ATTRIBUTION_VOCABULARY_MISSING` when no attribution wording is seeded.
 
@@ -313,3 +306,33 @@ Requests expire within an hour; form payloads are capped at 1 MiB. The localhost
 only its exact Host/Origin and closes on terminal transport states. Unknown publication, counters
 and window filters stay unknown. This is bounded public video-grid collection, not comments, a
 representative market sample, or an automatic fallback. Host cleanup preserves owner tabs.
+
+### Threads host collection and period paths
+
+`prepare_host_browser_search` accepts optional `source="threads"`; omitting it keeps
+`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 53 tools.
+Threads collection uses only the authorized host browser. Internal Threads Playwright collection
+is removed; the retained suggestions/trending tools return `UNAVAILABLE/HOST_BROWSER_REQUIRED`.
+Stored Threads credentials do not establish collection readiness. No API grant probe or API path
+is activated, and failure never selects a fallback collector.
+
+Reels stays on Playwright without automation-hiding flags. A login wall, checkpoint, challenge,
+unparseable response or missing search envelope is unavailable with a reason, never a measured
+zero. A verified, well-formed empty search envelope may return `EMPTY_NO_DATA` for the executed
+keyword. This does not establish coverage for other keywords or a known time window.
+
+Threads `threads-search-top-v2` collects a bounded visible Top sample on `www.threads.com/search`.
+Posts are found by page structure in any UI language; counters are read only for UI languages
+with seeded action labels (English and Vietnamese) and stay unknown otherwise. Loading, an
+empty shell or all records being dropped cannot prove an empty market. Capture time and publication time stay separate.
+Counters retain raw display and precision: `1.4K` or `1,4K` is rounded, a blank is unknown, and shares are
+not quotes. Rounded counters do not become exact period totals. Author headers and attribution
+are removed before receipts or storage; links use identity-free content references. Free-text
+personal names remain a sanitization limitation.
+
+On both seen and created axes, `collection_path_changed` refuses different proven paths,
+`collection_path_unknown` refuses a proven path against an unknown path, and
+`collection_path_mixed` refuses multiple proven paths or proven/unknown mixtures within either
+period. These cells have no indicators or deltas. Identical proven paths remain eligible;
+if both periods have only unknown paths, legacy comparison rules and output stay unchanged.
+Cadence, coverage, publication placement and judgment rules still apply.

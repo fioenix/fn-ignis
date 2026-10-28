@@ -163,3 +163,6 @@ def undeclared_sentinels() -> List[str]:
 def mention_sentinels() -> List[str]:
     """Handles that appear only inside content text; the scan adds these from T030 on."""
     return [SENTINEL_MENTIONED_HANDLE]
+
+# A media attribution can name somebody other than the account in the post header.
+SENTINEL_THREADS_ATTRIBUTED_NAME = "Synthetic Other Person"

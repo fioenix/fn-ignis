@@ -6,11 +6,11 @@ Proposed extension of Spec 012; no new table or persisted-evidence transformatio
 
 - Add frozen `source=tiktok|threads`, default TikTok, mapping to `tiktok_video`/`threads` surface.
   Retain task/session/request IDs, mode, exact finite query IDs/text/limits, issue/expiry and caller.
-- Browser descriptor: exact origin/route, packaged extractor/handoff; Threads `threads-search-top-v1`,
+- Browser descriptor: exact origin/route, packaged extractor/handoff; Threads `threads-search-top-v2`,
   TikTok unchanged. API descriptor: `threads-mcp-keyword-v1`, task-authorized approved external MCP;
   not an Ignis API client or credential. Both are strict allowed variants for Threads only.
 - Freeze source-specific attribution templates; tactical uses packaged seed, mission its repository.
-  Missing Threads vocabulary never falls back to TikTok templates. Unsupported locale fails closed.
+  Missing Threads vocabulary never falls back to TikTok templates. Missing/unusable page language fails closed; an unseeded usable locale retains records with unknown counters.
 - Mission retains manifest/Brief/plan/frame revisions. Sibling source tickets share those bindings;
   stage all required host surfaces before a single writer executes. Group by mission/caller/frame
   and reject duplicate sources. No new persistent queue, tool argument or second run.
@@ -21,6 +21,16 @@ Common identity/source/path/version, one answer per exact approved query, curren
 status/reason and bounded records. Strict union: browser variant uses page URL/search verification;
 API variant uses provider operation, executed keyword, public grant evidence and scope/limits, not
 pretend DOM attestation. Legacy TikTok answers remain valid only on TikTok tickets.
+
+Threads query answers require `locale`: a lowercase primary language subtag (`[a-z]{2,8}`),
+or `unsupported`. The latter is DEGRADED, unverified, zero records. Any other locale allows
+structural records, but only kinds labelled in the ticket snapshot may carry measured counters.
+No Threads answer may claim EMPTY_NO_DATA. Locale stays transient; outcome notes disclose
+unmeasured counters. No new persisted field/table is introduced.
+
+Ticket-local `action_labels` is a locale-to-kind-to-title map, read from `market_lexicons`
+(`threads_action_labels_<locale>`, category `<kind>`) and frozen for extraction/validation.
+037 seeds en/vi only; it changes no schema or evidence. Labels are machinery, not positive terms.
 
 Host API attestation: provider `fioenix/threads-mcp`, keyword-search operation class,
 `APPROVED_PUBLIC_KEYWORD_SEARCH`, verification time and non-secret verification reference without
@@ -50,7 +60,8 @@ unavailable`. Unknown author marker when author not collected; no identity fetch
 
 Kind/unit, `raw_display`, nullable numeric `value`, `precision=exact|rounded|unknown`.
 Observed browser kinds: likes/replies/reposts/shares. API quotes/views only if reported. `12` is an
-exact displayed integer; `1.4K` is rounded 1400 with its raw display preserved; blank is unknown.
+exact displayed integer; `1.4K` or label-prefixed `Thích1,4K` is rounded 1400 with its raw display preserved;
+K/M accept either decimal separator and round half up; blank/label-only is unknown.
 Unobserved number syntax stays unknown. Rounded/missing components never populate an exact-looking
 legacy total. Periods retain precision/sample limits and known components; incompatible aggregates
 are unknown with uncounted items. Free-text personal names remain Spec 015 FR-012's documented limit.
@@ -58,7 +69,8 @@ are unknown with uncounted items. Free-text personal names remain Spec 015 FR-01
 ## CollectionPathIdentity and probe attestation
 
 - Legacy `playwright:threads_session` only with explicit stored proof.
-- `host_browser:threads-search-top-v1`, Top visible-sample semantics.
+- `host_browser:threads-search-top-v2`, language-independent Top visible-sample semantics.
+  Historical `host_browser:threads-search-top-v1` remains distinct; never rewrite old periods.
 - `threads_mcp:threads-mcp-keyword-v1`, actual API ordering/limits recorded.
 - Other channels retain established paths/revisions, including flag-free Reels.
 
@@ -72,8 +84,15 @@ themselves prove persisted probe provenance. Empty probes need attestation becau
 Read-time legacy classification uses explicit metadata or matching persisted plan, records its
 basis, never writes history or infers from dates/cookies. Missing/conflicting path is unknown.
 Extend internal PeriodCoverage/SeenSnapshot and PeriodItem inputs before merge; per topic/channel/
-axis require one proven identical method each period plus existing coverage/cadence/judgment gates.
-Changed/mixed/unknown reasons suppress deltas; do not discard measurements or alter placement.
+axis apply the coordinator's delegated acceptance decision (28/10/2026), preserving the existing
+coverage/cadence/judgment gates: both sides wholly unknown retain legacy comparability and response
+shape, without a path reason; one proven identical identity on both sides is comparable; different
+proven identities refuse with `collection_path_changed`; one proven side versus one wholly unknown
+side refuses with `collection_path_unknown`. A side with two or more proven identities, or with a
+proven identity and an unknown observation/probe, refuses with `collection_path_mixed`, even if both
+periods contain the same mixture. These path reasons suppress deltas; do not discard measurements,
+alter placement or infer missing provenance. This supersedes the earlier blanket unknown refusal
+in research R6 and preserves unchanged Spec 016/018 legacy channels.
 
 ## Lifecycle
 
@@ -87,4 +106,4 @@ Restart invalidates process-local tickets/groups; no durable resume or automatic
 Tactical returns sanitized observations, no mission persistence. Mission reuses canonical sources,
 immutable observations, associations and qualification. Store allowlisted cleaned JSON only, never
 raw API payload/errors, HTML, author identity or credentials. SQLite/PostgreSQL parity is required;
-036 adds vocabulary rows idempotently, no schema/evidence/marker rewrite.
+036/037 add vocabulary rows idempotently, no schema/evidence/marker rewrite.

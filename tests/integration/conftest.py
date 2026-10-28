@@ -69,8 +69,15 @@ SCHEMA_MIGRATIONS = (
     "032_watchlists.sql",
     # Spec 016 US4: keyword searches per channel per day, for the daily request ceilings.
     "033_connector_request_days.sql",
+    # Attribution seeds need the vocabulary schema, as on SQLite. It sits after the T037 rehearsal
+    # prefix because no earlier migration depends on it.
+    "003_market_lexicons.sql",
+    "034_tiktok_attribution.sql",
     # Spec 018: the user's listening plans, append-only.
     "035_watchlist_listening_plans.sql",
+    # Spec 020: seed-only host attribution; never an evidence transformation.
+    "036_threads_attribution.sql",
+    "037_threads_action_labels.sql",
 )
 
 

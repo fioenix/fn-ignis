@@ -337,3 +337,26 @@ async def test_an_evidence_batch_reads_the_declarations_once(tmp_path):
 
     assert len(batch["evidence"]) == 3
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_threads_host_public_receipt_has_no_header_attribution_or_mention(monkeypatch):
+    from ignis.interfaces.mcp import server
+    from ignis.application.use_cases import host_browser_search as module
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from tests.fixtures.author_identity_sentinels import SENTINEL_THREADS_HANDLE, SENTINEL_THREADS_ATTRIBUTED_NAME
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    service = module.HostBrowserSearchService()
+    monkeypatch.setattr(server, "_host_browser_search_service", service)
+    try:
+        request = await server.handle_prepare_host_browser_search("task", "session", ["synthetic"], 3, 60, True,
+                                                                 source="threads")
+        payload = host_answer(request)
+        payload["answers"][0]["records"][0]["source_url"] = f"https://www.threads.com/@{SENTINEL_THREADS_HANDLE}/post/Synthetic020"
+        service.stage(request["request_id"], payload)
+        receipt = await server.handle_submit_host_browser_search(request["request_id"], "task", "session")
+        assert _leaks(receipt) == []
+        assert SENTINEL_THREADS_ATTRIBUTED_NAME not in json.dumps(receipt)
+        assert receipt["observations"][0]["source_url"] == "https://www.threads.com/t/Synthetic020"
+    finally:
+        service.close()

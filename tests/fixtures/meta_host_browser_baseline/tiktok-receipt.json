@@ -1,0 +1,31 @@
+{
+  "mode": "TACTICAL",
+  "observations": [
+    {
+      "captured_at": "2026-10-27T12:00:00+00:00",
+      "collection_path": "host_browser:tiktok-public-grid-v1",
+      "excerpt": "Túi đi làm",
+      "metric_kind": null,
+      "metric_known": false,
+      "metric_value": null,
+      "published_at": null,
+      "query": "túi đi làm",
+      "query_id": "00000000-0000-0000-0000-000000000002",
+      "request_id": "00000000-0000-0000-0000-000000000001",
+      "source_url": "https://www.tiktok.com/share/video/7417820067028536584"
+    }
+  ],
+  "outcomes": [
+    {
+      "note": "Bounded visible public video grid; window and counters unmeasured",
+      "queried_window": null,
+      "query": "túi đi làm",
+      "query_id": "00000000-0000-0000-0000-000000000002",
+      "search_verified": true,
+      "signals_collected": 1,
+      "status": "HEALTHY"
+    }
+  ],
+  "request_id": "00000000-0000-0000-0000-000000000001",
+  "status": "ACCEPTED"
+}

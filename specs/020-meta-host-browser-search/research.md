@@ -208,3 +208,107 @@ explicit runtime gates, not unanswered product Clarifications or claims that the
   present as changes. Original spec/G2, source, tests, configuration and context files are unchanged.
 - No feature tests, PostgreSQL, installed wheel, actual relay transport, API grant or live-run proof.
   No full suite, tasks generation, implementation, commit, routine update or agent-context update.
+
+
+## R11. Threads same-tab encrypted fragment (owner decision, 28/10/2026)
+
+- Live facts supplied by the owner/coordinator (not repeated in this implementation): signed-in
+  Chrome `threads.com/search` sends `Cross-Origin-Opener-Policy: same-origin-allow-popups` and a
+  relay-opened Threads tab has `window.opener === null`. Scripted `window.open` returns null
+  without a user gesture. Scripted `location.replace` to a loopback URL with a 20,000-character
+  fragment preserves that fragment; BroadcastChannel exists on the receiver origin. TikTok's
+  opener handoff staged and accepted 10 records and remains unchanged.
+- Decision: amend the opener-loss prohibition for Threads only. Encrypt `{kind, request_id, answer}`
+  with AES-GCM using a random 256-bit ticket key and fresh 96-bit IV, base64url encode
+  `iv||ciphertext`, then navigate the same tab to the exact relay receiver. A 1,000,000-character
+  fragment bound is checked before navigation; the 100 ms timer allows status/counts to return.
+  The live probe established 20,000 characters only; the larger configured ceiling needs browser
+  acceptance testing and is not a claim that all browsers accept a URL of that size.
+- Privacy: transient Threads source URLs contain author handles before server validation. Plaintext
+  history fragments would violate the intended at-rest boundary. URLs/history therefore carry
+  ciphertext only; key material lives in `tab_script` and main relay data, never in the receiver,
+  URL, log or another MCP response field. Task-end tab cleanup remains mandatory; browser memory
+  and supported host tool-value retention are outside server erasure guarantees.
+- Receiver: Threads-only exact GET `<token path>receive`, static nonce-CSP, no external resources,
+  no-store/no-referrer. Read and immediately clear the hash before broadcasting the raw fragment
+  on `ignis-host-answer:<request_id>`; no decryption or record rendering. The main relay decrypts,
+  validates the binding/limits and first answer, and stages the unchanged complete envelope once.
+  Tampered, malformed, wrong-binding, duplicate and late messages cannot change accepted state.
+- Rejected alternatives: popup (observed blocked); manual Stage-answer as the default (requires
+  full-envelope value transfer, brittle and not automatic); CORS/fetch to loopback (widens the
+  network trust boundary); window.name (persists plaintext across navigation and browser behavior
+  is not an established transport). Plaintext fragments are rejected for history privacy.
+- Impact: no dependencies, signatures, database changes or collection/extractor behavior changes.
+  Validator, staging/rejection/lifetime/shutdown and TikTok opener transport remain authoritative.
+  Deterministic tests are offline evidence; live Chrome, actual navigation limits and end-to-end
+  staging remain coordinator checks. This decision does not complete T051 or T052.
+
+
+## R12. Language-independent Threads extraction (T056, owner-approved 28/10/2026)
+
+Evidence: `.handoff/spec020-vi-dom-capture-20261028.md`, supplied live statistics from 11 visible
+posts, `lang=vi`, exact UTC timestamp anchors. The nearest ancestor with at least four SVG-bearing
+buttons held seven controls: two follow controls, more, then the four actions. Vietnamese SVG titles
+were `Thích`, `Trả lời`, `Đăng lại`, `Chia sẻ`; non-SVG text included label-prefixed integers,
+comma-decimal K and label-only unknowns. Avatar alt starts `Ảnh đại diện`. Post-image alt remains
+English `Photo by <name> on <date>` under vi; the 036 template matched all 11 observed images.
+These are supplied capture facts, not a new live check by this implementer.
+
+This decision supersedes R2's locale limitation and R4's original numeric grammar.
+
+Decision: detect cards structurally from timestamp anchors and the nearest ancestor holding at
+least four visible SVG buttons; preserve header/nav/aside/single-timestamp/blocked-parent and clock
+exclusions. Keep excerpt extraction unchanged. No agent-read measured extraction: deterministic
+packaged ETL preserves comparability, identity control and cost. No positional action mapping.
+
+Use existing `market_lexicons`, domain `threads_action_labels_<locale>`, category `<kind>`, term
+as the exact SVG title, seeded en/vi in 037. This fits vocabulary rows and existing registration/
+repository/bootstrap paths better than an opaque runtime-config JSON document. Exclude this
+machinery domain prefix from relevance terms. The locale domain suffix preserves the existing
+unique(domain, term) key when two languages share an identical title. Mission prepare reads its
+caller database; tactical retains
+Spec 012's no-caller-store/no-auth initialization boundary by executing the packaged seed in an
+isolated SQLite memory table and reading its rows. Each ticket freezes the map for both extractor
+injection and validation. An operator-added locale is available to mission prepare; tactical gains
+locales through shipped seed rows. No Python or JavaScript label constants, dependencies or transport
+changes. Missing labels leave counters unknown without discarding structurally verified records.
+
+Use the page primary language subtag as answer.locale; unusable lang preserves T054 unsupported /
+DEGRADED / unverified / no-records behavior. Unknown-but-valid locales retain records with explicit
+unmeasured-counter notes. Strip only the matching leading label before numeric parsing; preserve
+raw display; K/M with comma/dot decimal stays rounded, digits exact, empty unknown. Validator checks
+the same grammar/value/precision and rejects every incompatible measurement or Threads empty claim.
+
+Attribution trace: service source-specific templates → validate_answer → strip_platform_attribution
+→ PII/mention cleanup → sanitized receipt / mission author policy / storage. Selection is by source,
+never UI locale. Extractor excludes img/svg/header and accessible media content. Leave 036 and the
+sanitizer unchanged. Existing free-text-person-name limits remain.
+
+Bump to threads-search-top-v2 in envelopes and mission path descriptors so v1/v2 periods refuse
+comparison. Preserve historical v1 fixtures; add explicit two-axis v1/v2 rejection. Regenerate
+baseline/manifest artifacts only with their prescribed scripts; unchanged output is expected because
+those fixtures cover legacy TikTok/public input schemas, not the Threads extractor revision.
+Live language/card/counter/receiver acceptance remains coordinator-owned; no live session is used.
+
+
+## R13. Independent review follow-up (T057, owner-approved 28/10/2026)
+
+Release preparation fixes T053–T056 without reopening the accepted T055 transport. Compare SVG
+action titles and leading display labels case-insensitively (`toLowerCase()` / `.lower()`), since
+operator registration lowercases stored terms; preserve `raw_display` verbatim. Share the market
+vocabulary domain predicate between startup grouping and runtime registration so action labels,
+attribution and query templates never enter the evaluators' positive vocabulary.
+
+The receiver clears the hash before handling it, broadcasts only base64url fragments of 39 through
+1,000,000 characters, and otherwise posts nothing. A nonempty AES-GCM payload requires at least
+29 decoded bytes (12-byte IV + 16-byte tag + ciphertext); the relay refuses shorter decoded input
+before decrypting. Host guidance closes task-created tabs only after relay `STAGED` or submit,
+never immediately after the delayed handoff returns `posted: true`.
+
+**Accepted v0.9.0 limitation — review finding 2; structural card detection follow-up:** media
+inside a card can contain SVG buttons, causing the nearest qualifying structural ancestor to stop
+below the action row and leave counters unknown. A quoted post with two timestamps in one card
+blocks that card and marks the whole query `DEGRADED`, while keeping other valid records. These
+conservative outcomes remain accepted for v0.9.0; follow up on card/action-row ownership and quote
+isolation with deterministic fixtures and separately authorized live verification. T057 does not
+change either detection behavior or claim those counters/quotes are fully supported.

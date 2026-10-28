@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ignis.config import settings
-from ignis.domain.value_objects import GeoCode, IngressScope, PlatformType, Timeframe
+from ignis.domain.value_objects import GeoCode, IngressScope, Timeframe
 from ignis.infrastructure.cache.insights_cache import InsightsTTLCache
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin
@@ -142,24 +142,6 @@ def test_mutating_a_returned_dict_does_not_corrupt_the_cached_entry():
 
 
 @pytest.mark.asyncio
-async def test_threads_second_pass_within_the_ttl_issues_no_insights_request():
-    plugin = ThreadsPlugin(auth_manager=_auth_manager())
-    graph = _CountingGraph(THREADS_LIST, THREADS_INSIGHTS)
-
-    with patch("httpx.AsyncClient.get", side_effect=graph.get):
-        first = await plugin.fetch_signals(geo=GeoCode.VN, timeframe=Timeframe.LAST_7D, limit=25, scope=IngressScope.OWN_PROFILE)
-        assert graph.insights_calls == 1
-
-        second = await plugin.fetch_signals(geo=GeoCode.VN, timeframe=Timeframe.LAST_7D, limit=25, scope=IngressScope.OWN_PROFILE)
-
-    # The 15-minute re-scan hits the cache: still exactly one insights request in total.
-    assert graph.insights_calls == 1
-    assert first[0].metric_value == 48200.0
-    assert second[0].metric_value == first[0].metric_value
-    assert second[0].metadata["reply_count"] == 284
-
-
-@pytest.mark.asyncio
 async def test_reels_second_pass_within_the_ttl_issues_no_insights_request():
     plugin = ReelsPlugin(auth_manager=_auth_manager(), ig_user_id="17841400000000000")
     graph = _CountingGraph(REELS_LIST, REELS_INSIGHTS)
@@ -176,45 +158,11 @@ async def test_reels_second_pass_within_the_ttl_issues_no_insights_request():
 
 
 @pytest.mark.asyncio
-async def test_an_expired_entry_forces_a_fresh_insights_request():
-    plugin = ThreadsPlugin(auth_manager=_auth_manager(), insights_cache=InsightsTTLCache(ttl_seconds=0))
-    graph = _CountingGraph(THREADS_LIST, THREADS_INSIGHTS)
-
-    with patch("httpx.AsyncClient.get", side_effect=graph.get):
-        await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
-        await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
-
-    assert graph.insights_calls == 2
-
-
-@pytest.mark.asyncio
-async def test_only_the_uncached_posts_are_fetched_on_the_next_pass():
+async def test_retired_threads_does_not_consume_or_refresh_insight_cache():
+    from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
     cache = InsightsTTLCache()
     plugin = ThreadsPlugin(auth_manager=_auth_manager(), insights_cache=cache)
-    graph = _CountingGraph(THREADS_LIST, THREADS_INSIGHTS)
-
-    # Warm one of the two posts, then ingest a window containing both.
-    cache.set(PlatformType.THREADS.value, "17900000000001", plugin.INSIGHT_METRICS, {"views": 1.0})
-    two_posts = {"data": THREADS_LIST["data"] + [dict(THREADS_LIST["data"][0], id="17900000000002")]}
-    graph.list_payload = two_posts
-
-    with patch("httpx.AsyncClient.get", side_effect=graph.get):
-        signals = await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)
-
-    assert graph.insights_calls == 1
-    assert len(signals) == 2
-    assert signals[0].metric_value == 1.0
-
-
-@pytest.mark.asyncio
-async def test_plugins_do_not_share_a_cache_across_instances():
-    cache_a = InsightsTTLCache()
-    plugin_a = ThreadsPlugin(auth_manager=_auth_manager(), insights_cache=cache_a)
-    plugin_b = ThreadsPlugin(auth_manager=_auth_manager())
-    graph = _CountingGraph(THREADS_LIST, THREADS_INSIGHTS)
-
-    with patch("httpx.AsyncClient.get", side_effect=graph.get):
-        await plugin_a.fetch_signals(scope=IngressScope.OWN_PROFILE)
-        await plugin_b.fetch_signals(scope=IngressScope.OWN_PROFILE)
-
-    assert graph.insights_calls == 2
+    with patch.object(cache, "get", side_effect=AssertionError("Retired cache read")), \
+            patch("httpx.AsyncClient", side_effect=AssertionError("Retired insights request")):
+        with pytest.raises(ConnectorCapabilityUnavailableException, match="HOST_BROWSER_REQUIRED"):
+            await plugin.fetch_signals(scope=IngressScope.OWN_PROFILE)

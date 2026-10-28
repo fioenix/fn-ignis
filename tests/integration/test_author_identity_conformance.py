@@ -327,3 +327,76 @@ async def test_the_scan_catches_a_connector_that_leaks(
 
     leaks = _leaks(surfaces, undeclared_sentinels())
     assert f"table observations: {SENTINEL_TIKTOK_HANDLE}" in leaks, repository_case.name
+
+
+@pytest.mark.asyncio
+async def test_threads_host_receipt_tables_journal_logs_have_no_header_or_media_identity(
+    repository_case, tmp_path, monkeypatch, caplog, persistent_key
+):
+    from ignis.application.use_cases import host_browser_search as module
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from tests.fixtures.author_identity_sentinels import SENTINEL_THREADS_ATTRIBUTED_NAME, SENTINEL_THREADS_HANDLE
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("threads",))
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+        payload = host_answer(request)
+        for item in payload["answers"]:
+            item["records"][0]["source_url"] = f"https://www.threads.com/@{SENTINEL_THREADS_HANDLE}/post/Synthetic020Q0"
+        service.stage(request["request_id"], payload)
+        staged = repr(service._tickets[request["request_id"]]["receipt"])
+        receipt = await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        surfaces = {f"table {name}": text for name, text in _table_texts(repository_case).items()}
+        surfaces.update({f"file {name}": text for name, text in _file_texts(tmp_path).items()})
+        surfaces.update(receipt=json.dumps(receipt, default=str), staged=staged, logs=caplog.text)
+        surfaces.update(await _mcp_responses(repository_case, mission, tmp_path, monkeypatch))
+        assert _leaks(surfaces, [SENTINEL_THREADS_HANDLE, SENTINEL_THREADS_ATTRIBUTED_NAME, "synthetic.mention"]) == []
+        assert repository_case.counts()["observations"] == 1
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["tiktok", "threads"])
+async def test_review_host_policy_keeps_marker_and_declared_mentions_without_identity_leaks(
+    repository_case, tmp_path, monkeypatch, caplog, persistent_key, source
+):
+    from unittest.mock import AsyncMock
+    from datetime import timedelta
+    from ignis.domain.author_identity import AuthorState, DeclaredAccount
+    from tests.fixtures.author_identity_sentinels import SENTINEL_HOST_BROWSER_HANDLE, SENTINEL_MENTIONED_HANDLE
+    from ignis.application.use_cases import host_browser_search as module
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    caplog.set_level(logging.DEBUG)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path,
+        required=("threads",) if source == "threads" else ("tiktok_video",))
+    declared_id = "f042bb35-cbbc-4d38-bf21-e49c0ed1a009"
+    declaration = DeclaredAccount(declared_id, str(mission.id), source, SENTINEL_MENTIONED_HANDLE,
+                                  "Synthetic declared account", datetime.now(timezone.utc) - timedelta(days=1))
+    monkeypatch.setattr(repository_case.repository, "list_mission_declared_accounts", AsyncMock(return_value=[declaration]))
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source=source)
+        payload = host_answer(request)
+        for item in payload["answers"]:
+            row = item["records"][0]
+            row["source_url"] = (f"https://www.threads.com/@{SENTINEL_HOST_BROWSER_HANDLE}/post/Synthetic020Q0"
+                                 if source == "threads" else f"https://www.tiktok.com/@{SENTINEL_HOST_BROWSER_HANDLE}/video/7417820067028536584")
+            row["excerpt"] = f"Synthetic body @{SENTINEL_MENTIONED_HANDLE}"
+        reply = service.stage(request["request_id"], payload)
+        staged = repr(service._tickets[request["request_id"]]["receipt"])
+        receipt = await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        signals = await repository_case.repository.get_mission_signals(mission.id)
+        assert signals[0].author_assignment.state is AuthorState.KNOWN
+        assert signals[0].author_assignment.marker
+        assert f"@[declared:{declared_id}]" in signals[0].raw_title
+        assert service._tickets[request["request_id"]].get("author_records") is None
+        surfaces = {f"table {name}": text for name, text in _table_texts(repository_case).items()}
+        surfaces.update({f"file {name}": text for name, text in _file_texts(tmp_path).items()})
+        surfaces.update(receipt=repr(receipt), staged=staged, relay_reply=repr(reply), logs=caplog.text)
+        assert _leaks(surfaces, [SENTINEL_HOST_BROWSER_HANDLE, SENTINEL_MENTIONED_HANDLE]) == []
+    finally:
+        service.close()

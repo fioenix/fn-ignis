@@ -71,6 +71,20 @@ Every view names the two closed periods it compares, in Asia/Ho_Chi_Minh. Topics
 watchlist's current version; after a keyword change, an earlier period can lack collections for the
 new keywords and show as not comparable.
 
+## Collection paths and precision
+
+Apply the path gate on both axes. `collection_path_changed` means two proven identities differ;
+`collection_path_unknown` means one period is proven and the other is unknown.
+`collection_path_mixed` means either period mixes proven identities, or proven and unknown paths.
+Show the returned reason and path basis, with no indicators, arrows or deltas for a refused cell.
+Identical proven paths remain eligible. When both periods have only unknown paths, use the
+legacy comparison rules and unchanged output. Coverage, cadence and judgment still apply.
+Never repair a comparison by recollecting, changing a routine or inferring a path from dates.
+
+Keep capture time separate from publication time. Raw rounded counters, such as `1.4K`, retain
+their precision; missing values remain unknown. Never turn rounded or missing counters into an
+exact total. Render only the indicators the snapshot supplies.
+
 ## Display rules
 
 | State | Show it only when the snapshot says so |

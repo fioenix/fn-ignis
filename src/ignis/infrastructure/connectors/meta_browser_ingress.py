@@ -13,54 +13,14 @@ from urllib.request import Request
 import httpx
 
 from ignis.config import reveal_secret, settings
-from ignis.domain.exceptions import ConnectorExecutionException
+from ignis.domain.exceptions import ConnectorExecutionException, ConnectorCapabilityUnavailableException
 from ignis.domain.value_objects import GeoCode
 from ignis.infrastructure.config.runtime_config_manager import RuntimeConfigManager
 
 logger = logging.getLogger(__name__)
 
 
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-)
-
 # Project in the page so unrelated account/bootstrap JSON never leaves the browser.
-THREADS_SEARCH_RELAY_EXTRACTOR = r"""(elements, query) => {
-    const expected = new Set(), streams = [];
-    function walk(node, depth) {
-        if (!node || typeof node !== 'object' || depth > 24) return;
-        if (Array.isArray(node) && node[0] === 'RelayPrefetchedStreamCache' && node[1] === 'next') {
-            const args = node[3];
-            if (Array.isArray(args)) streams.push(args);
-            return;
-        }
-        if (Array.isArray(node.expectedPreloaders)) {
-            for (const preloader of node.expectedPreloaders) {
-                if (preloader?.queryName === 'BarcelonaSearchResultsQuery' &&
-                    preloader.variables?.query === query && typeof preloader.preloaderID === 'string') {
-                    expected.add(preloader.preloaderID);
-                }
-            }
-        }
-        for (const value of Object.values(node)) walk(value, depth + 1);
-    }
-    for (const element of elements) {
-        try { walk(JSON.parse(element.textContent), 0); } catch {}
-    }
-    const results = [];
-    for (const [id, wrapper] of streams) {
-        const bbox = wrapper?.__bbox, result = bbox?.result;
-        if (!expected.has(id) || bbox?.complete !== true || !result || result.errors) continue;
-        const search = result.data?.searchResults;
-        if (search && typeof search === 'object' && !Array.isArray(search)) {
-            results.push({data: {searchResults: search}});
-        }
-    }
-    return results;
-}"""
-
-
 def get_threads_web_client_id() -> str:
     """Retrieve dynamic Meta web client ID (X-IG-App-ID) from runtime configuration."""
     return RuntimeConfigManager.get_instance().get_sync("threads_web_client_id", "238260118697367")
@@ -251,55 +211,8 @@ async def fetch_graphql_direct(
     geo: GeoCode = GeoCode.VN,
     timeout_seconds: float = 12.0,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Fast-path: execute an authenticated GraphQL query directly via httpx without launching Playwright.
-    Uses persisted doc_id and session cookies captured from storage_state.
-    Returns parsed JSON dict on success, or None on error/invalidation so caller falls back to Playwright.
-    """
-    target_url = url or get_threads_graphql_endpoint()
-    cookie_header = build_cookie_header(storage_state, target_url)
-    if not cookie_header:
-        logger.debug("No cookies in storage_state; cannot perform direct GraphQL fetch.")
-        return None
-
-    client_id = get_threads_web_client_id()
-    csrf_token = extract_token_from_storage(storage_state, "csrftoken", target_url) or ""
-    headers = {
-        "User-Agent": USER_AGENT,
-        "X-IG-App-ID": client_id,
-        "X-FB-LSD": lsd or "AVq0",
-        "X-CSRFToken": csrf_token,
-        "X-ASBD-ID": "129477",
-        "Cookie": cookie_header,
-        "Origin": "https://www.threads.com",
-        "Referer": "https://www.threads.com/search",
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "*/*",
-        "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7" if geo == GeoCode.VN else "en-US,en;q=0.9",
-    }
-
-    form_data = {
-        "lsd": lsd or "AVq0",
-        "doc_id": doc_id,
-        "variables": json.dumps(variables),
-    }
-
-    try:
-        # Custom CSRF headers are not stripped by HTTPX on cross-origin redirects.
-        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False) as client:
-            resp = await client.post(target_url, headers=headers, data=form_data)
-            if resp.status_code != 200:
-                logger.debug(f"Direct GraphQL POST returned status {resp.status_code} for doc_id {doc_id}")
-                return None
-
-            payload = resp.json()
-            if isinstance(payload, dict) and payload.get("errors"):
-                logger.debug(f"GraphQL returned errors for doc_id {doc_id}: {payload.get('errors')}")
-                return None
-            return payload
-    except Exception as e:
-        logger.debug(f"Direct GraphQL POST encountered exception: {e}")
-        return None
+    """Retired Threads cookie-HTTP compatibility export; never sends a request."""
+    raise ConnectorCapabilityUnavailableException("HOST_BROWSER_REQUIRED: Threads cookie-HTTP collection is retired.")
 
 
 async def collect_json_payloads(
@@ -320,6 +233,9 @@ async def collect_json_payloads(
     in GraphQLDocIdCache for future zero-overhead fast-path calls. Scoped search capture
     requires the exact request query and an admitted response before caching or retention.
     """
+    hostname = urllib.parse.urlsplit(url).hostname or ""
+    if hostname in {"threads.com", "www.threads.com", "threads.net", "www.threads.net"}:
+        raise ConnectorCapabilityUnavailableException("HOST_BROWSER_REQUIRED: Internal Threads browser collection is retired.")
     try:
         from playwright.async_api import async_playwright
     except ImportError:
@@ -327,117 +243,186 @@ async def collect_json_payloads(
         return []
 
     payloads: List[Dict[str, Any]] = []
+    blocked_response_reason: Optional[str] = None
 
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
-                    "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                 ],
             )
-            context_kwargs: Dict[str, Any] = {
-                "user_agent": USER_AGENT,
-                "viewport": {"width": 1280, "height": 900},
-                "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
-                "storage_state": storage_state,
-            }
-            if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
-                context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
+            response_tasks: List[asyncio.Task] = []
+            accepting_responses = True
+            page = None
+            response_listener = None
 
-            context = await browser.new_context(**context_kwargs)
-            page = await context.new_page()
+            async def settle_response_reads():
+                nonlocal accepting_responses, blocked_response_reason
+                accepting_responses = False
+                if page is not None and response_listener is not None:
+                    page.remove_listener("response", response_listener)
+                pending = [task for task in response_tasks if not task.done()]
+                if pending:
+                    # The finite capture ended before these responses settled. Never bless
+                    # provisional cards or wait/retry another collection to fill that gap.
+                    blocked_response_reason = blocked_response_reason or "REELS_PAGE_UNUSABLE"
+                    for task in pending:
+                        task.cancel()
+                if response_tasks:
+                    results = await asyncio.gather(*response_tasks, return_exceptions=True)
+                    if any(isinstance(result, BaseException) for result in results):
+                        blocked_response_reason = blocked_response_reason or "REELS_PAGE_UNUSABLE"
 
-            # Self-healing listener: capture doc_id and lsd from outgoing GraphQL queries
-            async def handle_request(request: Any) -> None:
-                if expected_query is not None:
-                    # A request alone cannot authorize a public-search signature.
-                    return
-                try:
-                    req_url = request.url
-                    if any(marker in req_url for marker in url_markers) and request.method == "POST":
-                        post_data = request.post_data
-                        if post_data:
-                            params = urllib.parse.parse_qs(post_data)
-                            doc_ids = params.get("doc_id")
-                            lsds = params.get("lsd")
-                            if doc_ids:
-                                captured_doc_id = doc_ids[0]
-                                captured_lsd = lsds[0] if lsds else None
-                                vars_raw = params.get("variables", ["{}"])[0]
-                                variables = json.loads(vars_raw)
-                                if isinstance(variables, dict) and (
-                                    "query" in variables or "search_query" in variables
-                                ) and not ("has_communities" in variables or "has_favicons" in variables):
-                                    # Public search signatures are cached only by proven scoped responses.
-                                    return
-                                GraphQLDocIdCache.record_signature_from_payload(
-                                    captured_doc_id, captured_lsd, vars_raw
-                                )
-                except Exception:
-                    pass
+            try:
+                context_kwargs: Dict[str, Any] = {
+                    "viewport": {"width": 1280, "height": 900},
+                    "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
+                    "storage_state": storage_state,
+                }
+                if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
+                    context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
 
-            page.on("request", handle_request)
+                context = await browser.new_context(**context_kwargs)
+                page = await context.new_page()
 
-            async def handle_response(response: Any) -> None:
-                if not any(marker in response.url for marker in url_markers):
-                    return
-                try:
-                    if "json" not in response.headers.get("content-type", ""):
+                # Self-healing listener: capture doc_id and lsd from outgoing GraphQL queries
+                async def handle_request(request: Any) -> None:
+                    if expected_query is not None:
+                        # A request alone cannot authorize a public-search signature.
                         return
-                    params: Dict[str, List[str]] = {}
-                    if expected_query is not None:
-                        if response.status != 200 or response.request.method != "POST":
+                    try:
+                        req_url = request.url
+                        if any(marker in req_url for marker in url_markers) and request.method == "POST":
+                            post_data = request.post_data
+                            if post_data:
+                                params = urllib.parse.parse_qs(post_data)
+                                doc_ids = params.get("doc_id")
+                                lsds = params.get("lsd")
+                                if doc_ids:
+                                    captured_doc_id = doc_ids[0]
+                                    captured_lsd = lsds[0] if lsds else None
+                                    vars_raw = params.get("variables", ["{}"])[0]
+                                    variables = json.loads(vars_raw)
+                                    if isinstance(variables, dict) and (
+                                        "query" in variables or "search_query" in variables
+                                    ) and not ("has_communities" in variables or "has_favicons" in variables):
+                                        # Public search signatures are cached only by proven scoped responses.
+                                        return
+                                    GraphQLDocIdCache.record_signature_from_payload(
+                                        captured_doc_id, captured_lsd, vars_raw
+                                    )
+                    except Exception:
+                        pass
+
+                page.on("request", handle_request)
+
+                async def handle_response(response: Any) -> None:
+                    nonlocal blocked_response_reason
+                    if not any(marker in response.url for marker in url_markers):
+                        return
+                    is_reels = hostname in {"instagram.com", "www.instagram.com"}
+                    if is_reels and urllib.parse.urlsplit(response.url).hostname not in {"instagram.com", "www.instagram.com"}:
+                        return
+                    if is_reels and response.status != 200:
+                        blocked_response_reason = "REELS_PAGE_UNUSABLE"
+                    try:
+                        if "json" not in response.headers.get("content-type", ""):
+                            if is_reels:
+                                blocked_response_reason = "REELS_PAGE_UNUSABLE"
                             return
-                        params = urllib.parse.parse_qs(response.request.post_data or "")
-                        variables = json.loads(params.get("variables", ["{}"])[0])
-                        if not isinstance(variables, dict):
-                            return
-                        queries = [variables[key] for key in ("query", "search_query") if key in variables]
-                        if not queries or any(query != expected_query for query in queries):
-                            return
-                    body = await response.json()
-                except Exception:
-                    return
-                if isinstance(body, dict):
-                    if expected_query is not None:
-                        if body.get("errors") or payload_validator is None or payload_validator(body) is None:
-                            return
-                        doc_ids = params.get("doc_id")
-                        if doc_ids:
-                            GraphQLDocIdCache.set("search_posts", doc_ids[0], params.get("lsd", [None])[0])
-                    payloads.append(body)
+                        params: Dict[str, List[str]] = {}
+                        if expected_query is not None:
+                            if response.status != 200 or response.request.method != "POST":
+                                return
+                            params = urllib.parse.parse_qs(response.request.post_data or "")
+                            variables = json.loads(params.get("variables", ["{}"])[0])
+                            if not isinstance(variables, dict):
+                                return
+                            queries = [variables[key] for key in ("query", "search_query") if key in variables]
+                            if not queries or any(query != expected_query for query in queries):
+                                return
+                        body = await response.json()
+                    except Exception:
+                        if is_reels:
+                            blocked_response_reason = "REELS_PAGE_UNUSABLE"
+                        return
+                    if isinstance(body, dict):
+                        if is_reels:
+                            message = body.get("message")
+                            if message == "login_required":
+                                blocked_response_reason = "REELS_LOGIN_REQUIRED"
+                            elif message == "challenge_required" or body.get("challenge"):
+                                blocked_response_reason = "REELS_CHALLENGE"
+                            elif message == "checkpoint_required" or body.get("checkpoint_url"):
+                                blocked_response_reason = "REELS_CHECKPOINT"
+                            elif body.get("status") == "fail" or body.get("errors") or body.get("error"):
+                                blocked_response_reason = "REELS_PAGE_UNUSABLE"
+                            if blocked_response_reason:
+                                return
+                        if expected_query is not None:
+                            if body.get("errors") or payload_validator is None or payload_validator(body) is None:
+                                return
+                            doc_ids = params.get("doc_id")
+                            if doc_ids:
+                                GraphQLDocIdCache.set("search_posts", doc_ids[0], params.get("lsd", [None])[0])
+                        payloads.append(body)
 
-            page.on("response", handle_response)
+                def on_response(response: Any):
+                    if not accepting_responses or not any(marker in response.url for marker in url_markers):
+                        return None
+                    task = asyncio.create_task(handle_response(response))
+                    response_tasks.append(task)
+                    return task
 
-            navigation = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(settle_ms)
+                response_listener = on_response
+                page.on("response", response_listener)
 
-            if expected_query is not None and payload_validator is not None and navigation is not None:
-                requested = urllib.parse.urlsplit(url)
-                returned = urllib.parse.urlsplit(navigation.request.url)
-                landed = urllib.parse.urlsplit(page.url)
-                if (
-                    navigation.status == 200
-                    and requested.scheme == returned.scheme == landed.scheme == "https"
-                    and requested.hostname == returned.hostname == landed.hostname == "www.threads.com"
-                    and requested.path == returned.path == landed.path == "/search"
-                    and all(urllib.parse.parse_qs(part.query).get("q") == [expected_query]
-                            for part in (requested, returned, landed))
-                ):
-                    rendered = await page.locator('script[type="application/json"]').evaluate_all(
-                        THREADS_SEARCH_RELAY_EXTRACTOR, expected_query,
-                    )
-                    payloads.extend(body for body in rendered
-                                    if isinstance(body, dict) and payload_validator(body) is not None)
+                navigation = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(settle_ms)
+                async def require_available_page():
+                    if hostname in {"instagram.com", "www.instagram.com"}:
+                        landed = urllib.parse.urlsplit(page.url)
+                        path = landed.path.lower()
+                        reason = blocked_response_reason
+                        if "/accounts/login" in path:
+                            reason = "REELS_LOGIN_REQUIRED"
+                        elif "/checkpoint" in path:
+                            reason = "REELS_CHECKPOINT"
+                        elif "/challenge" in path:
+                            reason = "REELS_CHALLENGE"
+                        elif landed.hostname not in {"instagram.com", "www.instagram.com"} or navigation is None:
+                            reason = "REELS_PAGE_UNUSABLE"
+                        elif navigation.status in (401, 403):
+                            reason = "REELS_LOGIN_REQUIRED"
+                        elif navigation.status != 200:
+                            reason = "REELS_PAGE_UNUSABLE"
+                        # These are verbatim third-party UI selectors, not domain vocabulary.
+                        elif await page.locator('form[action*="/accounts/login"]').count():
+                            reason = "REELS_LOGIN_REQUIRED"
+                        elif await page.locator('iframe[src*="captcha"], input[name="captcha"]').count():
+                            reason = "REELS_CHALLENGE"
+                        if reason:
+                            raise ConnectorCapabilityUnavailableException(reason + ": The Reels page is unavailable; no absence was measured.")
 
-            for _ in range(max(scrolls, 0)):
-                await page.mouse.wheel(0, 2400)
-                await page.wait_for_timeout(1800)
+                await require_available_page()
 
-            await browser.close()
+                for _ in range(max(scrolls, 0)):
+                    await page.mouse.wheel(0, 2400)
+                    await page.wait_for_timeout(1800)
+                    await require_available_page()
+                await settle_response_reads()
+                await require_available_page()
+
+            finally:
+                try:
+                    await settle_response_reads()
+                finally:
+                    await browser.close()
+    except ConnectorCapabilityUnavailableException:
+        raise
     except Exception as e:
         logger.error(f"Meta browser-session ingress failed for {url}: {e}")
         raise ConnectorExecutionException(f"Meta browser-session ingress failed for {url}: {e}") from e
@@ -607,93 +592,3 @@ def caption_text(node: Dict[str, Any]) -> str:
     if isinstance(caption, str):
         return caption.strip()
     return str(node.get("text") or "").strip()
-
-
-async def collect_threads_search_suggestions_via_browser(
-    storage_state: Dict[str, Any],
-    keyword: str,
-    geo: GeoCode = GeoCode.VN,
-    timeout_ms: int = 3000,
-) -> List[Dict[str, Any]]:
-    """
-    Drive a logged-in Playwright context to www.threads.com/search, focus the search input,
-    type `keyword` to trigger autocomplete, and capture incoming GraphQL response payloads.
-    """
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        logger.warning("Playwright is not installed; skipping Meta browser-session search suggestions.")
-        return []
-
-    payloads: List[Dict[str, Any]] = []
-    search_url = "https://www.threads.com/search"
-
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                ],
-            )
-            context_kwargs: Dict[str, Any] = {
-                "user_agent": USER_AGENT,
-                "viewport": {"width": 1280, "height": 900},
-                "locale": "vi-VN" if geo == GeoCode.VN else "en-US",
-                "storage_state": storage_state,
-            }
-            if reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER):
-                context_kwargs["proxy"] = {"server": reveal_secret(settings.PLAYWRIGHT_PROXY_SERVER)}
-
-            context = await browser.new_context(**context_kwargs)
-            page = await context.new_page()
-
-            async def handle_request(request: Any) -> None:
-                try:
-                    if "/graphql" in request.url and request.method == "POST":
-                        post_data = request.post_data
-                        if post_data:
-                            params = urllib.parse.parse_qs(post_data)
-                            doc_ids = params.get("doc_id")
-                            lsds = params.get("lsd")
-                            if doc_ids:
-                                captured_doc_id = doc_ids[0]
-                                captured_lsd = lsds[0] if lsds else None
-                                vars_raw = params.get("variables", ["{}"])[0]
-                                GraphQLDocIdCache.record_signature_from_payload(
-                                    captured_doc_id, captured_lsd, vars_raw
-                                )
-                except Exception:
-                    pass
-
-            page.on("request", handle_request)
-
-            async def handle_response(response: Any) -> None:
-                if "/graphql" not in response.url:
-                    return
-                try:
-                    if "json" not in response.headers.get("content-type", ""):
-                        return
-                    body = await response.json()
-                    if isinstance(body, dict):
-                        payloads.append(body)
-                except Exception:
-                    pass
-
-            page.on("response", handle_response)
-
-            await page.goto(search_url, wait_until="domcontentloaded", timeout=25000)
-            await page.wait_for_timeout(2000)
-
-            input_el = page.locator("input").first
-            if await input_el.count() > 0:
-                await input_el.fill(keyword)
-                await page.wait_for_timeout(timeout_ms)
-
-            await browser.close()
-    except Exception as e:
-        logger.warning(f"Failed to collect search suggestions via browser: {e}")
-
-    return payloads

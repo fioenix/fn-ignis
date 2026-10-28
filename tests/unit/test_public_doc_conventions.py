@@ -406,3 +406,21 @@ def test_rotation_runbook_counts_stored_rows_not_only_active_ones():
     assert re.search(r"stored_rows\s*=\s*0", text), (
         "The runbook does not gate key replacement on stored rows reaching zero."
     )
+
+
+@pytest.mark.parametrize("relative", ["README.md", "README.vi.md", "docs/USER_GUIDE.md", "docs/USER_GUIDE.vi.md"])
+def test_spec020_public_docs_explain_the_browser_only_boundary(relative):
+    text = _read(relative)
+    for term in ('source="threads"', 'source="tiktok"', "threads-search-top-v2", "Playwright",
+                 "Reels", "collection_path_changed", "collection_path_mixed", "collection_path_unknown",
+                 "53", "sql/037_threads_action_labels.sql"):
+        assert term in text, f"{relative} must explain {term}"
+    assert "AutomationControlled" not in text, "Do not publish an evasion recipe"
+
+
+def test_spec020_quickstart_separates_automated_proof_from_live_authority():
+    text = _read("specs/020-meta-host-browser-search/quickstart.md")
+    assert "Future implementation guide" not in text
+    for term in ('source="threads"', 'source="tiktok"', "both unknown", "verified empty",
+                 "T047", "T049", "T050", "T051", "T052", "spec020-dist"):
+        assert term in text, term

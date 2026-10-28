@@ -53,6 +53,16 @@ that hides automation, or is reported unavailable when the platform blocks it.
   các mcp & plugin có sẵn" (prefer the Threads MCP when usable; Ignis focuses on analysis and uses
   existing MCP servers and plugins where it can).
 
+### Session 2026-10-28
+
+- Q: Does missing historical path provenance make two unchanged periods incomparable? → A: No.
+  Both sides wholly unknown retain legacy comparison and response shape; identical proven paths
+  compare; different proven paths or proven-versus-unknown across sides refuse with a path reason.
+  A side mixing multiple proven identities, or proven and unknown inputs, refuses as mixed.
+  (Coordinator decided under the owner's overnight delegation; basis: FR-006 concerns a possible
+  path change and unchanged Spec 016/018 channels must retain their existing comparisons. This
+  supersedes research R6's earlier blanket unknown refusal.)
+
 ## Context: current state (observed 27/10/2026 on `main` at `8a816fb`)
 
 - The `threads` and `reels` channels collect through Playwright with session cookies captured by

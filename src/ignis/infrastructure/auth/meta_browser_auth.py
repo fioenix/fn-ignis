@@ -30,11 +30,6 @@ class MetaBrowserAuthManager:
     SESSION_COOKIE_NAMES: tuple[str, ...] = ("sessionid", "ds_user_id")
     SESSION_TTL_DAYS = 30
 
-    USER_AGENT = (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-    )
-
     def __init__(self, repository: Optional[ITrendRepository] = None):
         self._repository = repository
 
@@ -110,13 +105,11 @@ class MetaBrowserAuthManager:
             browser = await p.chromium.launch(
                 headless=headless,
                 args=[
-                    "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                 ],
             )
             context = await browser.new_context(
-                user_agent=self.USER_AGENT,
                 viewport={"width": 1280, "height": 850},
                 locale="vi-VN",
             )

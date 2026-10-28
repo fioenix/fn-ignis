@@ -136,7 +136,7 @@ async def test_dom_fallback_keeps_the_full_sanitized_caption_for_qualification()
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("platform", ["tiktok", "threads"])
-async def test_all_requested_queries_are_executed_without_a_silent_ten_query_cap(platform):
+async def test_tiktok_query_union_stays_complete_and_threads_never_collects_internally(platform):
     queries = [f"retail-query-{index}" for index in range(12)]
     attestation = SearchAttestation()
     async def fetch(**kwargs):
@@ -147,9 +147,11 @@ async def test_all_requested_queries_are_executed_without_a_silent_ten_query_cap
         with patch.object(plugin, "_fetch_via_playwright", side_effect=fetch):
             await plugin.search_signals(queries, attestation=attestation)
     else:
-        plugin = ThreadsPlugin()
-        with patch("ignis.infrastructure.connectors.threads.threads_plugin.GraphQLDocIdCache.get", return_value=(None, None)), patch.object(plugin, "_fetch_via_browser_session", side_effect=fetch):
-            await plugin._search_via_browser_session(queries, {}, GeoCode.VN, 20, attestation)
+        from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
+        with pytest.raises(ConnectorCapabilityUnavailableException, match="HOST_BROWSER_REQUIRED"):
+            await ThreadsPlugin().search_signals(queries, attestation=attestation)
+        assert attestation.queried == []
+        return
     assert attestation.queried == queries
 
 
@@ -189,3 +191,20 @@ async def test_reels_records_a_keyword_without_hashtag_characters_as_failed():
         await plugin._search_via_browser_session(["!!!"], {}, GeoCode.VN, 20, attestation)
     assert attestation.queried == []
     assert attestation.failures == ["!!!: the keyword has no hashtag characters"]
+
+
+@pytest.mark.parametrize("publication,expected", [("exact", 100.0), ("missing", 0.0), ("future", 0.0)])
+def test_threads_host_freshness_uses_exact_publication_never_capture(publication, expected):
+    from datetime import timedelta
+    from ignis.domain.entities import TrendSignal
+    from ignis.domain.value_objects import PlatformType
+    from ignis.infrastructure.harness.quality_evaluator import QualityEvaluator
+    now = datetime.now(timezone.utc)
+    published = now - timedelta(hours=1) if publication == "exact" else None
+    if publication == "future":
+        published = now + timedelta(days=1)
+    signal = TrendSignal(platform=PlatformType.THREADS, raw_title="Synthetic public observation",
+        metric_value=0, source_url="https://www.threads.com/t/Synthetic027", geo_code=GeoCode.VN,
+        captured_at=now, published_at=published, metadata={"collection_path": "host_browser:threads-search-top-v1"})
+    score = QualityEvaluator().evaluate_quality([signal], timeframe_days=7)
+    assert score.data_freshness_score == expected

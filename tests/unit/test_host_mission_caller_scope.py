@@ -1,21 +1,19 @@
-"""A MISSION host search submits into the caller store it was prepared in (Spec 012).
-
-The caller-storage middleware scopes a tool by its name or by a mission, workspace or watchlist
-argument. `prepare_host_browser_search` carries `mission_id`, but `submit_host_browser_search`
-carries only the request's ids, so it used to reach the global store, could not find the
-mission's research workspace there and failed every live MISSION ingestion.
-"""
+"""Mission ticket routing preserves the invoking caller and refuses scope substitution."""
 from types import SimpleNamespace
 
 import pytest
+from fastmcp.exceptions import ToolError
 
-from ignis.infrastructure.caller_storage import current_caller_storage
+from ignis.application.use_cases.host_browser_search import HostBrowserSearchService
+from ignis.infrastructure.caller_storage import CallerStorageMiddleware, current_caller_storage
 from ignis.interfaces.mcp import server
+from tests.fixtures.meta_host_browser_answers import NoSocketRelay
 
 
 class _Scope:
-    def __init__(self, components):
-        self.components = components
+    def __init__(self, root, executor):
+        self.root = root
+        self.components = {"repository": _Repository(), "execute_mission_use_case": executor}
 
     def check(self):
         pass
@@ -26,60 +24,101 @@ class _Repository:
         return SimpleNamespace(id=mission_id)
 
 
-class _Service:
+class _Service(HostBrowserSearchService):
+    """Keep real ticket/caller guards; replace only mission planning and writer entry."""
     def __init__(self):
-        self.submitted = []
+        super().__init__()
+        self.entered = []
 
-    async def prepare_mission(self, executor, mission_id, host_task_ref, session_ref, lifetime, authorized):
-        return {"request_id": "request", "mission_id": str(mission_id)}
-
-    def mode(self, request_id, host_task_ref, session_ref):
-        return "MISSION"
+    async def prepare_mission(self, executor, mission_id, host_task_ref, session_ref, lifetime, authorized,
+                              source="tiktok"):
+        return self.prepare(host_task_ref, session_ref, ["synthetic"], 20, lifetime, authorized,
+                            mode="MISSION", source=source)
 
     async def submit_mission(self, executor, request_id, host_task_ref, session_ref):
-        self.submitted.append((executor, current_caller_storage.get()))
+        self.mode(request_id, host_task_ref, session_ref)
+        self.entered.append(("submit", executor, current_caller_storage.get()))
         return {"status": "ACCEPTED"}
+
+    async def cancel_mission(self, request_id, host_task_ref, session_ref):
+        receipt = self.cancel(request_id, host_task_ref, session_ref)
+        self.entered.append(("cancel", None, current_caller_storage.get()))
+        return receipt
 
 
 @pytest.fixture
-def service(monkeypatch):
-    fake = _Service()
-    monkeypatch.setattr(server, "_host_browser_search_service", fake)
-    monkeypatch.setattr(server, "_host_mission_scopes", {})
+def routing(tmp_path, monkeypatch):
+    from ignis.application.use_cases import host_browser_search
+    monkeypatch.setattr(host_browser_search, "LoopbackRelay", NoSocketRelay)
+    service = _Service()
+    monkeypatch.setattr(server, "_host_browser_search_service", service)
     monkeypatch.setattr(server, "_COMPONENTS", None)
-    monkeypatch.setattr(server, "_init_components", lambda: {"execute_mission_use_case": "global"})
-    return fake
+    monkeypatch.setattr(server, "_init_components", lambda: pytest.fail("Reached global components"))
+    monkeypatch.delenv("IGNIS_CALLER_ROOT", raising=False)
+    scope = _Scope(tmp_path / "caller", "caller-executor")
+    other = _Scope(tmp_path / "other", "other-executor")
+    owner = SimpleNamespace(closed=False, caller_scopes={str(s.root): s for s in (scope, other)})
+    middleware = CallerStorageMiddleware(lambda s: pytest.fail("Unexpected composition"), lambda *a: None,
+                                         host_request_mode=service.request_mode)
+    monkeypatch.setattr(middleware, "_checked_startup_root", lambda ctx: ctx.root)
+
+    async def invoke(tool, arguments, caller=scope):
+        ctx = (SimpleNamespace(root=caller.root, request_context=object(),
+                               lifespan_context={"mission_relay": owner}) if caller else None)
+        context = SimpleNamespace(message=SimpleNamespace(name=tool, arguments=arguments), fastmcp_context=ctx)
+
+        async def call_next(context):
+            return await getattr(server, "handle_" + tool)(**context.message.arguments)
+        return await middleware.on_call_tool(context, call_next)
+
+    yield service, scope, other, invoke
+    service.close()
 
 
-async def _prepare(scope):
-    token = current_caller_storage.set(scope)
-    try:
-        return await server.handle_prepare_host_browser_search(
-            "task", "chrome", [], 20, 600, True, mode="MISSION", mission_id="mission")
-    finally:
-        current_caller_storage.reset(token)
+async def _prepare(invoke):
+    request = await invoke("prepare_host_browser_search", dict(host_task_ref="task", session_ref="chrome",
+        queries=[], result_limit=20, lifetime_seconds=600, authorized=True, mode="MISSION", mission_id="mission"))
+    return dict(request_id=request["request_id"], host_task_ref="task", session_ref="chrome")
 
 
 @pytest.mark.asyncio
-async def test_mission_submit_uses_the_store_it_was_prepared_in(service):
-    scope = _Scope({"repository": _Repository(), "execute_mission_use_case": "caller"})
-    assert (await _prepare(scope))["request_id"] == "request"
-
-    receipt = await server.handle_submit_host_browser_search("request", "task", "chrome")
-
-    assert receipt == {"status": "ACCEPTED"}
-    assert service.submitted == [("caller", scope)], "the submission left the caller store"
+@pytest.mark.parametrize("operation", ["submit", "cancel"])
+async def test_mission_ticket_same_caller_routes_to_its_prepared_store(routing, operation):
+    service, scope, _, invoke = routing
+    arguments = await _prepare(invoke)
+    receipt = await invoke(operation + "_host_browser_search", arguments)
+    assert receipt["status"] == ("ACCEPTED" if operation == "submit" else "CANCELLED")
+    assert service.entered == [(operation, "caller-executor" if operation == "submit" else None, scope)]
     assert current_caller_storage.get() is None
-    assert server._host_mission_scopes == {}
 
 
 @pytest.mark.asyncio
-async def test_mission_prepared_in_the_global_store_submits_there(service):
-    server._COMPONENTS = {"repository": _Repository(), "execute_mission_use_case": "global"}
-    request = await server.handle_prepare_host_browser_search(
-        "task", "chrome", [], 20, 600, True, mode="MISSION", mission_id="mission")
-    assert request["request_id"] == "request"
+@pytest.mark.parametrize("operation", ["submit", "cancel"])
+@pytest.mark.parametrize("caller", ["different", "missing"])
+async def test_mission_ticket_wrong_or_missing_middleware_caller_refuses_before_writer(routing, operation, caller):
+    service, _, other, invoke = routing
+    arguments = await _prepare(invoke)
+    if caller == "missing":
+        with pytest.raises(ToolError, match="ROOT_REQUIRED category=REQUEST_CONTEXT_ABSENT"):
+            await invoke(operation + "_host_browser_search", arguments, None)
+    else:
+        receipt = await invoke(operation + "_host_browser_search", arguments, other)
+        assert receipt["status"] == "BLOCKED"
+    assert service.entered == []
+    assert current_caller_storage.get() is None
+    # A refused caller cannot consume or cancel the legitimate caller's ticket.
+    assert (await invoke(operation + "_host_browser_search", arguments))["status"] != "BLOCKED"
 
-    await server.handle_submit_host_browser_search("request", "task", "chrome")
 
-    assert service.submitted == [("global", None)]
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["submit", "cancel"])
+async def test_direct_mission_handler_without_pinned_caller_refuses_before_writer(routing, operation):
+    service, _, _, invoke = routing
+    arguments = await _prepare(invoke)
+    receipt = await getattr(server, "handle_" + operation + "_host_browser_search")(**arguments)
+    assert receipt["status"] == "BLOCKED"
+    assert service.entered == []
+
+
+def test_mission_scope_authority_has_no_write_only_server_index():
+    assert not hasattr(server, "_host_mission_scopes")

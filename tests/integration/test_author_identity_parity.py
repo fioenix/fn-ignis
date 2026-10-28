@@ -89,3 +89,32 @@ async def test_the_policy_changes_no_claim_permission_or_gap_report(repository_c
     assert plain["claims"] and plain["permitted"] == (1 if contradiction else 0), repository_case.name
     assert stripped == plain, repository_case.name
     assert [value for value in undeclared_sentinels() if value in str(analysis)] == [], repository_case.name
+
+
+@pytest.mark.asyncio
+async def test_threads_host_duplicate_queries_keep_one_content_reference_and_both_lineages(repository_case, tmp_path, monkeypatch):
+    from ignis.application.use_cases import host_browser_search as module
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from test_host_browser_mission import assignment
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    store, _, mission, executor = await assignment(repository_case.repository, tmp_path, market=True, required=("threads",))
+    service = module.HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
+        payload = host_answer(request)
+        payload["answers"][1]["records"][0]["source_url"] = payload["answers"][0]["records"][0]["source_url"].removesuffix("/media")
+        service.stage(request["request_id"], payload)
+        await service.submit_mission(executor, request["request_id"], "task", "chrome")
+        signals = await repository_case.repository.get_mission_signals(mission.id)
+        assert len(signals) == 2 and len({s.source_id for s in signals}) == 1
+        assert {s.metadata["query"] for s in signals} == {"túi đi làm", "túi đi làm bất tiện"}
+        assert {s.source_url for s in signals} == {"https://www.threads.com/t/Synthetic020Q0"}
+        # Existing per-topic merge remains once per source while retaining every query binding.
+        from ignis.domain.watchlist_period import PeriodItem, _merge
+        entries = _merge([PeriodItem(str(s.source_id), "threads", s.published_at, s.raw_title, "", s.source_url,
+            True, (s.metadata["query"],), ((s.captured_at, s.metric_value, s.metadata),)) for s in signals])
+        assert len(entries) == 1
+        assert entries[0].query_keywords == {"túi đi làm", "túi đi làm bất tiện"}
+        assert "synthetic.header" not in repr(signals)
+    finally:
+        service.close()

@@ -42,7 +42,7 @@ For a Codex-only installation with separate UAT storage, run
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
 The current source tree contains migrations through
-`sql/035_watchlist_listening_plans.sql`. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok author attribution wording that
+`sql/037_threads_action_labels.sql`. Migration 037 seeds the Threads action-button labels for each UI language that host-browser search uses to read counters; it rewrites no stored evidence. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok author attribution wording that
 host-browser search removes from excerpts; it rewrites no stored evidence. Migration 033 adds a per-channel, per-day count of keyword
 searches for the daily request ceilings; it rewrites no stored evidence. Migration 032 adds watchlists, their immutable versions and the runs
 bound to them; it rewrites no stored evidence. Migration 031 adds per-mission author keys, declared
@@ -103,7 +103,7 @@ signature authority. Representative operations:
 - Atomic source tools such as `get_tiktok_search_suggestions` and
   `get_tiktok_video_comments` can answer source-specific questions without a Market verdict.
 - Opt-in `prepare_host_browser_search`, `submit_host_browser_search` and
-  `cancel_host_browser_search` collect bounded public TikTok grids through an authorized host
+  `cancel_host_browser_search` collect bounded public TikTok grids and Threads Top results through an authorized host
   browser. See [host-browser scope and limits](docs/USER_GUIDE.md#explicit-host-browser-tiktok-search-development-branch).
 - `get_mission_evidence_qualification_batch` and
   `submit_mission_evidence_qualifications` record evidence judgments.
@@ -127,6 +127,37 @@ Agent instructions are in [AGENTS.md](AGENTS.md). The separate
 The [user guide](docs/USER_GUIDE.md) covers the current source workflow. Historical v0.7.0
 diagrams and the published release remain available through the v0.7.0 Git tag; they are not
 diagrams of this branch.
+
+### Threads host collection and period paths
+
+`prepare_host_browser_search` accepts optional `source="threads"`; omitting it keeps
+`source="tiktok"`. Submit and cancel keep their three ID parameters. There are still 53 tools.
+Threads collection uses only the authorized host browser. Internal Threads Playwright collection
+is removed; the retained suggestions/trending tools return `UNAVAILABLE/HOST_BROWSER_REQUIRED`.
+Stored Threads credentials do not establish collection readiness. No API grant probe or API path
+is activated, and failure never selects a fallback collector.
+
+Reels stays on Playwright without automation-hiding flags. A login wall, checkpoint, challenge,
+unparseable response or missing search envelope is unavailable with a reason, never a measured
+zero. A verified, well-formed empty search envelope may return `EMPTY_NO_DATA` for the executed
+keyword. This does not establish coverage for other keywords or a known time window.
+
+Threads `threads-search-top-v2` collects a bounded visible Top sample on `www.threads.com/search`.
+Posts are found by page structure in any UI language; counters are read only for UI languages
+with seeded action labels (English and Vietnamese) and stay unknown otherwise. Loading, an
+empty shell or all records being dropped cannot prove an empty market. Capture time and publication time stay separate.
+Counters retain raw display and precision: `1.4K` or `1,4K` is rounded, a blank is unknown, and shares are
+not quotes. Rounded counters do not become exact period totals. Author headers and attribution
+are removed before receipts or storage; links use identity-free content references. Free-text
+personal names remain a sanitization limitation.
+
+On both seen and created axes, `collection_path_changed` refuses different proven paths,
+`collection_path_unknown` refuses a proven path against an unknown path, and
+`collection_path_mixed` refuses multiple proven paths or proven/unknown mixtures within either
+period. These cells have no indicators or deltas. Identical proven paths remain eligible;
+if both periods have only unknown paths, legacy comparison rules and output stay unchanged.
+Cadence, coverage, publication placement and judgment rules still apply.
+
 
 ## Verification and release status
 

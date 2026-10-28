@@ -1,0 +1,20 @@
+{
+  "expires_at": "2026-10-27T12:01:00Z",
+  "extractor_version": "tiktok-public-grid-v1",
+  "host_task_ref": "task-1",
+  "issued_at": "2026-10-27T12:00:00Z",
+  "mode": "TACTICAL",
+  "protocol_version": 1,
+  "queries": [
+    {
+      "query": "túi đi làm",
+      "query_id": "00000000-0000-0000-0000-000000000002",
+      "result_limit": 3,
+      "search_url": "https://www.tiktok.com/search?q=t%C3%BAi%20%C4%91i%20l%C3%A0m"
+    }
+  ],
+  "relay_url": "http://127.0.0.1:0/SYNTHETIC-RELAY",
+  "request_id": "00000000-0000-0000-0000-000000000001",
+  "session_ref": "chrome-1",
+  "tab_script": "[mock relay; transport script excluded from baseline]"
+}

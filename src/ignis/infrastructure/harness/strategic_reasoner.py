@@ -765,7 +765,10 @@ class StrategicMarketReasoner:
                     and auth_status.get(p_val) is False
                 )
 
-                if needs_auth:
+                if health_entry and health_entry.get("collection_available") is False:
+                    status = ChannelHealthStatus.DEGRADED
+                    notes = health_entry.get("reason_code") or "Collection is unavailable for this surface."
+                elif needs_auth:
                     status = ChannelHealthStatus.AUTH_REQUIRED
                     notes = "Missing token or browser session for this channel."
                 elif health_entry and health_entry.get("circuit_state") == "OPEN":

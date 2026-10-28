@@ -20,7 +20,8 @@ evidence frame are the shared policy; this skill does not define a second policy
    identity, query, scope, collection time, and channel state. Stop after answering the request.
 2. For a bounded multi-source frame, propose and confirm a research workspace, then call
    `create_attention_mission` or `confirm_market_brief` with the requester's confirmed Mission
-   Manifest. Call `execute_mission_ingress` once for the assigned mission.
+   Manifest. For non-host collection, call `execute_mission_ingress` once; for opt-in host-browser
+   search, follow the path below to collect and submit one mission run.
 3. Inspect the returned collection-plan digest, frame digest, and every declared channel outcome.
    Treat an unavailable surface as missing evidence. An exact measured empty result has its own
    `EMPTY_NO_DATA` state. See [the frame example](examples/collection-frame.md).
@@ -36,30 +37,50 @@ and the task has reached its declared stop condition.
 
 ## Opt-in host-browser search
 
-Use this path only when the requester authorizes their live browser for the exact public TikTok
-query batch and the host provides supported navigation and read-only DOM evaluation. Read the live
-`prepare_host_browser_search`, `submit_host_browser_search`, and `cancel_host_browser_search` schemas.
-This path is not a default collector or an automatic fallback.
+Use the requester's own browser through the host's existing browser tooling, only with explicit
+live-browser authorization for this bounded batch. This is not a default collector or an automatic fallback.
+Before prepare, check the host can open a tab, click in the relay, evaluate read-only script in a
+tab it opened, and close tabs it opened. If any capability is missing, stop before collection:
+unsupported transport. Read the live `prepare_host_browser_search`, `submit_host_browser_search`
+and `cancel_host_browser_search` schemas. Before opening the relay, use the browser/profile the requester named
+for collection and confirm the host tooling is connected to it; with several browsers connected, ask the requester which.
+If tooling asks for or refuses origin access (source site or loopback relay), stop and ask the
+requester to grant access in the host; ungranted means that source is unavailable for this run.
 
-Prepare explicit task/session references, result and lifetime bounds, and authorization. For MISSION,
-use the existing confirmed mission ID, queries=[] and result_limit=20; the complete query union
-including falsifiers comes from that mission. Preparation holds no mission writer while waiting.
+Call `prepare_host_browser_search` with source="tiktok" or source="threads", explicit task/session
+references, authorization, result and lifetime bounds. For MISSION, use the confirmed mission ID,
+queries=[] and result_limit=20; the mission supplies the full query union, including falsifiers.
+When both sources are in scope, prepare sibling tickets for the same mission/task/session/frame,
+stage both before submitting either, and compose one mission run. Preparation holds no mission writer.
 
-Open the returned loopback relay through host browser tooling. For each approved query, click its
-"Open search" button: the relay opens the exact search URL in a new tab. Before each click check task
-cancellation/expiry and owner interruption. In that tab, evaluate the `tab_script` that preparation returned
-(the same script the relay page shows) once the grid has loaded; it runs the packaged extractor, posts the answer to the relay and returns only status and
-counts. The relay accepts answers only from tabs it opened and stages them once every query has one.
-If the host cannot click or evaluate in the opened tab, the manual path remains: evaluate the packaged
-extractor, fill the Search answer JSON field directly from the retained object and click Stage answer.
-Call MCP submit with IDs only, then read back observations/outcomes
-or canonical mission run/frame. A failed or uncertain ingestion requires journal/frame readback.
+Open the returned loopback relay in the confirmed browser. For each query, check
+cancellation/expiry and owner interruption, click "Open search" in the relay (a few seconds apart), wait for results to load,
+evaluate `tab_script` once in the relay-opened source tab, then read its status and counts.
+Threads encrypts the answer and navigates the same tab to a relay receiver page (a task-created tab).
+Close task-created tabs only after the relay shows `STAGED` or after submit.
+Never close a tab immediately after `posted: true`; navigation is delayed and the answer may be lost.
+TikTok posts to its relay opener. The host sees status and counts only. Source-tab conduct is read-only:
+no typing, clicking, scrolling, signing in, consenting or challenge solving.
+If automatic handoff fails, stop and report; manual Stage-answer requires the full envelope: `source` (Threads only,
+`"threads"`), `request_id`, `host_task_ref`, `session_ref`, `extractor_version` from prepare, and
+`answers`: one answer per approved query in prepare order, each the packaged extractor's retained object.
+Transfer that envelope directly into Search answer JSON and click Stage answer; never reconstruct, transcribe or repair
+model-built records. A rejected payload closes the relay: prepare a new ticket before staging again.
+Missing host capabilities still stop collection. Call `submit_host_browser_search` with IDs only after all queries are staged; read back observations/outcomes
+or canonical mission run/frame. Failed or uncertain ingestion requires journal/frame readback.
 
-Unsupported host transport stops before collection. Never reconstruct result records in model
-tool arguments. Unverified/failed search is DEGRADED; explicit verified no-results differs from it.
-Counters, publication dates and windows the extractor did not measure remain unknown. The visible
-grid is a bounded sample, not representative demand or a commercial conclusion.
-
-On cancellation, failure or completion stop navigating, cancel a nonterminal request when possible,
+For a visible sign-in wall, challenge, error page or missing grid, the extractor reports `DEGRADED`
+(or the validator rejects a mismatched page). On any such state, stop that query, retain the
+outcome as reported (unavailable/`DEGRADED`), tell the requester and move on; no retry loop or other collector.
+Unverified/failed search is `DEGRADED`; explicit verified no-results differs from it; current Threads
+extraction cannot verify empty results. Unmeasured counters, publication dates and windows remain unknown.
+The visible grid is a bounded sample, not representative demand or a commercial conclusion.
+Use only this host path for search; these alternatives are excluded:
+- Separately launched Playwright/headless browsers: blocked despite a valid session on 25/10/2026.
+- LLM agents reading/driving pages: periods lose comparability and the charter forbids model-built records.
+- Third-party scrape/unblocker services: data leaves the machine; proxy unblocking is evasion.
+- CDP / remote debugging: excluded by Spec 012; anti-detection tooling is also excluded.
+Reels keeps its flag-free Playwright path, outside this search guidance.
+On cancellation, failure or completion, stop navigating, cancel a nonterminal request when possible,
 and close task-created tabs in the host's finally path. Preserve owner tabs and browser. The relay
-closes on submission, rejection, cancellation, expiry or server exit; it cannot close Chrome itself.
+closes on submission, rejection, cancellation, expiry or server exit; it cannot close the browser itself.

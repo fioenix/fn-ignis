@@ -38,7 +38,7 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/035_watchlist_listening_plans.sql`. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn mẫu câu
+Cây mã nguồn hiện có migration tới `sql/037_threads_action_labels.sql`. Migration 037 nạp sẵn nhãn các nút hành động của Threads theo từng ngôn ngữ giao diện, dùng để đọc chỉ số khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 036 nạp sẵn mẫu câu ghi công tác giả của Threads, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn mẫu câu
 ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt
 host; nó không sửa bằng chứng đã lưu. Migration 033 thêm bộ đếm số
 lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không sửa bằng
@@ -105,7 +105,7 @@ chuẩn cho tham số. Một số thao tác đại diện:
 - Các tool nguồn riêng lẻ như `get_tiktok_search_suggestions` và
   `get_tiktok_video_comments` có thể trả lời câu hỏi cụ thể mà không cần kết luận thị trường.
 - Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và
-  `cancel_host_browser_search` thu thập lưới video công khai có giới hạn qua trình duyệt được
+  `cancel_host_browser_search` thu thập lưới TikTok và kết quả Threads Top có giới hạn qua trình duyệt được
   cho phép. Đây là đường chủ động chọn, không phải phương án tự động dự phòng;
   xem [phạm vi và giới hạn](docs/USER_GUIDE.vi.md#tìm-kiếm-tiktok-qua-trình-duyệt-host-trên-nhánh-phát-triển).
 - `get_mission_evidence_qualification_batch` và
@@ -131,6 +131,40 @@ Hướng dẫn agent nằm trong [AGENTS.md](AGENTS.md); ba skill
 [theo dõi](.agents/skills/ignis-track/SKILL.md) tách biệt. [Hướng dẫn sử dụng](docs/USER_GUIDE.vi.md)
 mô tả nhánh mã nguồn hiện tại. Các sơ đồ Dual-Track của v0.7.0 là tài liệu lịch sử, không
 biểu diễn nhánh này.
+
+### Thu thập Threads qua host và so sánh đường thu thập
+
+`prepare_host_browser_search` có tham số tùy chọn `source="threads"`. Khi bỏ qua tham số này,
+tool giữ `source="tiktok"`. Submit và cancel vẫn nhận ba tham số ID. Tổng số tool vẫn là 53.
+Threads chỉ thu thập qua trình duyệt host được cho phép. Phần thu thập Threads bằng Playwright
+đã bị loại bỏ. Hai tool gợi ý và xu hướng cũ trả về `UNAVAILABLE/HOST_BROWSER_REQUIRED`.
+Credential Threads đã lưu không chứng minh có thể thu thập. Ignis không kích hoạt đường API,
+không probe quyền API và không tự chuyển sang cách thu thập dự phòng khi lỗi.
+
+Reels vẫn dùng Playwright, không dùng cờ che giấu tự động hóa. Trang yêu cầu đăng nhập,
+checkpoint, challenge, phản hồi không đọc được hoặc thiếu search envelope đều là kết quả
+không khả dụng có lý do, không phải số 0 đã đo. Search envelope rỗng, đúng cấu trúc và đã được
+xác minh có thể trả về `EMPTY_NO_DATA` cho từ khóa đã chạy. Kết quả này không chứng minh đã
+bao phủ từ khóa khác hay biết rõ khoảng thời gian.
+
+Threads `threads-search-top-v2` chỉ lấy mẫu Top hữu hạn đang hiển thị trên
+`www.threads.com/search`. Bài viết được nhận diện theo cấu trúc trang ở mọi ngôn ngữ giao diện.
+Chỉ số chỉ đọc được khi ngôn ngữ giao diện đã có nhãn nút trong dữ liệu seed (hiện là tiếng Anh
+và tiếng Việt); với ngôn ngữ khác, chỉ số để ở trạng thái chưa biết.
+Trang đang tải, khung trang rỗng hoặc toàn bộ bản ghi bị loại không chứng minh thị trường rỗng.
+Thời điểm chụp và thời điểm đăng được giữ riêng. Chỉ số giữ nguyên chữ hiển thị và độ chính xác:
+`1.4K` hay `1,4K` là số làm tròn, ô trống là chưa biết; shares không phải quotes.
+Số làm tròn không trở thành tổng chính xác trong kỳ. Tiêu đề tác giả và câu ghi công bị bỏ trước khi trả receipt hoặc lưu.
+Link dùng tham chiếu nội dung không chứa danh tính. Tên người trong văn bản tự do vẫn là một
+giới hạn của bước làm sạch.
+
+Trên cả trục seen và created, `collection_path_changed` từ chối hai đường thu thập đã xác định
+nhưng khác nhau. `collection_path_unknown` từ chối một đường đã xác định so với một đường chưa biết.
+`collection_path_mixed` từ chối khi một kỳ trộn nhiều đường đã xác định, hoặc trộn đường đã xác định
+với đường chưa biết. Các ô này không có chỉ số hay chênh lệch. Hai đường đã xác định giống nhau
+vẫn có thể so sánh. Khi cả hai kỳ chỉ có đường chưa biết, quy tắc và kết quả so sánh cũ được giữ
+nguyên. Nhịp lấy mẫu, độ bao phủ, cách xếp theo ngày đăng và điều kiện đánh giá vẫn áp dụng.
+
 
 ## Kiểm chứng và trạng thái phát hành
 

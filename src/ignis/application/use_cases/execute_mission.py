@@ -523,6 +523,20 @@ class ExecuteMissionUseCase:
             "completed_at": outcome.completed_at.isoformat(),
         }
 
+    @staticmethod
+    def _probe_attestation(outcome, mission, collection_plan_digest):
+        """Retain source descriptors even when an executed host probe has no observations."""
+        provided = outcome.scope_attestation
+        if outcome.connector_path and outcome.connector_path.startswith("host_browser:"):
+            return {**(provided or {}), "collection_path": outcome.connector_path,
+                    "connector_revision": outcome.connector_revision}
+        if provided is not None:
+            return provided
+        if collection_plan_digest is not None and outcome.status.value in ("HEALTHY", "EMPTY_NO_DATA"):
+            return {"geo": mission.geo_code.value, "timeframe": outcome.queried_window or mission.timeframe,
+                    "keywords": list(outcome.queried_keywords)}
+        return None
+
     async def _record_probe_outcomes(
         self, mission, journal, outcomes, *, collection_plan_digest=None
     ) -> None:
@@ -552,18 +566,7 @@ class ExecuteMissionUseCase:
                         outcome.queried_keywords, mission.geo_code, outcome.queried_window
                     ),
                     completed_at=completed_at,
-                    scope_attestation=(
-                        outcome.scope_attestation
-                        if outcome.scope_attestation is not None
-                        else ({
-                            "geo": mission.geo_code.value,
-                            "timeframe": outcome.queried_window or mission.timeframe,
-                            "keywords": list(outcome.queried_keywords),
-                        }
-                        if collection_plan_digest is not None
-                        and outcome.status.value in ("HEALTHY", "EMPTY_NO_DATA")
-                        else None)
-                    ),
+                    scope_attestation=self._probe_attestation(outcome, mission, collection_plan_digest),
                     note=(
                         outcome.note
                         or (

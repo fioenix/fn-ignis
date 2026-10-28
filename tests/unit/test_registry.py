@@ -638,6 +638,7 @@ async def test_the_list_only_search_keeps_its_contract():
 
 # --- Review 0d70e9b: an empty answer is a measured zero only when the surface attests it ran ------
 
+from tests.unit.test_meta_browser_ingress import REELS_PAYLOAD  # noqa: E402
 from ignis.infrastructure.connectors.reels.reels_plugin import ReelsPlugin  # noqa: E402
 from ignis.infrastructure.connectors.threads.threads_plugin import ThreadsPlugin  # noqa: E402
 
@@ -666,7 +667,7 @@ async def test_a_browser_surface_that_captured_nothing_is_not_a_measured_empty(p
     from unittest.mock import patch
 
     registry = _registry(_session_plugin(plugin_class))
-    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[])), \
+    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[]), create=True), \
             patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
         result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"])
 
@@ -693,18 +694,22 @@ async def test_an_empty_answer_without_an_attestation_is_degraded_not_measured()
 )
 @pytest.mark.asyncio
 async def test_a_browser_surface_attests_the_keywords_it_actually_queried(plugin_class, module):
-    """Threads executes the full plan; Reels keeps its cap, 20 keywords since 26/10/2026."""
+    """Reels retains its keyword cap; Threads never dispatches the retired internal path."""
     from unittest.mock import patch
 
     keywords = [f"topic{index}" for index in range(1, 23)]
     registry = _registry(_session_plugin(plugin_class))
-    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[EMPTY_SEARCH_PAYLOAD])), \
+    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[REELS_PAYLOAD]), create=True), \
             patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
         result = await registry.search_with_outcomes(keywords=keywords)
 
     [outcome] = result.outcomes
-    assert outcome.status is ChannelHealthStatus.EMPTY_NO_DATA
-    assert outcome.queried_keywords == tuple(keywords if plugin_class is ThreadsPlugin else keywords[:20])
+    if plugin_class is ThreadsPlugin:
+        assert outcome.status is ChannelHealthStatus.DEGRADED and outcome.queried_keywords == ()
+        assert "HOST_BROWSER_REQUIRED" in outcome.note
+    else:
+        assert outcome.status is ChannelHealthStatus.HEALTHY
+        assert outcome.queried_keywords == tuple(keywords[:20])
 
 
 # --- Follow-up review: the window each surface attests is the one the platform filtered by -------
@@ -760,30 +765,15 @@ async def test_youtube_attests_no_query_when_its_search_call_fails():
 
 
 @pytest.mark.asyncio
-async def test_threads_graph_attests_the_since_until_window_it_sent():
-    from unittest.mock import MagicMock, patch
-
+async def test_retired_threads_attests_no_query_or_window_and_never_uses_graph():
     from ignis.application.ports.connector_port import SearchAttestation
-
-    oauth = AsyncMock()
-    oauth.get_access_token.return_value = "LONG_LIVED_TOKEN"
-    windows = []
-    empty = MagicMock(status_code=200)
-    empty.json.return_value = {"data": []}
-
-    async def _get(url, params=None, **kwargs):
-        if "keyword_search" in url:
-            windows.append((params.get("since"), params.get("until")))
-        return empty
-
+    from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
     attestation = SearchAttestation()
-    with patch("httpx.AsyncClient.get", side_effect=_get):
-        await ThreadsPlugin(auth_manager=oauth).search_signals(
-            keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D, attestation=attestation,
-        )
-
-    assert windows and all(since and until for since, until in windows)
-    assert attestation.window == "7d" and attestation.queried == ["ai cho cửa hàng"]
+    oauth = AsyncMock()
+    with pytest.raises(ConnectorCapabilityUnavailableException, match="HOST_BROWSER_REQUIRED"):
+        await ThreadsPlugin(auth_manager=oauth).search_signals(["synthetic"], attestation=attestation)
+    oauth.get_access_token.assert_not_awaited()
+    assert attestation.queried == [] and attestation.window is None
 
 
 @pytest.mark.parametrize(
@@ -798,9 +788,87 @@ async def test_a_browser_surface_attests_no_window_because_it_filters_by_none(pl
     from unittest.mock import patch
 
     registry = _registry(_session_plugin(plugin_class))
-    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[EMPTY_SEARCH_PAYLOAD])), \
+    with patch(f"{module}.collect_json_payloads", AsyncMock(return_value=[REELS_PAYLOAD]), create=True), \
             patch(f"{module}.fetch_graphql_direct", AsyncMock(return_value=None), create=True):
         result = await registry.search_with_outcomes(keywords=["ai cho cửa hàng"], timeframe=Timeframe.LAST_7D)
 
     [outcome] = result.outcomes
-    assert outcome.status is ChannelHealthStatus.EMPTY_NO_DATA and outcome.queried_window is None
+    assert outcome.queried_window is None
+    assert outcome.status is (ChannelHealthStatus.DEGRADED if plugin_class is ThreadsPlugin else ChannelHealthStatus.HEALTHY)
+
+
+@pytest.mark.asyncio
+async def test_real_threads_host_absence_refuses_before_dispatch_or_ceiling(monkeypatch):
+    plugin = ThreadsPlugin(auth_manager=AsyncMock(), browser_auth_manager=AsyncMock())
+    registry = _registry(plugin)
+    plugin.search_signals = AsyncMock(side_effect=AssertionError("Internal Threads dispatch"))
+    registry._daily_ceiling_note = AsyncMock(side_effect=AssertionError("Unavailable host spent ceiling"))
+    result = await registry.search_with_outcomes(keywords=["synthetic"])
+    [outcome] = result.outcomes
+    assert outcome.status is ChannelHealthStatus.DEGRADED
+    assert "HOST_BROWSER_REQUIRED" in outcome.note
+    assert outcome.queried_keywords == ()
+    plugin.search_signals.assert_not_awaited()
+    registry._daily_ceiling_note.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_retired_threads_circuit_health_does_not_claim_collection_readiness():
+    registry = _registry(ThreadsPlugin())
+    health = registry.get_health_status()["threads"]
+    assert health["circuit_state"] == "CLOSED"
+    assert health["collection_available"] is False and health["reason_code"] == "HOST_BROWSER_REQUIRED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("optional", [False, True])
+async def test_retired_threads_requirement_resolution_cannot_admit_browser_authority(optional):
+    plugin = ThreadsPlugin(auth_manager=AsyncMock(), browser_auth_manager=AsyncMock())
+    plugin.resolve_ingest_runtime = AsyncMock(side_effect=AssertionError("Retired runtime resolution"))
+    registry = _registry(plugin)
+    result = await registry.resolve_execution_requirements(target_platforms=[PlatformType.THREADS],
+        allowed_surfaces=("threads",), required_surfaces=() if optional else ("threads",),
+        optional_surfaces=("threads",) if optional else (), keywords=["synthetic"])
+    assert result["resources"] == () and result["authority"] == () and result["quota_costs"] == {}
+    assert result["unavailable_resources"] == (() if optional else ("threads",))
+    assert result["not_requested_resources"] == (("threads",) if optional else ())
+    plugin.resolve_ingest_runtime.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["fetch", "search"])
+async def test_private_registry_collection_seams_refuse_retired_threads_without_breaker_or_ceiling(operation):
+    from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
+    plugin = ThreadsPlugin()
+    plugin.fetch_signals = AsyncMock(side_effect=AssertionError("Retired fetch dispatch"))
+    plugin.search_signals = AsyncMock(side_effect=AssertionError("Retired search dispatch"))
+    registry = _registry(plugin)
+    registry._daily_ceiling_note = AsyncMock(side_effect=AssertionError("Retired request accounting"))
+    breaker = registry._breakers["threads"]
+    with pytest.raises(ConnectorCapabilityUnavailableException, match="HOST_BROWSER_REQUIRED"):
+        if operation == "fetch":
+            await registry._safe_fetch(plugin, breaker, GeoCode.VN, Timeframe.LAST_7D)
+        else:
+            await registry._safe_search(plugin, breaker, ["synthetic"], GeoCode.VN, Timeframe.LAST_7D)
+    assert breaker.failure_count == 0
+    registry._daily_ceiling_note.assert_not_awaited()
+    plugin.fetch_signals.assert_not_awaited()
+    plugin.search_signals.assert_not_awaited()
+
+
+@pytest.mark.parametrize("bound", [False, True])
+def test_channel_audit_retirement_dominates_credential_presence_but_keeps_recorded_signals(bound):
+    from ignis.infrastructure.harness.strategic_reasoner import StrategicMarketReasoner
+    from ignis.domain.entities import ResearchMission
+    registry = _registry(ThreadsPlugin())
+    reasoner = StrategicMarketReasoner()
+    mission = ResearchMission(title="Synthetic Threads availability", keywords=["synthetic"], platforms=[PlatformType.THREADS])
+    [row] = reasoner.summarize_channel_ingress(mission, [], auth_status={"threads": bound},
+                                              connector_health=registry.get_health_status())
+    assert row.status is ChannelHealthStatus.DEGRADED
+    assert row.notes == "HOST_BROWSER_REQUIRED"
+    retained = TrendSignal(platform=PlatformType.THREADS, raw_title="Synthetic retained body", metric_value=0,
+        source_url="https://www.threads.com/t/SyntheticRetained", metadata={"connector_surface": "threads"})
+    [row] = reasoner.summarize_channel_ingress(mission, [retained], auth_status={"threads": bound},
+                                              connector_health=registry.get_health_status())
+    assert row.status is ChannelHealthStatus.HEALTHY and row.signals_count == 1

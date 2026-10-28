@@ -76,13 +76,11 @@ class TikTokAuthManager:
             browser = await p.chromium.launch(
                 headless=headless,
                 args=[
-                    "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                 ]
             )
             context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
                 viewport={"width": 1280, "height": 850},
                 locale="vi-VN",
             )
