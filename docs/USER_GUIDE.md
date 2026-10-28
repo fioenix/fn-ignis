@@ -1,6 +1,7 @@
-# Ignis User Guide — v0.8.0
+# Ignis User Guide — v0.9.0
 
-This guide describes v0.8.0, including Spec 011 and watchlists. The v0.7.0 Dual-Track
+This guide describes v0.9.0: Threads and TikTok host-browser search, Reels without
+automation-hiding flags, migrations through `038`, and retained watchlists. The v0.7.0 Dual-Track
 worker and its diagrams are historical and do not describe this branch. See [README](../README.md) for the product contract and release boundary.
 
 ## 1. Start and inspect
@@ -273,8 +274,11 @@ unchanged, and reading a snapshot confers no execution authority.
 
 The local MCP server exposes **53 tools**. Discover the running server's descriptions for exact
 signatures; removed daily-discovery and unguided-research tools are not part of this branch.
-The release workflow builds `ghcr.io/fioenix/fn-ignis:0.8.0` when the `v0.8.0` tag is pushed.
-The v0.7.0 image does not contain the workflow described here.
+For an existing PostgreSQL database on `035`, apply `036`, `037` and `038` in order as the
+table owner. Without `038`, every MISSION TikTok host-browser query fails closed as `DEGRADED`.
+
+The release workflow builds `ghcr.io/fioenix/fn-ignis:0.9.0` when the `v0.9.0` tag is pushed.
+The v0.8.0 image does not contain the v0.9.0 host-browser contract described here.
 PyPI publication is not advertised. Run the branch's
 `.venv/bin/pytest tests/` (the CI scope; PostgreSQL cases skip unless `IGNIS_TEST_POSTGRES_DSN`
 names a disposable test database) and `uv lock --check` for local checks. The test suite
@@ -285,7 +289,7 @@ PostgreSQL, pilot, integration, and owner-controlled release gates, and
 [the Spec 014 task ledger](../specs/014-evidence-factory/tasks.md) for the Mission Relay,
 research-work and follow-up gates that remain open.
 
-### Explicit host-browser TikTok search (development branch)
+### Explicit host-browser TikTok and Threads search
 
 `prepare_host_browser_search`, `submit_host_browser_search` and `cancel_host_browser_search` provide
 an opt-in, task-bound host path. It needs an explicitly authorized browser and supported host DOM
@@ -320,6 +324,10 @@ Reels stays on Playwright without automation-hiding flags. A login wall, checkpo
 unparseable response or missing search envelope is unavailable with a reason, never a measured
 zero. A verified, well-formed empty search envelope may return `EMPTY_NO_DATA` for the executed
 keyword. This does not establish coverage for other keywords or a known time window.
+
+TikTok now uses `tiktok-public-grid-v2`; Threads uses `threads-search-top-v2`. Watchlist periods
+spanning the upgrade report `not_comparable` with `collection_path_changed` or
+`collection_path_mixed` when their collection paths differ or mix.
 
 Threads `threads-search-top-v2` collects a bounded visible Top sample on `www.threads.com/search`.
 Posts are found by page structure in any UI language; counters are read only for UI languages

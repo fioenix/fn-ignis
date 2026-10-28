@@ -1,6 +1,7 @@
-# Hướng dẫn sử dụng Ignis — v0.8.0
+# Hướng dẫn sử dụng Ignis — v0.9.0
 
-Tài liệu này mô tả v0.8.0, gồm Spec 011 và watchlist. Worker và sơ đồ Dual-Track của v0.7.0
+Tài liệu này mô tả v0.9.0: tìm kiếm Threads và TikTok qua trình duyệt host, Reels không dùng
+cờ che giấu tự động hóa, migration tới `038` và watchlist được giữ lại. Worker và sơ đồ Dual-Track của v0.7.0
 là lịch sử, không mô tả phiên bản này. Xem
 [README tiếng Việt](../README.vi.md) để biết hợp đồng sản phẩm và ranh giới phát hành.
 
@@ -264,8 +265,12 @@ cấp quyền thực hiện.
 
 MCP server cục bộ có **53 tools**. Xem mô tả trực tiếp từ server để biết tham số chính xác;
 các tool khám phá hằng ngày và nghiên cứu không giới hạn đã bị loại.
-Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.8.0` khi tag `v0.8.0` được push.
-Image v0.7.0 không có quy trình được mô tả ở đây.
+Với PostgreSQL hiện có ở `035`, áp dụng lần lượt `036`, `037` và `038` bằng tài khoản sở hữu
+bảng. Nếu thiếu `038`, mọi truy vấn TikTok qua trình duyệt host ở chế độ MISSION đều bị chặn
+với trạng thái `DEGRADED`.
+
+Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.9.0` khi tag `v0.9.0` được push.
+Image v0.8.0 không có hợp đồng thu thập qua trình duyệt host của v0.9.0 được mô tả ở đây.
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu
 `IGNIS_TEST_POSTGRES_DSN` không trỏ tới một database kiểm thử dùng một lần) và `uv lock --check`
 để kiểm tra cục bộ. Bộ kiểm thử tự thay credential bằng giá trị trơ; nếu muốn tách hẳn khỏi
@@ -273,7 +278,7 @@ Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng p
 cho các cổng PostgreSQL, pilot, tích hợp và phát hành cần chủ sở hữu quyết định. Các cổng còn mở
 của Mission Relay, công việc nghiên cứu và bổ sung chứng cứ nằm trong
 [danh sách việc của Spec 014](../specs/014-evidence-factory/tasks.md).
-### Tìm kiếm TikTok qua trình duyệt host trên nhánh phát triển
+### Tìm kiếm TikTok và Threads qua trình duyệt host
 
 Ba tool `prepare_host_browser_search`, `submit_host_browser_search` và
 `cancel_host_browser_search` cung cấp đường thu thập chủ động chọn, chỉ trong nhiệm vụ được duyệt.
@@ -309,6 +314,10 @@ checkpoint, challenge, phản hồi không đọc được hoặc thiếu search
 không khả dụng có lý do, không phải số 0 đã đo. Search envelope rỗng, đúng cấu trúc và đã được
 xác minh có thể trả về `EMPTY_NO_DATA` cho từ khóa đã chạy. Kết quả này không chứng minh đã
 bao phủ từ khóa khác hay biết rõ khoảng thời gian.
+
+TikTok hiện dùng `tiktok-public-grid-v2`; Threads dùng `threads-search-top-v2`. Các kỳ watchlist
+trải qua thời điểm nâng cấp trả về `not_comparable` với lý do `collection_path_changed` hoặc
+`collection_path_mixed` khi đường thu thập khác nhau hoặc bị trộn trong kỳ.
 
 Threads `threads-search-top-v2` chỉ lấy mẫu Top hữu hạn đang hiển thị trên
 `www.threads.com/search`. Bài viết được nhận diện theo cấu trúc trang ở mọi ngôn ngữ giao diện.

@@ -6,7 +6,9 @@ Ignis là bộ công cụ tự lưu trữ để nghiên cứu thị trường t�
 lập: thu thập có thể kết thúc bằng một khung chứng cứ; phân tích có thể kết thúc bằng báo cáo
 thiếu chứng cứ thay vì cố đưa ra kết luận.
 
-**Ranh giới phát hành:** v0.8.0 gồm Spec 011, watchlist và bản xem theo kỳ gắn với mục tiêu đã lưu. Mã nguồn
+**Ranh giới phát hành:** v0.9.0 bổ sung tìm kiếm Threads và TikTok qua trình duyệt host, Reels
+không dùng cờ che giấu tự động hóa và migration tới `038`; watchlist và bản xem theo kỳ gắn với
+mục tiêu đã lưu vẫn được giữ. Mã nguồn
 và image v0.7.0 đã công bố vẫn thuộc kiến trúc Dual-Track cũ; chúng không có bộ 53 tool theo
 nhiệm vụ được mô tả ở đây.
 
@@ -70,8 +72,12 @@ vận hành phê duyệt. Các file trước đó gồm `sql/022_builtin_uuid_de
 Không chạy lại 025 khi đã có hàng DEGRADED chứa kết quả một phần: constraint cũ sẽ chặn chúng
 trước khi 026 chạy. Kiểm chứng chạy lại 026 không đồng nghĩa chạy lại toàn bộ lịch sử migration.
 
-Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.8.0` khi tag `v0.8.0` được push.
-Image v0.7.0 không có quy trình được mô tả ở đây. Chưa công bố
+Với PostgreSQL hiện có ở `035`, áp dụng lần lượt `036`, `037` và `038` bằng tài khoản sở hữu
+bảng. Nếu thiếu `038`, mọi truy vấn TikTok qua trình duyệt host ở chế độ MISSION đều bị chặn
+với trạng thái `DEGRADED`.
+
+Workflow phát hành tạo image `ghcr.io/fioenix/fn-ignis:0.9.0` khi tag `v0.9.0` được push.
+Image v0.8.0 không có hợp đồng thu thập qua trình duyệt host của v0.9.0 được mô tả ở đây. Chưa công bố
 gói PyPI. Lệnh mission được chấp nhận ghi HTML vào `<root>/.fnignis/reports/`; phương án dự phòng
 trong source checkout là `reports/` không được commit. Mã template báo cáo chỉ nằm tại
 `src/ignis/infrastructure/templates/html/`.
@@ -146,6 +152,10 @@ checkpoint, challenge, phản hồi không đọc được hoặc thiếu search
 không khả dụng có lý do, không phải số 0 đã đo. Search envelope rỗng, đúng cấu trúc và đã được
 xác minh có thể trả về `EMPTY_NO_DATA` cho từ khóa đã chạy. Kết quả này không chứng minh đã
 bao phủ từ khóa khác hay biết rõ khoảng thời gian.
+
+TikTok hiện dùng `tiktok-public-grid-v2`; Threads dùng `threads-search-top-v2`. Các kỳ watchlist
+trải qua thời điểm nâng cấp trả về `not_comparable` với lý do `collection_path_changed` hoặc
+`collection_path_mixed` khi đường thu thập khác nhau hoặc bị trộn trong kỳ.
 
 Threads `threads-search-top-v2` chỉ lấy mẫu Top hữu hạn đang hiển thị trên
 `www.threads.com/search`. Bài viết được nhận diện theo cấu trúc trang ở mọi ngôn ngữ giao diện.

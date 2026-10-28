@@ -5,8 +5,9 @@ inspectable evidence from accessible social sources, then challenge a market hyp
 acting on it. Its two capabilities are independent: source collection can end with an evidence
 frame, while Market analysis can end with a Gap Report rather than a forced verdict.
 
-**Release boundary:** v0.8.0 includes the Spec 011 product reset, watchlists and goal-driven
-period views. The v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 53-tool
+**Release boundary:** v0.9.0 adds Threads and TikTok host-browser search, Reels without
+automation-hiding flags and migrations through `038`, retaining watchlists and goal-driven period
+views. The v0.7.0 source and image are historical Dual-Track artifacts; they do not expose the 53-tool
 mission-bound surface described here.
 
 ## Product contract
@@ -69,8 +70,11 @@ the operator's approval. The previous files include `sql/022_builtin_uuid_defaul
 Do not rerun historical 025 after partial DEGRADED rows exist: it reinstalls the stricter count
 CHECK before 026 can run. Replay verification for 026 is not whole-history replay verification.
 
-The release workflow builds `ghcr.io/fioenix/fn-ignis:0.8.0` when the `v0.8.0` tag is pushed.
-The v0.7.0 image does not contain the workflow described here.
+For an existing PostgreSQL database on `035`, apply `036`, `037` and `038` in order as the
+table owner. Without `038`, every MISSION TikTok host-browser query fails closed as `DEGRADED`.
+
+The release workflow builds `ghcr.io/fioenix/fn-ignis:0.9.0` when the `v0.9.0` tag is pushed.
+The v0.8.0 image does not contain the v0.9.0 host-browser contract described here.
 PyPI publication is not advertised. Admitted mission calls write HTML to
 `<root>/.fnignis/reports/`; the source-checkout fallback is gitignored `reports/`.
 Committed report templates live only in `src/ignis/infrastructure/templates/html/`.
@@ -104,7 +108,7 @@ signature authority. Representative operations:
   `get_tiktok_video_comments` can answer source-specific questions without a Market verdict.
 - Opt-in `prepare_host_browser_search`, `submit_host_browser_search` and
   `cancel_host_browser_search` collect bounded public TikTok grids and Threads Top results through an authorized host
-  browser. See [host-browser scope and limits](docs/USER_GUIDE.md#explicit-host-browser-tiktok-search-development-branch).
+  browser. See [host-browser scope and limits](docs/USER_GUIDE.md#explicit-host-browser-tiktok-and-threads-search).
 - `get_mission_evidence_qualification_batch` and
   `submit_mission_evidence_qualifications` record evidence judgments.
 - `submit_mission_claims`, `get_mission_claims`, and `get_mission_analysis` control
@@ -141,6 +145,10 @@ Reels stays on Playwright without automation-hiding flags. A login wall, checkpo
 unparseable response or missing search envelope is unavailable with a reason, never a measured
 zero. A verified, well-formed empty search envelope may return `EMPTY_NO_DATA` for the executed
 keyword. This does not establish coverage for other keywords or a known time window.
+
+TikTok now uses `tiktok-public-grid-v2`; Threads uses `threads-search-top-v2`. Watchlist periods
+spanning the upgrade report `not_comparable` with `collection_path_changed` or
+`collection_path_mixed` when their collection paths differ or mix.
 
 Threads `threads-search-top-v2` collects a bounded visible Top sample on `www.threads.com/search`.
 Posts are found by page structure in any UI language; counters are read only for UI languages
