@@ -246,8 +246,8 @@ def test_every_release_version_carrier_agrees():
 
 # The release this branch prepares and the date of the release before it. Both move with
 # the next version bump, in the same commit as the carriers themselves.
-RELEASE_CANDIDATE = "0.8.0"
-PREVIOUS_RELEASE_DATE = "2026-09-29"
+RELEASE_CANDIDATE = "0.9.0"
+PREVIOUS_RELEASE_DATE = "2026-10-27"
 
 
 def test_every_carrier_names_the_release_candidate():
