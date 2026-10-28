@@ -528,7 +528,7 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   test basenames; wheel built from the branch and smoke-tested in an isolated venv (53 tools,
   optional prepare `source`, submit/cancel unchanged).
 
-- [ ] T051 **Needs separate owner approval**: after T050 and explicit bounded real-session/G3-run
+- [X] T051 **Needs separate owner approval**: after T050 and explicit bounded real-session/G3-run
   authority, execute the implemented Ignis prepare → Threads/TikTok host extraction → relay → submit →
   single G3 mission run and canonical readback per `specs/020-meta-host-browser-search/quickstart.md`;
   record sanitized request/run IDs, versions, per-query/channel outcomes, at least one Threads
@@ -537,6 +537,10 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   SC-005). Preserve owner browser/tabs, stop on login/challenge/denial, no fallback, credentials or G3
   routine change. Leave unchecked without approval or actual live proof; manual G2/fixtures/wheel smoke
   are insufficient.
+  Owner accepted 28/10/2026 with three deviations: a trimmed G3 (both topics, 4 keywords), the
+  Fioenix Chrome profile, and path-gate refusal shown only offline (the live week was still open).
+  Evidence: mission aaf02a60, TikTok+Threads sibling tickets in one run, 89 signals, zero stored
+  author URLs, Threads counters parsed; `.handoff/spec020-live-run-20261028.md`.
 - [X] T052 **Needs separate owner approval**: after T050 and explicit bounded real Reels session/run
   authority, execute flag-free Reels and read back either observations or unavailable with the actual
   login/checkpoint/challenge/unusable reason, never measured zero from a blocked page; record sanitized
