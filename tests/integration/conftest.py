@@ -77,6 +77,7 @@ SCHEMA_MIGRATIONS = (
     "035_watchlist_listening_plans.sql",
     # Spec 020: seed-only host attribution; never an evidence transformation.
     "036_threads_attribution.sql",
+    "037_threads_action_labels.sql",
 )
 
 

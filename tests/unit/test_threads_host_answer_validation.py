@@ -28,7 +28,7 @@ def record_data(**overrides):
 
 def answer_data(source=None, **overrides):
     data = dict(request_id="request", host_task_ref="task", session_ref="session",
-                extractor_version="tiktok-public-grid-v1" if source is None else "threads-search-top-v1",
+                extractor_version="tiktok-public-grid-v1" if source is None else "threads-search-top-v2",
                 answers=[dict(query_id="q1", query="synthetic query", page_url="https://www.threads.com/search?q=synthetic%20query",
                               captured_at=CLOCK, search_verified=True, empty_state_visible=False,
                               status="HEALTHY", records=[record_data()])])
@@ -58,7 +58,7 @@ def test_threads_request_and_answer_freeze_matching_source_and_version():
     request = HostSearchRequest.model_validate(request_data(source="threads"))
     answer = HostSearchAnswer.model_validate(answer_data("threads"), context={"request": request})
     assert request.source == answer.source == "threads"
-    assert request.extractor_version == answer.extractor_version == "threads-search-top-v1"
+    assert request.extractor_version == answer.extractor_version == "threads-search-top-v2"
     assert request.model_dump(mode="json")["source"] == "threads"
     for envelope in (request, answer):
         for field, value in (("source", "tiktok"), ("extractor_version", "tiktok-public-grid-v1")):
@@ -67,9 +67,9 @@ def test_threads_request_and_answer_freeze_matching_source_and_version():
 
 
 @pytest.mark.parametrize("source,version", [
-    ("instagram", "threads-search-top-v1"), ("threads", "tiktok-public-grid-v1"),
-    ("tiktok", "threads-search-top-v1"), ("threads", "threads-mcp-keyword-v1"),
-    ("threads", "threads-search-top-v2"),
+    ("instagram", "threads-search-top-v2"), ("threads", "tiktok-public-grid-v1"),
+    ("tiktok", "threads-search-top-v2"), ("threads", "threads-mcp-keyword-v1"),
+    ("threads", "threads-search-top-v1"),
 ])
 def test_unsupported_or_cross_source_versions_are_not_browser_envelopes(source, version):
     with pytest.raises(ValidationError):
@@ -200,7 +200,7 @@ def test_threads_staging_removes_identity_and_keeps_exact_clock_counters_and_pat
     assert "synthetic.mention" not in record["excerpt"]
     assert record["published_at"] == "2026-10-27T01:02:03.123456+00:00"
     assert record["counters"][0]["precision"] == "rounded" and record["counters"][1]["value"] is None
-    assert record["collection_path"] == "host_browser:threads-search-top-v1"
+    assert record["collection_path"] == "host_browser:threads-search-top-v2"
     assert receipt["outcomes"][0]["sampling"]["limit"] == 3
 
 
@@ -234,7 +234,7 @@ def test_threads_bad_scope_refuses_entire_batch_without_collectible_receipt(thre
     elif mutation == "future":
         answer["captured_at"] = "2099-01-01T00:00:00Z"
     elif mutation == "locale":
-        answer["locale"] = "vi"
+        answer["locale"] = "en-US"
     elif mutation == "empty":
         answer.update(status="EMPTY_NO_DATA", records=[], empty_state_visible=True)
     elif mutation == "record-route":
@@ -287,8 +287,7 @@ def test_unsupported_threads_locale_is_recorded_as_degraded(threads_service, mix
     assert outcome["status"] == "DEGRADED" and outcome["signals_collected"] == 0
     assert outcome["search_verified"] is False
     assert "page locale is unsupported" in outcome["note"].lower()
-    assert "English only" in outcome["note"]
-    assert outcome["collection_path"] == "host_browser:threads-search-top-v1"
+    assert outcome["collection_path"] == "host_browser:threads-search-top-v2"
     assert len(receipt["observations"]) == int(mixed)
     if mixed:
         assert receipt["outcomes"][1]["status"] == "HEALTHY"
@@ -301,7 +300,7 @@ def test_unsupported_threads_locale_is_recorded_as_degraded(threads_service, mix
     {"search_verified": True}, {"records": [record_data()]},
     {"status": "HEALTHY", "search_verified": True, "records": [record_data()]},
     {"search_verified": True, "records": [record_data()]},
-    {"locale": "vi"}, {"locale": "en-US"}, {"locale": ""}, {"locale": None},
+    {"locale": "en-US"}, {"locale": ""}, {"locale": None},
 ])
 def test_unsupported_threads_locale_cannot_claim_measurement(threads_service, changes):
     from tests.fixtures.meta_host_browser_answers import host_answer
@@ -336,3 +335,49 @@ def test_english_threads_and_legacy_tiktok_outcomes_keep_their_contract(threads_
                                "Bounded visible public video grid; window and counters unmeasured")
     if source == "tiktok":
         assert "source" not in receipt and "collection_path" not in outcome
+
+
+@pytest.mark.parametrize("locale,raw,value,precision", [
+    ("vi", "Thích1,4K", 1400, "rounded"), ("en", "Like4.1K", 4100, "rounded"),
+    ("vi", "Thích1,25M", 1250000, "rounded"), ("vi", "Thích1.2345K", 1235, "rounded"),
+    ("vi", "Thích", None, "unknown"), ("th", "123", None, "unknown"),
+    ("vi", "Thích" + "9" * 40 + "M", None, "unknown"),
+])
+def test_locale_labels_validate_measurements_and_unknown_locale_notes(threads_service, locale, raw, value, precision):
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    request = threads_request(threads_service)
+    payload = host_answer(request)
+    payload["answers"][0]["locale"] = locale
+    payload["answers"][0]["records"][0]["counters"] = [counter(raw_display=raw, value=value, precision=precision)]
+    threads_service.stage(request["request_id"], payload)
+    receipt = threads_service.submit(request["request_id"], "task", "session")
+    assert receipt["observations"][0]["counters"][0]["value"] == value
+    if locale == "th":
+        assert "unmeasured" in receipt["outcomes"][0]["note"]
+
+
+@pytest.mark.parametrize("locale,raw,value,precision", [
+    ("th", "12", 12, "exact"), ("vi", "Thích1,4K", 1400, "exact"),
+    ("vi", "Thích1,4K", 1401, "rounded"), ("vi", "Reply12", 12, "exact"),
+])
+def test_locale_cannot_promote_unknown_or_rounded_measurements(threads_service, locale, raw, value, precision):
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    request = threads_request(threads_service)
+    payload = host_answer(request)
+    payload["answers"][0]["locale"] = locale
+    payload["answers"][0]["records"][0]["counters"] = [counter(raw_display=raw, value=value, precision=precision)]
+    with pytest.raises(ValueError):
+        threads_service.stage(request["request_id"], payload)
+
+
+def test_ticket_freezes_caller_action_labels_for_validation(threads_service):
+    from tests.fixtures.meta_host_browser_answers import host_answer
+    labels = {"th": {"likes": "Synthetic Thai Action"}}
+    request = threads_request(threads_service, action_labels=labels)
+    labels["th"]["likes"] = "Changed after preparation"
+    payload = host_answer(request)
+    payload["answers"][0]["locale"] = "th"
+    payload["answers"][0]["records"][0]["counters"] = [counter(raw_display="Synthetic Thai Action12")]
+    threads_service.stage(request["request_id"], payload)
+    receipt = threads_service.submit(request["request_id"], "task", "session")
+    assert receipt["observations"][0]["counters"][0]["value"] == 12

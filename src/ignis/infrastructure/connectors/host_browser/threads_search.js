@@ -1,21 +1,24 @@
-({query_id, query, result_limit}) => {
+({query_id, query, result_limit, action_labels = {}}) => {
   const page = new URL(location.href), captured_at = new Date().toISOString();
   const answer = {query_id, query, page_url: page.href, captured_at, search_verified: false,
-                  empty_state_visible: false, status: 'DEGRADED', records: [], locale: 'en'};
+                  empty_state_visible: false, status: 'DEGRADED', records: [], locale: 'unsupported'};
   if (page.origin !== 'https://www.threads.com' || page.pathname !== '/search' || page.hash ||
       [...page.searchParams.keys()].join(',') !== 'q' || page.searchParams.get('q') !== query ||
       !Number.isInteger(result_limit) || result_limit < 1 || result_limit > 100) return answer;
-  if (!/^en(?:-|$)/i.test(document.documentElement.lang || '')) { answer.locale = 'unsupported'; return answer; }
+  const language = (document.documentElement.lang || '').trim();
+  if (!/^[a-z]{2,8}(?:-[a-z0-9]{1,8})*$/i.test(language)) return answer;
+  answer.locale = language.split('-')[0].toLowerCase();
+  const labels = action_labels[answer.locale] || {};
   answer.search_verified = true;
   const visible = node => node.getClientRects().length && !node.closest('[hidden]');
   const anchorURL = href => { try { return new URL(href, page.origin); } catch { return null; } };
   const post = href => { const url = anchorURL(href); if (!url) return null;
     const match = url.pathname.match(/^\/@[A-Za-z0-9_.]+\/post\/([A-Za-z0-9_-]+)(?:\/media)?\/?$/);
     return url.origin === page.origin && !url.search && !url.hash && match ? {id: match[1], url: url.origin + url.pathname.replace(/\/media\/?$/, '')} : null; };
-  // Locale-dependent UI titles match G2's observed English action controls verbatim.
-  const titles = ['Like', 'Reply', 'Repost', 'Share'], kinds = ['likes', 'replies', 'reposts', 'shares'];
+  const kinds = ['likes', 'replies', 'reposts', 'shares'];
   const actions = card => Array.from(card.querySelectorAll('svg title'));
-  const complete = card => titles.every(label => actions(card).some(node => node.textContent.trim() === label));
+  const complete = card => Array.from(card.querySelectorAll('button,[role="button"]'))
+    .filter(control => visible(control) && control.querySelector('svg')).length >= 4;
   const candidates = [], blocked = [];
   for (const anchor of document.querySelectorAll('a[href]')) {
     if (!anchor.querySelector('time[datetime]') || !post(anchor.getAttribute('href')) || !visible(anchor) ||
@@ -58,15 +61,21 @@
     while (header.parentElement && header.parentElement !== card) header = header.parentElement;
     const excerpt = text(card, header).split('\n').map(line => line.trim()).filter(Boolean).join('\n');
     if (!excerpt) { dropped = true; continue; }
-    const counters = titles.map((label, index) => {
-      const title = actions(card).find(node => node.textContent.trim() === label);
-      const control = title.closest('[role="button"],button');
+    const counters = kinds.map(kind => {
+      const label = labels[kind];
+      const matches = label ? actions(card).filter(node => node.textContent.trim() === label) : [];
+      const title = matches.length === 1 ? matches[0] : null;
+      const control = title && title.closest('[role="button"],button');
       const raw_display = control ? [...control.childNodes].filter(node => node.nodeType === 3 || node.tagName.toLowerCase() !== 'svg').map(node => node.textContent).join('').trim() : '';
       let value = null, precision = 'unknown';
-      if (/^\d+$/.test(raw_display)) { value = Number(raw_display); precision = 'exact'; }
-      else if (/^\d+\.\d+K$/.test(raw_display)) { value = Math.round(Number(raw_display.slice(0,-1)) * 1000); precision = 'rounded'; }
+      const numeric = label && raw_display.startsWith(label) ? raw_display.slice(label.length).trim() : raw_display;
+      if (/^\d+$/.test(numeric)) { value = Number(numeric); precision = 'exact'; }
+      else if (/^\d+(?:[.,]\d+)?[KM]$/.test(numeric)) {
+        value = Math.round(Number(numeric.slice(0,-1).replace(',', '.')) * (numeric.endsWith('M') ? 1000000 : 1000));
+        precision = 'rounded';
+      }
       if (!Number.isSafeInteger(value)) { value = null; precision = 'unknown'; }
-      return {kind: kinds[index], unit: 'count', raw_display, value, precision};
+      return {kind, unit: 'count', raw_display, value, precision};
     });
     // Timestamp URL stays transient for self-exclusion and canonical mission author policy.
     if (!sample.rows.has(identity.id) && sample.rows.size < result_limit) sample.rows.set(identity.id,

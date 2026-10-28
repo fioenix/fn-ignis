@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import json
 import threading
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
@@ -14,6 +15,7 @@ from ignis.infrastructure.caller_storage import current_caller_storage
 from ignis.domain.source_identity import identity_free_source_url
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text
 from ignis.infrastructure.connectors.host_browser.relay import LoopbackRelay
+from ignis.infrastructure.connectors.host_browser.action_labels import action_labels_from_rows, seeded_action_labels
 from ignis.infrastructure.connectors.host_browser.validator import validate_answer
 from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary, seeded_lexicon_terms
 
@@ -114,7 +116,7 @@ class HostBrowserSearchService:
 
     def prepare(self, host_task_ref: str, session_ref: str, queries: list[str],
                 result_limit: int, lifetime_seconds: int, authorized: bool, *, mode="TACTICAL",
-                attribution_templates=None, source="tiktok", self_identities=()) -> dict:
+                attribution_templates=None, source="tiktok", self_identities=(), action_labels=None) -> dict:
         if authorized is not True:
             raise ValueError("Explicit browser authorization is required")
         attribution_templates = (self.attribution_templates_for(source) if attribution_templates is None
@@ -138,6 +140,12 @@ class HostBrowserSearchService:
         if len({query.query for query in request.queries}) != len(request.queries):
             raise ValueError("Each search query may appear once in a batch")
         extractor = files("ignis.infrastructure.connectors.host_browser").joinpath(source + "_search.js").read_text()
+        labels = (copy.deepcopy(seeded_action_labels() if action_labels is None else action_labels)
+                  if source == "threads" else {})
+        if source == "threads":
+            # Data injection leaves the packaged handoff and relay transport unchanged.
+            extractor = ("args => (" + extractor.strip() + ")({...args, action_labels: "
+                         + json.dumps(labels, ensure_ascii=True) + "})")
         with self._lock:
             relays = self._prune(now)
         for relay in relays:
@@ -149,6 +157,7 @@ class HostBrowserSearchService:
                     raise ValueError("Too many active task receipts; finish or wait for expiry")
                 ticket = dict(request=request, state="PREPARED", receipt=None, payload=None,
                               attribution_templates=attribution_templates, self_identities=tuple(self_identities),
+                              action_labels=labels,
                               caller=current_caller_storage.get())
                 self._tickets[request.request_id] = ticket
                 relay = ticket["relay"] = LoopbackRelay(
@@ -210,7 +219,7 @@ class HostBrowserSearchService:
                 try:
                     receipt = validate_answer(ticket["request"], payload, datetime.now(timezone.utc),
                                               ticket["attribution_templates"], ticket["self_identities"],
-                                              author_records=author_records)
+                                              author_records=author_records, action_labels=ticket["action_labels"])
                 except ValueError:
                     group = ticket.get("group")
                     if group is not None:
@@ -311,6 +320,8 @@ class HostBrowserSearchService:
             for relay in relays:
                 relay.close()
             attribution_templates = await self.refresh_attribution_templates(executor._repo, source=source)
+            labels = (action_labels_from_rows(await executor._repo.get_domain_lexicons())
+                      if source == "threads" else {})
             binding = await prepare_scope(executor, mission_id, source)
             sync = getattr(executor, "_vocabulary_sync", None)
             identity_repo = getattr(sync, "_credential_repository", executor._repo)
@@ -336,7 +347,7 @@ class HostBrowserSearchService:
                     previous_deadline = group.binding.get("expires_at")
                 request = self.prepare(host_task_ref, session_ref, binding["queries"], 20, lifetime_seconds, authorized,
                                        mode="MISSION", attribution_templates=attribution_templates,
-                                       source=source, self_identities=identities)
+                                       source=source, self_identities=identities, action_labels=labels)
                 owned_request_id = request["request_id"]
                 if group is None:
                     group = _MissionGroup(key, binding, caller, binding["required_host_sources"])

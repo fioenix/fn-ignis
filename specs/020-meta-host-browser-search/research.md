@@ -242,3 +242,50 @@ explicit runtime gates, not unanswered product Clarifications or claims that the
   Validator, staging/rejection/lifetime/shutdown and TikTok opener transport remain authoritative.
   Deterministic tests are offline evidence; live Chrome, actual navigation limits and end-to-end
   staging remain coordinator checks. This decision does not complete T051 or T052.
+
+
+## R12. Language-independent Threads extraction (T056, owner-approved 28/10/2026)
+
+Evidence: `.handoff/spec020-vi-dom-capture-20261028.md`, supplied live statistics from 11 visible
+posts, `lang=vi`, exact UTC timestamp anchors. The nearest ancestor with at least four SVG-bearing
+buttons held seven controls: two follow controls, more, then the four actions. Vietnamese SVG titles
+were `Thích`, `Trả lời`, `Đăng lại`, `Chia sẻ`; non-SVG text included label-prefixed integers,
+comma-decimal K and label-only unknowns. Avatar alt starts `Ảnh đại diện`. Post-image alt remains
+English `Photo by <name> on <date>` under vi; the 036 template matched all 11 observed images.
+These are supplied capture facts, not a new live check by this implementer.
+
+This decision supersedes R2's locale limitation and R4's original numeric grammar.
+
+Decision: detect cards structurally from timestamp anchors and the nearest ancestor holding at
+least four visible SVG buttons; preserve header/nav/aside/single-timestamp/blocked-parent and clock
+exclusions. Keep excerpt extraction unchanged. No agent-read measured extraction: deterministic
+packaged ETL preserves comparability, identity control and cost. No positional action mapping.
+
+Use existing `market_lexicons`, domain `threads_action_labels_<locale>`, category `<kind>`, term
+as the exact SVG title, seeded en/vi in 037. This fits vocabulary rows and existing registration/
+repository/bootstrap paths better than an opaque runtime-config JSON document. Exclude this
+machinery domain prefix from relevance terms. The locale domain suffix preserves the existing
+unique(domain, term) key when two languages share an identical title. Mission prepare reads its
+caller database; tactical retains
+Spec 012's no-caller-store/no-auth initialization boundary by executing the packaged seed in an
+isolated SQLite memory table and reading its rows. Each ticket freezes the map for both extractor
+injection and validation. An operator-added locale is available to mission prepare; tactical gains
+locales through shipped seed rows. No Python or JavaScript label constants, dependencies or transport
+changes. Missing labels leave counters unknown without discarding structurally verified records.
+
+Use the page primary language subtag as answer.locale; unusable lang preserves T054 unsupported /
+DEGRADED / unverified / no-records behavior. Unknown-but-valid locales retain records with explicit
+unmeasured-counter notes. Strip only the matching leading label before numeric parsing; preserve
+raw display; K/M with comma/dot decimal stays rounded, digits exact, empty unknown. Validator checks
+the same grammar/value/precision and rejects every incompatible measurement or Threads empty claim.
+
+Attribution trace: service source-specific templates → validate_answer → strip_platform_attribution
+→ PII/mention cleanup → sanitized receipt / mission author policy / storage. Selection is by source,
+never UI locale. Extractor excludes img/svg/header and accessible media content. Leave 036 and the
+sanitizer unchanged. Existing free-text-person-name limits remain.
+
+Bump to threads-search-top-v2 in envelopes and mission path descriptors so v1/v2 periods refuse
+comparison. Preserve historical v1 fixtures; add explicit two-axis v1/v2 rejection. Regenerate
+baseline/manifest artifacts only with their prescribed scripts; unchanged output is expected because
+those fixtures cover legacy TikTok/public input schemas, not the Threads extractor revision.
+Live language/card/counter/receiver acceptance remains coordinator-owned; no live session is used.

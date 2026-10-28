@@ -219,3 +219,23 @@ this planning run; any later guidance sync requires separately scoped work.
 No constitutional violation proposed. Existing process-local lifecycle intentionally has no durable
 resume: restart invalidates tickets/groups. Reuse avoids another public tool but leaves transport
 and multi-source writer proof as explicit implementation gates, not claimed capabilities.
+
+
+### Owner decision (28/10/2026): T056 language-independent Threads extraction
+
+Resume the accepted Spec Kit implementation phase for the owner-specified T056 seam; this touches
+counter/locale contracts and seed migration 037, so it is not the direct-path depth exception.
+Keep T056 unchecked until coordinator acceptance, as explicitly requested. Requirements checklist
+remains 16/16; no extension hooks exist. Canonical workflow is the owner-supplied
+`.handoff/spec020-skill/coding-workflow.vault-read.md` (review-by remains overdue).
+
+Read the supplied Vietnamese DOM capture and live-run notes, then test first: en/vi record and
+counter parity, primary locales, unknown counters without labels, exact/rounded/empty/prefixed
+counts, T054 unsupported, v1/v2 period refusal, TikTok and T055 parity. Use market_lexicons action
+labels and caller-local frozen snapshots as research R12 / the updated contract specify. Tactical
+uses an isolated seed-backed in-memory table, preserving no caller/auth initialization. Mission
+uses its caller repository. Inject labels through an extractor wrapper; do not modify relay or
+handoff transport. Attribution remains source-specific and locale-independent. No live session,
+credentials, version-release bump or commit. Targeted migration-chain, packaging, convention,
+consumer checks and changed-Python ruff/diff checks are required; report unavailable PostgreSQL or
+loopback separately. The skill has no English-only Threads claim and requires no replacement.

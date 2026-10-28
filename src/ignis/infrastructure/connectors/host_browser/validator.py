@@ -2,10 +2,11 @@
 
 import re
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
+from ignis.infrastructure.connectors.host_browser.action_labels import seeded_action_labels
 from ignis.domain.host_browser_search import HostSearchAnswer, HostSearchRequest
 from ignis.domain.self_content import is_self_authored
 from ignis.domain.source_identity import identity_free_source_url
@@ -35,15 +36,24 @@ def _content_url(source, raw):
     return identity_free_source_url(source, raw, {})
 
 
-def _counters(components):
+def _counters(components, labels):
     result = []
     for counter in components:
         raw = counter.raw_display.strip()
-        if re.fullmatch(r"[0-9]+", raw):
+        label = labels.get(counter.kind)
+        if label and raw.startswith(label):
+            raw = raw[len(label):].strip()
+        if not label:
+            expected, precision = None, "unknown"
+        elif re.fullmatch(r"[0-9]+", raw):
             expected, precision = int(raw), "exact"
-        elif re.fullmatch(r"[0-9]+\.[0-9]+K", raw):
-            expected, precision = int(Decimal(raw[:-1]) * 1000), "rounded"
+        elif re.fullmatch(r"[0-9]+(?:[.,][0-9]+)?[KM]", raw):
+            multiplier = 1000000 if raw.endswith("M") else 1000
+            expected = int((Decimal(raw[:-1].replace(",", ".")) * multiplier).to_integral_value(rounding=ROUND_HALF_UP))
+            precision = "rounded"
         else:
+            expected, precision = None, "unknown"
+        if expected is not None and expected > 9007199254740991:
             expected, precision = None, "unknown"
         if (counter.value, counter.precision) != (expected, precision):
             raise ValueError("Counter does not preserve displayed precision")
@@ -54,7 +64,8 @@ def _counters(components):
 
 
 def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
-                    attribution_templates: tuple[str, ...] = (), self_identities=(), *, author_records=None) -> dict:
+                    attribution_templates: tuple[str, ...] = (), self_identities=(), *, author_records=None, action_labels=None) -> dict:
+    action_labels = seeded_action_labels() if action_labels is None else action_labels
     answer = HostSearchAnswer.model_validate(payload, context={"request": request})
     if not attribution_templates:
         raise ValueError("Source attribution vocabulary is unavailable")
@@ -76,7 +87,7 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
                 or parse_qs(page.query, keep_blank_values=True) != {"q": [query.query]} or item.query != query.query):
             raise ValueError("Search page does not match the approved query")
         if request.source == "threads":
-            if item.locale not in {"en", "unsupported"} or item.status == "EMPTY_NO_DATA":
+            if not re.fullmatch(r"[a-z]{2,8}|unsupported", item.locale or "") or item.status == "EMPTY_NO_DATA":
                 raise ValueError("Unsupported Threads locale or unproved empty state")
             if item.locale == "unsupported" and (item.status != "DEGRADED" or item.records or item.search_verified):
                 raise ValueError("Unsupported Threads locale cannot provide verified observations")
@@ -114,7 +125,7 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
                 metric_value=None, metric_kind=None, metric_known=False, collection_path=path["collection_path"])
             if request.source == "threads":
                 observation.update(source=request.source, source_verifiable=cleaned_url is not None,
-                                   counters=_counters(record.counters), **path)
+                                   counters=_counters(record.counters, action_labels.get(item.locale, {})), **path)
             observations.append(observation)
             if author_records is not None:
                 # This private in-memory input reaches canonical author policy, never a receipt/store.
@@ -124,9 +135,11 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
                        queried_window=None, search_verified=item.search_verified,
                        note="Bounded visible public video grid; window and counters unmeasured")
         if request.source == "threads":
-            outcome.update(**path, note=("Threads page locale is unsupported (English only); no observations collected"
+            outcome.update(**path, note=("Threads page locale is unsupported; no observations collected"
                                          if item.locale == "unsupported" else
-                                         "Bounded visible Top sample; rounded and unknown counters retained"))
+                                         ("Bounded visible Top sample; counters unmeasured for locale " + item.locale
+                                          if not action_labels.get(item.locale) else
+                                          "Bounded visible Top sample; rounded and unknown counters retained")))
         outcomes.append(outcome)
     receipt = dict(status="ACCEPTED", mode=request.mode, request_id=request.request_id,
                    observations=observations, outcomes=outcomes)

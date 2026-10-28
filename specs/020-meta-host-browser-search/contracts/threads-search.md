@@ -1,6 +1,6 @@
-# Extractor Contract: Threads Top Search v1
+# Extractor Contract: Threads Top Search v2
 
-Proposed packaged `threads_search.js`, `threads-search-top-v1`, with source-specific handoff.
+Proposed packaged `threads_search.js`, `threads-search-top-v2`, with source-specific handoff.
 Grounding: Threads section of [g2-surfaces.md](../g2-surfaces.md). No Instagram extractor.
 
 ## Page and bounded extraction
@@ -17,7 +17,8 @@ The initial version supports visible sample, not search exhaustion. No HTML/tran
 1. Verify exact page/query/public-result envelope. Initial empty shell, Loading and sidebar
    suggestions cannot establish healthy or empty search.
 2. Anchor canonical `/@<author>/post/<post-id>` timestamp links containing `time[datetime]`.
-   Walk to smallest ancestor with that post's action row; overlapping/nested ambiguity is skipped/
+   Walk to the nearest ancestor containing at least four visible SVG-bearing buttons (`button`
+   or `role=button`), independently of title language; overlapping/nested ambiguity is skipped/
    degraded, never broadened to whole feed. No opaque classes, invented test IDs or article hook.
 3. Deduplicate shortcode including /media links. Text/image/carousel is allowed only with verified
    body/envelope. Image-node count, panorama button and `1 / 2` are not post counts. No unobserved
@@ -27,9 +28,21 @@ The initial version supports visible sample, not search exhaustion. No HTML/tran
    If body cannot be isolated, drop card; never whole-card innerText or alt-only fallback.
 5. Read exact ISO time[datetime], not relative text or title. Invalid/future publication is rejected
    or unknown; never capture-time substitution.
-6. Match SVG title Like/Reply/Repost/Share and adjacent numeric text within the action row. G2 found
-   no wrapper aria-label. Emit separate raw displays/units/precision; support observed integers and
-   decimal-dot K, retain unrecognized syntax as unknown. Blank is unknown; no views or Share=quotes.
+6. Read the primary language subtag from `document.documentElement.lang`, normalized lowercase
+   (`vi-VN` → `vi`). Missing/malformed language yields `locale=unsupported`, DEGRADED, unverified,
+   zero records (T054). Any well-formed primary locale may collect records by structure.
+   Prepare freezes `market_lexicons` domain `threads_action_labels_<locale>`, category `<kind>`,
+   term equal to the SVG title. Migration 037 seeds en/vi observed titles. Tactical reads the
+   packaged seed in an isolated in-memory SQLite table without opening caller storage; mission
+   reads its caller repository. Both inject the frozen table as data into the packaged extractor
+   and validate against that same snapshot. New locales require rows, not source changes.
+   Match counters only by SVG title, never by button position; absent/ambiguous title is unknown.
+   No labels for the locale means all counters unknown/null, records still allowed, and an outcome
+   note saying counters are unmeasured for that locale. A partial label map measures only its kinds.
+   Strip the matched leading label from button text for parsing only; preserve `raw_display`.
+   Plain digits are exact; K/M suffixes accept dot/comma decimal and round half up to an integer
+   (`Thích1,4K` → rounded 1400, `4.1K` → rounded 4100). Empty/label-only/unrecognized/unsafe integer
+   displays stay unknown/null. Never promote rounded precision to exact or Share to quotes.
 7. Emit allowlisted records only; content shortcode builds identity-free /t/ link. Validator also
    applies Spec 015 link policy, seeded attribution stripping and PII/mention cleanup before output/
    persistence. Errors contain reason codes/counts, no identities or raw payload.
@@ -70,6 +83,8 @@ transient key retention. The configured size ceiling still requires live browser
 | Initial shell/loading/unchanged count/suggestions only | DEGRADED, no absence claim |
 | Login/checkpoint/challenge/unusable | DEGRADED or precise existing unavailable/auth state with reason; no bypass |
 | No cards without validated no-results signature | DEGRADED; this version never emits healthy empty |
+| Missing/unusable page language | DEGRADED, unverified, no records |
+| Well-formed locale without seeded labels | Records allowed; every counter unknown/null, explicit unmeasured note |
 | Every card removed by sanitation | DEGRADED, not EMPTY_NO_DATA |
 | Wrong page/query/source/version or malformed answer | Whole-answer rejection before writes |
 

@@ -589,6 +589,28 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   the encrypted receiver without opener, relay STAGED, submit ACCEPTED with two DEGRADED
   unsupported-locale outcomes and zero observations. English card parsing remains live-unverified.
 
+- [X] T056 Implement language-independent deterministic Threads extraction, owner-approved
+  28/10/2026. Evidence: `.handoff/spec020-vi-dom-capture-20261028.md` and the live-run note.
+  Test first: nearest timestamp-anchor ancestor with at least four SVG buttons; preserve header,
+  nav/aside, single timestamp, blocked-parent, identity and aware/nonfuture clock exclusions.
+  Seed en/vi action labels in 037 through market_lexicons; prepare freezes database label data and
+  injects it into tab_script, never label constants or positional kind guesses. Strip matched label
+  only for parsing; support comma/dot K/M rounded counts, exact digits and unknown empty displays.
+  Emit primary page locale; allow structural records in unseeded locales with unknown/null counters
+  and an explicit unmeasured note. Preserve T054 unsupported/no-records and all measurement/empty
+  rejections. Verify locale-independent attribution without changing it. Bump threads-search-top-v2
+  in request/answer/mission paths; prove v1/v2 periods stay apart; regenerate baseline/manifests via
+  prescribed scripts. Add seven-button Vietnamese fixture and en/vi/unknown/empty/prefix/TikTok/T055
+  coverage. Update contract, research R12, data model and plan; skill replacement only if English-only
+  wording exists. Run changed tests and traced consumers including migrations/packaging/conventions,
+  ruff and diff checks. No commit, credentials, live browser or T055 transport changes. Keep unticked
+  for coordinator acceptance; deterministic offline proof is not live readiness.
+  Coordinator integration 28/10/2026: named migration 037 in the four public guides and their
+  contract tests; 584 targeted passed with PostgreSQL and loopback, 184 doc/distribution passed.
+  Live Chrome (Vietnamese UI): two queries, 20 HEALTHY observations via the T055 receiver, vi
+  counters parsed (`Thích1,4K` rounded, plain digits exact, blank unknown), 20/20 identity-free
+  links, zero stored `threads.com/@` rows. Repost-banner display-name risk remains live-unverified.
+
 ## Dependencies and execution order
 
 ```text

@@ -38,7 +38,7 @@ môi trường Python và SQLite cục bộ, nạp từ vựng, cấu hình các
 tra tổng hợp. Credentials và phiên đăng nhập social thực tế là tùy chọn, phải do người vận
 hành cho phép. Kết quả kiểm tra tổng hợp không chứng minh nguồn live truy cập được.
 
-Cây mã nguồn hiện có migration tới `sql/036_threads_attribution.sql`. Migration 036 nạp sẵn mẫu câu ghi công tác giả của Threads, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn mẫu câu
+Cây mã nguồn hiện có migration tới `sql/037_threads_action_labels.sql`. Migration 037 nạp sẵn nhãn các nút hành động của Threads theo từng ngôn ngữ giao diện, dùng để đọc chỉ số khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 036 nạp sẵn mẫu câu ghi công tác giả của Threads, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt; nó không sửa bằng chứng đã lưu. Migration 035 lưu lịch sử mục tiêu, kỳ so sánh và nhịp lấy mẫu của watchlist; nó không sửa bằng chứng đã lưu. Migration 034 nạp sẵn mẫu câu
 ghi công tác giả của TikTok, dùng để bỏ câu ghi công khỏi trích đoạn khi tìm kiếm qua trình duyệt
 host; nó không sửa bằng chứng đã lưu. Migration 033 thêm bộ đếm số
 lượt tìm theo từ khóa của từng kênh trong từng ngày, dùng cho trần request theo ngày; nó không sửa bằng
@@ -147,12 +147,14 @@ không khả dụng có lý do, không phải số 0 đã đo. Search envelope r
 xác minh có thể trả về `EMPTY_NO_DATA` cho từ khóa đã chạy. Kết quả này không chứng minh đã
 bao phủ từ khóa khác hay biết rõ khoảng thời gian.
 
-Threads `threads-search-top-v1` chỉ lấy mẫu Top hữu hạn đang hiển thị trên
-`www.threads.com/search`. Hiện chỉ hỗ trợ cấu trúc trang tiếng Anh đã quan sát được.
+Threads `threads-search-top-v2` chỉ lấy mẫu Top hữu hạn đang hiển thị trên
+`www.threads.com/search`. Bài viết được nhận diện theo cấu trúc trang ở mọi ngôn ngữ giao diện.
+Chỉ số chỉ đọc được khi ngôn ngữ giao diện đã có nhãn nút trong dữ liệu seed (hiện là tiếng Anh
+và tiếng Việt); với ngôn ngữ khác, chỉ số để ở trạng thái chưa biết.
 Trang đang tải, khung trang rỗng hoặc toàn bộ bản ghi bị loại không chứng minh thị trường rỗng.
 Thời điểm chụp và thời điểm đăng được giữ riêng. Chỉ số giữ nguyên chữ hiển thị và độ chính xác:
-`1.4K` là số làm tròn, ô trống là chưa biết; shares không phải quotes. Số làm tròn không trở thành
-tổng chính xác trong kỳ. Tiêu đề tác giả và câu ghi công bị bỏ trước khi trả receipt hoặc lưu.
+`1.4K` hay `1,4K` là số làm tròn, ô trống là chưa biết; shares không phải quotes.
+Số làm tròn không trở thành tổng chính xác trong kỳ. Tiêu đề tác giả và câu ghi công bị bỏ trước khi trả receipt hoặc lưu.
 Link dùng tham chiếu nội dung không chứa danh tính. Tên người trong văn bản tự do vẫn là một
 giới hạn của bước làm sạch.
 

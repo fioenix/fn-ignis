@@ -411,9 +411,9 @@ def test_rotation_runbook_counts_stored_rows_not_only_active_ones():
 @pytest.mark.parametrize("relative", ["README.md", "README.vi.md", "docs/USER_GUIDE.md", "docs/USER_GUIDE.vi.md"])
 def test_spec020_public_docs_explain_the_browser_only_boundary(relative):
     text = _read(relative)
-    for term in ('source="threads"', 'source="tiktok"', "threads-search-top-v1", "Playwright",
+    for term in ('source="threads"', 'source="tiktok"', "threads-search-top-v2", "Playwright",
                  "Reels", "collection_path_changed", "collection_path_mixed", "collection_path_unknown",
-                 "53", "sql/036_threads_attribution.sql"):
+                 "53", "sql/037_threads_action_labels.sql"):
         assert term in text, f"{relative} must explain {term}"
     assert "AutomationControlled" not in text, "Do not publish an evasion recipe"
 

@@ -211,3 +211,11 @@ def test_unchanged_native_channels_without_provenance_keep_exact_indicators(axis
         assert indicator["change"] == (None if value is None else {"absolute": 0, "relative": 0.0})
         missing = int(value is None)
         assert indicator["uncounted_items"] == {"current": missing, "previous": missing}
+
+
+@pytest.mark.parametrize("axis", ["seen", "created"])
+def test_threads_v1_and_language_independent_v2_periods_are_not_comparable(axis):
+    current = {**HOST, "collection_path": "host_browser:threads-search-top-v2", "connector_revision": "threads-search-top-v2"}
+    result = compare(axis, [HOST], [current])
+    assert result["status"] == "not_comparable"
+    assert "collection_path_changed" in result["reasons"]

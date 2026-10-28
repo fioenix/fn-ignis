@@ -32,8 +32,8 @@ class Element {
 }
 const fixed='2026-10-28T01:00:00.000Z';
 class Clock extends Date { constructor(value){super(value===undefined?fixed:value);}static now(){return Date.parse(fixed);} }
-const document={root:null,documentElement:{lang:payload.locale||'en'},querySelectorAll:s=>document.root.querySelectorAll(s)};
+const document={root:null,documentElement:{lang:payload.locale === undefined ? 'en' : payload.locale},querySelectorAll:s=>document.root.querySelectorAll(s)};
 const context={document,location:{href:payload.url},URL,Date:Clock,Map,Set,globalThis:null};context.globalThis=context;
 const extract=vm.runInNewContext('('+fs.readFileSync(process.argv[2],'utf8')+')',context);
-let result;for(const tree of payload.frames){document.root=new Element(tree);result=extract({query_id:'q1',query:'synthetic query',result_limit:payload.limit||3});}
+let result;for(const tree of payload.frames){document.root=new Element(tree);result=extract({query_id:'q1',query:'synthetic query',result_limit:payload.limit||3,action_labels:payload.action_labels||{}});}
 console.log(JSON.stringify(result));

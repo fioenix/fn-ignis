@@ -42,7 +42,7 @@ For a Codex-only installation with separate UAT storage, run
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
 The current source tree contains migrations through
-`sql/036_threads_attribution.sql`. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok author attribution wording that
+`sql/037_threads_action_labels.sql`. Migration 037 seeds the Threads action-button labels for each UI language that host-browser search uses to read counters; it rewrites no stored evidence. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok author attribution wording that
 host-browser search removes from excerpts; it rewrites no stored evidence. Migration 033 adds a per-channel, per-day count of keyword
 searches for the daily request ceilings; it rewrites no stored evidence. Migration 032 adds watchlists, their immutable versions and the runs
 bound to them; it rewrites no stored evidence. Migration 031 adds per-mission author keys, declared
@@ -142,10 +142,11 @@ unparseable response or missing search envelope is unavailable with a reason, ne
 zero. A verified, well-formed empty search envelope may return `EMPTY_NO_DATA` for the executed
 keyword. This does not establish coverage for other keywords or a known time window.
 
-Threads `threads-search-top-v1` collects a bounded visible Top sample on `www.threads.com/search`.
-Only the observed English page structure is supported. Loading, an empty shell or all records
-being dropped cannot prove an empty market. Capture time and publication time stay separate.
-Counters retain raw display and precision: `1.4K` is rounded, a blank is unknown, and shares are
+Threads `threads-search-top-v2` collects a bounded visible Top sample on `www.threads.com/search`.
+Posts are found by page structure in any UI language; counters are read only for UI languages
+with seeded action labels (English and Vietnamese) and stay unknown otherwise. Loading, an
+empty shell or all records being dropped cannot prove an empty market. Capture time and publication time stay separate.
+Counters retain raw display and precision: `1.4K` or `1,4K` is rounded, a blank is unknown, and shares are
 not quotes. Rounded counters do not become exact period totals. Author headers and attribution
 are removed before receipts or storage; links use identity-free content references. Free-text
 personal names remain a sanitization limitation.

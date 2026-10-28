@@ -110,28 +110,44 @@ async def test_missing_mission_source_vocabulary_refuses_without_mutating_packag
 
 
 @pytest.mark.asyncio
-async def test_host_threads_receipt_and_storage_keep_identity_free_precision_and_paths(repository_case, tmp_path, monkeypatch):
+@pytest.mark.parametrize("locale", ["en", "vi", "th", "xx"])
+async def test_host_threads_receipt_and_storage_keep_identity_free_precision_and_paths(repository_case, tmp_path, monkeypatch, locale):
     from ignis.application.use_cases import host_browser_search as module
     from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
     from test_host_browser_mission import assignment
     monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
     store, _, mission, executor = await assignment(repository_case.repository, tmp_path, required=("threads",))
+    if locale == "xx":
+        await repository_case.repository.register_lexicon_terms("threads_action_labels_xx", ["synthetic action"], "likes")
     service = HostBrowserSearchService()
     try:
         request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True, source="threads")
-        service.stage(request["request_id"], host_answer(request))
+        payload = host_answer(request)
+        for answer in payload["answers"]:
+            answer["locale"] = locale
+            for record in answer["records"]:
+                if locale == "vi":
+                    record["counters"][0]["raw_display"] = "Thích1,4K"
+                elif locale == "xx":
+                    record["counters"][0]["raw_display"] = "synthetic action1,4K"
+                elif locale == "th":
+                    record["counters"][0].update(value=None, precision="unknown")
+        service.stage(request["request_id"], payload)
         held = repr(service._tickets[request["request_id"]]["receipt"])
         assert "synthetic.header" not in held and "Synthetic Other Person" not in held
         receipt = await service.submit_mission(executor, request["request_id"], "task", "chrome")
         signals = await repository_case.repository.get_mission_signals(mission.id)
         assert len(signals) == 1 and signals[0].platform is PlatformType.THREADS
         assert signals[0].source_url == "https://www.threads.com/t/Synthetic020Q0"
-        assert signals[0].metadata["counters"][0]["precision"] == "rounded"
+        assert signals[0].metadata["counters"][0]["precision"] == ("unknown" if locale == "th" else "rounded")
+        assert signals[0].metadata["counters"][0]["value"] == (None if locale == "th" else 1400)
         assert signals[0].metadata["sampling"]["ordering"] == "top_visible_sample"
         assert signals[0].published_at.microsecond == 123456
         probes = await store.get_latest_completed_probe_outcomes(mission.id)
-        assert probes[0].scope_attestation["collection_path"] == "host_browser:threads-search-top-v1"
-        assert probes[0].scope_attestation["connector_revision"] == "threads-search-top-v1"
+        assert probes[0].scope_attestation["collection_path"] == "host_browser:threads-search-top-v2"
+        assert probes[0].scope_attestation["connector_revision"] == "threads-search-top-v2"
+        if locale == "th":
+            assert "counters unmeasured for locale th" in probes[0].scope_attestation["query_outcomes"][0]["note"]
         assert receipt["status"] == "ACCEPTED"
     finally:
         service.close()
@@ -196,11 +212,11 @@ async def test_empty_host_probe_persists_descriptor_path_without_overwriting_que
         await executor._record_probe_outcomes(mission, journal, [SurfaceProbeResult(
             platform="threads", connector_surface="threads", status=ChannelHealthStatus.DEGRADED,
             signals_collected=0, queried_keywords=("túi đi làm",), scope_attestation=attestation,
-            connector_path="host_browser:threads-search-top-v1", connector_revision="threads-search-top-v1")],
+            connector_path="host_browser:threads-search-top-v2", connector_revision="threads-search-top-v2")],
             collection_plan_digest="p" * 64)
     probe = (await store.get_latest_completed_probe_outcomes(mission.id))[0]
-    assert probe.scope_attestation["collection_path"] == "host_browser:threads-search-top-v1"
-    assert probe.scope_attestation["connector_revision"] == "threads-search-top-v1"
+    assert probe.scope_attestation["collection_path"] == "host_browser:threads-search-top-v2"
+    assert probe.scope_attestation["connector_revision"] == "threads-search-top-v2"
     assert probe.scope_attestation["query_outcomes"] == attestation["query_outcomes"]
     assert "collection_path" not in attestation
     assert not probe.measures_zero
@@ -254,7 +270,6 @@ async def test_unsupported_locale_reaches_mission_channel_and_both_period_axes(r
         query_outcome = probe.scope_attestation["query_outcomes"][0]
         assert query_outcome["status"] == "DEGRADED"
         assert "page locale is unsupported" in query_outcome["note"].lower()
-        assert "English only" in query_outcome["note"]
         channel = receipt["mission"]["channel_outcomes"][0]
         assert channel["status"] == "DEGRADED" and channel["signals_collected"] == 0
         assert channel["scope_attestation"]["query_outcomes"][0] == query_outcome
@@ -269,3 +284,30 @@ async def test_unsupported_locale_reaches_mission_channel_and_both_period_axes(r
         assert (await store.get_latest_completed_probe_outcomes(mission.id))[0] == probe
     finally:
         service.close()
+
+
+@pytest.mark.asyncio
+async def test_action_labels_seed_replay_and_operator_locale_rows(repository_case):
+    from ignis.infrastructure.connectors.host_browser.action_labels import action_labels_from_rows, seeded_action_labels
+    repo = repository_case.repository
+    rows = [r for r in await repo.get_domain_lexicons() if r["domain"].startswith("threads_action_labels_")]
+    assert len(rows) == 8
+    assert action_labels_from_rows(rows) == seeded_action_labels()
+    vocabulary = await load_market_vocabulary(repo)
+    assert not set(r["term"] for r in rows).intersection(vocabulary.positive_terms)
+    before = storage_snapshot(repository_case)
+    for _ in range(2):
+        if repository_case.name == "sqlite":
+            await replay_seed(repository_case)
+        else:
+            with connection(repository_case) as conn:
+                conn.execute((SEED.parent / "037_threads_action_labels.sql").read_text())
+    assert storage_snapshot(repository_case) == before
+    assert [r for r in await repo.get_domain_lexicons() if r["domain"].startswith("threads_action_labels_")] == rows
+    await repo.register_lexicon_terms("threads_action_labels_th", ["synthetic thai action"], "likes")
+    labels = action_labels_from_rows(await repo.get_domain_lexicons())
+    assert labels["th"] == {"likes": "synthetic thai action"}
+    assert "th" not in seeded_action_labels()
+    # The same verb may occur in multiple languages; the existing unique key must allow it.
+    await repo.register_lexicon_terms("threads_action_labels_xx", ["synthetic thai action"], "likes")
+    assert action_labels_from_rows(await repo.get_domain_lexicons())["xx"] == labels["th"]

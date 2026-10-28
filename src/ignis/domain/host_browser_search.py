@@ -5,11 +5,11 @@ from typing import Literal, Self
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, model_serializer, model_validator
 
 HostSearchSource = Literal["tiktok", "threads"]
-HostExtractorVersion = Literal["tiktok-public-grid-v1", "threads-search-top-v1"]
+HostExtractorVersion = Literal["tiktok-public-grid-v1", "threads-search-top-v2"]
 
 
 def _version_for_source(source: HostSearchSource) -> HostExtractorVersion:
-    return "threads-search-top-v1" if source == "threads" else "tiktok-public-grid-v1"
+    return "threads-search-top-v2" if source == "threads" else "tiktok-public-grid-v1"
 
 
 class HostEnvelope(BaseModel):
@@ -48,7 +48,7 @@ class HostSearchRequest(HostEnvelope):
     @classmethod
     def default_source_version(cls, value):
         if isinstance(value, dict) and "extractor_version" not in value and value.get("source") == "threads":
-            return {**value, "extractor_version": "threads-search-top-v1"}
+            return {**value, "extractor_version": "threads-search-top-v2"}
         return value
 
     @model_validator(mode="after")

@@ -252,7 +252,7 @@ def test_source_bound_relay_script_uses_opened_window_query_and_request_without_
     monkeypatch.setattr(module, "HTTPServer", FakeHTTP)
     request = handoff_request()
     request["source"] = source
-    request["extractor_version"] = "threads-search-top-v1" if source == "threads" else "tiktok-public-grid-v1"
+    request["extractor_version"] = "threads-search-top-v2" if source == "threads" else "tiktok-public-grid-v1"
     request["queries"][0]["search_url"] = request["queries"][0]["search_url"].replace("www.tiktok.com", "www.threads.com") if source == "threads" else request["queries"][0]["search_url"]
     relay = module.LoopbackRelay(request, "arg => ({records: []})", lambda answer: {}, 10)
     try:
@@ -300,7 +300,7 @@ def test_manual_threads_unsupported_locale_stages_through_the_real_form():
         receipt = service.submit(request["request_id"], "task", "session")
         assert receipt["observations"] == []
         assert receipt["outcomes"][0]["status"] == "DEGRADED"
-        assert "English only" in receipt["outcomes"][0]["note"]
+        assert "page locale is unsupported" in receipt["outcomes"][0]["note"]
     finally:
         service.close()
 
@@ -324,7 +324,7 @@ def socket_free_relay(monkeypatch):
     relays = []
     def create(source="threads", count=1):
         request = handoff_request()
-        request.update(source=source, extractor_version="threads-search-top-v1" if source == "threads" else "tiktok-public-grid-v1")
+        request.update(source=source, extractor_version="threads-search-top-v2" if source == "threads" else "tiktok-public-grid-v1")
         request["queries"] = [dict(query_id=f"query-{i+1}", query=f"synthetic {i+1}", result_limit=3,
             search_url=f"https://www.{source}.com/search?q=synthetic%20{i+1}") for i in range(count)]
         relay = module.LoopbackRelay(request,

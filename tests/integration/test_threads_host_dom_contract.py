@@ -43,6 +43,10 @@ def extract(frames=None, **overrides):
         parser.feed(frame)
         trees.append(parser.root)
     payload = dict(url="https://www.threads.com/search?q=synthetic%20query", frames=trees, limit=3)
+    payload['action_labels'] = {
+        'en': {'likes': 'Like', 'replies': 'Reply', 'reposts': 'Repost', 'shares': 'Share'},
+        'vi': {'likes': 'Thích', 'replies': 'Trả lời', 'reposts': 'Đăng lại', 'shares': 'Chia sẻ'},
+    }
     payload.update(overrides)
     result = subprocess.run([node, str(FIXTURES / "dom_probe.js"), str(EXTRACTOR), json.dumps(payload)],
                             text=True, capture_output=True, check=True)
@@ -100,7 +104,7 @@ def test_virtualized_removals_keep_a_bounded_unique_sample_across_explicit_reads
 
 
 def test_unsupported_locale_is_degraded_without_guessing_labels():
-    result = extract(locale="vi")
+    result = extract(locale="")
     assert result["status"] == "DEGRADED" and result["records"] == []
 
 
@@ -131,3 +135,71 @@ def test_review_malformed_anchor_is_skipped_without_losing_valid_posts():
     assert result["status"] == "HEALTHY"
     assert len(result["records"]) == 1
     assert "First body line" in result["records"][0]["excerpt"]
+
+
+def test_vietnamese_structure_and_label_prefixed_counters_match_english():
+    vi = extract([(FIXTURES / "cards.vi.html").read_text()], locale="vi-VN")
+    en = extract()
+    assert vi["locale"] == "vi" and vi["status"] == "HEALTHY"
+    assert len(vi["records"]) == len(en["records"]) == 1
+    assert vi["records"][0]["excerpt"] == en["records"][0]["excerpt"]
+    for left, right in zip(vi["records"][0]["counters"], en["records"][0]["counters"], strict=True):
+        assert {k: v for k, v in left.items() if k != "raw_display"} == {
+            k: v for k, v in right.items() if k != "raw_display"}
+    assert vi["records"][0]["counters"][0]["raw_display"] == "Thích1,4K"
+    assert vi["records"][0]["counters"][2]["raw_display"] == "Đăng lại"
+
+
+def test_unknown_locale_collects_structure_without_positional_measurements():
+    result = extract([(FIXTURES / "cards.vi.html").read_text()], locale="th")
+    assert result["locale"] == "th" and result["status"] == "HEALTHY"
+    assert len(result["records"]) == 1
+    assert len(result["records"][0]["counters"]) == 4
+    assert all(c["value"] is None and c["precision"] == "unknown" for c in result["records"][0]["counters"])
+
+
+@pytest.mark.parametrize("display,value,precision", [
+    ("1,4K", 1400, "rounded"), ("4.1K", 4100, "rounded"), ("1,25M", 1250000, "rounded"),
+    ("1K", 1000, "rounded"), ("1.2345K", 1235, "rounded"), ("466", 466, "exact"),
+    ("", None, "unknown"), ("1,400", None, "unknown"), ("9" * 40 + "M", None, "unknown"),
+])
+def test_counter_label_is_removed_only_for_parsing(display, value, precision):
+    html = (FIXTURES / "cards.vi.html").read_text().replace("Thích1,4K", "Thích" + display)
+    result = extract([html], locale="vi")
+    assert result["records"][0]["counters"][0] == dict(
+        kind="likes", unit="count", raw_display="Thích" + display, value=value, precision=precision)
+
+
+def test_action_order_cannot_assign_counter_kinds():
+    html = (FIXTURES / "cards.vi.html").read_text().replace("<title>Thích</title>", "<title>Other</title>")
+    counters = extract([html], locale="vi")["records"][0]["counters"]
+    assert counters[0]["precision"] == "unknown" and counters[0]["value"] is None
+    assert counters[1]["kind"] == "replies" and counters[1]["value"] == 9
+
+
+def test_prepare_injects_seeded_labels_into_the_packaged_extractor_without_transport_changes(tmp_path, monkeypatch):
+    from ignis.application.use_cases import host_browser_search as module
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay
+    captured = []
+    class CaptureRelay(NoSocketRelay):
+        def __init__(self, request, extractor, *args):
+            super().__init__()
+            captured.append(extractor)
+    monkeypatch.setattr(module, "LoopbackRelay", CaptureRelay)
+    service = module.HostBrowserSearchService()
+    try:
+        service.prepare("task", "session", ["synthetic query"], 3, 60, True, source="threads")
+        script = tmp_path / "prepared.js"
+        script.write_text(captured[0])
+        monkeypatch.setattr(__import__(__name__, fromlist=["EXTRACTOR"]), "EXTRACTOR", script)
+        result = extract([(FIXTURES / "cards.vi.html").read_text()], locale="vi", action_labels={})
+        assert result["records"][0]["counters"][0]["value"] == 1400
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize("clock", ["2099-01-01T00:00:00Z", "2026-10-27T01:02:03"])
+def test_future_and_zoneless_timestamps_are_dropped_in_vietnamese(clock):
+    html = (FIXTURES / "cards.vi.html").read_text().replace("2026-10-27T01:02:03.123456Z", clock)
+    result = extract([html], locale="vi")
+    assert result["records"] == [] and result["status"] == "DEGRADED"

@@ -30,6 +30,7 @@ SEEDS = (
     "014_language_detection_vocabulary.sql",
     "034_tiktok_attribution.sql",
     "036_threads_attribution.sql",
+    "037_threads_action_labels.sql",
 )
 
 
