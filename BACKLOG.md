@@ -7,9 +7,9 @@
 > - **Schema:** Migration mới nhất là `sql/038_tiktok_attribution_locales.sql`.
 > - **Thu thập:** Threads và TikTok qua trình duyệt host; Reels dùng Playwright không có cờ che giấu tự động hóa.
 >   Ignis không có worker hay lịch khám phá hằng ngày; routine chạy trên host khi được yêu cầu.
-> - **Trạng thái:** Phát hành `v0.9.0` ngày 28/10/2026, trước lượt G3 lúc 07:00 thứ Sáu 30/10/2026,
->   qua mã nguồn, GitHub Release và GHCR; PyPI tiếp tục được hoãn.
->   Kiểm tra trạng thái thật bằng `python scripts/check_release_state.py`.
+> - **Trạng thái:** `v0.9.0` đã tag và publish ngày 28/10/2026 qua source, GitHub Release và GHCR
+>   (`ghcr.io/fioenix/fn-ignis:0.9.0`); PyPI tiếp tục được hoãn. Kiểm tra trạng thái thật bằng
+>   `python scripts/check_release_state.py`.
 
 ---
 
