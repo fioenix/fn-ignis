@@ -64,10 +64,10 @@ def prepare(service, **overrides):
 def answer(request, **overrides):
     query = request["queries"][0]
     payload = dict(request_id=request["request_id"], host_task_ref="task-1", session_ref="chrome-1",
-                   extractor_version="tiktok-public-grid-v1", answers=[dict(
+                   extractor_version="tiktok-public-grid-v2", answers=[dict(
                        query_id=query["query_id"], query=query["query"], page_url=query["search_url"],
                        captured_at=datetime.now(timezone.utc).isoformat(), search_verified=True,
-                       empty_state_visible=False, status="HEALTHY", records=[dict(
+                       empty_state_visible=False, status="HEALTHY", locale="vi", records=[dict(
                            source_url="https://www.tiktok.com/@fixture/video/7417820067028536584",
                            excerpt="Túi đi làm", published_at=None,
                        )],
@@ -96,7 +96,7 @@ def test_tactical_result_retains_unknown_metrics_and_exact_provenance(service):
     assert record["published_at"] is None
     assert record["metric_value"] is None
     assert record["query"] == "túi đi làm"
-    assert record["collection_path"] == "host_browser:tiktok-public-grid-v1"
+    assert record["collection_path"] == "host_browser:tiktok-public-grid-v2"
     assert "mission_id" not in receipt
     assert receipt["outcomes"][0]["queried_window"] is None
     assert service.submit(request["request_id"], "task-1", "chrome-1") == receipt
@@ -211,6 +211,22 @@ def test_preparation_without_attribution_vocabulary_fails_closed():
         service.close()
 
 
+def test_t058_tactical_missing_locale_vocabulary_refuses_before_relay(monkeypatch):
+    from unittest.mock import Mock
+    from ignis.application.use_cases import host_browser_search as module
+
+    relay = Mock(side_effect=AssertionError("Missing locales must refuse before relay creation"))
+    monkeypatch.setattr(module, "LoopbackRelay", relay)
+    service = module.HostBrowserSearchService()
+    try:
+        with pytest.raises(module.AttributionVocabularyMissing, match="attribution"):
+            prepare(service, attribution_locales={})
+        relay.assert_not_called()
+        assert service._tickets == {}
+    finally:
+        service.close()
+
+
 def test_preparation_returns_the_relay_tab_script(service):
     """Browser tooling may refuse to read the script back from the page, so preparation hands it over."""
     import html
@@ -256,3 +272,29 @@ def test_threads_tactical_ticket_checks_original_caller_and_expiry(service, monk
         assert service.instance._tickets[request["request_id"]]["receipt"] is None
     finally:
         current_caller_storage.reset(token)
+
+
+@pytest.mark.parametrize("locale", [None, "en", "unsupported", "VI", "vi_VN"])
+@pytest.mark.parametrize("status", ["HEALTHY", "EMPTY_NO_DATA"])
+def test_t058_unseeded_tiktok_locale_has_no_records_or_author_sidecar(locale, status):
+    from datetime import timedelta
+    from ignis.domain.host_browser_search import HostSearchRequest, HostSearchQuery
+    from ignis.infrastructure.connectors.host_browser.validator import validate_answer
+    now = datetime.now(timezone.utc)
+    request = HostSearchRequest(request_id="fixture", host_task_ref="task-1", session_ref="chrome-1",
+        issued_at=now - timedelta(seconds=1), expires_at=now + timedelta(seconds=60),
+        queries=(HostSearchQuery(query_id="q", query="test", search_url="https://www.tiktok.com/search?q=test", result_limit=3),))
+    payload = answer({"request_id": "fixture", "queries": [{"query_id": "q", "query": "test", "search_url": "https://www.tiktok.com/search?q=test"}]})
+    item = payload["answers"][0]
+    item.update(locale=locale, status=status, empty_state_visible=status == "EMPTY_NO_DATA")
+    if status == "EMPTY_NO_DATA":
+        item["records"] = []
+    else:
+        item["records"][0]["excerpt"] = "Caption created by Fixture Poster"
+    sidecar = []
+    result = validate_answer(request, payload, datetime.now(timezone.utc), ("do {author} tạo với",), author_records=sidecar)
+    assert result["observations"] == sidecar == []
+    [outcome] = result["outcomes"]
+    assert outcome["status"] == "DEGRADED"
+    assert outcome["search_verified"] is False
+    assert "unmeasured" in outcome["note"]

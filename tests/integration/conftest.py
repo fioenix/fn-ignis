@@ -78,6 +78,7 @@ SCHEMA_MIGRATIONS = (
     # Spec 020: seed-only host attribution; never an evidence transformation.
     "036_threads_attribution.sql",
     "037_threads_action_labels.sql",
+    "038_tiktok_attribution_locales.sql",
 )
 
 

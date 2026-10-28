@@ -228,7 +228,10 @@ async def test_reels_is_healthy_synthetic_probe():
     ("captcha", "REELS_CHALLENGE"), ("answered_empty", None), ("unusable", "REELS_PAGE_UNUSABLE"),
     ("unrelated_json", "REELS_PAGE_UNUSABLE"), ("late_checkpoint", "REELS_CHECKPOINT"),
     ("response403", "REELS_LOGIN_REQUIRED"), ("response_fail", "REELS_PAGE_UNUSABLE"),
-    ("html_response", "REELS_PAGE_UNUSABLE"), ("response_challenge", "REELS_CHALLENGE")])
+    ("html_response", "REELS_PAGE_UNUSABLE"), ("response_challenge", "REELS_CHALLENGE"),
+    ("t058_wrong_tag", "REELS_PAGE_UNUSABLE"), ("t058_unbound", "REELS_PAGE_UNUSABLE"),
+    ("t058_redirect", "REELS_PAGE_UNUSABLE"), ("t058_wrong_tag_empty", "REELS_PAGE_UNUSABLE"),
+    ("t058_malformed_then_empty", "REELS_PAGE_UNUSABLE"), ("t058_empty_then_malformed", "REELS_PAGE_UNUSABLE")])
 async def test_reels_flag_free_pages_require_cards_or_a_verified_empty_envelope(state, reason):
     from types import SimpleNamespace
     from ignis.domain.exceptions import ConnectorCapabilityUnavailableException
@@ -241,17 +244,30 @@ async def test_reels_flag_free_pages_require_cards_or_a_verified_empty_envelope(
     page.remove_listener = MagicMock()
     page.locator = MagicMock(side_effect=lambda selector: SimpleNamespace(count=AsyncMock(
         return_value=int(state == "captcha" and "captcha" in selector))))
-    body = {"viewer": {"id": "not-a-reel"}} if state == "unrelated_json" else {"data": {"recent": {"sections": None}}} if state == "unusable" else {"data": {"recent": {"sections": []}}} if state == "answered_empty" else REELS_PAYLOAD
+    if state == "t058_redirect":
+        page.url = "https://www.instagram.com/explore/tags/other/"
+    body = {"viewer": {"id": "not-a-reel"}} if state == "unrelated_json" else {"data": {"recent": {"sections": None}}} if state == "unusable" else {"data": {"recent": {"sections": []}}} if state in {"answered_empty", "t058_wrong_tag_empty"} else REELS_PAYLOAD
     if state in {"response403", "response_fail", "response_challenge"}:
         body = {**body, "status": "fail", "message": {"response403": "login_required", "response_challenge": "challenge_required"}.get(state, "unavailable")}
-    response = SimpleNamespace(url="https://www.instagram.com/api/v1/tags/web_info/", status=403 if state == "response403" else 200,
+    response_url = "https://www.instagram.com/api/v1/tags/web_info/?tag_name=" + ("other" if state in {"t058_wrong_tag", "t058_wrong_tag_empty"} else "synthetic")
+    if state == "t058_unbound":
+        response_url = "https://www.instagram.com/api/v1/clips/"
+    response = SimpleNamespace(url=response_url, request=SimpleNamespace(url=response_url, method="GET"), status=403 if state == "response403" else 200,
         headers={"content-type": "text/html" if state == "html_response" else "application/json"}, json=AsyncMock(return_value=body))
     if state == "late_checkpoint":
         async def wheel(*args):
             page.url = "https://www.instagram.com/checkpoint/"
         page.mouse.wheel.side_effect = wheel
     async def navigate(*args, **kwargs):
-        await handlers["response"](response)
+        if state in {"t058_malformed_then_empty", "t058_empty_then_malformed"}:
+            bodies = [{"data": {"recent": {"sections": None}}}, {"data": {"recent": {"sections": []}}}]
+            if state == "t058_empty_then_malformed":
+                bodies.reverse()
+            for body in bodies:
+                response.json = AsyncMock(return_value=body)
+                await handlers["response"](response)
+        else:
+            await handlers["response"](response)
         return SimpleNamespace(status=200)
     page.goto.side_effect = navigate
     browser = AsyncMock()
@@ -298,7 +314,8 @@ async def test_reels_unsettled_response_cannot_become_healthy_during_browser_clo
         await release.wait()
         return {"status": "fail", "message": "challenge_required", **REELS_PAYLOAD}
     def response(reader):
-        return SimpleNamespace(url="https://www.instagram.com/api/v1/tags/web_info/", status=200,
+        return SimpleNamespace(url="https://www.instagram.com/api/v1/tags/web_info/?tag_name=synthetic",
+                               request=SimpleNamespace(url="https://www.instagram.com/api/v1/tags/web_info/?tag_name=synthetic", method="GET"), status=200,
                                headers={"content-type": "application/json"}, json=reader)
     async def navigate(*args, **kwargs):
         await handlers["response"](response(AsyncMock(return_value=REELS_PAYLOAD)))

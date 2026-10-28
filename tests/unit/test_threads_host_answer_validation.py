@@ -28,7 +28,7 @@ def record_data(**overrides):
 
 def answer_data(source=None, **overrides):
     data = dict(request_id="request", host_task_ref="task", session_ref="session",
-                extractor_version="tiktok-public-grid-v1" if source is None else "threads-search-top-v2",
+                extractor_version="tiktok-public-grid-v2" if source is None else "threads-search-top-v2",
                 answers=[dict(query_id="q1", query="synthetic query", page_url="https://www.threads.com/search?q=synthetic%20query",
                               captured_at=CLOCK, search_verified=True, empty_state_visible=False,
                               status="HEALTHY", records=[record_data()])])
@@ -49,7 +49,7 @@ def test_legacy_tiktok_envelopes_keep_their_default_source_and_wire_shape():
     legacy = answer_data()
     answer = HostSearchAnswer.model_validate(legacy)
     assert request.source == answer.source == "tiktok"
-    assert request.extractor_version == answer.extractor_version == "tiktok-public-grid-v1"
+    assert request.extractor_version == answer.extractor_version == "tiktok-public-grid-v2"
     assert "source" not in request.model_dump(mode="json")
     assert answer.model_dump(mode="json") == legacy
 
@@ -61,13 +61,13 @@ def test_threads_request_and_answer_freeze_matching_source_and_version():
     assert request.extractor_version == answer.extractor_version == "threads-search-top-v2"
     assert request.model_dump(mode="json")["source"] == "threads"
     for envelope in (request, answer):
-        for field, value in (("source", "tiktok"), ("extractor_version", "tiktok-public-grid-v1")):
+        for field, value in (("source", "tiktok"), ("extractor_version", "tiktok-public-grid-v2")):
             with pytest.raises(ValidationError, match="frozen"):
                 setattr(envelope, field, value)
 
 
 @pytest.mark.parametrize("source,version", [
-    ("instagram", "threads-search-top-v2"), ("threads", "tiktok-public-grid-v1"),
+    ("instagram", "threads-search-top-v2"), ("threads", "tiktok-public-grid-v2"),
     ("tiktok", "threads-search-top-v2"), ("threads", "threads-mcp-keyword-v1"),
     ("threads", "threads-search-top-v1"),
 ])
@@ -388,3 +388,12 @@ def test_lowercase_operator_label_validates_mixed_case_prefix_verbatim(raw):
     from ignis.infrastructure.connectors.host_browser.validator import _counters
     record = HostPublicRecord.model_validate(record_data(counters=[counter(raw_display=raw)]))
     assert _counters(record.counters, {"likes": "me gusta"}) == [counter(raw_display=raw)]
+
+
+@pytest.mark.parametrize("labels", [("Like", "like"), ("Straße", "STRASSE")])
+def test_t058_casefold_action_label_collision_fails_closed(labels):
+    from ignis.infrastructure.connectors.host_browser.action_labels import action_labels_from_rows
+    rows = [dict(domain="threads_action_labels_en", category=kind, term=term)
+            for kind, term in zip(("likes", "replies"), labels)]
+    with pytest.raises(ValueError, match="Ambiguous"):
+        action_labels_from_rows(rows)

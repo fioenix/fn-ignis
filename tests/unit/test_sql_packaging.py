@@ -20,6 +20,7 @@ SEED_FILES = (
     "007_runtime_configs.sql",
     "036_threads_attribution.sql",
     "037_threads_action_labels.sql",
+    "038_tiktok_attribution_locales.sql",
     # Run by the SQLite bootstrap after the vocabulary replay; missing from a wheel, the retired
     # UI-noise terms would silently come back on every installed SQLite database.
     "020_retire_ambiguous_tiktok_ui_noise.sql",
@@ -27,7 +28,7 @@ SEED_FILES = (
 # Not a seed: PostgreSQL-only, and read by no bootstrap. The Compose init and an operator applying
 # sql/ by hand need the whole chain, so the newest migration is pinned here and shipped with it.
 NEWEST_POSTGRES_ONLY_MIGRATION = "035_watchlist_listening_plans.sql"
-NEWEST_MIGRATION = "037_threads_action_labels.sql"
+NEWEST_MIGRATION = "038_tiktok_attribution_locales.sql"
 # The closed sdist member list: runtime package, the SQL chain, and the build metadata. Anything
 # else -- tests, docs, examples, reports, handoff notes, agent or local settings -- must not ship.
 SDIST_MEMBERS = {"src/ignis", "sql", "pyproject.toml", "README.md", "LICENSE"}

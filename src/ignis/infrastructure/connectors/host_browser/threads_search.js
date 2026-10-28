@@ -59,7 +59,7 @@
     if (header === card) { dropped = true; continue; }
     // The verified card owns the boundary: header nesting depth is not a stable selector.
     while (header.parentElement && header.parentElement !== card) header = header.parentElement;
-    const excerpt = text(card, header).split('\n').map(line => line.trim()).filter(Boolean).join('\n');
+    const excerpt = text(card, header).split('\n').map(line => line.trim()).filter(Boolean).join('\n').slice(0, 2000);
     if (!excerpt) { dropped = true; continue; }
     const counters = kinds.map(kind => {
       const label = labels[kind];

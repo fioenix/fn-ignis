@@ -231,3 +231,10 @@ async def test_operator_registered_lowercase_labels_match_titles_and_prefixes(tm
         assert _counters(record.counters, labels["es"]) == counters
     finally:
         await repo.close()
+
+
+def test_t058_oversized_excerpt_is_bounded_without_losing_other_cards():
+    html = (FIXTURES / "cards.html").read_text().replace("First body line", "x" * 2200)
+    result = extract([html])
+    assert result["status"] == "HEALTHY"
+    assert len(result["records"][0]["excerpt"]) == 2000

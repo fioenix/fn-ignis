@@ -60,8 +60,8 @@ async def prepare_scope(executor, mission_id, source="tiktok"):
     requirements["surface_requirements"] = {**requirements.get("surface_requirements", {}), **{
         ("tiktok_video" if name == "tiktok" else name): dict(
             authority_tier="browser_session", quota_costs={},
-            connector_path="host_browser:" + ("tiktok-public-grid-v1" if name == "tiktok" else "threads-search-top-v2"),
-            connector_revision="tiktok-public-grid-v1" if name == "tiktok" else "threads-search-top-v2",
+            connector_path="host_browser:" + ("tiktok-public-grid-v2" if name == "tiktok" else "threads-search-top-v2"),
+            connector_revision="tiktok-public-grid-v2" if name == "tiktok" else "threads-search-top-v2",
             sampling=dict(limit=20, ordering="visible_grid" if name == "tiktok" else "top_visible_sample"),
         ) for name in host_sources}}
     requirements = executor._scope_optional_execution(manifest, requirements)
@@ -119,7 +119,7 @@ async def ingest_scope(executor, binding, receipt, *, author_records=None):
                     note="Optional host source was not staged; no fallback was requested"))
         for source, staged in receipts.items():
             surface = "tiktok_video" if source == "tiktok" else source
-            version = "tiktok-public-grid-v1" if source == "tiktok" else "threads-search-top-v2"
+            version = "tiktok-public-grid-v2" if source == "tiktok" else "threads-search-top-v2"
             path = collection_path(source, version, 20)
             host_signals = [TrendSignal(
                 platform=PlatformType(source), raw_title=record["excerpt"], metric_value=0.0,

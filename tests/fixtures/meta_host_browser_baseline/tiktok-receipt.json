@@ -3,7 +3,7 @@
   "observations": [
     {
       "captured_at": "2026-10-27T12:00:00+00:00",
-      "collection_path": "host_browser:tiktok-public-grid-v1",
+      "collection_path": "host_browser:tiktok-public-grid-v2",
       "excerpt": "Túi đi làm",
       "metric_kind": null,
       "metric_known": false,

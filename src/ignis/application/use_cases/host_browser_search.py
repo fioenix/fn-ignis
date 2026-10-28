@@ -16,6 +16,7 @@ from ignis.domain.source_identity import identity_free_source_url
 from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text
 from ignis.infrastructure.connectors.host_browser.relay import LoopbackRelay
 from ignis.infrastructure.connectors.host_browser.action_labels import action_labels_from_rows, seeded_action_labels
+from ignis.infrastructure.connectors.host_browser.attribution_locales import attribution_locales_from_rows, seeded_attribution_locales
 from ignis.infrastructure.connectors.host_browser.validator import validate_answer
 from ignis.infrastructure.config.vocabulary_loader import load_market_vocabulary, seeded_lexicon_terms
 
@@ -116,12 +117,15 @@ class HostBrowserSearchService:
 
     def prepare(self, host_task_ref: str, session_ref: str, queries: list[str],
                 result_limit: int, lifetime_seconds: int, authorized: bool, *, mode="TACTICAL",
-                attribution_templates=None, source="tiktok", self_identities=(), action_labels=None) -> dict:
+                attribution_templates=None, source="tiktok", self_identities=(), action_labels=None, attribution_locales=None) -> dict:
         if authorized is not True:
             raise ValueError("Explicit browser authorization is required")
         attribution_templates = (self.attribution_templates_for(source) if attribution_templates is None
                                  else tuple(attribution_templates))
         if not attribution_templates:
+            raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
+        locales = copy.deepcopy(seeded_attribution_locales() if attribution_locales is None else attribution_locales) if source == "tiktok" else {}
+        if source == "tiktok" and not locales:
             raise AttributionVocabularyMissing("No attribution vocabulary is registered for the host source")
         if type(lifetime_seconds) is not int or not 0 < lifetime_seconds <= 3600:
             raise ValueError("Lifetime must be finite and at most one hour")
@@ -157,7 +161,7 @@ class HostBrowserSearchService:
                     raise ValueError("Too many active task receipts; finish or wait for expiry")
                 ticket = dict(request=request, state="PREPARED", receipt=None, payload=None,
                               attribution_templates=attribution_templates, self_identities=tuple(self_identities),
-                              action_labels=labels,
+                              action_labels=labels, attribution_locales=locales,
                               caller=current_caller_storage.get())
                 self._tickets[request.request_id] = ticket
                 relay = ticket["relay"] = LoopbackRelay(
@@ -219,7 +223,8 @@ class HostBrowserSearchService:
                 try:
                     receipt = validate_answer(ticket["request"], payload, datetime.now(timezone.utc),
                                               ticket["attribution_templates"], ticket["self_identities"],
-                                              author_records=author_records, action_labels=ticket["action_labels"])
+                                              author_records=author_records, action_labels=ticket["action_labels"],
+                                              attribution_locales=ticket["attribution_locales"])
                 except ValueError:
                     group = ticket.get("group")
                     if group is not None:
@@ -322,6 +327,8 @@ class HostBrowserSearchService:
             attribution_templates = await self.refresh_attribution_templates(executor._repo, source=source)
             labels = (action_labels_from_rows(await executor._repo.get_domain_lexicons())
                       if source == "threads" else {})
+            locales = (attribution_locales_from_rows(await executor._repo.get_domain_lexicons())
+                       if source == "tiktok" else {})
             binding = await prepare_scope(executor, mission_id, source)
             sync = getattr(executor, "_vocabulary_sync", None)
             identity_repo = getattr(sync, "_credential_repository", executor._repo)
@@ -347,7 +354,7 @@ class HostBrowserSearchService:
                     previous_deadline = group.binding.get("expires_at")
                 request = self.prepare(host_task_ref, session_ref, binding["queries"], 20, lifetime_seconds, authorized,
                                        mode="MISSION", attribution_templates=attribution_templates,
-                                       source=source, self_identities=identities, action_labels=labels)
+                                       source=source, self_identities=identities, action_labels=labels, attribution_locales=locales)
                 owned_request_id = request["request_id"]
                 if group is None:
                     group = _MissionGroup(key, binding, caller, binding["required_host_sources"])

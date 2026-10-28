@@ -47,7 +47,7 @@ def is_market_vocabulary_domain(domain: str) -> bool:
     """Keep mechanism labels and templates out of positive market vocabulary."""
     domain = domain.lower()
     return (domain not in MACHINERY_DOMAINS and not _is_template_domain(domain)
-            and not domain.startswith("threads_action_labels_"))
+            and not domain.startswith(("threads_action_labels_", "tiktok_attribution_")))
 
 
 @dataclass(frozen=True)

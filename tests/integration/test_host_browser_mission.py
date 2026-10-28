@@ -77,10 +77,10 @@ async def test_existing_writer_seam_rechecks_before_any_ingress(repository_case,
 
 def staged_answer(request):
     return dict(request_id=request["request_id"], host_task_ref="task", session_ref="chrome",
-                extractor_version="tiktok-public-grid-v1", answers=[dict(
+                extractor_version="tiktok-public-grid-v2", answers=[dict(
                     query_id=query["query_id"], query=query["query"], page_url=query["search_url"],
                     captured_at=datetime.now(timezone.utc).isoformat(), search_verified=True,
-                    empty_state_visible=False, status="HEALTHY", records=[dict(
+                    empty_state_visible=False, status="HEALTHY", locale="vi", records=[dict(
                         source_url="https://www.tiktok.com/@fixture/video/7417820067028536584",
                         excerpt="Túi đi làm", published_at=None,
                     )],
@@ -707,12 +707,13 @@ async def test_host_mission_applies_attribution_wording_added_in_the_database(re
         with psycopg.connect(repository_case.dsn) as conn:
             for migration in ("003_market_lexicons.sql", "034_tiktok_attribution.sql"):
                 conn.execute((sql / migration).read_text(encoding="utf-8"))
-    await repo.register_lexicon_terms("tiktok_attribution", ["created by {author} with"], "ui_attribution")
+    await repo.register_lexicon_terms("tiktok_attribution_en", ["created by {author} with"], "ui_attribution")
     store, workspace, mission, executor = await assignment(repo, tmp_path)
     service = HostBrowserSearchService()
     try:
         request = await service.prepare_mission(executor, mission.id, "task", "chrome", 60, True)
         payload = staged_answer(request)
+        payload["answers"][0]["locale"] = "en"
         payload["answers"][0]["records"][0]["excerpt"] = "Work bag review created by Fixture Poster with original sound"
         service.stage(request["request_id"], payload)
         await service.submit_mission(executor, request["request_id"], "task", "chrome")
@@ -1358,3 +1359,54 @@ async def test_failed_prepare_never_stops_a_draining_group(repository_case, tmp_
         release.set()
         await asyncio.gather(*tasks, return_exceptions=True)
         await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_t058_mission_locale_snapshot_comes_from_caller_repository(repository_case, tmp_path, monkeypatch):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    repo = repository_case.repository
+    await repo.register_lexicon_terms("tiktok_attribution_en", ["created by {author} with"], "ui_attribution")
+    store, workspace, mission, executor = await assignment(repo, tmp_path)
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "session", 60, True)
+        payload = host_answer(request)
+        for item in payload["answers"]:
+            item["locale"] = "en"
+            item["records"][0]["excerpt"] = "Caption created by Fixture Poster with music"
+        service.stage(request["request_id"], payload)
+        ticket = service._tickets[request["request_id"]]
+        assert all(row["excerpt"] == "Caption" for row in ticket["receipt"]["observations"])
+        assert all(row["excerpt"] == "Caption" for row in ticket["author_records"])
+        assert repository_case.counts()["observations"] == 0
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("locale,expected_count", [("vi", 1), ("en", 0)])
+async def test_t058_locale_gate_reaches_canonical_mission_storage(repository_case, tmp_path, monkeypatch, locale, expected_count):
+    from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    repo = repository_case.repository
+    store, workspace, mission, executor = await assignment(repo, tmp_path)
+    service = HostBrowserSearchService()
+    try:
+        request = await service.prepare_mission(executor, mission.id, "task", "session", 60, True)
+        payload = host_answer(request)
+        for item in payload["answers"]:
+            item["locale"] = locale
+            item["records"][0]["excerpt"] = ("Caption do Fixture Poster tạo với music" if locale == "vi"
+                                             else "Caption created by Fixture Poster with music")
+        service.stage(request["request_id"], payload)
+        await service.submit_mission(executor, request["request_id"], "task", "session")
+        held = await repo.get_mission_signals(mission.id)
+        assert len(held) == expected_count
+        assert all(signal.raw_title == "Caption" for signal in held)
+        assert "Fixture Poster" not in repr([signal.metadata for signal in held])
+        assert repository_case.counts()["observations"] == expected_count
+    finally:
+        service.close()

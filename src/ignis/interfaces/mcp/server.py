@@ -3560,8 +3560,9 @@ async def handle_get_tiktok_video_comments(video_url: str, limit: int = 30) -> s
         tiktok_plugin = TikTokPlugin(auth_manager=comp.get("tiktok_auth_manager"))
 
     # The caller's link may name the creator; the response and the log name the video only.
-    video_link = identity_free_source_url("tiktok", video_url, {})
+    video_link = None
     try:
+        video_link = TikTokPlugin.canonical_comment_video_url(video_url)
         comments = await tiktok_plugin.fetch_video_comments(
             video_url=video_url, limit=limit, author_key=_ephemeral_author_key()
         )

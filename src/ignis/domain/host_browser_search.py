@@ -5,11 +5,11 @@ from typing import Literal, Self
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationInfo, model_serializer, model_validator
 
 HostSearchSource = Literal["tiktok", "threads"]
-HostExtractorVersion = Literal["tiktok-public-grid-v1", "threads-search-top-v2"]
+HostExtractorVersion = Literal["tiktok-public-grid-v2", "threads-search-top-v2"]
 
 
 def _version_for_source(source: HostSearchSource) -> HostExtractorVersion:
-    return "threads-search-top-v2" if source == "threads" else "tiktok-public-grid-v1"
+    return "threads-search-top-v2" if source == "threads" else "tiktok-public-grid-v2"
 
 
 class HostEnvelope(BaseModel):
@@ -28,7 +28,7 @@ class HostSearchRequest(HostEnvelope):
     mode: Literal["TACTICAL", "MISSION"] = "TACTICAL"
     # Omit the legacy default on serialization to preserve existing TikTok envelopes.
     source: HostSearchSource = "tiktok"
-    extractor_version: HostExtractorVersion = "tiktok-public-grid-v1"
+    extractor_version: HostExtractorVersion = "tiktok-public-grid-v2"
     request_id: str
     host_task_ref: str = Field(min_length=1, max_length=128)
     session_ref: str = Field(min_length=1, max_length=128)

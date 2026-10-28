@@ -102,3 +102,12 @@ buttons inside a card can satisfy structural detection below the action row, lea
 unknown. A quoted post with two timestamps in one card blocks that card and marks the whole query
 `DEGRADED` while retaining other valid records. Follow up on structural card/action-row ownership
 and quoted-post isolation; these remain conservative limitations, not complete counter/quote support.
+
+## T058 bounds and opener isolation
+
+Threads query controls open search tabs with `noopener`; encrypted-fragment handoff and receiver
+BroadcastChannel need no opener. TikTok retains its required opener and accepted reverse-tabnabbing
+residual (see [tiktok-search.md](tiktok-search.md)); COOP headers remain unchanged without browser
+compatibility proof. Normalize each Threads body excerpt then cap at 2000 characters before sample
+caching. Locale action labels that collide under casefold across kinds are invalid vocabulary.
+Relay form Content-Length must contain ASCII digits only; other digit scripts are a 400 error.

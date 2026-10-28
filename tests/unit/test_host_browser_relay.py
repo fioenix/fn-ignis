@@ -554,3 +554,60 @@ await listener({data:Buffer.alloc(length).toString('base64url')});
 console.log(JSON.stringify({decrypts,submitted}));})().catch(e=>{console.error(e);process.exit(1)});
 ''', json.dumps(data), script, str(length))
     assert result == {"decrypts": int(length > 28), "submitted": 0}
+
+
+@pytest.mark.parametrize("length", ["²", "١", "１"])
+def test_t058_non_ascii_content_length_returns_400(socket_free_relay, length):
+    import io
+    from email.message import Message
+    relay = socket_free_relay("tiktok")
+    handler = object.__new__(relay._server.handler)
+    handler.path = relay._path
+    handler.headers = Message()
+    handler.headers["Host"] = relay.origin.removeprefix("http://")
+    handler.headers["Origin"] = relay.origin
+    handler.headers["Content-Length"] = length
+    handler.wfile = io.BytesIO()
+    statuses = []
+    handler.send_response = statuses.append
+    handler.send_header = lambda *args: None
+    handler.end_headers = lambda: None
+    handler.do_POST()
+    assert statuses == [400]
+
+
+@pytest.mark.parametrize("source,features", [("threads", "noopener"), ("tiktok", "")])
+def test_t058_search_tab_opener_is_source_bound(socket_free_relay, source, features):
+    import re
+    relay = socket_free_relay(source)
+    script = re.findall(r'<script nonce="[^"]+">(.*?)</script>', relay._page, re.S)[0]
+    data = re.search(r'id="relay-data">(.*?)</script>', relay._page, re.S)[1]
+    result = run_node(r'''
+const vm=require('vm'),{webcrypto}=require('crypto'); let click, opened;
+const data=JSON.parse(process.argv[1]);
+const document={getElementById:id=>id==='relay-data'?{textContent:JSON.stringify(data)}:{},
+ querySelector:selector=>selector==='form'?{}:{addEventListener:(name,cb)=>click=cb}};
+vm.runInNewContext(process.argv[2],{document,window:{open:(...args)=>{opened=args;return {};},addEventListener:()=>{}},
+ CSS:{escape:x=>x},BroadcastChannel:class{},crypto:webcrypto,Uint8Array,atob,Map,JSON});
+click(); console.log(JSON.stringify(opened));
+''', data, script)
+    assert result[2:] == ([features] if features else [])
+
+
+def test_t058_oversized_ascii_content_length_does_not_escape_handler(socket_free_relay):
+    import io
+    from email.message import Message
+    relay = socket_free_relay("tiktok")
+    handler = object.__new__(relay._server.handler)
+    handler.path = relay._path
+    handler.headers = Message()
+    handler.headers["Host"] = relay.origin.removeprefix("http://")
+    handler.headers["Origin"] = relay.origin
+    handler.headers["Content-Length"] = "9" * 5000
+    handler.wfile = io.BytesIO()
+    statuses = []
+    handler.send_response = statuses.append
+    handler.send_header = lambda *args: None
+    handler.end_headers = lambda: None
+    handler.do_POST()
+    assert statuses == [413]

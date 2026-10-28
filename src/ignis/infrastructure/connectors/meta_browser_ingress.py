@@ -327,7 +327,8 @@ async def collect_json_payloads(
                     if is_reels and urllib.parse.urlsplit(response.url).hostname not in {"instagram.com", "www.instagram.com"}:
                         return
                     if is_reels and response.status != 200:
-                        blocked_response_reason = "REELS_PAGE_UNUSABLE"
+                        blocked_response_reason = ("REELS_LOGIN_REQUIRED" if response.status in (401, 403)
+                                                   else "REELS_PAGE_UNUSABLE")
                     try:
                         if "json" not in response.headers.get("content-type", ""):
                             if is_reels:
@@ -335,15 +336,28 @@ async def collect_json_payloads(
                             return
                         params: Dict[str, List[str]] = {}
                         if expected_query is not None:
-                            if response.status != 200 or response.request.method != "POST":
+                            if response.status != 200:
                                 return
-                            params = urllib.parse.parse_qs(response.request.post_data or "")
-                            variables = json.loads(params.get("variables", ["{}"])[0])
-                            if not isinstance(variables, dict):
-                                return
-                            queries = [variables[key] for key in ("query", "search_query") if key in variables]
-                            if not queries or any(query != expected_query for query in queries):
-                                return
+                            if is_reels:
+                                # Admit only the hashtag endpoint with exact request provenance.
+                                response_url = urllib.parse.urlsplit(response.url)
+                                request_url = urllib.parse.urlsplit(response.request.url)
+                                if (response.request.method != "GET" or response_url.scheme != "https"
+                                        or response_url.netloc != "www.instagram.com"
+                                        or response_url.path != "/api/v1/tags/web_info/"
+                                        or request_url != response_url
+                                        or urllib.parse.parse_qs(response_url.query, keep_blank_values=True).get("tag_name") != [expected_query]):
+                                    return
+                            else:
+                                if response.request.method != "POST":
+                                    return
+                                params = urllib.parse.parse_qs(response.request.post_data or "")
+                                variables = json.loads(params.get("variables", ["{}"])[0])
+                                if not isinstance(variables, dict):
+                                    return
+                                queries = [variables[key] for key in ("query", "search_query") if key in variables]
+                                if not queries or any(query != expected_query for query in queries):
+                                    return
                         body = await response.json()
                     except Exception:
                         if is_reels:
@@ -364,6 +378,8 @@ async def collect_json_payloads(
                                 return
                         if expected_query is not None:
                             if body.get("errors") or payload_validator is None or payload_validator(body) is None:
+                                if is_reels:
+                                    blocked_response_reason = "REELS_PAGE_UNUSABLE"
                                 return
                             doc_ids = params.get("doc_id")
                             if doc_ids:
@@ -394,6 +410,12 @@ async def collect_json_payloads(
                         elif "/challenge" in path:
                             reason = "REELS_CHALLENGE"
                         elif landed.hostname not in {"instagram.com", "www.instagram.com"} or navigation is None:
+                            reason = "REELS_PAGE_UNUSABLE"
+                        elif expected_query is not None and (
+                            landed.scheme != "https" or landed.netloc != "www.instagram.com"
+                            or urllib.parse.unquote(landed.path) != "/explore/tags/" + expected_query + "/"
+                            or landed.query or landed.fragment
+                        ):
                             reason = "REELS_PAGE_UNUSABLE"
                         elif navigation.status in (401, 403):
                             reason = "REELS_LOGIN_REQUIRED"

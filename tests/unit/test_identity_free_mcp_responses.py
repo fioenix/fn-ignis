@@ -212,6 +212,7 @@ async def test_the_plugin_marks_commenters_only_under_the_key_it_is_given():
     ]}
     with patch("playwright.async_api.async_playwright") as playwright:
         page = AsyncMock()
+        page.url = SHARE_LINK
         page.evaluate.return_value = raw
         p = AsyncMock()
         playwright.return_value.__aenter__.return_value = p
@@ -252,6 +253,7 @@ async def test_the_plugin_stores_no_raw_mention_in_comment_text():
     plugin = TikTokPlugin(auth_manager=None)
     with patch("playwright.async_api.async_playwright") as playwright:
         page = AsyncMock()
+        page.url = SHARE_LINK
         page.evaluate.return_value = {"comments": [{"cid": "1", "text": f"@{MENTIONED} đẹp", "user": {}}]}
         p = AsyncMock()
         playwright.return_value.__aenter__.return_value = p
