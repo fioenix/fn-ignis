@@ -125,8 +125,9 @@ def test_host_search_preserves_evidence_limits_and_finally_cleanup():
 def test_routine_distinguishes_threads_host_search_from_saved_sign_in():
     routine = " ".join(ROUTINE.read_text(encoding="utf-8").split())
     assert "`reels` and `tiktok_video_grid` need a saved sign-in: check `get_platform_auth_status`." in routine
-    assert "`threads` collects only through host-browser search" in routine
+    assert "Leave `threads` out of a routine" in routine
     assert "host-browser search section of the `ignis-collect` skill" in routine
+    assert "`execute_mission_ingress` refuses a mission whose channel it cannot collect" in routine
     assert "`threads`, `reels` and `tiktok_video_grid` need a saved sign-in" not in routine
 
 
