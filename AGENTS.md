@@ -2,29 +2,25 @@
 
 This document defines the operational protocol, architectural guidelines, and tool selection principles for AI Agents (**Claude Desktop, Claude Code, Antigravity, OpenAI Codex, OpenClaw, Hermes, and Pi Agent**) interacting with `fn-ignis`.
 
----
-
 ## ⚡ 0. Zero-Touch Agent Bootstrap Protocol (Automated Setup)
 
-> **MANDATORY INSTRUCTION FOR ALL AI AGENTS:**  
-> When given this repository link (`https://github.com/fioenix/fn-ignis`) or instructed to set up `fn-ignis` for the user, execute this command immediately:
->
-> ```bash
-> ./scripts/bootstrap.sh
-> ```
->
-> **Autonomous Actions Performed:**
-> 1. Provisions virtual environment (`.venv`) and installs `fn-ignis` in editable mode.
-> 2. Creates `.env` with SQLite default (`DATABASE_URL=sqlite:///ignis.db`) and generates a persistent Fernet (256-bit key: AES-128-CBC + HMAC-SHA256) key.
-> 3. Bootstraps SQLite database schemas and loads 84+ seed domain lexicons & noise filters.
-> 4. Auto-configures FastMCP server in all supported agent environments (`.mcp.json`, `claude_desktop_config.json`, Google Antigravity, OpenAI Codex `config.toml`).
->
-> Owner-approved exception (2026-10-04): `./scripts/bootstrap.sh --client codex --env-file /absolute/path/to/uat/.env` configures only Codex and isolates UAT storage. The default remains all clients.
-> 5. Runs synthetic diagnostics and outputs structured readiness confirmation.
->
-> *No user input or external database installation is required.*
+Advisory (agent judgment): when given this repository link (`https://github.com/fioenix/fn-ignis`) or asked to set up `fn-ignis`, run `./scripts/bootstrap.sh`. It needs no user input or external database; it reports readiness per component, and external connectors stay unavailable or degraded until the operator supplies credentials.
 
----
+Owner-approved exception (2026-10-04): `./scripts/bootstrap.sh --client codex --env-file /absolute/path/to/uat/.env` configures only Codex and isolates UAT storage. The default remains all clients.
+
+## Commands
+
+```bash
+uv sync --locked --extra dev --extra browser   # install
+uv run ruff check src/ tests/                  # lint
+uv run pytest tests/                           # complete suite, as CI runs it
+uv run pytest tests/unit/test_repo_conventions.py::test_agent_guidance_routes_only_explicit_mission_bound_work  # one test
+uv build                                       # build the package
+python -m ignis.interfaces.cli.setup_bundle --json  # auto-provision
+ignis-mcp                                      # FastMCP server over stdio
+```
+
+Run requested missions through the current MCP mission operations; do not start a worker.
 
 ## 🏛️ 1. Architecture: Mission-Bound Evidence Grounding
 
@@ -57,6 +53,8 @@ Attention observations remain context and never silently become Market support.
 The beachhead pilot is Vietnamese consumer-market research for founders, operators, independent
 analysts, consultants, and small teams. This is a validation audience, not proof of market fit.
 
+`specs/011-evidence-grounded-product-reset/` is the governing contract for this model.
+
 ## 🧭 2. Operating Modes
 
 ### Tactical collection
@@ -66,25 +64,7 @@ channel state, and limitations. It does not create a mission, schedule follow-up
 strategic Market verdict. Requested collection preserves source languages for downstream
 qualification.
 
-### Strategic Market research
-
-1. Frame the decision backwards from the outcome. Confirm a Mission Manifest, allowed sources,
-   authority boundary, cost, output, stop conditions, and retention policy.
-2. Confirm the Market Brief: target user, problem, hypothesis, at least two alternatives, null
-   hypothesis, falsifiers, kill criteria, and revision rule.
-3. Plan and run only authorized probes. Preserve every channel's measured outcome, including
-   auth failure, rate limit, degradation, and healthy emptiness.
-4. Qualify each observation against the current Brief and collection-plan frame, including
-   support, contradiction, and context. Do not promote external files or earlier Attention
-   observations to primary evidence without mission-scoped verification.
-5. Submit typed candidate claims against the current evidence-frame digest. Read the current
-   Claim Ledger. Render permitted claims with citations, contradiction, limitations, and decision
-   conditions; otherwise render the Gap Report and next-best probe.
-6. Stop at completion, insufficient evidence, cancellation, failure, or missing authority.
-
-This is an analytical reference, not an unskippable pipeline for tactical calls. Outcome thinking
-defines the decision, design thinking locates the user and method, and critical thinking actively
-tests the initial belief.
+Strategic Market research follows the mission and evidence steps in `docs/agents/research-reporting.md`; read it before a strategic mission. It is an analytical reference, not a pipeline for tactical calls.
 
 ### Connector access boundary
 
@@ -93,60 +73,9 @@ the capability. Treat `SELF_ONLY` and `NOT_PERMITTED` as unavailable for market 
 user-authorized browser session only when the mission permits it. Never present an own-account
 timeline as market evidence. Browser, token, and paid-quota authority must be confirmed before use.
 
----
 ## 🎨 3. Presentation & Evidence Attribution Standards
 
-### Campaign Identification Banner
-When executing a formal Strategic Research Campaign, prefix the analysis with the campaign identifier banner:
-
-> **🎯 Campaign:** `[VN-AI-AGENT-90D]` — *AI Agents & Automation in Vietnam*  
-> **Shortcode:** `VN-AI-AGENT-90D` *(or `fb16c5ee`)*  
-> **Session ID:** `codex://threads/01a05666...` *(if available)*
-
-### Native Artifacts First
-- Render source coverage, permitted claims, or a Gap Report directly in chat at the level of detail the user requested.
-- Export standalone HTML files to `reports/` via `generate_mission_artifact` when the user requests a persistent local dossier.
-
-### 🎨 FINOLABS Design System
-
-Every HTML artifact renders in the FINOLABS design system. The tokens are vendored into
-`src/ignis/infrastructure/templates/html/_fino_theme.html` from the "Finolabs Design System"
-project on claude.ai/design (`theme.css`); update that partial when the source moves, and keep the
-values byte-identical rather than eyeballing new ones.
-
-Rules that apply to artifacts specifically:
-- Artifacts are **product surfaces**: `<body class="product-mode">`, density and data-viz tokens,
-  never the marketing register on the same page.
-- **Type**: Anton for display caps, Space Grotesk for UI and body, JetBrains Mono for numbers and
-  machine labels. Numbers use `font-variant-numeric: tabular-nums`.
-- **Colour**: never hard-code hex. Chrome reads the role tokens (`--color-foreground`,
-  `--color-border`), series read the data-viz slots (`--color-chart-1..12`), labels read the tag
-  pairs. Mint is the everyday brand colour; violet is reserved for a single high-stakes accent.
-- **No emoji.** `→ ↗ • — ◆ ◇` are the allowed glyphs; `→` is the canonical action glyph.
-- **Radius** `--radius-lg` for cards, `--radius-full` for chips; shadows only `xs`, `md`, `xl`.
-- Artifacts may fetch the FINOLABS webfonts, and nothing else external beyond the CDN libraries a
-  template already declares. The trend graph renders its canvas and force layout inline so the
-  export stays usable offline.
-
-### 📊 Evidence Attribution Standards
-When presenting strategic conclusions, agents must maintain evidentiary integrity:
-1. **Data Ingress Summary Table**:
-   - Explicitly list every requested channel, including those that did not run or could not be measured.
-   - Display counts and exact channel state from the current evidence frame; never equate missingness with zero.
-2. **Inline Evidence Citations**:
-   - Render only current-frame `PERMITTED` Claim Ledger entries with their observation bindings.
-   - Disclose contradiction, sample limitations, denominator/timeframe for measurements, and conditions that would change the decision.
-
-### 🧾 Recommended Full Strategic Report Structure
-When compiling a Comprehensive Strategic Dossier, the following standard structure is recommended:
-1. **Campaign Identification Banner**
-2. **Data Ingress Summary Table** (from `channel_summaries`)
-3. **Quality Scorecard**
-4. **Single-Source 4-Lens Breakdown** (with source citations)
-5. **Current-frame Claim Ledger and counterevidence** (only permitted claims)
-6. **Decision conditions or Gap Report** (never invent a verdict when evidence fails)
-
-*(For ad-hoc queries, agents should adjust output format flexibly to match the user's specific conversational need).*
+Read `docs/agents/research-reporting.md` before rendering a strategic dossier or HTML artifact: it holds the campaign banner, the FINOLABS design system, attribution rules, and the recommended report structure.
 
 ### 🌐 Language Boundary Protocol
 
@@ -158,7 +87,7 @@ is speaking in the current conversation. Agents reason internally in English.
 | Chat responses to the user | User's language | The only place conversational language applies |
 | `reports/`, `README.vi.md`, `docs/*.vi.md` | Target market language | Regional deliverables |
 | HTML report copy rendered for a regional audience | Target market language | Template body text, not template identifiers |
-| `src/**` — code, identifiers, docstrings, comments | **English** | No exceptions |
+| `src/**` — code, identifiers, docstrings, comments | **English** | Enforcer: `tests/unit/test_repo_conventions.py` |
 | `src/**` — log lines, exception messages, strings the code emits (`summary_text`, fallback names, status labels) | **English** | These are machine-facing output, not conversation |
 | `tests/**` — docstrings, comments, assert messages, test names | **English** | A failing assertion is developer output |
 | `tests/**` — fixture data (titles, comments, keywords under test) | Any language | Vietnamese fixtures are required to test Vietnamese behaviour |
@@ -214,104 +143,23 @@ connector probe or quota reservation. Source language is retained; relevance and
 are judged downstream. The historical YouTube `scheduled_used` column remains read-only audit
 data, not a reason to schedule work or reserve quota.
 
----
 ## 🏷️ 4. Release Versioning Principles & SemVer Guardrails
 
-All agents use the **`MAJOR.MINOR.PATCH`** release format. During the current `0.x` beta,
-the owner-approved criterion is user-visible product impact, not implementation size:
-
-```
-v MAJOR . MINOR . PATCH
-    ↑       ↑       ↑
-Major   User-visible   Internal / Fix
-```
-
-### Version Bump Criteria
-
-| Increment Level | When to Bump | Example Transition | Reset Rule |
-|---|---|---|---|
-| **`PATCH`** (`+0.0.1`, tier 3) | Fixes, optimization, refactoring, tests, documentation, and other changes without a material user-visible product change. | `0.7.0` $\rightarrow$ `0.7.1` | None |
-| **`MINOR`** (`+0.1.0`, tier 2) | A clear change to user-facing capabilities or how users operate Ignis. A new migration, dependency, or large refactor alone is not sufficient. | `0.7.0` $\rightarrow$ `0.8.0` | `PATCH` resets to `0` |
-| **`MAJOR`** (`+1.0.0`) | An explicitly owner-approved major/stable product boundary; incompatible public-contract changes after `1.0.0` retain the MAJOR rule. | `0.x.y` $\rightarrow$ `1.0.0` | `MINOR` & `PATCH` reset to `0` |
-
-Owner approved this beta criterion on 2026-10-02. It supersedes the former automatic
-MAJOR-for-breaking rule during `0.x`, not the obligation to disclose removed tools, incompatible
-contracts, or required migration steps. Spec 011's clear change to the user workflow targets
-`v0.8.0`; target approval is not permission to merge, tag, or publish.
-
-### ⛔ Strict Agent Guardrails
-
-1. **NO Speculative or Arbitrary Bumps**: Do NOT bump version numbers for routine single-file bug fixes or daily development tasks. Versions are bumped **ONLY during formal release preparation** on `release/*` or `main`.
-2. **NO Number Skipping**: Never jump versions arbitrarily (e.g. from `0.1.0` directly to `0.5.0` or `1.0.0`). Always increment by strictly `+1` at the appropriate level.
-3. **Atomic Version Synchronization**: Six files carry the version string, not three. When a version bump is performed, the Agent **MUST update every one of them in a single atomic commit**, then tag:
-   - [`pyproject.toml`](pyproject.toml) $\rightarrow$ `version = "X.Y.Z"`
-   - [`openclaw.json`](openclaw.json) $\rightarrow$ `"version": "X.Y.Z"`
-   - [`server.json`](server.json) $\rightarrow$ twice: the manifest version and the package version
-   - [`CITATION.cff`](CITATION.cff) $\rightarrow$ `version: X.Y.Z` and `date-released`
-   - [`.openclaw/config.yaml`](.openclaw/config.yaml) $\rightarrow$ `version: X.Y.Z`
-   - [`BACKLOG.md`](BACKLOG.md) $\rightarrow$ the version banner
-   - Git Tag on `main` $\rightarrow$ `vX.Y.Z`
-
-   The identical list is enforced in Checklist C below. Do not reintroduce the obsolete three-file wording.
-4. **Beta Phase Principle (`0.X.Y`)**: While in initial beta stages (`0.X.Y`), prioritize `PATCH` and `MINOR` increments. Do NOT rush to `1.0.0` until enterprise multi-tenancy and production stability milestones are reached.
-
----
+Versions use `MAJOR.MINOR.PATCH`. During `0.x`, the bump follows user-visible product impact, and a bump happens only during formal release preparation. Read `docs/agents/release-gates.md` before any bump: it holds the criteria and the six release-controlled files.
 
 ## 🗑️ 5. Ephemeral Agent Handoff & Review Protocol
 
-> **MANDATORY RULE FOR TEMPORARY WORKING ARTIFACTS:**
-> Any interim review notes, audit summaries, handoff memos, or scratchpads exchanged between AI agents (Claude Code, Antigravity, OpenAI Codex) **MUST be written exclusively into `.handoff/` (or named `*.handoff.md` / `*.ephemeral.md`)**.
+> Advisory (agent judgment). Any interim review notes, audit summaries, handoff memos, or scratchpads exchanged between AI agents (Claude Code, Antigravity, OpenAI Codex) belong in `.handoff/` (or named `*.handoff.md` / `*.ephemeral.md`).
 >
 > - **DO NOT** create temporary audit or review files directly inside `docs/` or project root.
 > - `docs/` is reserved **strictly for permanent product documentation** (e.g. `USER_GUIDE.md`, architecture manuals).
 > - `.handoff/` is 100% ignored by Git and will be purged periodically without affecting repository history.
 
----
-
 ## 🛡️ 6. Pre-Flight & Operational Release Checklists
 
-Every AI Agent modifying this repository or preparing a release must verify compliance against these three mandatory checklists:
+Before completing a change, `.venv/bin/pytest tests/unit/test_repo_conventions.py` passes. Read `docs/agents/release-gates.md` for Checklists A, B, and C before cutting a release.
 
-### Checklist A: Open-Source Codebase & Documentation Standards
-- [ ] **Global Codebase Convention**: All source code (`src/`), test suites (`tests/`), variable/function names, docstrings, inline comments, assert messages, log lines, and strings emitted by the code follow standard English (see the Language Boundary Protocol table in Section 3).
-- [ ] **No Hardcoded Vocabulary**: No new domain terms, synonyms, intent keywords, noise phrases, or category keywords added as Python constants in `src/` (see the Data-Driven Vocabulary Protocol in Section 3).
-- [ ] **Convention Gate**: `.venv/bin/pytest tests/unit/test_repo_conventions.py` passes.
-- [ ] **Developer Meta-Guidance**: Core developer instructions (`AGENTS.md`, `CLAUDE.md`, skills) are maintained in English.
-- [ ] **Git Commits & Branching**: 100% English imperative commit messages (e.g., `Add`, `Fix`, `Refactor`, `Update`).
-- [ ] **Regional Documentation**: Dedicated localized documentation (such as `README.vi.md`) and market dossiers in `reports/` are accurately maintained for regional audiences.
-
-### Checklist B: Harness Autonomy & Non-Prescriptive Decoupling
-- [ ] **Non-Prescriptive Instructions**: Verify FastMCP server instructions and tool docstrings do NOT coerce agents into forced pipelines (no "MUST STRICTLY FOLLOW").
 - [ ] **Atomic Independence**: Ensure all 53 FastMCP tools are independently callable within their authority and evidence contracts.
-- [ ] **Framework Separation**: The strategic research recipe is a reference, never a forced pipeline for tactical collection.
-- [ ] **Contextual Deliverables**: Deliverables match user intent (concise text, cards, tables, or full HTML dashboards) without forcing boilerplate templates for trivial queries.
-
-### Checklist C: Formal Release & Version Bump Gate
-- [ ] **Automated Test Gate**: Run `.venv/bin/pytest tests/unit/` (or `uv run pytest`) with 100% pass rate before committing release changes.
-- [ ] **Docs & Specs Sync**: Verify `docs/` (e.g., `USER_GUIDE.md`, architecture specs) and tool catalogs (`README.md`, `README.vi.md`) are fully updated with newly introduced tools, parameters, or schemas.
-- [ ] **Clean Working Tree**: Verify no uncommitted scratchpads, no leaked credentials/`.env`, and no temporary audit notes placed in `docs/` (strictly `.handoff/`).
-- [ ] **Branch Merge to Main**: Ensure the feature or maintenance branch is fully merged into `main` before tagging.
-- [ ] **Packaging Verification**: Run distribution build check (`python -m build` or `uv build`) to verify clean package artifacts without missing assets.
-- [ ] **Atomic Version Synchronization**: Six files carry the version string, not three. Update every one of them in a single atomic commit, then tag:
-  - `pyproject.toml` (`version = "X.Y.Z"`)
-  - `openclaw.json` (`"version": "X.Y.Z"`)
-  - `server.json` (twice: the manifest version and the package version)
-  - `CITATION.cff` (`version: X.Y.Z`)
-  - `.openclaw/config.yaml` (`version: X.Y.Z`)
-  - `BACKLOG.md` (the version banner)
-  - Git Tag (`vX.Y.Z`) on `main`
-  - Verify with `grep -rn "<previous version>" --include="*.toml" --include="*.json" --include="*.yaml" --include="*.cff" --include="*.md" .` returning nothing
-- [ ] **Regenerate `uv.lock` in that same commit.** The lock records the project's own version,
-  so bumping `pyproject.toml` without running `uv lock` makes `uv sync --locked` fail on a clean
-  checkout and takes CI down with it. Run `uv lock`; never hand-edit the file. Confirm with
-  `uv lock --check`.
-- [ ] **GitHub Release Tagging**: Tag and push release commit (`git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push origin vX.Y.Z`) and publish the GitHub Release note.
-- [ ] **SemVer Guardrail**: Increment strictly by `+1` (`PATCH`, `MINOR`, `MAJOR`) according to Section 4 criteria. Never jump versions arbitrarily.
-
-
-
-
----
 
 ## 📁 7. Artifact Output vs. Committed Samples
 
@@ -319,22 +167,15 @@ Every AI Agent modifying this repository or preparing a release must verify comp
 - `examples/case-studies/` holds the **curated sample dossiers** that documentation links to. `scripts/generate_sample_case_studies.py` writes there on purpose.
 - HTML **templates** live in `src/ignis/infrastructure/templates/html/` and are the only report source committed as code.
 
----
-
 ## ⚖️ 8. Decision Boundaries & Decision Records
 
 These boundaries hold for every contributor. Where the `noulmes` skill is installed, an agent applies them with its decision check (`jev.py check`) before acting and its gate (`jev.py gate`) before asking the owner.
 
 **The owner decides these; an agent asks before acting:**
-- An agent asks the owner before a migration transforms persisted evidence (Constitution VI),
-  unless the operation is covered by the explicit fn-ignis development authorization below.
+- An agent asks the owner before a migration transforms persisted evidence (Constitution VI).
 - An agent asks the owner before a version bump, a tag, or a release (Section 4).
 - An agent asks the owner before changing or removing an MCP tool's signature.
 - An agent asks the owner before moving a connector between the HTTP and browser tiers.
-- The owner preauthorized in-scope development operations on the fn-ignis Supabase project
-  `jxbysxsovxjglgkgkkfu` on 2026-10-02. Apply, test, and verify dev database changes without
-  repeated permission requests; preserve recovery evidence before destructive data operations.
-  This delegation covers neither other databases nor release or real social-session authority.
 - An agent asks the owner before using a real TikTok, Threads, or Instagram session or token.
 
 **The agent decides these alone and records the decision:** vocabulary seeded in `sql/`, test fixtures, internal refactors that keep every contract, `.handoff/` notes, and thresholds in a local SQLite `runtime_configs`.
@@ -346,3 +187,13 @@ These boundaries hold for every contributor. Where the `noulmes` skill is instal
 - An agent records a decision in a spec's `## Clarifications` only when the task belongs to that spec, even when `.specify/feature.json` names that spec; `feature.json` can still name a finished spec.
 - A decision that belongs to no spec is recorded as a dated note tagged `fn-ignis` in the first folder of `NOULMES_DECISIONS` when it is set, and is otherwise reported as unrecorded.
 - `docs/decisions/` holds architecture and product ADRs. An agent drafts an ADR as `Proposed`, and the owner sets its status.
+
+## 9. Delivery Practices
+
+Read `docs/agents/delivery-practices.md` before substantial implementation, a TypeSafe judgment, or a material status report.
+
+Session naming: when starting or switching a task, rename the session with the host's title tool. Titles start with `IGN`: `IGN <task ID> — <short description>`, or `IGN <concise action-oriented description>` without a task ID. Advisory (agent judgment).
+
+## Agent skills
+
+This repository uses the finolabs-vibecode skills. Routing on: use `fnl-coding-router`. Use Spec Kit. Pull requests follow `fnl-review-gate` "Pull requests"; reviewers may post code/security reviews. Help: `/fnl-ask`.
