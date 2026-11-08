@@ -20,9 +20,13 @@ từ `specs/*/tasks.md` ngày 09/11/2026; từ `v0.9.0` (28/10) `main` chỉ nh�
 
 ### Có task cụ thể, chưa nghiệm thu
 
-- [ ] **Spec 014 — 3 task còn lại (113/116):** T079 follow-up thật có giới hạn, T112 theo dõi mission thật từ
-  Claude Code, T113 bảng nghiệm thu FR/SC. T079 và T112 cần chủ sở hữu cho phép dùng session mạng xã hội thật;
-  T113 phụ thuộc hai task đó. T082, T084, T087 đóng 09/11/2026 (T087 có giới hạn: Python 3.11 chưa chạy full unit).
+- [ ] **Spec 014 — 2 task còn lại (114/116):** T079 follow-up thật và T113 bảng nghiệm thu FR/SC (phụ thuộc T079).
+  T079 không chạy được qua MCP hiện tại: production không có activation factory cho follow-up, không có đường công khai ghi
+  gap/budget, và cần Market parent trên YouTube (`server.py` lifespan, `follow_up_caller_activation.py:1-5`). Cần chủ sở hữu
+  quyết: dựng trusted root có review kèm API key, hay rút T079 khỏi phạm vi. T082, T084, T087, T112 đã đóng 09/11/2026.
+- [ ] **TikTok trên profile Finos bị fail-closed:** giao diện không phải tiếng Việt nên không có template attribution; mọi
+  bản ghi bị loại. Cần đổi ngôn ngữ giao diện của profile hoặc seed locale đó từ chữ thật TikTok hiển thị.
+- [ ] **Snapshot chưa chọn run hiển thị channel là "chưa đo"** dù outcome đã ghi (phát hiện ở T112).
 - [ ] **Spec 017 — T006** nghiệm thu Claude Code Desktop theo `quickstart.md`; **T008** chạy một routine thật
   14 ngày liên tiếp trên một watchlist golden set (có thể báo cáo riêng, không đặt ngưỡng). `spec.md` vẫn ghi
   `Draft` dù 6/8 task xong; cần đồng bộ.
