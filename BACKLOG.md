@@ -20,10 +20,9 @@ từ `specs/*/tasks.md` ngày 09/11/2026; từ `v0.9.0` (28/10) `main` chỉ nh�
 
 ### Có task cụ thể, chưa nghiệm thu
 
-- [ ] **Spec 014 — 6 task còn lại (110/116):** T079 follow-up thật có giới hạn, T082 race/interrupt vòng đời,
-  T084 rehearsal schema và parity hai backend, T087 regression đầy đủ, T112 theo dõi mission thật từ
-  Claude Code, T113 bảng nghiệm thu FR/SC. T112 và T079 cần mission thật dưới quyền hiện hành.
-  T113 phụ thuộc T079, T082, T084, T087, T098 và T111–T112.
+- [ ] **Spec 014 — 3 task còn lại (113/116):** T079 follow-up thật có giới hạn, T112 theo dõi mission thật từ
+  Claude Code, T113 bảng nghiệm thu FR/SC. T079 và T112 cần chủ sở hữu cho phép dùng session mạng xã hội thật;
+  T113 phụ thuộc hai task đó. T082, T084, T087 đóng 09/11/2026 (T087 có giới hạn: Python 3.11 chưa chạy full unit).
 - [ ] **Spec 017 — T006** nghiệm thu Claude Code Desktop theo `quickstart.md`; **T008** chạy một routine thật
   14 ngày liên tiếp trên một watchlist golden set (có thể báo cáo riêng, không đặt ngưỡng). `spec.md` vẫn ghi
   `Draft` dù 6/8 task xong; cần đồng bộ.
@@ -33,8 +32,8 @@ từ `specs/*/tasks.md` ngày 09/11/2026; từ `v0.9.0` (28/10) `main` chỉ nh�
 
 ### Việc của người vận hành
 
-- [ ] `claude_desktop_config.json` còn giá trị cũ (kiểm lần cuối 13/09/2026; xem mục chi tiết trong phần
-  Source identity). Cần đọc lại config thật trước khi đóng.
+- [x] `claude_desktop_config.json` còn giá trị cũ — đóng 09/11/2026: file hiện không còn entry `fn-ignis` nào
+  (chỉ đọc tên server, không đọc giá trị).
 
 ### Quyết định 09/11/2026 — chế độ Market verdict tiếp tục đóng băng
 
@@ -62,14 +61,16 @@ Nợ nhỏ giữ nguyên, sửa khi chạm tới, không lên lịch:
 - [ ] `son`/`kem` mơ hồ trong taxonomy `beauty`.
 - [ ] `_contiguous_phrase` chỉ đọc `canonical_name` (nhãn xuất hiện trong báo cáo Attention).
 
-Chưa kiểm, chưa đóng, cần đọc code hoặc dữ liệu trước khi xếp:
+Đóng sau khi kiểm code 09/11/2026:
 
-- [ ] `first_seen_at` của cluster cũ chưa đo — chưa biết có ai đọc cột này không.
-- [ ] Taxonomy chưa phủ vertical ngoài thị trường (tin tức, thể thao, người nổi tiếng, wellness).
-- [ ] Discovery source Google Trends là tin tức — chưa kiểm discovery hai tầng còn tồn tại không.
+- [x] `first_seen_at` của cluster cũ — ngoài tầng persistence không có chỗ nào đọc trường này, nên giá trị cũ
+  không ảnh hưởng kết quả nào. Không cần đo.
+- [x] Discovery source Google Trends là tin tức — superseded: `fetch_from_all` chỉ được gọi từ
+  `IngestTrendsUseCase`, và `ingest_use_case` được dựng ở `server.py:918` nhưng không tool nào gọi. Đường discovery
+  đã chết; mã thừa còn đó, chưa dọn.
 
 Đã chuyển sang parking lot ("Market verdict — đóng băng"): supply score không phân biệt "không có dữ liệu"
-với "không ai xem".
+với "không ai xem"; taxonomy chưa phủ vertical ngoài thị trường.
 
 ---
 
@@ -331,13 +332,13 @@ video YouTube chứa nguyên văn keyword đó ở bất kỳ đâu trong corpus
   đổi, cả hai ca đó về `unclassified`, và các cluster đúng đều giữ nguyên.
 - [ ] **`son` và `kem` trong taxonomy `beauty` mơ hồ khi mất dấu** (sơn/son, kém/kem). Luật đối
   chứng đã vô hiệu hoá tác hại của chúng, nên không còn gấp. Nợ có sẵn từ seed gốc.
-- [ ] **Taxonomy chưa phủ các vertical ngoài thị trường:** tin tức, thể thao, người nổi tiếng,
+- [~] **(Parking lot 09/11/2026) Taxonomy chưa phủ các vertical ngoài thị trường:** tin tức, thể thao, người nổi tiếng,
   sức khoẻ/wellness vẫn rơi vào `unclassified`. Đây là **câu hỏi phạm vi sản phẩm**, không phải
   bug: một harness về cơ hội thị trường có nên theo dõi bóng đá không? Chờ Fio quyết.
 - [x] **BREAKOUT đã với tới được (cập nhật 10/09/2026):** 5 cluster đạt `cross_platform_score
   >= 80`, và lượt pass đủ 6 connector ngày 09/09 tạo ra 2 cluster trải 4 nền tảng. Trước đó
   tối đa là 3. Ghi chú cũ nói chưa cluster nào đạt đã sai từ khi ingress hai tầng chạy thật.
-- [ ] **Discovery source chưa đúng mục đích sản phẩm:** feed trending VN của Google Trends là tin
+- [x] **(Superseded 09/11/2026, xem "Việc đang mở") Discovery source chưa đúng mục đích sản phẩm:** feed trending VN của Google Trends là tin
   tức tổng hợp (bóng đá, thời sự), nên ghép chủ đề theo nó cho ra corpus tin tức chứ không phải
   corpus cơ hội thị trường. Phần liên quan đến thị trường hiện chỉ đến từ seed lexicon.
 
@@ -632,7 +633,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   Dòng có từ trước cột này **không phục dựng được** target thật — selection chưa từng được ghi —
   nên chúng nhận default năm platform để giữ đúng hành vi cũ; đây là **assumption của migration,
   không phải bằng chứng lịch sử**. Postgres không phải đổi, chỉ chạy thêm contract parity.
-- [ ] **Chưa đo: `first_seen_at` đã lưu của các cluster cũ (mở 11/09/2026).** Bản sửa nullable-clock
+- [x] **(Đóng 09/11/2026: không có chỗ đọc ngoài persistence) Chưa đo: `first_seen_at` đã lưu của các cluster cũ (mở 11/09/2026).** Bản sửa nullable-clock
   chỉ áp cho cluster **mới tính**; nó không sửa giá trị đã nằm trong `topic_clusters`, và cả hai
   upsert đều không cập nhật `first_seen_at` khi cluster đã tồn tại. Nghĩa là một cluster từng được
   tính bằng `min()` trên publish-time clock sẽ giữ nguyên giá trị đó vô thời hạn. Baseline **không**
@@ -897,7 +898,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   tình cờ khởi động server sẽ ghi đè `.env` của project. Một decoy dựng lên để chứng minh: thứ tự cũ
   cho decoy thắng, thứ tự mới cho project thắng. Có test giữ đúng thứ tự vì lỗi này im lặng, chỉ
   sai giá trị chứ không báo gì.
-- [ ] **Việc của người vận hành: `claude_desktop_config.json` vẫn còn giá trị cũ.** Kiểm lại
+- [x] **(Đóng 09/11/2026: không còn entry `fn-ignis`) Việc của người vận hành: `claude_desktop_config.json` vẫn còn giá trị cũ.** Kiểm lại
   13/09/2026: entry global vẫn mang trực tiếp bốn biến môi trường thay vì một đường dẫn, trong
   khi `.mcp.json` đã chỉ còn `IGNIS_ENV_FILE`. Claude Desktop giữ config trong memory và ghi đè external edit khi thoát, nên
   thứ tự đúng là: **quit Claude Desktop trước**, chạy `./scripts/bootstrap.sh` (hoặc
@@ -1463,6 +1464,8 @@ tưởng, nhưng không được tính là việc đang mở cho tới khi một
   (`strategic_reasoner.py`), nên signal thiếu metric bị tính như video 0 view. Chạm 2,1% signal sau khi sửa race.
   Đúng cách: ghi cờ trong metadata khi rơi về DOM và cho supply bỏ qua signal đó. Có thể bị thay hẳn nếu Spec 019
   đi tiếp, nên đừng sửa trước khi quyết công thức.
+- **Taxonomy chưa phủ vertical ngoài thị trường** (tin tức, thể thao, người nổi tiếng, wellness): đường watchlist
+  không dùng phân loại ngành, nên chỉ đáng làm khi Market mở lại.
 
 #### Epic 3: Live Alerts & Notification Webhooks
 *Mục tiêu: Đẩy thông báo chủ động cho người dùng khi xu hướng bùng nổ.*

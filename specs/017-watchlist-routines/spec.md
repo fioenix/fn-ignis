@@ -4,7 +4,8 @@
 
 **Created**: 2026-10-21
 
-**Status**: Draft
+**Status**: Implemented and merged (6/8 tasks, read 09/11/2026). Open: T006 Claude Code Desktop
+acceptance and T008 the 14-day routine measurement, both of which need the owner.
 
 **Input**: The owner's accepted decision record
 [`docs/decisions/2026-10-21-listening-first-product-direction.md`](../../docs/decisions/2026-10-21-listening-first-product-direction.md)
