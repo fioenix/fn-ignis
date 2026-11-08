@@ -36,18 +36,40 @@ từ `specs/*/tasks.md` ngày 09/11/2026; từ `v0.9.0` (28/10) `main` chỉ nh�
 - [ ] `claude_desktop_config.json` còn giá trị cũ (kiểm lần cuối 13/09/2026; xem mục chi tiết trong phần
   Source identity). Cần đọc lại config thật trước khi đóng.
 
-### Chờ chủ sở hữu quyết — chưa đóng, chưa di chuyển
+### Quyết định 09/11/2026 — chế độ Market verdict tiếp tục đóng băng
 
-Các mục thuộc đường corpus/cluster từ tháng 9, trước hướng listening-first và bỏ discovery hằng ngày.
-Đề xuất của phiên rà soát: đóng "superseded" hoặc hạ xuống parking lot, nhưng chưa xác minh đường cluster
-còn được gọi trong luồng mission hiện tại hay không.
+Chủ sở hữu đồng ý (09/11/2026): chế độ Market verdict giữ trạng thái đóng băng, không rã đông trong kế hoạch
+gần. Căn cứ: pilot Việt Nam và UAT mission thật chưa chạy nên chưa có bằng chứng verdict có giá trị; thứ tự
+ưu tiên 21/10 không đặt verdict ở phía trước; chưa có production. Lập luận phụ, chưa kiểm: nếu Spec 019 đi tiếp,
+dữ liệu cung của Shopee có thể thay công thức supply score dựa trên view.
 
-- [ ] Taxonomy chưa phủ vertical ngoài thị trường (tin tức, thể thao, người nổi tiếng, wellness) — "Còn lại" của Epic 0.
-- [ ] Discovery source Google Trends là tin tức — "Còn lại" của Epic 0.
+Đối tượng (chủ sở hữu nhắc lại 09/11/2026; đã có trong `AGENTS.md` và quyết định 21/10): cá nhân nghiên cứu thị
+trường để bán hàng và founder mới mở bán, chưa có đủ tài khoản nền tảng để cấu hình; chỉ kéo được nguồn công khai
+hoặc gián tiếp qua tài khoản cá nhân TikTok, Threads, Instagram, Reels, Shopee, YouTube. Hệ quả: đóng băng là
+thứ tự làm, không phải bỏ mục tiêu — câu "bán hay không" chính là việc của nhóm này, nên chế độ verdict sẽ phải
+mở lại; API dành cho nhà bán vẫn xếp "mở rộng sau".
+
+Kiểm code cùng ngày: cluster **không** legacy toàn phần. Phần lineage `cluster_id` / `parent_cluster_id`
+(Attention → Market, `create_market_revision.py`) và clustering trong `execute_mission.py` đang sống; phần
+nhãn và supply score chỉ còn phục vụ các tool Market đã đăng ký (`discover_market_opportunities`,
+`generate_mission_artifact`, nhánh qualification của `get_mission_analysis`). Đường watchlist không dùng cluster.
+
+**Điều kiện mở lại** (một trong hai): (a) pilot Việt Nam hoặc một mission Market thật chạy xong và có người cần
+verdict mà listening không trả lời được; (b) Spec 019 qua ba cổng tài khoản, đủ dữ liệu cầu và cung.
+
+Nợ nhỏ giữ nguyên, sửa khi chạm tới, không lên lịch:
+
 - [ ] `son`/`kem` mơ hồ trong taxonomy `beauty`.
-- [ ] `first_seen_at` của cluster cũ chưa đo.
-- [ ] Supply score không phân biệt "không có dữ liệu" với "không ai xem".
-- [ ] `_contiguous_phrase` chỉ đọc `canonical_name`.
+- [ ] `_contiguous_phrase` chỉ đọc `canonical_name` (nhãn xuất hiện trong báo cáo Attention).
+
+Chưa kiểm, chưa đóng, cần đọc code hoặc dữ liệu trước khi xếp:
+
+- [ ] `first_seen_at` của cluster cũ chưa đo — chưa biết có ai đọc cột này không.
+- [ ] Taxonomy chưa phủ vertical ngoài thị trường (tin tức, thể thao, người nổi tiếng, wellness).
+- [ ] Discovery source Google Trends là tin tức — chưa kiểm discovery hai tầng còn tồn tại không.
+
+Đã chuyển sang parking lot ("Market verdict — đóng băng"): supply score không phân biệt "không có dữ liệu"
+với "không ai xem".
 
 ---
 
@@ -248,7 +270,10 @@ Các thay đổi này chưa commit/merge hoặc phát hành.
   thực nghiệm; không có kết quả thì không tuyên bố Ignis vượt trội. Mục này chưa cho phép
   sử dụng tài khoản, session hoặc quota có phí ngoài phạm vi đã duyệt.
 
-## 0. Chất Lượng Corpus (Epic Đang Mở)
+## 0. Chất lượng cụm (Attention/Market)
+
+> Đổi tên 09/11/2026. Phần dưới là kết quả đo corpus tháng 9, trước hướng listening-first; việc còn mở và
+> quyết định liên quan nằm ở mục "Việc đang mở" đầu file, không đọc "Còn lại" dưới đây như danh sách việc hiện hành.
 
 Đo trực tiếp trên Postgres ngày 09/09/2026. Bản đo chi tiết giữ ngoài repository.
 
@@ -994,7 +1019,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   (đúng mô tả, sai nguyên nhân); kết luận "card chưa render" trong khi probe đọc `card` còn
   parser đọc `parent`, tức **đo sai element**; và tưởng `views=0` là đặc tính đường search trong
   khi 197/201 row lịch sử có metric.
-- [ ] **Còn lại: supply score không phân biệt "không có dữ liệu" với "không ai xem".**
+- [~] **Đã chuyển sang parking lot "Market verdict — đóng băng" (09/11/2026): supply score không phân biệt "không có dữ liệu" với "không ai xem".**
   `view_factor = 0.0 if loc_views == 0`, nên một signal thiếu metric bị tính như một video 0 view.
   Sau khi sửa race thì chỉ còn 2,1% signal rơi vào diện này, nên không gấp. Sửa đúng cách là ghi
   một cờ trong metadata khi rơi về DOM và cho supply bỏ qua signal đó thay vì coi là 0.
@@ -1431,6 +1456,13 @@ Finos chưa kết nối, routine bỏ qua bước TikTok.
 
 Các mục dưới đây chưa có measurement, decision hay release target. Chúng được giữ để không mất ý
 tưởng, nhưng không được tính là việc đang mở cho tới khi một outcome cụ thể được ưu tiên.
+
+#### Market verdict — đóng băng (quyết định 09/11/2026)
+*Điều kiện mở lại ghi ở mục "Việc đang mở"; nếu chưa thỏa thì không lên lịch.*
+- **Supply score phân biệt "không có dữ liệu" với "không ai xem":** `view_factor = 0.0` khi `loc_views == 0`
+  (`strategic_reasoner.py`), nên signal thiếu metric bị tính như video 0 view. Chạm 2,1% signal sau khi sửa race.
+  Đúng cách: ghi cờ trong metadata khi rơi về DOM và cho supply bỏ qua signal đó. Có thể bị thay hẳn nếu Spec 019
+  đi tiếp, nên đừng sửa trước khi quyết công thức.
 
 #### Epic 3: Live Alerts & Notification Webhooks
 *Mục tiêu: Đẩy thông báo chủ động cho người dùng khi xu hướng bùng nổ.*
