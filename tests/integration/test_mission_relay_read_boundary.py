@@ -924,7 +924,7 @@ async def test_postgres_reader_borrows_identity_without_opening_or_initializing_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("relay_case", ("postgres",), indirect=True)
 async def test_postgres_selected_journal_outcomes_do_not_use_newer_same_mission_run(relay_case, monkeypatch):
-    """Native PostgreSQL run outcomes retain the exact selected run, including explicit null."""
+    """Native PostgreSQL outcomes follow the selected run; with none selected, the latest run."""
     case, missions, runs = relay_case
     mission, newer = missions[0], uuid4()
     await case.repository.record_run_journal(RunJournal(
@@ -946,7 +946,8 @@ async def test_postgres_selected_journal_outcomes_do_not_use_newer_same_mission_
     assert selected.evidence.outcomes[0].run_id == runs[0] and selected.evidence.outcomes[0].signals_collected == 3
     unspecified = await reader.load_snapshot(_request(mission, None))
     assert type(unspecified) is MissionRelayRead and unspecified.run is None
-    assert unspecified.evidence.outcomes == () and unspecified.high_water.position == (2, 1)
+    assert [outcome.run_id for outcome in unspecified.evidence.outcomes] == [newer]
+    assert unspecified.high_water.position == (2, 1)
     assert _state(case) == before
 
 
@@ -1657,7 +1658,7 @@ async def test_selected_outcome_run_preserves_full_same_mission_event_stream(rel
     before = _state(case)
     reader = _reader(repository)
     _setup_traps(monkeypatch, repository)
-    for selected, expected_outcome_runs in ((None, ()), (runs[0], (runs[0],)), (later_run, (later_run,))):
+    for selected, expected_outcome_runs in ((None, (later_run,)), (runs[0], (runs[0],)), (later_run, (later_run,))):
         result = await reader.load_snapshot(_request(mission, selected))
         assert type(result) is MissionRelayRead
         assert result.high_water.position == (2, 1)

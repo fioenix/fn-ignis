@@ -16,7 +16,7 @@
 ## Việc đang mở — đọc lại 09/11/2026
 
 Mục này là các việc đang được chọn làm tính đến 09/11/2026; các phần bên dưới là lịch sử và bối cảnh. Spec 011, 012 và 013
-vẫn giữ ledger riêng; đã rà ngày 09/11/2026 và ghi trạng thái từng dòng. Còn lại ở các spec đó là việc của chủ sở hữu: pilot 011 và quyết định baseline. Trạng thái Spec 014 và 017 lấy từ `tasks.md` cùng ngày; từ `v0.9.0` (28/10) `main` chỉ nhận hai bản nâng dependabot (#105, #106).
+vẫn giữ ledger riêng; đã rà ngày 09/11/2026 và ghi trạng thái từng dòng. Còn lại ở các spec đó: pilot 011 và quyết định baseline của chủ sở hữu, và kiểm tra hình ảnh báo cáo Market của Spec 013 T018, T022. Trạng thái Spec 014 và 017 lấy từ `tasks.md` cùng ngày; từ `v0.9.0` (28/10) `main` chỉ nhận hai bản nâng dependabot (#105, #106).
 
 ### Có task cụ thể, chưa nghiệm thu
 
