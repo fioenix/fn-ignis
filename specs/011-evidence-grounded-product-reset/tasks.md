@@ -9,6 +9,10 @@ description: "Dependency-ordered implementation tasks for the evidence-grounded 
 
 **Prerequisites**: `plan.md`, `spec.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`
 
+**Current status — 2026-11-09**: Implemented and released in `v0.8.0`. T085–T090 are parked with the
+frozen Market verdict and T092–T098 are closed; each line states how. Gate and dependency notes below
+that present those tasks as open are historical.
+
 **Tests**: Required. Every behavior change follows RED → GREEN, including SQLite/PostgreSQL parity,
 public MCP inventory, deterministic artifact, clean-bootstrap, and fail-closed negative controls.
 
@@ -302,7 +306,7 @@ separate implementation completion from owner-authorized migration, release, and
   erase a needed consumer.
 - **Phase 8** depends on the locally complete US1–US5 implementation. T085 blocks only pilots that
   use real restricted sessions. T095 blocks migration application, deletion, versioning, tagging,
-  pushing, and release.
+  pushing, and release. (Historical: T095 was retired on 2026-11-09.)
 
 ### User Story Dependency Graph
 

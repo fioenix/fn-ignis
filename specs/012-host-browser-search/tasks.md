@@ -2,6 +2,9 @@
 
 **Input**: Approved spec.md, plan.md, research.md, data-model.md and contracts/.
 **Execution**: Inline, test-first. Keep existing owner edits. No release or DB mutation authorized.
+**Current status — 2026-11-09**: Implemented and released in `v0.8.0`; no open tasks. The 2026-10-04
+reconciliation and the status notes below are historical. The retired process tasks keep their red
+order unproven.
 **Latest reconciliation — 2026-10-04**: Behavioral implementation and actual bounded UAT are verified
 against the final runtime; shipping is not. Initial RED ordering for T004/T006/T007 and the
 before-extraction chronology of T020/T022 are not established by retained evidence reviewed here.

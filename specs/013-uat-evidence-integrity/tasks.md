@@ -3,7 +3,7 @@
 **Input**: spec.md, plan.md, research.md, data-model.md and contracts/query-proof-and-uat.md.
 **Organization**: Independent user stories; observed RED→GREEN required for each production fix. No checked task implies shipping.
 
-**Owner disposition — 2026-10-04**: Goal 1 accepted for PR/merge before Goal 2 with documented historical test-first-order and unavailable independent pixel-proof exceptions. T006/T018/the visual portion of T022 remain unchecked as technical observations, not PO integration blockers. See uat-ledger.md. T027 source integration is verified below; post-merge CI is separately tracked and no release is implied.
+**Owner disposition — 2026-10-04**: Goal 1 accepted for PR/merge before Goal 2 with documented historical test-first-order and unavailable independent pixel-proof exceptions. T006/T018/the visual portion of T022 remain unchecked as technical observations, not PO integration blockers. See uat-ledger.md. T027 source integration is verified below; post-merge CI is separately tracked and no release is implied. **Update 2026-11-09**: T006, T018 and T022 are now retired; each line states how, and the Market report pixels stay uninspected.
 
 ## Phase 1: Setup
 

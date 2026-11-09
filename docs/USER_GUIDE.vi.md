@@ -273,8 +273,8 @@ Image v0.8.0 không có hợp đồng thu thập qua trình duyệt host của v
 Chưa công bố cách cài qua PyPI. Chạy `.venv/bin/pytest tests/` (đúng phạm vi CI; các ca kiểm thử PostgreSQL bị bỏ qua nếu
 `IGNIS_TEST_POSTGRES_DSN` không trỏ tới một database kiểm thử dùng một lần) và `uv lock --check`
 để kiểm tra cục bộ. Bộ kiểm thử tự thay credential bằng giá trị trơ; nếu muốn tách hẳn khỏi
-`.env` của checkout, dùng [cách cô lập cấu hình](../specs/014-evidence-factory/quickstart.md#isolated-settings). Xem [danh sách việc của Spec 011](../specs/011-evidence-grounded-product-reset/tasks.md)
-cho các cổng PostgreSQL, pilot, tích hợp và phát hành cần chủ sở hữu quyết định. Các cổng còn mở
+`.env` của checkout, dùng [cách cô lập cấu hình](../specs/014-evidence-factory/quickstart.md#isolated-settings). [Danh sách việc của Spec 011](../specs/011-evidence-grounded-product-reset/tasks.md)
+ghi các pilot đang đóng băng cùng chế độ Market verdict. Các yêu cầu chưa đạt
 của Mission Relay, công việc nghiên cứu và bổ sung chứng cứ nằm trong
 [danh sách việc của Spec 014](../specs/014-evidence-factory/tasks.md).
 ### Tìm kiếm TikTok và Threads qua trình duyệt host
