@@ -649,6 +649,8 @@ PostgreSQL (`timescale/timescaledb-ha:pg16`, trust auth, no credentials):
   opens, guest/hyphenated TikTok video paths canonicalised). Coordinator rerun: 711 passed, 93
   skipped (PostgreSQL DSN absent); ruff and diff checks clean. Live browser behaviour unverified:
   Reels `/api/v1/tags/web_info/` binding and TikTok comment redirect containment.
+- [X] T059 Replace per-locale TikTok name removal with `tiktok-public-grid-v3`, which keeps only the caption element and the hashtags after it in any interface language, owner-approved 09/11/2026 (`research.md` R15). Acceptance: the poster's name is never read or sent; a missing, duplicate, hidden or mismatched caption drops the record; hashtags are kept; interface language no longer gates records
+- [X] T060 Open TikTok host-browser searches on `/search/video` and reject answers from any other path, owner-approved 09/11/2026 (`research.md` R16)
 
 ## Dependencies and execution order
 

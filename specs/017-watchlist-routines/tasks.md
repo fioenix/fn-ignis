@@ -52,16 +52,20 @@ before T002 if any is missing.
 - [x] T005 [P] Document routines in README.md, README.vi.md, docs/USER_GUIDE.md and
   docs/USER_GUIDE.vi.md; Vietnamese through the vietnamizer core workflow.
   Done 22/10/2026: README.md, README.vi.md and both user guides; Vietnamese through the vietnamizer core workflow.
-- [ ] T006 Run the Claude Code Desktop acceptance in [quickstart.md](quickstart.md) and record it in
+- [x] T006 Run the Claude Code Desktop acceptance in [quickstart.md](quickstart.md) and record it in
   `.handoff/spec017/acceptance.handoff.md` (SC-001, SC-002, SC-003).
+  Done 23/10/2026, closed by the owner 09/11/2026: SC-001, SC-002 and SC-003 passed. Not exercised: removal after
+  confirmation (FR-008), and the guide's creation path as changed after 23/10/2026.
 - [x] T007 Run the full suite, ruff, `git diff --check`, the package build and
   `scripts/wheel_mcp_smoke.py`; code and security review of the diff; dispose of findings with
   evidence before the PR.
   Done 22/10/2026 at the branch head: unit 2810 passed, integration on SQLite 1566 passed (PostgreSQL in CI); ruff and `git diff --check` clean; `uv lock --check` resolves; the built wheel ships `guides/ignis_routine.md` and `scripts/wheel_mcp_smoke.py` holds a session with 52 tools. Self-review of the diff: no tool or signature change, serving reads nothing, no credential or author field in the guide; the routine prompt names the watchlist the person wrote, which is their own text.
-- [ ] T008 After activation, keep one real routine running on one golden-set watchlist for 14
+- [~] T008 After activation, keep one real routine running on one golden-set watchlist for 14
   consecutive days and record the share of days with a completed run (SC-005) in
   `.handoff/spec017/routine-14-days.handoff.md`. The feature may merge before this finishes; the
   measurement is reported separately and sets no target.
+  **Parked 2026-11-09 (owner)**: not measured. The routine is not set up again only to fill this measurement; see
+  Clarifications, Session 2026-11-09.
 
 ## Dependencies
 

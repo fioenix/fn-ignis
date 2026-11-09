@@ -124,7 +124,7 @@ Disposition of open R1 tasks for `speckit-tasks`:
 
 | R1 task | R2 disposition |
 |---|---|
-| T079 real follow-up UAT | Keep; evidence is the tracking artifact instead of the viewer. |
+| T079 real follow-up UAT | Keep; evidence is the tracking artifact instead of the viewer. Retired by the owner on 2026-11-09. |
 | T081 end-to-end security | Narrow to snapshot and artifact surfaces: cross-mission and child scope, masking, bounds, publication consent. Drop Host/Origin/CSP/browser cases. |
 | T082 lifecycle races | Keep. |
 | T083 desktop FPS | Drop. |

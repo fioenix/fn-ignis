@@ -82,10 +82,11 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
         raise ValueError("Every approved query requires exactly one answer")
     observations, outcomes = [], []
     origin = "www.threads.com" if request.source == "threads" else "www.tiktok.com"
+    search_path = "/search" if request.source == "threads" else "/search/video"
     for item in answer.answers:
         query = expected[item.query_id]
         page = urlsplit(item.page_url)
-        if (page.scheme != "https" or page.netloc != origin or page.path != "/search" or page.fragment
+        if (page.scheme != "https" or page.netloc != origin or page.path != search_path or page.fragment
                 or parse_qs(page.query, keep_blank_values=True) != {"q": [query.query]} or item.query != query.query):
             raise ValueError("Search page does not match the approved query")
         if request.source == "threads":
@@ -106,11 +107,6 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
         templates = attribution_templates
         if request.source == "tiktok":
             templates = attribution_locales.get(item.locale, ()) if re.fullmatch(r"[a-z]{2,8}", item.locale or "") else ()
-            if not templates:
-                outcomes.append(dict(query_id=query.query_id, query=query.query, status="DEGRADED",
-                    signals_collected=0, queried_window=None, search_verified=False,
-                    note="TikTok attribution locale is unseeded or unsupported; absence and content unmeasured"))
-                continue
         seen, count = set(), 0
         path = collection_path(request.source, request.extractor_version, query.result_limit)
         for record in item.records:

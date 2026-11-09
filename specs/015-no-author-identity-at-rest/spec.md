@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-20
 
-**Status**: Draft
+**Status**: Implemented and released in `v0.8.0`
 
 **Input**: Owner description (20/10/2026): "Ignis only needs an aggregate view of the market and
 consumer taste; it does not need to know WHO said something." Make "Ignis stores no author

@@ -43,7 +43,7 @@ For a Codex-only installation with separate UAT storage, run
 Other client configurations remain unchanged; omitting these options retains the all-client setup.
 
 The current source tree contains migrations through
-`sql/038_tiktok_attribution_locales.sql`. Migration 038 seeds locale-qualified TikTok attribution templates; unseeded page locales produce record-free DEGRADED outcomes, with absence unmeasured. It rewrites no stored evidence. Migration 037 seeds the Threads action-button labels for each UI language that host-browser search uses to read counters; it rewrites no stored evidence. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok author attribution wording that
+`sql/038_tiktok_attribution_locales.sql`. Migration 038 seeds locale-qualified TikTok attribution templates. Since `tiktok-public-grid-v3` keeps only the caption element and the hashtags after it, interface language no longer gates records. It rewrites no stored evidence. Migration 037 seeds the Threads action-button labels for each UI language that host-browser search uses to read counters; it rewrites no stored evidence. Migration 036 seeds the Threads author attribution wording that host-browser search removes from excerpts; it rewrites no stored evidence. Migration 035 adds append-only watchlist goals, comparison periods and snapshot cadences; it rewrites no stored evidence. Migration 034 seeds the TikTok author attribution wording that
 host-browser search removes from excerpts; it rewrites no stored evidence. Migration 033 adds a per-channel, per-day count of keyword
 searches for the daily request ceilings; it rewrites no stored evidence. Migration 032 adds watchlists, their immutable versions and the runs
 bound to them; it rewrites no stored evidence. Migration 031 adds per-mission author keys, declared
@@ -71,7 +71,7 @@ Do not rerun historical 025 after partial DEGRADED rows exist: it reinstalls the
 CHECK before 026 can run. Replay verification for 026 is not whole-history replay verification.
 
 For an existing PostgreSQL database on `035`, apply `036`, `037` and `038` in order as the
-table owner. Without `038`, every MISSION TikTok host-browser query fails closed as `DEGRADED`.
+table owner. Without `038`, a MISSION TikTok host-browser search is refused before it starts.
 
 The release workflow builds `ghcr.io/fioenix/fn-ignis:0.9.0` when the `v0.9.0` tag is pushed.
 The v0.8.0 image does not contain the v0.9.0 host-browser contract described here.
@@ -146,7 +146,7 @@ unparseable response or missing search envelope is unavailable with a reason, ne
 zero. A verified, well-formed empty search envelope may return `EMPTY_NO_DATA` for the executed
 keyword. This does not establish coverage for other keywords or a known time window.
 
-TikTok now uses `tiktok-public-grid-v2`; Threads uses `threads-search-top-v2`. Watchlist periods
+TikTok now uses `tiktok-public-grid-v3`; Threads uses `threads-search-top-v2`. Watchlist periods
 spanning the upgrade report `not_comparable` with `collection_path_changed` or
 `collection_path_mixed` when their collection paths differ or mix.
 
