@@ -799,11 +799,33 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
 
         def _sync_initialize() -> None:
             if not self._initialized:
+                self._refuse_legacy_taxonomy()
                 self._create_tables_and_seed()
                 self._refuse_an_unbackfilled_corpus()
                 self._initialized = True
 
         await self._run_write(_sync_initialize)
+
+    def _refuse_legacy_taxonomy(self) -> None:
+        """Refuse before bootstrap opens a writable connection or executes any schema/seed SQL."""
+        if self._mem_conn is not None:
+            conn = self._mem_conn
+        else:
+            path = Path(self._db_path)
+            if not path.is_file():
+                return
+            conn = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
+        try:
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'industry_taxonomies'"
+            ).fetchone():
+                raise RepositoryException(
+                    "Legacy industry taxonomy requires explicit retirement before startup. "
+                    "Use scripts/retire_industry_taxonomy.py project, then apply with the reviewed baseline."
+                )
+        finally:
+            if conn is not self._mem_conn:
+                conn.close()
 
     async def _ensure_progress_schema(self) -> None:
         """Explicit additive setup for authorized writers, never canonical bootstrap or reads."""

@@ -259,3 +259,60 @@ def verify(connection, backend, store_identity, baseline):
     return {'status': 'VERIFIED', 'changed_count': 0, 'invariants': checks,
             'clusters_digest': actual['clusters_before_digest'],
             'schema_digest': actual['schema_before_digest']}
+
+
+def apply(connection, backend, store_identity, baseline):
+    """Lock, recheck the published snapshot, mutate, verify actual state, then commit."""
+    _validate_baseline(baseline, backend, store_identity)
+    if backend not in ('sqlite', 'postgres'):
+        raise RetirementError('UNSUPPORTED_BACKEND', 2)
+    active = connection.in_transaction if backend == 'sqlite' else bool(connection.info.transaction_status)
+    if active:
+        raise RetirementError('ACTIVE_TRANSACTION')
+    try:
+        if backend == 'sqlite':
+            connection.execute('PRAGMA busy_timeout = 5000')
+            connection.execute('BEGIN IMMEDIATE')
+        else:
+            connection.execute("SET LOCAL lock_timeout = '5s'")
+            # No snapshot is read before these locks. All apply callers use this order.
+            for table in sorted((*PROTECTED_SETS, 'topic_clusters')):
+                connection.execute(f'LOCK TABLE public."{table}" IN ACCESS EXCLUSIVE MODE')
+            if connection.execute("SELECT to_regclass('public.industry_taxonomies')").fetchone()[0]:
+                connection.execute('LOCK TABLE public.industry_taxonomies IN ACCESS EXCLUSIVE MODE')
+        current = project(connection, backend, store_identity)
+        if not current['table_present']:
+            result = verify(connection, backend, store_identity, baseline)
+            connection.rollback()  # A validated retry writes nothing, including no marker.
+            return {**result, 'status': 'ALREADY_RETIRED', 'committed': False}
+        if current != baseline:
+            raise RetirementError('BASELINE_DRIFT')
+        if backend == 'sqlite':
+            import re
+            # SQLite permits dropping a table still referenced by a view or trigger. Refuse
+            # those dependencies explicitly; never leave another object's SQL broken.
+            if any(row[2] != TABLE and row[3] and re.search(r'\bindustry_taxonomies\b', row[3], re.I)
+                   for row in _schema(connection, backend)):
+                raise RetirementError('DEPENDENT_OBJECT')
+            placeholders = ','.join('?' for _ in FORMER_CODES)
+            connection.execute(
+                f'UPDATE topic_clusters SET category = ? WHERE category IN ({placeholders})',
+                ('unclassified', *FORMER_CODES),
+            )
+            connection.execute('DROP TABLE industry_taxonomies')
+        else:
+            from ignis.resources import sql_seed_file
+            migration = sql_seed_file(MIGRATION_ID + '.sql')
+            if migration is None:
+                raise RetirementError('MIGRATION_UNAVAILABLE', 2)
+            connection.execute("SELECT set_config('ignis.taxonomy_projection_digest', %s, true)",
+                               (baseline['projection_digest'],))
+            connection.execute(migration.read_text(encoding='utf-8'))
+        result = verify(connection, backend, store_identity, baseline)
+        connection.commit()
+        return {**result, 'status': 'APPLIED', 'changed_count': baseline['reset_total'], 'committed': True}
+    except Exception as error:
+        connection.rollback()
+        if isinstance(error, RetirementError):
+            raise
+        raise RetirementError('APPLY_FAILED') from None

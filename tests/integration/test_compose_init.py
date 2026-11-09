@@ -31,6 +31,7 @@ COMPOSE_FILE = REPO / "docker-compose.prod.yml"
 # Test data: the T016 retirements, absent only if 020 ran.
 RETIRED_UI_NOISE = ("live", "thông báo", "tin nhắn")
 READBACK = {
+    "taxonomy_absent": "SELECT to_regclass('public.industry_taxonomies') IS NULL",
     "later_objects": (
         "SELECT count(*) FROM unnest(ARRAY['public.sources', 'public.observations',"
         " 'public.mission_evidence', 'public.research_workspaces', 'public.mission_run_journals',"
@@ -85,7 +86,7 @@ READBACK = {
     ),
 }
 # The newest migration a fresh container has to reach; the full list is read from sql/ itself.
-NEWEST_MIGRATION = "038_tiktok_attribution_locales.sql"
+NEWEST_MIGRATION = "039_remove_seeded_taxonomy.sql"
 
 # Exact full-chain identities: 027 adds three tables/one UUID default; 028 adds fifteen
 # tables, 029 three, 030 six, 031 two, 032 three, 033 one and 035 one, all with caller-bound identities and
@@ -93,7 +94,6 @@ NEWEST_MIGRATION = "038_tiktok_attribution_locales.sql"
 # Counts alone cannot detect a swapped table or default.
 EXPECTED_PUBLIC_TABLES = (
     "connector_request_days",
-    "industry_taxonomies",
     "market_brief_revisions",
     "market_lexicons",
     "mission_author_keys",
@@ -151,7 +151,6 @@ EXPECTED_PUBLIC_TABLES = (
     "youtube_quota_buckets",
 )
 EXPECTED_UUID_COLUMNS = (
-    "industry_taxonomies.id",
     "market_brief_revisions.id",
     "market_lexicons.id",
     "mission_claim_evidence.id",
@@ -172,16 +171,17 @@ EXPECTED_UUID_COLUMNS = (
 
 def _assert_readback(readback):
     assert readback == {
+        "taxonomy_absent": "t",
         "later_objects": "13",
         "ui_noise_terms": "10",
         "retired_present": "0",
         "rls_market_lexicons": "t",
         "public_policies": "0",
-        "public_tables": "57",
+        "public_tables": "56",
         "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
         "public_tables_without_rls": "0",
         "supabase_roles": "0",
-        "builtin_uuid_defaults": "16",
+        "builtin_uuid_defaults": "15",
         "builtin_uuid_columns": ",".join(EXPECTED_UUID_COLUMNS),
         "uuid_ossp_defaults": "0",
     }
@@ -386,10 +386,10 @@ def test_readback_oracle_rejects_identity_substitution_and_access_widening(contr
     """Correct counts cannot hide the wrong schema or a widened access policy."""
     readback = {
         "later_objects": "13", "ui_noise_terms": "10", "retired_present": "0",
-        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "57",
+        "rls_market_lexicons": "t", "public_policies": "0", "public_tables": "56",
         "public_table_names": ",".join(EXPECTED_PUBLIC_TABLES),
         "public_tables_without_rls": "0", "supabase_roles": "0",
-        "builtin_uuid_defaults": "16", "builtin_uuid_columns": ",".join(EXPECTED_UUID_COLUMNS),
+        "builtin_uuid_defaults": "15", "builtin_uuid_columns": ",".join(EXPECTED_UUID_COLUMNS),
         "uuid_ossp_defaults": "0",
     }
     _assert_readback(readback)

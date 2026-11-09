@@ -177,3 +177,148 @@ async def test_fresh_and_repeated_bootstrap_never_creates_taxonomy(tmp_path):
         await repo.close()
         with sqlite3.connect(path) as conn:
             assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'industry_taxonomies'").fetchall() == []
+
+
+def apply_fixture(path, baseline, factory=sqlite3.Connection):
+    with sqlite3.connect(path, factory=factory) as conn:
+        return retirement.apply(conn, 'sqlite', 'fixture-store', baseline)
+
+
+def test_apply_resets_exact_codes_preserves_all_fields_and_retries(legacy):
+    baseline = projection(legacy)
+    result = apply_fixture(legacy, baseline)
+    assert result['changed_count'] == 14
+    with sqlite3.connect(legacy) as conn:
+        assert retirement.verify(conn, 'sqlite', 'fixture-store', baseline)['status'] == 'VERIFIED'
+        assert conn.execute("SELECT category FROM topic_clusters WHERE id = '1'").fetchone() == ('unclassified',)
+    assert apply_fixture(legacy, baseline)['changed_count'] == 0
+    with sqlite3.connect(legacy) as conn:
+        conn.execute("INSERT INTO topic_clusters VALUES ('new-source', 'beauty', 99, 'new', X'00')")
+    with pytest.raises(retirement.RetirementError, match='POST_STATE_MISMATCH'):
+        apply_fixture(legacy, baseline)
+    fresh = projection(legacy)
+    assert fresh['state'] == 'ALREADY_RETIRED'
+    assert apply_fixture(legacy, fresh)['changed_count'] == 0
+    with sqlite3.connect(legacy) as conn:
+        assert conn.execute("SELECT category FROM topic_clusters WHERE id = 'new-source'").fetchone() == ('beauty',)
+
+
+@pytest.mark.parametrize('mutation', [
+    "UPDATE topic_clusters SET id = 'substitute' WHERE id = '0'",
+    "UPDATE topic_clusters SET updated = 'changed' WHERE id = '0'",
+    "UPDATE topic_clusters SET score = 123 WHERE id = '0'",
+    "UPDATE observations SET payload = 'changed'",
+    "UPDATE mission_claim_evidence SET payload = 'changed'",
+    "UPDATE mission_manifests SET payload = 'changed'",
+])
+def test_apply_rejects_stale_baseline_before_writing(legacy, mutation):
+    baseline = projection(legacy)
+    with sqlite3.connect(legacy) as conn:
+        conn.execute(mutation)
+    before = legacy.read_bytes()
+    with pytest.raises(retirement.RetirementError, match='BASELINE_DRIFT'):
+        apply_fixture(legacy, baseline)
+    assert legacy.read_bytes() == before
+
+
+@pytest.mark.parametrize('stage', ['after_update', 'after_drop'])
+def test_apply_rolls_back_both_mutation_boundaries(legacy, stage):
+    class Failure(sqlite3.Connection):
+        def execute(self, statement, *args, **kwargs):
+            if statement.startswith('DROP TABLE') and stage == 'after_update':
+                raise RuntimeError('injected failure')
+            result = super().execute(statement, *args, **kwargs)
+            if statement.startswith('DROP TABLE') and stage == 'after_drop':
+                raise RuntimeError('injected failure')
+            return result
+    baseline = projection(legacy)
+    with pytest.raises(retirement.RetirementError, match='APPLY_FAILED'):
+        apply_fixture(legacy, baseline, Failure)
+    assert projection(legacy) == baseline
+
+
+def test_apply_empty_target_drops_table_and_absent_marker_never_resets(legacy):
+    with sqlite3.connect(legacy) as conn:
+        conn.execute("UPDATE topic_clusters SET category = 'source label'")
+    baseline = projection(legacy)
+    assert baseline['reset_total'] == 0
+    assert apply_fixture(legacy, baseline)['changed_count'] == 0
+    assert projection(legacy)['state'] == 'ALREADY_RETIRED'
+
+
+def test_apply_unknown_dependent_object_rolls_back(legacy):
+    with sqlite3.connect(legacy) as conn:
+        conn.execute('CREATE VIEW unrelated_view AS SELECT * FROM industry_taxonomies')
+    baseline = projection(legacy)
+    with pytest.raises(retirement.RetirementError):
+        apply_fixture(legacy, baseline)
+    assert projection(legacy) == baseline
+
+
+def test_apply_missing_or_wrong_store_baseline_refuses(legacy):
+    baseline = projection(legacy)
+    for bad in (None, {}, {**baseline, 'store_identity': 'another-store'}):
+        with pytest.raises(retirement.RetirementError, match='INVALID_BASELINE'):
+            apply_fixture(legacy, bad)
+    assert projection(legacy) == baseline
+
+
+def test_cli_apply_requires_published_receipt_and_verifies_commit(legacy, capsys):
+    module = cli()
+    assert module.main(['project', '--sqlite', str(legacy)]) == 0
+    receipt = legacy.parent / 'projection.json'
+    receipt.write_text(capsys.readouterr().out)
+    assert module.main(['apply', '--sqlite', str(legacy), '--baseline', str(receipt)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result['changed_count'] == 14 and result['committed'] is True
+    assert module.main(['verify', '--sqlite', str(legacy), '--baseline', str(receipt)]) == 0
+    capsys.readouterr()
+    assert module.main(['apply', '--sqlite', str(legacy), '--baseline', str(receipt)]) == 0
+    assert json.loads(capsys.readouterr().out)['changed_count'] == 0
+
+
+
+def test_numbered_migration_uses_exact_frozen_identifiers_and_empty_digest():
+    import re
+    text = (Path(__file__).resolve().parents[2] / 'sql' / '039_remove_seeded_taxonomy.sql').read_text()
+    codes = re.search(r'former_codes CONSTANT text\[\] := ARRAY\[(.*?)\];', text, re.S).group(1)
+    assert tuple(re.findall(r"'([^']+)'", codes)) == retirement.FORMER_CODES
+    assert retirement._RowsDigest('targets', ['id', 'category']).finish()['digest'] in text
+
+
+
+def test_postgres_service_cli_selects_read_only_backend_without_config(capsys, monkeypatch):
+    import psycopg
+    module = cli()
+    statements = []
+    class Connection:
+        def execute(self, statement):
+            statements.append(statement)
+        def close(self):
+            statements.append('closed')
+    def connect(**kwargs):
+        assert kwargs == {'service': 'synthetic-service'}
+        return Connection()
+    monkeypatch.setattr(psycopg, 'connect', connect)
+    monkeypatch.setattr(retirement, 'postgres_identity', lambda conn: 'synthetic-identity')
+    def project(conn, backend, identity):
+        assert backend == 'postgres' and identity == 'synthetic-identity'
+        assert statements == ['SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY']
+        return {'backend': backend}
+    monkeypatch.setattr(retirement, 'project', project)
+    assert module.main(['project', '--postgres-service', 'synthetic-service']) == 0
+    assert json.loads(capsys.readouterr().out) == {'backend': 'postgres'}
+    assert statements[-1] == 'closed'
+
+
+@pytest.mark.parametrize('flag', ['--sqlite', '--postgres-service'])
+def test_empty_backend_never_falls_through_to_default_connection(flag, capsys, monkeypatch):
+    import psycopg
+    calls = []
+    def forbidden(**kwargs):
+        calls.append(True)
+        raise RuntimeError('synthetic connection guard')
+    monkeypatch.setattr(psycopg, 'connect', forbidden)
+    assert cli().main(['project', flag, '']) == 2
+    assert json.loads(capsys.readouterr().out)['reason'] == 'INVALID_INPUT'
+    assert calls == []

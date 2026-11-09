@@ -8,7 +8,7 @@ import pytest
 from ignis.domain.exceptions import RepositoryException
 from ignis.infrastructure.persistence.sqlite_repository import SqliteTrendRepository
 
-PROTECTED = ('market_lexicons', 'industry_taxonomies', 'runtime_configs', 'platform_credentials',
+PROTECTED = ('market_lexicons', 'runtime_configs', 'platform_credentials',
              'research_workspaces')
 
 
@@ -108,7 +108,6 @@ def test_ready_connections_reject_schema_changes_and_protected_table_writes(tmp_
         'ALTER TABLE research_missions ADD COLUMN extra TEXT',
         "INSERT INTO runtime_configs (key, value, created_at, updated_at) VALUES ('synthetic', '1', 'x', 'x')",
         'UPDATE market_lexicons SET term = term',
-        'DELETE FROM industry_taxonomies',
         'DELETE FROM platform_credentials',
         "UPDATE mission_evidence_qualifications SET status = status",
         "INSERT INTO mission_claim_evidence (claim_id) VALUES ('x')",
@@ -156,3 +155,43 @@ def test_default_bootstrap_is_unchanged(tmp_path):
         assert connection.execute('SELECT COUNT(*) FROM market_lexicons').fetchone()[0] > 0
         assert connection.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'mission_progress_%'").fetchone()[0] == 0
+
+
+def test_legacy_taxonomy_refusal_precedes_any_bootstrap(tmp_path, monkeypatch):
+    path = _store(tmp_path / 'legacy')
+    with sqlite3.connect(path) as conn:
+        conn.execute('CREATE TABLE industry_taxonomies (id TEXT PRIMARY KEY)')
+    before = _bytes(path)
+    entered = []
+    monkeypatch.setattr(SqliteTrendRepository, '_create_tables_and_seed', lambda self: entered.append('bootstrap'))
+    repo = SqliteTrendRepository(str(path))
+    with pytest.raises(RepositoryException, match='retire_industry_taxonomy'):
+        asyncio.run(repo._ensure_schema())
+    assert entered == []
+    assert _bytes(path) == before
+
+
+def test_explicit_retirement_matches_fresh_core_and_keeps_progress(tmp_path, reference):
+    from ignis.infrastructure.migration import taxonomy_retirement as retirement
+    path = _store(tmp_path / 'legacy')
+    with sqlite3.connect(path) as conn:
+        progress = [row for row in SqliteTrendRepository._schema_objects(conn) if row[1].startswith('mission_progress')]
+        conn.execute('CREATE TABLE industry_taxonomies (id TEXT PRIMARY KEY)')
+    old = _bytes(path)
+    with pytest.raises(RepositoryException):
+        _open(path, reference)
+    assert _bytes(path) == old
+    with sqlite3.connect(path) as conn:
+        baseline = retirement.project(conn, 'sqlite', 'ready-fixture')
+    with sqlite3.connect(path) as conn:
+        retirement.apply(conn, 'sqlite', 'ready-fixture', baseline)
+    assert SqliteTrendRepository.existing_core_schema_digest(str(path)) == reference
+    with sqlite3.connect(path) as conn:
+        assert [row for row in SqliteTrendRepository._schema_objects(conn) if row[1].startswith('mission_progress')] == progress
+    ready = _open(path, reference)
+    asyncio.run(ready._ensure_schema())
+    asyncio.run(ready.close())
+    ordinary = SqliteTrendRepository(str(path))
+    asyncio.run(ordinary._ensure_schema())
+    asyncio.run(ordinary.close())
+    assert SqliteTrendRepository.existing_core_schema_digest(str(path)) == reference

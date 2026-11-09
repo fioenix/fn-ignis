@@ -45,8 +45,8 @@ pytestmark = pytest.mark.migration_chain
 
 # The last migration an installation could have run before T018; 021 onwards is the upgrade.
 LAST_BEFORE_T018 = 20
-# Client roles may read these, through the two SELECT policies 006 installs, and do nothing else.
-CLIENT_READ_ONLY = ("industry_taxonomies", "market_lexicons")
+# Client roles may read these, through the remaining SELECT policy from 006, and do nothing else.
+CLIENT_READ_ONLY = ("market_lexicons",)
 # Only the owner -- the runtime -- may touch these. The value names the data, for the report.
 OWNER_ONLY = {
     "market_brief_revisions": "Market Brief",
@@ -501,7 +501,7 @@ def _through_020() -> tuple:
 
 
 def _from_021() -> tuple:
-    return tuple(name for name in all_postgres_migrations() if _prefix(name) > LAST_BEFORE_T018)
+    return tuple(name for name in all_postgres_migrations() if LAST_BEFORE_T018 < _prefix(name) <= 38)
 
 
 def _seed(dsn: str) -> None:
@@ -698,25 +698,26 @@ def test_client_roles_read_the_vocabulary_and_are_denied_everything_else(supabas
     assert _differences(_role_matrix(dsn), _expected_matrix(dsn)) == []
 
 
-def test_the_only_policies_are_the_two_vocabulary_reads(supabase_like_dsn):
+def test_the_only_policy_is_the_remaining_lexicon_read(supabase_like_dsn):
     dsn = supabase_like_dsn
     _apply(dsn, *all_postgres_migrations())
 
     assert [(row[0], row[1], row[2], row[4]) for row in _all(dsn, POLICY_QUERY)] == [
-        ("industry_taxonomies", "allow_read_industry_taxonomies", "SELECT", list(SUPABASE_ROLES)),
         ("market_lexicons", "allow_read_market_lexicons", "SELECT", list(SUPABASE_ROLES)),
     ]
 
 
-def test_re_applying_021_and_then_the_whole_chain_changes_no_posture(supabase_like_dsn):
+def test_re_applying_021_and_then_the_historical_chain_changes_no_posture(supabase_like_dsn, monkeypatch):
+    monkeypatch.setattr(__import__(__name__), "CLIENT_READ_ONLY", ("industry_taxonomies", "market_lexicons"))
+    monkeypatch.setitem(POSTURE, "industry_taxonomies", "client read-only")
     dsn = supabase_like_dsn
-    _apply(dsn, *all_postgres_migrations())
+    _apply(dsn, *(name for name in all_postgres_migrations() if _prefix(name) <= 38))
     _seed(dsn)
     settled = _state(dsn)
 
     _apply(dsn, *_from_021())
     assert _state(dsn) == settled
-    _apply(dsn, *all_postgres_migrations())
+    _apply(dsn, *(name for name in all_postgres_migrations() if _prefix(name) <= 38))
     assert _state(dsn) == settled
     assert _posture_violations(dsn) == []
 
@@ -724,7 +725,9 @@ def test_re_applying_021_and_then_the_whole_chain_changes_no_posture(supabase_li
 # --- B. an existing database, migrated through 020 before 021 arrives -------------------------
 
 
-def test_a_database_migrated_through_020_is_exposed_until_021_closes_it(supabase_like_dsn):
+def test_a_database_migrated_through_020_is_exposed_until_021_closes_it(supabase_like_dsn, monkeypatch):
+    monkeypatch.setattr(__import__(__name__), "CLIENT_READ_ONLY", ("industry_taxonomies", "market_lexicons"))
+    monkeypatch.setitem(POSTURE, "industry_taxonomies", "client read-only")
     dsn = supabase_like_dsn
     _apply(dsn, *_through_020())
     _seed(dsn)
@@ -861,7 +864,6 @@ async def test_the_runtime_owner_reads_and_writes_every_table_class_after_021(
         config = await repository.get_runtime_config("t018.owner")
         credential = await repository.get_platform_credentials("threads")
         vocabulary = await repository.get_domain_lexicons("t018_owner")
-        taxonomies = await repository.get_industry_taxonomies()
         evidence = await repository.get_mission_signals(mission.id)
         stored_brief = await repository.get_brief_revision_for_mission(mission.id)
         journals = await repository.list_run_journals(mission.id)
@@ -875,7 +877,6 @@ async def test_the_runtime_owner_reads_and_writes_every_table_class_after_021(
     assert config == "yes"
     assert credential["credentials_data"] == {"access_token": "owner"}
     assert registered == 1 and [row["term"] for row in vocabulary] == ["owner term"]
-    assert taxonomies, "the owner could not read the seeded taxonomies"
     assert [UUID(str(s.observation_id)) for s in evidence] == [signal.observation_id]
     assert stored_brief is not None and stored_brief.brief_revision_id == brief.brief_revision_id
     assert [journal.run_id for journal in journals] == [run_id]

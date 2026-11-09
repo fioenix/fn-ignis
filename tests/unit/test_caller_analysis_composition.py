@@ -93,7 +93,7 @@ result = asyncio.run(main())
 print(json.dumps({'result': result, 'entered': entered, 'constructed': sorted(set(constructed))}, default=str))
 '''
 
-PRESERVED = ('market_lexicons', 'industry_taxonomies', 'runtime_configs', 'platform_credentials', 'research_workspaces')
+PRESERVED = ('market_lexicons', 'runtime_configs', 'platform_credentials', 'research_workspaces')
 GATES = ['MISSING_HYPOTHESIS_COVERAGE:alternative:1', 'MISSING_HYPOTHESIS_COVERAGE:alternative:2',
          'MISSING_HYPOTHESIS_COVERAGE:null', 'MISSING_CONTRADICTION_COVERAGE', 'MISSING_DEMAND_EVIDENCE',
          'MISSING_SUPPLY_EVIDENCE']
