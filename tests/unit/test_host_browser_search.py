@@ -277,7 +277,7 @@ def test_threads_tactical_ticket_checks_original_caller_and_expiry(service, monk
 
 
 @pytest.mark.parametrize("locale", [None, "en", "unsupported", "VI", "vi_VN"])
-def test_v3_locale_never_gates_records_and_trims_only_seeded_wording(locale):
+def test_v3_locale_never_gates_records(locale):
     from datetime import timedelta
     from ignis.domain.host_browser_search import HostSearchRequest, HostSearchQuery
     from ignis.infrastructure.connectors.host_browser.validator import validate_answer
@@ -295,19 +295,3 @@ def test_v3_locale_never_gates_records_and_trims_only_seeded_wording(locale):
     [outcome] = result["outcomes"]
     assert outcome["status"] == "HEALTHY"
 
-
-@pytest.mark.parametrize("excerpt,expected", [("Caption #tag do", "Caption #tag"), ("Mua do bạn giới thiệu", "Mua do bạn giới thiệu"), ("do", None)])
-def test_v3_trims_the_leftover_seeded_lead_and_drops_an_empty_result(excerpt, expected):
-    from datetime import timedelta
-    from ignis.domain.host_browser_search import HostSearchRequest, HostSearchQuery
-    from ignis.infrastructure.connectors.host_browser.validator import validate_answer
-    now = datetime.now(timezone.utc)
-    request = HostSearchRequest(request_id="fixture", host_task_ref="task-1", session_ref="chrome-1",
-        issued_at=now - timedelta(seconds=1), expires_at=now + timedelta(seconds=60),
-        queries=(HostSearchQuery(query_id="q", query="test", search_url="https://www.tiktok.com/search?q=test", result_limit=3),))
-    payload = answer({"request_id": "fixture", "queries": [{"query_id": "q", "query": "test", "search_url": "https://www.tiktok.com/search?q=test", "result_limit": 3}]})
-    item = payload["answers"][0]
-    item.update(locale="vi", status="HEALTHY", empty_state_visible=False)
-    item["records"][0]["excerpt"] = excerpt
-    result = validate_answer(request, payload, datetime.now(timezone.utc), ("do {author} tạo với",))
-    assert [record["excerpt"] for record in result["observations"]] == ([expected] if expected else [])

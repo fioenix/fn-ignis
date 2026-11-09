@@ -8,9 +8,9 @@ satisfy a v3 ticket; historical observations/path facts remain unchanged.
 
 Each query reports `locale` from `document.documentElement.lang`: validate the language tag,
 extract its primary subtag and lowercase it (`[a-z]{2,8}`), else `unsupported`. Since v3 the locale
-does not gate records: the extractor removes the poster by the one visible
-`search-card-user-unique-id` beside the tile (research R15), and matching locale templates only
-trim leftover wording. A missing or ambiguous name element, or a name absent from the label,
+does not gate records: the extractor keeps the one visible `search-card-video-caption` beside the
+tile and the hashtags that directly follow it in the label (research R15). It never reads the
+poster's name. A missing, duplicate or hidden caption, or one that does not start the label,
 drops that record.
 
 Vocabulary lives in `market_lexicons`, domain `tiktok_attribution_<locale>`, category `ui_attribution`.

@@ -11,7 +11,7 @@ from ignis.infrastructure.connectors.host_browser.attribution_locales import see
 from ignis.domain.host_browser_search import HostSearchAnswer, HostSearchRequest
 from ignis.domain.self_content import is_self_authored
 from ignis.domain.source_identity import identity_free_source_url
-from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, sanitize_pii_text, strip_platform_attribution, strip_trailing_attribution_lead
+from ignis.infrastructure.security.pii_sanitizer import mask_author_identity_text, sanitize_pii_text, strip_platform_attribution
 
 
 def collection_path(source, version, limit):
@@ -115,10 +115,7 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
             # Match the transient author-bearing URL before destroying it. Never stage it.
             if is_self_authored(SimpleNamespace(platform=request.source, source_url=record.source_url, metadata={}), self_identities):
                 continue
-            stripped = strip_platform_attribution(record.excerpt, templates)
-            if request.source == "tiktok":
-                stripped = strip_trailing_attribution_lead(stripped, templates)
-            policy_excerpt = sanitize_pii_text(stripped)
+            policy_excerpt = sanitize_pii_text(strip_platform_attribution(record.excerpt, templates))
             excerpt = mask_author_identity_text(policy_excerpt)
             if not excerpt.strip():
                 continue

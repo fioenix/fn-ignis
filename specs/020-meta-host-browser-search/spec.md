@@ -97,7 +97,7 @@ that hides automation, or is reported unavailable when the platform blocks it.
 
 ### Session 2026-11-09
 
-- Q: How is the TikTok poster's name removed now that a real page shows it has its own element? → A: Extractor v3 reads the name from `search-card-user-unique-id` beside the tile, removes the earliest letter-bounded occurrence of that name or the URL handle and everything after it from the image label, in any interface language, and drops the record when the name element is missing or the boundary cannot be found. The caption element is not used because it omitted hashtags on 4 of 12 tiles and truncated 1 of 12. Interface language no longer gates records; templates only trim the leftover wording. (owner approved 09/11/2026; basis: measured 28 of 28 tiles.)
+- Q: How is the TikTok poster's name kept out of an answer? → A: Extractor v3 keeps only the text of `search-card-video-caption` and the hashtags that directly follow it in the image label, and drops the record when the caption element is missing, not unique, not rendered, or not the start of the label. It never reads the poster's name. Matching the name against the label was rejected after two review rounds: a name written differently in the label could not be proved removed. Interface language no longer gates records. (owner approved 09/11/2026; basis: measured 28 of 28 tiles.)
 
 ## Context: current state (observed 27/10/2026 on `main` at `8a816fb`)
 

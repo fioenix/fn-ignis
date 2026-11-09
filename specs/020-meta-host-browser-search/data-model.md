@@ -110,7 +110,7 @@ raw API payload/errors, HTML, author identity or credentials. SQLite/PostgreSQL 
 
 ## T058 TikTok locale snapshot amendment
 
-Superseded for record admission by T059 (research R15): locale templates now only trim leftover wording.
+Superseded for record admission by T059 (research R15): extraction no longer depends on locale templates.
 
 TikTok query answers report the primary language subtag, lowercase [a-z]{2,8}, else unsupported.
 The ticket freezes locale-to-attribution-template tuples from caller rows (MISSION) or packaged

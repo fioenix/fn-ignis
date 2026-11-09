@@ -11,23 +11,23 @@ import pytest
 EXTRACTOR = Path(__file__).resolve().parents[2] / "src/ignis/infrastructure/connectors/host_browser/tiktok_search.js"
 
 
-def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi đi làm", image_alt="Túi đi làm do Trần Trọng Review tạo với nhạc", image_visible=True, locale="vi-VN", poster="Trần Trọng Review"):
+def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi đi làm", image_alt="Túi đi làm do Trần Trọng Review tạo với nhạc", image_visible=True, locale="vi-VN", caption="Túi đi làm"):
     assert EXTRACTOR.exists(), "The packaged deterministic extractor is missing"
     node = shutil.which("node")
     if not node:
         pytest.skip("Node is required for deterministic JavaScript fixture execution")
     code = """
       const fs = require('fs'), vm = require('vm');
-      const poster = JSON.parse(process.argv[8]);
-      const NAME = '[data-e2e="search-card-user-unique-id"]';
-      const shape = poster && typeof poster === 'object' ? poster : {names: poster === null ? [] : [poster], visible: true, cards: 1};
+      const caption = JSON.parse(process.argv[8]);
+      const CAPTION = '[data-e2e="search-card-video-caption"]';
+      const shape = caption && typeof caption === 'object' ? caption : {captions: caption === null ? [] : [caption], visible: true, cards: 1};
       const CARDS = 'div[data-e2e="search_top-item"], div[data-e2e="search_video-item"]';
       const makeCard = (url, text, visible) => { const card = ({
         getClientRects: () => visible ? [1] : [],
         innerText: text,
         parentElement: {
           querySelectorAll: selector => selector === CARDS ? Array(shape.cards).fill(card)
-            : selector === NAME ? shape.names.map(name => ({textContent: name, getClientRects: () => shape.visible ? [1] : []})) : []
+            : selector === CAPTION ? shape.captions.map(text => ({textContent: text, getClientRects: () => shape.visible ? [1] : []})) : []
         },
         querySelector: selector => selector === 'a[href*="/video/"]' ? {
           href: url,
@@ -53,7 +53,7 @@ def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi �
       console.log(JSON.stringify(fn({query_id: 'query-1', query: process.argv[2], result_limit: 3})));
     """
     result = subprocess.run([node, "-e", code, str(EXTRACTOR), query, page_query, card_text,
-                             image_alt, str(image_visible).lower(), locale, json.dumps(poster)],
+                             image_alt, str(image_visible).lower(), locale, json.dumps(caption)],
                             check=True, capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -63,7 +63,7 @@ def test_public_card_extractor_preserves_missingness_and_excludes_hidden_private
     assert result["status"] == "HEALTHY"
     assert result["records"] == [{
         "source_url": "https://www.tiktok.com/@public/video/7417820067028536584",
-        "excerpt": "Túi đi làm do", "published_at": None,
+        "excerpt": "Túi đi làm", "published_at": None,
     }]
     assert result["empty_state_visible"] is False
     assert "metric_value" not in result["records"][0]
@@ -86,11 +86,11 @@ def test_counter_only_grid_is_degraded_not_content_evidence(counter):
 
 def test_counter_tile_uses_visible_video_image_label_as_content():
     label = "Túi đẹp nha anh em! #jivi #tuidilam do Trần Trọng Review tạo với bản nhạc Peace"
-    result = extract(card_text="290", image_alt=label)
+    result = extract(card_text="290", image_alt=label, caption="Túi đẹp nha anh em!")
     assert result["status"] == "HEALTHY"
     assert result["records"] == [{
         "source_url": "https://www.tiktok.com/@public/video/7417820067028536584",
-        "excerpt": "Túi đẹp nha anh em! #jivi #tuidilam do", "published_at": None,
+        "excerpt": "Túi đẹp nha anh em! #jivi #tuidilam", "published_at": None,
     }]
 
 
@@ -120,35 +120,31 @@ def test_t058_oversized_alt_cannot_cut_attribution_before_validation():
     assert result["status"] == "DEGRADED"
 
 
-@pytest.mark.parametrize("alt,poster,expected", [
-    ("Son đẹp #son do Fixture Poster tạo với nhạc gốc - Fixture Poster", "Fixture Poster", "Son đẹp #son do"),
-    ("Caption #tag created by Fixture Poster with music", "Fixture Poster", "Caption #tag created by"),
-    ("Caption created by Aster created by Birch with music", "Aster created by Birch", "Caption created by"),
-    ("Caption do Aster   Birch tạo với nhạc", "Aster Birch", "Caption do"),
-    ("Video review hay do V tạo với nhạc", "V", "Video review hay do"),
-    ("Caption do A.b (c) tạo với nhạc", "A.b (c)", "Caption do"),
-    ("Caption #tag created by Fixture Alpha, with original sound - Fixture Alpha", "Fixture Alpha", "Caption #tag created by"),
-    ("Caption do Fixture\u200b Alpha tạo với nhạc - Fixture Alpha", "Fixture Alpha", "Caption do"),
-    ("Caption do Tra\u0300n tạo với nhạc - Tr\u00e0n", "Tr\u00e0n", "Caption do"),
-    ("Caption do Fixture Alpha🎵 tạo với nhạc - Fixture Alpha", "Fixture Alpha", "Caption do"),
-    ("Caption by public, nhạc - Fixture Alpha", "Fixture Alpha", "Caption by"),
+@pytest.mark.parametrize("alt,caption,expected", [
+    ("Son đẹp #son do Fixture Poster tạo với nhạc gốc - Fixture Poster", "Son đẹp", "Son đẹp #son"),
+    ("Caption #tag #b created by Fixture Poster with music", "Caption", "Caption #tag #b"),
+    ("Caption #a#b created by Fixture Poster with music", "Caption", "Caption #a#b"),
+    ("Caption created by Aster created by #Birch with music", "Caption", "Caption"),
+    ("Caption created by Fixtu\u200b\u0300re Alpha with music - Fixt\u00f9re Alpha", "Caption", "Caption"),
+    ("Cu\u0300 #a do Fixture Poster tạo với nhạc", "C\u00f9", "C\u00f9 #a"),
+    ("Hai   dòng\n#a do Fixture Poster tạo với nhạc", "Hai dòng", "Hai dòng #a"),
+    ("Caption #a", "Caption #a", "Caption #a"),
 ])
-def test_v3_removes_the_poster_by_its_own_element_in_any_language(alt, poster, expected):
-    result = extract(image_alt=alt, poster=poster)
+def test_v3_keeps_only_the_caption_and_the_hashtags_that_follow_it(alt, caption, expected):
+    result = extract(image_alt=alt, caption=caption)
     assert [record["excerpt"] for record in result["records"]] == [expected]
-    assert f" {poster} " not in f" {result['records'][0]['excerpt']} "
+    assert not any(name in result["records"][0]["excerpt"] for name in ("Fixture", "Aster", "Birch", "Fixt"))
 
 
-@pytest.mark.parametrize("alt,poster", [
+@pytest.mark.parametrize("alt,caption", [
     ("Caption do Fixture Poster tạo với nhạc", None),
     ("Caption do Fixture Poster tạo với nhạc", ""),
-    ("Caption do Fixture Poster tạo với nhạc", "Someone Else"),
-    ("Fixture Poster tạo video", "Fixture Poster"),
-    ("Caption do Alpha tạo với nhạc - Beta", {"names": ["Beta", "Alpha"], "visible": True, "cards": 1}),
-    ("Caption do Alpha tạo với nhạc - Beta", {"names": ["Beta"], "visible": False, "cards": 1}),
-    ("Caption do Alpha tạo với nhạc - Alpha", {"names": ["Alpha"], "visible": True, "cards": 2}),
+    ("Caption do Fixture Poster tạo với nhạc", "Một caption khác"),
+    ("Caption do Alpha tạo với nhạc", {"captions": ["Caption", "Caption"], "visible": True, "cards": 1}),
+    ("Caption do Alpha tạo với nhạc", {"captions": ["Caption"], "visible": False, "cards": 1}),
+    ("Caption do Alpha tạo với nhạc", {"captions": ["Caption"], "visible": True, "cards": 2}),
 ])
-def test_v3_drops_a_record_when_the_poster_boundary_cannot_be_established(alt, poster):
-    result = extract(image_alt=alt, poster=poster)
+def test_v3_drops_a_record_when_the_caption_cannot_be_tied_to_the_label(alt, caption):
+    result = extract(image_alt=alt, caption=caption)
     assert result["records"] == []
     assert result["status"] == "DEGRADED"

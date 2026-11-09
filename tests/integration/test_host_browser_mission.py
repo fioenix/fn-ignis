@@ -1386,7 +1386,7 @@ async def test_t058_mission_locale_snapshot_comes_from_caller_repository(reposit
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("locale,excerpt,expected_count", [("vi", "Caption do", 1), ("en", "Caption", 1), ("fr", "Caption", 1), ("vi", "do", 0)])
+@pytest.mark.parametrize("locale,excerpt,expected_count", [("vi", "Caption", 1), ("en", "Caption", 1), ("fr", "Caption", 1)])
 async def test_v3_locale_never_gates_canonical_mission_storage(repository_case, tmp_path, monkeypatch, locale, excerpt, expected_count):
     from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
     from ignis.application.use_cases import host_browser_search as module
