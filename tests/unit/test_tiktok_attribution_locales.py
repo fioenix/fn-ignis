@@ -65,6 +65,24 @@ def test_tactical_packaged_seed_strips_observed_english_attribution(monkeypatch)
         service.close()
 
 
+def test_ambiguous_repeated_attribution_never_reaches_a_receipt(monkeypatch):
+    from ignis.application.use_cases import host_browser_search as module
+    monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
+    service = HostBrowserSearchService()
+    try:
+        request = service.prepare("task", "session", ["test"], 3, 60, True)
+        payload = host_answer(request)
+        payload["answers"][0]["locale"] = "en"
+        payload["answers"][0]["records"][0]["excerpt"] = (
+            "Caption created by Fixture Poster with music created by Sound Maker with beats")
+        service.stage(request["request_id"], payload)
+        receipt = service.submit(request["request_id"], "task", "session")
+        assert receipt["observations"] == []
+        assert "Fixture Poster" not in json.dumps(receipt)
+    finally:
+        service.close()
+
+
 def test_tactical_uses_packaged_seed_and_ticket_freezes_locale_templates(monkeypatch):
     from ignis.application.use_cases import host_browser_search as module
     monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)

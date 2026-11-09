@@ -120,7 +120,11 @@ def validate_answer(request: HostSearchRequest, payload: dict, now: datetime,
             # Match the transient author-bearing URL before destroying it. Never stage it.
             if is_self_authored(SimpleNamespace(platform=request.source, source_url=record.source_url, metadata={}), self_identities):
                 continue
-            policy_excerpt = sanitize_pii_text(strip_platform_attribution(record.excerpt, templates))
+            stripped = strip_platform_attribution(record.excerpt, templates)
+            # A second complete attribution means the rightmost cut may have kept the poster's name.
+            if request.source == "tiktok" and strip_platform_attribution(stripped, templates) != stripped:
+                continue
+            policy_excerpt = sanitize_pii_text(stripped)
             excerpt = mask_author_identity_text(policy_excerpt)
             if not excerpt.strip():
                 continue

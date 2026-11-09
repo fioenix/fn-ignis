@@ -1386,8 +1386,14 @@ async def test_t058_mission_locale_snapshot_comes_from_caller_repository(reposit
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("locale,expected_count", [("vi", 1), ("en", 0)])
-async def test_t058_locale_gate_reaches_canonical_mission_storage(repository_case, tmp_path, monkeypatch, locale, expected_count):
+@pytest.mark.parametrize("locale,excerpt,expected_count", [
+    ("vi", "Caption do Fixture Poster tạo với music", 1),
+    ("en", "Caption created by Fixture Poster with music", 1),
+    ("fr", "Caption created by Fixture Poster with music", 0),
+    ("en", "Caption created by Fixture Poster with music created by Sound Maker with beats", 0),
+])
+async def test_t058_locale_gate_reaches_canonical_mission_storage(
+        repository_case, tmp_path, monkeypatch, locale, excerpt, expected_count):
     from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
     from ignis.application.use_cases import host_browser_search as module
     monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
@@ -1399,8 +1405,7 @@ async def test_t058_locale_gate_reaches_canonical_mission_storage(repository_cas
         payload = host_answer(request)
         for item in payload["answers"]:
             item["locale"] = locale
-            item["records"][0]["excerpt"] = ("Caption do Fixture Poster tạo với music" if locale == "vi"
-                                             else "Caption created by Fixture Poster with music")
+            item["records"][0]["excerpt"] = excerpt
         service.stage(request["request_id"], payload)
         await service.submit_mission(executor, request["request_id"], "task", "session")
         held = await repo.get_mission_signals(mission.id)
