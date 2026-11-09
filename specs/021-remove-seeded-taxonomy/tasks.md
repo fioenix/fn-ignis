@@ -3,7 +3,7 @@
 **Input**: `specs/021-remove-seeded-taxonomy/`
 **Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`
 **Route**: DEEP / migration; the Spec Kit depth gate requires this task list.
-**Status**: Implementation in progress; local evidence in `.handoff/021-taxonomy-verification.md`. Real PostgreSQL/Compose proof remains open.
+**Status**: Local implementation and targeted checks complete (22/29 tasks). Evidence: `.handoff/021-taxonomy-verification.md`. Real PostgreSQL/Compose, built artifacts and independent review remain open.
 
 ## Format and execution rules
 
@@ -105,7 +105,7 @@ on the final targeted evidence and review.
 
 ## Phase 6: Polish and cross-cutting acceptance
 
-- [ ] T028 Run `.venv/bin/pytest tests/unit/test_repo_conventions.py`, scoped lint/diff checks and only the affected consumer set from `specs/021-remove-seeded-taxonomy/quickstart.md`; record fresh results and skips in `.handoff/021-taxonomy-verification.md`. Run no full suite without the owner's request; do not repeat unchanged passing heavy jobs.
+- [X] T028 Run `.venv/bin/pytest tests/unit/test_repo_conventions.py`, scoped lint/diff checks and only the affected consumer set from `specs/021-remove-seeded-taxonomy/quickstart.md`; record fresh results and skips in `.handoff/021-taxonomy-verification.md`. Run no full suite without the owner's request; do not repeat unchanged passing heavy jobs.
 - [ ] T029 Re-evaluate all FR-001–FR-011 and SC-001–SC-005 against source/test/receipt evidence in `.handoff/021-taxonomy-verification.md`; update `specs/021-remove-seeded-taxonomy/tasks.md` only for observed completed work. Keep missing real PostgreSQL/Compose, rehearsal or data-baseline evidence open. Obtain independent code/security review under the router gates before a later authorized merge; this task grants no commit/push/merge/release authority.
 
 ## Dependencies and execution order
@@ -173,3 +173,7 @@ classifier, credential path or migration framework is needed.
   `_fold_accents` are required by YouTube keyword matching and retain their exact algorithms.
   Taxonomy-only registration, storage and inference are removed. The settled spec is unchanged.
 - No real store was migrated; no push, pull request, merge, release or version change occurred.
+- Final caller analysis/pilot rerun: 47 passed under the machine-wide heavy-job lock.
+  T028 is complete locally: repo conventions 11 passed; scoped Ruff and committed-range
+  diff checks pass. T029 stays open for the unavailable backend/build evidence and independent
+  code/security reviews before any later authorized merge.
