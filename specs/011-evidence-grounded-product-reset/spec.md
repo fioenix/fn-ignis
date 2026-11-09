@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-29
 
-**Status**: Accepted for planning
+**Status**: Implemented and released in `v0.8.0`; the Vietnam pilots T085–T090 are parked with the frozen Market verdict (Clarifications, Session 2026-11-09)
 
 **Input**: Owner approval of `docs/PRODUCT_PROPOSAL.vi.md` on 2026-09-29
 
@@ -158,6 +158,14 @@
   → A: No. Name the unreleased runtime `fn-ignis-social-market-research`, without changing
   tool signatures or release identifiers (agent decided; basis: FR-032 and the breaking
   product-category cutover).
+
+### Session 2026-11-09
+
+- Q: Which open tasks still stand after the 2026-10-21 listening-first decision and the v0.8.0 and v0.9.0 releases?
+  → A: T092, T097 and T098 are superseded by those releases. T093, T095 and T096 are retired because they target
+  the Supabase development store, which Ignis no longer uses; nothing was deleted and that store was not re-read.
+  T085–T090 are parked with the frozen Market verdict and run only for a real market question with a named person
+  who needs the answer. No pilot outcome is claimed (owner decided; basis: ledger review on 2026-11-09).
 
 ## User Scenarios & Testing
 

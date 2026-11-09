@@ -2,7 +2,7 @@
 
 **Feature Branch**: `release/v0.8.0` (existing branch retained)
 **Created**: 2026-10-04
-**Status**: Approved scope; acceptance incomplete
+**Status**: Accepted by the owner with documented exceptions (Clarifications); released in `v0.8.0`
 **Input**: Owner delegates the complete UAT, lessons/issues, planning, implementation and a second complete UAT loop.
 
 ## User Scenarios & Testing
@@ -116,3 +116,9 @@ Empty search versus missing response; query redirects; wrong response query; sta
 - Q: Can isolated query-proof regression and remediation proceed before the missing baseline qualification/claim cases? → A: Yes, as independent offline work; all missing baseline and final cases remain mandatory (agent decided; basis: no persisted evidence or session changes, and the decision check found no recorded contradiction).
 - Q: How are real TikTok UAT excerpts qualified? → A: Use TypeSafe as a narrow advisor, then independently review every excerpt before typed immutable submission; seller promotions cannot establish demand, and query wording alone cannot establish counterevidence (agent decided; basis: semantic-judgment routing and evidence-first constraints).
 - Q: How may the collector recover the verified server-rendered search result? → A: Extend the existing browser capture boundary only: successful exact navigation, exact BarcelonaSearchResultsQuery expected preloader, identical complete stream preloaderID, no errors and validated public envelope; return only admitted public data (agent decided; basis: actual structural proof, existing tier and constitution, decision check found no recorded contradiction).
+
+### Session 2026-11-09
+
+- Q: Should T006, T018 and T022 stay open? → A: No. T006 is superseded. T018 and T022 close under the 2026-10-04
+  owner exception, with the Market report pixels still uninspected and no PASS claimed; Market verdict is frozen
+  (owner decided; basis: ledger review on 2026-11-09).

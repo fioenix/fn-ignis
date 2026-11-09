@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-25
 
-**Status**: Accepted for planning
+**Status**: Implemented and released in `v0.6.0`
 
 **Input**: Product-owner approval of
 `docs/decisions/2026-09-25-decision-grade-evidence-qualification.md`

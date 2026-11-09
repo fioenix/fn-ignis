@@ -40,7 +40,9 @@ Take every value from the snapshot. Show:
 - mission ID, `surface` (`MARKET` or `ATTENTION`), `revision` and `read_at`;
 - the run: `run_id` echoes only a run you selected; when it is null, show
   `research.current_run_id` if research is available, otherwise say the run is unknown;
-- `frame_digest`, or `frame_pending_reason` when no frame is bound;
+- `frame_digest`, or `frame_pending_reason` when no frame is bound. On an Attention mission no claim
+  binds to a frame, so `frame_digest` stays null and the reason reads `UNAVAILABLE`: say that, and do
+  not report it as a failed collection;
 - `collection_state`, or "unknown" when it is null;
 - each entry in `channels` with its `platform`, `connector_surface`, `status`, `signals_collected`
   and `note`;
@@ -50,7 +52,8 @@ Take every value from the snapshot. Show:
   permitted claims from `claim_gate.claims` with their evidence bindings; otherwise
   `claim_gate.gap_report`; earlier claims from `claim_gate.history` labeled as history;
 - research work and findings from `research` when its `availability` is `AVAILABLE`, otherwise
-  say research is unknown. For each finding, show `latest_recorded` (the newest revision) and
+  say research is unknown. `SCHEMA_UNAVAILABLE` can occur in a SQLite store before its first research
+  write; otherwise a missing or incompatible schema leaves research unknown. For each finding, show `latest_recorded` (the newest revision) and
   `current_eligible` (eligible for the current frame) separately; a finding with `text_withheld`
   true is shown as withheld, never as empty text. Label work `activity` with
   `provenance` `HOST_REPORTED` as reported by the host, and items with `recorded_provenance`
@@ -59,6 +62,23 @@ Take every value from the snapshot. Show:
 - totals from `counts` with the evidence page shown (`evidence_offset`, `page_size`).
 
 Every artifact states that it is a point-in-time snapshot taken at `read_at`, not a live view.
+
+## The six evidence responsibilities
+
+Present all six in whatever layout fits, and keep each one identifiable when you group them. For
+each, state what it receives, what it produces, why it matters and what can fail, using the current
+values from the snapshot. When the snapshot does not establish a responsibility, show it as pending
+or unavailable and say which; never drop it. On an Attention mission, qualification and falsification
+normally stay unassessed: show them that way rather than leaving them out.
+
+| Responsibility | Receives | Produces | Why it matters | What can fail | Snapshot fields |
+|---|---|---|---|---|---|
+| Mission authority | The confirmed mission request | The manifest and the allowed scope | Bounds what may be collected and claimed | No manifest, or a run outside its scope | `manifest_digest`, `brief_revision_id`, `surface` |
+| Collection | Approved queries and sources | Channel outcomes and observations | Shows what was asked and what answered | Auth, rate limit, degraded or unrequested channels | `channels`, `collection_state`, `counts` |
+| Provenance | Each collected item | Source link, times and source policy | Lets a reader check where evidence came from | Unknown times or source policy | `source_url`, `published_at`, `captured_at`, `source_policy` |
+| Qualification | Observations and the current frame | A relation and role for each observation | Separates relevant evidence from noise | Unassessed items, unavailable evaluator | `qualification_relation`, `evidence_role`, `qualification_frame_fingerprint` |
+| Falsification | Qualified evidence and contrary probes | Contradicting evidence and named gaps | A claim has to survive what argues against it | No contrary evidence sought or found | `direction`, `claim_gate.gap_report.missing_evidence`, `claim_gate.gap_report.attempted_probes` |
+| Claim permission | The current frame and recorded claims | Permitted claims or a gap report | Decides whether a conclusion may be shown | Stale frame, withheld or unavailable gate | `claim_gate.state`, `claim_gate.render_status`, `claim_gate.reason_code` |
 
 ## Display rules
 

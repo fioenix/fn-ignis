@@ -357,7 +357,8 @@ class RelaySourcePolicy:
             "captured_at": self.captured_at.isoformat() if self.captured_at is not None else None,
             "boundary_at": self.boundary_at.isoformat() if self.boundary_at is not None else None,
             "age_seconds": self.age_seconds, "automatic_action": False,
-            "policy_url": "https://developers.google.com/youtube/terms/developer-policies"}
+            "policy_url": "https://developers.google.com/youtube/terms/developer-policies"
+            if self.status in ("WITHIN_30_DAY_WINDOW", "REFRESH_OR_DELETE_REQUIRED") else None}
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

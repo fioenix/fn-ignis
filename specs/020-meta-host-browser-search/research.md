@@ -365,3 +365,13 @@ T058 review hardening: reject TikTok alt labels longer than 2000 before extracti
 attribution tail before sanitation could leave the poster name. This conservative card drop is
 covered by a synthetic long-vi-label test; live label length reachability remains unverified.
 Matching-tag malformed Reels responses poison the capture even if another bound response is empty.
+
+## R15. TikTok caption and hashtags instead of author removal (T059, owner-approved 09/11/2026)
+
+Measured on one Vietnamese-interface account, query `son môi`, counts only: 28 of 28 tiles on `/search/video` and `/search` had `search-card-video-caption` as a child of the tile's parent, and it never contained the poster's name or handle. On the 12 video tiles of `/search` it was always the start of the image label: equal to the label's text before the attribution on 7, omitting only hashtags on 4, and shorter by 60 or more other characters on 1.
+
+Two designs were rejected. Per-locale templates cannot separate a name containing the lead words from the attribution, and they block every unseeded interface language. Removing the known name from the label failed two independent review rounds: a name written differently in the label than in its element leaves the first occurrence unmatched and a later sound credit sets the cut, so removal cannot be proved. Text after the caption is therefore never kept, except hashtags, which cannot start the attribution wording. The accepted cost is the caption text the page truncates (1 of 12 tiles). A poster naming themselves inside their own caption remains the free-text limit of Spec 015. A selector change drops records rather than leaking; the extractor version changes so watchlist periods report the collection-path change.
+
+## R16. TikTok video results path (T060, owner-approved 09/11/2026)
+
+On one Vietnamese-interface account and the query `son môi`, `/search?q=` loaded an error page with no tiles on 3 of 7 loads; `/search/video?q=` loaded tiles on 2 of 2, with the same caption structure. The sample is small and does not establish a failure rate. The video page also removes LIVE tiles, which never yielded records. It is a different sample of results from the general page, so it is not comparable with earlier `/search` captures; `tiktok-public-grid-v3` has not been released, so the version is not changed again. The Playwright `tiktok_plugin` path is a separate connector and is unchanged.
