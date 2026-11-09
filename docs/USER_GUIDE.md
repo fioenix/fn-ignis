@@ -151,8 +151,8 @@ that during setup. Each firing also judges which collected items are on your top
 period view counts only judged items. Setup ends with a first run you watch; in a mode that asks,
 you approve only `start_watchlist_run`, `execute_mission_ingress`,
 `get_mission_evidence_qualification_batch` and `submit_mission_evidence_qualifications`.
-You pause or remove it in the app, and removing it keeps the watchlist's history. A firing happens
-Ignis itself schedules nothing.
+You pause or remove it in the app, and removing it keeps the watchlist's history. A firing happens only while the app is open. Other hosts
+are not supported yet, and Ignis itself schedules nothing.
 
 ## 3. Understand evidence and analysis
 
