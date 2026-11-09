@@ -52,8 +52,10 @@ before T002 if any is missing.
 - [x] T005 [P] Document routines in README.md, README.vi.md, docs/USER_GUIDE.md and
   docs/USER_GUIDE.vi.md; Vietnamese through the vietnamizer core workflow.
   Done 22/10/2026: README.md, README.vi.md and both user guides; Vietnamese through the vietnamizer core workflow.
-- [ ] T006 Run the Claude Code Desktop acceptance in [quickstart.md](quickstart.md) and record it in
+- [x] T006 Run the Claude Code Desktop acceptance in [quickstart.md](quickstart.md) and record it in
   `.handoff/spec017/acceptance.handoff.md` (SC-001, SC-002, SC-003).
+  Done 23/10/2026, closed by the owner 09/11/2026: SC-001, SC-002 and SC-003 passed. Not exercised: removal after
+  confirmation (FR-008), and the guide's creation path as changed after 23/10/2026.
 - [x] T007 Run the full suite, ruff, `git diff --check`, the package build and
   `scripts/wheel_mcp_smoke.py`; code and security review of the diff; dispose of findings with
   evidence before the PR.

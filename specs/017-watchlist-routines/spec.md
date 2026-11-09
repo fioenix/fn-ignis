@@ -4,8 +4,7 @@
 
 **Created**: 2026-10-21
 
-**Status**: Implemented and merged (6/8 tasks, read 09/11/2026). Open: T006 Claude Code Desktop
-acceptance and T008 the 14-day routine measurement, both of which need the owner.
+**Status**: Implemented and merged (7/8 tasks, read 09/11/2026). Open: T008, the 14-day routine measurement; its routine last ran on 04/11/2026 and the host no longer lists it.
 
 **Input**: The owner's accepted decision record
 [`docs/decisions/2026-10-21-listening-first-product-direction.md`](../../docs/decisions/2026-10-21-listening-first-product-direction.md)
@@ -139,6 +138,12 @@ confirm (listed again under "Owner review"):
   topics. Setup asks for those two approvals too (agent decided; basis: the G3 period views of
   23–25/10/2026 showed no figure or item until the 25/10 run was judged, after which three items
   appeared).
+
+### Session 2026-11-09
+
+- Q: Does T006 stay open because the guide changed after the 23/10 run? → A: No. T006 closes on the 23/10 result, where
+  SC-001, SC-002 and SC-003 passed. Removal after confirmation (FR-008) and the guide's later creation path stay
+  unexercised and are not claimed (owner decided; basis: `.handoff/spec017/acceptance.handoff.md`).
 
 ## User Scenarios & Testing *(mandatory)*
 
