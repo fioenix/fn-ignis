@@ -312,7 +312,7 @@ _WATCHLIST_DDL = """
 """
 
 # Tables an existing-ready connection may change: the finite parent's mission, journal, progress,
-# source, observation, quota and cluster records. Vocabulary, taxonomy, runtime configuration,
+# source, observation, quota and cluster records. Vocabulary, runtime configuration,
 # credentials and workspace registrations are never written through this path.
 _EXISTING_READY_WRITABLE = frozenset(
     {
@@ -4196,31 +4196,6 @@ class SqliteTrendRepository(ITrendRepository, IMissionRelayWriter):
                     conn.close()
 
         return await self._run_write(_sync_reg)
-
-    async def get_industry_taxonomies(self) -> List[Dict[str, Any]]:
-        await self._ensure_schema()
-
-        def _sync_get():
-            conn = self._get_connection()
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT industry_code, industry_name, keywords, created_at FROM industry_taxonomies")
-                rows = cur.fetchall()
-                taxonomies = []
-                for r in rows:
-                    kws = json.loads(r["keywords"]) if r["keywords"] else []
-                    taxonomies.append({
-                        "industry_code": r["industry_code"],
-                        "industry_name": r["industry_name"],
-                        "keywords": kws,
-                        "created_at": r["created_at"],
-                    })
-                return taxonomies
-            finally:
-                if self._mem_conn is None:
-                    conn.close()
-
-        return await asyncio.to_thread(_sync_get)
 
     async def get_runtime_config(self, key: str) -> Optional[str]:
         await self._ensure_schema()

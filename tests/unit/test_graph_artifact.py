@@ -130,3 +130,18 @@ def test_graph_artifact_sanitizes_pii_in_labels():
     cluster = _cluster("Contact me at nguyen.van.a@example.com now", 50.0, "tech", _signals(PlatformType.THREADS, 1))
     payload = _graph_payload(HtmlArtifactBuilder().build_graph_artifact([cluster], geo=GeoCode.VN))
     assert "nguyen.van.a@example.com" not in payload["nodes"][0]["label"]
+
+
+
+def test_unclassified_renders_in_dashboard_graph_filter_and_card():
+    cluster = _cluster('Unclassified synthetic topic', 42, 'unclassified', _signals(PlatformType.YOUTUBE, 2))
+    builder = HtmlArtifactBuilder()
+    dashboard = builder.build_dashboard_artifact([cluster])
+    graph = builder.build_graph_artifact([cluster])
+    payload = _graph_payload(graph)
+    assert [node['category'] for node in payload['nodes']] == ['unclassified']
+    assert 'unclassified' in dashboard
+    assert 'n.category === cat' in graph
+    card = builder.build_topic_card_artifact(cluster, cluster.signals)
+    assert cluster.canonical_name in card
+    assert 'category-badge' not in card

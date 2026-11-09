@@ -91,14 +91,14 @@ to extend a taxonomy.
 
 ### Tests before changes
 
-- [ ] T023 [P] [US3] Change `tests/unit/test_market_lexicons.py` to assert the exact success/error payload contracts, domain-filter semantics, no taxonomy read and unchanged 53-tool inventory/signatures; observe extra-key/read RED before T025. Reuse the existing MCP registry discovery instead of hardcoding an artificial tool list.
-- [ ] T024 [P] [US3] Extend `tests/unit/test_graph_artifact.py` and `tests/unit/test_taxonomy_evidence_parity.py` to render `unclassified` through dashboard/graph/card/mission builders, inspect dynamic graph filter data, and compare Market/Attention outputs before/after stored-category reset. Existing rendering may already pass; record parity, not RED. Any discovered rendering defect needs its own assertion RED before changing `src/ignis/infrastructure/templates/html/`.
+- [X] T023 [P] [US3] Change `tests/unit/test_market_lexicons.py` to assert the exact success/error payload contracts, domain-filter semantics, no taxonomy read and unchanged 53-tool inventory/signatures; observe extra-key/read RED before T025. Reuse the existing MCP registry discovery instead of hardcoding an artificial tool list.
+- [X] T024 [P] [US3] Extend `tests/unit/test_graph_artifact.py` and `tests/unit/test_taxonomy_evidence_parity.py` to render `unclassified` through dashboard/graph/card/mission builders, inspect dynamic graph filter data, and compare Market/Attention outputs before/after stored-category reset. Existing rendering may already pass; record parity, not RED. Any discovered rendering defect needs its own assertion RED before changing `src/ignis/infrastructure/templates/html/`.
 
 ### Implementation
 
-- [ ] T025 [US3] Remove only the taxonomy response field/read and description promise from `src/ignis/interfaces/mcp/server.py`; remove `get_industry_taxonomies` from `src/ignis/application/ports/repository_port.py` and both `src/ignis/infrastructure/persistence/postgres_repository.py` and `sqlite_repository.py`. Reconcile taxonomy-only test doubles in `tests/integration/test_decision_grade_evidence.py`. Turn T023 GREEN; keep names, parameters, other keys and 53 tools.
-- [ ] T026 [US3] Update the Data-Driven Vocabulary Protocol in `AGENTS.md`, schema facts in `docs/PROJECT_REVIEW_CONTEXT.md`, and the schema statement in `BACKLOG.md` to remove active taxonomy guidance while preserving lexicon/data-driven/diacritic/platform-language rules and historical context. Preserve original language; apply Vietnamizer/manual reader pass to changed human-facing Vietnamese prose. Do not edit the settled `specs/021-remove-seeded-taxonomy/spec.md`.
-- [ ] T027 [US3] Run the targeted MCP/rendering/evidence parity checks and inspect shipped runtime references against `specs/021-remove-seeded-taxonomy/contracts/vocabulary.md`; record that historical SQL keyword lists and migration-only codes are the only intentional remnants, with no live taxonomy getter/seed/registration path, in `.handoff/021-taxonomy-verification.md`.
+- [X] T025 [US3] Remove only the taxonomy response field/read and description promise from `src/ignis/interfaces/mcp/server.py`; remove `get_industry_taxonomies` from `src/ignis/application/ports/repository_port.py` and both `src/ignis/infrastructure/persistence/postgres_repository.py` and `sqlite_repository.py`. Reconcile taxonomy-only test doubles in `tests/integration/test_decision_grade_evidence.py`. Turn T023 GREEN; keep names, parameters, other keys and 53 tools.
+- [X] T026 [US3] Update the Data-Driven Vocabulary Protocol in `AGENTS.md`, schema facts in `docs/PROJECT_REVIEW_CONTEXT.md`, and the schema statement in `BACKLOG.md` to remove active taxonomy guidance while preserving lexicon/data-driven/diacritic/platform-language rules and historical context. Preserve original language; apply Vietnamizer/manual reader pass to changed human-facing Vietnamese prose. Do not edit the settled `specs/021-remove-seeded-taxonomy/spec.md`.
+- [X] T027 [US3] Run the targeted MCP/rendering/evidence parity checks and inspect shipped runtime references against `specs/021-remove-seeded-taxonomy/contracts/vocabulary.md`; record that historical SQL keyword lists and migration-only codes are the only intentional remnants, with no live taxonomy getter/seed/registration path, in `.handoff/021-taxonomy-verification.md`.
 
 **Checkpoint**: All three stories meet their independent assertions; integration remains gated
 on the final targeted evidence and review.
@@ -159,3 +159,17 @@ story independently, then integrate without broadening scope. No new version, de
 classifier, credential path or migration framework is needed.
 
 **Task inventory**: 29 tasks; setup 2, foundational 5, US1 6, US2 9, US3 5, final acceptance 2.
+
+## Local acceptance notes
+
+- SQLite retirement, read-only projection/verification, rollback, retries and startup refusal
+  have observed local evidence. Full commands and counts are in
+  `.handoff/021-taxonomy-verification.md` (ignored local artifact).
+- T016–T019 and T022 remain open: PostgreSQL scenarios and SQL are authored, but no real
+  PostgreSQL/Compose execution is authorized here. Mock/service routing is not backend proof.
+- T021 remains open: static package inventory and copied installed-resource startup pass;
+  actual wheel/sdist builds are unverified (hatchling is absent from the prescribed venv).
+- T010's shared-helper assumption was corrected after caller RED: `_has_diacritics` and
+  `_fold_accents` are required by YouTube keyword matching and retain their exact algorithms.
+  Taxonomy-only registration, storage and inference are removed. The settled spec is unchanged.
+- No real store was migrated; no push, pull request, merge, release or version change occurred.

@@ -688,8 +688,7 @@ async def test_cold_start_vocabulary_failure_calls_no_connector_and_fails_clearl
         raise RuntimeError("market_lexicons is unreadable")
 
     process["sync"]._repository = type(
-        "UnreadableVocabulary", (), {"get_domain_lexicons": unreadable,
-                                     "get_industry_taxonomies": unreadable}
+        "UnreadableVocabulary", (), {"get_domain_lexicons": unreadable}
     )()
 
     with pytest.raises(VocabularySynchronizationError):
@@ -1941,6 +1940,12 @@ async def test_taxonomy_category_only_reset_preserves_analysis(
     from ignis.domain.entities import TopicCluster
     from ignis.interfaces.mcp import server as mcp_server
 
+    from ignis.infrastructure.templates import html_builder
+    class FixedRenderClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return T0
+    monkeypatch.setattr(html_builder, 'datetime', FixedRenderClock)
     repository = repository_case.repository
     store, workspace = await _workspace(repository, host_workspace)
     items = CORPUS["semantic_controls"]["positive"]

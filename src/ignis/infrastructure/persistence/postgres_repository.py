@@ -2218,26 +2218,6 @@ class PostgresTimescaleRepository(ITrendRepository):
             logger.error(f"Error registering lexicon terms: {e}", exc_info=True)
             raise RepositoryException(f"Failed to register lexicon terms: {e}") from e
 
-    async def get_industry_taxonomies(self) -> List[Dict[str, Any]]:
-        pool = await self._get_pool()
-        query = "SELECT industry_code, industry_name, keywords FROM industry_taxonomies ORDER BY industry_code ASC;"
-        try:
-            async with pool.connection() as conn:
-                async with conn.cursor(row_factory=tuple_row) as cur:
-                    await cur.execute(query)
-                    rows = await cur.fetchall()
-            return [
-                {
-                    "industry_code": r[0],
-                    "industry_name": r[1],
-                    "keywords": r[2] if isinstance(r[2], list) else list(r[2] or []),
-                }
-                for r in rows
-            ]
-        except Exception as e:
-            logger.error(f"Error fetching industry taxonomies: {e}")
-            return []
-
     async def get_runtime_config(self, key: str) -> Optional[str]:
         pool = await self._get_pool()
         query = "SELECT value FROM runtime_configs WHERE key = %s;"

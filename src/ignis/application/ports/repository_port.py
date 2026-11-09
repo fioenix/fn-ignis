@@ -278,11 +278,6 @@ class ITrendRepository(ABC):
         pass
 
     @abstractmethod
-    async def get_industry_taxonomies(self) -> List[Dict[str, Any]]:
-        """Retrieve all active industry taxonomies and category keyword mappings."""
-        pass
-
-    @abstractmethod
     async def get_runtime_config(self, key: str) -> Optional[str]:
         """Retrieve dynamic runtime configuration value by key."""
         pass

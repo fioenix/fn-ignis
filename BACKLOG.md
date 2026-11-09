@@ -1100,7 +1100,7 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
 
 - [x] **Bật RLS cho mọi bảng trong schema `public` — T018, chặn release, ngày 24/09/2026.**
   `sql/021_public_schema_rls_coverage.sql` bật RLS trên cả 17 bảng `public` mà chuỗi migration tạo
-  ra và chia chúng thành hai lớp. `market_lexicons`, `industry_taxonomies` vẫn cho client đọc qua hai
+  ra và chia chúng thành hai lớp. Ở thời điểm đó, `market_lexicons`, `industry_taxonomies` cho client đọc qua hai
   policy của `006`; 15 bảng còn lại chỉ owner được đụng tới, `anon` và `authenticated` bị thu hồi
   mọi quyền trên bảng lẫn sequence đi kèm. Thu hồi quyền là bắt buộc chứ không phải cho chắc: RLS
   không chặn TRUNCATE, trong khi trước `021` cả hai role đều TRUNCATE được toàn bộ 17 bảng, kể cả
@@ -1112,6 +1112,10 @@ như vậy làm ranh giới phát hành đọc chặt hơn thực tế.
   bỏ RLS khỏi một bảng sau `006` là phép kiểm tra fail ngay. Danh sách bảng được liệt kê cứng chứ
   không dò catalog, nên bảng của ứng dụng khác trong database dùng chung không bị đụng tới. Database
   khởi tạo trước khi có `021` phải tự chạy file này một lần bằng quyền owner.
+  Spec 021 bổ sung migration `039` để bỏ `industry_taxonomies` cùng policy của bảng này;
+  sau migration chỉ còn policy đọc vocabulary trên `market_lexicons`. 69 term theo lĩnh vực,
+  nhãn giao diện nền tảng và vocabulary nhận diện ngôn ngữ được giữ nguyên. Thay đổi này chưa
+  được áp dụng lên store thật trong lượt triển khai Spec 021.
 
 - [x] **Đưa phép thử Compose init vào CI — T019, ngày 24/09/2026.** Workflow
   `.github/workflows/compose-init.yml` (tên `Compose Init`) chỉ có một job `compose-fresh-init`, báo

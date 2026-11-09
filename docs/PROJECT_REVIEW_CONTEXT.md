@@ -162,7 +162,13 @@ still in people's heads:
 
 ## 3. Measured state
 
-Read from the live Postgres on 10/09/2026 at 08:10 UTC.
+Historical snapshot, read from the live Postgres on 10/09/2026 at 08:10 UTC.
+
+Spec 021 retires `industry_taxonomies` through migration 039. Fresh SQLite stores no longer
+create it; PostgreSQL reaches the same schema after the full migration chain. Categories now
+come only from usable source labels, with `unclassified` as the fallback. The 69 seeded domain
+terms, platform-interface labels and language-detection vocabulary in `market_lexicons` remain.
+The historical measurements below do not establish that any live store has been migrated.
 
 | | |
 |---|---|
