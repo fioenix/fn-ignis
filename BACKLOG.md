@@ -23,9 +23,10 @@ vẫn giữ ledger riêng; đã rà ngày 09/11/2026 và ghi trạng thái từn
 - [ ] **Spec 014 — ledger đã đóng (115 task xong, T079 rút), còn 4 yêu cầu UNMET** trong bảng nghiệm thu T113:
   FR-001 và FR-003 (artifact chưa trình bày đủ sáu trách nhiệm và giải thích từng giai đoạn), SC-001 (chưa đo người đọc hiểu
   trong hai phút), SC-014 (không có follow-up thật vì T079 đã rút 09/11/2026; `execute_mission_follow_up` vẫn bị từ chối mặc định).
-- [ ] **TikTok trên profile Finos bị fail-closed:** validator báo locale chưa seed hoặc không hỗ trợ, nên mọi bản ghi bị
-  loại. Giả thuyết: giao diện không phải tiếng Việt; chưa đo trực tiếp giá trị `lang`. Cần đo lại, rồi đổi ngôn ngữ giao
-  diện của profile hoặc seed locale đó từ chữ thật TikTok hiển thị.
+- [x] **TikTok trên profile Finos bị fail-closed** — đóng 09/11/2026. Đo trực tiếp: trang có `lang=en` trong khi
+  `tiktok_attribution_en` chưa có mẫu, nên validator loại toàn bộ. Đã đổi giao diện profile sang Tiếng Việt (`vi-VN`);
+  một lượt host-browser TACTICAL với truy vấn "son môi" trả `ACCEPTED`/`HEALTHY`, 12 observation, đã gỡ tên tác giả
+  (18 thẻ, 6 thẻ không cho bản ghi). Chưa kiểm: thiết lập có giữ sau khi khởi động lại Chrome, và nhánh MISSION.
 - [ ] **Spec 017 — T006** nghiệm thu Claude Code Desktop theo `quickstart.md`; **T008** chạy một routine thật
   14 ngày liên tiếp trên một watchlist golden set (có thể báo cáo riêng, không đặt ngưỡng).
 - [ ] **Spec 019 (Shopee Affiliate)** — `Draft`, chưa có plan/tasks, chờ ba cổng kiểm tài khoản của chủ sở hữu.
