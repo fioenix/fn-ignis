@@ -1,5 +1,6 @@
 import logging
 import re
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
@@ -52,6 +53,19 @@ class SemanticClusterer(IClusteringEngine):
     Uses Szymkiewicz-Simpson Overlap & Jaccard index for short text title matching.
     Sub-50ms deterministic execution without external LLM dependency.
     """
+
+    @staticmethod
+    def _has_diacritics(text: str) -> bool:
+        """Keep the shared Vietnamese script check used by YouTube language detection."""
+        if "đ" in text or "Đ" in text:
+            return True
+        return any(unicodedata.combining(ch) for ch in unicodedata.normalize("NFD", text))
+
+    @staticmethod
+    def _fold_accents(text: str) -> str:
+        """Preserve the shared normalization used by YouTube language detection."""
+        decomposed = unicodedata.normalize("NFD", text.replace("đ", "d").replace("Đ", "D"))
+        return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 
     def __init__(
         self,
