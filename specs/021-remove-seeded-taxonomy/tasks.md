@@ -3,7 +3,7 @@
 **Input**: `specs/021-remove-seeded-taxonomy/`
 **Prerequisites**: `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`
 **Route**: DEEP / migration; the Spec Kit depth gate requires this task list.
-**Status**: Planned only. No tests, implementation or migrations have run in this planning session.
+**Status**: Implementation in progress; local evidence in `.handoff/021-taxonomy-verification.md`. Real PostgreSQL/Compose proof remains open.
 
 ## Format and execution rules
 
@@ -22,19 +22,19 @@ revision and limitation in `.handoff/021-taxonomy-verification.md` during implem
 
 ## Phase 1: Setup
 
-- [ ] T001 Confirm branch/revision, scoped rules, unchanged owner decisions and current SQL tip against `specs/021-remove-seeded-taxonomy/plan.md`; record authorized stores, execution limits and the targeted command set in `.handoff/021-taxonomy-verification.md`. Recheck 039 is free before creating it; do not change branches or inspect credentials.
-- [ ] T002 Inventory the actual call sites and historical/latest-state assertions from `specs/021-remove-seeded-taxonomy/research.md`; record the removal checklist, exact pre-change hashes of `sql/001` through `sql/038` and the 69 retained domain-term tuples in `.handoff/021-taxonomy-verification.md`, without running a database or build merely for inventory.
+- [X] T001 Confirm branch/revision, scoped rules, unchanged owner decisions and current SQL tip against `specs/021-remove-seeded-taxonomy/plan.md`; record authorized stores, execution limits and the targeted command set in `.handoff/021-taxonomy-verification.md`. Recheck 039 is free before creating it; do not change branches or inspect credentials.
+- [X] T002 Inventory the actual call sites and historical/latest-state assertions from `specs/021-remove-seeded-taxonomy/research.md`; record the removal checklist, exact pre-change hashes of `sql/001` through `sql/038` and the 69 retained domain-term tuples in `.handoff/021-taxonomy-verification.md`, without running a database or build merely for inventory.
 
 ## Phase 2: Foundational evidence and projection
 
 **Goal**: Define the exact immutable baseline and create a usable read-only projection before
 any persisted-data mutation is implemented. All stories depend on this phase.
 
-- [ ] T003 Add parity tests in `tests/unit/test_taxonomy_evidence_parity.py` and `tests/integration/test_decision_grade_evidence.py`: vary only stored cluster category and compare Market discovery, Market/Attention qualification analysis, generated mission content, frame digests, claims and handoff IDs; preserve signal metadata and memberships. Add an observation/claim-content negative control to show the comparison detects relevant changes. Record the existing behavior result, not invented RED.
-- [ ] T004 Add projection behavior tests in `tests/unit/test_taxonomy_retirement.py`: all 14 counts including zero, exact IDs/old values in hashed target identity, stable reordered reads, same-count substitution detection, all-column/noncategory hashes, protected evidence digests, collision warning and absent-table no-op. Observe assertion RED against a minimal no-op projection before T006.
-- [ ] T005 Add CLI/read-boundary tests in `tests/unit/test_taxonomy_retirement.py`: raw read-only SQLite connection, no repository initialization or credential/config discovery, stdout-only sanitized receipt, correct backend selection, malformed/unsupported inputs and stable exit reasons. Observe assertion RED before T007; use synthetic files/services only.
-- [ ] T006 Implement frozen code identifiers, backend snapshot readers and versioned deterministic projection/actual-post-state comparison in `src/ignis/infrastructure/migration/taxonomy_retirement.py` per `data-model.md`; protect all specified evidence sets and lexicons, never read credential/key tables. Turn T004 GREEN without copying a keyword corpus.
-- [ ] T007 Implement `project` and read-only `verify` in `scripts/retire_industry_taxonomy.py` using T006 and `contracts/taxonomy-retirement.md`; no implicit output-file write, seed, caller configuration or `.env` load. Turn T005 GREEN and demonstrate repeated projection equality without database/schema mutation on a disposable fixture.
+- [X] T003 Add parity tests in `tests/unit/test_taxonomy_evidence_parity.py` and `tests/integration/test_decision_grade_evidence.py`: vary only stored cluster category and compare Market discovery, Market/Attention qualification analysis, generated mission content, frame digests, claims and handoff IDs; preserve signal metadata and memberships. Add an observation/claim-content negative control to show the comparison detects relevant changes. Record the existing behavior result, not invented RED.
+- [X] T004 Add projection behavior tests in `tests/unit/test_taxonomy_retirement.py`: all 14 counts including zero, exact IDs/old values in hashed target identity, stable reordered reads, same-count substitution detection, all-column/noncategory hashes, protected evidence digests, collision warning and absent-table no-op. Observe assertion RED against a minimal no-op projection before T006.
+- [X] T005 Add CLI/read-boundary tests in `tests/unit/test_taxonomy_retirement.py`: raw read-only SQLite connection, no repository initialization or credential/config discovery, stdout-only sanitized receipt, correct backend selection, malformed/unsupported inputs and stable exit reasons. Observe assertion RED before T007; use synthetic files/services only.
+- [X] T006 Implement frozen code identifiers, backend snapshot readers and versioned deterministic projection/actual-post-state comparison in `src/ignis/infrastructure/migration/taxonomy_retirement.py` per `data-model.md`; protect all specified evidence sets and lexicons, never read credential/key tables. Turn T004 GREEN without copying a keyword corpus.
+- [X] T007 Implement `project` and read-only `verify` in `scripts/retire_industry_taxonomy.py` using T006 and `contracts/taxonomy-retirement.md`; no implicit output-file write, seed, caller configuration or `.env` load. Turn T005 GREEN and demonstrate repeated projection equality without database/schema mutation on a disposable fixture.
 
 **Checkpoint**: Projection is executable and independently verified, but no migration is accepted.
 
