@@ -11,16 +11,24 @@ import pytest
 EXTRACTOR = Path(__file__).resolve().parents[2] / "src/ignis/infrastructure/connectors/host_browser/tiktok_search.js"
 
 
-def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi đi làm", image_alt="Túi đi làm", image_visible=True, locale="vi-VN"):
+def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi đi làm", image_alt="Túi đi làm do Trần Trọng Review tạo với nhạc", image_visible=True, locale="vi-VN", caption="Túi đi làm"):
     assert EXTRACTOR.exists(), "The packaged deterministic extractor is missing"
     node = shutil.which("node")
     if not node:
         pytest.skip("Node is required for deterministic JavaScript fixture execution")
     code = """
       const fs = require('fs'), vm = require('vm');
-      const makeCard = (url, text, visible) => ({
+      const caption = JSON.parse(process.argv[8]);
+      const CAPTION = '[data-e2e="search-card-video-caption"]';
+      const shape = caption && typeof caption === 'object' ? caption : {captions: caption === null ? [] : [caption], visible: true, cards: 1};
+      const CARDS = 'div[data-e2e="search_top-item"], div[data-e2e="search_video-item"]';
+      const makeCard = (url, text, visible) => { const card = ({
         getClientRects: () => visible ? [1] : [],
         innerText: text,
+        parentElement: {
+          querySelectorAll: selector => selector === CARDS ? Array(shape.cards).fill(card)
+            : selector === CAPTION ? shape.captions.map(text => ({textContent: text, getClientRects: () => shape.visible ? [1] : []})) : []
+        },
         querySelector: selector => selector === 'a[href*="/video/"]' ? {
           href: url,
           querySelectorAll: selector => selector === 'img[alt]' ? [{
@@ -28,7 +36,7 @@ def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi �
             getClientRects: () => process.argv[6] === 'true' ? [1] : []
           }] : []
         } : null
-      });
+      }); return card; };
       const document = {
         documentElement: {lang: process.argv[7]},
         querySelectorAll: selector => selector === 'div[data-e2e="search_top-item"], div[data-e2e="search_video-item"]' ? [
@@ -40,12 +48,12 @@ def extract(query="túi đi làm", page_query="túi đi làm", card_text="Túi �
         ] : []
       };
       const fn = vm.runInNewContext('(' + fs.readFileSync(process.argv[1], 'utf8') + ')', {
-        document, location: {href: 'https://www.tiktok.com/search?q=' + encodeURIComponent(process.argv[3])}, URL, Date
+        document, location: {href: 'https://www.tiktok.com/search/video?q=' + encodeURIComponent(process.argv[3])}, URL, Date
       });
       console.log(JSON.stringify(fn({query_id: 'query-1', query: process.argv[2], result_limit: 3})));
     """
     result = subprocess.run([node, "-e", code, str(EXTRACTOR), query, page_query, card_text,
-                             image_alt, str(image_visible).lower(), locale],
+                             image_alt, str(image_visible).lower(), locale, json.dumps(caption)],
                             check=True, capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -78,11 +86,11 @@ def test_counter_only_grid_is_degraded_not_content_evidence(counter):
 
 def test_counter_tile_uses_visible_video_image_label_as_content():
     label = "Túi đẹp nha anh em! #jivi #tuidilam do Trần Trọng Review tạo với bản nhạc Peace"
-    result = extract(card_text="290", image_alt=label)
+    result = extract(card_text="290", image_alt=label, caption="Túi đẹp nha anh em!")
     assert result["status"] == "HEALTHY"
     assert result["records"] == [{
         "source_url": "https://www.tiktok.com/@public/video/7417820067028536584",
-        "excerpt": label, "published_at": None,
+        "excerpt": "Túi đẹp nha anh em! #jivi #tuidilam", "published_at": None,
     }]
 
 
@@ -108,5 +116,35 @@ def test_t058_tiktok_reports_primary_page_language(lang, expected):
 def test_t058_oversized_alt_cannot_cut_attribution_before_validation():
     label = "x" * 1980 + " do Fixture Poster tạo với music"
     result = extract(image_alt=label)
+    assert result["records"] == []
+    assert result["status"] == "DEGRADED"
+
+
+@pytest.mark.parametrize("alt,caption,expected", [
+    ("Son đẹp #son do Fixture Poster tạo với nhạc gốc - Fixture Poster", "Son đẹp", "Son đẹp #son"),
+    ("Caption #tag #b created by Fixture Poster with music", "Caption", "Caption #tag #b"),
+    ("Caption #a#b created by Fixture Poster with music", "Caption", "Caption #a#b"),
+    ("Caption created by Aster created by #Birch with music", "Caption", "Caption"),
+    ("Caption created by Fixtu\u200b\u0300re Alpha with music - Fixt\u00f9re Alpha", "Caption", "Caption"),
+    ("Cu\u0300 #a do Fixture Poster tạo với nhạc", "C\u00f9", "C\u00f9 #a"),
+    ("Hai   dòng\n#a do Fixture Poster tạo với nhạc", "Hai dòng", "Hai dòng #a"),
+    ("Caption #a", "Caption #a", "Caption #a"),
+])
+def test_v3_keeps_only_the_caption_and_the_hashtags_that_follow_it(alt, caption, expected):
+    result = extract(image_alt=alt, caption=caption)
+    assert [record["excerpt"] for record in result["records"]] == [expected]
+    assert not any(name in result["records"][0]["excerpt"] for name in ("Fixture", "Aster", "Birch", "Fixt"))
+
+
+@pytest.mark.parametrize("alt,caption", [
+    ("Caption do Fixture Poster tạo với nhạc", None),
+    ("Caption do Fixture Poster tạo với nhạc", ""),
+    ("Caption do Fixture Poster tạo với nhạc", "Một caption khác"),
+    ("Caption do Alpha tạo với nhạc", {"captions": ["Caption", "Caption"], "visible": True, "cards": 1}),
+    ("Caption do Alpha tạo với nhạc", {"captions": ["Caption"], "visible": False, "cards": 1}),
+    ("Caption do Alpha tạo với nhạc", {"captions": ["Caption"], "visible": True, "cards": 2}),
+])
+def test_v3_drops_a_record_when_the_caption_cannot_be_tied_to_the_label(alt, caption):
+    result = extract(image_alt=alt, caption=caption)
     assert result["records"] == []
     assert result["status"] == "DEGRADED"

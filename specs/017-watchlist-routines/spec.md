@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-21
 
-**Status**: Draft
+**Status**: Implemented and merged (7/8 tasks, read 09/11/2026). T008, the 14-day routine measurement, is parked (Clarifications, Session 2026-11-09); its routine last ran on 04/11/2026 and the host no longer lists it.
 
 **Input**: The owner's accepted decision record
 [`docs/decisions/2026-10-21-listening-first-product-direction.md`](../../docs/decisions/2026-10-21-listening-first-product-direction.md)
@@ -138,6 +138,18 @@ confirm (listed again under "Owner review"):
   topics. Setup asks for those two approvals too (agent decided; basis: the G3 period views of
   23–25/10/2026 showed no figure or item until the 25/10 run was judged, after which three items
   appeared).
+
+### Session 2026-11-09
+
+- Q: Does T006 stay open because the guide changed after the 23/10 run? → A: No. T006 closes on the 23/10 result, where
+  SC-001, SC-002 and SC-003 passed. Removal after confirmation (FR-008) and the guide's later creation path stay
+  unexercised and are not claimed (owner decided; basis: `.handoff/spec017/acceptance.handoff.md`).
+- Q: Should the routine be set up again to complete T008? → A: No. T008 is parked. It sets no target and gates nothing.
+  The last recorded run is dated 04/11/2026 and the host listed no scheduled tasks when checked on 09/11/2026; reader
+  dependence and when the interruption began were not established. SC-005 stays unmeasured; G3 holds 12 runs
+  from 23/10 to 04/11/2026, 8 of them COMPLETED, some started by hand. T008 reopens when a person needs a recurring period
+  view for a real decision, on a watchlist for that topic; that setup also exercises FR-008 and the later creation path
+  (owner decided; basis: ledger review on 2026-11-09).
 
 ## User Scenarios & Testing *(mandatory)*
 

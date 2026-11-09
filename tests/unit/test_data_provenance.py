@@ -973,3 +973,15 @@ def test_the_artifact_and_the_analysis_serialize_one_qualification_block():
     for handler in (server.handle_get_mission_analysis, server.handle_generate_mission_artifact,
                     server.handle_discover_market_opportunities):
         assert "_surface_payload(report, mission)" in inspect.getsource(handler), handler.__name__
+
+
+def test_report_shows_the_timeframe_value_not_the_enum_name(sample_trend_signal):
+    from ignis.domain.value_objects import Timeframe
+
+    mission = _mission()
+    mission.timeframe = Timeframe.LAST_7D
+    html = HtmlArtifactBuilder().build_mission_report_artifact(
+        mission=mission, signals=[sample_trend_signal], platform_breakdown={"google": 1},
+    )
+    assert "Timeframe." not in html, "The report must show the timeframe value, not the enum name"
+    assert "Matching 7d window" in html

@@ -73,6 +73,17 @@ def test_attention_report_preserves_missing_reach_and_uses_only_measured_maturit
     assert all("steady viewer baseline" not in item.statement for item in report.strategic_insights)
 
 
+def test_attention_report_without_a_video_surface_states_no_maturity():
+    signal = TrendSignal(platform=PlatformType.THREADS, raw_title="Tìm áo khoác cho nữ", geo_code=GeoCode.VN,
+                         metadata={"metric_known": False})
+    mission = ResearchMission(title="Jackets", keywords=["áo khoác"], surface=ResearchSurface.ATTENTION)
+    report = StrategicMarketReasoner().analyze_mission(
+        mission, [signal], [TopicCluster(canonical_name="Áo khoác", signals=[signal])], QualityScorecard(),
+    )
+    assert report.maturity_stage is None
+    assert all("Zero localized tutorial videos" not in item.statement for item in report.strategic_insights)
+
+
 def test_measured_zero_remains_a_real_measurement():
     signal = TrendSignal(platform=PlatformType.TIKTOK, raw_title="Túi đi làm", metric_value=0)
     report = StrategicMarketReasoner().analyze_mission(

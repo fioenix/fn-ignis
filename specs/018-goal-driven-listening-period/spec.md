@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-26
 
-**Status**: Draft
+**Status**: Implemented and released in `v0.8.0`
 
 **Input**: User description: "Watchlist lưu mục tiêu và kỳ so sánh, routine suy ra nhịp chạy từ kỳ so sánh và khoảng nhìn lại, phủ dữ liệu tính theo khoảng nhìn lại." (The watchlist keeps the user's goal and comparison period; the routine derives its cadence from the comparison period; coverage follows from it. The look-back framing was replaced in clarification by snapshots.)
 

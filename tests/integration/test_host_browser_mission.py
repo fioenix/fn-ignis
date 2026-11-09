@@ -77,7 +77,7 @@ async def test_existing_writer_seam_rechecks_before_any_ingress(repository_case,
 
 def staged_answer(request):
     return dict(request_id=request["request_id"], host_task_ref="task", session_ref="chrome",
-                extractor_version="tiktok-public-grid-v2", answers=[dict(
+                extractor_version="tiktok-public-grid-v3", answers=[dict(
                     query_id=query["query_id"], query=query["query"], page_url=query["search_url"],
                     captured_at=datetime.now(timezone.utc).isoformat(), search_verified=True,
                     empty_state_visible=False, status="HEALTHY", locale="vi", records=[dict(
@@ -1386,8 +1386,8 @@ async def test_t058_mission_locale_snapshot_comes_from_caller_repository(reposit
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("locale,expected_count", [("vi", 1), ("en", 0)])
-async def test_t058_locale_gate_reaches_canonical_mission_storage(repository_case, tmp_path, monkeypatch, locale, expected_count):
+@pytest.mark.parametrize("locale,excerpt,expected_count", [("vi", "Caption", 1), ("en", "Caption", 1), ("fr", "Caption", 1)])
+async def test_v3_locale_never_gates_canonical_mission_storage(repository_case, tmp_path, monkeypatch, locale, excerpt, expected_count):
     from tests.fixtures.meta_host_browser_answers import NoSocketRelay, host_answer
     from ignis.application.use_cases import host_browser_search as module
     monkeypatch.setattr(module, "LoopbackRelay", NoSocketRelay)
@@ -1399,8 +1399,7 @@ async def test_t058_locale_gate_reaches_canonical_mission_storage(repository_cas
         payload = host_answer(request)
         for item in payload["answers"]:
             item["locale"] = locale
-            item["records"][0]["excerpt"] = ("Caption do Fixture Poster tạo với music" if locale == "vi"
-                                             else "Caption created by Fixture Poster with music")
+            item["records"][0]["excerpt"] = excerpt
         service.stage(request["request_id"], payload)
         await service.submit_mission(executor, request["request_id"], "task", "session")
         held = await repo.get_mission_signals(mission.id)

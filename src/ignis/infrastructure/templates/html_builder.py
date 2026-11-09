@@ -13,7 +13,6 @@ from ignis.domain.harness_models import (
     HarnessResearchReport,
     QualityScorecard,
     StrategicInsight,
-    TrendMaturityStage,
 )
 from ignis.domain.source_identity import identity_free_source_url
 from ignis.domain.value_objects import GeoCode
@@ -298,7 +297,7 @@ class HtmlArtifactBuilder(IArtifactBuilder):
             overall_confidence=82.5,
         ))
         channel_summaries: List[ChannelDataSummary] = list(report.channel_summaries) if report else []
-        maturity = report.maturity_stage if report else TrendMaturityStage.EMERGING
+        maturity = report.maturity_stage if report else None
         opportunities = report.market_opportunities if report else []
         insights = _normalize_insights(report.strategic_insights if report else ([] if analysis_contract else [
             "Multi-platform verified market signals collected.",
