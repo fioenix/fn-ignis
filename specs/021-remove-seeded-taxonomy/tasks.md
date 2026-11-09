@@ -69,7 +69,7 @@ actual rows/digests, inject rollback failures, and retry before/after new source
 
 - [X] T014 [P] [US2] Add SQLite apply tests in `tests/unit/test_taxonomy_retirement.py` for all 14 codes, outside-code/null categories, historical source-code collision, table absent/empty target, unchanged timestamps and every other field, rollback after UPDATE/after DROP, stale same-count baseline and retry preserving a new source-coded cluster. Observe intended reset/transaction assertions RED against a no-op apply before T019.
 - [X] T015 [P] [US2] Add startup refusal and post-cutover ready-store parity tests in `tests/unit/test_sqlite_existing_ready.py`; update absent-taxonomy protected-set expectations in `tests/unit/test_caller_analysis_composition.py` and `tests/unit/test_caller_youtube_pilot_cli.py`. Prove old store refusal precedes every schema/seed write and ready analysis never migrates. Observe assertion RED before T020; preserve all remaining denied-write assertions.
-- [ ] T016 [P] [US2] Add real PostgreSQL scenarios in `tests/integration/test_taxonomy_retirement.py` matching T014, plus locked baseline recheck, bounded lock failure, direct populated SQL refusal without receipt, zero-cluster publication NOTICE, edited taxonomy rows, unexpected dependent-object rollback and owner-role execution. Observe behavioral RED on a pre-039 database/no-op apply before T018–T019. **Requires real PostgreSQL; mocks are not acceptance.**
+- [ ] T016 [P] [US2] Add real PostgreSQL scenarios in `tests/integration/test_postgres_taxonomy_retirement.py` matching T014, plus locked baseline recheck, bounded lock failure, direct populated SQL refusal without receipt, zero-cluster publication NOTICE, edited taxonomy rows, unexpected dependent-object rollback and owner-role execution. Observe behavioral RED on a pre-039 database/no-op apply before T018–T019. **Requires real PostgreSQL; mocks are not acceptance.**
 - [ ] T017 [P] [US2] Update final-state assertions in `tests/integration/test_compose_init.py`, `tests/integration/test_postgres_migration_contract.py` and `tests/integration/test_postgres_rls_coverage.py`: absent taxonomy/table/default/policy, exact remaining identities, 56 tables/15 UUID defaults and only the remaining lexicon read policy. Retain 006/021/022 historical-prefix security/replay tests; add real whole-chain end-state/retry coverage without promising standalone 006 on a retired Supabase schema. Also add the 039 packaged-chain/no-SQLite-seed expectation in `tests/unit/test_sql_packaging.py` and observe its inventory RED before T018. Observe final-state RED before T018. **Requires real PostgreSQL and, for the init path, Compose.**
 
 ### Implementation
@@ -177,3 +177,23 @@ classifier, credential path or migration framework is needed.
   T028 is complete locally: repo conventions 11 passed; scoped Ruff and committed-range
   diff checks pass. T029 stays open for the unavailable backend/build evidence and independent
   code/security reviews before any later authorized merge.
+
+
+## Review rework, round 1 (2026-11-10)
+
+- Corrected the protected-row reader to order keyless evidence tables by every column;
+  `topic_clusters` still requires a primary key. SQLite regression observed
+  `UNSUPPORTED_STORE` before the fix; the final retirement unit module has 38 passing tests.
+- Renamed the PostgreSQL retirement module to `test_postgres_taxonomy_retirement.py` so
+  unit and integration collection can coexist. Added populated 001-038 upgrade coverage
+  with the real keyless `trend_signals` schema, and direct SQL 039 replay coverage.
+- The writer-wait test clears the PostgreSQL statistics snapshot before each lock poll;
+  the product lock/recheck order is unchanged. PostgreSQL execution remains CI-only.
+- Apply reports SQLite cursor rowcount and PostgreSQL UPDATE diagnostics, rather than
+  copying the projection count. The startup refusal names the matching source checkout.
+- Corrected final-schema oracles while retaining exact table/UUID identities and RLS/policy
+  negative controls; vocabulary-only migrations remain checked at their historical prefix.
+  Regenerated both tracked Hermes catalogs with `scripts/sync_tool_manifests.py --write`.
+- Fresh local evidence and execution limits are in `.handoff/021-taxonomy-verification.md`.
+  No additional task is ticked: PostgreSQL, Compose, full bootstrap, package builds and
+  independent acceptance remain unverified here. The settled owner decisions are unchanged.
