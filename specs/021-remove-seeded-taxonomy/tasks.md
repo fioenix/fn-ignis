@@ -196,5 +196,5 @@ classifier, credential path or migration framework is needed.
   negative controls; vocabulary-only migrations remain checked at their historical prefix.
   Regenerated both tracked Hermes catalogs with `scripts/sync_tool_manifests.py --write`.
 - Fresh local evidence and execution limits are in `.handoff/021-taxonomy-verification.md`.
-  No additional task is ticked: PostgreSQL, Compose, full bootstrap, package builds and
-  independent acceptance remain unverified here. The settled owner decisions are unchanged.
+  At this local rework step no additional task was ticked; the CI evidence at the top of
+  this file closed T016 to T019 and T021 afterwards. The settled owner decisions are unchanged.
