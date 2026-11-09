@@ -56,7 +56,7 @@ PULL_REQUEST_PATH_FILTERS = ("paths", "paths-ignore")
 # test_t021_ci_runtime_pinning.py does: T022 must not move these at all, and a pin compared only
 # with another pin moves when both do. A reviewed bump updates these constants in the same commit.
 PINNED_RUNNER = "ubuntu-24.04"
-PINNED_SETUP_UV = "astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7"
+PINNED_SETUP_UV = "astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2"
 PINNED_UV_VERSION = "0.12.17"
 
 EXPECTED_CONCURRENCY = {"group": "performance-${{ github.ref }}", "cancel-in-progress": False}

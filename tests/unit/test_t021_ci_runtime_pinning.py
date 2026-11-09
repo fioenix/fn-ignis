@@ -32,7 +32,7 @@ PINNED_RUNNER = "ubuntu-24.04"
 SETUP_UV = "astral-sh/setup-uv"
 UPLOAD_ARTIFACT = "actions/upload-artifact"
 PINNED_UPLOAD_ARTIFACT = (
-    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+    "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9"
 )
 # Compose Init holds the reviewed pin; the other workflows are compared with it, not with a copy.
 UV_WORKFLOWS = (CI, PERFORMANCE, COMPOSE_INIT)
@@ -310,7 +310,7 @@ def test_upload_artifact_uses_the_reviewed_node24_release_commit():
 
 def test_upload_artifact_pin_carries_its_release_comment():
     lines = _upload_artifact_lines(PERFORMANCE)
-    assert lines == [f"uses: {PINNED_UPLOAD_ARTIFACT} # v7.0.1"], (
+    assert lines == [f"uses: {PINNED_UPLOAD_ARTIFACT} # v7.0.2"], (
         "the upload-artifact SHA must carry its reviewed release beside it"
     )
 
