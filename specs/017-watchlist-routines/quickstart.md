@@ -9,8 +9,9 @@ Validation guide; [tasks.md](tasks.md) is the acceptance authority.
    - With a fixture watchlist on local SQLite, ask "run this watchlist every morning at 7"; confirm;
      one task `ignis-watchlist-<prefix>` appears in the host's list.
    - Ask again: the agent offers to change the existing task.
-   - Setup's attended "Run now" asks to approve only `start_watchlist_run` and
-     `execute_mission_ingress`; one mission bound to the current version reaches a terminal state,
+   - Setup's attended "Run now" asks to approve only `start_watchlist_run`,
+     `execute_mission_ingress`, `get_mission_evidence_qualification_batch` and
+     `submit_mission_evidence_qualifications`; one mission bound to the current version reaches a terminal state,
      and no other mission, watchlist version or routine record is written.
    - A second, unattended firing from the task's own working folder (the workspace repository)
      reaches the Ignis server with the right caller root and needs no new approval.
